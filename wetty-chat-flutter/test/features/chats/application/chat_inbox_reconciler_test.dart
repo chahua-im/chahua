@@ -73,7 +73,7 @@ void main() {
       await container.read(chatInboxReconcilerProvider).reconcile();
 
       final groups = container.read(groupListV2ViewModelProvider).value;
-      final threads = container.read(threadListV2ViewModelProvider).value;
+      final threads = container.read(activeThreadListV2ViewModelProvider).value;
       final badge = container.read(unreadBadgeProvider);
 
       expect(groups?.groups, hasLength(1));

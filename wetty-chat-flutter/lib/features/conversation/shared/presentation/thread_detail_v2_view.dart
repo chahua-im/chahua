@@ -40,7 +40,9 @@ class _ThreadDetailV2PageState extends ConsumerState<ThreadDetailV2Page> {
         _isNewThread = false;
       });
     }
-    await ref.read(threadListV2ViewModelProvider.notifier).refreshThreads();
+    await ref
+        .read(activeThreadListV2ViewModelProvider.notifier)
+        .refreshThreads();
   }
 
   @override

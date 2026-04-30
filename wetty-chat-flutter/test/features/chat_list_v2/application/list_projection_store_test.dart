@@ -215,7 +215,7 @@ void main() {
     });
 
     test(
-      'server read state updates archived bucket without active badge delta',
+      'server read state updates archived list without active badge delta',
       () {
         final container = _container(threadUnreadTotal: 4);
         addTearDown(container.dispose);
@@ -249,7 +249,7 @@ void main() {
       },
     );
 
-    test('threadByIdProvider searches archived bucket', () {
+    test('threadByIdProvider searches archived list', () {
       final container = _container();
       addTearDown(container.dispose);
       container

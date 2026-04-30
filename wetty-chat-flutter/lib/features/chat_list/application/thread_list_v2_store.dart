@@ -9,7 +9,7 @@ import '../model/thread_list_item.dart';
 import '../../shared/data/read_state_models.dart';
 import 'realtime_projection_policy.dart';
 
-typedef ThreadListV2BucketState = ({
+typedef ThreadListV2ListState = ({
   List<ThreadListItem> threads,
   String? nextCursor,
   bool hasMore,
@@ -24,8 +24,8 @@ typedef ThreadUnreadTotals = ({
 });
 
 typedef ThreadListV2StoreState = ({
-  ThreadListV2BucketState active,
-  ThreadListV2BucketState archived,
+  ThreadListV2ListState active,
+  ThreadListV2ListState archived,
   bool hasArchivedThreads,
   ThreadUnreadTotals unreadTotals,
 });
@@ -38,8 +38,8 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
   @override
   ThreadListV2StoreState build() {
     return (
-      active: _emptyBucket(),
-      archived: _emptyBucket(),
+      active: _emptyListState(),
+      archived: _emptyListState(),
       hasArchivedThreads: false,
       unreadTotals: _emptyUnreadTotals(),
     );
@@ -49,7 +49,7 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
     required List<ThreadListItem> threads,
     String? nextCursor,
   }) {
-    _replaceState(active: _bucketWithPage(threads, nextCursor));
+    _replaceState(active: _listStateWithPage(threads, nextCursor));
   }
 
   void replaceArchivedPage({
@@ -57,7 +57,7 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
     String? nextCursor,
   }) {
     _replaceState(
-      archived: _bucketWithPage(threads, nextCursor),
+      archived: _listStateWithPage(threads, nextCursor),
       hasArchivedThreads: threads.isNotEmpty,
     );
   }
@@ -71,7 +71,7 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
     String? nextCursor,
   }) {
     _replaceState(
-      active: _bucketWithAppendedPage(state.active, threads, nextCursor),
+      active: _listStateWithAppendedPage(state.active, threads, nextCursor),
     );
   }
 
@@ -80,7 +80,7 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
     String? nextCursor,
   }) {
     _replaceState(
-      archived: _bucketWithAppendedPage(state.archived, threads, nextCursor),
+      archived: _listStateWithAppendedPage(state.archived, threads, nextCursor),
       hasArchivedThreads: state.hasArchivedThreads || threads.isNotEmpty,
     );
   }
@@ -98,12 +98,12 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
       return;
     }
 
-    final bucket = location.archived ? state.archived : state.active;
-    final previous = bucket.threads[location.index];
+    final listState = location.archived ? state.archived : state.active;
+    final previous = listState.threads[location.index];
     final updated = previous.copyWith(unreadCount: response.unreadCount);
-    _replaceBucketThreads(
+    _replaceListThreads(
       archived: location.archived,
-      threads: _replaceThreadAt(bucket.threads, location.index, updated),
+      threads: _replaceThreadAt(listState.threads, location.index, updated),
     );
     _applyThreadUnreadDelta(
       archived: location.archived,
@@ -138,8 +138,8 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
       return true;
     }
 
-    final bucket = location.archived ? state.archived : state.active;
-    final previous = bucket.threads[location.index];
+    final listState = location.archived ? state.archived : state.active;
+    final previous = listState.threads[location.index];
     final alreadyProjected = matchesThreadPreview(previous.lastReply, payload);
     final isCurrentUserMessage = payload.sender.uid == _currentUserId;
     final updated = previous.copyWith(
@@ -154,10 +154,10 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
           ? previous.unreadCount
           : previous.unreadCount + 1,
     );
-    _replaceBucketThreads(
+    _replaceListThreads(
       archived: location.archived,
       threads: _reinsertThreadByActivity(
-        bucket.threads,
+        listState.threads,
         location.index,
         updated,
       ),
@@ -183,16 +183,16 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
       return true;
     }
 
-    final bucket = location.archived ? state.archived : state.active;
-    final previous = bucket.threads[location.index];
+    final listState = location.archived ? state.archived : state.active;
+    final previous = listState.threads[location.index];
     if (!matchesThreadPreview(previous.lastReply, payload)) {
       return false;
     }
 
-    _replaceBucketThreads(
+    _replaceListThreads(
       archived: location.archived,
       threads: _replaceThreadAt(
-        bucket.threads,
+        listState.threads,
         location.index,
         previous.copyWith(lastReply: _toReplyPreview(payload)),
       ),
@@ -213,8 +213,8 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
       return true;
     }
 
-    final bucket = location.archived ? state.archived : state.active;
-    final previous = bucket.threads[location.index];
+    final listState = location.archived ? state.archived : state.active;
+    final previous = listState.threads[location.index];
     final isCurrentPreview = matchesThreadPreview(previous.lastReply, payload);
     if (isCurrentPreview) {
       return true;
@@ -223,9 +223,9 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
     final updated = previous.copyWith(
       replyCount: previous.replyCount > 0 ? previous.replyCount - 1 : 0,
     );
-    _replaceBucketThreads(
+    _replaceListThreads(
       archived: location.archived,
-      threads: _replaceThreadAt(bucket.threads, location.index, updated),
+      threads: _replaceThreadAt(listState.threads, location.index, updated),
     );
     return false;
   }
@@ -281,12 +281,12 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
       return false;
     }
 
-    final bucket = location.archived ? state.archived : state.active;
-    final previous = bucket.threads[location.index];
-    _replaceBucketThreads(
+    final listState = location.archived ? state.archived : state.active;
+    final previous = listState.threads[location.index];
+    _replaceListThreads(
       archived: location.archived,
       threads: _replaceThreadAt(
-        bucket.threads,
+        listState.threads,
         location.index,
         previous.copyWith(
           threadRootMessage: messagePreviewFromMessageItemDto(payload),
@@ -367,27 +367,27 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
     ref.read(unreadBadgeProvider.notifier).applyThreadUnreadDelta(delta);
   }
 
-  void _replaceBucketThreads({
+  void _replaceListThreads({
     required bool archived,
     required List<ThreadListItem> threads,
   }) {
-    final bucket = archived ? state.archived : state.active;
-    final updatedBucket = (
+    final listState = archived ? state.archived : state.active;
+    final updatedList = (
       threads: threads,
-      nextCursor: bucket.nextCursor,
-      hasMore: bucket.hasMore,
-      isLoaded: bucket.isLoaded,
+      nextCursor: listState.nextCursor,
+      hasMore: listState.hasMore,
+      isLoaded: listState.isLoaded,
     );
     if (archived) {
-      _replaceState(archived: updatedBucket);
+      _replaceState(archived: updatedList);
     } else {
-      _replaceState(active: updatedBucket);
+      _replaceState(active: updatedList);
     }
   }
 
   void _replaceState({
-    ThreadListV2BucketState? active,
-    ThreadListV2BucketState? archived,
+    ThreadListV2ListState? active,
+    ThreadListV2ListState? archived,
     bool? hasArchivedThreads,
     ThreadUnreadTotals? unreadTotals,
   }) {
@@ -400,7 +400,7 @@ class ThreadListV2Store extends Notifier<ThreadListV2StoreState> {
   }
 }
 
-ThreadListV2BucketState _emptyBucket() {
+ThreadListV2ListState _emptyListState() {
   return (
     threads: const <ThreadListItem>[],
     nextCursor: null,
@@ -418,7 +418,7 @@ ThreadUnreadTotals _emptyUnreadTotals() {
   );
 }
 
-ThreadListV2BucketState _bucketWithPage(
+ThreadListV2ListState _listStateWithPage(
   List<ThreadListItem> threads,
   String? nextCursor,
 ) {
@@ -430,12 +430,12 @@ ThreadListV2BucketState _bucketWithPage(
   );
 }
 
-ThreadListV2BucketState _bucketWithAppendedPage(
-  ThreadListV2BucketState bucket,
+ThreadListV2ListState _listStateWithAppendedPage(
+  ThreadListV2ListState listState,
   List<ThreadListItem> threads,
   String? nextCursor,
 ) {
-  final existingKeys = bucket.threads
+  final existingKeys = listState.threads
       .map((thread) => '${thread.chatId}:${thread.threadRootId}')
       .toSet();
   final appended = threads
@@ -446,7 +446,7 @@ ThreadListV2BucketState _bucketWithAppendedPage(
       .toList(growable: false);
 
   return (
-    threads: [...bucket.threads, ...appended],
+    threads: [...listState.threads, ...appended],
     nextCursor: nextCursor,
     hasMore: nextCursor != null && nextCursor.isNotEmpty,
     isLoaded: true,

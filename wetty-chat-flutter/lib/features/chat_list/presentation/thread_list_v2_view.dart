@@ -20,7 +20,7 @@ class ThreadListV2View extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    final asyncState = ref.watch(threadListV2ViewModelProvider);
+    final asyncState = ref.watch(activeThreadListV2ViewModelProvider);
     final archivedSummary = ref.watch(
       threadListV2StoreProvider.select(
         (state) => (
@@ -45,7 +45,8 @@ class ThreadListV2View extends ConsumerWidget {
               Text(error.toString(), textAlign: TextAlign.center),
               const SizedBox(height: 16),
               CupertinoButton.filled(
-                onPressed: () => ref.invalidate(threadListV2ViewModelProvider),
+                onPressed: () =>
+                    ref.invalidate(activeThreadListV2ViewModelProvider),
                 child: Text(l10n.retry),
               ),
             ],
@@ -65,7 +66,7 @@ class ThreadListV2View extends ConsumerWidget {
                   const SizedBox(height: 16),
                   CupertinoButton.filled(
                     onPressed: () =>
-                        ref.invalidate(threadListV2ViewModelProvider),
+                        ref.invalidate(activeThreadListV2ViewModelProvider),
                     child: Text(l10n.retry),
                   ),
                 ],

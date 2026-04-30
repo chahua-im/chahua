@@ -35,7 +35,7 @@ class AllListV2View extends ConsumerWidget {
     final items = ref.watch(allListV2ItemsProvider);
     final uiState = ref.watch(allListV2ViewModelProvider);
     final groupAsync = ref.watch(groupListV2ViewModelProvider);
-    final threadAsync = ref.watch(threadListV2ViewModelProvider);
+    final threadAsync = ref.watch(activeThreadListV2ViewModelProvider);
     final isInitialLoading =
         items.isEmpty && groupAsync.isLoading && threadAsync.isLoading;
 

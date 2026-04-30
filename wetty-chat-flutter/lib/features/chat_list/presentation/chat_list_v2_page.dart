@@ -98,13 +98,13 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
     }
 
     if (activeTab == ChatListTab.threads) {
-      final threadState = ref.read(threadListV2ViewModelProvider).value;
+      final threadState = ref.read(activeThreadListV2ViewModelProvider).value;
       if (threadState == null ||
           !threadState.hasMore ||
           threadState.isLoadingMore) {
         return;
       }
-      ref.read(threadListV2ViewModelProvider.notifier).loadMoreThreads();
+      ref.read(activeThreadListV2ViewModelProvider.notifier).loadMoreThreads();
       return;
     }
 
@@ -131,7 +131,7 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
       ChatListTab.groups =>
         ref.read(groupListV2ViewModelProvider.notifier).refreshGroups(),
       ChatListTab.threads =>
-        ref.read(threadListV2ViewModelProvider.notifier).refreshThreads(),
+        ref.read(activeThreadListV2ViewModelProvider.notifier).refreshThreads(),
       ChatListTab.all =>
         ref.read(allListV2ViewModelProvider.notifier).refreshAll(),
     };

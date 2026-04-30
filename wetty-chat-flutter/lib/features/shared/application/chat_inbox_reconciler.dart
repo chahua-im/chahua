@@ -51,12 +51,14 @@ class ChatInboxReconciler {
   }
 
   Future<void> _refreshThreads() async {
-    final current = _ref.read(threadListV2ViewModelProvider).value;
+    final current = _ref.read(activeThreadListV2ViewModelProvider).value;
     if (current == null) {
-      await _ref.read(threadListV2ViewModelProvider.future);
+      await _ref.read(activeThreadListV2ViewModelProvider.future);
       return;
     }
-    await _ref.read(threadListV2ViewModelProvider.notifier).refreshThreads();
+    await _ref
+        .read(activeThreadListV2ViewModelProvider.notifier)
+        .refreshThreads();
   }
 }
 

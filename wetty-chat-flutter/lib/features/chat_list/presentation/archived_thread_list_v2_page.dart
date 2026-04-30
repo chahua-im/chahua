@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../application/archived_thread_list_v2_view_model.dart';
+import '../application/thread_list_v2_view_model.dart';
 import '../model/thread_list_item.dart';
 import 'chat_workspace_layout_scope.dart';
 import 'widgets/thread_list_row.dart';
