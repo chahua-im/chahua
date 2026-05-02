@@ -145,18 +145,17 @@ class ThreadListV2ViewModel extends AsyncNotifier<ThreadListV2ViewState> {
       errorMessage: current.errorMessage,
     ));
     try {
-      final limit = current.threads.isEmpty ? 20 : current.threads.length;
       switch (scope) {
         case ThreadListV2Scope.active:
           await Future.wait([
-            ref.read(threadListV2RepositoryProvider).loadThreads(limit: limit),
+            ref.read(threadListV2RepositoryProvider).loadThreads(),
             ref.read(threadListV2RepositoryProvider).probeArchivedThreads(),
           ]);
           ref.read(readStateRepositoryProvider).resetThreadBaselines();
         case ThreadListV2Scope.archived:
           await ref
               .read(threadListV2RepositoryProvider)
-              .loadArchivedThreads(limit: limit);
+              .loadArchivedThreads();
       }
 
       final listState = _currentListState();
