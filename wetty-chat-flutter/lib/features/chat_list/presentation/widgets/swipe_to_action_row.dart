@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_swipe_action_cell/flutter_swipe_action_cell.dart';
-import 'package:chahua/app/theme/style_config.dart';
 
 enum SwipeToActionDirection { right, left }
 
@@ -32,8 +31,9 @@ class SwipeToActionRow extends StatelessWidget {
     final action = SwipeAction(
       performsFirstActionWithFullSwipe: true,
       onTap: (handler) async {
-        await onAction();
+        // Close the swipe cell before the action can remove this row.
         await handler(false);
+        await onAction();
       },
       color: color,
       icon: Icon(icon, color: CupertinoColors.white),
