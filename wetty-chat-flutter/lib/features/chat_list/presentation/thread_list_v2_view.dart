@@ -135,8 +135,8 @@ class _ArchivedThreadsFolderRow extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     return ListRowInteractionSurface(
       isActive: false,
-      onTap: () async {
-        await context.push(
+      onTap: () {
+        context.push(
           AppRoutes.archivedThreads,
           extra: {
             'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
@@ -144,12 +144,6 @@ class _ArchivedThreadsFolderRow extends ConsumerWidget {
             ),
           },
         );
-        if (!context.mounted) {
-          return;
-        }
-        await ref
-            .read(activeThreadListV2ViewModelProvider.notifier)
-            .refreshThreads();
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
