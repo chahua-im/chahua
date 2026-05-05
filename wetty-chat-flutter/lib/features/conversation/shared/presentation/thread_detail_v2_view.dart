@@ -1,7 +1,6 @@
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/conversation/shared/presentation/conversation_surface_v2.dart';
-import 'package:chahua/features/chat_list/application/thread_list_v2_view_model.dart';
 import 'package:chahua/features/chat_list/presentation/chat_workspace_layout_scope.dart';
 import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/l10n/app_localizations.dart';
@@ -35,14 +34,13 @@ class _ThreadDetailV2PageState extends ConsumerState<ThreadDetailV2Page> {
     if (!_isNewThread) {
       return;
     }
+    // Backend auto-subscribes on the first thread reply; websocket
+    // reconciliation owns refreshing active and archived thread lists.
     if (mounted) {
       setState(() {
         _isNewThread = false;
       });
     }
-    await ref
-        .read(activeThreadListV2ViewModelProvider.notifier)
-        .refreshThreads();
   }
 
   @override
