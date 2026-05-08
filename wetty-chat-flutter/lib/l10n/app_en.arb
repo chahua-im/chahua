@@ -338,6 +338,9 @@
   "noThreadsYet": "No threads yet",
   "@noThreadsYet": { "description": "Empty state for the thread list" },
 
+  "archived": "Archived",
+  "@archived": { "description": "Navigation title for the archived chats and threads page" },
+
   "archivedThreads": "Archived threads",
   "@archivedThreads": { "description": "Title and folder row label for archived threads" },
 

@@ -119,6 +119,7 @@
   "unarchiveThreadMessage": "這個話題會移回話題列表。要繼續嗎？",
   "noGroupsYet": "暫無群組",
   "noThreadsYet": "暫無話題",
+  "archived": "已封存",
   "archivedThreads": "已封存話題",
   "noArchivedThreads": "暫無已封存話題",
   "noChatsOrThreadsYet": "暫無聊天或話題",

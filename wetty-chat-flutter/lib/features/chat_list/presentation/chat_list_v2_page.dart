@@ -13,6 +13,7 @@ import 'package:chahua/l10n/app_localizations.dart';
 
 import 'widgets/chat_list_segment.dart';
 import '../application/all_list_v2_view_model.dart';
+import '../application/chat_list_v2_scope.dart';
 import '../application/group_list_v2_view_model.dart';
 import '../application/thread_list_v2_view_model.dart';
 import 'widgets/chat_list_v2_tab_body.dart';
@@ -21,12 +22,14 @@ import 'widgets/websocket_connection_banner.dart';
 class ChatListV2Page extends ConsumerStatefulWidget {
   const ChatListV2Page({
     super.key,
+    this.scope = ChatListV2Scope.active,
     this.embedded = false,
     this.selectedChatId,
     this.selectedThreadRootId,
     this.onOpenSettings,
   });
 
+  final ChatListV2Scope scope;
   final bool embedded;
   final String? selectedChatId;
   final int? selectedThreadRootId;
@@ -153,6 +156,10 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
     final chromeBackgroundColor = _isScrolledUnder
         ? CupertinoTheme.of(context).barBackgroundColor
         : CupertinoColors.systemBackground;
+    final title = switch (widget.scope) {
+      ChatListV2Scope.active => l10n.tabChats,
+      ChatListV2Scope.archived => l10n.archived,
+    };
 
     final scrollView = CustomScrollView(
       controller: _scrollController,
@@ -178,6 +185,7 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
           ),
         const WebSocketConnectionBannerSliver(),
         ChatListV2TabBody(
+          scope: widget.scope,
           activeTab: activeTab,
           selectedChatId: widget.selectedChatId,
           selectedThreadRootId: widget.selectedThreadRootId,
@@ -198,7 +206,7 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
                       semanticLabel: l10n.tabSettings,
                       onPressed: widget.onOpenSettings!,
                     ),
-              middle: Text(l10n.tabChats),
+              middle: Text(title),
             ),
             Expanded(
               child: SafeArea(top: false, bottom: false, child: scrollView),
@@ -211,7 +219,7 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
         backgroundColor: chromeBackgroundColor,
-        middle: Text(l10n.tabChats),
+        middle: Text(title),
       ),
       child: SafeArea(bottom: false, child: scrollView),
     );

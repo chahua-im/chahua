@@ -5,6 +5,7 @@ import 'package:chahua/l10n/app_localizations.dart';
 
 import '../../../app/routing/route_names.dart';
 import '../../../app/theme/style_config.dart';
+import '../application/chat_list_v2_scope.dart';
 import '../application/thread_list_v2_store.dart';
 import '../model/thread_list_item.dart';
 import 'chat_workspace_layout_scope.dart';
@@ -15,8 +16,13 @@ import 'widgets/unread_badge_formatter.dart';
 import '../application/thread_list_v2_view_model.dart';
 
 class ThreadListV2View extends ConsumerWidget {
-  const ThreadListV2View({super.key, this.selectedThreadRootId});
+  const ThreadListV2View({
+    super.key,
+    this.scope = ChatListV2Scope.active,
+    this.selectedThreadRootId,
+  });
 
+  final ChatListV2Scope scope;
   final int? selectedThreadRootId;
 
   @override

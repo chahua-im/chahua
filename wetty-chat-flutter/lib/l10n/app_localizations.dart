@@ -777,6 +777,12 @@ abstract class AppLocalizations {
   /// **'No threads yet'**
   String get noThreadsYet;
 
+  /// Navigation title for the archived chats and threads page
+  ///
+  /// In en, this message translates to:
+  /// **'Archived'**
+  String get archived;
+
   /// Title and folder row label for archived threads
   ///
   /// In en, this message translates to:

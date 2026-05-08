@@ -16,16 +16,19 @@ import 'widgets/thread_list_row.dart';
 import '../application/all_list_v2_models.dart';
 import '../application/all_list_v2_projection.dart';
 import '../application/all_list_v2_view_model.dart';
+import '../application/chat_list_v2_scope.dart';
 import '../application/group_list_v2_view_model.dart';
 import '../application/thread_list_v2_view_model.dart';
 
 class AllListV2View extends ConsumerWidget {
   const AllListV2View({
     super.key,
+    this.scope = ChatListV2Scope.active,
     this.selectedChatId,
     this.selectedThreadRootId,
   });
 
+  final ChatListV2Scope scope;
   final String? selectedChatId;
   final int? selectedThreadRootId;
 

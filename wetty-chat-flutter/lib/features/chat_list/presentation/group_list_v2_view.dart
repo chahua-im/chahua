@@ -11,11 +11,17 @@ import 'package:chahua/features/shared/model/message/message.dart';
 import '../../shared/presentation/chat_timestamp_formatter.dart';
 import 'widgets/chat_list_row.dart';
 import '../model/chat_list_item.dart';
+import '../application/chat_list_v2_scope.dart';
 import '../application/group_list_v2_view_model.dart';
 
 class GroupListV2View extends ConsumerWidget {
-  const GroupListV2View({super.key, this.selectedChatId});
+  const GroupListV2View({
+    super.key,
+    this.scope = ChatListV2Scope.active,
+    this.selectedChatId,
+  });
 
+  final ChatListV2Scope scope;
   final String? selectedChatId;
 
   @override
