@@ -30,5 +30,5 @@ export function PendingInviteModalHost() {
     };
   }, []);
 
-  return <PendingInviteModal inviteCode={inviteCode} onCleared={() => setInviteCode(null)} />;
+  return <PendingInviteModal inviteCode={inviteCode} onCleared={() => setInviteCode(null)} openChatOnResolved />;
 }

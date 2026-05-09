@@ -2,6 +2,7 @@ import { IonContent, IonIcon, IonModal } from '@ionic/react';
 import { close } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { useHistory } from 'react-router-dom';
+import type { GroupInfoResponse } from '@/api/group';
 import { useIsDesktop } from '@/hooks/platformHooks';
 import { InvitePreviewCard } from './InvitePreviewCard';
 import styles from './InviteMessageModal.module.scss';
@@ -9,16 +10,28 @@ import styles from './InviteMessageModal.module.scss';
 interface InviteMessageModalProps {
   inviteCode: string | null;
   onDismiss: () => void;
+  onResolved?: (chat: GroupInfoResponse) => void | Promise<void>;
   showAlreadyMemberOpenChatAction?: boolean;
 }
 
 export function InviteMessageModal({
   inviteCode,
   onDismiss,
+  onResolved,
   showAlreadyMemberOpenChatAction = true,
 }: InviteMessageModalProps) {
   const isDesktop = useIsDesktop();
   const history = useHistory();
+
+  const resolveInvite = async (chat: GroupInfoResponse) => {
+    if (onResolved) {
+      await onResolved(chat);
+      return;
+    }
+
+    onDismiss();
+    history.replace(`/chats/chat/${chat.id}`);
+  };
 
   return (
     <IonModal
@@ -36,10 +49,7 @@ export function InviteMessageModal({
             <InvitePreviewCard
               inviteCode={inviteCode}
               showAlreadyMemberOpenChatAction={showAlreadyMemberOpenChatAction}
-              onResolved={(chat) => {
-                onDismiss();
-                history.replace(`/chats/chat/${chat.id}`);
-              }}
+              onResolved={resolveInvite}
               onCancel={onDismiss}
             />
           </div>
