@@ -5,6 +5,7 @@ import 'package:chahua/features/conversation/shared/application/conversation_can
 import 'package:chahua/features/conversation/shared/data/conversation_timeline_v2_repository.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_timeline_v2_active_segment.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
+import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
 import 'package:chahua/features/conversation/timeline/model/message_visibility_window.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
@@ -79,7 +80,7 @@ abstract class ConversationTimelineState with _$ConversationTimelineState {
     @Default(false) bool isLoadingOlder,
     @Default(false) bool isLoadingNewer,
     @Default(false) bool isResolvingJump,
-    String? highlightedStableKey,
+    ConversationMessageHighlight? highlight,
     @Default((
       kind: ConversationTimelineViewportCommandKind.none,
       placement: ConversationTimelineViewportPlacement.bottomPreferred,
@@ -118,6 +119,11 @@ class ConversationTimelineViewModel
 
   int? _highlightedServerMessageId;
   int? _highlightFirstServerMessageIdAfter;
+  int? _pendingHighlightGeneration;
+  int _highlightGeneration = 0;
+  ConversationMessageHighlight? _activeHighlight;
+  Timer? _highlightClearTimer;
+  bool _didRegisterDispose = false;
   TimelineViewportFacts? _latestViewportFacts;
   String? _lastRenderedTailStableKey;
   _TimelineRenderSplitPolicy _renderSplitPolicy =
@@ -140,6 +146,10 @@ class ConversationTimelineViewModel
 
   @override
   ConversationTimelineState build() {
+    if (!_didRegisterDispose) {
+      ref.onDispose(_cancelHighlightClearTimer);
+      _didRegisterDispose = true;
+    }
     _repository = ref.read(conversationTimelineV2RepositoryProvider(identity));
     final activeSegmentMode = _activeSegmentMode;
     if (activeSegmentMode == null) {
@@ -262,6 +272,7 @@ class ConversationTimelineViewModel
     );
     _highlightedServerMessageId = null;
     _highlightFirstServerMessageIdAfter = null;
+    _clearHighlightSignal();
   }
 
   Future<void> recoverLatestAfterRefresh() {
@@ -328,6 +339,7 @@ class ConversationTimelineViewModel
       case ConversationLocalSendViewportIntent.latestAwayFromBottom:
         _highlightedServerMessageId = null;
         _highlightFirstServerMessageIdAfter = null;
+        _clearHighlightSignal();
         _renderSplitPolicy = const _TimelineRenderSplitPolicy.none();
         _shouldCaptureLatestTailSplit = true;
         _issueViewportCommand(
@@ -357,6 +369,10 @@ class ConversationTimelineViewModel
     _setActiveSegmentMode(aroundMode);
     _highlightedServerMessageId = highlight ? messageId : null;
     _highlightFirstServerMessageIdAfter = null;
+    _pendingHighlightGeneration = highlight ? ++_highlightGeneration : null;
+    if (!highlight) {
+      _clearHighlightSignal();
+    }
     _renderSplitPolicy = _TimelineRenderSplitPolicy.fromMessageInclusive(
       messageId,
     );
@@ -380,6 +396,7 @@ class ConversationTimelineViewModel
     _setActiveSegmentMode(aroundMode);
     _highlightedServerMessageId = null;
     _highlightFirstServerMessageIdAfter = lastReadMessageId;
+    _pendingHighlightGeneration = ++_highlightGeneration;
     _renderSplitPolicy = _TimelineRenderSplitPolicy.afterMessage(
       lastReadMessageId,
     );
@@ -479,6 +496,7 @@ class ConversationTimelineViewModel
         }
       }
     }
+    _syncHighlightSignal(highlightedStableKey);
     final currentTailStableKey = segment.orderedMessages.isEmpty
         ? null
         : segment.orderedMessages.last.stableKey;
@@ -517,12 +535,62 @@ class ConversationTimelineViewModel
       isLoadingOlder: isLoadingOlder ?? state.isLoadingOlder,
       isLoadingNewer: isLoadingNewer ?? state.isLoadingNewer,
       isResolvingJump: false,
-      highlightedStableKey: highlightedStableKey,
+      highlight: _activeHighlight,
       viewportCommand: viewportCommand?.command ?? _lastViewportCommand,
       viewportCommandGeneration:
           viewportCommand?.generation ?? _viewportCommandGeneration,
       isBootstrapping: false,
     );
+  }
+
+  void _syncHighlightSignal(String? highlightedStableKey) {
+    if (highlightedStableKey == null) {
+      return;
+    }
+    final pendingGeneration = _pendingHighlightGeneration;
+    final activeHighlight = _activeHighlight;
+    if (pendingGeneration == null) {
+      if (activeHighlight?.stableKey != highlightedStableKey) {
+        _clearHighlightSignal();
+      }
+      return;
+    }
+    if (activeHighlight?.stableKey == highlightedStableKey &&
+        activeHighlight?.generation == pendingGeneration) {
+      return;
+    }
+    _activeHighlight = ConversationMessageHighlight(
+      stableKey: highlightedStableKey,
+      generation: pendingGeneration,
+      startedAt: DateTime.now(),
+    );
+    _scheduleHighlightClear(pendingGeneration);
+  }
+
+  void _scheduleHighlightClear(int generation) {
+    _highlightClearTimer?.cancel();
+    _highlightClearTimer = Timer(
+      ConversationMessageHighlight.totalDuration,
+      () {
+        if (_activeHighlight?.generation != generation) {
+          return;
+        }
+        _clearHighlightSignal();
+        ref.invalidateSelf();
+      },
+    );
+  }
+
+  void _clearHighlightSignal() {
+    _highlightClearTimer?.cancel();
+    _highlightClearTimer = null;
+    _pendingHighlightGeneration = null;
+    _activeHighlight = null;
+  }
+
+  void _cancelHighlightClearTimer() {
+    _highlightClearTimer?.cancel();
+    _highlightClearTimer = null;
   }
 
   ({ConversationTimelineViewportCommand command, int generation})?

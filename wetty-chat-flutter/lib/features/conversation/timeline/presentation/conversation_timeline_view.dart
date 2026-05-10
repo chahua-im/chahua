@@ -8,6 +8,7 @@ import 'package:chahua/features/conversation/timeline/presentation/conversation_
 import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
+import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
 import 'package:chahua/features/conversation/timeline/model/message_long_press_details_v2.dart';
 import 'package:chahua/features/conversation/timeline/model/message_visibility_window.dart';
 import 'package:chahua/features/conversation/message_bubble/presentation/message_row_v2.dart';
@@ -503,7 +504,7 @@ class _ConversationTimelineViewState
   SliverList _buildMessageSliver(
     List<ConversationMessageV2> messages, {
     Key? key,
-    String? highlightedStableKey,
+    ConversationMessageHighlight? highlight,
     required Map<String, ({bool showSenderName, bool showAvatar})>
     rowPresentationByStableKey,
   }) {
@@ -522,7 +523,9 @@ class _ConversationTimelineViewState
           key: _keyForMessage(message),
           child: MessageRowV2(
             message: message,
-            isHighlighted: message.stableKey == highlightedStableKey,
+            highlight: message.stableKey == highlight?.stableKey
+                ? highlight
+                : null,
             showSenderName: rowPresentation.showSenderName,
             showAvatar: rowPresentation.showAvatar,
             onLongPress: _openMessageOverlay,
@@ -616,7 +619,7 @@ class _ConversationTimelineViewState
               if (beforeMessages.isNotEmpty)
                 _buildMessageSliver(
                   beforeMessages,
-                  highlightedStableKey: state.highlightedStableKey,
+                  highlight: state.highlight,
                   rowPresentationByStableKey: rowPresentationByStableKey,
                 ),
 
@@ -631,7 +634,7 @@ class _ConversationTimelineViewState
                 _buildMessageSliver(
                   afterMessages,
                   key: _afterContentSliverKey,
-                  highlightedStableKey: state.highlightedStableKey,
+                  highlight: state.highlight,
                   rowPresentationByStableKey: rowPresentationByStableKey,
                 ),
             ],

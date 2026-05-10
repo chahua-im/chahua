@@ -116,6 +116,7 @@ class AppColorTheme {
     required this.chatReceivedMeta,
     required this.chatLinkOnSent,
     required this.chatLinkOnReceived,
+    required this.chatMessageHighlight,
     required this.chatReplyActionBackground,
     required this.chatAttachmentChipSent,
     required this.chatAttachmentChipReceived,
@@ -152,6 +153,7 @@ class AppColorTheme {
   final Color chatReceivedMeta;
   final Color chatLinkOnSent;
   final Color chatLinkOnReceived;
+  final Color chatMessageHighlight;
   final Color chatReplyActionBackground;
   final Color chatAttachmentChipSent;
   final Color chatAttachmentChipReceived;
@@ -188,6 +190,7 @@ class AppColorTheme {
     Color? chatReceivedMeta,
     Color? chatLinkOnSent,
     Color? chatLinkOnReceived,
+    Color? chatMessageHighlight,
     Color? chatReplyActionBackground,
     Color? chatAttachmentChipSent,
     Color? chatAttachmentChipReceived,
@@ -229,6 +232,7 @@ class AppColorTheme {
       chatReceivedMeta: chatReceivedMeta ?? this.chatReceivedMeta,
       chatLinkOnSent: chatLinkOnSent ?? this.chatLinkOnSent,
       chatLinkOnReceived: chatLinkOnReceived ?? this.chatLinkOnReceived,
+      chatMessageHighlight: chatMessageHighlight ?? this.chatMessageHighlight,
       chatReplyActionBackground:
           chatReplyActionBackground ?? this.chatReplyActionBackground,
       chatAttachmentChipSent:
@@ -297,6 +301,7 @@ class AppColorTheme {
     chatReceivedMeta: Color(0xFF6B7280),
     chatLinkOnSent: Color(0xFFD9EBFF),
     chatLinkOnReceived: Color(0xFF2B7ACD),
+    chatMessageHighlight: Color(0x55FFD65A),
     chatReplyActionBackground: Color(0xFFE9EDF3),
     chatAttachmentChipSent: Color(0xFFDCEBFF),
     chatAttachmentChipReceived: Color(0xFFF1EAE3),
@@ -334,6 +339,7 @@ class AppColorTheme {
     chatReceivedMeta: Color(0xFFAEAEB2),
     chatLinkOnSent: Color(0xFFD9EBFF),
     chatLinkOnReceived: Color(0xFF66A8FF),
+    chatMessageHighlight: Color(0x4DF4C542),
     chatReplyActionBackground: Color(0xFF2C3440),
     chatAttachmentChipSent: Color(0xFF1C4FA3),
     chatAttachmentChipReceived: Color(0xFF35363A),

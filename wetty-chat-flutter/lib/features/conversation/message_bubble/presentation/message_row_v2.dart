@@ -1,5 +1,7 @@
 import 'package:chahua/core/network/api_config.dart';
+import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/features/conversation/media/presentation/attachment_viewer_request.dart';
+import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
 import 'package:chahua/features/shared/presentation/app_avatar.dart';
 import 'package:chahua/features/shared/model/message/message.dart'
     hide MessageItem;
@@ -9,6 +11,9 @@ import 'package:flutter/cupertino.dart';
 import '../../timeline/model/message_long_press_details_v2.dart';
 import '../../timeline/presentation/reply_swipe_action_v2.dart';
 import 'message_item.dart';
+
+@visibleForTesting
+const messageRowHighlightKey = ValueKey<String>('message-row-highlight');
 
 const double _bottomSpacing = 12;
 const double _avatarSlotWidth = 36;
@@ -21,7 +26,7 @@ class MessageRowV2 extends StatefulWidget {
   const MessageRowV2({
     super.key,
     required this.message,
-    this.isHighlighted = false,
+    this.highlight,
     this.onLongPress,
     this.onReply,
     this.onToggleReaction,
@@ -34,7 +39,7 @@ class MessageRowV2 extends StatefulWidget {
   });
 
   final ConversationMessageV2 message;
-  final bool isHighlighted;
+  final ConversationMessageHighlight? highlight;
   final ValueChanged<MessageLongPressDetailsV2>? onLongPress;
   final VoidCallback? onReply;
   final ValueChanged<String>? onToggleReaction;
@@ -49,8 +54,14 @@ class MessageRowV2 extends StatefulWidget {
   State<MessageRowV2> createState() => _MessageRowV2State();
 }
 
-class _MessageRowV2State extends State<MessageRowV2> {
+class _MessageRowV2State extends State<MessageRowV2>
+    with SingleTickerProviderStateMixin {
   final GlobalKey _bubbleKey = GlobalKey();
+  late final AnimationController _highlightController = AnimationController(
+    vsync: this,
+    duration: ConversationMessageHighlight.totalDuration,
+  );
+  ConversationMessageHighlight? _activeHighlight;
 
   bool get _isMe => widget.message.sender.uid == ApiSession.currentUserId;
   bool get _canReply =>
@@ -74,6 +85,52 @@ class _MessageRowV2State extends State<MessageRowV2> {
       case TargetPlatform.fuchsia:
         return false;
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _syncHighlight();
+  }
+
+  @override
+  void didUpdateWidget(covariant MessageRowV2 oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncHighlight();
+  }
+
+  @override
+  void dispose() {
+    _highlightController.dispose();
+    super.dispose();
+  }
+
+  void _syncHighlight() {
+    final highlight = widget.highlight;
+    if (highlight == null) {
+      _activeHighlight = null;
+      _highlightController.stop();
+      _highlightController.value = 1;
+      return;
+    }
+    if (_activeHighlight?.stableKey == highlight.stableKey &&
+        _activeHighlight?.generation == highlight.generation) {
+      return;
+    }
+    _activeHighlight = highlight;
+    _highlightController.value = highlight.animationProgress(DateTime.now());
+    _highlightController.forward();
+  }
+
+  Color _resolveHighlightColor(BuildContext context, double progress) {
+    final highlight = _activeHighlight;
+    if (highlight == null) {
+      return CupertinoColors.transparent;
+    }
+    final elapsed = ConversationMessageHighlight.totalDuration * progress;
+    final opacity = highlight.opacityAt(highlight.startedAt.add(elapsed));
+    final highlightColor = context.appColors.chatMessageHighlight;
+    return highlightColor.withValues(alpha: highlightColor.a * opacity);
   }
 
   _BubbleLayout _getBubbleLayout() {
@@ -150,16 +207,21 @@ class _MessageRowV2State extends State<MessageRowV2> {
             child: ReplySwipeActionV2(
               enabled: _canReply,
               onTriggered: widget.onReply,
-              child: DecoratedBox(
-                decoration: widget.isHighlighted
-                    ? BoxDecoration(
-                        border: Border.all(
-                          color: CupertinoColors.activeBlue,
-                          width: 1.5,
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                      )
-                    : const BoxDecoration(),
+              child: AnimatedBuilder(
+                animation: _highlightController,
+                builder: (context, child) {
+                  return DecoratedBox(
+                    key: messageRowHighlightKey,
+                    decoration: BoxDecoration(
+                      color: _resolveHighlightColor(
+                        context,
+                        _highlightController.value,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: child,
+                  );
+                },
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment
                       .end, // Important for tall message to align avatar at bottom

@@ -14,7 +14,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$ConversationTimelineState implements DiagnosticableTreeMixin {
 
- List<ConversationMessageV2> get beforeMessages; List<ConversationMessageV2> get afterMessages; bool get canLoadOlder; bool get canLoadNewer; bool get isLoadingOlder; bool get isLoadingNewer; bool get isResolvingJump; String? get highlightedStableKey; ConversationTimelineViewportCommand get viewportCommand; int get viewportCommandGeneration; bool get isBootstrapping;
+ List<ConversationMessageV2> get beforeMessages; List<ConversationMessageV2> get afterMessages; bool get canLoadOlder; bool get canLoadNewer; bool get isLoadingOlder; bool get isLoadingNewer; bool get isResolvingJump; ConversationMessageHighlight? get highlight; ConversationTimelineViewportCommand get viewportCommand; int get viewportCommandGeneration; bool get isBootstrapping;
 /// Create a copy of ConversationTimelineState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -26,21 +26,21 @@ $ConversationTimelineStateCopyWith<ConversationTimelineState> get copyWith => _$
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'ConversationTimelineState'))
-    ..add(DiagnosticsProperty('beforeMessages', beforeMessages))..add(DiagnosticsProperty('afterMessages', afterMessages))..add(DiagnosticsProperty('canLoadOlder', canLoadOlder))..add(DiagnosticsProperty('canLoadNewer', canLoadNewer))..add(DiagnosticsProperty('isLoadingOlder', isLoadingOlder))..add(DiagnosticsProperty('isLoadingNewer', isLoadingNewer))..add(DiagnosticsProperty('isResolvingJump', isResolvingJump))..add(DiagnosticsProperty('highlightedStableKey', highlightedStableKey))..add(DiagnosticsProperty('viewportCommand', viewportCommand))..add(DiagnosticsProperty('viewportCommandGeneration', viewportCommandGeneration))..add(DiagnosticsProperty('isBootstrapping', isBootstrapping));
+    ..add(DiagnosticsProperty('beforeMessages', beforeMessages))..add(DiagnosticsProperty('afterMessages', afterMessages))..add(DiagnosticsProperty('canLoadOlder', canLoadOlder))..add(DiagnosticsProperty('canLoadNewer', canLoadNewer))..add(DiagnosticsProperty('isLoadingOlder', isLoadingOlder))..add(DiagnosticsProperty('isLoadingNewer', isLoadingNewer))..add(DiagnosticsProperty('isResolvingJump', isResolvingJump))..add(DiagnosticsProperty('highlight', highlight))..add(DiagnosticsProperty('viewportCommand', viewportCommand))..add(DiagnosticsProperty('viewportCommandGeneration', viewportCommandGeneration))..add(DiagnosticsProperty('isBootstrapping', isBootstrapping));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConversationTimelineState&&const DeepCollectionEquality().equals(other.beforeMessages, beforeMessages)&&const DeepCollectionEquality().equals(other.afterMessages, afterMessages)&&(identical(other.canLoadOlder, canLoadOlder) || other.canLoadOlder == canLoadOlder)&&(identical(other.canLoadNewer, canLoadNewer) || other.canLoadNewer == canLoadNewer)&&(identical(other.isLoadingOlder, isLoadingOlder) || other.isLoadingOlder == isLoadingOlder)&&(identical(other.isLoadingNewer, isLoadingNewer) || other.isLoadingNewer == isLoadingNewer)&&(identical(other.isResolvingJump, isResolvingJump) || other.isResolvingJump == isResolvingJump)&&(identical(other.highlightedStableKey, highlightedStableKey) || other.highlightedStableKey == highlightedStableKey)&&(identical(other.viewportCommand, viewportCommand) || other.viewportCommand == viewportCommand)&&(identical(other.viewportCommandGeneration, viewportCommandGeneration) || other.viewportCommandGeneration == viewportCommandGeneration)&&(identical(other.isBootstrapping, isBootstrapping) || other.isBootstrapping == isBootstrapping));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConversationTimelineState&&const DeepCollectionEquality().equals(other.beforeMessages, beforeMessages)&&const DeepCollectionEquality().equals(other.afterMessages, afterMessages)&&(identical(other.canLoadOlder, canLoadOlder) || other.canLoadOlder == canLoadOlder)&&(identical(other.canLoadNewer, canLoadNewer) || other.canLoadNewer == canLoadNewer)&&(identical(other.isLoadingOlder, isLoadingOlder) || other.isLoadingOlder == isLoadingOlder)&&(identical(other.isLoadingNewer, isLoadingNewer) || other.isLoadingNewer == isLoadingNewer)&&(identical(other.isResolvingJump, isResolvingJump) || other.isResolvingJump == isResolvingJump)&&(identical(other.highlight, highlight) || other.highlight == highlight)&&(identical(other.viewportCommand, viewportCommand) || other.viewportCommand == viewportCommand)&&(identical(other.viewportCommandGeneration, viewportCommandGeneration) || other.viewportCommandGeneration == viewportCommandGeneration)&&(identical(other.isBootstrapping, isBootstrapping) || other.isBootstrapping == isBootstrapping));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(beforeMessages),const DeepCollectionEquality().hash(afterMessages),canLoadOlder,canLoadNewer,isLoadingOlder,isLoadingNewer,isResolvingJump,highlightedStableKey,viewportCommand,viewportCommandGeneration,isBootstrapping);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(beforeMessages),const DeepCollectionEquality().hash(afterMessages),canLoadOlder,canLoadNewer,isLoadingOlder,isLoadingNewer,isResolvingJump,highlight,viewportCommand,viewportCommandGeneration,isBootstrapping);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'ConversationTimelineState(beforeMessages: $beforeMessages, afterMessages: $afterMessages, canLoadOlder: $canLoadOlder, canLoadNewer: $canLoadNewer, isLoadingOlder: $isLoadingOlder, isLoadingNewer: $isLoadingNewer, isResolvingJump: $isResolvingJump, highlightedStableKey: $highlightedStableKey, viewportCommand: $viewportCommand, viewportCommandGeneration: $viewportCommandGeneration, isBootstrapping: $isBootstrapping)';
+  return 'ConversationTimelineState(beforeMessages: $beforeMessages, afterMessages: $afterMessages, canLoadOlder: $canLoadOlder, canLoadNewer: $canLoadNewer, isLoadingOlder: $isLoadingOlder, isLoadingNewer: $isLoadingNewer, isResolvingJump: $isResolvingJump, highlight: $highlight, viewportCommand: $viewportCommand, viewportCommandGeneration: $viewportCommandGeneration, isBootstrapping: $isBootstrapping)';
 }
 
 
@@ -51,7 +51,7 @@ abstract mixin class $ConversationTimelineStateCopyWith<$Res>  {
   factory $ConversationTimelineStateCopyWith(ConversationTimelineState value, $Res Function(ConversationTimelineState) _then) = _$ConversationTimelineStateCopyWithImpl;
 @useResult
 $Res call({
- List<ConversationMessageV2> beforeMessages, List<ConversationMessageV2> afterMessages, bool canLoadOlder, bool canLoadNewer, bool isLoadingOlder, bool isLoadingNewer, bool isResolvingJump, String? highlightedStableKey, ConversationTimelineViewportCommand viewportCommand, int viewportCommandGeneration, bool isBootstrapping
+ List<ConversationMessageV2> beforeMessages, List<ConversationMessageV2> afterMessages, bool canLoadOlder, bool canLoadNewer, bool isLoadingOlder, bool isLoadingNewer, bool isResolvingJump, ConversationMessageHighlight? highlight, ConversationTimelineViewportCommand viewportCommand, int viewportCommandGeneration, bool isBootstrapping
 });
 
 
@@ -68,7 +68,7 @@ class _$ConversationTimelineStateCopyWithImpl<$Res>
 
 /// Create a copy of ConversationTimelineState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? beforeMessages = null,Object? afterMessages = null,Object? canLoadOlder = null,Object? canLoadNewer = null,Object? isLoadingOlder = null,Object? isLoadingNewer = null,Object? isResolvingJump = null,Object? highlightedStableKey = freezed,Object? viewportCommand = null,Object? viewportCommandGeneration = null,Object? isBootstrapping = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? beforeMessages = null,Object? afterMessages = null,Object? canLoadOlder = null,Object? canLoadNewer = null,Object? isLoadingOlder = null,Object? isLoadingNewer = null,Object? isResolvingJump = null,Object? highlight = freezed,Object? viewportCommand = null,Object? viewportCommandGeneration = null,Object? isBootstrapping = null,}) {
   return _then(_self.copyWith(
 beforeMessages: null == beforeMessages ? _self.beforeMessages : beforeMessages // ignore: cast_nullable_to_non_nullable
 as List<ConversationMessageV2>,afterMessages: null == afterMessages ? _self.afterMessages : afterMessages // ignore: cast_nullable_to_non_nullable
@@ -77,8 +77,8 @@ as bool,canLoadNewer: null == canLoadNewer ? _self.canLoadNewer : canLoadNewer /
 as bool,isLoadingOlder: null == isLoadingOlder ? _self.isLoadingOlder : isLoadingOlder // ignore: cast_nullable_to_non_nullable
 as bool,isLoadingNewer: null == isLoadingNewer ? _self.isLoadingNewer : isLoadingNewer // ignore: cast_nullable_to_non_nullable
 as bool,isResolvingJump: null == isResolvingJump ? _self.isResolvingJump : isResolvingJump // ignore: cast_nullable_to_non_nullable
-as bool,highlightedStableKey: freezed == highlightedStableKey ? _self.highlightedStableKey : highlightedStableKey // ignore: cast_nullable_to_non_nullable
-as String?,viewportCommand: null == viewportCommand ? _self.viewportCommand : viewportCommand // ignore: cast_nullable_to_non_nullable
+as bool,highlight: freezed == highlight ? _self.highlight : highlight // ignore: cast_nullable_to_non_nullable
+as ConversationMessageHighlight?,viewportCommand: null == viewportCommand ? _self.viewportCommand : viewportCommand // ignore: cast_nullable_to_non_nullable
 as ConversationTimelineViewportCommand,viewportCommandGeneration: null == viewportCommandGeneration ? _self.viewportCommandGeneration : viewportCommandGeneration // ignore: cast_nullable_to_non_nullable
 as int,isBootstrapping: null == isBootstrapping ? _self.isBootstrapping : isBootstrapping // ignore: cast_nullable_to_non_nullable
 as bool,
@@ -166,10 +166,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<ConversationMessageV2> beforeMessages,  List<ConversationMessageV2> afterMessages,  bool canLoadOlder,  bool canLoadNewer,  bool isLoadingOlder,  bool isLoadingNewer,  bool isResolvingJump,  String? highlightedStableKey,  ConversationTimelineViewportCommand viewportCommand,  int viewportCommandGeneration,  bool isBootstrapping)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<ConversationMessageV2> beforeMessages,  List<ConversationMessageV2> afterMessages,  bool canLoadOlder,  bool canLoadNewer,  bool isLoadingOlder,  bool isLoadingNewer,  bool isResolvingJump,  ConversationMessageHighlight? highlight,  ConversationTimelineViewportCommand viewportCommand,  int viewportCommandGeneration,  bool isBootstrapping)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ConversationTimelineState() when $default != null:
-return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_that.canLoadNewer,_that.isLoadingOlder,_that.isLoadingNewer,_that.isResolvingJump,_that.highlightedStableKey,_that.viewportCommand,_that.viewportCommandGeneration,_that.isBootstrapping);case _:
+return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_that.canLoadNewer,_that.isLoadingOlder,_that.isLoadingNewer,_that.isResolvingJump,_that.highlight,_that.viewportCommand,_that.viewportCommandGeneration,_that.isBootstrapping);case _:
   return orElse();
 
 }
@@ -187,10 +187,10 @@ return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_tha
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<ConversationMessageV2> beforeMessages,  List<ConversationMessageV2> afterMessages,  bool canLoadOlder,  bool canLoadNewer,  bool isLoadingOlder,  bool isLoadingNewer,  bool isResolvingJump,  String? highlightedStableKey,  ConversationTimelineViewportCommand viewportCommand,  int viewportCommandGeneration,  bool isBootstrapping)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<ConversationMessageV2> beforeMessages,  List<ConversationMessageV2> afterMessages,  bool canLoadOlder,  bool canLoadNewer,  bool isLoadingOlder,  bool isLoadingNewer,  bool isResolvingJump,  ConversationMessageHighlight? highlight,  ConversationTimelineViewportCommand viewportCommand,  int viewportCommandGeneration,  bool isBootstrapping)  $default,) {final _that = this;
 switch (_that) {
 case _ConversationTimelineState():
-return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_that.canLoadNewer,_that.isLoadingOlder,_that.isLoadingNewer,_that.isResolvingJump,_that.highlightedStableKey,_that.viewportCommand,_that.viewportCommandGeneration,_that.isBootstrapping);case _:
+return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_that.canLoadNewer,_that.isLoadingOlder,_that.isLoadingNewer,_that.isResolvingJump,_that.highlight,_that.viewportCommand,_that.viewportCommandGeneration,_that.isBootstrapping);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -207,10 +207,10 @@ return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_tha
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<ConversationMessageV2> beforeMessages,  List<ConversationMessageV2> afterMessages,  bool canLoadOlder,  bool canLoadNewer,  bool isLoadingOlder,  bool isLoadingNewer,  bool isResolvingJump,  String? highlightedStableKey,  ConversationTimelineViewportCommand viewportCommand,  int viewportCommandGeneration,  bool isBootstrapping)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<ConversationMessageV2> beforeMessages,  List<ConversationMessageV2> afterMessages,  bool canLoadOlder,  bool canLoadNewer,  bool isLoadingOlder,  bool isLoadingNewer,  bool isResolvingJump,  ConversationMessageHighlight? highlight,  ConversationTimelineViewportCommand viewportCommand,  int viewportCommandGeneration,  bool isBootstrapping)?  $default,) {final _that = this;
 switch (_that) {
 case _ConversationTimelineState() when $default != null:
-return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_that.canLoadNewer,_that.isLoadingOlder,_that.isLoadingNewer,_that.isResolvingJump,_that.highlightedStableKey,_that.viewportCommand,_that.viewportCommandGeneration,_that.isBootstrapping);case _:
+return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_that.canLoadNewer,_that.isLoadingOlder,_that.isLoadingNewer,_that.isResolvingJump,_that.highlight,_that.viewportCommand,_that.viewportCommandGeneration,_that.isBootstrapping);case _:
   return null;
 
 }
@@ -222,7 +222,7 @@ return $default(_that.beforeMessages,_that.afterMessages,_that.canLoadOlder,_tha
 
 
 class _ConversationTimelineState with DiagnosticableTreeMixin implements ConversationTimelineState {
-  const _ConversationTimelineState({final  List<ConversationMessageV2> beforeMessages = const <ConversationMessageV2>[], final  List<ConversationMessageV2> afterMessages = const <ConversationMessageV2>[], this.canLoadOlder = false, this.canLoadNewer = false, this.isLoadingOlder = false, this.isLoadingNewer = false, this.isResolvingJump = false, this.highlightedStableKey, this.viewportCommand = const (kind: ConversationTimelineViewportCommandKind.none, placement: ConversationTimelineViewportPlacement.bottomPreferred), this.viewportCommandGeneration = 0, this.isBootstrapping = true}): _beforeMessages = beforeMessages,_afterMessages = afterMessages;
+  const _ConversationTimelineState({final  List<ConversationMessageV2> beforeMessages = const <ConversationMessageV2>[], final  List<ConversationMessageV2> afterMessages = const <ConversationMessageV2>[], this.canLoadOlder = false, this.canLoadNewer = false, this.isLoadingOlder = false, this.isLoadingNewer = false, this.isResolvingJump = false, this.highlight, this.viewportCommand = const (kind: ConversationTimelineViewportCommandKind.none, placement: ConversationTimelineViewportPlacement.bottomPreferred), this.viewportCommandGeneration = 0, this.isBootstrapping = true}): _beforeMessages = beforeMessages,_afterMessages = afterMessages;
   
 
  final  List<ConversationMessageV2> _beforeMessages;
@@ -244,7 +244,7 @@ class _ConversationTimelineState with DiagnosticableTreeMixin implements Convers
 @override@JsonKey() final  bool isLoadingOlder;
 @override@JsonKey() final  bool isLoadingNewer;
 @override@JsonKey() final  bool isResolvingJump;
-@override final  String? highlightedStableKey;
+@override final  ConversationMessageHighlight? highlight;
 @override@JsonKey() final  ConversationTimelineViewportCommand viewportCommand;
 @override@JsonKey() final  int viewportCommandGeneration;
 @override@JsonKey() final  bool isBootstrapping;
@@ -260,21 +260,21 @@ _$ConversationTimelineStateCopyWith<_ConversationTimelineState> get copyWith => 
 void debugFillProperties(DiagnosticPropertiesBuilder properties) {
   properties
     ..add(DiagnosticsProperty('type', 'ConversationTimelineState'))
-    ..add(DiagnosticsProperty('beforeMessages', beforeMessages))..add(DiagnosticsProperty('afterMessages', afterMessages))..add(DiagnosticsProperty('canLoadOlder', canLoadOlder))..add(DiagnosticsProperty('canLoadNewer', canLoadNewer))..add(DiagnosticsProperty('isLoadingOlder', isLoadingOlder))..add(DiagnosticsProperty('isLoadingNewer', isLoadingNewer))..add(DiagnosticsProperty('isResolvingJump', isResolvingJump))..add(DiagnosticsProperty('highlightedStableKey', highlightedStableKey))..add(DiagnosticsProperty('viewportCommand', viewportCommand))..add(DiagnosticsProperty('viewportCommandGeneration', viewportCommandGeneration))..add(DiagnosticsProperty('isBootstrapping', isBootstrapping));
+    ..add(DiagnosticsProperty('beforeMessages', beforeMessages))..add(DiagnosticsProperty('afterMessages', afterMessages))..add(DiagnosticsProperty('canLoadOlder', canLoadOlder))..add(DiagnosticsProperty('canLoadNewer', canLoadNewer))..add(DiagnosticsProperty('isLoadingOlder', isLoadingOlder))..add(DiagnosticsProperty('isLoadingNewer', isLoadingNewer))..add(DiagnosticsProperty('isResolvingJump', isResolvingJump))..add(DiagnosticsProperty('highlight', highlight))..add(DiagnosticsProperty('viewportCommand', viewportCommand))..add(DiagnosticsProperty('viewportCommandGeneration', viewportCommandGeneration))..add(DiagnosticsProperty('isBootstrapping', isBootstrapping));
 }
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ConversationTimelineState&&const DeepCollectionEquality().equals(other._beforeMessages, _beforeMessages)&&const DeepCollectionEquality().equals(other._afterMessages, _afterMessages)&&(identical(other.canLoadOlder, canLoadOlder) || other.canLoadOlder == canLoadOlder)&&(identical(other.canLoadNewer, canLoadNewer) || other.canLoadNewer == canLoadNewer)&&(identical(other.isLoadingOlder, isLoadingOlder) || other.isLoadingOlder == isLoadingOlder)&&(identical(other.isLoadingNewer, isLoadingNewer) || other.isLoadingNewer == isLoadingNewer)&&(identical(other.isResolvingJump, isResolvingJump) || other.isResolvingJump == isResolvingJump)&&(identical(other.highlightedStableKey, highlightedStableKey) || other.highlightedStableKey == highlightedStableKey)&&(identical(other.viewportCommand, viewportCommand) || other.viewportCommand == viewportCommand)&&(identical(other.viewportCommandGeneration, viewportCommandGeneration) || other.viewportCommandGeneration == viewportCommandGeneration)&&(identical(other.isBootstrapping, isBootstrapping) || other.isBootstrapping == isBootstrapping));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ConversationTimelineState&&const DeepCollectionEquality().equals(other._beforeMessages, _beforeMessages)&&const DeepCollectionEquality().equals(other._afterMessages, _afterMessages)&&(identical(other.canLoadOlder, canLoadOlder) || other.canLoadOlder == canLoadOlder)&&(identical(other.canLoadNewer, canLoadNewer) || other.canLoadNewer == canLoadNewer)&&(identical(other.isLoadingOlder, isLoadingOlder) || other.isLoadingOlder == isLoadingOlder)&&(identical(other.isLoadingNewer, isLoadingNewer) || other.isLoadingNewer == isLoadingNewer)&&(identical(other.isResolvingJump, isResolvingJump) || other.isResolvingJump == isResolvingJump)&&(identical(other.highlight, highlight) || other.highlight == highlight)&&(identical(other.viewportCommand, viewportCommand) || other.viewportCommand == viewportCommand)&&(identical(other.viewportCommandGeneration, viewportCommandGeneration) || other.viewportCommandGeneration == viewportCommandGeneration)&&(identical(other.isBootstrapping, isBootstrapping) || other.isBootstrapping == isBootstrapping));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_beforeMessages),const DeepCollectionEquality().hash(_afterMessages),canLoadOlder,canLoadNewer,isLoadingOlder,isLoadingNewer,isResolvingJump,highlightedStableKey,viewportCommand,viewportCommandGeneration,isBootstrapping);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_beforeMessages),const DeepCollectionEquality().hash(_afterMessages),canLoadOlder,canLoadNewer,isLoadingOlder,isLoadingNewer,isResolvingJump,highlight,viewportCommand,viewportCommandGeneration,isBootstrapping);
 
 @override
 String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'ConversationTimelineState(beforeMessages: $beforeMessages, afterMessages: $afterMessages, canLoadOlder: $canLoadOlder, canLoadNewer: $canLoadNewer, isLoadingOlder: $isLoadingOlder, isLoadingNewer: $isLoadingNewer, isResolvingJump: $isResolvingJump, highlightedStableKey: $highlightedStableKey, viewportCommand: $viewportCommand, viewportCommandGeneration: $viewportCommandGeneration, isBootstrapping: $isBootstrapping)';
+  return 'ConversationTimelineState(beforeMessages: $beforeMessages, afterMessages: $afterMessages, canLoadOlder: $canLoadOlder, canLoadNewer: $canLoadNewer, isLoadingOlder: $isLoadingOlder, isLoadingNewer: $isLoadingNewer, isResolvingJump: $isResolvingJump, highlight: $highlight, viewportCommand: $viewportCommand, viewportCommandGeneration: $viewportCommandGeneration, isBootstrapping: $isBootstrapping)';
 }
 
 
@@ -285,7 +285,7 @@ abstract mixin class _$ConversationTimelineStateCopyWith<$Res> implements $Conve
   factory _$ConversationTimelineStateCopyWith(_ConversationTimelineState value, $Res Function(_ConversationTimelineState) _then) = __$ConversationTimelineStateCopyWithImpl;
 @override @useResult
 $Res call({
- List<ConversationMessageV2> beforeMessages, List<ConversationMessageV2> afterMessages, bool canLoadOlder, bool canLoadNewer, bool isLoadingOlder, bool isLoadingNewer, bool isResolvingJump, String? highlightedStableKey, ConversationTimelineViewportCommand viewportCommand, int viewportCommandGeneration, bool isBootstrapping
+ List<ConversationMessageV2> beforeMessages, List<ConversationMessageV2> afterMessages, bool canLoadOlder, bool canLoadNewer, bool isLoadingOlder, bool isLoadingNewer, bool isResolvingJump, ConversationMessageHighlight? highlight, ConversationTimelineViewportCommand viewportCommand, int viewportCommandGeneration, bool isBootstrapping
 });
 
 
@@ -302,7 +302,7 @@ class __$ConversationTimelineStateCopyWithImpl<$Res>
 
 /// Create a copy of ConversationTimelineState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? beforeMessages = null,Object? afterMessages = null,Object? canLoadOlder = null,Object? canLoadNewer = null,Object? isLoadingOlder = null,Object? isLoadingNewer = null,Object? isResolvingJump = null,Object? highlightedStableKey = freezed,Object? viewportCommand = null,Object? viewportCommandGeneration = null,Object? isBootstrapping = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? beforeMessages = null,Object? afterMessages = null,Object? canLoadOlder = null,Object? canLoadNewer = null,Object? isLoadingOlder = null,Object? isLoadingNewer = null,Object? isResolvingJump = null,Object? highlight = freezed,Object? viewportCommand = null,Object? viewportCommandGeneration = null,Object? isBootstrapping = null,}) {
   return _then(_ConversationTimelineState(
 beforeMessages: null == beforeMessages ? _self._beforeMessages : beforeMessages // ignore: cast_nullable_to_non_nullable
 as List<ConversationMessageV2>,afterMessages: null == afterMessages ? _self._afterMessages : afterMessages // ignore: cast_nullable_to_non_nullable
@@ -311,8 +311,8 @@ as bool,canLoadNewer: null == canLoadNewer ? _self.canLoadNewer : canLoadNewer /
 as bool,isLoadingOlder: null == isLoadingOlder ? _self.isLoadingOlder : isLoadingOlder // ignore: cast_nullable_to_non_nullable
 as bool,isLoadingNewer: null == isLoadingNewer ? _self.isLoadingNewer : isLoadingNewer // ignore: cast_nullable_to_non_nullable
 as bool,isResolvingJump: null == isResolvingJump ? _self.isResolvingJump : isResolvingJump // ignore: cast_nullable_to_non_nullable
-as bool,highlightedStableKey: freezed == highlightedStableKey ? _self.highlightedStableKey : highlightedStableKey // ignore: cast_nullable_to_non_nullable
-as String?,viewportCommand: null == viewportCommand ? _self.viewportCommand : viewportCommand // ignore: cast_nullable_to_non_nullable
+as bool,highlight: freezed == highlight ? _self.highlight : highlight // ignore: cast_nullable_to_non_nullable
+as ConversationMessageHighlight?,viewportCommand: null == viewportCommand ? _self.viewportCommand : viewportCommand // ignore: cast_nullable_to_non_nullable
 as ConversationTimelineViewportCommand,viewportCommandGeneration: null == viewportCommandGeneration ? _self.viewportCommandGeneration : viewportCommandGeneration // ignore: cast_nullable_to_non_nullable
 as int,isBootstrapping: null == isBootstrapping ? _self.isBootstrapping : isBootstrapping // ignore: cast_nullable_to_non_nullable
 as bool,
