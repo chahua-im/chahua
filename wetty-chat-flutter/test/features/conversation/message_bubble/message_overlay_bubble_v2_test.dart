@@ -4,6 +4,7 @@ import 'package:chahua/features/conversation/timeline/model/message_long_press_d
 import 'package:chahua/features/conversation/timeline/presentation/message_overlay/message_overlay_bubble_v2.dart';
 import 'package:chahua/features/shared/model/message/message.dart'
     hide MessageItem;
+import 'package:chahua/l10n/app_localizations.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show SelectionArea;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,6 +54,8 @@ Future<void> _pumpWithSettings(WidgetTester tester, Widget child) async {
     ProviderScope(
       overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],
       child: CupertinoApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: CupertinoPageScaffold(
           child: Center(child: SizedBox(width: 320, child: child)),
         ),
