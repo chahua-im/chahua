@@ -9,7 +9,6 @@ use serde_json::json;
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
-use uuid::Uuid;
 
 use diesel::PgConnection;
 
@@ -23,17 +22,15 @@ use crate::handlers::chats::{send_prepared_message, PreparedMessageSend};
 use crate::handlers::groups::load_group_info;
 use crate::handlers::members::{check_membership, require_admin_role};
 use crate::models::{
-    GroupJoinReason, GroupRole, Invite, InviteType, MessageType, NewGroupMembership, NewInvite,
+    GroupJoinReason, GroupRole, Invite, InviteType, MessageType, NewGroupMembership,
 };
 use crate::schema::{group_membership, invites};
+use crate::services::invites as invite_service;
 use crate::utils::auth::CurrentUid;
-use crate::utils::ids;
 use crate::AppState;
 
 const DEFAULT_INVITES_LIMIT: i64 = 100;
 const MAX_INVITES_LIMIT: i64 = 100;
-const INVITE_CODE_LEN: usize = 10;
-const INVITE_CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
 const INVALID_INVITE_CODE_MESSAGE: &str = "Invalid invite code";
 const INVALID_INVITE_MESSAGE: &str = "Invalid invite";
 
@@ -166,42 +163,10 @@ mod double_opt_datetime {
     }
 }
 
-fn invite_to_response(invite: Invite) -> InviteResponse {
-    InviteResponse {
-        id: invite.id,
-        code: invite.code,
-        chat_id: invite.chat_id,
-        invite_type: invite.invite_type,
-        creator_uid: invite.creator_uid,
-        target_uid: invite.target_uid,
-        required_chat_id: invite.required_chat_id,
-        created_at: invite.created_at,
-        expires_at: invite.expires_at,
-        revoked_at: invite.revoked_at,
-        used_at: invite.used_at,
-    }
-}
-
 fn invite_limit(limit: Option<i64>) -> i64 {
     limit
         .unwrap_or(DEFAULT_INVITES_LIMIT)
         .clamp(1, MAX_INVITES_LIMIT)
-}
-
-fn generate_invite_code() -> String {
-    let mut code = String::with_capacity(INVITE_CODE_LEN);
-
-    while code.len() < INVITE_CODE_LEN {
-        for byte in Uuid::new_v4().into_bytes() {
-            let idx = (byte as usize) % INVITE_CODE_ALPHABET.len();
-            code.push(INVITE_CODE_ALPHABET[idx] as char);
-            if code.len() == INVITE_CODE_LEN {
-                break;
-            }
-        }
-    }
-
-    code
 }
 
 fn validate_create_body(body: &CreateInviteBody) -> Result<(), AppError> {
@@ -232,13 +197,6 @@ fn validate_create_body(body: &CreateInviteBody) -> Result<(), AppError> {
     Ok(())
 }
 
-fn is_unique_violation(error: &diesel::result::Error) -> bool {
-    matches!(
-        error,
-        diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _)
-    )
-}
-
 fn load_invite_by_id(conn: &mut PgConnection, invite_id: i64) -> Result<Invite, AppError> {
     invites::table
         .filter(invites::id.eq(invite_id))
@@ -249,60 +207,7 @@ fn load_invite_by_id(conn: &mut PgConnection, invite_id: i64) -> Result<Invite, 
 }
 
 fn validate_invite_is_active(invite: &Invite, now: DateTime<Utc>) -> bool {
-    invite.revoked_at.is_none() && invite.expires_at.is_none_or(|expires_at| expires_at > now)
-}
-
-async fn create_generic_invite(
-    conn: &mut PgConnection,
-    state: &AppState,
-    chat_id: i64,
-    uid: i32,
-    expires_at: Option<DateTime<Utc>>,
-) -> Result<Invite, AppError> {
-    let id = ids::next_id(state.id_gen.as_ref()).await.map_err(|e| {
-        tracing::error!("next_id for invite: {:?}", e);
-        AppError::Internal("ID generation failed")
-    })?;
-
-    let now = Utc::now();
-    let mut inserted = None;
-
-    for _ in 0..8 {
-        let new_invite = NewInvite {
-            id,
-            code: generate_invite_code(),
-            chat_id,
-            invite_type: InviteType::Generic,
-            creator_uid: Some(uid),
-            target_uid: None,
-            required_chat_id: None,
-            created_at: now,
-            expires_at,
-            revoked_at: None,
-            used_at: None,
-        };
-
-        match diesel::insert_into(invites::table)
-            .values(&new_invite)
-            .returning(Invite::as_returning())
-            .get_result::<Invite>(conn)
-        {
-            Ok(invite) => {
-                inserted = Some(invite);
-                break;
-            }
-            Err(error) if is_unique_violation(&error) => continue,
-            Err(error) => {
-                tracing::error!("insert invite: {:?}", error);
-                return Err(AppError::Internal("Failed to create invite"));
-            }
-        }
-    }
-
-    inserted.ok_or_else(|| {
-        tracing::error!("failed to generate unique invite code after retries");
-        AppError::Internal("Failed to create invite")
-    })
+    invite_service::validate_invite_is_active(invite, now)
 }
 
 async fn create_invite_from_body(
@@ -311,50 +216,19 @@ async fn create_invite_from_body(
     uid: i32,
     body: &CreateInviteBody,
 ) -> Result<Invite, AppError> {
-    let id = ids::next_id(state.id_gen.as_ref()).await.map_err(|e| {
-        tracing::error!("next_id for invite: {:?}", e);
-        AppError::Internal("ID generation failed")
-    })?;
-
-    let now = Utc::now();
-    let mut inserted = None;
-
-    for _ in 0..8 {
-        let new_invite = NewInvite {
-            id,
-            code: generate_invite_code(),
+    invite_service::create_invite(
+        conn,
+        state,
+        invite_service::NewInviteInput {
             chat_id: body.chat_id,
             invite_type: body.invite_type.clone(),
             creator_uid: Some(uid),
             target_uid: body.target_uid,
             required_chat_id: body.required_chat_id,
-            created_at: now,
             expires_at: body.expires_at,
-            revoked_at: None,
-            used_at: None,
-        };
-
-        match diesel::insert_into(invites::table)
-            .values(&new_invite)
-            .returning(Invite::as_returning())
-            .get_result::<Invite>(conn)
-        {
-            Ok(invite) => {
-                inserted = Some(invite);
-                break;
-            }
-            Err(error) if is_unique_violation(&error) => continue,
-            Err(error) => {
-                tracing::error!("insert invite: {:?}", error);
-                return Err(AppError::Internal("Failed to create invite"));
-            }
-        }
-    }
-
-    inserted.ok_or_else(|| {
-        tracing::error!("failed to generate unique invite code after retries");
-        AppError::Internal("Failed to create invite")
-    })
+        },
+    )
+    .await
 }
 
 fn preview_eligibility(
@@ -429,7 +303,10 @@ async fn post_invite(
     require_admin_role(conn, body.chat_id, uid)?;
     let invite = create_invite_from_body(conn, &state, uid, &body).await?;
 
-    Ok((StatusCode::CREATED, Json(invite_to_response(invite))))
+    Ok((
+        StatusCode::CREATED,
+        Json(invite_service::invite_to_response(invite)),
+    ))
 }
 
 #[utoipa::path(
@@ -467,7 +344,14 @@ async fn post_send_invite_message(
         }
         invite
     } else {
-        create_generic_invite(conn, &state, body.source_chat_id, uid, body.expires_at).await?
+        invite_service::create_generic_invite(
+            conn,
+            &state,
+            body.source_chat_id,
+            uid,
+            body.expires_at,
+        )
+        .await?
     };
 
     let send_result = send_prepared_message(
@@ -492,7 +376,7 @@ async fn post_send_invite_message(
     Ok((
         StatusCode::CREATED,
         Json(SendInviteMessageResponse {
-            invite: invite_to_response(invite),
+            invite: invite_service::invite_to_response(invite),
             message: send_result.response,
         }),
     ))
@@ -532,7 +416,10 @@ async fn get_invites(
         .load::<Invite>(conn)?;
 
     Ok(Json(ListInvitesResponse {
-        invites: rows.into_iter().map(invite_to_response).collect(),
+        invites: rows
+            .into_iter()
+            .map(invite_service::invite_to_response)
+            .collect(),
     }))
 }
 
@@ -558,7 +445,7 @@ async fn get_invite(
     let invite = load_invite_by_id(conn, invite_id)?;
     require_admin_role(conn, invite.chat_id, uid)?;
 
-    Ok(Json(invite_to_response(invite)))
+    Ok(Json(invite_service::invite_to_response(invite)))
 }
 
 #[utoipa::path(
@@ -607,7 +494,7 @@ async fn get_invite_by_code(
     let chat = load_group_info(conn, &state, invite.chat_id, uid)?;
 
     Ok(Json(InvitePreviewResponse {
-        invite: invite_to_response(invite),
+        invite: invite_service::invite_to_response(invite),
         chat,
         already_member: matches!(eligibility, PreviewEligibility::AlreadyMember),
     }))
@@ -646,7 +533,7 @@ async fn patch_invite(
         .returning(Invite::as_returning())
         .get_result::<Invite>(conn)?;
 
-    Ok(Json(invite_to_response(updated)))
+    Ok(Json(invite_service::invite_to_response(updated)))
 }
 
 #[utoipa::path(

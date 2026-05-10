@@ -41,5 +41,9 @@ impl utoipa::Modify for SecurityAddon {
             "bearer_jwt",
             SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
         );
+        components.add_security_scheme(
+            "service_token_bearer",
+            SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
+        );
     }
 }

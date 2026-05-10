@@ -17,6 +17,7 @@ const CACHE_TTL: Duration = Duration::from_secs(60);
 pub enum Action {
     ChatCreate,
     MemberViewAll,
+    InviteCreate,
     PermissionAll,
     ServiceTokenManage,
 }
@@ -26,6 +27,7 @@ impl Action {
         match self {
             Self::ChatCreate => "chat.create",
             Self::MemberViewAll => "member.viewAll",
+            Self::InviteCreate => "invite.create",
             Self::PermissionAll => "permission.all",
             Self::ServiceTokenManage => "serviceToken.manage",
         }

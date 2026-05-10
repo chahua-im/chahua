@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod chats;
+pub mod external;
 pub mod groups;
 pub mod invites;
 pub mod members;
