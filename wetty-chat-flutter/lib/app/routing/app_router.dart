@@ -1,6 +1,6 @@
+import 'package:chahua/features/chat_list/application/chat_list_v2_scope.dart';
 import 'package:chahua/features/chat_list/presentation/chat_list_v2_page.dart';
 import 'package:chahua/features/chat_list/presentation/chat_workspace_shell.dart';
-import 'package:chahua/features/chat_list/presentation/archived_thread_list_v2_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -266,11 +266,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                         ],
                       ),
                       GoRoute(
+                        path: 'chats/archived',
+                        pageBuilder: (context, state) => _chatWorkspacePage(
+                          key: const ValueKey('chats/archived'),
+                          disableTransition: _disableTransition(state),
+                          child: const ChatListV2Page(
+                            scope: ChatListV2Scope.archived,
+                          ),
+                        ),
+                      ),
+                      GoRoute(
                         path: 'threads/archived',
                         pageBuilder: (context, state) => _chatWorkspacePage(
                           key: const ValueKey('threads/archived'),
                           disableTransition: _disableTransition(state),
-                          child: const ArchivedThreadListV2Page(),
+                          child: const ChatListV2Page(
+                            scope: ChatListV2Scope.archived,
+                          ),
                         ),
                       ),
                       GoRoute(

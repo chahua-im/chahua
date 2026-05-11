@@ -2,6 +2,7 @@ abstract final class AppRoutes {
   static const bootstrap = '/bootstrap';
   static const login = '/login';
   static const chats = '/';
+  static const archivedChats = '/chats/archived';
   static const archivedThreads = '/threads/archived';
   static String chatDetail(String chatId) => '/chat/$chatId';
   static String chatMembers(String chatId) => '/chat/$chatId/members';
