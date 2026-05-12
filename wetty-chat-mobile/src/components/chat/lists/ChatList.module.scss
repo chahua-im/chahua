@@ -94,6 +94,11 @@
   text-transform: none;
 }
 
+.chatsListDraftLabel {
+  color: var(--ion-color-danger, #eb445a);
+  font-weight: 500;
+}
+
 .chatListItem {
   color: inherit;
 }
@@ -112,6 +117,10 @@
 
   .chatsListPreviewSender {
     color: var(--ion-color-primary-contrast);
+  }
+
+  .chatsListDraftLabel {
+    color: inherit;
   }
 
   .chatsListPreview {

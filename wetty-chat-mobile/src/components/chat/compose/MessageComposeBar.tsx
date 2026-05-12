@@ -16,6 +16,7 @@ import { MentionAutocomplete } from './MentionAutocomplete';
 import type { StickerSummary } from '@/api/stickers';
 import type { ComposeSendPayload, ComposeUploadInput, ComposeUploadResult, EditingMessage, ReplyTo } from './types';
 import { isSupportedMediaFile } from '@/utils/heicMedia';
+import { useChatDraft, loadDraft } from '@/hooks/useChatDraft';
 export type {
   ComposeSendAudioPayload,
   ComposeSendPayload,
@@ -29,6 +30,8 @@ export type {
 
 interface MessageComposeBarProps {
   chatId?: string | number;
+  draftKey?: string;
+  onRestoreReply?: (replyToMessageId: string) => void;
   onSend: (payload: ComposeSendPayload) => void;
   uploadAttachment: (input: ComposeUploadInput) => Promise<ComposeUploadResult>;
   replyTo?: ReplyTo;
@@ -58,6 +61,8 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
   function MessageComposeBarInner(
     {
       chatId,
+      draftKey: draftKeyProp,
+      onRestoreReply,
       onSend,
       uploadAttachment,
       replyTo,
@@ -70,14 +75,51 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
     }: MessageComposeBarProps,
     ref,
   ) {
+    const draftKeyValue = draftKeyProp ?? String(chatId ?? '');
+    const isEditing = editing != null;
+    const { saveDebounced, clear: clearDraft } = useChatDraft(isEditing ? undefined : draftKeyValue);
+
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [text, setText] = useState(() => editing?.text ?? '');
+    const [draftLoaded, setDraftLoaded] = useState(false);
     const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
     const stickerOverlayActiveRef = useRef(false);
     const [isDragOver, setIsDragOver] = useState(false);
     const dragCounterRef = useRef(0);
+
+    useEffect(() => {
+      if (!draftKeyValue || isEditing) {
+        setDraftLoaded(true);
+        return;
+      }
+
+      let canceled = false;
+      void loadDraft(draftKeyValue).then((draft) => {
+        if (canceled) return;
+        if (draft) {
+          setText(draft.text);
+          if (draft.replyToMessageId) {
+            onRestoreReply?.(draft.replyToMessageId);
+          }
+        }
+        setDraftLoaded(true);
+      });
+
+      return () => {
+        canceled = true;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draftKeyValue]);
+
+    useEffect(() => {
+      if (!draftLoaded || isEditing) return;
+      saveDebounced({
+        text,
+        replyToMessageId: replyTo?.messageId,
+      });
+    }, [text, replyTo?.messageId, draftLoaded, isEditing, saveDebounced]);
 
     const {
       mentionState,
@@ -166,9 +208,10 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       setText('');
       clearAll();
       clearMentions();
+      clearDraft();
       const ta = textareaRef.current;
       if (ta) ta.style.height = 'auto';
-    }, [clearAll, clearMentions, uploads, existingAttachments, onSend, text, toWireFormat]);
+    }, [clearAll, clearDraft, clearMentions, uploads, existingAttachments, onSend, text, toWireFormat]);
 
     const uploadedRecords = uploads.filter((record) => record.state.status === 'uploaded');
     const currentAttachmentIds = [

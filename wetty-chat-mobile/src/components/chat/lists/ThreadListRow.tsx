@@ -1,12 +1,13 @@
 import { type ReactNode, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { IonBadge, IonIcon, IonItem, IonItemOption, IonItemOptions, IonItemSliding, IonLabel } from '@ionic/react';
+import { t } from '@lingui/core/macro';
 import { toMessagePreview, type MessagePreview } from '@/api/messages';
 import type { StoredThreadListItem } from '@/api/threads';
 import { OverlayAvatar } from '@/components/OverlayAvatar';
 import type { RootState } from '@/store/index';
 import { selectLatestThreadReplyMessage } from '@/store/messagesSlice';
-import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
 import styles from './ThreadListRow.module.scss';
 
 function formatRelativeTime(isoString: string, locale: string): string {
@@ -41,6 +42,7 @@ interface ThreadListRowProps {
   thread: StoredThreadListItem;
   locale: string;
   isActive?: boolean;
+  draftText?: string;
   onSelect: (chatId: string, threadRootId: string) => void;
   endAction?: {
     color: string;
@@ -50,7 +52,7 @@ interface ThreadListRowProps {
   };
 }
 
-export function ThreadListRow({ thread, locale, isActive, onSelect, endAction }: ThreadListRowProps) {
+export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, endAction }: ThreadListRowProps) {
   const rootMsg = thread.threadRootMessage;
   const rootPreview = formatMessagePreview(rootMsg, getNotificationPreviewLabels(locale));
 
@@ -87,11 +89,19 @@ export function ThreadListRow({ thread, locale, isActive, onSelect, endAction }:
       <IonLabel className={styles.bodyContent}>
         {/* Row 2: replied to */}
         <div className={styles.repliedTo}>{rootPreview || rootMsg.sender.name}</div>
-        {/* Row 3: latest reply */}
-        {lastReply && lastReplyPreview && (
+        {/* Row 3: latest reply or draft */}
+        {draftText !== undefined ? (
           <p className={styles.latestReply}>
-            <span className={styles.latestReplySender}>{lastReply.sender.name ?? 'User'}:</span> {lastReplyPreview}
+            <span className={styles.draftLabel}>{t`Draft: `}</span>
+            {truncatePreview(draftText)}
           </p>
+        ) : (
+          lastReply &&
+          lastReplyPreview && (
+            <p className={styles.latestReply}>
+              <span className={styles.latestReplySender}>{lastReply.sender.name ?? 'User'}:</span> {lastReplyPreview}
+            </p>
+          )
         )}
       </IonLabel>
       <div slot="end" className={styles.chatsListEndSlot}>

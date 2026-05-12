@@ -23,6 +23,10 @@
     color: var(--ion-color-primary-contrast);
   }
 
+  .draftLabel {
+    color: inherit;
+  }
+
   .headerTime {
     color: rgba(var(--ion-color-primary-contrast-rgb), 0.8);
   }
@@ -127,6 +131,11 @@
 .latestReplySender {
   font-weight: 500;
   color: var(--ion-color-dark);
+}
+
+.draftLabel {
+  color: var(--ion-color-danger, #eb445a);
+  font-weight: 500;
 }
 
 .chatsListEndSlot {

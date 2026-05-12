@@ -288,6 +288,9 @@ msgstr "下載"
 msgid "Download image"
 msgstr "下載圖片"
 
+msgid "Draft: "
+msgstr "草稿："
+
 msgid "Drop images or videos"
 msgstr "拖放圖片或影片"
 

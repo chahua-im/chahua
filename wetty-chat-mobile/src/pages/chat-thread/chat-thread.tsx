@@ -1891,6 +1891,13 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
           <MessageComposeBar
             ref={composeBarRef}
             chatId={chatId}
+            draftKey={storeChatId}
+            onRestoreReply={(replyToMessageId) => {
+              const message = messageLookup.get(replyToMessageId);
+              if (message) {
+                setReplyingTo(message);
+              }
+            }}
             onSend={handleSend}
             uploadAttachment={uploadAttachment}
             onError={(message) => showToast(message, 3000)}

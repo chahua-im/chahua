@@ -51,7 +51,10 @@ import { markChatAsUnread, markMessagesAsRead, type MessagePreview, type Message
 import { syncAppBadgeCount } from '@/utils/badges';
 import { getChatDisplayName } from '@/utils/chatDisplay';
 import { UserAvatar } from '@/components/UserAvatar';
-import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
+import { getAllDrafts } from '@/utils/draftSync';
+import { onDraftChange } from '@/utils/draftEvents';
+import { loadDraft } from '@/hooks/useChatDraft';
 import { buildResumeHash } from '@/types/chatThreadNavigation';
 import { CHAT_LIST_REFRESH_MIN_DURATION_MS } from '@/constants/chatTiming';
 import { type ChatListTab, ChatListSegment } from '@/components/chat/lists/ChatListSegment';
@@ -168,6 +171,7 @@ export function ChatList({
   const messageChats = useSelector((state: RootState) => state.messages.chats);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<ChatListTab>(initialTab ?? (showAllTab ? 'all' : 'groups'));
   const effectiveTab = activeTab === 'all' && !showAllTab ? 'groups' : activeTab;
   const chats = archivedMode ? archivedChats : activeChats;
@@ -207,17 +211,39 @@ export function ChatList({
 
   useEffect(() => {
     loadLists()
-      .then(() => {
-        setError(null);
-      })
+      .then(() => setError(null))
       .catch((err: Error) => setError(err.message || t`Failed to load chats`))
       .finally(() => setLoading(false));
     void updateAppBadge();
+
+    getAllDrafts()
+      .then((draftsMap) => setDrafts(draftsMap))
+      .catch(() => {});
   }, [loadLists, updateAppBadge]);
 
   useEffect(() => {
     void updateAppBadge();
   }, [unreadChats, unreadThreads, updateAppBadge]);
+
+  useEffect(() => {
+    const unsubscribe = onDraftChange((draftKey) => {
+      loadDraft(draftKey)
+        .then((draft) => {
+          setDrafts((prev) => {
+            if (draft) {
+              return { ...prev, [draftKey]: draft.text };
+            }
+            // Draft was cleared — remove from map
+            const next = { ...prev };
+            delete next[draftKey];
+            return next;
+          });
+        })
+        .catch(() => {});
+    });
+
+    return unsubscribe;
+  }, []);
 
   const handleToggleRead = async (chat: ChatListEntry, slidingItem: HTMLIonItemSlidingElement | null) => {
     slidingItem?.close();
@@ -297,9 +323,7 @@ export function ChatList({
     const startTime = Date.now();
 
     loadLists()
-      .then(() => {
-        setError(null);
-      })
+      .then(() => setError(null))
       .catch((err: Error) => {
         setError(err.message || t`Failed to refresh chats`);
       })
@@ -310,6 +334,11 @@ export function ChatList({
           event.detail.complete();
         }, delay);
       });
+
+    // Refresh drafts independently
+    getAllDrafts()
+      .then((draftsMap) => setDrafts(draftsMap))
+      .catch(() => {});
 
     void updateAppBadge();
   };
@@ -448,7 +477,16 @@ export function ChatList({
               <IonIcon aria-hidden="true" icon={notificationsOffOutline} className={styles.chatsListMutedIcon} />
             ) : null}
           </h3>
-          <p className={styles.chatsListPreview}>{getMessagePreview(chat.lastMessage, locale)}</p>
+          <p className={styles.chatsListPreview}>
+            {chat.id in drafts ? (
+              <>
+                <span className={styles.chatsListDraftLabel}>{t`Draft: `}</span>
+                {truncatePreview(drafts[chat.id])}
+              </>
+            ) : (
+              getMessagePreview(chat.lastMessage, locale)
+            )}
+          </p>
         </IonLabel>
         <div slot="end" className={styles.chatsListEndSlot}>
           <div className={styles.chatsListTime}>{formatLastActivity(chat.lastMessageAt, locale)}</div>
@@ -464,23 +502,27 @@ export function ChatList({
     </IonItemSliding>
   );
 
-  const renderThreadItem = (thread: StoredThreadListItem) => (
-    <ThreadListRow
-      key={`thread-${thread.threadRootMessage.id}`}
-      thread={thread}
-      locale={locale}
-      isActive={activeThreadId === thread.threadRootMessage.id}
-      onSelect={handleThreadSelect}
-      endAction={{
-        color: archivedMode ? 'success' : 'medium',
-        icon: archivedMode ? arrowUndoOutline : archiveOutline,
-        label: archivedMode ? t`Unarchive` : t`Archive`,
-        onAction: () => {
-          void handleArchiveThread(thread, archivedMode);
-        },
-      }}
-    />
-  );
+  const renderThreadItem = (thread: StoredThreadListItem) => {
+    const threadDraftKey = `${thread.chatId}_thread_${thread.threadRootMessage.id}`;
+    return (
+      <ThreadListRow
+        key={`thread-${thread.threadRootMessage.id}`}
+        thread={thread}
+        locale={locale}
+        isActive={activeThreadId === thread.threadRootMessage.id}
+        onSelect={handleThreadSelect}
+        draftText={drafts[threadDraftKey]}
+        endAction={{
+          color: archivedMode ? 'success' : 'medium',
+          icon: archivedMode ? arrowUndoOutline : archiveOutline,
+          label: archivedMode ? t`Unarchive` : t`Archive`,
+          onAction: () => {
+            void handleArchiveThread(thread, archivedMode);
+          },
+        }}
+      />
+    );
+  };
 
   const renderContent = () => {
     if (error) {

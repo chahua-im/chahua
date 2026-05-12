@@ -288,6 +288,9 @@ msgstr "Download"
 msgid "Download image"
 msgstr "Download image"
 
+msgid "Draft: "
+msgstr "Draft: "
+
 msgid "Drop images or videos"
 msgstr "Drop images or videos"
 
