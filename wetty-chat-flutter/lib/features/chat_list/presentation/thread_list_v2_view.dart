@@ -28,7 +28,7 @@ class ThreadListV2View extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    final provider = _threadListProviderForScope(scope);
+    final provider = threadListV2ViewModelProvider(scope);
     final asyncState = ref.watch(provider);
     final archivedSummary = ref.watch(
       threadListV2StoreProvider.select(
@@ -130,14 +130,6 @@ class ThreadListV2View extends ConsumerWidget {
         );
       },
     );
-  }
-
-  AsyncNotifierProvider<ThreadListV2ViewModel, ThreadListV2ViewState>
-  _threadListProviderForScope(ChatListV2Scope scope) {
-    return switch (scope) {
-      ChatListV2Scope.active => activeThreadListV2ViewModelProvider,
-      ChatListV2Scope.archived => archivedThreadListV2ViewModelProvider,
-    };
   }
 }
 
@@ -256,10 +248,7 @@ class _ThreadListV2Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final provider = switch (scope) {
-      ChatListV2Scope.active => activeThreadListV2ViewModelProvider,
-      ChatListV2Scope.archived => archivedThreadListV2ViewModelProvider,
-    };
+    final provider = threadListV2ViewModelProvider(scope);
     return Consumer(
       builder: (context, ref, _) => SwipeToActionRow(
         key: ValueKey('thread-v2-${thread.chatId}-${thread.threadRootId}'),

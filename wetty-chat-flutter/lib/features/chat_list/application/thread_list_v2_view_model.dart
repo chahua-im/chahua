@@ -4,13 +4,8 @@ import 'package:chahua/features/shared/data/read_state_repository.dart';
 
 import '../data/thread_list_v2_repository.dart';
 import '../model/thread_list_item.dart';
+import 'chat_list_v2_scope.dart';
 import 'thread_list_v2_store.dart';
-
-/// Selects which thread list a [ThreadListV2ViewModel] instance manages.
-///
-/// The provider is a family keyed by this scope. The active scope backs the
-/// normal Threads tab; the archived scope backs the archive folder page.
-enum ThreadListV2Scope { active, archived }
 
 typedef ThreadListV2ViewState = ({
   List<ThreadListItem> threads,
@@ -31,7 +26,7 @@ typedef ThreadListV2ViewState = ({
 class ThreadListV2ViewModel extends AsyncNotifier<ThreadListV2ViewState> {
   ThreadListV2ViewModel(this.scope);
 
-  final ThreadListV2Scope scope;
+  final ChatListV2Scope scope;
 
   @override
   Future<ThreadListV2ViewState> build() async {
@@ -43,12 +38,12 @@ class ThreadListV2ViewModel extends AsyncNotifier<ThreadListV2ViewState> {
 
   Future<ThreadListV2ViewState> _loadInitial() async {
     switch (scope) {
-      case ThreadListV2Scope.active:
+      case ChatListV2Scope.active:
         await Future.wait([
           ref.read(threadListV2RepositoryProvider).loadThreads(),
           ref.read(threadListV2RepositoryProvider).probeArchivedThreads(),
         ]);
-      case ThreadListV2Scope.archived:
+      case ChatListV2Scope.archived:
         final archived = ref.read(threadListV2StoreProvider).archived;
         if (!archived.isLoaded) {
           await ref.read(threadListV2RepositoryProvider).loadArchivedThreads();
@@ -101,9 +96,9 @@ class ThreadListV2ViewModel extends AsyncNotifier<ThreadListV2ViewState> {
     ));
     try {
       switch (scope) {
-        case ThreadListV2Scope.active:
+        case ChatListV2Scope.active:
           await ref.read(threadListV2RepositoryProvider).loadMoreThreads();
-        case ThreadListV2Scope.archived:
+        case ChatListV2Scope.archived:
           await ref
               .read(threadListV2RepositoryProvider)
               .loadMoreArchivedThreads();
@@ -145,13 +140,13 @@ class ThreadListV2ViewModel extends AsyncNotifier<ThreadListV2ViewState> {
     ));
     try {
       switch (scope) {
-        case ThreadListV2Scope.active:
+        case ChatListV2Scope.active:
           await Future.wait([
             ref.read(threadListV2RepositoryProvider).loadThreads(),
             ref.read(threadListV2RepositoryProvider).probeArchivedThreads(),
           ]);
           ref.read(readStateRepositoryProvider).resetThreadBaselines();
-        case ThreadListV2Scope.archived:
+        case ChatListV2Scope.archived:
           await ref.read(threadListV2RepositoryProvider).loadArchivedThreads();
       }
 
@@ -190,8 +185,8 @@ class ThreadListV2ViewModel extends AsyncNotifier<ThreadListV2ViewState> {
   ThreadListV2ListState _currentListState() {
     final storeState = ref.read(threadListV2StoreProvider);
     return switch (scope) {
-      ThreadListV2Scope.active => storeState.active,
-      ThreadListV2Scope.archived => storeState.archived,
+      ChatListV2Scope.active => storeState.active,
+      ChatListV2Scope.archived => storeState.archived,
     };
   }
 }
@@ -200,7 +195,7 @@ final threadListV2ViewModelProvider =
     AsyncNotifierProvider.family<
       ThreadListV2ViewModel,
       ThreadListV2ViewState,
-      ThreadListV2Scope
+      ChatListV2Scope
     >(ThreadListV2ViewModel.new);
 
 /// View model for the normal Threads tab.
@@ -208,12 +203,12 @@ final threadListV2ViewModelProvider =
 /// Loads active threads and probes archived-thread existence for the archive
 /// folder row.
 final activeThreadListV2ViewModelProvider = threadListV2ViewModelProvider(
-  ThreadListV2Scope.active,
+  ChatListV2Scope.active,
 );
 
 /// View model for the archived-threads page.
 ///
 /// Loads and paginates only archived threads.
 final archivedThreadListV2ViewModelProvider = threadListV2ViewModelProvider(
-  ThreadListV2Scope.archived,
+  ChatListV2Scope.archived,
 );

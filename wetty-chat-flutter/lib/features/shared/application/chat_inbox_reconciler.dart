@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:chahua/core/notifications/unread_badge_provider.dart';
 import 'package:chahua/core/session/dev_session_store.dart';
+import 'package:chahua/features/chat_list/application/chat_list_v2_scope.dart';
 import 'package:chahua/features/chat_list/application/group_list_v2_view_model.dart';
 import 'package:chahua/features/chat_list/application/thread_list_v2_view_model.dart';
 
@@ -52,12 +53,12 @@ class ChatInboxReconciler {
 
   Future<void> _refreshThreads() async {
     await Future.wait([
-      _refreshThreadScope(ThreadListV2Scope.active),
-      _refreshThreadScope(ThreadListV2Scope.archived),
+      _refreshThreadScope(ChatListV2Scope.active),
+      _refreshThreadScope(ChatListV2Scope.archived),
     ]);
   }
 
-  Future<void> _refreshThreadScope(ThreadListV2Scope scope) async {
+  Future<void> _refreshThreadScope(ChatListV2Scope scope) async {
     final provider = threadListV2ViewModelProvider(scope);
     final current = _ref.read(provider).value;
     if (current == null) {
