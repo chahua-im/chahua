@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { t } from '@lingui/core/macro';
 import type { Attachment } from '@/api/messages';
 import type { UploadPreviewItem } from '@/components/chat/compose/UploadPreview';
-import type { ComposeUploadInput, ComposeUploadResult, DraftUploadRecord } from './types';
+import type { ComposeUploadInput, ComposeUploadResult, UploadRecord } from './types';
 
 import { MAX_ATTACHMENTS_PER_MESSAGE } from '@/constants/media';
 import {
@@ -18,12 +18,12 @@ import {
 
 const isAbortError = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
 
-const createDraftId = () => {
+const createUploadId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
 
-  return `draft_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return `upload_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 };
 
 const getNativeImageDimensions = (file: File): Promise<{ width?: number; height?: number }> =>
@@ -107,112 +107,112 @@ export function useComposeAttachments({
   onError,
   maxAttachments = MAX_ATTACHMENTS_PER_MESSAGE,
 }: UseComposeAttachmentsArgs) {
-  const [drafts, setDrafts] = useState<DraftUploadRecord[]>([]);
+  const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<Attachment[]>(initialExistingAttachments);
-  const draftsRef = useRef<DraftUploadRecord[]>([]);
+  const uploadsRef = useRef<UploadRecord[]>([]);
 
-  const cleanupDraft = useCallback((draftRecord: DraftUploadRecord) => {
-    draftRecord.abortController?.abort();
-    URL.revokeObjectURL(draftRecord.draft.previewUrl);
+  const cleanupRecord = useCallback((record: UploadRecord) => {
+    record.abortController?.abort();
+    URL.revokeObjectURL(record.state.previewUrl);
   }, []);
 
-  const clearDrafts = useCallback(
-    (currentDrafts: DraftUploadRecord[]) => {
-      currentDrafts.forEach(cleanupDraft);
-      setDrafts([]);
+  const clearUploads = useCallback(
+    (currentUploads: UploadRecord[]) => {
+      currentUploads.forEach(cleanupRecord);
+      setUploads([]);
     },
-    [cleanupDraft],
+    [cleanupRecord],
   );
 
   useEffect(() => {
-    draftsRef.current = drafts;
-  }, [drafts]);
+    uploadsRef.current = uploads;
+  }, [uploads]);
 
   useEffect(
     () => () => {
-      draftsRef.current.forEach(cleanupDraft);
+      uploadsRef.current.forEach(cleanupRecord);
     },
-    [cleanupDraft],
+    [cleanupRecord],
   );
 
   const startUpload = useCallback(
     async (localId: string, file: File) => {
       const abortController = new AbortController();
 
-      setDrafts((prev) =>
-        prev.map((draftRecord) =>
-          draftRecord.draft.localId === localId
+      setUploads((prev) =>
+        prev.map((record) =>
+          record.state.localId === localId
             ? {
-                ...draftRecord,
+                ...record,
                 abortController,
-                draft: {
-                  ...draftRecord.draft,
+                state: {
+                  ...record.state,
                   status: 'uploading',
                   progress: 0,
                   errorMessage: undefined,
                   attachmentId: undefined,
                 },
               }
-            : draftRecord,
+            : record,
         ),
       );
 
       try {
         const dimensions = await getMediaDimensions(file);
-        const currentDraft = draftsRef.current.find((r) => r.draft.localId === localId)?.draft;
+        const currentState = uploadsRef.current.find((r) => r.state.localId === localId)?.state;
 
-        setDrafts((prev) =>
-          prev.map((draftRecord) =>
-            draftRecord.draft.localId === localId
+        setUploads((prev) =>
+          prev.map((record) =>
+            record.state.localId === localId
               ? {
-                  ...draftRecord,
-                  draft: {
-                    ...draftRecord.draft,
+                  ...record,
+                  state: {
+                    ...record.state,
                     width: dimensions.width,
                     height: dimensions.height,
                   },
                 }
-              : draftRecord,
+              : record,
           ),
         );
 
         const result = await uploadAttachment({
           file,
           dimensions,
-          order: currentDraft?.order,
+          order: currentState?.order,
           signal: abortController.signal,
           onProgress: (progress) => {
-            setDrafts((prev) =>
-              prev.map((draftRecord) =>
-                draftRecord.draft.localId === localId
+            setUploads((prev) =>
+              prev.map((record) =>
+                record.state.localId === localId
                   ? {
-                      ...draftRecord,
-                      draft: {
-                        ...draftRecord.draft,
+                      ...record,
+                      state: {
+                        ...record.state,
                         progress,
                       },
                     }
-                  : draftRecord,
+                  : record,
               ),
             );
           },
         });
 
-        setDrafts((prev) =>
-          prev.map((draftRecord) =>
-            draftRecord.draft.localId === localId
+        setUploads((prev) =>
+          prev.map((record) =>
+            record.state.localId === localId
               ? {
-                  ...draftRecord,
+                  ...record,
                   abortController: undefined,
-                  draft: {
-                    ...draftRecord.draft,
+                  state: {
+                    ...record.state,
                     status: 'uploaded',
                     progress: 100,
                     attachmentId: result.attachmentId,
                     errorMessage: undefined,
                   },
                 }
-              : draftRecord,
+              : record,
           ),
         );
       } catch (error) {
@@ -221,21 +221,21 @@ export function useComposeAttachments({
         }
 
         console.error('Failed to upload attachment:', error);
-        setDrafts((prev) =>
-          prev.map((draftRecord) =>
-            draftRecord.draft.localId === localId
+        setUploads((prev) =>
+          prev.map((record) =>
+            record.state.localId === localId
               ? {
-                  ...draftRecord,
+                  ...record,
                   abortController: undefined,
-                  draft: {
-                    ...draftRecord.draft,
+                  state: {
+                    ...record.state,
                     status: 'error',
                     progress: 0,
                     attachmentId: undefined,
                     errorMessage: t`Upload failed`,
                   },
                 }
-              : draftRecord,
+              : record,
           ),
         );
       }
@@ -249,7 +249,7 @@ export function useComposeAttachments({
       if (mediaFiles.length === 0) return;
 
       let allowedFiles = mediaFiles;
-      const currentCount = existingAttachments.length + draftsRef.current.length;
+      const currentCount = existingAttachments.length + uploadsRef.current.length;
       if (currentCount + mediaFiles.length > maxAttachments) {
         const available = Math.max(0, maxAttachments - currentCount);
         if (onError) {
@@ -259,10 +259,10 @@ export function useComposeAttachments({
         allowedFiles = mediaFiles.slice(0, available);
       }
 
-      const queuedDrafts: DraftUploadRecord[] = allowedFiles.map((file, index) => ({
+      const queuedRecords: UploadRecord[] = allowedFiles.map((file, index) => ({
         file,
-        draft: {
-          localId: createDraftId(),
+        state: {
+          localId: createUploadId(),
           kind: isImageFile(file) ? 'image' : 'video',
           name: file.name,
           previewUrl: URL.createObjectURL(file),
@@ -274,9 +274,9 @@ export function useComposeAttachments({
         },
       }));
 
-      setDrafts((prev) => [...prev, ...queuedDrafts]);
-      queuedDrafts.forEach(({ draft, file }) => {
-        void startUpload(draft.localId, file);
+      setUploads((prev) => [...prev, ...queuedRecords]);
+      queuedRecords.forEach(({ state, file }) => {
+        void startUpload(state.localId, file);
       });
     },
     [startUpload, existingAttachments, maxAttachments, onError],
@@ -307,23 +307,23 @@ export function useComposeAttachments({
     return () => document.removeEventListener('paste', handleGlobalPaste);
   }, [containerRef, queueFiles]);
 
-  const removeDraft = useCallback(
+  const removeUpload = useCallback(
     (localId: string) => {
-      setDrafts((prev) => {
-        const draftToRemove = prev.find((draftRecord) => draftRecord.draft.localId === localId);
-        if (draftToRemove) {
-          cleanupDraft(draftToRemove);
+      setUploads((prev) => {
+        const toRemove = prev.find((record) => record.state.localId === localId);
+        if (toRemove) {
+          cleanupRecord(toRemove);
         }
 
-        return prev.filter((draftRecord) => draftRecord.draft.localId !== localId);
+        return prev.filter((record) => record.state.localId !== localId);
       });
     },
-    [cleanupDraft],
+    [cleanupRecord],
   );
 
-  const retryDraft = useCallback(
+  const retryUpload = useCallback(
     (localId: string) => {
-      const file = draftsRef.current.find((draftRecord) => draftRecord.draft.localId === localId)?.file;
+      const file = uploadsRef.current.find((record) => record.state.localId === localId)?.file;
       if (!file) return;
       void startUpload(localId, file);
     },
@@ -337,11 +337,11 @@ export function useComposeAttachments({
 
   const clearAll = useCallback(() => {
     setExistingAttachments([]);
-    clearDrafts(draftsRef.current);
-  }, [clearDrafts]);
+    clearUploads(uploadsRef.current);
+  }, [clearUploads]);
 
-  const hasUploadingDraft = drafts.some((draftRecord) => draftRecord.draft.status === 'uploading');
-  const hasFailedDraft = drafts.some((draftRecord) => draftRecord.draft.status === 'error');
+  const hasPending = uploads.some((record) => record.state.status === 'uploading');
+  const hasFailed = uploads.some((record) => record.state.status === 'error');
 
   const previewItems: UploadPreviewItem[] = [
     ...existingAttachments.map((attachment) => ({
@@ -360,22 +360,22 @@ export function useComposeAttachments({
           ? attachment.url
           : undefined,
     })),
-    ...drafts.map((draftRecord) => ({
-      itemType: 'draft' as const,
-      ...draftRecord.draft,
+    ...uploads.map((record) => ({
+      itemType: 'pending' as const,
+      ...record.state,
     })),
   ];
 
   return {
-    drafts,
+    uploads,
     existingAttachments,
     previewItems,
-    hasUploadingDraft,
-    hasFailedDraft,
+    hasPending,
+    hasFailed,
     queueFiles,
     clearAll,
-    removeDraft,
-    retryDraft,
+    removeUpload,
+    retryUpload,
     removeExistingAttachment,
   };
 }

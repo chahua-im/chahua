@@ -5,9 +5,9 @@ import { DisplayableImage } from '@/components/shared/DisplayableImage';
 import { isHeicLikeMedia } from '@/utils/heicMedia';
 import styles from './UploadPreview.module.scss';
 
-export type ComposeUploadDraftStatus = 'uploading' | 'uploaded' | 'error';
+export type UploadStatus = 'uploading' | 'uploaded' | 'error';
 
-export interface ImageUploadDraft {
+export interface UploadFileState {
   localId: string;
   kind: 'image' | 'video';
   name: string;
@@ -18,7 +18,7 @@ export interface ImageUploadDraft {
   height?: number;
   order?: number;
   progress: number;
-  status: ComposeUploadDraftStatus;
+  status: UploadStatus;
   attachmentId?: string;
   errorMessage?: string;
 }
@@ -32,7 +32,7 @@ export interface ExistingAttachmentPreview {
 }
 
 export type UploadPreviewItem =
-  | ({ itemType: 'draft' } & ImageUploadDraft)
+  | ({ itemType: 'pending' } & UploadFileState)
   | ({ itemType: 'existing' } & ExistingAttachmentPreview);
 
 interface UploadPreviewProps {
@@ -47,7 +47,7 @@ export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) 
   return (
     <div className={styles.previewTray} aria-label={t`Attachment preview tray`}>
       {items.map((item) => {
-        const mimeType = item.itemType === 'draft' ? item.mimeType : item.kind;
+        const mimeType = item.itemType === 'pending' ? item.mimeType : item.kind;
         const isImagePreview =
           item.kind === 'image' || item.kind.startsWith('image/') || isHeicLikeMedia({ mimeType, fileName: item.name });
 
@@ -80,7 +80,7 @@ export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) 
               <IonIcon icon={closeCircle} />
             </button>
 
-            {item.itemType === 'draft' && item.status !== 'uploaded' && (
+            {item.itemType === 'pending' && item.status !== 'uploaded' && (
               <div className={`${styles.overlay} ${item.status === 'error' ? styles.overlayError : ''}`}>
                 {item.status === 'uploading' ? (
                   <>
@@ -117,5 +117,5 @@ export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) 
 }
 
 // When file/video/audio previews are added, keep this tray-level API unchanged and
-// branch on draft.kind into dedicated card renderers. The compose bar should continue
-// to own draft lifecycle, while this component stays focused on presentation/actions.
+// branch on file.kind into dedicated card renderers. The compose bar should continue
+// to own upload lifecycle, while this component stays focused on presentation/actions.

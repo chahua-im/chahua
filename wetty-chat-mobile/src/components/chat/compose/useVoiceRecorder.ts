@@ -4,7 +4,7 @@ import type {
   ComposeSendAudioPayload,
   ComposeUploadInput,
   ComposeUploadResult,
-  RecordedVoiceDraft,
+  RecordedVoiceData,
   VoiceRecorderState,
 } from './types';
 
@@ -135,19 +135,19 @@ export function useVoiceRecorder({
     setVoiceRecorderState(null);
   }, [setVoiceRecorderState, stopVoiceStream]);
 
-  const uploadAndSendDraft = useCallback(
-    async (draft: RecordedVoiceDraft) => {
+  const uploadAndSendVoice = useCallback(
+    async (voiceData: RecordedVoiceData) => {
       const uploadAbortController = new AbortController();
       voiceUploadAbortControllerRef.current = uploadAbortController;
       setVoiceRecorderState({
         phase: 'uploading',
-        ...draft,
+        ...voiceData,
         uploadProgress: 0,
       });
 
       try {
         const result = await uploadAttachment({
-          file: draft.file,
+          file: voiceData.file,
           signal: uploadAbortController.signal,
           onProgress: (progress) => {
             setVoiceRecorder((currentVoice) =>
@@ -163,13 +163,13 @@ export function useVoiceRecorder({
 
         onSend({
           kind: 'audio',
-          durationMs: draft.durationMs,
+          durationMs: voiceData.durationMs,
           attachmentId: result.attachmentId,
           uploadedAttachment: {
             attachmentId: result.attachmentId,
-            file: draft.file,
-            mimeType: draft.mimeType,
-            size: draft.size,
+            file: voiceData.file,
+            mimeType: voiceData.mimeType,
+            size: voiceData.size,
           },
         });
         setVoiceRecorder(null);
@@ -179,7 +179,7 @@ export function useVoiceRecorder({
           reportVoiceError(t`Failed to send voice message.`);
           setVoiceRecorderState({
             phase: 'recorded',
-            ...draft,
+            ...voiceData,
             uploadProgress: 0,
           });
         } else {
@@ -207,7 +207,7 @@ export function useVoiceRecorder({
 
       if (current.phase !== 'recording') {
         if (action === 'send' && current.phase === 'recorded') {
-          void uploadAndSendDraft(current);
+          void uploadAndSendVoice(current);
         } else if (action === 'cancel' && current.phase === 'recorded') {
           resetVoiceRecorder();
         }
@@ -231,7 +231,7 @@ export function useVoiceRecorder({
 
       recorder.stop();
     },
-    [resetVoiceRecorder, setVoiceRecorderState, uploadAndSendDraft],
+    [resetVoiceRecorder, setVoiceRecorderState, uploadAndSendVoice],
   );
 
   const startVoiceRecording = useCallback(async () => {
@@ -335,7 +335,7 @@ export function useVoiceRecorder({
             lastModified: Date.now(),
           },
         );
-        const draft: RecordedVoiceDraft = {
+        const voiceData: RecordedVoiceData = {
           file,
           mimeType: blobType,
           size: file.size,
@@ -343,13 +343,13 @@ export function useVoiceRecorder({
         };
 
         if (finalAction === 'send') {
-          await uploadAndSendDraft(draft);
+          await uploadAndSendVoice(voiceData);
           return;
         }
 
         setVoiceRecorderState({
           phase: 'recorded',
-          ...draft,
+          ...voiceData,
           uploadProgress: 0,
         });
       };
@@ -378,7 +378,7 @@ export function useVoiceRecorder({
     reportVoiceError,
     setVoiceRecorderState,
     stopVoiceStream,
-    uploadAndSendDraft,
+    uploadAndSendVoice,
   ]);
 
   useEffect(() => {

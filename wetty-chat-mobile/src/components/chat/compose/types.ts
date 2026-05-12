@@ -1,6 +1,6 @@
 import type { Attachment, MentionInfo } from '@/api/messages';
 import type { StickerSummary } from '@/api/stickers';
-import type { ImageUploadDraft } from '@/components/chat/compose/UploadPreview';
+import type { UploadFileState } from '@/components/chat/compose/UploadPreview';
 
 export interface ReplyTo {
   messageId: string;
@@ -66,13 +66,13 @@ export interface ComposeSendStickerPayload {
 
 export type ComposeSendPayload = ComposeSendTextPayload | ComposeSendAudioPayload | ComposeSendStickerPayload;
 
-export interface DraftUploadRecord {
-  draft: ImageUploadDraft;
+export interface UploadRecord {
+  state: UploadFileState;
   file: File;
   abortController?: AbortController;
 }
 
-export interface RecordedVoiceDraft {
+export interface RecordedVoiceData {
   file: File;
   mimeType: string;
   size: number;
@@ -88,4 +88,4 @@ export type VoiceRecorderState =
   | ({
       phase: 'recorded' | 'uploading';
       uploadProgress: number;
-    } & RecordedVoiceDraft);
+    } & RecordedVoiceData);
