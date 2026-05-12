@@ -28,7 +28,8 @@ class ThreadListV2View extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    final asyncState = ref.watch(activeThreadListV2ViewModelProvider);
+    final provider = _threadListProviderForScope(scope);
+    final asyncState = ref.watch(provider);
     final archivedSummary = ref.watch(
       threadListV2StoreProvider.select(
         (state) => (
@@ -53,8 +54,7 @@ class ThreadListV2View extends ConsumerWidget {
               Text(error.toString(), textAlign: TextAlign.center),
               const SizedBox(height: 16),
               CupertinoButton.filled(
-                onPressed: () =>
-                    ref.invalidate(activeThreadListV2ViewModelProvider),
+                onPressed: () => ref.invalidate(provider),
                 child: Text(l10n.retry),
               ),
             ],
@@ -73,8 +73,7 @@ class ThreadListV2View extends ConsumerWidget {
                   Text(viewState.errorMessage!, textAlign: TextAlign.center),
                   const SizedBox(height: 16),
                   CupertinoButton.filled(
-                    onPressed: () =>
-                        ref.invalidate(activeThreadListV2ViewModelProvider),
+                    onPressed: () => ref.invalidate(provider),
                     child: Text(l10n.retry),
                   ),
                 ],
@@ -84,17 +83,18 @@ class ThreadListV2View extends ConsumerWidget {
         }
 
         final showArchiveFolder =
-            archivedSummary.hasArchivedThreads ||
-            archivedSummary.unreadCount > 0;
+            scope == ChatListV2Scope.active &&
+            (archivedSummary.hasArchivedThreads ||
+                archivedSummary.unreadCount > 0);
 
         if (viewState.threads.isEmpty && !showArchiveFolder) {
           return SliverFillRemaining(
             hasScrollBody: false,
             child: Center(
-              child: Text(
-                l10n.noThreadsYet,
-                style: appSecondaryTextStyle(context),
-              ),
+              child: Text(switch (scope) {
+                ChatListV2Scope.active => l10n.noThreadsYet,
+                ChatListV2Scope.archived => l10n.noArchivedThreads,
+              }, style: appSecondaryTextStyle(context)),
             ),
           );
         }
@@ -113,6 +113,7 @@ class ThreadListV2View extends ConsumerWidget {
                 final threadIndex = showArchiveFolder ? index - 1 : index;
                 final thread = viewState.threads[threadIndex];
                 return _ThreadListV2Row(
+                  scope: scope,
                   thread: thread,
                   isActive: thread.threadRootId == selectedThreadRootId,
                 );
@@ -129,6 +130,14 @@ class ThreadListV2View extends ConsumerWidget {
         );
       },
     );
+  }
+
+  AsyncNotifierProvider<ThreadListV2ViewModel, ThreadListV2ViewState>
+  _threadListProviderForScope(ChatListV2Scope scope) {
+    return switch (scope) {
+      ChatListV2Scope.active => activeThreadListV2ViewModelProvider,
+      ChatListV2Scope.archived => archivedThreadListV2ViewModelProvider,
+    };
   }
 }
 
@@ -234,24 +243,42 @@ class _UnreadBadge extends StatelessWidget {
 }
 
 class _ThreadListV2Row extends StatelessWidget {
-  const _ThreadListV2Row({required this.thread, required this.isActive});
+  const _ThreadListV2Row({
+    required this.scope,
+    required this.thread,
+    required this.isActive,
+  });
 
+  final ChatListV2Scope scope;
   final ThreadListItem thread;
   final bool isActive;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final provider = switch (scope) {
+      ChatListV2Scope.active => activeThreadListV2ViewModelProvider,
+      ChatListV2Scope.archived => archivedThreadListV2ViewModelProvider,
+    };
     return Consumer(
       builder: (context, ref, _) => SwipeToActionRow(
         key: ValueKey('thread-v2-${thread.chatId}-${thread.threadRootId}'),
         direction: SwipeToActionDirection.left,
         icon: CupertinoIcons.archivebox,
-        label: l10n.swipeActionArchive,
-        actionColor: CupertinoColors.systemOrange,
-        onAction: () => ref
-            .read(activeThreadListV2ViewModelProvider.notifier)
-            .archiveThread(thread),
+        label: switch (scope) {
+          ChatListV2Scope.active => l10n.swipeActionArchive,
+          ChatListV2Scope.archived => l10n.swipeActionUnarchive,
+        },
+        actionColor: switch (scope) {
+          ChatListV2Scope.active => CupertinoColors.systemOrange,
+          ChatListV2Scope.archived => CupertinoColors.systemGreen,
+        },
+        onAction: () => switch (scope) {
+          ChatListV2Scope.active =>
+            ref.read(provider.notifier).archiveThread(thread),
+          ChatListV2Scope.archived =>
+            ref.read(provider.notifier).unarchiveThread(thread),
+        },
         child: ThreadListRow(
           thread: thread,
           isActive: isActive,

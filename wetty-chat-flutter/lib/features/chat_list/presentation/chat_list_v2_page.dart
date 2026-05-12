@@ -102,13 +102,14 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
     }
 
     if (activeTab == ChatListTab.threads) {
-      final threadState = ref.read(activeThreadListV2ViewModelProvider).value;
+      final provider = _threadListProviderForScope(widget.scope);
+      final threadState = ref.read(provider).value;
       if (threadState == null ||
           !threadState.hasMore ||
           threadState.isLoadingMore) {
         return;
       }
-      ref.read(activeThreadListV2ViewModelProvider.notifier).loadMoreThreads();
+      ref.read(provider.notifier).loadMoreThreads();
       return;
     }
 
@@ -135,9 +136,19 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
       ChatListTab.groups =>
         ref.read(groupListV2ViewModelProvider.notifier).refreshGroups(),
       ChatListTab.threads =>
-        ref.read(activeThreadListV2ViewModelProvider.notifier).refreshThreads(),
+        ref
+            .read(_threadListProviderForScope(widget.scope).notifier)
+            .refreshThreads(),
       ChatListTab.all =>
         ref.read(allListV2ViewModelProvider.notifier).refreshAll(),
+    };
+  }
+
+  AsyncNotifierProvider<ThreadListV2ViewModel, ThreadListV2ViewState>
+  _threadListProviderForScope(ChatListV2Scope scope) {
+    return switch (scope) {
+      ChatListV2Scope.active => activeThreadListV2ViewModelProvider,
+      ChatListV2Scope.archived => archivedThreadListV2ViewModelProvider,
     };
   }
 
