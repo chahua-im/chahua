@@ -116,15 +116,15 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
     }, []);
 
     const {
-      drafts,
+      uploads,
       existingAttachments,
       previewItems,
-      hasUploadingDraft,
-      hasFailedDraft,
+      hasPending,
+      hasFailed,
       queueFiles,
       clearAll,
-      removeDraft,
-      retryDraft,
+      removeUpload,
+      retryUpload,
       removeExistingAttachment,
     } = useComposeAttachments({
       uploadAttachment,
@@ -139,12 +139,12 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
 
     const handleSend = useCallback(() => {
       const trimmed = toWireFormat(text.trim());
-      const uploadedDrafts = drafts.filter(
-        (draftRecord) => draftRecord.draft.status === 'uploaded' && Boolean(draftRecord.draft.attachmentId),
+      const uploadedRecords = uploads.filter(
+        (record) => record.state.status === 'uploaded' && Boolean(record.state.attachmentId),
       );
       const attachmentIds = [
         ...existingAttachments.map((attachment) => attachment.id),
-        ...uploadedDrafts.map((draftRecord) => draftRecord.draft.attachmentId!),
+        ...uploadedRecords.map((record) => record.state.attachmentId!),
       ];
 
       if (!trimmed && attachmentIds.length === 0) return;
@@ -154,13 +154,13 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
         text: trimmed,
         attachmentIds,
         existingAttachments,
-        uploadedAttachments: uploadedDrafts.map((draftRecord) => ({
-          attachmentId: draftRecord.draft.attachmentId!,
-          file: draftRecord.file,
-          mimeType: draftRecord.draft.mimeType,
-          size: draftRecord.draft.size,
-          width: draftRecord.draft.width,
-          height: draftRecord.draft.height,
+        uploadedAttachments: uploadedRecords.map((record) => ({
+          attachmentId: record.state.attachmentId!,
+          file: record.file,
+          mimeType: record.state.mimeType,
+          size: record.state.size,
+          width: record.state.width,
+          height: record.state.height,
         })),
       });
       setText('');
@@ -168,13 +168,13 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       clearMentions();
       const ta = textareaRef.current;
       if (ta) ta.style.height = 'auto';
-    }, [clearAll, clearMentions, drafts, existingAttachments, onSend, text, toWireFormat]);
+    }, [clearAll, clearMentions, uploads, existingAttachments, onSend, text, toWireFormat]);
 
-    const uploadedDrafts = drafts.filter((draftRecord) => draftRecord.draft.status === 'uploaded');
+    const uploadedRecords = uploads.filter((record) => record.state.status === 'uploaded');
     const currentAttachmentIds = [
       ...existingAttachments.map((attachment) => attachment.id),
-      ...uploadedDrafts
-        .map((draftRecord) => draftRecord.draft.attachmentId)
+      ...uploadedRecords
+        .map((record) => record.state.attachmentId)
         .filter((attachmentId): attachmentId is string => Boolean(attachmentId)),
     ];
     const hasAttachment = currentAttachmentIds.length > 0;
@@ -186,11 +186,9 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       trimmedText === originalEditText &&
       currentAttachmentIds.length === originalAttachmentIds.length &&
       currentAttachmentIds.every((attachmentId, index) => attachmentId === originalAttachmentIds[index]);
-    const canSend =
-      !hasUploadingDraft && !hasFailedDraft && (trimmedText.length > 0 || hasAttachment) && !isUnchangedEdit;
-    const canStartVoiceBase =
-      trimmedText.length === 0 && !hasAttachment && !editing && !hasUploadingDraft && !hasFailedDraft;
-    const canRequestRecentEdit = !editing && !replyTo && text.length === 0 && !hasAttachment && drafts.length === 0;
+    const canSend = !hasPending && !hasFailed && (trimmedText.length > 0 || hasAttachment) && !isUnchangedEdit;
+    const canStartVoiceBase = trimmedText.length === 0 && !hasAttachment && !editing && !hasPending && !hasFailed;
+    const canRequestRecentEdit = !editing && !replyTo && text.length === 0 && !hasAttachment && uploads.length === 0;
 
     const {
       voiceRecorder,
@@ -345,9 +343,9 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
                   removeExistingAttachment(localId);
                   return;
                 }
-                removeDraft(localId);
+                removeUpload(localId);
               }}
-              onRetry={retryDraft}
+              onRetry={retryUpload}
             />
 
             {voiceRecorder ? (
