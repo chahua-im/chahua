@@ -17,6 +17,7 @@ class ChatListItemDto {
     this.lastReadMessageId,
     this.lastMessage,
     this.mutedUntil,
+    this.archived = false,
   });
 
   @FlexibleIntConverter()
@@ -31,6 +32,8 @@ class ChatListItemDto {
   final MessagePreviewDto? lastMessage;
   @NullableDateTimeConverter()
   final DateTime? mutedUntil;
+  @JsonKey(defaultValue: false)
+  final bool archived;
 
   factory ChatListItemDto.fromJson(Map<String, dynamic> json) =>
       _$ChatListItemDtoFromJson(json);
@@ -80,10 +83,21 @@ class CreateChatResponseDto {
 
 @JsonSerializable(explicitToJson: true)
 class UnreadCountResponseDto {
-  const UnreadCountResponseDto({this.unreadCount = 0});
+  const UnreadCountResponseDto({
+    this.unreadCount = 0,
+    this.archivedUnreadCount = 0,
+    this.unreadChatCount = 0,
+    this.archivedUnreadChatCount = 0,
+  });
 
   @JsonKey(defaultValue: 0)
   final int unreadCount;
+  @JsonKey(defaultValue: 0)
+  final int archivedUnreadCount;
+  @JsonKey(defaultValue: 0)
+  final int unreadChatCount;
+  @JsonKey(defaultValue: 0)
+  final int archivedUnreadChatCount;
 
   factory UnreadCountResponseDto.fromJson(Map<String, dynamic> json) =>
       _$UnreadCountResponseDtoFromJson(json);

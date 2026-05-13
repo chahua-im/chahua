@@ -21,6 +21,7 @@ ChatListItemDto _$ChatListItemDtoFromJson(
       ? null
       : MessagePreviewDto.fromJson(json['lastMessage'] as Map<String, dynamic>),
   mutedUntil: const NullableDateTimeConverter().fromJson(json['mutedUntil']),
+  archived: json['archived'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$ChatListItemDtoToJson(
@@ -36,6 +37,7 @@ Map<String, dynamic> _$ChatListItemDtoToJson(
   'lastReadMessageId': instance.lastReadMessageId,
   'lastMessage': instance.lastMessage?.toJson(),
   'mutedUntil': const NullableDateTimeConverter().toJson(instance.mutedUntil),
+  'archived': instance.archived,
 };
 
 ListChatsResponseDto _$ListChatsResponseDtoFromJson(
@@ -82,11 +84,20 @@ UnreadCountResponseDto _$UnreadCountResponseDtoFromJson(
   Map<String, dynamic> json,
 ) => UnreadCountResponseDto(
   unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
+  archivedUnreadCount: (json['archivedUnreadCount'] as num?)?.toInt() ?? 0,
+  unreadChatCount: (json['unreadChatCount'] as num?)?.toInt() ?? 0,
+  archivedUnreadChatCount:
+      (json['archivedUnreadChatCount'] as num?)?.toInt() ?? 0,
 );
 
 Map<String, dynamic> _$UnreadCountResponseDtoToJson(
   UnreadCountResponseDto instance,
-) => <String, dynamic>{'unreadCount': instance.unreadCount};
+) => <String, dynamic>{
+  'unreadCount': instance.unreadCount,
+  'archivedUnreadCount': instance.archivedUnreadCount,
+  'unreadChatCount': instance.unreadChatCount,
+  'archivedUnreadChatCount': instance.archivedUnreadChatCount,
+};
 
 MarkChatReadStateResponseDto _$MarkChatReadStateResponseDtoFromJson(
   Map<String, dynamic> json,

@@ -14,7 +14,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$ChatListItem {
 
- String get id; String? get name; String? get avatarUrl; DateTime? get lastMessageAt; int get unreadCount; String? get lastReadMessageId; MessagePreview? get lastMessage; DateTime? get mutedUntil;
+ String get id; String? get name; String? get avatarUrl; DateTime? get lastMessageAt; int get unreadCount; String? get lastReadMessageId; MessagePreview? get lastMessage; DateTime? get mutedUntil; bool get archived;
 /// Create a copy of ChatListItem
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -25,16 +25,16 @@ $ChatListItemCopyWith<ChatListItem> get copyWith => _$ChatListItemCopyWithImpl<C
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatListItem&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.avatarUrl, avatarUrl) || other.avatarUrl == avatarUrl)&&(identical(other.lastMessageAt, lastMessageAt) || other.lastMessageAt == lastMessageAt)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastReadMessageId, lastReadMessageId) || other.lastReadMessageId == lastReadMessageId)&&(identical(other.lastMessage, lastMessage) || other.lastMessage == lastMessage)&&(identical(other.mutedUntil, mutedUntil) || other.mutedUntil == mutedUntil));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatListItem&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.avatarUrl, avatarUrl) || other.avatarUrl == avatarUrl)&&(identical(other.lastMessageAt, lastMessageAt) || other.lastMessageAt == lastMessageAt)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastReadMessageId, lastReadMessageId) || other.lastReadMessageId == lastReadMessageId)&&(identical(other.lastMessage, lastMessage) || other.lastMessage == lastMessage)&&(identical(other.mutedUntil, mutedUntil) || other.mutedUntil == mutedUntil)&&(identical(other.archived, archived) || other.archived == archived));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,name,avatarUrl,lastMessageAt,unreadCount,lastReadMessageId,lastMessage,mutedUntil);
+int get hashCode => Object.hash(runtimeType,id,name,avatarUrl,lastMessageAt,unreadCount,lastReadMessageId,lastMessage,mutedUntil,archived);
 
 @override
 String toString() {
-  return 'ChatListItem(id: $id, name: $name, avatarUrl: $avatarUrl, lastMessageAt: $lastMessageAt, unreadCount: $unreadCount, lastReadMessageId: $lastReadMessageId, lastMessage: $lastMessage, mutedUntil: $mutedUntil)';
+  return 'ChatListItem(id: $id, name: $name, avatarUrl: $avatarUrl, lastMessageAt: $lastMessageAt, unreadCount: $unreadCount, lastReadMessageId: $lastReadMessageId, lastMessage: $lastMessage, mutedUntil: $mutedUntil, archived: $archived)';
 }
 
 
@@ -45,7 +45,7 @@ abstract mixin class $ChatListItemCopyWith<$Res>  {
   factory $ChatListItemCopyWith(ChatListItem value, $Res Function(ChatListItem) _then) = _$ChatListItemCopyWithImpl;
 @useResult
 $Res call({
- String id, String? name, String? avatarUrl, DateTime? lastMessageAt, int unreadCount, String? lastReadMessageId, MessagePreview? lastMessage, DateTime? mutedUntil
+ String id, String? name, String? avatarUrl, DateTime? lastMessageAt, int unreadCount, String? lastReadMessageId, MessagePreview? lastMessage, DateTime? mutedUntil, bool archived
 });
 
 
@@ -62,7 +62,7 @@ class _$ChatListItemCopyWithImpl<$Res>
 
 /// Create a copy of ChatListItem
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = freezed,Object? avatarUrl = freezed,Object? lastMessageAt = freezed,Object? unreadCount = null,Object? lastReadMessageId = freezed,Object? lastMessage = freezed,Object? mutedUntil = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = freezed,Object? avatarUrl = freezed,Object? lastMessageAt = freezed,Object? unreadCount = null,Object? lastReadMessageId = freezed,Object? lastMessage = freezed,Object? mutedUntil = freezed,Object? archived = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: freezed == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
@@ -72,7 +72,8 @@ as DateTime?,unreadCount: null == unreadCount ? _self.unreadCount : unreadCount 
 as int,lastReadMessageId: freezed == lastReadMessageId ? _self.lastReadMessageId : lastReadMessageId // ignore: cast_nullable_to_non_nullable
 as String?,lastMessage: freezed == lastMessage ? _self.lastMessage : lastMessage // ignore: cast_nullable_to_non_nullable
 as MessagePreview?,mutedUntil: freezed == mutedUntil ? _self.mutedUntil : mutedUntil // ignore: cast_nullable_to_non_nullable
-as DateTime?,
+as DateTime?,archived: null == archived ? _self.archived : archived // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 /// Create a copy of ChatListItem
@@ -169,10 +170,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String? name,  String? avatarUrl,  DateTime? lastMessageAt,  int unreadCount,  String? lastReadMessageId,  MessagePreview? lastMessage,  DateTime? mutedUntil)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String? name,  String? avatarUrl,  DateTime? lastMessageAt,  int unreadCount,  String? lastReadMessageId,  MessagePreview? lastMessage,  DateTime? mutedUntil,  bool archived)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ChatListItem() when $default != null:
-return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.unreadCount,_that.lastReadMessageId,_that.lastMessage,_that.mutedUntil);case _:
+return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.unreadCount,_that.lastReadMessageId,_that.lastMessage,_that.mutedUntil,_that.archived);case _:
   return orElse();
 
 }
@@ -190,10 +191,10 @@ return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.un
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String? name,  String? avatarUrl,  DateTime? lastMessageAt,  int unreadCount,  String? lastReadMessageId,  MessagePreview? lastMessage,  DateTime? mutedUntil)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String? name,  String? avatarUrl,  DateTime? lastMessageAt,  int unreadCount,  String? lastReadMessageId,  MessagePreview? lastMessage,  DateTime? mutedUntil,  bool archived)  $default,) {final _that = this;
 switch (_that) {
 case _ChatListItem():
-return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.unreadCount,_that.lastReadMessageId,_that.lastMessage,_that.mutedUntil);case _:
+return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.unreadCount,_that.lastReadMessageId,_that.lastMessage,_that.mutedUntil,_that.archived);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -210,10 +211,10 @@ return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.un
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String? name,  String? avatarUrl,  DateTime? lastMessageAt,  int unreadCount,  String? lastReadMessageId,  MessagePreview? lastMessage,  DateTime? mutedUntil)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String? name,  String? avatarUrl,  DateTime? lastMessageAt,  int unreadCount,  String? lastReadMessageId,  MessagePreview? lastMessage,  DateTime? mutedUntil,  bool archived)?  $default,) {final _that = this;
 switch (_that) {
 case _ChatListItem() when $default != null:
-return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.unreadCount,_that.lastReadMessageId,_that.lastMessage,_that.mutedUntil);case _:
+return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.unreadCount,_that.lastReadMessageId,_that.lastMessage,_that.mutedUntil,_that.archived);case _:
   return null;
 
 }
@@ -225,7 +226,7 @@ return $default(_that.id,_that.name,_that.avatarUrl,_that.lastMessageAt,_that.un
 
 
 class _ChatListItem implements ChatListItem {
-  const _ChatListItem({required this.id, this.name, this.avatarUrl, this.lastMessageAt, this.unreadCount = 0, this.lastReadMessageId, this.lastMessage, this.mutedUntil});
+  const _ChatListItem({required this.id, this.name, this.avatarUrl, this.lastMessageAt, this.unreadCount = 0, this.lastReadMessageId, this.lastMessage, this.mutedUntil, this.archived = false});
   
 
 @override final  String id;
@@ -236,6 +237,7 @@ class _ChatListItem implements ChatListItem {
 @override final  String? lastReadMessageId;
 @override final  MessagePreview? lastMessage;
 @override final  DateTime? mutedUntil;
+@override@JsonKey() final  bool archived;
 
 /// Create a copy of ChatListItem
 /// with the given fields replaced by the non-null parameter values.
@@ -247,16 +249,16 @@ _$ChatListItemCopyWith<_ChatListItem> get copyWith => __$ChatListItemCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatListItem&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.avatarUrl, avatarUrl) || other.avatarUrl == avatarUrl)&&(identical(other.lastMessageAt, lastMessageAt) || other.lastMessageAt == lastMessageAt)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastReadMessageId, lastReadMessageId) || other.lastReadMessageId == lastReadMessageId)&&(identical(other.lastMessage, lastMessage) || other.lastMessage == lastMessage)&&(identical(other.mutedUntil, mutedUntil) || other.mutedUntil == mutedUntil));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatListItem&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.avatarUrl, avatarUrl) || other.avatarUrl == avatarUrl)&&(identical(other.lastMessageAt, lastMessageAt) || other.lastMessageAt == lastMessageAt)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastReadMessageId, lastReadMessageId) || other.lastReadMessageId == lastReadMessageId)&&(identical(other.lastMessage, lastMessage) || other.lastMessage == lastMessage)&&(identical(other.mutedUntil, mutedUntil) || other.mutedUntil == mutedUntil)&&(identical(other.archived, archived) || other.archived == archived));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,name,avatarUrl,lastMessageAt,unreadCount,lastReadMessageId,lastMessage,mutedUntil);
+int get hashCode => Object.hash(runtimeType,id,name,avatarUrl,lastMessageAt,unreadCount,lastReadMessageId,lastMessage,mutedUntil,archived);
 
 @override
 String toString() {
-  return 'ChatListItem(id: $id, name: $name, avatarUrl: $avatarUrl, lastMessageAt: $lastMessageAt, unreadCount: $unreadCount, lastReadMessageId: $lastReadMessageId, lastMessage: $lastMessage, mutedUntil: $mutedUntil)';
+  return 'ChatListItem(id: $id, name: $name, avatarUrl: $avatarUrl, lastMessageAt: $lastMessageAt, unreadCount: $unreadCount, lastReadMessageId: $lastReadMessageId, lastMessage: $lastMessage, mutedUntil: $mutedUntil, archived: $archived)';
 }
 
 
@@ -267,7 +269,7 @@ abstract mixin class _$ChatListItemCopyWith<$Res> implements $ChatListItemCopyWi
   factory _$ChatListItemCopyWith(_ChatListItem value, $Res Function(_ChatListItem) _then) = __$ChatListItemCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String? name, String? avatarUrl, DateTime? lastMessageAt, int unreadCount, String? lastReadMessageId, MessagePreview? lastMessage, DateTime? mutedUntil
+ String id, String? name, String? avatarUrl, DateTime? lastMessageAt, int unreadCount, String? lastReadMessageId, MessagePreview? lastMessage, DateTime? mutedUntil, bool archived
 });
 
 
@@ -284,7 +286,7 @@ class __$ChatListItemCopyWithImpl<$Res>
 
 /// Create a copy of ChatListItem
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = freezed,Object? avatarUrl = freezed,Object? lastMessageAt = freezed,Object? unreadCount = null,Object? lastReadMessageId = freezed,Object? lastMessage = freezed,Object? mutedUntil = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = freezed,Object? avatarUrl = freezed,Object? lastMessageAt = freezed,Object? unreadCount = null,Object? lastReadMessageId = freezed,Object? lastMessage = freezed,Object? mutedUntil = freezed,Object? archived = null,}) {
   return _then(_ChatListItem(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,name: freezed == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
@@ -294,7 +296,8 @@ as DateTime?,unreadCount: null == unreadCount ? _self.unreadCount : unreadCount 
 as int,lastReadMessageId: freezed == lastReadMessageId ? _self.lastReadMessageId : lastReadMessageId // ignore: cast_nullable_to_non_nullable
 as String?,lastMessage: freezed == lastMessage ? _self.lastMessage : lastMessage // ignore: cast_nullable_to_non_nullable
 as MessagePreview?,mutedUntil: freezed == mutedUntil ? _self.mutedUntil : mutedUntil // ignore: cast_nullable_to_non_nullable
-as DateTime?,
+as DateTime?,archived: null == archived ? _self.archived : archived // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 

@@ -16,6 +16,7 @@ abstract class ChatListItem with _$ChatListItem {
     String? lastReadMessageId,
     MessagePreview? lastMessage,
     DateTime? mutedUntil,
+    @Default(false) bool archived,
   }) = _ChatListItem;
 
   factory ChatListItem.fromDto(ChatListItemDto dto) => ChatListItem(
@@ -29,5 +30,6 @@ abstract class ChatListItem with _$ChatListItem {
         ? null
         : MessagePreview.fromDto(dto.lastMessage!),
     mutedUntil: dto.mutedUntil,
+    archived: dto.archived,
   );
 }
