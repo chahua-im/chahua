@@ -63,6 +63,10 @@ abstract class PushPlatformClient {
   Future<void> registerForRemoteNotifications();
   Future<void> unregisterForRemoteNotifications();
   Future<Map<String, dynamic>?> getLaunchNotification();
+  Future<void> dismissDeliveredNotificationsForConversation({
+    required int chatId,
+    int? threadRootId,
+  });
   Future<PushSubscriptionDescriptor?> subscriptionDescriptorForToken(
     String token,
   );
@@ -116,6 +120,17 @@ class ApnsPushPlatformClient implements PushPlatformClient {
   @override
   Future<Map<String, dynamic>?> getLaunchNotification() {
     return _apns.getLaunchNotification();
+  }
+
+  @override
+  Future<void> dismissDeliveredNotificationsForConversation({
+    required int chatId,
+    int? threadRootId,
+  }) {
+    return _apns.dismissDeliveredNotificationsForConversation(
+      chatId: chatId,
+      threadRootId: threadRootId,
+    );
   }
 
   @override
@@ -181,6 +196,12 @@ class UnsupportedPushPlatformClient implements PushPlatformClient {
 
   @override
   Future<Map<String, dynamic>?> getLaunchNotification() async => null;
+
+  @override
+  Future<void> dismissDeliveredNotificationsForConversation({
+    required int chatId,
+    int? threadRootId,
+  }) async {}
 
   @override
   Future<PushSubscriptionDescriptor?> subscriptionDescriptorForToken(

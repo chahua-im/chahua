@@ -12,6 +12,7 @@ import '../../chat_list/application/thread_list_v2_store.dart';
 import '../../conversation/shared/domain/conversation_identity.dart';
 import '../../conversation/compose/data/message_api_service_v2.dart';
 import '../../../core/notifications/unread_badge_provider.dart';
+import '../../../core/notifications/push_platform_client.dart';
 import 'read_state_models.dart';
 
 enum _ReadReportKind { chat, thread }
@@ -199,6 +200,9 @@ class ReadStateRepository {
           messageId: messageId,
           response: response,
         );
+    if (response.unreadCount == 0) {
+      unawaited(_dismissDeliveredNotifications(identity));
+    }
     ref.read(unreadBadgeProvider.notifier).scheduleReconcile();
   }
 
@@ -220,7 +224,29 @@ class ReadStateRepository {
     ref
         .read(threadListV2StoreProvider.notifier)
         .applyServerReadState(threadRootId: threadRootId, response: response);
+    if (response.unreadCount == 0) {
+      unawaited(_dismissDeliveredNotifications(identity));
+    }
     ref.read(unreadBadgeProvider.notifier).scheduleReconcile();
+  }
+
+  Future<void> _dismissDeliveredNotifications(
+    ConversationIdentity identity,
+  ) async {
+    try {
+      await ref
+          .read(pushPlatformClientProvider)
+          .dismissDeliveredNotificationsForConversation(
+            chatId: identity.chatId,
+            threadRootId: identity.threadRootId,
+          );
+    } catch (error, stackTrace) {
+      log(
+        'dismissDeliveredNotificationsForConversation failed: $error',
+        name: 'ReadStateRepository',
+        stackTrace: stackTrace,
+      );
+    }
   }
 }
 

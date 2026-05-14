@@ -68,6 +68,20 @@ class ApnsChannel {
   /// Clears the app icon badge count.
   Future<void> clearBadge() => _channel.invokeMethod<void>('clearBadge');
 
+  /// Dismisses delivered notifications for a chat or one of its threads.
+  Future<void> dismissDeliveredNotificationsForConversation({
+    required int chatId,
+    int? threadRootId,
+  }) {
+    return _channel.invokeMethod<void>(
+      'dismissDeliveredNotificationsForConversation',
+      <String, dynamic>{
+        'chatId': chatId.toString(),
+        'threadRootId': ?threadRootId?.toString(),
+      },
+    );
+  }
+
   /// Returns the notification payload that launched the app (cold start),
   /// or `null` if the app was not launched from a notification.
   Future<Map<String, dynamic>?> getLaunchNotification() async {

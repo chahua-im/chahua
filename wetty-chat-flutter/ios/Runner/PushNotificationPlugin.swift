@@ -61,6 +61,23 @@ class PushNotificationPlugin: NSObject, FlutterPlugin, UNUserNotificationCenterD
         case "clearBadge":
             setBadge(0)
             result(nil)
+        case "dismissDeliveredNotificationsForConversation":
+            guard let args = call.arguments as? [String: Any],
+                  let chatId = args["chatId"] as? String
+            else {
+                result(FlutterError(
+                    code: "INVALID_ARGUMENTS",
+                    message: "chatId is required",
+                    details: nil
+                ))
+                return
+            }
+            let threadRootId = args["threadRootId"] as? String
+            dismissDeliveredNotificationsForConversation(
+                chatId: chatId,
+                threadRootId: threadRootId,
+                result: result
+            )
         case "getLaunchNotification":
             if let payload = launchNotificationPayload {
                 launchNotificationPayload = nil
@@ -162,6 +179,67 @@ class PushNotificationPlugin: NSObject, FlutterPlugin, UNUserNotificationCenterD
                 UNUserNotificationCenter.current().setBadgeCount(count)
             }
             UIApplication.shared.applicationIconBadgeNumber = count
+        }
+    }
+
+    private func dismissDeliveredNotificationsForConversation(
+        chatId: String,
+        threadRootId: String?,
+        result: @escaping FlutterResult
+    ) {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { notifications in
+            let identifiers = notifications
+                .filter { self.matchesConversation($0, chatId: chatId, threadRootId: threadRootId) }
+                .map { $0.request.identifier }
+
+            if !identifiers.isEmpty {
+                center.removeDeliveredNotifications(withIdentifiers: identifiers)
+            }
+
+            DispatchQueue.main.async {
+                result(nil)
+            }
+        }
+    }
+
+    private func matchesConversation(
+        _ notification: UNNotification,
+        chatId: String,
+        threadRootId: String?
+    ) -> Bool {
+        let expectedThreadIdentifier: String
+        if let threadRootId = threadRootId, !threadRootId.isEmpty {
+            expectedThreadIdentifier = "chat_\(chatId)_thread_\(threadRootId)"
+        } else {
+            expectedThreadIdentifier = "chat_\(chatId)"
+        }
+
+        if notification.request.content.threadIdentifier == expectedThreadIdentifier {
+            return true
+        }
+
+        guard let wettyChatData = notification.request.content.userInfo["wettyChat"] as? [String: Any],
+              Self.stringValue(wettyChatData["chatId"]) == chatId
+        else {
+            return false
+        }
+
+        let notificationThreadRootId = Self.stringValue(wettyChatData["threadRootId"])
+        if let threadRootId = threadRootId, !threadRootId.isEmpty {
+            return notificationThreadRootId == threadRootId
+        }
+        return notificationThreadRootId == nil || notificationThreadRootId?.isEmpty == true
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        switch value {
+        case let string as String:
+            return string
+        case let number as NSNumber:
+            return number.stringValue
+        default:
+            return nil
         }
     }
 

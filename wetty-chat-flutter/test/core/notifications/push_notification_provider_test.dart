@@ -191,6 +191,12 @@ class _FakePushPlatformClient implements PushPlatformClient {
   Future<Map<String, dynamic>?> getLaunchNotification() async => null;
 
   @override
+  Future<void> dismissDeliveredNotificationsForConversation({
+    required int chatId,
+    int? threadRootId,
+  }) async {}
+
+  @override
   Future<PushSubscriptionDescriptor?> subscriptionDescriptorForToken(
     String token,
   ) async {
