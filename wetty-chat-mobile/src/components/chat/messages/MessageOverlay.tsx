@@ -34,6 +34,7 @@ interface MessageOverlayBaseProps {
   isConfirmed?: boolean;
   sourceRect: DOMRect;
   interactionPos?: { x: number; y: number };
+  messageId?: string;
   actions: MessageOverlayAction[];
   reactions?: {
     emojis: string[];
@@ -70,6 +71,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     isConfirmed,
     sourceRect,
     interactionPos,
+    messageId,
     actions,
     reactions,
     onClose,
@@ -94,26 +96,32 @@ export function MessageOverlay(props: MessageOverlayProps) {
     const content = contentRef.current;
     if (!content) return;
 
-    // We get dimensions from offsetHeight/Width because getBoundingClientRect()
-    // is affected by the scale() animation currently running on the element.
+    // Resolve the current bubble position from the live DOM (it may have moved
+    // since the long-press event, e.g. after the on-screen keyboard closed).
+    let currentSourceRect = sourceRect;
+    if (messageId) {
+      const el = document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+      if (el) {
+        currentSourceRect = el.getBoundingClientRect();
+      }
+    }
+
     const visualViewport = window.visualViewport;
     const vh = visualViewport?.height ?? window.innerHeight;
     const vw = visualViewport?.width ?? window.innerWidth;
     const offsetTop = visualViewport?.offsetTop ?? 0;
     const offsetLeft = visualViewport?.offsetLeft ?? 0;
 
-    // Start at the original bubble position, offset by the bubble clone's
-    // position within the content container (reactions may be above it)
     const bubbleEl = content.querySelector('[data-bubble-clone]') as HTMLElement | null;
     const bubbleOffsetTop = bubbleEl ? bubbleEl.offsetTop : 0;
 
-    let top = sourceRect.top - bubbleOffsetTop;
+    let top = currentSourceRect.top - bubbleOffsetTop;
 
     // Check if there's enough space below for the actions
     const actionListEl = content.querySelector('[data-action-list]') as HTMLElement | null;
     const reactionBarEl = content.querySelector('[data-reaction-bar]') as HTMLElement | null;
     if (actionListEl) {
-      const spaceBelow = offsetTop + vh - sourceRect.bottom;
+      const spaceBelow = offsetTop + vh - currentSourceRect.bottom;
       // Required space: action list height + flex gap (8px) + minimum bottom padding
       const requiredSpace = actionListEl.offsetHeight + 8 + 40;
 
@@ -126,7 +134,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
         }
         // Re-read bubbleOffsetTop since the layout just changed!
         const newBubbleOffsetTop = bubbleEl ? bubbleEl.offsetTop : 0;
-        top = sourceRect.top - newBubbleOffsetTop;
+        top = currentSourceRect.top - newBubbleOffsetTop;
       }
     }
 
@@ -134,7 +142,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     const currentContentWidth = content.offsetWidth;
 
     // For sent messages, align right edge to source right edge
-    let left = isSent ? sourceRect.right - currentContentWidth : sourceRect.left;
+    let left = isSent ? currentSourceRect.right - currentContentWidth : currentSourceRect.left;
 
     const computedStyle = getComputedStyle(document.documentElement);
     const safeBottomStr = computedStyle.getPropertyValue('--ion-safe-area-bottom');
@@ -162,12 +170,22 @@ export function MessageOverlay(props: MessageOverlayProps) {
       reactionBarEl ? reactionBarEl.offsetWidth : 0,
     );
 
+    // Reset any opaque-menu overrides from a previous layout pass.
+    const resetMenuStyles = (el: HTMLElement) => {
+      el.style.position = '';
+      el.style.top = '';
+      el.style.left = '';
+      el.style.right = '';
+      el.style.zIndex = '';
+      el.classList.remove(styles.opaqueMenu);
+    };
+    if (actionListEl) resetMenuStyles(actionListEl);
+    if (reactionBarEl) resetMenuStyles(reactionBarEl);
+
     // Check if the current content height exceeds available vertical space
-    // and we have an interaction position so we can overlay the menus on the bubble
+    // and we have an interaction position so we can overlay the menus on the bubble.
     if (interactionPos && currentContentHeight > offsetTop + vh - bottomPad - topPad) {
-      // Because we position them absolute, bubbleOffsetThis will be 0.
-      // So content top will be exactly sourceRect.top
-      top = sourceRect.top;
+      top = currentSourceRect.top;
 
       const localViewportTop = offsetTop + topPad - top;
       const localViewportBottom = offsetTop + vh - bottomPad - top;
@@ -189,16 +207,21 @@ export function MessageOverlay(props: MessageOverlayProps) {
         el.style.top = `${desiredTop}px`;
         el.style.left = `${leftX}px`;
         el.style.right = 'auto';
-        el.style.zIndex = '1000'; // Higher z-index to cover image overlays
+        el.style.zIndex = '1000';
         el.classList.add(styles.opaqueMenu);
       };
 
-      const REACTION_BAR_OFFSET = 2; // smaller gap (was 8)
-      const ACTION_LIST_OFFSET = 4; // smaller gap (was 12)
+      const REACTION_BAR_OFFSET = 2;
+      const ACTION_LIST_OFFSET = 4;
+
+      // Shift interactionPos by the same amount the bubble moved since the
+      // long-press event so the menus track the visual touch point.
+      const interactionOffsetY = interactionPos.y - sourceRect.top;
+      const currentInteractionY = currentSourceRect.top + interactionOffsetY;
 
       if (reactionBarEl && actionListEl) {
-        let rTop = interactionPos.y - top - reactionHeight - REACTION_BAR_OFFSET;
-        let aTop = interactionPos.y - top + ACTION_LIST_OFFSET;
+        let rTop = currentInteractionY - top - reactionHeight - REACTION_BAR_OFFSET;
+        let aTop = currentInteractionY - top + ACTION_LIST_OFFSET;
 
         // Push down if reaction bar hits top
         if (rTop < localViewportTop) {
@@ -223,12 +246,12 @@ export function MessageOverlay(props: MessageOverlayProps) {
       } else if (reactionBarEl) {
         applyPos(
           reactionBarEl,
-          interactionPos.y - top - reactionHeight - REACTION_BAR_OFFSET,
+          currentInteractionY - top - reactionHeight - REACTION_BAR_OFFSET,
           menuLocalLeft,
           reactionHeight,
         );
       } else if (actionListEl) {
-        applyPos(actionListEl, interactionPos.y - top + ACTION_LIST_OFFSET, menuLocalLeft, actionHeight);
+        applyPos(actionListEl, currentInteractionY - top + ACTION_LIST_OFFSET, menuLocalLeft, actionHeight);
       }
     } else {
       // Clamp vertically: prioritize bottom clamp over top clamp so interactive elements stay reachable
@@ -243,7 +266,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     content.style.top = `${top}px`;
     content.style.left = `${left}px`;
     content.style.visibility = 'visible';
-  }, [isSent, sourceRect, interactionPos]);
+  }, [isSent, sourceRect, interactionPos, messageId]);
 
   // Body scroll lock
   useEffect(() => {

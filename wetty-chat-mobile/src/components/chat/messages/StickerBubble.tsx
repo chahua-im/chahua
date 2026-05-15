@@ -1,4 +1,4 @@
-import type { CSSProperties, HTMLAttributes, Ref } from 'react';
+import type { Ref } from 'react';
 import { IonIcon } from '@ionic/react';
 import { arrowUndo, chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
@@ -9,17 +9,12 @@ import { formatMessagePreview, type PreviewMessage, getNotificationPreviewLabels
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { UserAvatar } from '@/components/UserAvatar';
 import { useMouseDetected } from '@/hooks/platformHooks';
+import type { BubblePropsOverride } from './ChatBubbleBase';
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
-
-type BubblePropsOverride = Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'className' | 'style'> & {
-  className?: string;
-  style?: CSSProperties;
-  [dataAttr: `data-${string}`]: string | undefined;
-};
 
 export interface StickerBubbleProps {
   messageType?: 'sticker';

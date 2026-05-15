@@ -198,7 +198,7 @@ function getImageLayoutStyle(
   return imageStyle;
 }
 
-type BubblePropsOverride = Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'className' | 'style'> & {
+export type BubblePropsOverride = Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'className' | 'style'> & {
   className?: string;
   style?: CSSProperties;
   [dataAttr: `data-${string}`]: string | undefined;

@@ -484,6 +484,13 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     interactionPos?: { x: number; y: number };
   } | null>(null);
 
+  // When a long-press happens while the keyboard is open we defer showing the
+  // overlay until the keyboard has fully closed so the DOM rect is correct.
+  const deferredOverlayRef = useRef<{
+    message: MessageResponse;
+    interactionPos?: { x: number; y: number };
+  } | null>(null);
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     console.log('[ChatThread] view-mounted', {
@@ -510,7 +517,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
       const nextViewportHeight = getViewportHeight();
       setViewportHeight(nextViewportHeight);
       if (!composeFocused) {
-        setBaselineViewportHeight(nextViewportHeight);
+        setBaselineViewportHeight((prev) => Math.max(prev, nextViewportHeight));
       }
     };
 
@@ -531,10 +538,30 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
 
   const handleComposeFocusChange = useCallback((focused: boolean) => {
     setComposeFocused(focused);
-    if (!focused) {
-      setBaselineViewportHeight(window.visualViewport?.height ?? window.innerHeight);
-    }
   }, []);
+
+  // Threshold in CSS pixels: when the visible viewport is this much shorter than
+  // the keyboard-closed baseline we consider the on-screen keyboard to be open.
+  const KEYBOARD_OPEN_HEIGHT_DIFF = 120;
+  // When the gap shrinks below this value the keyboard animation is considered finished.
+  const KEYBOARD_CLOSED_HEIGHT_DIFF = 20;
+
+  const isKeyboardOpen =
+    !isDesktop && composeFocused && baselineViewportHeight - viewportHeight > KEYBOARD_OPEN_HEIGHT_DIFF;
+  const keyboardFullyClosed =
+    !isDesktop && !composeFocused && baselineViewportHeight - viewportHeight < KEYBOARD_CLOSED_HEIGHT_DIFF;
+
+  // When the keyboard finishes closing after a deferred long-press, show the overlay.
+  useEffect(() => {
+    if (!keyboardFullyClosed || !deferredOverlayRef.current) return;
+    const { message, interactionPos } = deferredOverlayRef.current;
+    deferredOverlayRef.current = null;
+    const el = document.querySelector(`[data-message-id="${CSS.escape(message.id)}"]`);
+    const rect = el?.getBoundingClientRect();
+    if (rect) {
+      setOverlayMessage({ message, sourceRect: rect, interactionPos });
+    }
+  }, [keyboardFullyClosed]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -1580,15 +1607,17 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     ],
   );
 
-  const isKeyboardOpen = !isDesktop && composeFocused && baselineViewportHeight - viewportHeight > 120;
-
   const onClickChatItem = useCallback(
     (msg: MessageResponse, sourceRect: DOMRect, interactionPos?: { x: number; y: number }) => {
       if (isKeyboardOpen) {
+        // Defer: dismiss keyboard now, show overlay after it's fully closed
+        // so we get the correct DOM rect for the message.
+        deferredOverlayRef.current = { message: msg, interactionPos };
         composeBarRef.current?.blurInput();
         return;
       }
 
+      deferredOverlayRef.current = null;
       setOverlayMessage({ message: msg, sourceRect, interactionPos });
     },
     [isKeyboardOpen],
@@ -1953,6 +1982,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
               timestamp: msg.createdAt,
               edited: msg.isEdited,
               isConfirmed: !msg.id.startsWith('cg_'),
+              messageId: msg.id,
               replyTo: msg.replyToMessage
                 ? {
                     senderName: msg.replyToMessage.sender.name ?? `User ${msg.replyToMessage.sender.uid}`,
@@ -1969,7 +1999,10 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
                   handleReactionToggle(msg, emoji, !!msg.reactions?.some((r) => r.emoji === emoji && r.reactedByMe));
                 },
               },
-              onClose: () => setOverlayMessage(null),
+              onClose: () => {
+                deferredOverlayRef.current = null;
+                setOverlayMessage(null);
+              },
             } as const;
 
             if (msg.messageType === 'sticker') {

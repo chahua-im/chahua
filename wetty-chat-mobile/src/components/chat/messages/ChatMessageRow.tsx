@@ -3,6 +3,7 @@ import { t } from '@lingui/core/macro';
 import { type MessageResponse, type User } from '@/api/messages';
 import { InviteMessageModal } from '@/components/invites/InviteMessageModal';
 import { ChatBubble } from './ChatBubble';
+import { type BubblePropsOverride } from './ChatBubbleBase';
 import { InviteMessageCard } from './InviteMessageCard';
 import { MessageDateSeparator } from './MessageDateSeparator';
 import { SystemMessage } from './SystemMessage';
@@ -90,6 +91,7 @@ export function ChatMessageRow({
     onThreadClick: () => onThreadClick(msg),
     onAvatarClick: () => onAvatarClick(msg.sender),
     isConfirmed: !msg.id.startsWith('cg_'),
+    bubbleProps: { 'data-message-id': msg.id } as BubblePropsOverride,
     replyTo: replyToMessage
       ? {
           senderName: replyToMessage.sender.name ?? `User ${replyToMessage.sender.uid}`,
