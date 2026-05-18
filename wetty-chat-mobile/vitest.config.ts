@@ -12,5 +12,6 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    reporters: ['default', ['junit', { outputFile: 'test_output/report.xml' }]],
   },
 });
