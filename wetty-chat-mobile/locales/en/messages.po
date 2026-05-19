@@ -116,9 +116,6 @@ msgstr "Avatar uploaded"
 msgid "Back"
 msgstr "Back"
 
-msgid "Back to chats"
-msgstr "Back to chats"
-
 msgid "Blocked"
 msgstr "Blocked"
 
@@ -324,6 +321,9 @@ msgstr "Enter an exact UID to find a specific user."
 msgid "Enter an invite code"
 msgstr "Enter an invite code"
 
+msgid "Enter at least 2 characters"
+msgstr "Enter at least 2 characters"
+
 msgid "Enter chat name"
 msgstr "Enter chat name"
 
@@ -446,6 +446,9 @@ msgstr "Failed to revoke invite"
 
 msgid "Failed to save group info"
 msgstr "Failed to save group info"
+
+msgid "Failed to search messages"
+msgstr "Failed to search messages"
 
 msgid "Failed to send"
 msgstr "Failed to send"
@@ -725,6 +728,9 @@ msgstr "No matching users found."
 msgid "No members found."
 msgstr "No members found."
 
+msgid "No messages found"
+msgstr "No messages found"
+
 msgid "No messages yet"
 msgstr "No messages yet"
 
@@ -952,6 +958,9 @@ msgstr "Save Settings"
 msgid "Saving..."
 msgstr "Saving..."
 
+msgid "Search"
+msgstr "Search"
+
 msgid "Search by username or UID"
 msgstr "Search by username or UID"
 
@@ -966,6 +975,12 @@ msgstr "Search groups"
 
 msgid "Search members"
 msgstr "Search members"
+
+msgid "Search messages"
+msgstr "Search messages"
+
+msgid "Search messages in this chat"
+msgstr "Search messages in this chat"
 
 msgid "Searching..."
 msgstr "Searching..."

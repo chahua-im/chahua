@@ -218,7 +218,11 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const storeChatId = threadId ? `${chatId}_thread_${threadId}` : chatId;
   const history = useHistory();
   const location = useLocation();
-  const initialResumeMessageId = parseResumeHash(location.hash);
+  const initialResumeMessageIdRef = useRef<string | null>(parseResumeHash(location.hash));
+  const initialResumeMessageId = initialResumeMessageIdRef.current;
+  const lastHandledResumeKeyRef = useRef<string | null>(
+    initialResumeMessageId ? `${storeChatId}:${initialResumeMessageId}` : null,
+  );
 
   const dispatch = useDispatch();
   const currentUserId = useSelector((state: RootState) => state.user.uid);
@@ -1111,6 +1115,30 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     },
     [chatId, dispatch, showToast, storeChatId, threadId],
   );
+
+  useEffect(() => {
+    const messageId = parseResumeHash(location.hash);
+    if (!messageId) {
+      lastHandledResumeKeyRef.current = null;
+      return;
+    }
+
+    const resumeKey = `${storeChatId}:${messageId}`;
+    if (lastHandledResumeKeyRef.current === resumeKey) {
+      return;
+    }
+
+    lastHandledResumeKeyRef.current = resumeKey;
+    void jumpToMessage(messageId).finally(() => {
+      if (parseResumeHash(history.location.hash) === messageId) {
+        history.replace({
+          pathname: history.location.pathname,
+          search: history.location.search,
+          hash: '',
+        });
+      }
+    });
+  }, [history, jumpToMessage, location.hash, storeChatId]);
 
   const canLoadOlder = useSelector((state: RootState) => selectCanLoadOlder(state, storeChatId));
   const canLoadNewer = useSelector((state: RootState) => selectCanLoadNewer(state, storeChatId));

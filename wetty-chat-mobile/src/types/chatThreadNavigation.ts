@@ -8,7 +8,12 @@ export interface ChatThreadRouteState {
 export function parseResumeHash(hash: string): string | null {
   if (!hash.startsWith('#msg=')) return null;
   const messageId = hash.slice(5);
-  return messageId || null;
+  if (!messageId) return null;
+  try {
+    return decodeURIComponent(messageId);
+  } catch {
+    return messageId;
+  }
 }
 
 /**

@@ -65,6 +65,13 @@ pub struct ListMessagesResponse {
     pub prev_cursor: Option<i64>,
 }
 
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessagesResponse {
+    pub messages: Vec<MessageResponse>,
+    pub next_offset: Option<usize>,
+}
+
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReactionReactor {

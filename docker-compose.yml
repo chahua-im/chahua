@@ -17,14 +17,30 @@ services:
       POSTGRES_PASSWORD: NIM1gs7unjbQumYD
     volumes:
       - postgres_data:/var/lib/postgresql/data
+  meilisearch:
+    restart: unless-stopped
+    image: getmeili/meilisearch:v1.37
+    ports:
+      - 7700:7700
+    environment:
+      MEILI_MASTER_KEY: local-wetty-chat-meili-master-key
+    volumes:
+      - meilisearch_data:/meili_data
   backend:
     restart: unless-stopped
     build: backend
     ports:
       - 3000:3000
+    depends_on:
+      - postgres
+      - meilisearch
     environment:
       DATABASE_URL: postgresql://wetty_chat:NIM1gs7unjbQumYD@postgres:5432/wetty_chat
       BACKEND_LOG_FORMAT: pretty
+      MESSAGE_SEARCH_ENABLED: "true"
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: local-wetty-chat-meili-master-key
+      MESSAGE_SEARCH_INDEX: messages_v1
   rustfs:
     image: rustfs/rustfs:latest
     restart: unless-stopped
@@ -53,3 +69,4 @@ services:
       "
 volumes:
   postgres_data:
+  meilisearch_data:

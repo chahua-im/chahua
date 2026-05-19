@@ -58,6 +58,7 @@ emojis = "0.8"
 unicode-segmentation = "1.13.2"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 matroska = "0.30"
+meilisearch-sdk = "0.33"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", features = ["axum"] }

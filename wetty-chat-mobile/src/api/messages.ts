@@ -130,6 +130,24 @@ export interface ListMessagesResponse {
   prevCursor?: string | null;
 }
 
+export interface SearchMessagesResponse {
+  messages: MessageResponse[];
+  nextOffset: number | null;
+}
+
+export interface SearchMessagesParams {
+  q: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function buildSearchMessagesParams(params: SearchMessagesParams): Record<string, string | number> {
+  const query: Record<string, string | number> = { q: params.q.trim() };
+  if (params.limit != null) query.limit = params.limit;
+  if (params.offset != null) query.offset = params.offset;
+  return query;
+}
+
 export interface CreateMessageBody {
   message?: string;
   messageType: string;
@@ -151,6 +169,17 @@ export function getMessages(
   if (params?.max != null) query.max = params.max;
   if (params?.threadId != null) query.threadId = params.threadId;
   return apiClient.get(`/chats/${chatId}/messages`, { params: query });
+}
+
+export function searchMessages(
+  chatId: string | number,
+  params: SearchMessagesParams,
+  options?: { signal?: AbortSignal },
+): Promise<AxiosResponse<SearchMessagesResponse>> {
+  return apiClient.get(`/chats/${chatId}/messages/search`, {
+    params: buildSearchMessagesParams(params),
+    signal: options?.signal,
+  });
 }
 
 export function sendMessage(chatId: string | number, body: CreateMessageBody): Promise<AxiosResponse<MessageResponse>> {

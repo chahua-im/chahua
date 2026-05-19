@@ -13,6 +13,7 @@ use tracing::{error, info, warn};
 use crate::dto::ws::{BulkDeletedPayload, ServerWsMessage};
 use crate::metrics::Metrics;
 use crate::schema::{attachments, group_membership, messages};
+use crate::services::message_search::MessageSearchService;
 use crate::services::ws_registry::ConnectionRegistry;
 
 const CHANNEL_BUFFER: usize = 64;
@@ -62,13 +63,14 @@ impl BackgroundService {
         db: Pool<ConnectionManager<PgConnection>>,
         ws_registry: Arc<ConnectionRegistry>,
         metrics: Arc<Metrics>,
+        message_search: Option<Arc<MessageSearchService>>,
     ) -> Arc<Self> {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER);
 
         let service = Arc::new(Self { job_tx: tx });
 
         tokio::spawn(async move {
-            supervise_worker(rx, db, ws_registry, metrics).await;
+            supervise_worker(rx, db, ws_registry, metrics, message_search).await;
         });
 
         service
@@ -92,12 +94,18 @@ async fn supervise_worker(
     db: Pool<ConnectionManager<PgConnection>>,
     ws_registry: Arc<ConnectionRegistry>,
     metrics: Arc<Metrics>,
+    message_search: Option<Arc<MessageSearchService>>,
 ) {
     loop {
-        let worker_result =
-            std::panic::AssertUnwindSafe(run_worker(&mut rx, &db, &ws_registry, &metrics))
-                .catch_unwind()
-                .await;
+        let worker_result = std::panic::AssertUnwindSafe(run_worker(
+            &mut rx,
+            &db,
+            &ws_registry,
+            &metrics,
+            &message_search,
+        ))
+        .catch_unwind()
+        .await;
 
         match worker_result {
             Ok(()) => {
@@ -123,6 +131,7 @@ async fn run_worker(
     db: &Pool<ConnectionManager<PgConnection>>,
     ws_registry: &Arc<ConnectionRegistry>,
     metrics: &Arc<Metrics>,
+    message_search: &Option<Arc<MessageSearchService>>,
 ) {
     while let Some(job) = rx.recv().await {
         let job_kind = job.kind();
@@ -133,7 +142,14 @@ async fn run_worker(
                 chat_id,
                 target_uid,
                 scope,
-            } => process_bulk_delete(*chat_id, *target_uid, *scope, db, ws_registry),
+            } => process_bulk_delete(
+                *chat_id,
+                *target_uid,
+                *scope,
+                db,
+                ws_registry,
+                message_search,
+            ),
         };
 
         let duration = started_at.elapsed().as_secs_f64();
@@ -160,6 +176,7 @@ fn process_bulk_delete(
     scope: DeleteScope,
     db: &Pool<ConnectionManager<PgConnection>>,
     ws_registry: &Arc<ConnectionRegistry>,
+    message_search: &Option<Arc<MessageSearchService>>,
 ) -> Result<(), String> {
     use crate::schema::attachments::dsl as a_dsl;
     use crate::schema::group_membership::dsl as gm_dsl;
@@ -216,6 +233,10 @@ fn process_bulk_delete(
             .set(dsl::deleted_at.eq(Some(now)))
             .execute(conn)
             .map_err(map_db)?;
+
+        if let Some(search_service) = message_search {
+            search_service.delete_message_ids_best_effort(batch_ids.clone());
+        }
 
         // Soft-delete attachments for these messages
         diesel::update(

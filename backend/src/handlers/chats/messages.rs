@@ -11,7 +11,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::{
-        messages::{ListMessagesResponse, MessageResponse},
+        messages::{ListMessagesResponse, MessageResponse, SearchMessagesResponse},
         ws::ServerWsMessage,
     },
     errors::AppError,
@@ -19,6 +19,9 @@ use crate::{
     handlers::{groups::load_requester_group_role, members::check_membership},
     models::{GroupRole, Message, MessageType},
     schema::{attachments, group_membership, groups, messages},
+    services::message_search::{
+        filter_authoritative_hits, validate_search_query, MessageSearchSort,
+    },
     utils::{auth::CurrentUid, pagination::validate_limit},
     AppState, MAX_MESSAGES_LIMIT,
 };
@@ -59,6 +62,16 @@ pub struct ListMessagesQuery {
     thread_id: Option<i64>,
 }
 
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMessagesQuery {
+    q: String,
+    #[serde(default)]
+    sort: Option<MessageSearchSort>,
+    limit: Option<i64>,
+    offset: Option<usize>,
+}
+
 #[derive(serde::Deserialize)]
 pub struct ThreadIdPath {
     chat_id: i64,
@@ -83,6 +96,7 @@ pub struct UpdateMessageBody {
 
 const SYSTEM_MESSAGE_TYPE_FORBIDDEN: &str = "System messages cannot be sent by clients";
 const INVITE_MESSAGE_TYPE_FORBIDDEN: &str = "Invite messages must be sent through invite APIs";
+const DEFAULT_SEARCH_LIMIT: i64 = 20;
 
 fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppError> {
     if matches!(message_type, MessageType::System) {
@@ -94,6 +108,13 @@ fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppErr
     }
 
     Ok(())
+}
+
+fn search_limit(limit: Option<i64>) -> usize {
+    validate_limit(
+        Some(limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
+        MAX_MESSAGES_LIMIT,
+    ) as usize
 }
 
 const MAX_ATTACHMENTS_PER_MESSAGE: usize = 20;
@@ -296,6 +317,119 @@ async fn get_messages(
     }))
 }
 
+/// GET /chats/:chat_id/messages/search — Search visible messages in a chat.
+#[utoipa::path(
+    get,
+    path = "/search",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        SearchMessagesQuery,
+    ),
+    responses(
+        (status = 200, description = "Search results", body = SearchMessagesResponse),
+        (status = 400, description = "Invalid search query"),
+        (status = 503, description = "Message search unavailable"),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn search_messages(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Query(params): Query<SearchMessagesQuery>,
+) -> Result<Json<SearchMessagesResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    let sort = params.sort.unwrap_or(MessageSearchSort::Relevance);
+    let sort_label = sort.as_str();
+    let query = match validate_search_query(&params.q) {
+        Ok(query) => query,
+        Err(_) => {
+            state
+                .metrics
+                .record_message_search_query(sort_label, "failure");
+            return Err(AppError::BadRequest(
+                "Search query must be at least 2 characters",
+            ));
+        }
+    };
+    let limit = search_limit(params.limit);
+    let offset = params.offset.unwrap_or(0);
+
+    let Some(search_service) = state.message_search.clone() else {
+        state
+            .metrics
+            .record_message_search_query(sort_label, "failure");
+        return Err(AppError::ServiceUnavailable("Message search unavailable"));
+    };
+
+    let candidate_page = match search_service
+        .search_candidates(&query, chat_id, sort, limit, offset)
+        .await
+    {
+        Ok(page) => page,
+        Err(err) => {
+            state
+                .metrics
+                .record_message_search_query(sort_label, "failure");
+            tracing::warn!(
+                chat_id,
+                sort = sort_label,
+                ?err,
+                "message search query failed"
+            );
+            return Err(AppError::ServiceUnavailable("Message search unavailable"));
+        }
+    };
+
+    if candidate_page.candidates.is_empty() {
+        state
+            .metrics
+            .record_message_search_query(sort_label, "success");
+        return Ok(Json(SearchMessagesResponse {
+            messages: Vec::new(),
+            next_offset: candidate_page.next_offset,
+        }));
+    }
+
+    use crate::schema::messages::dsl;
+    let candidate_ids = candidate_page
+        .candidates
+        .iter()
+        .map(|candidate| candidate.message_id)
+        .collect::<Vec<_>>();
+    let rows = match messages::table
+        .filter(dsl::id.eq_any(&candidate_ids))
+        .select(Message::as_select())
+        .load::<Message>(conn)
+    {
+        Ok(rows) => rows,
+        Err(err) => {
+            state
+                .metrics
+                .record_message_search_query(sort_label, "failure");
+            return Err(err.into());
+        }
+    };
+
+    let authoritative_messages =
+        filter_authoritative_hits(chat_id, &candidate_page.candidates, rows);
+    let messages = attach_metadata(conn, authoritative_messages, &state, uid).await;
+
+    state
+        .metrics
+        .record_message_search_query(sort_label, "success");
+
+    Ok(Json(SearchMessagesResponse {
+        messages,
+        next_offset: candidate_page.next_offset,
+    }))
+}
+
 /// GET /chats/:chat_id/messages/:message_id — Get a single message.
 #[utoipa::path(
     get,
@@ -420,6 +554,9 @@ async fn post_message(
     };
 
     send_result.side_effects.fire(&state);
+    if let Some(search_service) = state.message_search.clone() {
+        search_service.upsert_message_best_effort(send_result.inserted_message);
+    }
     if matches!(send_result.response.message_type, MessageType::Audio) {
         crate::services::audio_transcode::enqueue_message(send_result.response.id);
     }
@@ -572,6 +709,9 @@ pub(super) async fn post_thread_message(
 
     // Post-commit: fire deferred side effects (new message WS broadcast + push)
     msg_side_effects.fire(&state);
+    if let Some(search_service) = state.message_search.clone() {
+        search_service.upsert_response_best_effort(response.clone());
+    }
     if matches!(response.message_type, MessageType::Audio) {
         crate::services::audio_transcode::enqueue_message(response.id);
     }
@@ -700,6 +840,10 @@ async fn patch_message(
         .returning(Message::as_returning())
         .get_result(conn)?;
 
+    if let Some(search_service) = state.message_search.clone() {
+        search_service.upsert_message_best_effort(updated_message.clone());
+    }
+
     let response = attach_metadata(conn, vec![updated_message], &state, uid)
         .await
         .into_iter()
@@ -800,6 +944,10 @@ async fn delete_message(
         Ok(deleted_message)
     })?;
 
+    if let Some(search_service) = state.message_search.clone() {
+        search_service.delete_message_best_effort(message_id);
+    }
+
     let response = attach_metadata(conn, vec![deleted_message], &state, uid)
         .await
         .into_iter()
@@ -839,6 +987,7 @@ async fn delete_message(
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_messages, post_message))
+        .routes(utoipa_axum::routes!(search_messages))
         .routes(utoipa_axum::routes!(
             get_message,
             patch_message,
@@ -849,10 +998,12 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        validate_client_message_type, INVITE_MESSAGE_TYPE_FORBIDDEN, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
+        search_limit, validate_client_message_type, INVITE_MESSAGE_TYPE_FORBIDDEN,
+        SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
     use crate::errors::AppError;
     use crate::models::MessageType;
+    use crate::services::message_search::MessageSearchSort;
 
     #[test]
     fn rejects_system_message_type_from_clients() {
@@ -874,5 +1025,21 @@ mod tests {
         let err = validate_client_message_type(&MessageType::Invite)
             .expect_err("invite should be rejected");
         assert!(matches!(err, AppError::BadRequest(msg) if msg == INVITE_MESSAGE_TYPE_FORBIDDEN));
+    }
+
+    #[test]
+    fn search_limit_defaults_to_twenty_and_caps_to_message_max() {
+        assert_eq!(search_limit(None), 20);
+        assert_eq!(search_limit(Some(500)), 100);
+        assert_eq!(search_limit(Some(0)), 1);
+    }
+
+    #[test]
+    fn search_sort_rejects_unknown_values() {
+        assert!(serde_json::from_str::<MessageSearchSort>("\"oldest\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<MessageSearchSort>("\"newest\"").unwrap(),
+            MessageSearchSort::Newest
+        );
     }
 }

@@ -9,7 +9,7 @@ use base64::{
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rc4::{consts::U64, Key, KeyInit, Rc4, StreamCipher};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{fmt, sync::Once};
 
 use crate::errors::AppError;
 use crate::services::service_tokens::{self, AuthenticatedServiceToken};
@@ -67,6 +67,7 @@ const BASE64_ENGINE: base64::engine::GeneralPurpose = base64::engine::GeneralPur
     &base64::alphabet::STANDARD,
     GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
 );
+static JWT_CRYPTO_PROVIDER: Once = Once::new();
 
 #[derive(Debug, Clone, Copy)]
 enum DiscuzCipherError {
@@ -82,6 +83,12 @@ fn jwt_validation() -> Validation {
     validation.validate_exp = false;
     validation.required_spec_claims.clear();
     validation
+}
+
+fn ensure_jwt_crypto_provider() {
+    JWT_CRYPTO_PROVIDER.call_once(|| {
+        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
+    });
 }
 
 /// Implements the Discuz Cookie Decoding.
@@ -264,6 +271,7 @@ pub fn decode_auth_token(
     token: &str,
     jwt_signing_key: &[u8],
 ) -> Result<AuthClaims, (StatusCode, &'static str)> {
+    ensure_jwt_crypto_provider();
     decode::<AuthClaims>(
         token,
         &DecodingKey::from_secret(jwt_signing_key),
@@ -277,6 +285,7 @@ pub fn encode_auth_token(
     claims: &AuthClaims,
     jwt_signing_key: &[u8],
 ) -> Result<String, (StatusCode, &'static str)> {
+    ensure_jwt_crypto_provider();
     encode(
         &Header::default(),
         claims,

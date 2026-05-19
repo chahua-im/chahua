@@ -56,6 +56,7 @@ pub(crate) const MAX_MESSAGES_LIMIT: i64 = 100;
 pub(crate) const MAX_MEMBERS_LIMIT: i64 = 100;
 const MAX_REQUEST_BODY_BYTES: usize = 50 * 1024 * 1024;
 const LOG_FORMAT_ENV: &str = "BACKEND_LOG_FORMAT";
+const MESSAGE_SEARCH_REINDEX_COMMAND: &str = "message-search-reindex";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LogFormat {
@@ -80,6 +81,7 @@ pub(crate) struct AppState {
     push_service: Arc<services::push::PushService>,
     client_tracking: Arc<services::client_tracking::ClientTrackingService>,
     background_service: Arc<services::background::BackgroundService>,
+    message_search: Option<Arc<services::message_search::MessageSearchService>>,
     s3_client: aws_sdk_s3::Client,
     s3_bucket_name: String,
     s3_attachment_prefix: String,
@@ -105,6 +107,7 @@ async fn main() {
     init_tracing();
 
     db_tracing::install();
+    let command = read_command();
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let manager = ConnectionManager::<PgConnection>::new(&database_url);
@@ -121,6 +124,18 @@ async fn main() {
     }
 
     let metrics = Arc::new(metrics::Metrics::new());
+    if matches!(command, Some(BackendCommand::MessageSearchReindex)) {
+        if let Err(err) = run_message_search_reindex(pool.clone(), metrics.clone()).await {
+            tracing::error!(?err, "message search reindex failed");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    let message_search = build_message_search_service(metrics.clone())
+        .await
+        .expect("Failed to initialize message search service");
+
     let authz_service = services::authz::AuthorizationService::start();
     let ws_registry = Arc::new(services::ws_registry::ConnectionRegistry::new(
         metrics.clone(),
@@ -211,7 +226,9 @@ async fn main() {
             pool.clone(),
             ws_registry.clone(),
             metrics.clone(),
+            message_search.clone(),
         ),
+        message_search,
         s3_client,
         s3_bucket_name,
         s3_attachment_prefix,
@@ -343,6 +360,59 @@ async fn main() {
             result.unwrap();
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BackendCommand {
+    MessageSearchReindex,
+}
+
+fn read_command() -> Option<BackendCommand> {
+    let mut args = std::env::args().skip(1);
+    let command = args.next()?;
+    if args.next().is_some() {
+        panic!("backend commands do not accept extra arguments");
+    }
+
+    match command.as_str() {
+        MESSAGE_SEARCH_REINDEX_COMMAND => Some(BackendCommand::MessageSearchReindex),
+        _ => panic!("unknown backend command: {command}"),
+    }
+}
+
+async fn build_message_search_service(
+    metrics: Arc<metrics::Metrics>,
+) -> Result<
+    Option<Arc<services::message_search::MessageSearchService>>,
+    services::message_search::MessageSearchError,
+> {
+    let Some(config) = services::message_search::MessageSearchConfig::from_env()? else {
+        info!("Message search disabled");
+        return Ok(None);
+    };
+
+    let index_uid = config.index_uid.clone();
+    let service = Arc::new(services::message_search::MessageSearchService::new(
+        config, metrics,
+    )?);
+    service.ensure_ready().await?;
+    info!(index_uid, "Message search enabled");
+    Ok(Some(service))
+}
+
+async fn run_message_search_reindex(
+    pool: Pool<ConnectionManager<PgConnection>>,
+    metrics: Arc<metrics::Metrics>,
+) -> Result<(), services::message_search::MessageSearchError> {
+    let config = services::message_search::MessageSearchConfig::from_required_env()?;
+    let index_uid = config.index_uid.clone();
+    let service = services::message_search::MessageSearchService::new(config, metrics)?;
+    service.ensure_ready().await?;
+    let indexed = service
+        .run_reindex(&pool, services::message_search::REINDEX_BATCH_SIZE)
+        .await?;
+    info!(index_uid, indexed, "message search reindex completed");
+    Ok(())
 }
 
 fn read_socket_addr(var_name: &str, default: SocketAddr) -> SocketAddr {

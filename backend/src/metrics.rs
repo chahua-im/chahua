@@ -71,6 +71,8 @@ pub(crate) struct Metrics {
     app_version_requests_total: IntCounterVec,
     app_version_unique_clients: IntGaugeVec,
     app_version_clients: DashMap<String, DashSet<String>>,
+    message_search_index_operations_total: IntCounterVec,
+    message_search_queries_total: IntCounterVec,
     background_jobs_total: IntCounterVec,
     background_job_duration_seconds: HistogramVec,
     audio_transcode_source_total: IntCounterVec,
@@ -292,6 +294,32 @@ impl Metrics {
             &["version"],
         )
         .expect("app_version_unique_clients metric should be valid");
+        let message_search_index_operations_total = IntCounterVec::new(
+            opts!(
+                "message_search_index_operations_total",
+                "Total number of message search index operations"
+            ),
+            &["operation", "result"],
+        )
+        .expect("message_search_index_operations_total metric should be valid");
+        let message_search_queries_total = IntCounterVec::new(
+            opts!(
+                "message_search_queries_total",
+                "Total number of message search queries"
+            ),
+            &["sort", "result"],
+        )
+        .expect("message_search_queries_total metric should be valid");
+        for operation in ["upsert", "delete", "delete_batch"] {
+            for result in ["success", "failure"] {
+                message_search_index_operations_total.with_label_values(&[operation, result]);
+            }
+        }
+        for sort in ["relevance", "newest"] {
+            for result in ["success", "failure"] {
+                message_search_queries_total.with_label_values(&[sort, result]);
+            }
+        }
 
         let background_jobs_total = IntCounterVec::new(
             opts!(
@@ -442,6 +470,12 @@ impl Metrics {
             .register(Box::new(app_version_unique_clients.clone()))
             .expect("app_version_unique_clients registration should succeed");
         registry
+            .register(Box::new(message_search_index_operations_total.clone()))
+            .expect("message_search_index_operations_total registration should succeed");
+        registry
+            .register(Box::new(message_search_queries_total.clone()))
+            .expect("message_search_queries_total registration should succeed");
+        registry
             .register(Box::new(background_jobs_total.clone()))
             .expect("background_jobs_total registration should succeed");
         registry
@@ -492,6 +526,8 @@ impl Metrics {
             app_version_requests_total,
             app_version_unique_clients,
             app_version_clients: DashMap::new(),
+            message_search_index_operations_total,
+            message_search_queries_total,
             background_jobs_total,
             background_job_duration_seconds,
             audio_transcode_source_total,
@@ -686,6 +722,18 @@ impl Metrics {
         }
     }
 
+    pub(crate) fn record_message_search_index_operation(&self, operation: &str, result: &str) {
+        self.message_search_index_operations_total
+            .with_label_values(&[operation, result])
+            .inc();
+    }
+
+    pub(crate) fn record_message_search_query(&self, sort: &str, result: &str) {
+        self.message_search_queries_total
+            .with_label_values(&[sort, result])
+            .inc();
+    }
+
     pub(crate) fn set_activity_today(&self, snapshot: ActivityTodaySnapshot) {
         self.activity_today_active_users.set(snapshot.active_users);
         self.activity_today_new_users.set(snapshot.new_users);
@@ -878,6 +926,8 @@ mod tests {
         assert!(body.contains("activity_today_legacy_subscriptions_purged"));
         assert!(body.contains("app_version_requests_total"));
         assert!(body.contains("app_version_unique_clients"));
+        assert!(body.contains("message_search_index_operations_total"));
+        assert!(body.contains("message_search_queries_total"));
         assert!(body.contains("background_jobs_total"));
         assert!(body.contains("background_job_duration_seconds"));
         assert!(body.contains("audio_transcode_source_total"));
@@ -999,6 +1049,8 @@ mod tests {
         metrics.record_activity_daily_rollup_update("success");
         metrics.record_audio_transcode_source("audio/ogg");
         metrics.record_audio_transcode_job("failure", 1.5);
+        metrics.record_message_search_index_operation("upsert", "success");
+        metrics.record_message_search_query("relevance", "failure");
         metrics.set_activity_today(ActivityTodaySnapshot {
             active_users: 5,
             new_users: 2,
@@ -1051,6 +1103,11 @@ mod tests {
         assert!(
             rendered.contains("audio_transcode_job_duration_seconds_sum{result=\"failure\"} 1.5")
         );
+        assert!(rendered.contains(
+            "message_search_index_operations_total{operation=\"upsert\",result=\"success\"} 1"
+        ));
+        assert!(rendered
+            .contains("message_search_queries_total{result=\"failure\",sort=\"relevance\"} 1"));
         assert!(rendered.contains("activity_today_active_users 5"));
         assert!(rendered.contains("activity_today_new_users 2"));
         assert!(rendered.contains("activity_today_active_clients 6"));

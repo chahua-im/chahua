@@ -6,6 +6,7 @@ pub mod client_tracking;
 pub mod image_processing;
 pub mod invites;
 pub mod media;
+pub mod message_search;
 pub mod push;
 pub mod service_tokens;
 pub mod threads;
