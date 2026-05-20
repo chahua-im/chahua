@@ -1,4 +1,4 @@
-use crate::{dto::users::UserGroupTagInfo, AppState, AuthMethod};
+use crate::{dto::users::UserGroupTagInfo, AppState};
 use diesel::prelude::*;
 use diesel::sql_query;
 use diesel::PgConnection;
@@ -129,14 +129,11 @@ pub fn search_user_uids_by_prefix(
 }
 
 pub fn lookup_user_avatars(state: &AppState, uids: &[i32]) -> HashMap<i32, Option<String>> {
-    let (public_url, avatar_path) = match (
-        &state.auth_method,
-        &state.discuz_avatar_public_url,
-        &state.discuz_avatar_path,
-    ) {
-        (AuthMethod::Discuz, Some(url), Some(path)) => (url, path),
-        _ => return HashMap::new(),
-    };
+    let (public_url, avatar_path) =
+        match (&state.discuz_avatar_public_url, &state.discuz_avatar_path) {
+            (Some(url), Some(path)) => (url, path),
+            _ => return HashMap::new(),
+        };
 
     let start = Instant::now();
     let mut fs_duration_seconds = 0.0;

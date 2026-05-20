@@ -2554,12 +2554,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "md5"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
-
-[[package]]
 name = "meilisearch-index-setting-macro"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3332,15 +3326,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
-]
-
-[[package]]
-name = "rc4"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f1256e23efe6097f27aa82d6ca6889361c001586ae0f6917cbad072f05eb275"
-dependencies = [
- "cipher 0.4.4",
 ]
 
 [[package]]
@@ -4928,11 +4913,9 @@ dependencies = [
  "image",
  "jsonwebtoken",
  "matroska",
- "md5",
  "meilisearch-sdk",
  "prometheus",
  "rand 0.8.5",
- "rc4",
  "serde",
  "serde_json",
  "sha2",
@@ -4942,7 +4925,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-segmentation",
- "urlencoding",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",

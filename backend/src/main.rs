@@ -6,7 +6,6 @@ use base64::Engine;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use serde::Deserialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower::ServiceBuilder;
@@ -64,11 +63,20 @@ enum LogFormat {
     Json,
 }
 
-#[derive(Clone, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub(crate) enum AuthMethod {
-    #[default]
     UIDHeader,
-    Discuz,
+    #[default]
+    JwtOnly,
+}
+
+impl AuthMethod {
+    fn from_env(raw: Option<String>) -> Self {
+        match raw.as_deref() {
+            Some("UIDHeader") => Self::UIDHeader,
+            _ => Self::JwtOnly,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -87,8 +95,6 @@ pub(crate) struct AppState {
     s3_attachment_prefix: String,
     s3_base_url: Option<String>,
     pub auth_method: AuthMethod,
-    pub discuz_cookie_prefix: String,
-    pub discuz_authkey: String,
     pub discuz_avatar_public_url: Option<String>,
     pub discuz_avatar_path: Option<String>,
     pub jwt_signing_key: Vec<u8>,
@@ -156,27 +162,12 @@ async fn main() {
         std::env::var("ATTACHMENTS_PREFIX").unwrap_or_else(|_| "attachments".to_string());
     let s3_base_url = std::env::var("S3_BASE_URL").ok();
 
-    let auth_method_str = std::env::var("AUTH_METHOD").unwrap_or_else(|_| "UIDHeader".to_string());
-    let auth_method = match auth_method_str.as_str() {
-        "Discuz" => AuthMethod::Discuz,
-        _ => AuthMethod::UIDHeader,
-    };
+    let auth_method = AuthMethod::from_env(std::env::var("AUTH_METHOD").ok());
     let app_addr = read_socket_addr("APP_ADDR", SocketAddr::from(([0, 0, 0, 0], 3000)));
     let metrics_addr = read_socket_addr("METRICS_ADDR", SocketAddr::from(([0, 0, 0, 0], 3001)));
     let cors_allowed_origins = read_cors_allowed_origins("CORS_ALLOWED_ORIGINS");
-
-    let mut discuz_cookie_prefix = String::new();
-    let mut discuz_authkey = String::new();
-    let mut discuz_avatar_public_url = None;
-    let mut discuz_avatar_path = None;
-
-    if let AuthMethod::Discuz = auth_method {
-        discuz_cookie_prefix =
-            std::env::var("DISCUZ_COOKIE_PREFIX").expect("DISCUZ_COOKIE_PREFIX must be set");
-        discuz_authkey = std::env::var("DISCUZ_AUTHKEY").expect("DISCUZ_AUTHKEY must be set");
-        discuz_avatar_public_url = std::env::var("DISCUZ_AVATAR_PUBLIC_URL").ok();
-        discuz_avatar_path = std::env::var("DISCUZ_AVATAR_PATH").ok();
-    }
+    let discuz_avatar_public_url = std::env::var("DISCUZ_AVATAR_PUBLIC_URL").ok();
+    let discuz_avatar_path = std::env::var("DISCUZ_AVATAR_PATH").ok();
 
     let jwt_signing_key = base64::engine::general_purpose::STANDARD
         .decode(
@@ -234,8 +225,6 @@ async fn main() {
         s3_attachment_prefix,
         s3_base_url,
         auth_method,
-        discuz_cookie_prefix,
-        discuz_authkey,
         discuz_avatar_public_url,
         discuz_avatar_path,
         jwt_signing_key,
