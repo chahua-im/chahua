@@ -29,7 +29,7 @@ class AllListV2ViewModel extends Notifier<AllListV2UiState> {
 
     try {
       await Future.wait([
-        ref.read(groupListV2ViewModelProvider.notifier).refreshGroups(),
+        ref.read(activeGroupListV2ViewModelProvider.notifier).refreshGroups(),
         ref.read(activeThreadListV2ViewModelProvider.notifier).refreshThreads(),
       ]);
       state = (isRefreshing: false, isLoadingMore: false, errorMessage: null);
@@ -48,7 +48,7 @@ class AllListV2ViewModel extends Notifier<AllListV2UiState> {
       return;
     }
 
-    final groupState = ref.read(groupListV2ViewModelProvider).value;
+    final groupState = ref.read(activeGroupListV2ViewModelProvider).value;
     final threadState = ref.read(activeThreadListV2ViewModelProvider).value;
     final groupsHasMore = groupState?.hasMore ?? false;
     final threadsHasMore = threadState?.hasMore ?? false;
@@ -65,7 +65,9 @@ class AllListV2ViewModel extends Notifier<AllListV2UiState> {
     try {
       await Future.wait([
         if (groupsHasMore)
-          ref.read(groupListV2ViewModelProvider.notifier).loadMoreGroups(),
+          ref
+              .read(activeGroupListV2ViewModelProvider.notifier)
+              .loadMoreGroups(),
         if (threadsHasMore)
           ref
               .read(activeThreadListV2ViewModelProvider.notifier)

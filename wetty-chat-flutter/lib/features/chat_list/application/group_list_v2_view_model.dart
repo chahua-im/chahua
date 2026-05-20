@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:chahua/features/shared/data/read_state_repository.dart';
 import '../model/chat_list_item.dart';
 import '../data/group_list_v2_repository.dart';
+import 'chat_list_v2_scope.dart';
 import 'group_list_v2_store.dart';
 
 typedef GroupListV2ViewState = ({
@@ -15,6 +16,10 @@ typedef GroupListV2ViewState = ({
 });
 
 class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
+  GroupListV2ViewModel(this.scope);
+
+  final ChatListV2Scope scope;
+
   @override
   Future<GroupListV2ViewState> build() async {
     ref.listen<GroupListV2StoreState>(groupListV2StoreProvider, (_, _) {
@@ -24,11 +29,23 @@ class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
   }
 
   Future<GroupListV2ViewState> _loadInitial() async {
-    await ref.read(groupListV2RepositoryProvider).loadGroups();
-    final storeState = ref.read(groupListV2StoreProvider).active;
+    switch (scope) {
+      case ChatListV2Scope.active:
+        await Future.wait([
+          ref.read(groupListV2RepositoryProvider).loadGroups(),
+          ref.read(groupListV2RepositoryProvider).probeArchivedGroups(),
+        ]);
+      case ChatListV2Scope.archived:
+        final archived = ref.read(groupListV2StoreProvider).archived;
+        if (!archived.isLoaded) {
+          await ref.read(groupListV2RepositoryProvider).loadArchivedGroups();
+        }
+    }
+
+    final listState = _currentListState();
     return (
-      groups: storeState.groups,
-      hasMore: storeState.hasMore,
+      groups: listState.groups,
+      hasMore: listState.hasMore,
       isLoadingMore: false,
       isRefreshing: false,
       isLoading: false,
@@ -41,10 +58,10 @@ class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
     if (current == null) {
       return;
     }
-    final storeState = ref.read(groupListV2StoreProvider).active;
+    final listState = _currentListState();
     state = AsyncData((
-      groups: storeState.groups,
-      hasMore: storeState.hasMore,
+      groups: listState.groups,
+      hasMore: listState.hasMore,
       isLoadingMore: current.isLoadingMore,
       isRefreshing: current.isRefreshing,
       isLoading: false,
@@ -70,16 +87,23 @@ class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
       errorMessage: current.errorMessage,
     ));
     try {
-      await ref.read(groupListV2RepositoryProvider).loadMoreGroups();
+      switch (scope) {
+        case ChatListV2Scope.active:
+          await ref.read(groupListV2RepositoryProvider).loadMoreGroups();
+        case ChatListV2Scope.archived:
+          await ref
+              .read(groupListV2RepositoryProvider)
+              .loadMoreArchivedGroups();
+      }
     } catch (_) {
       // Silently fail pagination.
     } finally {
-      final storeState = ref.read(groupListV2StoreProvider).active;
+      final listState = _currentListState();
       final latest = state.value;
       if (latest != null) {
         state = AsyncData((
-          groups: storeState.groups,
-          hasMore: storeState.hasMore,
+          groups: listState.groups,
+          hasMore: listState.hasMore,
           isLoadingMore: false,
           isRefreshing: latest.isRefreshing,
           isLoading: false,
@@ -107,12 +131,21 @@ class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
       errorMessage: current.errorMessage,
     ));
     try {
-      await ref.read(groupListV2RepositoryProvider).loadGroups();
-      ref.read(readStateRepositoryProvider).resetChatBaselines();
-      final storeState = ref.read(groupListV2StoreProvider).active;
+      switch (scope) {
+        case ChatListV2Scope.active:
+          await Future.wait([
+            ref.read(groupListV2RepositoryProvider).loadGroups(),
+            ref.read(groupListV2RepositoryProvider).probeArchivedGroups(),
+          ]);
+          ref.read(readStateRepositoryProvider).resetChatBaselines();
+        case ChatListV2Scope.archived:
+          await ref.read(groupListV2RepositoryProvider).loadArchivedGroups();
+      }
+
+      final listState = _currentListState();
       state = AsyncData((
-        groups: storeState.groups,
-        hasMore: storeState.hasMore,
+        groups: listState.groups,
+        hasMore: listState.hasMore,
         isLoadingMore: false,
         isRefreshing: false,
         isLoading: false,
@@ -134,10 +167,7 @@ class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
   }
 
   Future<void> toggleGroupReadState({required String chatId}) async {
-    final group = ref
-        .read(groupListV2StoreProvider)
-        .active
-        .groups
+    final group = _currentListState().groups
         .where((group) => group.id == chatId)
         .firstOrNull;
     if (group == null) {
@@ -169,9 +199,34 @@ class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
         .read(groupListV2StoreProvider.notifier)
         .applyServerReadState(chatId: chatId, response: response);
   }
+
+  GroupListV2ListState _currentListState() {
+    final storeState = ref.read(groupListV2StoreProvider);
+    return switch (scope) {
+      ChatListV2Scope.active => storeState.active,
+      ChatListV2Scope.archived => storeState.archived,
+    };
+  }
 }
 
 final groupListV2ViewModelProvider =
-    AsyncNotifierProvider<GroupListV2ViewModel, GroupListV2ViewState>(
-      GroupListV2ViewModel.new,
-    );
+    AsyncNotifierProvider.family<
+      GroupListV2ViewModel,
+      GroupListV2ViewState,
+      ChatListV2Scope
+    >(GroupListV2ViewModel.new);
+
+/// View model for the normal Groups tab.
+///
+/// Loads active groups and probes archived-group existence for the archive
+/// folder row.
+final activeGroupListV2ViewModelProvider = groupListV2ViewModelProvider(
+  ChatListV2Scope.active,
+);
+
+/// View model for the archived Groups tab.
+///
+/// Loads and paginates only archived groups.
+final archivedGroupListV2ViewModelProvider = groupListV2ViewModelProvider(
+  ChatListV2Scope.archived,
+);

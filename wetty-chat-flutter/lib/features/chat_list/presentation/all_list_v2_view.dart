@@ -37,7 +37,7 @@ class AllListV2View extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     final items = ref.watch(allListV2ItemsProvider);
     final uiState = ref.watch(allListV2ViewModelProvider);
-    final groupAsync = ref.watch(groupListV2ViewModelProvider);
+    final groupAsync = ref.watch(activeGroupListV2ViewModelProvider);
     final threadAsync = ref.watch(activeThreadListV2ViewModelProvider);
     final isInitialLoading =
         items.isEmpty && groupAsync.isLoading && threadAsync.isLoading;
@@ -136,7 +136,7 @@ class _AllGroupListV2Row extends StatelessWidget {
             ? AppLocalizations.of(context)!.swipeActionMarkRead
             : AppLocalizations.of(context)!.swipeActionMarkUnread,
         onAction: () => ref
-            .read(groupListV2ViewModelProvider.notifier)
+            .read(activeGroupListV2ViewModelProvider.notifier)
             .toggleGroupReadState(chatId: group.id),
         child: ChatListRow(
           chatName: chatName,

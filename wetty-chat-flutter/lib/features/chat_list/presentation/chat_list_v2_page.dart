@@ -103,11 +103,12 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
       ref.read(_chatListV2SelectedTabProvider),
     );
     if (activeTab == ChatListTab.groups) {
-      final viewState = ref.read(groupListV2ViewModelProvider).value;
+      final provider = groupListV2ViewModelProvider(widget.scope);
+      final viewState = ref.read(provider).value;
       if (viewState == null || !viewState.hasMore || viewState.isLoadingMore) {
         return;
       }
-      ref.read(groupListV2ViewModelProvider.notifier).loadMoreGroups();
+      ref.read(provider.notifier).loadMoreGroups();
       return;
     }
 
@@ -144,7 +145,9 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
   Future<void> _refreshActiveTab(ChatListTab activeTab) {
     return switch (activeTab) {
       ChatListTab.groups =>
-        ref.read(groupListV2ViewModelProvider.notifier).refreshGroups(),
+        ref
+            .read(groupListV2ViewModelProvider(widget.scope).notifier)
+            .refreshGroups(),
       ChatListTab.threads =>
         ref
             .read(threadListV2ViewModelProvider(widget.scope).notifier)

@@ -27,7 +27,8 @@ class GroupListV2View extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    final asyncState = ref.watch(groupListV2ViewModelProvider);
+    final provider = groupListV2ViewModelProvider(scope);
+    final asyncState = ref.watch(provider);
 
     return asyncState.when(
       loading: () => const SliverFillRemaining(
@@ -60,6 +61,7 @@ class GroupListV2View extends ConsumerWidget {
                 final chat = viewState.groups[index];
                 return _GroupListV2Row(
                   chat: chat,
+                  scope: scope,
                   isActive: chat.id == selectedChatId,
                 );
               },
@@ -79,9 +81,14 @@ class GroupListV2View extends ConsumerWidget {
 }
 
 class _GroupListV2Row extends StatelessWidget {
-  const _GroupListV2Row({required this.chat, required this.isActive});
+  const _GroupListV2Row({
+    required this.chat,
+    required this.scope,
+    required this.isActive,
+  });
 
   final ChatListItem chat;
+  final ChatListV2Scope scope;
   final bool isActive;
 
   @override
@@ -103,7 +110,7 @@ class _GroupListV2Row extends StatelessWidget {
             ? AppLocalizations.of(context)!.swipeActionMarkRead
             : AppLocalizations.of(context)!.swipeActionMarkUnread,
         onAction: () => ref
-            .read(groupListV2ViewModelProvider.notifier)
+            .read(groupListV2ViewModelProvider(scope).notifier)
             .toggleGroupReadState(chatId: chat.id),
         child: ChatListRow(
           chatName: chatName,

@@ -71,7 +71,7 @@ void main() {
 
       await container.read(chatInboxReconcilerProvider).reconcile();
 
-      final groups = container.read(groupListV2ViewModelProvider).value;
+      final groups = container.read(activeGroupListV2ViewModelProvider).value;
       final threads = container.read(activeThreadListV2ViewModelProvider).value;
       final badge = container.read(unreadBadgeProvider);
 
@@ -82,7 +82,7 @@ void main() {
       expect(badge.chatUnreadTotal, 4);
       expect(badge.threadUnreadTotal, 2);
       expect(badge.combinedUnreadTotal, 6);
-      expect(chatService.fetchChatsCalls, 1);
+      expect(chatService.fetchChatsCalls, 2);
       expect(threadService.fetchThreadsCalls, 3);
       expect(chatService.fetchUnreadCountCalls, greaterThanOrEqualTo(1));
       expect(threadService.fetchUnreadCountCalls, greaterThanOrEqualTo(1));
@@ -136,7 +136,7 @@ void main() {
           isEmpty,
         );
         expect(container.read(unreadBadgeProvider).chatUnreadTotal, 4);
-        expect(chatService.fetchChatsCalls, 1);
+        expect(chatService.fetchChatsCalls, 2);
         expect(threadService.fetchThreadsCalls, 0);
         expect(chatService.fetchUnreadCountCalls, greaterThanOrEqualTo(1));
       },

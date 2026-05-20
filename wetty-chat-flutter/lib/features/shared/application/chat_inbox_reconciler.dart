@@ -43,12 +43,14 @@ class ChatInboxReconciler {
   }
 
   Future<void> _refreshGroups() async {
-    final current = _ref.read(groupListV2ViewModelProvider).value;
+    final current = _ref.read(activeGroupListV2ViewModelProvider).value;
     if (current == null) {
-      await _ref.read(groupListV2ViewModelProvider.future);
+      await _ref.read(activeGroupListV2ViewModelProvider.future);
       return;
     }
-    await _ref.read(groupListV2ViewModelProvider.notifier).refreshGroups();
+    await _ref
+        .read(activeGroupListV2ViewModelProvider.notifier)
+        .refreshGroups();
   }
 
   Future<void> _refreshThreads() async {
