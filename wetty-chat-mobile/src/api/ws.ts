@@ -23,6 +23,7 @@ import {
   messagesBulkDeleted,
   reactionsUpdated,
 } from '@/store/messageEvents';
+import { selectAllTimelineMessages } from '@/store/messages/selectors';
 import { getStoredJwtToken } from '@/utils/jwtToken';
 import { formatNotificationBody, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import { buildNotificationNavigationData } from '@/utils/notificationNavigation';
@@ -131,9 +132,7 @@ function normalizePayload(payload: unknown): MessageResponse | null {
 }
 
 function allMessagesForChat(chatId: string): MessageResponse[] {
-  const chat = store.getState().messages.chats[chatId];
-  if (!chat) return [];
-  return chat.windows.flatMap((window) => window.messages);
+  return selectAllTimelineMessages(store.getState(), chatId);
 }
 
 function showLocalNotification(message: MessageResponse): void {

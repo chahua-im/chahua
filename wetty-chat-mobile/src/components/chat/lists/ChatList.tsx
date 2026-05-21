@@ -61,6 +61,7 @@ import { type ChatListTab, ChatListSegment } from '@/components/chat/lists/ChatL
 import { ThreadListRow } from '@/components/chat/lists/ThreadListRow';
 import type { RootState } from '@/store';
 import { compareMessageOrder, isOptimisticMessageId } from '@/store/messageProjection';
+import type { ChatTimelineState } from '@/store/messages/types';
 import type { StoredThreadListItem } from '@/api/threads';
 import styles from './ChatList.module.scss';
 
@@ -112,17 +113,14 @@ function getMessagePreview(message: MessagePreview | null, locale: string): Reac
   );
 }
 
-function getLatestConfirmedRootMessageId(
-  chat: ChatListEntry,
-  windows: RootState['messages']['chats'][string]['windows'] | undefined,
-): string | null {
+function getLatestConfirmedRootMessageId(chat: ChatListEntry, timeline: ChatTimelineState | undefined): string | null {
   if (chat.lastMessage && !isOptimisticMessageId(chat.lastMessage.id)) {
     return chat.lastMessage.id;
   }
 
   let latestConfirmed: MessageResponse | null = null;
-  for (const window of windows ?? []) {
-    for (const message of window.messages) {
+  for (const segment of timeline?.segments ?? []) {
+    for (const message of segment.messages) {
       if (message.replyRootId != null || message.isDeleted || isOptimisticMessageId(message.id)) continue;
       if (!latestConfirmed || compareMessageOrder(message, latestConfirmed) > 0) {
         latestConfirmed = message;
@@ -249,7 +247,7 @@ export function ChatList({
     slidingItem?.close();
 
     if (chat.unreadCount > 0) {
-      const targetMessageId = getLatestConfirmedRootMessageId(chat, messageChats[chat.id]?.windows);
+      const targetMessageId = getLatestConfirmedRootMessageId(chat, messageChats[chat.id]);
       if (!targetMessageId) return;
 
       try {

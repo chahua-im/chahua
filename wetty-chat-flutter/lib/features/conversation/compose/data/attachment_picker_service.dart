@@ -10,6 +10,8 @@ import 'package:path/path.dart' as path;
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
+import 'package:chahua/core/platform/native_dialog_focus_guard.dart';
+
 enum ComposerAttachmentKind { image, gif, video }
 
 enum ComposerAttachmentSource { cameraPhoto, mediaLibrary }
@@ -39,10 +41,15 @@ class PickedComposerAttachment {
 }
 
 class AttachmentPickerService {
-  AttachmentPickerService({ImagePicker? imagePicker})
-    : _imagePicker = imagePicker ?? ImagePicker();
+  AttachmentPickerService({
+    ImagePicker? imagePicker,
+    NativeDialogFocusGuard nativeDialogFocusGuard =
+        const NativeDialogFocusGuard(),
+  }) : _imagePicker = imagePicker ?? ImagePicker(),
+       _nativeDialogFocusGuard = nativeDialogFocusGuard;
 
   final ImagePicker _imagePicker;
+  final NativeDialogFocusGuard _nativeDialogFocusGuard;
 
   Future<List<PickedComposerAttachment>> pick(
     ComposerAttachmentSource source,
@@ -54,6 +61,7 @@ class AttachmentPickerService {
   }
 
   Future<List<PickedComposerAttachment>> _pickCameraPhoto() async {
+    await _nativeDialogFocusGuard.prepareForNativeDialog();
     final photo = await _imagePicker.pickImage(source: ImageSource.camera);
     if (photo == null) {
       return const <PickedComposerAttachment>[];
@@ -64,6 +72,7 @@ class AttachmentPickerService {
   }
 
   Future<List<PickedComposerAttachment>> _pickMediaLibrary() async {
+    await _nativeDialogFocusGuard.prepareForNativeDialog();
     final media = await _imagePicker.pickMultipleMedia();
     return _toPickedAttachments(media, ComposerAttachmentSource.mediaLibrary);
   }

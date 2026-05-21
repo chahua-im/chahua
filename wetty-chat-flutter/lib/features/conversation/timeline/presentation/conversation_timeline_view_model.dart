@@ -5,10 +5,11 @@ import 'package:chahua/features/conversation/shared/application/conversation_can
 import 'package:chahua/features/conversation/shared/data/conversation_timeline_v2_repository.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_timeline_v2_active_segment.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
+import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
 import 'package:chahua/features/conversation/timeline/model/message_visibility_window.dart';
+import 'package:chahua/features/conversation/timeline/model/timeline_viewport_geometry.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
-import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
@@ -49,6 +50,7 @@ enum ConversationTimelineViewportCommandKind {
   none,
   resetToCenterOrigin,
   scrollToBottom,
+  settleToLiveEdge,
 }
 
 /// The preferred placement for the viewport command.
@@ -124,7 +126,7 @@ class ConversationTimelineViewModel
   ConversationMessageHighlight? _activeHighlight;
   Timer? _highlightClearTimer;
   bool _didRegisterDispose = false;
-  TimelineViewportFacts? _latestViewportFacts;
+  TimelineViewportSnapshot? _latestViewportSnapshot;
   String? _lastRenderedTailStableKey;
   _TimelineRenderSplitPolicy _renderSplitPolicy =
       const _TimelineRenderSplitPolicy.none();
@@ -207,11 +209,12 @@ class ConversationTimelineViewModel
     }
   }
 
-  void onViewportChanged(TimelineViewportFacts facts) {
-    _latestViewportFacts = facts;
+  void onViewportChanged(TimelineViewportSnapshot snapshot) {
+    final previousSnapshot = _latestViewportSnapshot;
+    _latestViewportSnapshot = snapshot;
     log(
       'vm viewport facts: identity=$identity mode=${_modeLabel(_activeSegmentMode)} '
-      'facts=$facts bootstrapping=${state.isBootstrapping} '
+      'snapshot=$snapshot bootstrapping=${state.isBootstrapping} '
       'canOlder=${state.canLoadOlder} canNewer=${state.canLoadNewer}',
       name: 'ConversationTimeline',
     );
@@ -220,11 +223,23 @@ class ConversationTimelineViewModel
       return;
     }
 
-    if (facts.isNearTop && state.canLoadOlder && !state.isLoadingOlder) {
+    if (snapshot.isNearTop && state.canLoadOlder && !state.isLoadingOlder) {
       unawaited(loadOlder());
     }
-    if (facts.isNearBottom && state.canLoadNewer && !state.isLoadingNewer) {
+    if (snapshot.isNearBottom && state.canLoadNewer && !state.isLoadingNewer) {
       unawaited(loadNewer());
+    }
+    final viewportExtentChanged =
+        previousSnapshot != null &&
+        (previousSnapshot.viewportExtent - snapshot.viewportExtent).abs() > 0.5;
+    if (viewportExtentChanged &&
+        (_activeSegmentMode?.isLatest ?? false) &&
+        snapshot.isNearBottom &&
+        !snapshot.viewportAtLiveEdge) {
+      _publishViewportCommand(
+        kind: ConversationTimelineViewportCommandKind.settleToLiveEdge,
+        placement: ConversationTimelineViewportPlacement.bottomPreferred,
+      );
     }
   }
 
@@ -257,7 +272,7 @@ class ConversationTimelineViewModel
   Future<void> jumpToLatest() async {
     log(
       'jumpToLatest: identity=$identity mode=${_modeLabel(_activeSegmentMode)} '
-      'latestFacts=$_latestViewportFacts split=${_splitLabel(_renderSplitPolicy)}',
+      'latestSnapshot=$_latestViewportSnapshot split=${_splitLabel(_renderSplitPolicy)}',
       name: 'ConversationTimeline',
     );
     unawaited(
@@ -285,12 +300,12 @@ class ConversationTimelineViewModel
   void followLatestTailIfNeeded() {
     final isFollowingTail =
         (_activeSegment?.isLatestSlice ?? false) &&
-        (_latestViewportFacts?.isNearBottom ?? false);
+        (_latestViewportSnapshot?.isNearBottom ?? false);
     log(
       'followLatestTailIfNeeded: identity=$identity '
       'mode=${_modeLabel(_activeSegmentMode)} '
       'activeLatest=${_activeSegment?.isLatestSlice} '
-      'latestFacts=$_latestViewportFacts isFollowingTail=$isFollowingTail',
+      'latestSnapshot=$_latestViewportSnapshot isFollowingTail=$isFollowingTail',
       name: 'ConversationTimeline',
     );
     if (isFollowingTail) {
@@ -305,7 +320,7 @@ class ConversationTimelineViewModel
 
   ConversationLocalSendViewportIntent captureLocalSendViewportIntent() {
     final isLatestSlice = _activeSegment?.isLatestSlice ?? false;
-    final isNearBottom = _latestViewportFacts?.isNearBottom ?? false;
+    final isNearBottom = _latestViewportSnapshot?.isNearBottom ?? false;
     final intent = !isLatestSlice
         ? ConversationLocalSendViewportIntent.nonLatest
         : isNearBottom
@@ -314,7 +329,7 @@ class ConversationTimelineViewModel
     log(
       'captureLocalSendViewportIntent: identity=$identity '
       'mode=${_modeLabel(_activeSegmentMode)} activeLatest=$isLatestSlice '
-      'latestFacts=$_latestViewportFacts intent=${intent.name}',
+      'latestSnapshot=$_latestViewportSnapshot intent=${intent.name}',
       name: 'ConversationTimeline',
     );
     return intent;
@@ -500,25 +515,25 @@ class ConversationTimelineViewModel
     final currentTailStableKey = segment.orderedMessages.isEmpty
         ? null
         : segment.orderedMessages.last.stableKey;
-    final shouldScrollToBottom =
+    final shouldSettleLiveEdge =
+        (_activeSegmentMode?.isLatest ?? false) &&
         segment.isLatestSlice &&
-        (_latestViewportFacts?.isNearBottom ?? false) &&
+        (_latestViewportSnapshot?.isNearBottom ?? false) &&
         _lastRenderedTailStableKey != null &&
-        currentTailStableKey != null &&
-        currentTailStableKey != _lastRenderedTailStableKey;
+        currentTailStableKey != null;
     log(
       'stateFromSegment: identity=$identity mode=${_modeLabel(_activeSegmentMode)} '
       'segmentLatest=${segment.isLatestSlice} count=${segment.orderedMessages.length} '
       'split=${_splitLabel(_renderSplitPolicy)} '
       'before=${beforeMessages.length} after=${afterMessages.length} '
       'lastTail=$_lastRenderedTailStableKey currentTail=$currentTailStableKey '
-      'latestFacts=$_latestViewportFacts shouldScrollToBottom=$shouldScrollToBottom '
+      'latestSnapshot=$_latestViewportSnapshot shouldSettleLiveEdge=$shouldSettleLiveEdge '
       'pending=${_commandLabel(_pendingViewportCommand)} generation=$_viewportCommandGeneration',
       name: 'ConversationTimeline',
     );
-    if (shouldScrollToBottom) {
+    if (shouldSettleLiveEdge) {
       _issueViewportCommand(
-        kind: ConversationTimelineViewportCommandKind.scrollToBottom,
+        kind: ConversationTimelineViewportCommandKind.settleToLiveEdge,
         placement: ConversationTimelineViewportPlacement.bottomPreferred,
       );
     }
@@ -638,6 +653,7 @@ class ConversationTimelineViewModel
     return null;
   }
 
+  /// Creates the compact command record consumed by the timeline widget.
   ConversationTimelineViewportCommand _viewportCommand({
     required ConversationTimelineViewportCommandKind kind,
     required ConversationTimelineViewportPlacement placement,
@@ -645,6 +661,26 @@ class ConversationTimelineViewModel
     return (kind: kind, placement: placement);
   }
 
+  /// Publishes an immediately executable viewport effect from a viewport event.
+  void _publishViewportCommand({
+    required ConversationTimelineViewportCommandKind kind,
+    required ConversationTimelineViewportPlacement placement,
+  }) {
+    final command = _viewportCommand(kind: kind, placement: placement);
+    _lastViewportCommand = command;
+    ++_viewportCommandGeneration;
+    log(
+      'publishViewportCommand: identity=$identity '
+      'command=${_commandLabel(command)} generation=$_viewportCommandGeneration',
+      name: 'ConversationTimeline',
+    );
+    state = state.copyWith(
+      viewportCommand: command,
+      viewportCommandGeneration: _viewportCommandGeneration,
+    );
+  }
+
+  /// Queues a viewport effect to be delivered with the next rendered state.
   void _issueViewportCommand({
     required ConversationTimelineViewportCommandKind kind,
     required ConversationTimelineViewportPlacement placement,

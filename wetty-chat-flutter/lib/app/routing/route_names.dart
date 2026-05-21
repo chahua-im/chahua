@@ -6,6 +6,8 @@ abstract final class AppRoutes {
   static String chatDetail(String chatId) => '/chat/$chatId';
   static String chatMembers(String chatId) => '/chat/$chatId/members';
   static String chatSettings(String chatId) => '/chat/$chatId/settings';
+  static String chatMessageSearch(String chatId) =>
+      '/chat/$chatId/settings/search';
   static String nestedThreadDetail(String chatId, String threadRootId) =>
       '/chat/$chatId/thread/$threadRootId';
   static String nestedNewThread(String chatId, String threadRootId) =>

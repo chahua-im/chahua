@@ -95,7 +95,7 @@ const threadsSlice = createSlice({
         state.items.unshift(thread);
       }
     },
-    /** Update the cached preview for threads whose messages aren't loaded in messagesSlice. */
+    /** Update the cached preview for threads whose messages aren't loaded in the message timeline store. */
     updateThreadCachedLastReply(
       state,
       action: PayloadAction<{ threadRootId: string; cachedLastReply: MessagePreview }>,

@@ -1,6 +1,6 @@
 import { combineReducers, configureStore, createListenerMiddleware } from '@reduxjs/toolkit';
 import connectionReducer from './connectionSlice';
-import messagesReducer from './messagesSlice';
+import messagesReducer from './messages/slice';
 import settingsReducer, { type SettingsState } from './settingsSlice';
 import stickerPreferencesReducer, {
   hydrateStickerPreferencesFromKv,
@@ -28,6 +28,7 @@ import userReducer, { fetchCurrentUser } from './userSlice';
 import { toMessagePreview, type MessageResponse } from '@/api/messages';
 import { messageAdded, messageConfirmed, messagePatched, messagesBulkDeleted } from './messageEvents';
 import { findLatestEligibleRootMessage, isOptimisticMessageId } from './messageProjection';
+import { selectHasLoadedTimeline } from './messages/selectors';
 import { kvSet } from '@/utils/db';
 import { isAnyOf } from '@reduxjs/toolkit';
 
@@ -59,11 +60,11 @@ listenerMiddleware.startListening({
       const isSubscribed = state.threads.items.some((t) => t.threadRootMessage.id === threadRootId);
       if (isSubscribed) {
         if (!message.isDeleted) {
-          // Only update the cached preview if the thread window isn't loaded
-          // (when loaded, the UI derives the preview from messagesSlice directly)
+          // Only update the cached preview if the thread timeline isn't loaded
+          // (when loaded, the UI derives the preview from the message timeline store)
           const storeKey = `${message.chatId}_thread_${threadRootId}`;
-          const hasWindow = (state.messages.chats[storeKey]?.windows?.length ?? 0) > 0;
-          if (!hasWindow) {
+          const hasTimeline = selectHasLoadedTimeline(state, storeKey);
+          if (!hasTimeline) {
             api.dispatch(
               updateThreadCachedLastReply({
                 threadRootId,
@@ -99,8 +100,8 @@ listenerMiddleware.startListening({
       const isSubscribed = state.threads.items.some((t) => t.threadRootMessage.id === threadRootId);
       if (isSubscribed && !message.isDeleted) {
         const storeKey = `${message.chatId}_thread_${threadRootId}`;
-        const hasWindow = (state.messages.chats[storeKey]?.windows?.length ?? 0) > 0;
-        if (!hasWindow) {
+        const hasTimeline = selectHasLoadedTimeline(state, storeKey);
+        if (!hasTimeline) {
           api.dispatch(
             updateThreadCachedLastReply({
               threadRootId,
@@ -124,7 +125,7 @@ listenerMiddleware.startListening({
         message: action.payload.message,
         fallbackMessage: action.payload.message.isDeleted
           ? findLatestEligibleRootMessage(
-              state.messages.chats[action.payload.chatId]?.windows,
+              state.messages.chats[action.payload.chatId]?.segments,
               action.payload.messageId,
             )
           : null,
@@ -159,8 +160,8 @@ listenerMiddleware.startListening({
     if (action.payload.message.replyRootId) {
       const threadRootId = action.payload.message.replyRootId;
       const storeKey = `${action.payload.chatId}_thread_${threadRootId}`;
-      const hasWindow = (state.messages.chats[storeKey]?.windows?.length ?? 0) > 0;
-      if (!hasWindow) {
+      const hasTimeline = selectHasLoadedTimeline(state, storeKey);
+      if (!hasTimeline) {
         const thread = state.threads.items.find((t) => t.threadRootMessage.id === threadRootId);
         if (thread?.cachedLastReply) {
           api.dispatch(
@@ -186,7 +187,7 @@ listenerMiddleware.startListening({
     const idSet = new Set(messageIds);
 
     // Update chat list preview — find the new latest eligible message
-    const fallbackMessage = findLatestEligibleRootMessage(state.messages.chats[chatId]?.windows);
+    const fallbackMessage = findLatestEligibleRootMessage(state.messages.chats[chatId]?.segments);
     if (fallbackMessage) {
       api.dispatch(
         projectChatMessagePatched({

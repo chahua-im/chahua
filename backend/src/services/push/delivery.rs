@@ -54,9 +54,62 @@ pub(super) struct ApnsSender {
     topic: String,
 }
 
-pub(super) enum SendFailure {
-    Stale(i64),
-    Transient,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeliveryFailureAction {
+    None,
+    Counted,
+    PruneImmediate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeliveryFailureClass {
+    InvalidSubscription,
+    ProviderRejected,
+    ProviderTransient,
+    BackendConfig,
+    PayloadBuild,
+}
+
+impl DeliveryFailureClass {
+    pub(super) fn as_metrics_label(self) -> &'static str {
+        match self {
+            Self::InvalidSubscription => "invalid_subscription",
+            Self::ProviderRejected => "provider_rejected",
+            Self::ProviderTransient => "provider_transient",
+            Self::BackendConfig => "backend_config",
+            Self::PayloadBuild => "payload_build",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DeliveryFailureDetails {
+    pub(super) class: DeliveryFailureClass,
+    pub(super) reason: String,
+    pub(super) action: DeliveryFailureAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DeliveryFailure {
+    pub(super) subscription_id: i64,
+    pub(super) user_id: i32,
+    pub(super) provider: PushProvider,
+    pub(super) class: DeliveryFailureClass,
+    pub(super) reason: String,
+    pub(super) action: DeliveryFailureAction,
+}
+
+impl DeliveryFailure {
+    fn from_details(sub: &PushSubscription, details: DeliveryFailureDetails) -> Self {
+        Self {
+            subscription_id: sub.id,
+            user_id: sub.user_id,
+            provider: sub.provider,
+            class: details.class,
+            reason: details.reason,
+            action: details.action,
+        }
+    }
 }
 
 impl PushService {
@@ -65,7 +118,7 @@ impl PushService {
         sub: &PushSubscription,
         web_payload: &[u8],
         apns_notification: &ApnsNotification,
-    ) -> Result<(), SendFailure> {
+    ) -> Result<(), DeliveryFailure> {
         match sub.provider {
             PushProvider::WebPush => self.send_web_push(sub, web_payload).await,
             PushProvider::Apns => self.send_apns_push(sub, apns_notification).await,
@@ -76,14 +129,20 @@ impl PushService {
         &self,
         sub: &PushSubscription,
         payload: &[u8],
-    ) -> Result<(), SendFailure> {
+    ) -> Result<(), DeliveryFailure> {
         let endpoint = match &sub.endpoint {
             Some(endpoint) => endpoint.clone(),
             None => {
                 self.metrics
                     .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
-                warn!("web push subscription {} missing endpoint", sub.id);
-                return Err(SendFailure::Stale(sub.id));
+                return Err(DeliveryFailure::from_details(
+                    sub,
+                    DeliveryFailureDetails {
+                        class: DeliveryFailureClass::InvalidSubscription,
+                        reason: "missing_endpoint".to_string(),
+                        action: DeliveryFailureAction::PruneImmediate,
+                    },
+                ));
             }
         };
         let data = match sub.web_push_data() {
@@ -95,7 +154,14 @@ impl PushService {
                     "web push subscription {} has invalid provider data: {:?}",
                     sub.id, e
                 );
-                return Err(SendFailure::Stale(sub.id));
+                return Err(DeliveryFailure::from_details(
+                    sub,
+                    DeliveryFailureDetails {
+                        class: DeliveryFailureClass::InvalidSubscription,
+                        reason: "invalid_provider_data".to_string(),
+                        action: DeliveryFailureAction::PruneImmediate,
+                    },
+                ));
             }
         };
 
@@ -112,7 +178,14 @@ impl PushService {
                     );
                     self.metrics
                         .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
-                    return Err(SendFailure::Transient);
+                    return Err(DeliveryFailure::from_details(
+                        sub,
+                        DeliveryFailureDetails {
+                            class: DeliveryFailureClass::BackendConfig,
+                            reason: "vapid_config".to_string(),
+                            action: DeliveryFailureAction::None,
+                        },
+                    ));
                 }
             };
 
@@ -124,7 +197,14 @@ impl PushService {
                 error!("Failed to build VAPID signature: {:?}", e);
                 self.metrics
                     .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
-                return Err(SendFailure::Transient);
+                return Err(DeliveryFailure::from_details(
+                    sub,
+                    DeliveryFailureDetails {
+                        class: DeliveryFailureClass::BackendConfig,
+                        reason: "vapid_signature".to_string(),
+                        action: DeliveryFailureAction::None,
+                    },
+                ));
             }
         };
 
@@ -142,24 +222,42 @@ impl PushService {
                 Err(e) => {
                     self.metrics
                         .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
-                    if matches!(
-                        e,
-                        web_push::WebPushError::EndpointNotValid(_)
-                            | web_push::WebPushError::EndpointNotFound(_)
-                    ) {
-                        warn!("stale web push subscription for endpoint {}", endpoint);
-                        Err(SendFailure::Stale(sub.id))
+                    let details = classify_web_push_error(&e);
+                    if details.action == DeliveryFailureAction::PruneImmediate {
+                        warn!(
+                            provider = PushProvider::WebPush.as_metrics_label(),
+                            subscription_id = sub.id,
+                            user_id = sub.user_id,
+                            reason = %details.reason,
+                            action = "prune",
+                            "stale web push subscription"
+                        );
                     } else {
-                        error!("Failed to send web push notification: {:?}", e);
-                        Err(SendFailure::Transient)
+                        error!(
+                            provider = PushProvider::WebPush.as_metrics_label(),
+                            subscription_id = sub.id,
+                            user_id = sub.user_id,
+                            failure_class = details.class.as_metrics_label(),
+                            reason = %details.reason,
+                            action = "retry",
+                            "failed to send web push notification"
+                        );
                     }
+                    Err(DeliveryFailure::from_details(sub, details))
                 }
             },
             Err(e) => {
                 error!("Failed to build web push message: {:?}", e);
                 self.metrics
                     .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
-                Err(SendFailure::Transient)
+                Err(DeliveryFailure::from_details(
+                    sub,
+                    DeliveryFailureDetails {
+                        class: DeliveryFailureClass::PayloadBuild,
+                        reason: "message_build".to_string(),
+                        action: DeliveryFailureAction::None,
+                    },
+                ))
             }
         }
     }
@@ -168,7 +266,7 @@ impl PushService {
         &self,
         sub: &PushSubscription,
         notification: &ApnsNotification,
-    ) -> Result<(), SendFailure> {
+    ) -> Result<(), DeliveryFailure> {
         let sender = match &self.apns_sender {
             Some(sender) => sender,
             None => {
@@ -178,7 +276,14 @@ impl PushService {
                 );
                 self.metrics
                     .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
-                return Err(SendFailure::Transient);
+                return Err(DeliveryFailure::from_details(
+                    sub,
+                    DeliveryFailureDetails {
+                        class: DeliveryFailureClass::BackendConfig,
+                        reason: "apns_not_configured".to_string(),
+                        action: DeliveryFailureAction::None,
+                    },
+                ));
             }
         };
         let device_token = match &sub.device_token {
@@ -187,7 +292,14 @@ impl PushService {
                 warn!("APNs subscription {} missing device token", sub.id);
                 self.metrics
                     .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
-                return Err(SendFailure::Stale(sub.id));
+                return Err(DeliveryFailure::from_details(
+                    sub,
+                    DeliveryFailureDetails {
+                        class: DeliveryFailureClass::InvalidSubscription,
+                        reason: "missing_device_token".to_string(),
+                        action: DeliveryFailureAction::PruneImmediate,
+                    },
+                ));
             }
         };
         if let Err(e) = sub.apns_data() {
@@ -197,7 +309,14 @@ impl PushService {
             );
             self.metrics
                 .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
-            return Err(SendFailure::Stale(sub.id));
+            return Err(DeliveryFailure::from_details(
+                sub,
+                DeliveryFailureDetails {
+                    class: DeliveryFailureClass::InvalidSubscription,
+                    reason: "invalid_provider_data".to_string(),
+                    action: DeliveryFailureAction::PruneImmediate,
+                },
+            ));
         }
         let environment = match sub.apns_environment {
             Some(environment) => environment,
@@ -205,7 +324,14 @@ impl PushService {
                 warn!("APNs subscription {} missing environment", sub.id);
                 self.metrics
                     .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
-                return Err(SendFailure::Stale(sub.id));
+                return Err(DeliveryFailure::from_details(
+                    sub,
+                    DeliveryFailureDetails {
+                        class: DeliveryFailureClass::InvalidSubscription,
+                        reason: "missing_environment".to_string(),
+                        action: DeliveryFailureAction::PruneImmediate,
+                    },
+                ));
             }
         };
 
@@ -215,32 +341,35 @@ impl PushService {
                     .record_push_notification(PushProvider::Apns.as_metrics_label(), true);
                 Ok(())
             }
-            Err(ApnsSendError::Stale(reason)) => {
+            Err(details) if details.action == DeliveryFailureAction::PruneImmediate => {
                 warn!(
-                    "stale APNs subscription {} for token {}: {:?}",
-                    sub.id, device_token, reason
+                    provider = PushProvider::Apns.as_metrics_label(),
+                    subscription_id = sub.id,
+                    user_id = sub.user_id,
+                    reason = %details.reason,
+                    action = "prune",
+                    "stale APNs subscription"
                 );
                 self.metrics
                     .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
-                Err(SendFailure::Stale(sub.id))
+                Err(DeliveryFailure::from_details(sub, details))
             }
-            Err(ApnsSendError::Transient(reason)) => {
+            Err(details) => {
                 error!(
-                    "failed to send APNs notification for subscription {}: {}",
-                    sub.id, reason
+                    provider = PushProvider::Apns.as_metrics_label(),
+                    subscription_id = sub.id,
+                    user_id = sub.user_id,
+                    failure_class = details.class.as_metrics_label(),
+                    reason = %details.reason,
+                    action = "retry",
+                    "failed to send APNs notification"
                 );
                 self.metrics
                     .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
-                Err(SendFailure::Transient)
+                Err(DeliveryFailure::from_details(sub, details))
             }
         }
     }
-}
-
-#[derive(Debug)]
-enum ApnsSendError {
-    Stale(ApnsErrorReason),
-    Transient(String),
 }
 
 impl ApnsSender {
@@ -297,7 +426,7 @@ impl ApnsSender {
         device_token: &str,
         environment: &PushEnvironment,
         notification: &ApnsNotification,
-    ) -> Result<(), ApnsSendError> {
+    ) -> Result<(), DeliveryFailureDetails> {
         let title_loc_args = [notification.title_loc_args[0].as_str()];
         let body_loc_args: Vec<&str> = notification
             .body_loc_args
@@ -321,8 +450,10 @@ impl ApnsSender {
         let mut inner_payload = builder.build(device_token, options);
         inner_payload
             .add_custom_data(APNS_CUSTOM_DATA_ROOT, &notification.custom_data)
-            .map_err(|e| {
-                ApnsSendError::Transient(format!("failed to serialize APNs payload: {:?}", e))
+            .map_err(|e| DeliveryFailureDetails {
+                class: DeliveryFailureClass::PayloadBuild,
+                reason: format!("payload_serialize: {:?}", e),
+                action: DeliveryFailureAction::None,
             })?;
         let payload = PayloadWithThreadId {
             inner: inner_payload,
@@ -336,22 +467,107 @@ impl ApnsSender {
         let response = client
             .send(payload)
             .await
-            .map_err(|e| ApnsSendError::Transient(format!("{:?}", e)))?;
+            .map_err(|e| classify_apns_send_error(&e))?;
 
         if response.code == 200 {
             Ok(())
         } else if let Some(error) = response.error {
             if is_stale_apns_error_reason(&error.reason) {
-                Err(ApnsSendError::Stale(error.reason))
+                Err(stale_apns_failure(&error.reason))
             } else {
-                Err(ApnsSendError::Transient(format!("{:?}", error.reason)))
+                Err(DeliveryFailureDetails {
+                    class: DeliveryFailureClass::ProviderTransient,
+                    reason: format!("{:?}", error.reason),
+                    action: DeliveryFailureAction::None,
+                })
             }
         } else {
-            Err(ApnsSendError::Transient(format!(
-                "APNs request failed with status {}",
-                response.code
-            )))
+            Err(DeliveryFailureDetails {
+                class: DeliveryFailureClass::ProviderTransient,
+                reason: format!("status_{}", response.code),
+                action: DeliveryFailureAction::None,
+            })
         }
+    }
+}
+
+pub(super) fn classify_web_push_error(error: &web_push::WebPushError) -> DeliveryFailureDetails {
+    match error {
+        web_push::WebPushError::EndpointNotValid(_) => DeliveryFailureDetails {
+            class: DeliveryFailureClass::ProviderRejected,
+            reason: "endpoint_not_valid".to_string(),
+            action: DeliveryFailureAction::PruneImmediate,
+        },
+        web_push::WebPushError::EndpointNotFound(_) => DeliveryFailureDetails {
+            class: DeliveryFailureClass::ProviderRejected,
+            reason: "endpoint_not_found".to_string(),
+            action: DeliveryFailureAction::PruneImmediate,
+        },
+        web_push::WebPushError::Unspecified => DeliveryFailureDetails {
+            class: DeliveryFailureClass::ProviderTransient,
+            reason: "unspecified".to_string(),
+            action: DeliveryFailureAction::Counted,
+        },
+        other => DeliveryFailureDetails {
+            class: DeliveryFailureClass::ProviderTransient,
+            reason: other.short_description().to_string(),
+            action: DeliveryFailureAction::None,
+        },
+    }
+}
+
+pub(super) fn classify_apns_send_error(error: &a2::Error) -> DeliveryFailureDetails {
+    match error {
+        a2::Error::ResponseError(response) => match &response.error {
+            Some(body) if is_stale_apns_error_reason(&body.reason) => {
+                stale_apns_failure(&body.reason)
+            }
+            Some(body) => DeliveryFailureDetails {
+                class: DeliveryFailureClass::ProviderTransient,
+                reason: format!("{:?}", body.reason),
+                action: DeliveryFailureAction::None,
+            },
+            None => DeliveryFailureDetails {
+                class: DeliveryFailureClass::ProviderTransient,
+                reason: format!("status_{}", response.code),
+                action: DeliveryFailureAction::None,
+            },
+        },
+        a2::Error::RequestTimeout(_) => DeliveryFailureDetails {
+            class: DeliveryFailureClass::ProviderTransient,
+            reason: "request_timeout".to_string(),
+            action: DeliveryFailureAction::None,
+        },
+        a2::Error::SignerError(_) | a2::Error::InvalidOptions(_) => DeliveryFailureDetails {
+            class: DeliveryFailureClass::BackendConfig,
+            reason: "apns_config".to_string(),
+            action: DeliveryFailureAction::None,
+        },
+        a2::Error::SerializeError(_) | a2::Error::BuildRequestError(_) => DeliveryFailureDetails {
+            class: DeliveryFailureClass::PayloadBuild,
+            reason: "apns_payload".to_string(),
+            action: DeliveryFailureAction::None,
+        },
+        a2::Error::ConnectionError(_) | a2::Error::ClientError(_) => DeliveryFailureDetails {
+            class: DeliveryFailureClass::ProviderTransient,
+            reason: "connection".to_string(),
+            action: DeliveryFailureAction::None,
+        },
+        a2::Error::ReadError(_) | a2::Error::Tls(_) | a2::Error::InvalidCertificate => {
+            DeliveryFailureDetails {
+                class: DeliveryFailureClass::BackendConfig,
+                reason: "apns_config".to_string(),
+                action: DeliveryFailureAction::None,
+            }
+        }
+    }
+}
+
+fn stale_apns_failure(reason: &ApnsErrorReason) -> DeliveryFailureDetails {
+    DeliveryFailureDetails {
+        class: DeliveryFailureClass::ProviderRejected,
+        reason: format!("{:?}", reason),
+        action: DeliveryFailureAction::PruneImmediate,
     }
 }
 

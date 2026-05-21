@@ -75,18 +75,14 @@ export async function syncJwtTokenToIdb(): Promise<string> {
   return '';
 }
 
-export function syncJwtTokenFromLanding(search: string, persist: boolean = true): string {
+export function syncJwtTokenFromLanding(search: string): string {
   const queryToken = getJwtTokenFromQuery(search);
   if (queryToken) {
     cachedJwtToken = queryToken;
+    setJwtTokenCookie(queryToken);
     syncClientIdFromJwt(queryToken);
-
-    if (persist) {
-      setJwtTokenCookie(queryToken);
-      void kvSet('jwt_token', queryToken);
-      void SetTokenCacheStorage(queryToken);
-    }
-
+    void kvSet('jwt_token', queryToken);
+    void SetTokenCacheStorage(queryToken);
     return queryToken;
   }
 

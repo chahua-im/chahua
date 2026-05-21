@@ -113,6 +113,7 @@ pub(crate) struct PreparedMessageSend {
 }
 
 pub(crate) struct SendMessageResult {
+    pub inserted_message: Message,
     pub response: MessageResponse,
     pub member_uids: Vec<i32>,
     pub side_effects: PendingSideEffects,
@@ -583,7 +584,7 @@ pub(crate) async fn send_prepared_message(
             .execute(conn)?;
     }
 
-    let response = attach_metadata(conn, vec![inserted_msg], state, prepared.sender_uid)
+    let response = attach_metadata(conn, vec![inserted_msg.clone()], state, prepared.sender_uid)
         .await
         .into_iter()
         .next()
@@ -612,6 +613,7 @@ pub(crate) async fn send_prepared_message(
     };
 
     Ok(SendMessageResult {
+        inserted_message: inserted_msg,
         response,
         member_uids,
         side_effects,

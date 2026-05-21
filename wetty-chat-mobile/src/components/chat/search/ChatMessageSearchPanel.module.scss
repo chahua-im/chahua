@@ -1,0 +1,81 @@
+.layout {
+  min-height: 100%;
+  padding-bottom: 24px;
+}
+
+.searchbarWrap {
+  background: var(--ion-color-light);
+  padding: 8px 12px 4px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.searchbar {
+  padding: 0;
+}
+
+.state {
+  align-items: center;
+  color: var(--ion-color-medium);
+  display: flex;
+  justify-content: center;
+  min-height: 96px;
+  padding: 24px;
+  text-align: center;
+}
+
+.resultList {
+  margin-top: 8px;
+}
+
+.resultItem {
+  --min-height: 64px;
+}
+
+.avatarSlot {
+  align-items: center;
+  display: flex;
+  min-width: 38px;
+}
+
+.resultLabel {
+  min-width: 0;
+}
+
+.resultHeader {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.senderName {
+  color: var(--ion-text-color);
+  font-size: 0.95rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timestamp {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+}
+
+.previewText {
+  color: var(--ion-color-medium);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loadMoreWrap {
+  padding: 4px 16px 16px;
+}

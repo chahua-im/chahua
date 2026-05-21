@@ -7,7 +7,7 @@ The project is relatively large and complex, so use subagents to explore the pro
 unless you know for sure there are limited files to look and you know which ones.
 
 ## Explicit confirmation
-If you are planning a large change (more than 50 lines) you should review your plan with the user
+If you are planning a large code change (more than 50 lines) you should review your plan with the user
 and only execute the edit after given explicit permission to proceed. This applies to fixing
 bugs as well, you should explain what the problem is & what the proposed fix is before making edit
 

@@ -60,17 +60,23 @@ import {
   setChatUnreadCount,
 } from '@/store/chatsSlice';
 import {
-  activateLatestWindow,
-  appendMessages,
-  prependMessages,
-  pushWindow,
+  clearPendingLiveMessages,
+  insertAfterAnchor,
+  insertAround,
+  insertBeforeAnchor,
   refreshLatest,
   resetChat,
+  setTimelineMode,
+} from '@/store/messages/slice';
+import {
   selectChatGeneration,
-  selectMessagesForChat,
-  selectNextCursorForChat,
-  selectPrevCursorForChat,
-} from '@/store/messagesSlice';
+  selectActiveTimelineMessages,
+  selectCanLoadNewer,
+  selectCanLoadOlder,
+  selectNewerAnchor,
+  selectOlderAnchor,
+  selectPendingLiveCount,
+} from '@/store/messages/selectors';
 import { messageAdded, messageConfirmed, messagePatched, reactionsUpdated } from '@/store/messageEvents';
 import type { RootState } from '@/store/index';
 import store from '@/store/index';
@@ -212,7 +218,11 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const storeChatId = threadId ? `${chatId}_thread_${threadId}` : chatId;
   const history = useHistory();
   const location = useLocation();
-  const initialResumeMessageId = parseResumeHash(location.hash);
+  const initialResumeMessageIdRef = useRef<string | null>(parseResumeHash(location.hash));
+  const initialResumeMessageId = initialResumeMessageIdRef.current;
+  const lastHandledResumeKeyRef = useRef<string | null>(
+    initialResumeMessageId ? `${storeChatId}:${initialResumeMessageId}` : null,
+  );
 
   const dispatch = useDispatch();
   const currentUserId = useSelector((state: RootState) => state.user.uid);
@@ -269,7 +279,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
       })
       .catch(() => {});
   }, [chatId, cachedMeta, dispatch]);
-  const messages = useSelector((state: RootState) => selectMessagesForChat(state, storeChatId));
+  const messages = useSelector((state: RootState) => selectActiveTimelineMessages(state, storeChatId));
   const messageLookup = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
 
   const formatDateSeparator = useCallback(
@@ -809,9 +819,9 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
           const nextCursor = res.data.nextCursor ?? null;
           const prevCursor = null;
           const currentState = store.getState();
-          const currentMessages = selectMessagesForChat(currentState, storeChatId);
-          const currentNextCursor = selectNextCursorForChat(currentState, storeChatId);
-          const currentPrevCursor = selectPrevCursorForChat(currentState, storeChatId);
+          const currentMessages = selectActiveTimelineMessages(currentState, storeChatId);
+          const currentNextCursor = selectOlderAnchor(currentState, storeChatId);
+          const currentPrevCursor = selectNewerAnchor(currentState, storeChatId);
           const shouldResetAnchor =
             forceReopen ||
             !areMessageListsEquivalent(currentMessages, list) ||
@@ -850,6 +860,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
               prevCursor,
             }),
           );
+          dispatch(setTimelineMode({ chatId: storeChatId, mode: { type: 'latest' } }));
 
           if (shouldResetAnchor) {
             setInitialAnchor((currentAnchor) => {
@@ -908,8 +919,9 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
         .then((res) => {
           const list = res.data.messages ?? [];
           dispatch(
-            pushWindow({
+            insertAround({
               chatId: storeChatId,
+              targetMessageId: pendingResumeMessageId,
               messages: list,
               nextCursor: res.data.nextCursor ?? null,
               prevCursor: res.data.prevCursor ?? null,
@@ -946,14 +958,18 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
 
   const loadMore = useCallback(() => {
     const st = store.getState();
-    const cursor = selectNextCursorForChat(st, storeChatId);
+    const cursor = selectOlderAnchor(st, storeChatId);
     if (!chatId || cursor == null || loadingMoreRef.current) return;
     const gen = selectChatGeneration(st, storeChatId);
     loadingMoreRef.current = true;
     setLoadingMore(true);
     getMessages(chatId, { before: cursor, max: 50, threadId })
       .then((res) => {
-        if (selectChatGeneration(store.getState(), storeChatId) !== gen) return;
+        if (selectChatGeneration(store.getState(), storeChatId) !== gen) {
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+          return;
+        }
         const list = res.data.messages ?? [];
         if (import.meta.env.DEV) {
           console.log('[ChatThread] loadMore resolved', {
@@ -963,7 +979,14 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
             nextCursor: res.data.nextCursor ?? null,
           });
         }
-        dispatch(prependMessages({ chatId: storeChatId, messages: list, nextCursor: res.data.nextCursor ?? null }));
+        dispatch(
+          insertBeforeAnchor({
+            chatId: storeChatId,
+            anchorMessageId: cursor,
+            messages: list,
+            nextCursor: res.data.nextCursor ?? null,
+          }),
+        );
         loadingMoreRef.current = false;
         setLoadingMore(false);
       })
@@ -976,7 +999,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
 
   const loadNewer = useCallback(() => {
     const st = store.getState();
-    const prevCursor = selectPrevCursorForChat(st, storeChatId);
+    const prevCursor = selectNewerAnchor(st, storeChatId);
     if (!chatId || prevCursor == null || loadingNewerRef.current) return;
     const gen = selectChatGeneration(st, storeChatId);
     loadingNewerRef.current = true;
@@ -985,7 +1008,14 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
       .then((res) => {
         if (selectChatGeneration(store.getState(), storeChatId) !== gen) return;
         const list = res.data.messages ?? [];
-        dispatch(appendMessages({ chatId: storeChatId, messages: list, prevCursor: res.data.prevCursor ?? null }));
+        dispatch(
+          insertAfterAnchor({
+            chatId: storeChatId,
+            anchorMessageId: prevCursor,
+            messages: list,
+            prevCursor: res.data.prevCursor ?? null,
+          }),
+        );
       })
       .catch((err: Error) => {
         showToast(err.message || t`Failed to load newer messages`);
@@ -1029,7 +1059,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const jumpToMessage = useCallback(
     (messageId: string, options?: { silent?: boolean }): Promise<boolean> => {
       const state = store.getState();
-      const currentMessages = selectMessagesForChat(state, storeChatId);
+      const currentMessages = selectActiveTimelineMessages(state, storeChatId);
       const idx = currentMessages.findIndex((m) => m.id === messageId);
       if (idx !== -1) {
         scrollApiRef.current?.scrollToMessageId(messageId, 'smooth');
@@ -1061,8 +1091,9 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
           }
 
           dispatch(
-            pushWindow({
+            insertAround({
               chatId: storeChatId,
+              targetMessageId: messageId,
               messages: list,
               nextCursor: res.data.nextCursor ?? null,
               prevCursor: res.data.prevCursor ?? null,
@@ -1085,17 +1116,44 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     [chatId, dispatch, showToast, storeChatId, threadId],
   );
 
-  const nextCursor = useSelector((state: RootState) => selectNextCursorForChat(state, storeChatId));
-  const prevCursor = useSelector((state: RootState) => selectPrevCursorForChat(state, storeChatId));
+  useEffect(() => {
+    const messageId = parseResumeHash(location.hash);
+    if (!messageId) {
+      lastHandledResumeKeyRef.current = null;
+      return;
+    }
+
+    const resumeKey = `${storeChatId}:${messageId}`;
+    if (lastHandledResumeKeyRef.current === resumeKey) {
+      return;
+    }
+
+    lastHandledResumeKeyRef.current = resumeKey;
+    void jumpToMessage(messageId).finally(() => {
+      if (parseResumeHash(history.location.hash) === messageId) {
+        history.replace({
+          pathname: history.location.pathname,
+          search: history.location.search,
+          hash: '',
+        });
+      }
+    });
+  }, [history, jumpToMessage, location.hash, storeChatId]);
+
+  const canLoadOlder = useSelector((state: RootState) => selectCanLoadOlder(state, storeChatId));
+  const canLoadNewer = useSelector((state: RootState) => selectCanLoadNewer(state, storeChatId));
+  const pendingLiveCount = useSelector((state: RootState) => selectPendingLiveCount(state, storeChatId));
 
   const scrollToAbsoluteBottom = useCallback(() => {
-    if (prevCursor != null) {
+    if (canLoadNewer || pendingLiveCount > 0) {
+      dispatch(setTimelineMode({ chatId: storeChatId, mode: { type: 'latest' } }));
+      dispatch(clearPendingLiveMessages({ chatId: storeChatId }));
       fetchLatestWindow({ forceReopen: true });
       return;
     }
 
     scrollApiRef.current?.scrollToBottom();
-  }, [fetchLatestWindow, prevCursor]);
+  }, [canLoadNewer, dispatch, fetchLatestWindow, pendingLiveCount, storeChatId]);
 
   const handleScrollToBottomClick = useCallback(() => {
     const hasUnreadReadBoundary =
@@ -1124,7 +1182,8 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     scrollToBottomUnreadCount,
     threadId,
   ]);
-  const showScrollToBottomButton = scrollToBottomUnreadCount > 0 || (!atBottom && isScrollingTowardNewerMessages);
+  const pendingJumpCount = scrollToBottomUnreadCount + pendingLiveCount;
+  const showScrollToBottomButton = pendingJumpCount > 0 || (!atBottom && isScrollingTowardNewerMessages);
 
   const uploadAttachment = useCallback(async ({ file, dimensions, onProgress, signal, order }: ComposeUploadInput) => {
     const res = await requestUploadUrl({
@@ -1146,31 +1205,21 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     const chatState = state.messages.chats[storeChatId];
     const winInfo = chatState
       ? {
-          winCount: chatState.windows.length,
-          activeWin: chatState.activeWindowIndex,
-          lastWin: chatState.windows.length - 1,
-          winMsgCounts: chatState.windows.map((w: { messages: unknown[] }) => w.messages.length),
+          segmentCount: chatState.segments.length,
+          segmentMsgCounts: chatState.segments.map((segment: { messages: unknown[] }) => segment.messages.length),
+          optimisticCount: chatState.optimisticMessages.length,
         }
       : null;
 
-    // Check whether the active window is behind the latest window.
-    // We can't rely on prevCursor alone — the active window's prevCursor may be
-    // null even though a newer window exists (the message was inserted there).
-    const needsWindowSwitch =
-      chatState != null && chatState.windows.length > 1 && chatState.activeWindowIndex !== chatState.windows.length - 1;
-
-    if (needsWindowSwitch || prevCursor != null) {
+    if (canLoadNewer || pendingLiveCount > 0) {
       console.debug('[msg-trace] revealLatestAfterSend:activateLatest', {
         storeChatId,
-        prevCursor,
-        needsWindowSwitch,
+        canLoadNewer,
+        pendingLiveCount,
         ...winInfo,
       });
-      // Synchronously switch to the latest window so the optimistic message
-      // (which addMessageToWindow placed in the last window) becomes visible
-      // via selectMessagesForChat immediately. Then reset the virtual scroll
-      // anchor to bottom and fetch fresh data in the background.
-      dispatch(activateLatestWindow({ chatId: storeChatId }));
+      dispatch(setTimelineMode({ chatId: storeChatId, mode: { type: 'latest' } }));
+      dispatch(clearPendingLiveMessages({ chatId: storeChatId }));
       setInitialAnchor((current) => ({ type: 'bottom', token: current.token + 1 }));
       fetchLatestWindow({ forceReopen: true });
       return;
@@ -1181,7 +1230,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
       ...winInfo,
     });
     scrollApiRef.current?.scrollToBottom();
-  }, [dispatch, fetchLatestWindow, prevCursor, storeChatId]);
+  }, [canLoadNewer, dispatch, fetchLatestWindow, pendingLiveCount, storeChatId]);
 
   const handleSend = useCallback(
     (payload: ComposeSendPayload) => {
@@ -1890,8 +1939,8 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
                 </div>
               ) : null
             }
-            loadOlder={{ hasMore: nextCursor != null, loading: loadingMore, onLoad: loadMore }}
-            loadNewer={prevCursor != null ? { hasMore: true, loading: loadingNewer, onLoad: loadNewer } : undefined}
+            loadOlder={{ hasMore: canLoadOlder, loading: loadingMore, onLoad: loadMore }}
+            loadNewer={canLoadNewer ? { hasMore: true, loading: loadingNewer, onLoad: loadNewer } : undefined}
             scrollApiRef={scrollApiRef}
             bottomPadding={16}
             onAtBottomChange={setAtBottom}
@@ -1905,10 +1954,8 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
             horizontal="end"
             className={`scroll-to-bottom-fab ${showScrollToBottomButton ? '' : 'scroll-to-bottom-fab--hidden'}`}
           >
-            {scrollToBottomUnreadCount > 0 && (
-              <span className="scroll-to-bottom-fab__badge">
-                {scrollToBottomUnreadCount > 99 ? '99+' : scrollToBottomUnreadCount}
-              </span>
+            {pendingJumpCount > 0 && (
+              <span className="scroll-to-bottom-fab__badge">{pendingJumpCount > 99 ? '99+' : pendingJumpCount}</span>
             )}
             <IonFabButton size="small" onClick={handleScrollToBottomClick}>
               <IonIcon icon={chevronDown} />

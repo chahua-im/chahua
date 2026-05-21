@@ -143,7 +143,10 @@ pub(crate) async fn supervise_worker<F, Fut>(
 
 #[cfg(test)]
 mod tests {
-    use super::delivery::is_stale_apns_error_reason;
+    use super::delivery::{
+        classify_apns_send_error, classify_web_push_error, is_stale_apns_error_reason,
+        DeliveryFailureAction,
+    };
     use super::payload::{
         build_apns_notification, build_push_payload, format_push_body, truncate_preview,
         APNS_BODY_LOC_KEY_AUDIO, APNS_BODY_LOC_KEY_IMAGE, APNS_BODY_LOC_KEY_IMAGE_WITH_PREVIEW,
@@ -460,6 +463,115 @@ mod tests {
         assert!(!is_stale_apns_error_reason(
             &ApnsErrorReason::InternalServerError
         ));
+    }
+
+    #[test]
+    fn apns_response_error_with_bad_device_token_prunes_subscription() {
+        let error = a2::Error::ResponseError(a2::Response {
+            apns_id: Some("test-apns-id".to_string()),
+            error: Some(a2::ErrorBody {
+                reason: ApnsErrorReason::BadDeviceToken,
+                timestamp: None,
+            }),
+            code: 400,
+        });
+
+        let failure = classify_apns_send_error(&error);
+
+        assert_eq!(failure.action, DeliveryFailureAction::PruneImmediate);
+        assert_eq!(failure.reason, "BadDeviceToken");
+    }
+
+    #[test]
+    fn apns_response_error_with_unregistered_prunes_subscription() {
+        let error = a2::Error::ResponseError(a2::Response {
+            apns_id: Some("test-apns-id".to_string()),
+            error: Some(a2::ErrorBody {
+                reason: ApnsErrorReason::Unregistered,
+                timestamp: None,
+            }),
+            code: 410,
+        });
+
+        let failure = classify_apns_send_error(&error);
+
+        assert_eq!(failure.action, DeliveryFailureAction::PruneImmediate);
+        assert_eq!(failure.reason, "Unregistered");
+    }
+
+    #[test]
+    fn apns_response_error_with_too_many_requests_is_retryable() {
+        let error = a2::Error::ResponseError(a2::Response {
+            apns_id: Some("test-apns-id".to_string()),
+            error: Some(a2::ErrorBody {
+                reason: ApnsErrorReason::TooManyRequests,
+                timestamp: None,
+            }),
+            code: 429,
+        });
+
+        let failure = classify_apns_send_error(&error);
+
+        assert_eq!(failure.action, DeliveryFailureAction::None);
+        assert_eq!(failure.reason, "TooManyRequests");
+    }
+
+    #[test]
+    fn apns_timeout_is_retryable() {
+        let error = a2::Error::RequestTimeout(30);
+
+        let failure = classify_apns_send_error(&error);
+
+        assert_eq!(failure.action, DeliveryFailureAction::None);
+        assert_eq!(failure.reason, "request_timeout");
+    }
+
+    #[test]
+    fn web_push_endpoint_not_found_prunes_immediately() {
+        let error = web_push::request_builder::parse_response(
+            http02::StatusCode::NOT_FOUND,
+            b"not found".to_vec(),
+        )
+        .expect_err("404 should classify as endpoint not found");
+
+        let failure = classify_web_push_error(&error);
+
+        assert_eq!(failure.action, DeliveryFailureAction::PruneImmediate);
+        assert_eq!(failure.reason, "endpoint_not_found");
+    }
+
+    #[test]
+    fn web_push_endpoint_not_valid_prunes_immediately() {
+        let error =
+            web_push::request_builder::parse_response(http02::StatusCode::GONE, b"gone".to_vec())
+                .expect_err("410 should classify as endpoint not valid");
+
+        let failure = classify_web_push_error(&error);
+
+        assert_eq!(failure.action, DeliveryFailureAction::PruneImmediate);
+        assert_eq!(failure.reason, "endpoint_not_valid");
+    }
+
+    #[test]
+    fn web_push_unspecified_counts_toward_pruning() {
+        let failure = classify_web_push_error(&web_push::WebPushError::Unspecified);
+
+        assert_eq!(failure.action, DeliveryFailureAction::Counted);
+        assert_eq!(failure.reason, "unspecified");
+    }
+
+    #[test]
+    fn web_push_server_error_is_retryable_without_pruning() {
+        let error = web_push::request_builder::parse_response(
+            http02::StatusCode::SERVICE_UNAVAILABLE,
+            b"temporarily unavailable".to_vec(),
+        )
+        .expect_err("503 should classify as server error");
+
+        let failure = classify_web_push_error(&error);
+
+        assert_eq!(failure.action, DeliveryFailureAction::None);
+        assert_eq!(failure.reason, "server_error");
     }
 
     #[test]

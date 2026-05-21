@@ -8,7 +8,7 @@ use prometheus::{
     IntGaugeVec, Registry, TextEncoder,
 };
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ActivityTodaySnapshot {
@@ -46,6 +46,8 @@ pub(crate) struct Metrics {
     push_notification_jobs_total: IntCounterVec,
     push_notification_job_duration_seconds: HistogramVec,
     push_notifications_suppressed_total: IntCounter,
+    push_delivery_failures_total: IntCounterVec,
+    push_subscription_prunes_total: IntCounterVec,
     ws_connected_users: IntGauge,
     ws_active_connections: IntGauge,
     ws_inactive_connections: IntGauge,
@@ -71,6 +73,17 @@ pub(crate) struct Metrics {
     app_version_requests_total: IntCounterVec,
     app_version_unique_clients: IntGaugeVec,
     app_version_clients: DashMap<String, DashSet<String>>,
+    message_search_index_operations_total: IntCounterVec,
+    message_search_queries_total: IntCounterVec,
+    message_search_query_duration_seconds: HistogramVec,
+    message_search_index_operation_duration_seconds: HistogramVec,
+    message_search_candidates_per_query: HistogramVec,
+    message_search_results_per_query: HistogramVec,
+    message_search_candidates_dropped_total: IntCounterVec,
+    message_search_index_documents_total: IntCounterVec,
+    message_search_reindex_duration_seconds: HistogramVec,
+    message_search_reindex_documents_total: IntCounterVec,
+    message_search_reindex_last_success_timestamp_seconds: IntGauge,
     background_jobs_total: IntCounterVec,
     background_job_duration_seconds: HistogramVec,
     audio_transcode_source_total: IntCounterVec,
@@ -145,6 +158,22 @@ impl Metrics {
             "Total number of push notifications skipped because a user had active websocket presence"
         ))
         .expect("push_notifications_suppressed_total metric should be valid");
+        let push_delivery_failures_total = IntCounterVec::new(
+            opts!(
+                "push_delivery_failures_total",
+                "Total number of classified push delivery failures"
+            ),
+            &["provider", "class"],
+        )
+        .expect("push_delivery_failures_total metric should be valid");
+        let push_subscription_prunes_total = IntCounterVec::new(
+            opts!(
+                "push_subscription_prunes_total",
+                "Total number of push subscriptions pruned after delivery failures"
+            ),
+            &["provider", "reason"],
+        )
+        .expect("push_subscription_prunes_total metric should be valid");
         let ws_connected_users = IntGauge::with_opts(opts!(
             "ws_connected_users",
             "Current number of users with at least one active websocket connection"
@@ -292,6 +321,132 @@ impl Metrics {
             &["version"],
         )
         .expect("app_version_unique_clients metric should be valid");
+        let message_search_index_operations_total = IntCounterVec::new(
+            opts!(
+                "message_search_index_operations_total",
+                "Total number of message search index operations"
+            ),
+            &["operation", "result"],
+        )
+        .expect("message_search_index_operations_total metric should be valid");
+        let message_search_queries_total = IntCounterVec::new(
+            opts!(
+                "message_search_queries_total",
+                "Total number of message search queries"
+            ),
+            &["sort", "result"],
+        )
+        .expect("message_search_queries_total metric should be valid");
+        for operation in ["upsert", "delete", "delete_batch"] {
+            for result in ["success", "failure"] {
+                message_search_index_operations_total.with_label_values(&[operation, result]);
+            }
+        }
+        for sort in ["relevance", "newest"] {
+            for result in ["success", "failure"] {
+                message_search_queries_total.with_label_values(&[sort, result]);
+            }
+        }
+        let message_search_query_duration_seconds = HistogramVec::new(
+            histogram_opts!(
+                "message_search_query_duration_seconds",
+                "Message search request latency in seconds",
+                vec![0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+            ),
+            &["sort", "result"],
+        )
+        .expect("message_search_query_duration_seconds metric should be valid");
+        let message_search_index_operation_duration_seconds = HistogramVec::new(
+            histogram_opts!(
+                "message_search_index_operation_duration_seconds",
+                "Message search index operation latency in seconds from enqueue to Meilisearch task completion",
+                vec![0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0]
+            ),
+            &["operation", "result"],
+        )
+        .expect("message_search_index_operation_duration_seconds metric should be valid");
+        let message_search_candidates_per_query = HistogramVec::new(
+            histogram_opts!(
+                "message_search_candidates_per_query",
+                "Number of Meilisearch candidate hits returned per message search query",
+                vec![0.0, 1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 500.0, 1000.0]
+            ),
+            &["sort"],
+        )
+        .expect("message_search_candidates_per_query metric should be valid");
+        let message_search_results_per_query = HistogramVec::new(
+            histogram_opts!(
+                "message_search_results_per_query",
+                "Number of authoritative messages returned per message search query after database filtering",
+                vec![0.0, 1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 500.0, 1000.0]
+            ),
+            &["sort"],
+        )
+        .expect("message_search_results_per_query metric should be valid");
+        let message_search_candidates_dropped_total = IntCounterVec::new(
+            opts!(
+                "message_search_candidates_dropped_total",
+                "Total number of message search candidates dropped during database authority checks"
+            ),
+            &["reason"],
+        )
+        .expect("message_search_candidates_dropped_total metric should be valid");
+        let message_search_index_documents_total = IntCounterVec::new(
+            opts!(
+                "message_search_index_documents_total",
+                "Total number of message search index documents affected by index operations"
+            ),
+            &["operation", "result"],
+        )
+        .expect("message_search_index_documents_total metric should be valid");
+        let message_search_reindex_duration_seconds = HistogramVec::new(
+            histogram_opts!(
+                "message_search_reindex_duration_seconds",
+                "Message search full reindex job latency in seconds",
+                vec![1.0, 5.0, 15.0, 30.0, 60.0, 300.0, 900.0, 1800.0, 3600.0]
+            ),
+            &["result"],
+        )
+        .expect("message_search_reindex_duration_seconds metric should be valid");
+        let message_search_reindex_documents_total = IntCounterVec::new(
+            opts!(
+                "message_search_reindex_documents_total",
+                "Total number of documents indexed by message search reindex jobs"
+            ),
+            &["result"],
+        )
+        .expect("message_search_reindex_documents_total metric should be valid");
+        let message_search_reindex_last_success_timestamp_seconds = IntGauge::with_opts(opts!(
+            "message_search_reindex_last_success_timestamp_seconds",
+            "Unix timestamp in seconds for the last successful message search reindex job"
+        ))
+        .expect("message_search_reindex_last_success_timestamp_seconds metric should be valid");
+        for sort in ["relevance", "newest"] {
+            message_search_candidates_per_query.with_label_values(&[sort]);
+            message_search_results_per_query.with_label_values(&[sort]);
+            for result in ["success", "failure"] {
+                message_search_query_duration_seconds.with_label_values(&[sort, result]);
+            }
+        }
+        for operation in ["upsert", "delete", "delete_batch"] {
+            for result in ["success", "failure"] {
+                message_search_index_operation_duration_seconds
+                    .with_label_values(&[operation, result]);
+                message_search_index_documents_total.with_label_values(&[operation, result]);
+            }
+        }
+        for reason in [
+            "missing_db_row",
+            "wrong_chat",
+            "not_searchable",
+            "stale_version",
+        ] {
+            message_search_candidates_dropped_total.with_label_values(&[reason]);
+        }
+        for result in ["success", "failure"] {
+            message_search_reindex_duration_seconds.with_label_values(&[result]);
+            message_search_reindex_documents_total.with_label_values(&[result]);
+        }
 
         let background_jobs_total = IntCounterVec::new(
             opts!(
@@ -370,6 +525,12 @@ impl Metrics {
             .register(Box::new(push_notifications_suppressed_total.clone()))
             .expect("push_notifications_suppressed_total registration should succeed");
         registry
+            .register(Box::new(push_delivery_failures_total.clone()))
+            .expect("push_delivery_failures_total registration should succeed");
+        registry
+            .register(Box::new(push_subscription_prunes_total.clone()))
+            .expect("push_subscription_prunes_total registration should succeed");
+        registry
             .register(Box::new(ws_connected_users.clone()))
             .expect("ws_connected_users registration should succeed");
         registry
@@ -442,6 +603,45 @@ impl Metrics {
             .register(Box::new(app_version_unique_clients.clone()))
             .expect("app_version_unique_clients registration should succeed");
         registry
+            .register(Box::new(message_search_index_operations_total.clone()))
+            .expect("message_search_index_operations_total registration should succeed");
+        registry
+            .register(Box::new(message_search_queries_total.clone()))
+            .expect("message_search_queries_total registration should succeed");
+        registry
+            .register(Box::new(message_search_query_duration_seconds.clone()))
+            .expect("message_search_query_duration_seconds registration should succeed");
+        registry
+            .register(Box::new(
+                message_search_index_operation_duration_seconds.clone(),
+            ))
+            .expect("message_search_index_operation_duration_seconds registration should succeed");
+        registry
+            .register(Box::new(message_search_candidates_per_query.clone()))
+            .expect("message_search_candidates_per_query registration should succeed");
+        registry
+            .register(Box::new(message_search_results_per_query.clone()))
+            .expect("message_search_results_per_query registration should succeed");
+        registry
+            .register(Box::new(message_search_candidates_dropped_total.clone()))
+            .expect("message_search_candidates_dropped_total registration should succeed");
+        registry
+            .register(Box::new(message_search_index_documents_total.clone()))
+            .expect("message_search_index_documents_total registration should succeed");
+        registry
+            .register(Box::new(message_search_reindex_duration_seconds.clone()))
+            .expect("message_search_reindex_duration_seconds registration should succeed");
+        registry
+            .register(Box::new(message_search_reindex_documents_total.clone()))
+            .expect("message_search_reindex_documents_total registration should succeed");
+        registry
+            .register(Box::new(
+                message_search_reindex_last_success_timestamp_seconds.clone(),
+            ))
+            .expect(
+                "message_search_reindex_last_success_timestamp_seconds registration should succeed",
+            );
+        registry
             .register(Box::new(background_jobs_total.clone()))
             .expect("background_jobs_total registration should succeed");
         registry
@@ -467,6 +667,8 @@ impl Metrics {
             push_notification_jobs_total,
             push_notification_job_duration_seconds,
             push_notifications_suppressed_total,
+            push_delivery_failures_total,
+            push_subscription_prunes_total,
             ws_connected_users,
             ws_active_connections,
             ws_inactive_connections,
@@ -492,6 +694,17 @@ impl Metrics {
             app_version_requests_total,
             app_version_unique_clients,
             app_version_clients: DashMap::new(),
+            message_search_index_operations_total,
+            message_search_queries_total,
+            message_search_query_duration_seconds,
+            message_search_index_operation_duration_seconds,
+            message_search_candidates_per_query,
+            message_search_results_per_query,
+            message_search_candidates_dropped_total,
+            message_search_index_documents_total,
+            message_search_reindex_duration_seconds,
+            message_search_reindex_documents_total,
+            message_search_reindex_last_success_timestamp_seconds,
             background_jobs_total,
             background_job_duration_seconds,
             audio_transcode_source_total,
@@ -606,6 +819,18 @@ impl Metrics {
         self.push_notifications_suppressed_total.inc();
     }
 
+    pub(crate) fn record_push_delivery_failure(&self, provider: &str, class: &str) {
+        self.push_delivery_failures_total
+            .with_label_values(&[provider, class])
+            .inc();
+    }
+
+    pub(crate) fn record_push_subscription_prune(&self, provider: &str, reason: &str) {
+        self.push_subscription_prunes_total
+            .with_label_values(&[provider, reason])
+            .inc();
+    }
+
     pub(crate) fn record_ws_connection_open(&self) {
         self.ws_connections_total.inc();
     }
@@ -683,6 +908,99 @@ impl Metrics {
                     .with_label_values(&[version])
                     .set(set.len() as i64);
             }
+        }
+    }
+
+    pub(crate) fn record_message_search_index_operation(&self, operation: &str, result: &str) {
+        self.message_search_index_operations_total
+            .with_label_values(&[operation, result])
+            .inc();
+    }
+
+    pub(crate) fn record_message_search_query(&self, sort: &str, result: &str) {
+        self.message_search_queries_total
+            .with_label_values(&[sort, result])
+            .inc();
+    }
+
+    pub(crate) fn record_message_search_query_duration(
+        &self,
+        sort: &str,
+        result: &str,
+        duration_seconds: f64,
+    ) {
+        self.message_search_query_duration_seconds
+            .with_label_values(&[sort, result])
+            .observe(duration_seconds);
+    }
+
+    pub(crate) fn record_message_search_index_operation_duration(
+        &self,
+        operation: &str,
+        result: &str,
+        duration_seconds: f64,
+    ) {
+        self.message_search_index_operation_duration_seconds
+            .with_label_values(&[operation, result])
+            .observe(duration_seconds);
+    }
+
+    pub(crate) fn observe_message_search_candidates(&self, sort: &str, count: usize) {
+        self.message_search_candidates_per_query
+            .with_label_values(&[sort])
+            .observe(count as f64);
+    }
+
+    pub(crate) fn observe_message_search_results(&self, sort: &str, count: usize) {
+        self.message_search_results_per_query
+            .with_label_values(&[sort])
+            .observe(count as f64);
+    }
+
+    pub(crate) fn record_message_search_candidate_drop(&self, reason: &str, count: usize) {
+        if count == 0 {
+            return;
+        }
+        self.message_search_candidates_dropped_total
+            .with_label_values(&[reason])
+            .inc_by(count as u64);
+    }
+
+    pub(crate) fn record_message_search_index_documents(
+        &self,
+        operation: &str,
+        result: &str,
+        count: usize,
+    ) {
+        if count == 0 {
+            return;
+        }
+        self.message_search_index_documents_total
+            .with_label_values(&[operation, result])
+            .inc_by(count as u64);
+    }
+
+    pub(crate) fn record_message_search_reindex(
+        &self,
+        result: &str,
+        duration_seconds: f64,
+        document_count: usize,
+    ) {
+        self.message_search_reindex_duration_seconds
+            .with_label_values(&[result])
+            .observe(duration_seconds);
+        if document_count > 0 {
+            self.message_search_reindex_documents_total
+                .with_label_values(&[result])
+                .inc_by(document_count as u64);
+        }
+        if result == "success" {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or_default();
+            self.message_search_reindex_last_success_timestamp_seconds
+                .set(timestamp);
         }
     }
 
@@ -878,6 +1196,17 @@ mod tests {
         assert!(body.contains("activity_today_legacy_subscriptions_purged"));
         assert!(body.contains("app_version_requests_total"));
         assert!(body.contains("app_version_unique_clients"));
+        assert!(body.contains("message_search_index_operations_total"));
+        assert!(body.contains("message_search_queries_total"));
+        assert!(body.contains("message_search_query_duration_seconds"));
+        assert!(body.contains("message_search_index_operation_duration_seconds"));
+        assert!(body.contains("message_search_candidates_per_query"));
+        assert!(body.contains("message_search_results_per_query"));
+        assert!(body.contains("message_search_candidates_dropped_total"));
+        assert!(body.contains("message_search_index_documents_total"));
+        assert!(body.contains("message_search_reindex_duration_seconds"));
+        assert!(body.contains("message_search_reindex_documents_total"));
+        assert!(body.contains("message_search_reindex_last_success_timestamp_seconds"));
         assert!(body.contains("background_jobs_total"));
         assert!(body.contains("background_job_duration_seconds"));
         assert!(body.contains("audio_transcode_source_total"));
@@ -999,6 +1328,15 @@ mod tests {
         metrics.record_activity_daily_rollup_update("success");
         metrics.record_audio_transcode_source("audio/ogg");
         metrics.record_audio_transcode_job("failure", 1.5);
+        metrics.record_message_search_index_operation("upsert", "success");
+        metrics.record_message_search_query("relevance", "failure");
+        metrics.record_message_search_query_duration("relevance", "success", 0.42);
+        metrics.record_message_search_index_operation_duration("upsert", "success", 1.25);
+        metrics.observe_message_search_candidates("relevance", 20);
+        metrics.observe_message_search_results("relevance", 18);
+        metrics.record_message_search_candidate_drop("stale_version", 2);
+        metrics.record_message_search_index_documents("upsert", "success", 1);
+        metrics.record_message_search_reindex("success", 3.5, 500);
         metrics.set_activity_today(ActivityTodaySnapshot {
             active_users: 5,
             new_users: 2,
@@ -1051,6 +1389,28 @@ mod tests {
         assert!(
             rendered.contains("audio_transcode_job_duration_seconds_sum{result=\"failure\"} 1.5")
         );
+        assert!(rendered.contains(
+            "message_search_index_operations_total{operation=\"upsert\",result=\"success\"} 1"
+        ));
+        assert!(rendered
+            .contains("message_search_queries_total{result=\"failure\",sort=\"relevance\"} 1"));
+        assert!(rendered.contains(
+            "message_search_query_duration_seconds_sum{result=\"success\",sort=\"relevance\"} 0.42"
+        ));
+        assert!(rendered.contains(
+            "message_search_index_operation_duration_seconds_sum{operation=\"upsert\",result=\"success\"} 1.25"
+        ));
+        assert!(rendered.contains("message_search_candidates_per_query_sum{sort=\"relevance\"} 20"));
+        assert!(rendered.contains("message_search_results_per_query_sum{sort=\"relevance\"} 18"));
+        assert!(rendered
+            .contains("message_search_candidates_dropped_total{reason=\"stale_version\"} 2"));
+        assert!(rendered.contains(
+            "message_search_index_documents_total{operation=\"upsert\",result=\"success\"} 1"
+        ));
+        assert!(rendered
+            .contains("message_search_reindex_duration_seconds_sum{result=\"success\"} 3.5"));
+        assert!(rendered.contains("message_search_reindex_documents_total{result=\"success\"} 500"));
+        assert!(rendered.contains("message_search_reindex_last_success_timestamp_seconds"));
         assert!(rendered.contains("activity_today_active_users 5"));
         assert!(rendered.contains("activity_today_new_users 2"));
         assert!(rendered.contains("activity_today_active_clients 6"));

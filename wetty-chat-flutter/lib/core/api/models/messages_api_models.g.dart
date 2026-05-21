@@ -298,6 +298,24 @@ Map<String, dynamic> _$ListMessagesResponseDtoToJson(
   'prevCursor': instance.prevCursor,
 };
 
+SearchMessagesResponseDto _$SearchMessagesResponseDtoFromJson(
+  Map<String, dynamic> json,
+) => SearchMessagesResponseDto(
+  messages:
+      (json['messages'] as List<dynamic>?)
+          ?.map((e) => MessageItemDto.fromJson(e as Map<String, dynamic>))
+          .toList() ??
+      [],
+  nextOffset: (json['nextOffset'] as num?)?.toInt(),
+);
+
+Map<String, dynamic> _$SearchMessagesResponseDtoToJson(
+  SearchMessagesResponseDto instance,
+) => <String, dynamic>{
+  'messages': instance.messages.map((e) => e.toJson()).toList(),
+  'nextOffset': instance.nextOffset,
+};
+
 SendMessageRequestDto _$SendMessageRequestDtoFromJson(
   Map<String, dynamic> json,
 ) => SendMessageRequestDto(

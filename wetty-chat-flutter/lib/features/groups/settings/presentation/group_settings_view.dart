@@ -14,6 +14,7 @@ import '../../../shared/presentation/app_avatar.dart';
 import '../../members/presentation/widgets/group_member_actions.dart';
 import '../../metadata/application/group_metadata_view_model.dart';
 import '../../metadata/data/group_metadata_models.dart';
+import 'package:chahua/l10n/app_localizations.dart';
 
 /// Group Settings page: hero section, mute/leave actions, edit group name,
 /// description, and save.
@@ -242,6 +243,13 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
       children: [
         _buildActionButton(
           context,
+          icon: CupertinoIcons.search,
+          label: AppLocalizations.of(context)!.messageSearchAction,
+          onTap: () => context.push(AppRoutes.chatMessageSearch(widget.chatId)),
+        ),
+        const SizedBox(width: 12),
+        _buildActionButton(
+          context,
           icon: isMuted ? CupertinoIcons.bell_slash_fill : CupertinoIcons.bell,
           label: isMuted ? _formatMutedLabel(metadata.mutedUntil!) : 'Mute',
           onTap: isMuted ? _unmuteChat : _showMuteActionSheet,
@@ -299,8 +307,8 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
     );
 
     return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('Group Settings'),
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(AppLocalizations.of(context)!.groupSettings),
       ),
       child: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),

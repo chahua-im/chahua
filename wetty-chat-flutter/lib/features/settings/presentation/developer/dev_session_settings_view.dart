@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:chahua/app/routing/route_names.dart';
 import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/core/session/dev_session_store.dart';
+import 'package:chahua/features/settings/presentation/developer/cjk_text_diagnostics_page.dart';
 
 class DevSessionSettingsPage extends ConsumerStatefulWidget {
   const DevSessionSettingsPage({super.key});
@@ -227,6 +229,19 @@ class _DevSessionSettingsPageState
               onPressed: _isSaving || !session.hasJwtToken ? null : _clearJwt,
               child: const Text('Clear Stored JWT'),
             ),
+            if (kDebugMode) ...[
+              const SizedBox(height: 24),
+              CupertinoButton(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    CupertinoPageRoute<void>(
+                      builder: (_) => const CjkTextDiagnosticsPage(),
+                    ),
+                  );
+                },
+                child: const Text('Open CJK Text Diagnostics'),
+              ),
+            ],
           ],
         ),
       ),

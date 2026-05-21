@@ -6,7 +6,7 @@ import { toMessagePreview, type MessagePreview } from '@/api/messages';
 import type { StoredThreadListItem } from '@/api/threads';
 import { OverlayAvatar } from '@/components/OverlayAvatar';
 import type { RootState } from '@/store/index';
-import { selectLatestThreadReplyMessage } from '@/store/messagesSlice';
+import { selectLatestThreadReplyMessage } from '@/store/messages/selectors';
 import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
 import styles from './ThreadListRow.module.scss';
 

@@ -766,6 +766,9 @@ pub struct PushSubscription {
     pub provider_data: serde_json::Value,
     pub created_at: chrono::NaiveDateTime,
     pub client_id: Option<String>,
+    pub delivery_failure_count: i32,
+    pub last_delivery_error: Option<String>,
+    pub last_delivery_error_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl PushSubscription {
@@ -790,4 +793,7 @@ pub struct NewPushSubscription {
     pub provider_data: serde_json::Value,
     pub created_at: chrono::NaiveDateTime,
     pub client_id: Option<String>,
+    pub delivery_failure_count: i32,
+    pub last_delivery_error: Option<String>,
+    pub last_delivery_error_at: Option<chrono::DateTime<chrono::Utc>>,
 }

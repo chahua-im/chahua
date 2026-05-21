@@ -11,6 +11,10 @@ import UserNotifications
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // Flutter can leave iOS with a visible keyboard but no focused text field
+    // after native dialogs such as Shake to Undo.
+    // Keep this until https://github.com/flutter/flutter/issues/150522 is fixed.
+    application.applicationSupportsShakeToEdit = false
     UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

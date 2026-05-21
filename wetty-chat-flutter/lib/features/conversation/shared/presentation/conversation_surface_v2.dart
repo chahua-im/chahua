@@ -256,6 +256,30 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
     }
   }
 
+  void _confirmPinMessage(ConversationMessageV2 message) {
+    final l10n = AppLocalizations.of(context)!;
+    showCupertinoDialog<void>(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: Text(l10n.pinMessageTitle),
+        content: Text(l10n.pinMessageBody),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.cancel),
+          ),
+          CupertinoDialogAction(
+            onPressed: () {
+              Navigator.pop(context);
+              unawaited(_pinMessage(message));
+            },
+            child: Text(l10n.pinMessage),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _confirmUnpinMessage(
     PinnedMessage pin, {
     bool optimistic = false,
@@ -380,7 +404,7 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
           onPressed: () {
             _dismissMessageOverlay();
             if (pinnedPin == null) {
-              unawaited(_pinMessage(message));
+              _confirmPinMessage(message);
             } else {
               _confirmUnpinMessage(pinnedPin);
             }

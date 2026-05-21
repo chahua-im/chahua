@@ -159,6 +159,7 @@ class TextBubbleMessageBody extends StatelessWidget {
                 fontSize: theme.chatMessageFontSize,
                 height: 1.28,
                 fontWeight: AppFontWeights.medium,
+                fontFamilyFallback: AppFontFamilies.cjkFallback,
               ),
               mentions: mentions,
               currentUserId: null,

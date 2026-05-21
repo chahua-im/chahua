@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   useIonAlert,
   IonButtons,
@@ -14,12 +14,13 @@ import {
   IonToolbar,
   useIonToast,
 } from '@ionic/react';
-import { exitOutline, linkOutline, settingsOutline } from 'ionicons/icons';
+import { exitOutline, linkOutline, searchOutline, settingsOutline } from 'ionicons/icons';
 import { useHistory, useParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { leaveGroup, type GroupRole } from '@/api/group';
+import type { MessageResponse } from '@/api/messages';
 import { setChatInList } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
 import { BackButton } from '@/components/BackButton';
@@ -31,8 +32,10 @@ import styles from './GroupInfo.module.scss';
 import { ShareInviteModal } from '@/components/chat/settings/ShareInviteModal';
 import { GroupSettingsActionButton } from '@/components/chat/settings/GroupSettingsActionButton';
 import { ChatAttachmentSection } from '@/components/chat/attachments/ChatAttachmentSection';
+import { ChatMessageSearchPanel } from '@/components/chat/search/ChatMessageSearchPanel';
 import { useGroupInfoMetadata } from './useGroupInfoMetadata';
 import { FeatureGate } from '@/components/FeatureGate';
+import { buildMessageSearchTarget } from '@/utils/messageSearch';
 
 interface GroupInfoCoreProps {
   chatId?: string;
@@ -48,6 +51,7 @@ interface GroupInfoContentProps {
   archived: boolean;
   myRole: GroupRole | null;
   leavingGroup: boolean;
+  onOpenSearch: () => void;
   onOpenSettings: () => void;
   onLeaveGroup: () => void;
 }
@@ -61,6 +65,7 @@ function GroupInfoContent({
   archived,
   myRole,
   leavingGroup,
+  onOpenSearch,
   onOpenSettings,
   onLeaveGroup,
 }: GroupInfoContentProps) {
@@ -77,6 +82,12 @@ function GroupInfoContent({
       />
 
       <div className={styles.shareActions}>
+        <FeatureGate feature="messageSearch">
+          <GroupSettingsActionButton icon={searchOutline} onClick={onOpenSearch}>
+            <Trans>Search</Trans>
+          </GroupSettingsActionButton>
+        </FeatureGate>
+
         <ChatMuteSettingItem chatId={chatId} mutedUntil={mutedUntil} archived={archived} />
 
         <ChatRoleGate chatId={chatId} allow="admin" role={myRole}>
@@ -115,6 +126,8 @@ function GroupInfoContent({
   );
 }
 
+type GroupInfoMode = 'info' | 'search';
+
 function GroupInfoSession({ chatId, backAction }: { chatId: string; backAction?: BackAction }) {
   const history = useHistory();
   const dispatch = useDispatch();
@@ -122,9 +135,17 @@ function GroupInfoSession({ chatId, backAction }: { chatId: string; backAction?:
   const [presentAlert, dismissAlert] = useIonAlert();
   const currentUserId = useSelector((state: RootState) => state.user.uid);
   const { archived, formState, loading, mutedUntil } = useGroupInfoMetadata(chatId);
+  const [mode, setMode] = useState<GroupInfoMode>('info');
   const [leavingGroup, setLeavingGroup] = useState(false);
   const alertHistoryStateRef = useRef(false);
   const alertClosedByHistoryRef = useRef(false);
+
+  const handleOpenSearchResult = useCallback(
+    (message: MessageResponse) => {
+      history.replace(buildMessageSearchTarget(chatId, message));
+    },
+    [chatId, history],
+  );
 
   const handleLeaveGroup = () => {
     if (!currentUserId || leavingGroup) {
@@ -193,14 +214,20 @@ function GroupInfoSession({ chatId, backAction }: { chatId: string; backAction?:
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonButtons slot="start">{backAction && <BackButton action={backAction} />}</IonButtons>
-          <IonTitle>
-            <Trans>Group Info</Trans>
-          </IonTitle>
+          <IonButtons slot="start">
+            {mode === 'search' ? (
+              <BackButton action={{ type: 'callback', onBack: () => setMode('info') }} />
+            ) : (
+              backAction && <BackButton action={backAction} />
+            )}
+          </IonButtons>
+          <IonTitle>{mode === 'search' ? <Trans>Search</Trans> : <Trans>Group Info</Trans>}</IonTitle>
         </IonToolbar>
       </IonHeader>
       <IonContent color="light" className="ion-no-padding">
-        {loading ? (
+        {mode === 'search' ? (
+          <ChatMessageSearchPanel chatId={chatId} onOpenMessage={handleOpenSearchResult} />
+        ) : loading ? (
           <div className={styles.loadingState}>
             <IonSpinner />
           </div>
@@ -214,6 +241,7 @@ function GroupInfoSession({ chatId, backAction }: { chatId: string; backAction?:
             archived={archived}
             myRole={formState.myRole}
             leavingGroup={leavingGroup}
+            onOpenSearch={() => setMode('search')}
             onOpenSettings={() => history.push(`/chats/chat/${chatId}/group-info/settings`)}
             onLeaveGroup={handleLeaveGroup}
           />

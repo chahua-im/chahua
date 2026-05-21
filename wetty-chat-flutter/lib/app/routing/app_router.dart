@@ -16,6 +16,7 @@ import 'package:chahua/features/conversation/shared/presentation/chat_detail_v2_
 import 'package:chahua/features/conversation/shared/presentation/thread_detail_v2_view.dart';
 import 'package:chahua/features/groups/members/presentation/group_members_view.dart';
 import 'package:chahua/features/groups/settings/presentation/group_settings_view.dart';
+import 'package:chahua/features/conversation/search/presentation/message_search_page.dart';
 import 'package:chahua/features/settings/presentation/appearance/appearance_settings_view.dart';
 import 'package:chahua/features/settings/presentation/appearance/badge_color_settings_view.dart';
 import 'package:chahua/features/settings/presentation/appearance/font_size_settings_view.dart';
@@ -195,6 +196,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                                 child: GroupSettingsPage(chatId: chatId),
                               );
                             },
+                            routes: [
+                              GoRoute(
+                                parentNavigatorKey: _rootNavigatorKey,
+                                path: 'search',
+                                pageBuilder: (context, state) {
+                                  final chatId = int.parse(
+                                    state.pathParameters['chatId']!,
+                                  );
+                                  return CupertinoPage(
+                                    key: state.pageKey,
+                                    child: MessageSearchPage(chatId: chatId),
+                                  );
+                                },
+                              ),
+                            ],
                           ),
                           GoRoute(
                             path: 'thread/:threadId/new',

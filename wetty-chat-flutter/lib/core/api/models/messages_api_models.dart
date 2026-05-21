@@ -338,6 +338,20 @@ class ListMessagesResponseDto {
 }
 
 @JsonSerializable(explicitToJson: true)
+class SearchMessagesResponseDto {
+  const SearchMessagesResponseDto({this.messages = const [], this.nextOffset});
+
+  @JsonKey(defaultValue: <MessageItemDto>[])
+  final List<MessageItemDto> messages;
+  final int? nextOffset;
+
+  factory SearchMessagesResponseDto.fromJson(Map<String, dynamic> json) =>
+      _$SearchMessagesResponseDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$SearchMessagesResponseDtoToJson(this);
+}
+
+@JsonSerializable(explicitToJson: true)
 class SendMessageRequestDto {
   const SendMessageRequestDto({
     required this.message,

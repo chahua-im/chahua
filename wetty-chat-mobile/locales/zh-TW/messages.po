@@ -116,9 +116,6 @@ msgstr "頭像已上傳"
 msgid "Back"
 msgstr "返回"
 
-msgid "Back to chats"
-msgstr "返回聊天列表"
-
 msgid "Blocked"
 msgstr "已封鎖"
 
@@ -324,6 +321,9 @@ msgstr "輸入精確 UID 以尋找特定使用者。"
 msgid "Enter an invite code"
 msgstr "輸入邀請碼"
 
+msgid "Enter at least 2 characters"
+msgstr "至少輸入 2 個字元"
+
 msgid "Enter chat name"
 msgstr "輸入聊天名稱"
 
@@ -446,6 +446,9 @@ msgstr "撤銷邀請失敗"
 
 msgid "Failed to save group info"
 msgstr "儲存群組資訊失敗"
+
+msgid "Failed to search messages"
+msgstr "搜尋訊息失敗"
 
 msgid "Failed to send"
 msgstr "傳送失敗"
@@ -725,6 +728,9 @@ msgstr "找不到符合的使用者。"
 msgid "No members found."
 msgstr "找不到成員。"
 
+msgid "No messages found"
+msgstr "找不到訊息"
+
 msgid "No messages yet"
 msgstr "暫無訊息"
 
@@ -956,6 +962,9 @@ msgstr "儲存設定"
 msgid "Saving..."
 msgstr "儲存中..."
 
+msgid "Search"
+msgstr "搜尋"
+
 msgid "Search by username or UID"
 msgstr "依使用者名稱或 UID 搜尋"
 
@@ -970,6 +979,12 @@ msgstr "搜尋群組"
 
 msgid "Search members"
 msgstr "搜尋成員"
+
+msgid "Search messages"
+msgstr "搜尋訊息"
+
+msgid "Search messages in this chat"
+msgstr "搜尋此聊天中的訊息"
 
 msgid "Searching..."
 msgstr "搜尋中..."

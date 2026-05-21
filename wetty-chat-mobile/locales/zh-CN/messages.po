@@ -116,9 +116,6 @@ msgstr "头像已上传"
 msgid "Back"
 msgstr "返回"
 
-msgid "Back to chats"
-msgstr "返回聊天列表"
-
 msgid "Blocked"
 msgstr "已阻止"
 
@@ -324,6 +321,9 @@ msgstr "输入精确 UID 以查找特定用户。"
 msgid "Enter an invite code"
 msgstr "输入邀请码"
 
+msgid "Enter at least 2 characters"
+msgstr "至少输入 2 个字符"
+
 msgid "Enter chat name"
 msgstr "输入聊天名称"
 
@@ -446,6 +446,9 @@ msgstr "撤销邀请失败"
 
 msgid "Failed to save group info"
 msgstr "保存群组信息失败"
+
+msgid "Failed to search messages"
+msgstr "搜索消息失败"
 
 msgid "Failed to send"
 msgstr "发送失败"
@@ -725,6 +728,9 @@ msgstr "未找到匹配的用户。"
 msgid "No members found."
 msgstr "未找到成员。"
 
+msgid "No messages found"
+msgstr "未找到消息"
+
 msgid "No messages yet"
 msgstr "暂无消息"
 
@@ -956,6 +962,9 @@ msgstr "保存设置"
 msgid "Saving..."
 msgstr "保存中..."
 
+msgid "Search"
+msgstr "搜索"
+
 msgid "Search by username or UID"
 msgstr "按用户名或 UID 搜索"
 
@@ -970,6 +979,12 @@ msgstr "搜索群组"
 
 msgid "Search members"
 msgstr "搜索成员"
+
+msgid "Search messages"
+msgstr "搜索消息"
+
+msgid "Search messages in this chat"
+msgstr "搜索此聊天中的消息"
 
 msgid "Searching..."
 msgstr "搜索中..."

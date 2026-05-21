@@ -19,6 +19,10 @@ export const FEATURES = {
     enabled: false,
     description: 'Shows the chat attachments section in the group info page.',
   },
+  messageSearch: {
+    enabled: true,
+    description: 'Shows chat-scoped message search from the group info page.',
+  },
   landingInviteModal: {
     enabled: true,
     description: 'Shows invite preview and redeem modal on the install landing page.',

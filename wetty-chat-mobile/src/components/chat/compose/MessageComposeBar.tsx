@@ -316,6 +316,16 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       });
     }, []);
 
+    const handleInputFocusChange = useCallback(
+      (focused: boolean) => {
+        if (focused) {
+          setStickerPickerOpen(false);
+        }
+        onFocusChange?.(focused);
+      },
+      [onFocusChange],
+    );
+
     const handleStickerSelect = useCallback(
       (sticker: StickerSummary) => {
         onSend({ kind: 'sticker', sticker });
@@ -401,7 +411,7 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
                   setText(value);
                   onMentionTextChange(value);
                 }}
-                onFocusChange={onFocusChange}
+                onFocusChange={handleInputFocusChange}
                 onSubmit={handleSend}
                 canRequestRecentEdit={canRequestRecentEdit}
                 onRequestEditLastMessage={onRequestEditLastMessage}

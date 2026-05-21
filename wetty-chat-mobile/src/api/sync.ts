@@ -2,7 +2,8 @@ import { type ChatListEntry, getChats } from '@/api/chats';
 import { getMessages } from '@/api/messages';
 import { getThreads } from '@/api/threads';
 import { setChatsList } from '@/store/chatsSlice';
-import { appendMessages } from '@/store/messagesSlice';
+import { insertAfterAnchor } from '@/store/messages/slice';
+import { selectLatestServerMessage } from '@/store/messages/selectors';
 import { setThreadsList } from '@/store/threadsSlice';
 import store from '@/store/index';
 import { syncAppBadgeCount } from '@/utils/badges';
@@ -15,7 +16,7 @@ let syncTimeout: ReturnType<typeof setTimeout> | null = null;
  * Robustly synchronizes the app state when coming to the foreground or reconnecting.
  * - Fetches the latest chats list (updating previews and unread counts).
  * - Updates the system app badge.
- * - Checks currently loaded chat windows and fetches any missing messages
+ * - Checks currently loaded latest timelines and fetches any missing messages
  *   (appending them seamlessly so as not to disrupt a user scrolling history).
  */
 export async function syncApp() {
@@ -59,16 +60,15 @@ export async function syncApp() {
 
       await syncAppBadgeCount();
 
-      // 2. Sync Active Message Windows
+      // 2. Sync loaded latest message timelines
       const state = store.getState();
       const activeChats = state.messages.chats;
 
       for (const [storeChatId, chatState] of Object.entries(activeChats)) {
-        const win = chatState.windows[chatState.activeWindowIndex];
-        if (!win || win.messages.length === 0) continue;
+        if (!chatState.hasReachedLatest) continue;
 
-        // Get last real (non-optimistic) message in the current window
-        const lastMsg = win.messages[win.messages.length - 1];
+        // Get last real (non-optimistic) message in the latest canonical segment
+        const lastMsg = selectLatestServerMessage(store.getState(), storeChatId);
         if (!lastMsg || lastMsg.id.startsWith('cg_')) continue;
 
         let apiChatId = storeChatId;
@@ -100,8 +100,9 @@ export async function syncApp() {
 
           if (messagesRes.data.messages && messagesRes.data.messages.length > 0) {
             store.dispatch(
-              appendMessages({
+              insertAfterAnchor({
                 chatId: storeChatId,
+                anchorMessageId: lastMsg.id,
                 messages: messagesRes.data.messages,
                 prevCursor: messagesRes.data.prevCursor ?? null,
               }),
@@ -109,8 +110,9 @@ export async function syncApp() {
           } else if (messagesRes.data.prevCursor !== undefined) {
             // No new messages, but update the prev cursor just in case
             store.dispatch(
-              appendMessages({
+              insertAfterAnchor({
                 chatId: storeChatId,
+                anchorMessageId: lastMsg.id,
                 messages: [],
                 prevCursor: messagesRes.data.prevCursor ?? null,
               }),

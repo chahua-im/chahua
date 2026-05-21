@@ -11,6 +11,7 @@ import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
 import 'package:chahua/features/conversation/timeline/model/message_long_press_details_v2.dart';
 import 'package:chahua/features/conversation/timeline/model/message_visibility_window.dart';
+import 'package:chahua/features/conversation/timeline/model/timeline_viewport_geometry.dart';
 import 'package:chahua/features/conversation/message_bubble/presentation/message_row_v2.dart';
 import 'package:chahua/features/conversation/timeline/presentation/jump_to_latest_fab.dart';
 import 'package:chahua/l10n/app_localizations.dart';
@@ -29,42 +30,15 @@ double resolveTopPreferredAnchorAlignment({
   if (viewportExtent <= 0) {
     return 0;
   }
-  final visibleFractionBelowAnchor = (afterExtent / viewportExtent).clamp(
-    0.0,
-    1.0,
+  final alignment = resolveTimelineTopPreferredAnchorAlignment(
+    afterExtent: afterExtent,
+    viewportExtent: viewportExtent,
   );
+  final visibleFractionBelowAnchor = 1.0 - alignment;
   log(
     'resolveTopPreferredAnchorAlignment: afterExtent=$afterExtent, viewportExtent=$viewportExtent, visibleFractionBelowAnchor=$visibleFractionBelowAnchor',
   );
-  return 1.0 - visibleFractionBelowAnchor;
-}
-
-MessageVisibilityWindow? _resolveMessageVisibilityWindow({
-  required Iterable<({int? messageId, double top, double bottom})> measurements,
-  required double viewportTop,
-  required double viewportBottom,
-}) {
-  final visible = <({int messageId, double top})>[];
-  for (final measurement in measurements) {
-    final messageId = measurement.messageId;
-    if (messageId == null) {
-      continue;
-    }
-    final visibleTop = measurement.top.clamp(viewportTop, viewportBottom);
-    final visibleBottom = measurement.bottom.clamp(viewportTop, viewportBottom);
-    if (visibleBottom <= visibleTop) {
-      continue;
-    }
-    visible.add((messageId: messageId, top: visibleTop));
-  }
-  if (visible.isEmpty) {
-    return null;
-  }
-  visible.sort((a, b) => a.top.compareTo(b.top));
-  return MessageVisibilityWindow(
-    firstVisibleMessageId: visible.first.messageId,
-    lastVisibleMessageId: visible.last.messageId,
-  );
+  return alignment;
 }
 
 class ConversationTimelineView extends ConsumerStatefulWidget {
@@ -108,9 +82,11 @@ class _ConversationTimelineViewState
   double _topPreferredAnchorAlignment = 0;
   bool _isTopPreferredAnchorResolved = false;
   UniqueKey _scrollViewKey = UniqueKey();
-  TimelineViewportFacts _latestViewportFacts = const TimelineViewportFacts();
+  TimelineViewportSnapshot _latestViewportSnapshot =
+      TimelineViewportSnapshot.empty;
   Map<String, ConversationMessageV2> _renderedMessagesByStableKey =
       const <String, ConversationMessageV2>{};
+  String? _renderedTailStableKey;
   bool _isViewportMeasurementScheduled = false;
   bool _hasReportedViewportFacts = false;
   MessageVisibilityWindow? _lastVisibilityWindow;
@@ -173,6 +149,9 @@ class _ConversationTimelineViewState
         _topPreferredAnchorAlignment = nextAlignment;
         _isTopPreferredAnchorResolved = true;
       });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _resetToCenterOrigin();
+      });
     });
   }
 
@@ -200,8 +179,7 @@ class _ConversationTimelineViewState
   }
 
   void _handleScrollChanged() {
-    _updateViewportFacts();
-    _updateMessageVisibilityWindow();
+    _updateViewportSnapshotAndVisibilityWindow();
   }
 
   void _scheduleViewportMeasurement() {
@@ -214,51 +192,13 @@ class _ConversationTimelineViewState
       if (!mounted) {
         return;
       }
-      _updateViewportFacts();
-      _updateMessageVisibilityWindow();
+      _updateViewportSnapshotAndVisibilityWindow();
     });
   }
 
-  /// Reports the viewport facts to the view model.
-  void _updateViewportFacts() {
+  /// Measures one frame of viewport geometry and reports it to timeline state.
+  void _updateViewportSnapshotAndVisibilityWindow() {
     if (!_scrollController.hasClients) {
-      return;
-    }
-
-    final position = _scrollController.position;
-    final facts = TimelineViewportFacts(
-      isNearTop: (position.pixels - position.minScrollExtent) <= _edgeThreshold,
-      isNearBottom:
-          (position.maxScrollExtent - position.pixels) <= _edgeThreshold,
-    );
-
-    final shouldReport =
-        !_hasReportedViewportFacts || facts != _latestViewportFacts;
-    if (shouldReport) {
-      log(
-        'view viewport facts reported: identity=${widget._identity} '
-        'initial=${!_hasReportedViewportFacts} '
-        'facts=$facts pixels=${position.pixels} '
-        'min=${position.minScrollExtent} max=${position.maxScrollExtent}',
-        name: 'ConversationTimeline',
-      );
-      if (facts != _latestViewportFacts) {
-        setState(() {
-          _latestViewportFacts = facts;
-        });
-      }
-      _hasReportedViewportFacts = true;
-
-      ref
-          .read(
-            conversationTimelineViewModelProvider(widget._identity).notifier,
-          )
-          .onViewportChanged(facts);
-    }
-  }
-
-  void _updateMessageVisibilityWindow() {
-    if (!_scrollController.hasClients || _renderedMessagesByStableKey.isEmpty) {
       return;
     }
 
@@ -267,10 +207,62 @@ class _ConversationTimelineViewState
       return;
     }
 
+    final position = _scrollController.position;
     final viewportTopLeft = viewportBox.localToGlobal(Offset.zero);
     final viewportTop = viewportTopLeft.dy;
     final viewportBottom = viewportTop + viewportBox.size.height;
-    final measurements = <({int? messageId, double top, double bottom})>[];
+    final measurements = _measureRenderedMessages();
+    final snapshot = resolveTimelineViewportSnapshot(
+      measurements: measurements,
+      renderedTailStableKey: _renderedTailStableKey,
+      viewportTop: viewportTop,
+      viewportBottom: viewportBottom,
+      pixels: position.pixels,
+      minScrollExtent: position.minScrollExtent,
+      maxScrollExtent: position.maxScrollExtent,
+      edgeThreshold: _edgeThreshold,
+    );
+    final viewportExtentChanged =
+        _hasReportedViewportFacts &&
+        (_latestViewportSnapshot.viewportExtent - snapshot.viewportExtent)
+                .abs() >
+            0.5;
+
+    final shouldReport =
+        !_hasReportedViewportFacts || snapshot != _latestViewportSnapshot;
+    if (shouldReport) {
+      log(
+        'view viewport facts reported: identity=${widget._identity} '
+        'initial=${!_hasReportedViewportFacts} '
+        'snapshot=$snapshot pixels=${position.pixels} '
+        'min=${position.minScrollExtent} max=${position.maxScrollExtent}',
+        name: 'ConversationTimeline',
+      );
+      if (snapshot != _latestViewportSnapshot) {
+        setState(() {
+          _latestViewportSnapshot = snapshot;
+        });
+      }
+      _hasReportedViewportFacts = true;
+
+      ref
+          .read(
+            conversationTimelineViewModelProvider(widget._identity).notifier,
+          )
+          .onViewportChanged(snapshot);
+    }
+
+    _updateMessageVisibilityWindow(measurements, viewportTop, viewportBottom);
+    if (viewportExtentChanged &&
+        snapshot.isNearBottom &&
+        !snapshot.viewportAtLiveEdge) {
+      _settleToLiveEdge();
+    }
+  }
+
+  /// Reads mounted row render boxes into stable-keyed geometry snapshots.
+  List<TimelineMessageGeometry> _measureRenderedMessages() {
+    final measurements = <TimelineMessageGeometry>[];
 
     for (final entry in _renderedMessagesByStableKey.entries) {
       final renderObject = _messageKeys[entry.key]?.currentContext
@@ -280,14 +272,24 @@ class _ConversationTimelineViewState
       }
 
       final topLeft = renderObject.localToGlobal(Offset.zero);
-      measurements.add((
-        messageId: entry.value.serverMessageId,
-        top: topLeft.dy,
-        bottom: topLeft.dy + renderObject.size.height,
-      ));
+      measurements.add(
+        TimelineMessageGeometry(
+          stableKey: entry.key,
+          messageId: entry.value.serverMessageId,
+          top: topLeft.dy,
+          bottom: topLeft.dy + renderObject.size.height,
+        ),
+      );
     }
+    return measurements;
+  }
 
-    final nextVisibilityWindow = _resolveMessageVisibilityWindow(
+  void _updateMessageVisibilityWindow(
+    List<TimelineMessageGeometry> measurements,
+    double viewportTop,
+    double viewportBottom,
+  ) {
+    final nextVisibilityWindow = resolveTimelineMessageVisibilityWindow(
       measurements: measurements,
       viewportTop: viewportTop,
       viewportBottom: viewportBottom,
@@ -332,7 +334,7 @@ class _ConversationTimelineViewState
         break;
       case ConversationTimelineViewportCommandKind.resetToCenterOrigin:
         // There are two cases for this, for now we are not caring, just forcing a new scrollable.
-        _scrollViewKey = UniqueKey();
+        _resetScrollableIdentity();
         if (state.viewportCommand.placement ==
             ConversationTimelineViewportPlacement.topPreferred) {
           _scheduleTopPreferredMeasurement(resetResolution: true);
@@ -348,11 +350,49 @@ class _ConversationTimelineViewState
           _scrollToBottom();
         });
         break;
+      case ConversationTimelineViewportCommandKind.settleToLiveEdge:
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          log(
+            'consumeViewportCommand post-frame settleToLiveEdge: '
+            'identity=${widget._identity} generation=$generation',
+            name: 'ConversationTimeline',
+          );
+          _settleToLiveEdge();
+        });
+        break;
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduleViewportMeasurement();
     });
+  }
+
+  /// Recreates the scrollable and controller so reset commands do not inherit pixels.
+  void _resetScrollableIdentity() {
+    final previousController = _scrollController;
+    previousController.removeListener(_handleScrollChanged);
+    _scrollController = ScrollController();
+    _scrollController.addListener(_handleScrollChanged);
+    _scrollViewKey = UniqueKey();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      previousController.dispose();
+    });
+  }
+
+  /// Moves the recreated center-anchored scrollable back to its origin.
+  void _resetToCenterOrigin() {
+    if (!mounted || !_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    final targetPixels = 0.0.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((position.pixels - targetPixels).abs() <= 0.5) {
+      return;
+    }
+    _scrollController.jumpTo(targetPixels);
   }
 
   Future<void> _scrollToBottom() async {
@@ -399,6 +439,37 @@ class _ConversationTimelineViewState
         stackTrace: stackTrace,
       );
     }
+  }
+
+  /// Corrects live-edge drift after data or viewport-size changes without animation.
+  void _settleToLiveEdge() {
+    if (!mounted || !_scrollController.hasClients) {
+      log(
+        'settleToLiveEdge skipped: identity=${widget._identity} '
+        'mounted=$mounted hasClients=${_scrollController.hasClients}',
+        name: 'ConversationTimeline',
+      );
+      return;
+    }
+
+    final position = _scrollController.position;
+    final targetPixels = position.maxScrollExtent.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    final delta = (position.pixels - targetPixels).abs();
+    if (delta <= 0.5) {
+      _scheduleViewportMeasurement();
+      return;
+    }
+
+    log(
+      'settleToLiveEdge jump: identity=${widget._identity} '
+      'from=${position.pixels} to=$targetPixels',
+      name: 'ConversationTimeline',
+    );
+    _scrollController.jumpTo(targetPixels);
+    _scheduleViewportMeasurement();
   }
 
   void _openMessageOverlay(MessageLongPressDetailsV2 details) {
@@ -562,9 +633,16 @@ class _ConversationTimelineViewState
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(
-      conversationTimelineViewModelProvider(widget._identity),
+    final timelineProvider = conversationTimelineViewModelProvider(
+      widget._identity,
     );
+    ref.listen<ConversationTimelineState>(timelineProvider, (previous, next) {
+      if (next.viewportCommandGeneration >
+          _lastHandledViewportCommandGeneration) {
+        _consumeViewportCommand(next);
+      }
+    });
+    final state = ref.watch(timelineProvider);
 
     if (state.isBootstrapping) {
       return const Center(child: CupertinoActivityIndicator());
@@ -594,6 +672,9 @@ class _ConversationTimelineViewState
     _renderedMessagesByStableKey = <String, ConversationMessageV2>{
       for (final message in orderedMessages) message.stableKey: message,
     };
+    _renderedTailStableKey = orderedMessages.isEmpty
+        ? null
+        : orderedMessages.last.stableKey;
     final rowPresentationByStableKey = _buildRowPresentation(orderedMessages);
     final beforeMessages = state.beforeMessages.reversed.toList(
       growable: false,
@@ -657,12 +738,13 @@ class _ConversationTimelineViewState
                   ' after=${state.afterMessages.length}'
                   ' | visible=${_lastVisibilityWindow?.firstVisibleMessageId.toString() ?? 'null'}'
                   '..${_lastVisibilityWindow?.lastVisibleMessageId.toString() ?? 'null'}'
-                  ' canLoadNewer=${state.canLoadNewer} isNearBottom=${_latestViewportFacts.isNearBottom}',
+                  ' canLoadNewer=${state.canLoadNewer} isNearBottom=${_latestViewportSnapshot.isNearBottom}'
+                  ' atLiveEdge=${_latestViewportSnapshot.viewportAtLiveEdge}',
                 ),
               ),
             ),
           ),
-        if (state.canLoadNewer || !_latestViewportFacts.isNearBottom)
+        if (state.canLoadNewer || !_latestViewportSnapshot.isNearBottom)
           Positioned(
             right: _jumpToLatestInset,
             bottom: _jumpToLatestInset,

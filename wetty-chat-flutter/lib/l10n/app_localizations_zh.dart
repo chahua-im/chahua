@@ -96,6 +96,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get groupSettings => '群组设置';
 
   @override
+  String get messageSearchAction => '搜索';
+
+  @override
+  String get messageSearchTitle => '搜索';
+
+  @override
+  String get messageSearchPlaceholder => '搜索消息';
+
+  @override
+  String get messageSearchEmptyPrompt => '搜索此聊天中的消息';
+
+  @override
+  String get messageSearchMinChars => '请输入至少 2 个字符';
+
+  @override
+  String get messageSearchNoResults => '未找到消息';
+
+  @override
+  String get messageSearchFailed => '搜索消息失败';
+
+  @override
+  String get messageSearchThreadContext => '在话题中';
+
+  @override
+  String get messageSearchLoadMore => '加载更多';
+
+  @override
   String get noMembers => '暂无成员';
 
   @override
@@ -253,6 +280,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get pinMessage => '置顶';
+
+  @override
+  String get pinMessageTitle => '置顶这条消息？';
+
+  @override
+  String get pinMessageBody => '这会为所有人在聊天中置顶它。';
 
   @override
   String get unpinMessage => '取消置顶';
@@ -533,6 +566,33 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get groupSettings => '群組設定';
 
   @override
+  String get messageSearchAction => '搜尋';
+
+  @override
+  String get messageSearchTitle => '搜尋';
+
+  @override
+  String get messageSearchPlaceholder => '搜尋訊息';
+
+  @override
+  String get messageSearchEmptyPrompt => '搜尋此聊天中的訊息';
+
+  @override
+  String get messageSearchMinChars => '請輸入至少 2 個字元';
+
+  @override
+  String get messageSearchNoResults => '找不到訊息';
+
+  @override
+  String get messageSearchFailed => '搜尋訊息失敗';
+
+  @override
+  String get messageSearchThreadContext => '在話題中';
+
+  @override
+  String get messageSearchLoadMore => '載入更多';
+
+  @override
   String get noMembers => '暫無成員';
 
   @override
@@ -690,6 +750,12 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get pinMessage => '置頂';
+
+  @override
+  String get pinMessageTitle => '置頂這則訊息？';
+
+  @override
+  String get pinMessageBody => '這會為所有人在聊天中置頂它。';
 
   @override
   String get unpinMessage => '取消置頂';

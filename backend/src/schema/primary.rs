@@ -266,6 +266,9 @@ diesel::table! {
         device_token -> Nullable<Text>,
         apns_environment -> Nullable<PushEnvironment>,
         provider_data -> Jsonb,
+        delivery_failure_count -> Int4,
+        last_delivery_error -> Nullable<Text>,
+        last_delivery_error_at -> Nullable<Timestamptz>,
     }
 }
 

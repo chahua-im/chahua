@@ -17,7 +17,7 @@ export function useLandingInviteFlow({ search, isPwa, appEntryUrl }: UseLandingI
 
   useEffect(() => {
     let cancelled = false;
-    syncJwtTokenFromLanding(search, PENDING_INVITE_PWA_MODAL_ENABLED);
+    syncJwtTokenFromLanding(search);
     const pendingInviteCode = PENDING_INVITE_PWA_MODAL_ENABLED
       ? syncPendingInviteFromLanding(search)
       : parsePendingInviteFromLanding(search);

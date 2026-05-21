@@ -88,6 +88,33 @@
   "groupSettings": "Group Settings",
   "@groupSettings": { "description": "Group settings page title" },
 
+  "messageSearchAction": "Search",
+  "@messageSearchAction": { "description": "Group info action label for message search" },
+
+  "messageSearchTitle": "Search",
+  "@messageSearchTitle": { "description": "Message search page title" },
+
+  "messageSearchPlaceholder": "Search messages",
+  "@messageSearchPlaceholder": { "description": "Placeholder for the message search field" },
+
+  "messageSearchEmptyPrompt": "Search messages in this chat",
+  "@messageSearchEmptyPrompt": { "description": "Empty prompt before entering a message search query" },
+
+  "messageSearchMinChars": "Enter at least 2 characters",
+  "@messageSearchMinChars": { "description": "Message shown when a search query is too short" },
+
+  "messageSearchNoResults": "No messages found",
+  "@messageSearchNoResults": { "description": "Empty state when message search returns no results" },
+
+  "messageSearchFailed": "Failed to search messages",
+  "@messageSearchFailed": { "description": "Error state when message search request fails" },
+
+  "messageSearchThreadContext": "In thread",
+  "@messageSearchThreadContext": { "description": "Label shown on a search result that belongs to a thread" },
+
+  "messageSearchLoadMore": "Load More",
+  "@messageSearchLoadMore": { "description": "Button label for loading more message search results" },
+
   "noMembers": "No members",
   "@noMembers": { "description": "Placeholder when group has no members" },
 
@@ -246,6 +273,12 @@
 
   "pinMessage": "Pin",
   "@pinMessage": { "description": "Message action label for pinning a message" },
+
+  "pinMessageTitle": "Pin message?",
+  "@pinMessageTitle": { "description": "Confirmation dialog title for pinning a message" },
+
+  "pinMessageBody": "This pins it for everyone in the chat.",
+  "@pinMessageBody": { "description": "Confirmation dialog body for pinning a message" },
 
   "unpinMessage": "Unpin",
   "@unpinMessage": { "description": "Message action label for unpinning a message" },

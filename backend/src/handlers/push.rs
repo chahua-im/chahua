@@ -169,6 +169,9 @@ async fn post_subscribe(
         provider_data: validated.provider_data.clone(),
         created_at: Utc::now().naive_utc(),
         client_id: Some(client_id.clone()),
+        delivery_failure_count: 0,
+        last_delivery_error: None,
+        last_delivery_error_at: None,
     };
 
     conn.transaction::<_, diesel::result::Error, _>(|conn| {
@@ -231,6 +234,10 @@ async fn post_subscribe(
                     push_subscriptions::client_id.eq(&current_client_id),
                     push_subscriptions::created_at.eq(created_at),
                     push_subscriptions::provider_data.eq(&provider_data),
+                    push_subscriptions::delivery_failure_count.eq(0),
+                    push_subscriptions::last_delivery_error.eq::<Option<String>>(None),
+                    push_subscriptions::last_delivery_error_at
+                        .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
                 ))
                 .execute(conn)?;
         } else {
@@ -254,6 +261,13 @@ async fn post_subscribe(
                             push_subscriptions::client_id.eq(&current_client_id),
                             push_subscriptions::created_at.eq(created_at),
                             push_subscriptions::provider_data.eq(&provider_data),
+                            push_subscriptions::delivery_failure_count.eq(0),
+                            push_subscriptions::last_delivery_error.eq::<Option<String>>(None),
+                            push_subscriptions::last_delivery_error_at.eq::<Option<
+                                chrono::DateTime<chrono::Utc>,
+                            >>(
+                                None
+                            ),
                         ))
                         .execute(conn)?;
                 }

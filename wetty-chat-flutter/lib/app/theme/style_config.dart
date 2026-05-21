@@ -6,6 +6,12 @@ class AppFontFamilies {
   // Intentionally null so each platform can use its native font cascade.
   // On iOS this lets Apple choose SF for Latin and PingFang for CJK text.
   static const String? system = null;
+
+  static const List<String> cjkFallback = [
+    'PingFang SC',
+    'PingFang TC',
+    'PingFang HK',
+  ];
 }
 
 class AppFontWeights {
@@ -414,6 +420,7 @@ TextStyle appTextStyle(
   FontStyle? fontStyle,
   TextDecoration? decoration,
   Color? decorationColor,
+  List<String>? fontFamilyFallback,
 }) {
   return CupertinoTheme.of(context).textTheme.textStyle.copyWith(
     color: color ?? context.appColors.textPrimary,
@@ -423,6 +430,7 @@ TextStyle appTextStyle(
     fontStyle: fontStyle,
     decoration: decoration,
     decorationColor: decorationColor,
+    fontFamilyFallback: fontFamilyFallback,
   );
 }
 
@@ -549,6 +557,7 @@ TextStyle appBubbleTextStyle(
   FontWeight? fontWeight,
   double? height,
   FontStyle? fontStyle,
+  List<String>? fontFamilyFallback,
 }) {
   return appTextStyle(
     context,
@@ -557,6 +566,7 @@ TextStyle appBubbleTextStyle(
     fontWeight: fontWeight,
     height: height,
     fontStyle: fontStyle,
+    fontFamilyFallback: fontFamilyFallback,
   );
 }
 

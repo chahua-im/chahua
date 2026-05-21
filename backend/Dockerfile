@@ -58,5 +58,6 @@ EXPOSE 3001
 # Runtime env vars such as DATABASE_URL and optional CORS_ALLOWED_ORIGINS
 # must be set via docker run -e or compose environment.
 ENV RUST_LOG=info
+ENV BACKEND_LOG_FORMAT=json
 
 ENTRYPOINT ["/app/wetty-chat-backend"]

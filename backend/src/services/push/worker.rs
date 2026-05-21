@@ -12,7 +12,7 @@ use crate::models::PushSubscription;
 use crate::schema::push_subscriptions;
 use crate::services::ws_registry::ConnectionRegistry;
 
-use super::delivery::SendFailure;
+use super::delivery::{DeliveryFailure, DeliveryFailureAction};
 use super::payload::{build_apns_notification, build_push_payload, format_push_body};
 use super::policy::{
     should_send_push, PushDecision, PushRecipientContext, PushSkipReason, ThreadPushState,
@@ -22,6 +22,7 @@ use super::{panic_payload_message, PushJob, PushService};
 const PUSH_CONCURRENCY: usize = 10;
 const PUSH_SUPPRESSION_FRESHNESS_SECS: u64 = 30;
 const PUSH_WORKER_RESTART_DELAY: Duration = Duration::from_secs(1);
+const PUSH_COUNTED_FAILURE_PRUNE_THRESHOLD: i32 = 3;
 
 pub(super) async fn supervise_push_worker(
     mut rx: mpsc::Receiver<PushJob>,
@@ -106,6 +107,32 @@ struct RecipientCandidate {
     muted_until: Option<chrono::DateTime<chrono::Utc>>,
     chat_archived: bool,
     thread_state: ThreadPushState,
+}
+
+#[derive(Debug)]
+enum DeliveryAttemptResult {
+    Success {
+        subscription_id: i64,
+        should_reset_failure_state: bool,
+    },
+    Failure {
+        failure: DeliveryFailure,
+        next_failure_count: i32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CountedFailurePersistenceAction {
+    Record,
+    Prune,
+}
+
+fn counted_failure_persistence_action(next_failure_count: i32) -> CountedFailurePersistenceAction {
+    if next_failure_count >= PUSH_COUNTED_FAILURE_PRUNE_THRESHOLD {
+        CountedFailurePersistenceAction::Prune
+    } else {
+        CountedFailurePersistenceAction::Record
+    }
 }
 
 fn load_recipient_candidates(
@@ -288,7 +315,7 @@ async fn process_push_job(
     let body_text = format_push_body(&job.sender_username, job.body_preview.as_deref());
 
     // 5. Send concurrently with bounded parallelism.
-    let stale_ids: Vec<i64> = stream::iter(subs)
+    let delivery_results: Vec<DeliveryAttemptResult> = stream::iter(subs)
         .map(|sub| {
             let service = service.clone();
 
@@ -302,27 +329,145 @@ async fn process_push_job(
                     .send_to_subscription(&sub, &web_payload, &apns_notification)
                     .await
                 {
-                    Ok(()) => None,
-                    Err(SendFailure::Stale(id)) => Some(id),
-                    Err(SendFailure::Transient) => None,
+                    Ok(()) => DeliveryAttemptResult::Success {
+                        subscription_id: sub.id,
+                        should_reset_failure_state: sub.delivery_failure_count != 0
+                            || sub.last_delivery_error.is_some()
+                            || sub.last_delivery_error_at.is_some(),
+                    },
+                    Err(failure) => DeliveryAttemptResult::Failure {
+                        failure,
+                        next_failure_count: sub.delivery_failure_count.saturating_add(1),
+                    },
                 }
             }
         })
         .buffer_unordered(PUSH_CONCURRENCY)
-        .filter_map(|result| async move { result })
         .collect()
         .await;
 
-    // 6. Clean up stale subscriptions.
-    if !stale_ids.is_empty() {
-        debug!("Cleaning up {} stale push subscriptions", stale_ids.len());
-        let _ = diesel::delete(
-            push_subscriptions::table.filter(push_subscriptions::dsl::id.eq_any(&stale_ids)),
+    apply_delivery_results(service, &mut conn, delivery_results)?;
+
+    Ok(())
+}
+
+fn apply_delivery_results(
+    service: &PushService,
+    conn: &mut PgConnection,
+    results: Vec<DeliveryAttemptResult>,
+) -> Result<(), String> {
+    let mut reset_ids = Vec::new();
+    let mut prune_ids = Vec::new();
+    let mut counted_failures = Vec::new();
+    let now = chrono::Utc::now();
+
+    for result in results {
+        match result {
+            DeliveryAttemptResult::Success {
+                subscription_id,
+                should_reset_failure_state,
+            } => {
+                if should_reset_failure_state {
+                    reset_ids.push(subscription_id);
+                }
+            }
+            DeliveryAttemptResult::Failure {
+                failure,
+                next_failure_count,
+            } => {
+                service.metrics.record_push_delivery_failure(
+                    failure.provider.as_metrics_label(),
+                    failure.class.as_metrics_label(),
+                );
+
+                match failure.action {
+                    DeliveryFailureAction::PruneImmediate => {
+                        warn!(
+                            provider = failure.provider.as_metrics_label(),
+                            subscription_id = failure.subscription_id,
+                            user_id = failure.user_id,
+                            failure_class = failure.class.as_metrics_label(),
+                            reason = %failure.reason,
+                            failure_count = next_failure_count,
+                            action = "prune",
+                            "pruning push subscription after immediate delivery failure"
+                        );
+                        service.metrics.record_push_subscription_prune(
+                            failure.provider.as_metrics_label(),
+                            failure.reason.as_str(),
+                        );
+                        prune_ids.push(failure.subscription_id);
+                    }
+                    DeliveryFailureAction::Counted
+                        if counted_failure_persistence_action(next_failure_count)
+                            == CountedFailurePersistenceAction::Prune =>
+                    {
+                        warn!(
+                            provider = failure.provider.as_metrics_label(),
+                            subscription_id = failure.subscription_id,
+                            user_id = failure.user_id,
+                            failure_class = failure.class.as_metrics_label(),
+                            reason = %failure.reason,
+                            failure_count = next_failure_count,
+                            action = "prune",
+                            "pruning push subscription after repeated delivery failures"
+                        );
+                        service.metrics.record_push_subscription_prune(
+                            failure.provider.as_metrics_label(),
+                            failure.reason.as_str(),
+                        );
+                        prune_ids.push(failure.subscription_id);
+                    }
+                    DeliveryFailureAction::Counted => {
+                        warn!(
+                            provider = failure.provider.as_metrics_label(),
+                            subscription_id = failure.subscription_id,
+                            user_id = failure.user_id,
+                            failure_class = failure.class.as_metrics_label(),
+                            reason = %failure.reason,
+                            failure_count = next_failure_count,
+                            action = "retry",
+                            "recording counted push delivery failure"
+                        );
+                        counted_failures.push((failure, next_failure_count));
+                    }
+                    DeliveryFailureAction::None => {}
+                }
+            }
+        }
+    }
+
+    if !reset_ids.is_empty() {
+        diesel::update(
+            push_subscriptions::table.filter(push_subscriptions::dsl::id.eq_any(&reset_ids)),
         )
-        .execute(&mut conn)
-        .map_err(|e| {
-            error!("Failed to clean up stale push subscriptions: {:?}", e);
-        });
+        .set((
+            push_subscriptions::dsl::delivery_failure_count.eq(0),
+            push_subscriptions::dsl::last_delivery_error.eq::<Option<String>>(None),
+            push_subscriptions::dsl::last_delivery_error_at
+                .eq::<Option<chrono::DateTime<chrono::Utc>>>(None),
+        ))
+        .execute(conn)
+        .map_err(|e| format!("Failed to reset push delivery failure state: {:?}", e))?;
+    }
+
+    for (failure, next_failure_count) in counted_failures {
+        diesel::update(push_subscriptions::table.find(failure.subscription_id))
+            .set((
+                push_subscriptions::dsl::delivery_failure_count.eq(next_failure_count),
+                push_subscriptions::dsl::last_delivery_error.eq(Some(failure.reason)),
+                push_subscriptions::dsl::last_delivery_error_at.eq(Some(now)),
+            ))
+            .execute(conn)
+            .map_err(|e| format!("Failed to update push delivery failure state: {:?}", e))?;
+    }
+
+    if !prune_ids.is_empty() {
+        diesel::delete(
+            push_subscriptions::table.filter(push_subscriptions::dsl::id.eq_any(&prune_ids)),
+        )
+        .execute(conn)
+        .map_err(|e| format!("Failed to prune push subscriptions: {:?}", e))?;
     }
 
     Ok(())
@@ -338,3 +483,32 @@ fn maybe_panic_for_test(job: &PushJob) {
 #[cfg(test)]
 static TEST_PANIC_MESSAGE_ID: std::sync::atomic::AtomicI64 =
     std::sync::atomic::AtomicI64::new(i64::MIN);
+
+#[cfg(test)]
+mod tests {
+    use super::{counted_failure_persistence_action, CountedFailurePersistenceAction};
+
+    #[test]
+    fn first_counted_delivery_failure_is_recorded() {
+        assert_eq!(
+            counted_failure_persistence_action(1),
+            CountedFailurePersistenceAction::Record
+        );
+    }
+
+    #[test]
+    fn second_counted_delivery_failure_is_recorded() {
+        assert_eq!(
+            counted_failure_persistence_action(2),
+            CountedFailurePersistenceAction::Record
+        );
+    }
+
+    #[test]
+    fn third_counted_delivery_failure_prunes_subscription() {
+        assert_eq!(
+            counted_failure_persistence_action(3),
+            CountedFailurePersistenceAction::Prune
+        );
+    }
+}

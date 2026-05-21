@@ -31,7 +31,9 @@ cp .env.example .env
 - `DATABASE_URL`
   Use a local PostgreSQL database, for example `postgres://wetty_chat:change_me@127.0.0.1:5432/wetty_chat`
 - `AUTH_METHOD=UIDHeader`
-  This is the recommended local setup. It avoids Discuz cookie auth.
+  This is the recommended local setup. It allows the dev client to authenticate
+  with `X-User-Id`. Leave unset, or set any value other than exact `UIDHeader`,
+  to require JWT auth.
 - `JWT_SIGNING_KEY_BASE64`
   Generate with `openssl rand -base64 32`
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`
@@ -41,13 +43,14 @@ cp .env.example .env
 - `AWS_REGION`
   Required by the AWS SDK config chain
 
-3. Discuz-specific variables are not needed for normal local development.
+3. Discuz avatar variables are not needed for normal local development.
 
 Notes:
 
 - Embedded Diesel migrations run automatically on backend startup.
 - If you plan to test attachments, also configure valid S3 credentials and optionally `S3_ENDPOINT_URL` for a local or S3-compatible object store.
 - For local frontend development, `UIDHeader` auth works because the dev client sends `X-User-Id` automatically.
+- For production, omit `AUTH_METHOD` or set it to a non-`UIDHeader` value so user routes require JWT auth.
 
 ### PostgreSQL
 
@@ -118,6 +121,8 @@ The dev client sends:
 - `X-Client-Id` when there is no JWT yet
 
 That matches the recommended local backend setting `AUTH_METHOD=UIDHeader`.
+Outside local development, keep `AUTH_METHOD` unset or set to a non-`UIDHeader`
+value so the backend does not trust `X-User-Id`.
 
 ## Formatting and hooks
 
