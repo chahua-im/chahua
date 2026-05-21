@@ -4,6 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:chahua/core/platform/native_dialog_focus_guard.dart';
+
 import '../../../app/theme/style_config.dart';
 import '../../../core/session/dev_session_store.dart';
 import '../application/sticker_pack_detail_view_model.dart';
@@ -92,6 +94,7 @@ class _StickerPackDetailPageState extends ConsumerState<StickerPackDetailPage> {
   }
 
   Future<void> _pickAndAddSticker() async {
+    await const NativeDialogFocusGuard().prepareForNativeDialog();
     final result = await FilePicker.pickFiles(type: FileType.image);
     if (result == null || result.files.isEmpty) return;
 
