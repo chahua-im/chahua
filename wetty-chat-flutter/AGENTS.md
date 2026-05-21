@@ -125,6 +125,10 @@ Image.network(
 );
 ```
 
+## Testing
+Especially when fixing bugs, we should first create a test that cover the failing use case when possible. This red test will be our goal to fix.
+When there are surrounding logic that is tightly coupled with the logic we are trying to cover, we should ensure there are tests covering those cases as well.
+
 ## Documentation Philosophy
 * **Comment wisely:** Use comments to explain why the code is written a certain way, not what the code does. The code itself should be self-explanatory.
 * **Document for the user:** Write documentation with the reader in mind. If you had a question and found the answer, add it to the documentation where you first looked.
