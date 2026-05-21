@@ -830,6 +830,10 @@ msgstr "Please choose at least one emoji"
 msgid "Please try again in a moment."
 msgstr "Please try again in a moment."
 
+#. placeholder {0}: item.name
+msgid "Preview {0}"
+msgstr "Preview {0}"
+
 msgid "Previous image"
 msgstr "Previous image"
 

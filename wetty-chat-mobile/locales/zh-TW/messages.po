@@ -830,6 +830,10 @@ msgstr "請至少選擇一個表情"
 msgid "Please try again in a moment."
 msgstr "請稍後再試。"
 
+#. placeholder {0}: item.name
+msgid "Preview {0}"
+msgstr "預覽 {0}"
+
 msgid "Previous image"
 msgstr "上一張圖片"
 
