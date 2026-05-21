@@ -101,17 +101,31 @@ class _GroupListV2Row extends StatelessWidget {
     final isMuted =
         chat.mutedUntil != null && chat.mutedUntil!.isAfter(DateTime.now());
     final isUnread = chat.unreadCount > 0;
+    final l10n = AppLocalizations.of(context)!;
+    final provider = groupListV2ViewModelProvider(scope);
 
     return Consumer(
       builder: (context, ref, _) => SwipeToActionRow(
         key: ValueKey('group-v2-${chat.id}'),
         icon: isUnread ? CupertinoIcons.checkmark_alt : CupertinoIcons.mail,
-        label: isUnread
-            ? AppLocalizations.of(context)!.swipeActionMarkRead
-            : AppLocalizations.of(context)!.swipeActionMarkUnread,
-        onAction: () => ref
-            .read(groupListV2ViewModelProvider(scope).notifier)
-            .toggleGroupReadState(chatId: chat.id),
+        label: isUnread ? l10n.swipeActionMarkRead : l10n.swipeActionMarkUnread,
+        onAction: () =>
+            ref.read(provider.notifier).toggleGroupReadState(chatId: chat.id),
+        secondaryIcon: CupertinoIcons.archivebox,
+        secondaryLabel: switch (scope) {
+          ChatListV2Scope.active => l10n.swipeActionArchive,
+          ChatListV2Scope.archived => l10n.swipeActionUnarchive,
+        },
+        secondaryActionColor: switch (scope) {
+          ChatListV2Scope.active => CupertinoColors.systemOrange,
+          ChatListV2Scope.archived => CupertinoColors.systemGreen,
+        },
+        secondaryOnAction: () => switch (scope) {
+          ChatListV2Scope.active =>
+            ref.read(provider.notifier).archiveGroup(chat),
+          ChatListV2Scope.archived =>
+            ref.read(provider.notifier).unarchiveGroup(chat),
+        },
         child: ChatListRow(
           chatName: chatName,
           avatarUrl: chat.avatarUrl,

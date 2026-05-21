@@ -200,6 +200,14 @@ class GroupListV2ViewModel extends AsyncNotifier<GroupListV2ViewState> {
         .applyServerReadState(chatId: chatId, response: response);
   }
 
+  Future<void> archiveGroup(ChatListItem group) async {
+    await ref.read(groupListV2RepositoryProvider).archiveGroup(group);
+  }
+
+  Future<void> unarchiveGroup(ChatListItem group) async {
+    await ref.read(groupListV2RepositoryProvider).unarchiveGroup(group);
+  }
+
   GroupListV2ListState _currentListState() {
     final storeState = ref.read(groupListV2StoreProvider);
     return switch (scope) {
