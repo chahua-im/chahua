@@ -85,7 +85,7 @@ impl AuthorizationService {
         resource: Resource,
     ) -> Result<bool, AppError> {
         let actions = self.load_cached_user_actions(conn, uid, resource)?;
-        Ok(actions.contains(action.as_str()))
+        Ok(actions.contains(action.as_str()) || actions.contains(Action::PermissionAll.as_str()))
     }
 
     #[allow(dead_code)]
@@ -97,7 +97,7 @@ impl AuthorizationService {
         resource: Resource,
     ) -> Result<bool, AppError> {
         let actions = self.load_cached_service_token_actions(conn, token_id, resource)?;
-        Ok(actions.contains(action.as_str()))
+        Ok(actions.contains(action.as_str()) || actions.contains(Action::PermissionAll.as_str()))
     }
 
     pub fn list_permissions(
