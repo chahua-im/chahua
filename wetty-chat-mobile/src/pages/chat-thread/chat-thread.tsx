@@ -103,6 +103,7 @@ import type { BackAction } from '@/types/back-action';
 import { requestUploadUrl, uploadFileToS3 } from '@/api/upload';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { buildPermalinkUrl } from '@/utils/permalinkUrl';
+import { formatUnreadCount } from '@/utils/unreadCount';
 import { ChatContext } from '@/components/chat/messages/ChatContext';
 import { useIsDesktop, useMouseDetected } from '@/hooks/platformHooks';
 import { useChatRole } from '@/components/chat/permissions/useChatRole';
@@ -1955,7 +1956,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
             className={`scroll-to-bottom-fab ${showScrollToBottomButton ? '' : 'scroll-to-bottom-fab--hidden'}`}
           >
             {pendingJumpCount > 0 && (
-              <span className="scroll-to-bottom-fab__badge">{pendingJumpCount > 99 ? '99+' : pendingJumpCount}</span>
+              <span className="scroll-to-bottom-fab__badge">{formatUnreadCount(pendingJumpCount)}</span>
             )}
             <IonFabButton size="small" onClick={handleScrollToBottomClick}>
               <IonIcon icon={chevronDown} />

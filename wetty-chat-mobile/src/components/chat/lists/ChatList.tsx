@@ -50,6 +50,7 @@ import { selectEffectiveLocale, selectShowAllTab } from '@/store/settingsSlice';
 import { markChatAsUnread, markMessagesAsRead, type MessagePreview, type MessageResponse } from '@/api/messages';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { getChatDisplayName } from '@/utils/chatDisplay';
+import { formatUnreadCount } from '@/utils/unreadCount';
 import { UserAvatar } from '@/components/UserAvatar';
 import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
 import { getAllDrafts } from '@/utils/draftSync';
@@ -65,6 +66,7 @@ import type { ChatTimelineState } from '@/store/messages/types';
 import type { StoredThreadListItem } from '@/api/threads';
 import styles from './ChatList.module.scss';
 
+// Must match the backend's `indefinite_mute_until()` value in services/chat.rs.
 const INDEFINITE_MUTE_UNTIL = '9999-12-31T23:59:59Z';
 
 function formatLastActivity(isoString: string | null, locale: string): string {
@@ -403,7 +405,7 @@ export function ChatList({
         <div className={styles.chatsListBadge}>
           {count > 0 ? (
             <IonBadge mode="ios" color="medium">
-              {count > 99 ? '99+' : count}
+              {formatUnreadCount(count)}
             </IonBadge>
           ) : null}
         </div>
@@ -491,7 +493,7 @@ export function ChatList({
           <div className={styles.chatsListBadge}>
             {chat.unreadCount > 0 && (
               <IonBadge mode="ios" color={isChatMuted(chat) ? 'medium' : 'primary'}>
-                {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                {formatUnreadCount(chat.unreadCount)}
               </IonBadge>
             )}
           </div>

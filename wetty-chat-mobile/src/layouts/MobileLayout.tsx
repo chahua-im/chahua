@@ -24,6 +24,7 @@ import NotFoundPage from '@/pages/not-found';
 import ComponentDemoPage from '@/pages/component-demo';
 
 import { safariSafeRouteAnimation } from '@/utils/navigationHistory';
+import { formatUnreadCount } from '@/utils/unreadCount';
 import { featureGatedList, whenFeature } from '@/features';
 import { selectTotalUnreadChatCount } from '@/store/chatsSlice';
 import styles from './MobileLayout.module.scss';
@@ -42,7 +43,7 @@ const MobileLayout: React.FC = () => {
         <IonLabel>
           <Trans>Chats</Trans>
         </IonLabel>
-        {unreadChatCount > 0 && <IonBadge color="primary">{unreadChatCount > 99 ? '99+' : unreadChatCount}</IonBadge>}
+        {unreadChatCount > 0 && <IonBadge color="primary">{formatUnreadCount(unreadChatCount)}</IonBadge>}
       </IonTabButton>,
       <IonTabButton tab="settings" href="/settings" key="settings">
         <IonIcon icon={settings} />

@@ -7,7 +7,7 @@ use tracing::warn;
 
 use crate::schema::group_membership;
 
-pub const MAX_UNREAD_COUNT: i64 = 100;
+pub const MAX_UNREAD_COUNT: i64 = 1000;
 const UNREAD_COUNT_CHUNK_SIZE: usize = 50;
 
 pub fn indefinite_mute_until() -> DateTime<Utc> {
@@ -99,13 +99,14 @@ fn get_unread_counts_batch(
                  OR gm.muted_until IS NULL
                  OR gm.muted_until <= NOW()
                )
-             LIMIT 100
+             LIMIT $4
          ) AS unread_messages ON TRUE
          GROUP BY input_uids.uid",
     )
     .bind::<diesel::sql_types::Array<diesel::sql_types::Integer>, _>(uids.to_vec())
     .bind::<diesel::sql_types::Bool, _>(archived)
-    .bind::<diesel::sql_types::Bool, _>(respect_mute);
+    .bind::<diesel::sql_types::Bool, _>(respect_mute)
+    .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT);
 
     match query.load::<UnreadCountRow>(conn) {
         Ok(rows) => Ok(rows),
@@ -140,7 +141,7 @@ pub fn get_unread_summary_counts(
                AND m.deleted_at IS NULL
                AND m.is_published = TRUE
                AND m.reply_root_id IS NULL
-             LIMIT 100
+             LIMIT $2
          ),
          archived_unread_messages AS (
              SELECT 1 AS marker
@@ -151,7 +152,7 @@ pub fn get_unread_summary_counts(
                AND m.deleted_at IS NULL
                AND m.is_published = TRUE
                AND m.reply_root_id IS NULL
-             LIMIT 100
+             LIMIT $2
          ),
          active_unread_chats AS (
              SELECT 1 AS marker
@@ -166,7 +167,7 @@ pub fn get_unread_summary_counts(
                    AND m.is_published = TRUE
                    AND m.reply_root_id IS NULL
                )
-             LIMIT 100
+             LIMIT $2
          ),
          archived_unread_chats AS (
              SELECT 1 AS marker
@@ -181,7 +182,7 @@ pub fn get_unread_summary_counts(
                    AND m.is_published = TRUE
                    AND m.reply_root_id IS NULL
                )
-             LIMIT 100
+             LIMIT $2
          )
          SELECT
            (SELECT COUNT(*)::bigint FROM active_unread_messages) AS unread_count,
@@ -189,7 +190,8 @@ pub fn get_unread_summary_counts(
            (SELECT COUNT(*)::bigint FROM active_unread_chats) AS unread_chat_count,
            (SELECT COUNT(*)::bigint FROM archived_unread_chats) AS archived_unread_chat_count",
     )
-    .bind::<diesel::sql_types::Integer, _>(uid);
+    .bind::<diesel::sql_types::Integer, _>(uid)
+    .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT);
 
     match query.get_result::<UnreadSummaryCounts>(conn) {
         Ok(row) => Ok(row),
@@ -215,11 +217,12 @@ pub fn get_chat_unread_count(
                AND deleted_at IS NULL
                AND is_published = TRUE
                AND id > COALESCE($2, 0)
-             LIMIT 100
+             LIMIT $3
          ) AS unread_messages",
     )
     .bind::<diesel::sql_types::BigInt, _>(chat_id)
-    .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(last_read_message_id);
+    .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(last_read_message_id)
+    .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT);
 
     query
         .get_result::<ChatUnreadCountRow>(conn)

@@ -1,5 +1,6 @@
 import { IonBadge, IonLabel, IonSegment, IonSegmentButton } from '@ionic/react';
 import { Trans } from '@lingui/react/macro';
+import { formatUnreadCount } from '@/utils/unreadCount';
 import styles from './ChatListSegment.module.scss';
 
 export type ChatListTab = 'all' | 'groups' | 'threads';
@@ -17,7 +18,7 @@ function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
     <IonBadge mode="ios" color="primary" className={styles.badge}>
-      {count > 99 ? '99+' : count}
+      {formatUnreadCount(count)}
     </IonBadge>
   );
 }
