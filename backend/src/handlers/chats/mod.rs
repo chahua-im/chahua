@@ -500,6 +500,10 @@ pub(crate) fn build_message_side_effects(
             message_id: response.id,
             thread_root_id: response.reply_root_id,
             mentioned_uids: push_preview.mentioned_uids,
+            reply_target_uid: response
+                .reply_to_message
+                .as_ref()
+                .map(|message| message.sender.uid),
         })
     } else {
         None

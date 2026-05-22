@@ -32,6 +32,7 @@ pub struct PushJob {
     pub message_id: i64,
     pub thread_root_id: Option<i64>,
     pub mentioned_uids: Vec<i32>,
+    pub reply_target_uid: Option<i32>,
 }
 
 pub struct PushService {
@@ -208,6 +209,7 @@ mod tests {
             message_id: 99,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let payload = build_push_payload(&job, 3, "alice: [Sticker] 🙂");
@@ -252,6 +254,7 @@ mod tests {
             message_id: 99,
             thread_root_id: Some(77),
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let n = build_apns_notification(&job, 7);
@@ -287,6 +290,7 @@ mod tests {
             message_id: 99,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let payload = build_apns_notification(&job, 0);
@@ -314,6 +318,7 @@ mod tests {
             message_id: 50,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let n = build_apns_notification(&job, 2);
@@ -341,6 +346,7 @@ mod tests {
             message_id: 51,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let n = build_apns_notification(&job, 0);
@@ -366,6 +372,7 @@ mod tests {
             message_id: 52,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let n = build_apns_notification(&job, 1);
@@ -391,6 +398,7 @@ mod tests {
             message_id: 54,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let n = build_apns_notification(&job, 0);
@@ -419,6 +427,7 @@ mod tests {
             message_id: 53,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let n = build_apns_notification(&job, 0);
@@ -443,6 +452,7 @@ mod tests {
             message_id: 54,
             thread_root_id: None,
             mentioned_uids: Vec::new(),
+            reply_target_uid: None,
         };
 
         let n = build_apns_notification(&job, 0);

@@ -13,6 +13,7 @@ pub(crate) struct PushRecipientContext {
     pub uid: i32,
     pub is_sender: bool,
     pub is_mentioned: bool,
+    pub is_reply_target: bool,
     pub chat_archived: bool,
     pub group_muted_until: Option<DateTime<Utc>>,
     pub thread_state: ThreadPushState,
@@ -44,12 +45,18 @@ pub(crate) fn should_send_push(
         return PushDecision::Skip(PushSkipReason::Sender);
     }
 
-    if recipient.chat_archived {
-        return PushDecision::Skip(PushSkipReason::ChatArchived);
-    }
-
     if recipient.has_active_presence {
         return PushDecision::Skip(PushSkipReason::ActivePresence);
+    }
+
+    if recipient.is_reply_target
+        && matches!(recipient.thread_state, ThreadPushState::NotThreadMessage)
+    {
+        return PushDecision::Send;
+    }
+
+    if recipient.chat_archived {
+        return PushDecision::Skip(PushSkipReason::ChatArchived);
     }
 
     match recipient.thread_state {
@@ -95,6 +102,7 @@ mod tests {
                 uid: 7,
                 is_sender: false,
                 is_mentioned: false,
+                is_reply_target: false,
                 chat_archived: false,
                 group_muted_until: None,
                 thread_state,
@@ -125,6 +133,25 @@ mod tests {
         recipient.group_muted_until = Some(now + Duration::minutes(5));
         recipient.is_mentioned = true;
         assert_eq!(should_send_push(&recipient, now), PushDecision::Send);
+    }
+
+    #[test]
+    fn normal_reply_target_bypasses_group_mute() {
+        let (now, mut reply_target) = base(ThreadPushState::NotThreadMessage);
+        reply_target.uid = 42;
+        reply_target.is_reply_target = true;
+        reply_target.group_muted_until = Some(now + Duration::minutes(5));
+
+        assert_eq!(should_send_push(&reply_target, now), PushDecision::Send);
+    }
+
+    #[test]
+    fn normal_reply_target_bypasses_chat_archive() {
+        let (now, mut reply_target) = base(ThreadPushState::NotThreadMessage);
+        reply_target.is_reply_target = true;
+        reply_target.chat_archived = true;
+
+        assert_eq!(should_send_push(&reply_target, now), PushDecision::Send);
     }
 
     #[test]

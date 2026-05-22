@@ -252,6 +252,7 @@ async fn process_push_job(
                 uid: candidate.uid,
                 is_sender: candidate.uid == job.sender_uid,
                 is_mentioned: mentioned_uids.contains(&candidate.uid),
+                is_reply_target: job.reply_target_uid == Some(candidate.uid),
                 chat_archived: candidate.chat_archived,
                 group_muted_until: candidate.muted_until,
                 thread_state: candidate.thread_state,
