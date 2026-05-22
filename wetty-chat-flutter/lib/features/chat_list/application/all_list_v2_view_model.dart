@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'chat_list_v2_scope.dart';
 import 'group_list_v2_view_model.dart';
 import 'thread_list_v2_view_model.dart';
 
@@ -10,6 +11,10 @@ typedef AllListV2UiState = ({
 });
 
 class AllListV2ViewModel extends Notifier<AllListV2UiState> {
+  AllListV2ViewModel(this.scope);
+
+  final ChatListV2Scope scope;
+
   @override
   AllListV2UiState build() {
     return (isRefreshing: false, isLoadingMore: false, errorMessage: null);
@@ -29,8 +34,10 @@ class AllListV2ViewModel extends Notifier<AllListV2UiState> {
 
     try {
       await Future.wait([
-        ref.read(activeGroupListV2ViewModelProvider.notifier).refreshGroups(),
-        ref.read(activeThreadListV2ViewModelProvider.notifier).refreshThreads(),
+        ref.read(groupListV2ViewModelProvider(scope).notifier).refreshGroups(),
+        ref
+            .read(threadListV2ViewModelProvider(scope).notifier)
+            .refreshThreads(),
       ]);
       state = (isRefreshing: false, isLoadingMore: false, errorMessage: null);
     } catch (error) {
@@ -48,8 +55,10 @@ class AllListV2ViewModel extends Notifier<AllListV2UiState> {
       return;
     }
 
-    final groupState = ref.read(activeGroupListV2ViewModelProvider).value;
-    final threadState = ref.read(activeThreadListV2ViewModelProvider).value;
+    final groupProvider = groupListV2ViewModelProvider(scope);
+    final threadProvider = threadListV2ViewModelProvider(scope);
+    final groupState = ref.read(groupProvider).value;
+    final threadState = ref.read(threadProvider).value;
     final groupsHasMore = groupState?.hasMore ?? false;
     final threadsHasMore = threadState?.hasMore ?? false;
     if (!groupsHasMore && !threadsHasMore) {
@@ -64,14 +73,8 @@ class AllListV2ViewModel extends Notifier<AllListV2UiState> {
 
     try {
       await Future.wait([
-        if (groupsHasMore)
-          ref
-              .read(activeGroupListV2ViewModelProvider.notifier)
-              .loadMoreGroups(),
-        if (threadsHasMore)
-          ref
-              .read(activeThreadListV2ViewModelProvider.notifier)
-              .loadMoreThreads(),
+        if (groupsHasMore) ref.read(groupProvider.notifier).loadMoreGroups(),
+        if (threadsHasMore) ref.read(threadProvider.notifier).loadMoreThreads(),
       ]);
     } finally {
       state = (
@@ -84,6 +87,8 @@ class AllListV2ViewModel extends Notifier<AllListV2UiState> {
 }
 
 final allListV2ViewModelProvider =
-    NotifierProvider<AllListV2ViewModel, AllListV2UiState>(
-      AllListV2ViewModel.new,
-    );
+    NotifierProvider.family<
+      AllListV2ViewModel,
+      AllListV2UiState,
+      ChatListV2Scope
+    >(AllListV2ViewModel.new);

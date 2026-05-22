@@ -1,24 +1,21 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:chahua/app/routing/route_names.dart';
+import 'package:chahua/app/theme/style_config.dart';
+import 'package:chahua/features/chat_list/application/all_list_v2_models.dart';
+import 'package:chahua/features/chat_list/application/all_list_v2_projection.dart';
+import 'package:chahua/features/chat_list/application/all_list_v2_view_model.dart';
+import 'package:chahua/features/chat_list/application/chat_list_v2_scope.dart';
 import 'package:chahua/l10n/app_localizations.dart';
-
-import '../../../app/routing/route_names.dart';
-import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
-import 'package:chahua/features/shared/model/message/message.dart';
-import '../../shared/presentation/chat_timestamp_formatter.dart';
-import 'chat_workspace_layout_scope.dart';
-import 'widgets/chat_list_row.dart';
-import 'widgets/swipe_to_action_row.dart';
-import '../model/chat_list_item.dart';
-import '../model/thread_list_item.dart';
-import 'widgets/thread_list_row.dart';
-import '../application/all_list_v2_models.dart';
-import '../application/all_list_v2_projection.dart';
-import '../application/all_list_v2_view_model.dart';
-import '../application/chat_list_v2_scope.dart';
-import '../application/group_list_v2_view_model.dart';
-import '../application/thread_list_v2_view_model.dart';
+import 'package:chahua/features/chat_list/application/group_list_v2_store.dart';
+import 'package:chahua/features/chat_list/application/group_list_v2_view_model.dart';
+import 'package:chahua/features/chat_list/application/thread_list_v2_store.dart';
+import 'package:chahua/features/chat_list/application/thread_list_v2_view_model.dart';
+import 'package:chahua/features/chat_list/presentation/chat_workspace_layout_scope.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/group_list_v2_row.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/list_row_interaction_surface.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/thread_list_v2_row.dart';
 
 class AllListV2View extends ConsumerWidget {
   const AllListV2View({
@@ -35,10 +32,13 @@ class AllListV2View extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    final items = ref.watch(allListV2ItemsProvider);
-    final uiState = ref.watch(allListV2ViewModelProvider);
-    final groupAsync = ref.watch(activeGroupListV2ViewModelProvider);
-    final threadAsync = ref.watch(activeThreadListV2ViewModelProvider);
+    final items = ref.watch(allListV2ItemsProvider(scope));
+    final uiState = ref.watch(allListV2ViewModelProvider(scope));
+    final groupAsync = ref.watch(groupListV2ViewModelProvider(scope));
+    final threadAsync = ref.watch(threadListV2ViewModelProvider(scope));
+    final showArchiveFolder =
+        scope == ChatListV2Scope.active &&
+        ref.watch(_showAllArchivedFolderProvider);
     final isInitialLoading =
         items.isEmpty && groupAsync.isLoading && threadAsync.isLoading;
 
@@ -56,7 +56,7 @@ class AllListV2View extends ConsumerWidget {
       );
     }
 
-    if (items.isEmpty) {
+    if (items.isEmpty && !showArchiveFolder) {
       return SliverFillRemaining(
         hasScrollBody: false,
         child: Center(child: Text(l10n.noChatsOrThreadsYet)),
@@ -66,12 +66,20 @@ class AllListV2View extends ConsumerWidget {
     return SliverMainAxisGroup(
       slivers: [
         SliverList.builder(
-          itemCount: items.length,
-          itemBuilder: (context, index) => _AllListV2Row(
-            item: items[index],
-            selectedChatId: selectedChatId,
-            selectedThreadRootId: selectedThreadRootId,
-          ),
+          itemCount: items.length + (showArchiveFolder ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (showArchiveFolder && index == 0) {
+              return const _AllArchivedFolderRow();
+            }
+
+            final itemIndex = showArchiveFolder ? index - 1 : index;
+            return _AllListV2Row(
+              item: items[itemIndex],
+              scope: scope,
+              selectedChatId: selectedChatId,
+              selectedThreadRootId: selectedThreadRootId,
+            );
+          },
         ),
         if (uiState.isLoadingMore)
           const SliverToBoxAdapter(
@@ -85,152 +93,116 @@ class AllListV2View extends ConsumerWidget {
   }
 }
 
+final _showAllArchivedFolderProvider = Provider<bool>((ref) {
+  final hasArchivedGroups = ref.watch(
+    groupListV2StoreProvider.select((state) => state.hasArchivedGroups),
+  );
+  final hasArchivedThreads = ref.watch(
+    threadListV2StoreProvider.select(
+      (state) =>
+          state.hasArchivedThreads ||
+          state.unreadTotals.archivedThreadCount > 0,
+    ),
+  );
+  return hasArchivedGroups || hasArchivedThreads;
+});
+
+class _AllArchivedFolderRow extends StatelessWidget {
+  const _AllArchivedFolderRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return ListRowInteractionSurface(
+      isActive: false,
+      onTap: () {
+        context.push(
+          AppRoutes.archivedChats,
+          extra: {
+            'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
+              context,
+            ),
+          },
+        );
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: CupertinoColors.systemGrey5.resolveFrom(context),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    CupertinoIcons.archivebox,
+                    color: CupertinoColors.systemGrey.resolveFrom(context),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    l10n.archived,
+                    style: appTextStyle(
+                      context,
+                      fontSize: AppFontSizes.body,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(
+                  CupertinoIcons.chevron_right,
+                  size: 16,
+                  color: CupertinoColors.systemGrey3,
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 76),
+            child: Container(
+              height: 0.5,
+              color: CupertinoColors.separator.resolveFrom(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AllListV2Row extends StatelessWidget {
   const _AllListV2Row({
     required this.item,
+    required this.scope,
     required this.selectedChatId,
     required this.selectedThreadRootId,
   });
 
   final AllListV2Item item;
+  final ChatListV2Scope scope;
   final String? selectedChatId;
   final int? selectedThreadRootId;
 
   @override
   Widget build(BuildContext context) {
     return switch (item) {
-      AllGroupListV2Item(:final group) => _AllGroupListV2Row(
-        group: group,
+      AllGroupListV2Item(:final group) => GroupListV2Row(
+        chat: group,
+        scope: scope,
         isActive: group.id == selectedChatId,
       ),
-      AllThreadListV2Item(:final thread) => _AllThreadListV2Row(
+      AllThreadListV2Item(:final thread) => ThreadListV2Row(
         thread: thread,
+        scope: scope,
         isActive: thread.threadRootId == selectedThreadRootId,
       ),
     };
-  }
-}
-
-class _AllGroupListV2Row extends StatelessWidget {
-  const _AllGroupListV2Row({required this.group, required this.isActive});
-
-  final ChatListItem group;
-  final bool isActive;
-
-  @override
-  Widget build(BuildContext context) {
-    final chatName = group.name?.isNotEmpty == true
-        ? group.name!
-        : AppLocalizations.of(context)!.chatFallbackName(group.id);
-    final dateText = formatChatListTimestamp(context, group.lastMessageAt);
-    final lastMessage = group.lastMessage;
-    final isMuted =
-        group.mutedUntil != null && group.mutedUntil!.isAfter(DateTime.now());
-    final isUnread = group.unreadCount > 0;
-
-    return Consumer(
-      builder: (context, ref, _) => SwipeToActionRow(
-        key: ValueKey('group-all-v2-${group.id}'),
-        icon: isUnread ? CupertinoIcons.checkmark_alt : CupertinoIcons.mail,
-        label: isUnread
-            ? AppLocalizations.of(context)!.swipeActionMarkRead
-            : AppLocalizations.of(context)!.swipeActionMarkUnread,
-        onAction: () => ref
-            .read(activeGroupListV2ViewModelProvider.notifier)
-            .toggleGroupReadState(chatId: group.id),
-        child: ChatListRow(
-          chatName: chatName,
-          avatarUrl: group.avatarUrl,
-          timestampText: dateText,
-          unreadCount: group.unreadCount,
-          senderName: lastMessage?.sender.name,
-          lastMessageText: _messagePreviewText(
-            lastMessage,
-            AppLocalizations.of(context)!,
-          ),
-          isActive: isActive,
-          isMuted: isMuted,
-          onTap: () {
-            context.go(
-              AppRoutes.chatDetail(group.id),
-              extra: {
-                'launchRequest': _launchRequestForChat(group),
-                'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
-                  context,
-                ),
-              },
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  static LaunchRequest _launchRequestForChat(ChatListItem chat) {
-    final lastReadMessageId = int.tryParse(chat.lastReadMessageId ?? '');
-    if (chat.unreadCount <= 0 || lastReadMessageId == null) {
-      return const LaunchRequest.latest();
-    }
-    return LaunchRequest.unread(lastReadMessageId: lastReadMessageId);
-  }
-
-  static String _messagePreviewText(
-    MessagePreview? message,
-    AppLocalizations l10n,
-  ) {
-    if (message == null) {
-      return '';
-    }
-    return formatMessagePreview(
-      message: message.message,
-      messageType: message.messageType,
-      sticker: message.sticker,
-      attachments: message.attachments,
-      firstAttachmentKind: message.firstAttachmentKind,
-      isDeleted: message.isDeleted,
-      mentions: message.mentions,
-      l10n: l10n,
-    );
-  }
-}
-
-class _AllThreadListV2Row extends StatelessWidget {
-  const _AllThreadListV2Row({required this.thread, required this.isActive});
-
-  final ThreadListItem thread;
-  final bool isActive;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    return Consumer(
-      builder: (context, ref, _) => SwipeToActionRow(
-        key: ValueKey('thread-all-v2-${thread.chatId}-${thread.threadRootId}'),
-        direction: SwipeToActionDirection.left,
-        icon: CupertinoIcons.archivebox,
-        label: l10n.swipeActionArchive,
-        actionColor: CupertinoColors.systemOrange,
-        onAction: () => ref
-            .read(activeThreadListV2ViewModelProvider.notifier)
-            .archiveThread(thread),
-        child: ThreadListRow(
-          thread: thread,
-          isActive: isActive,
-          onTap: () {
-            context.go(
-              AppRoutes.threadDetail(
-                thread.chatId,
-                thread.threadRootId.toString(),
-              ),
-              extra: {
-                'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
-                  context,
-                ),
-              },
-            );
-          },
-        ),
-      ),
-    );
   }
 }

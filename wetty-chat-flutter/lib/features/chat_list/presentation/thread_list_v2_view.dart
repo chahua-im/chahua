@@ -7,12 +7,10 @@ import '../../../app/routing/route_names.dart';
 import '../../../app/theme/style_config.dart';
 import '../application/chat_list_v2_scope.dart';
 import '../application/thread_list_v2_store.dart';
-import '../model/thread_list_item.dart';
 import 'chat_workspace_layout_scope.dart';
 import 'widgets/list_row_interaction_surface.dart';
-import 'widgets/swipe_to_action_row.dart';
-import 'widgets/thread_list_row.dart';
 import 'widgets/unread_badge_formatter.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/thread_list_v2_row.dart';
 import '../application/thread_list_v2_view_model.dart';
 
 class ThreadListV2View extends ConsumerWidget {
@@ -112,7 +110,7 @@ class ThreadListV2View extends ConsumerWidget {
 
                 final threadIndex = showArchiveFolder ? index - 1 : index;
                 final thread = viewState.threads[threadIndex];
-                return _ThreadListV2Row(
+                return ThreadListV2Row(
                   scope: scope,
                   thread: thread,
                   isActive: thread.threadRootId == selectedThreadRootId,
@@ -228,62 +226,6 @@ class _UnreadBadge extends StatelessWidget {
           context,
           fontSize: AppFontSizes.unreadBadge,
           fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _ThreadListV2Row extends StatelessWidget {
-  const _ThreadListV2Row({
-    required this.scope,
-    required this.thread,
-    required this.isActive,
-  });
-
-  final ChatListV2Scope scope;
-  final ThreadListItem thread;
-  final bool isActive;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final provider = threadListV2ViewModelProvider(scope);
-    return Consumer(
-      builder: (context, ref, _) => SwipeToActionRow(
-        key: ValueKey('thread-v2-${thread.chatId}-${thread.threadRootId}'),
-        direction: SwipeToActionDirection.left,
-        icon: CupertinoIcons.archivebox,
-        label: switch (scope) {
-          ChatListV2Scope.active => l10n.swipeActionArchive,
-          ChatListV2Scope.archived => l10n.swipeActionUnarchive,
-        },
-        actionColor: switch (scope) {
-          ChatListV2Scope.active => CupertinoColors.systemOrange,
-          ChatListV2Scope.archived => CupertinoColors.systemGreen,
-        },
-        onAction: () => switch (scope) {
-          ChatListV2Scope.active =>
-            ref.read(provider.notifier).archiveThread(thread),
-          ChatListV2Scope.archived =>
-            ref.read(provider.notifier).unarchiveThread(thread),
-        },
-        child: ThreadListRow(
-          thread: thread,
-          isActive: isActive,
-          onTap: () {
-            context.go(
-              AppRoutes.threadDetail(
-                thread.chatId,
-                thread.threadRootId.toString(),
-              ),
-              extra: {
-                'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
-                  context,
-                ),
-              },
-            );
-          },
         ),
       ),
     );
