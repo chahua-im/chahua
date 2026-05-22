@@ -653,7 +653,12 @@ final conversationTimelineActiveSegmentProvider =
 
         if (scope.segments.isEmpty) {
           if (scope.optimisticMessages.isEmpty) {
-            return null;
+            return (
+              orderedMessages: const <ConversationMessageV2>[],
+              canLoadBefore: false,
+              canLoadAfter: false,
+              isLatestSlice: true,
+            );
           }
           return (
             orderedMessages: scope.optimisticMessages,

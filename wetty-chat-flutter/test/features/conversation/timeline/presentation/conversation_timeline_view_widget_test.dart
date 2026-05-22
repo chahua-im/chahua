@@ -19,6 +19,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   group('ConversationTimelineView live edge behavior', () {
+    testWidgets('hides loading spinner when latest conversation is empty', (
+      tester,
+    ) async {
+      final api = _FakeMessageApiService(const []);
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+
+      expect(find.byType(CupertinoActivityIndicator), findsNothing);
+    });
+
     testWidgets(
       'keeps latest message visible when latest row gains reactions at live edge',
       (tester) async {
