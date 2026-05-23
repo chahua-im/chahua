@@ -250,6 +250,12 @@ async fn post_add_member(
 
     let role = body.role.unwrap_or(GroupRole::Member);
 
+    let last_message_id: Option<i64> = crate::schema::groups::table
+        .filter(crate::schema::groups::id.eq(chat_id))
+        .select(crate::schema::groups::last_message_id)
+        .first(conn)
+        .optional()?
+        .flatten();
     let now = Utc::now();
     let new_membership = NewGroupMembership {
         chat_id,
@@ -258,6 +264,7 @@ async fn post_add_member(
         joined_at: now,
         join_reason: GroupJoinReason::DirectInvite,
         join_reason_extra: Some(json!({ "inviter_uid": uid })),
+        last_read_message_id: last_message_id,
     };
 
     diesel::insert_into(group_membership::table)

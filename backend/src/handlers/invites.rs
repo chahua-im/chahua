@@ -641,6 +641,12 @@ async fn post_redeem_invite(
                 }
             }
 
+            let last_message_id: Option<i64> = crate::schema::groups::table
+                .filter(crate::schema::groups::id.eq(invite.chat_id))
+                .select(crate::schema::groups::last_message_id)
+                .first(conn)
+                .optional()?
+                .flatten();
             match diesel::insert_into(group_membership::table)
                 .values(&NewGroupMembership {
                     chat_id: invite.chat_id,
@@ -653,6 +659,7 @@ async fn post_redeem_invite(
                         "code": invite.code,
                         "creator_uid": invite.creator_uid,
                     })),
+                    last_read_message_id: last_message_id,
                 })
                 .execute(conn)
             {

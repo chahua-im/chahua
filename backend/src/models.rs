@@ -464,6 +464,7 @@ pub struct NewGroupMembership {
     pub joined_at: DateTime<Utc>,
     pub join_reason: GroupJoinReason,
     pub join_reason_extra: Option<serde_json::Value>,
+    pub last_read_message_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]

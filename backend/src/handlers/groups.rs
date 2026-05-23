@@ -267,6 +267,7 @@ async fn post_group(
             joined_at: now,
             join_reason: GroupJoinReason::Creator,
             join_reason_extra: None,
+            last_read_message_id: None,
         })
         .execute(conn)?;
 
