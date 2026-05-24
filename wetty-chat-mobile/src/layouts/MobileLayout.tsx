@@ -3,7 +3,7 @@ import { Trans } from '@lingui/react/macro';
 import { chatbubbles, flask, settings } from 'ionicons/icons';
 import { useMemo } from 'react';
 import { useSelector } from 'react-redux';
-import { Redirect, Route, useLocation } from 'react-router-dom';
+import { Redirect, Route, useLocation, matchPath } from 'react-router-dom';
 
 import ChatsPage from '@/pages/chats';
 import ArchivedPage from '@/pages/archived';
@@ -29,6 +29,7 @@ import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { featureGatedList, whenFeature } from '@/features';
 import { selectTotalUnreadChatCount } from '@/store/chatsSlice';
 import styles from './MobileLayout.module.scss';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const TAB_ROOT_PATHS = ['/', '/chats', '/settings', '/demo'];
 
@@ -36,6 +37,8 @@ const MobileLayout: React.FC = () => {
   const location = useLocation();
   const unreadChatCount = useSelector(selectTotalUnreadChatCount);
   const isTabRoot = TAB_ROOT_PATHS.includes(location.pathname);
+  const chatMatch = matchPath<{ id: string }>(location.pathname, { path: '/chats/chat/:id', exact: true });
+  useDocumentTitle(chatMatch?.params.id);
 
   const tabBarButtons = useMemo(() => {
     return featureGatedList([

@@ -27,6 +27,7 @@ import { HeaderActionMenu, type HeaderActionMenuItem } from '@/components/Header
 import { useHasGlobalPermission } from '@/hooks/useHasGlobalPermission';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 import type { RootState } from '@/store';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 type DesktopRouteState = ChatThreadRouteState;
 
@@ -234,6 +235,7 @@ export function DesktopSplitLayout() {
   const groupInfoSavedMessagesMatch = savedMessagesEnabled ? routeGroupInfoSavedMessagesMatch : null;
   const disabledGroupSavedMessagesChatId = savedMessagesEnabled ? null : routeGroupInfoSavedMessagesMatch?.id;
   const disabledSavedMessagesSettings = !savedMessagesEnabled && currentRoute.savedMessagesSettings;
+  useDocumentTitle(activeChatId);
   const globalSettingsOpen = currentRoute.globalSettings;
   const initialArchivedTab: ChatListTab | null =
     archivedMatch?.tab === 'threads' || archivedMatch?.tab === 'groups' || archivedMatch?.tab === 'all'

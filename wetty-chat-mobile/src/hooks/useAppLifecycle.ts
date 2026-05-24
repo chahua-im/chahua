@@ -7,12 +7,11 @@ import {
   setWebSocketAppState,
   type WebSocketAppState,
 } from '@/api/ws';
+import { isPageHidden } from '@/utils/dom';
 
 function getAppLifecycleState(): WebSocketAppState {
   if (typeof document === 'undefined') return 'active';
-  if (document.visibilityState !== 'visible') return 'inactive';
-  if (typeof document.hasFocus === 'function' && !document.hasFocus()) return 'inactive';
-  return 'active';
+  return isPageHidden() ? 'inactive' : 'active';
 }
 
 export function useAppLifecycle(): void {
