@@ -426,7 +426,130 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(api.requests.any((request) => request.after == 40), isTrue);
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.pumpAndSettle();
         _expectRowVisibleInViewport(tester, 60);
+        await _flushHighlightClearTimer(tester);
+      },
+    );
+
+    // Use case:
+    // The user opens a chat from unread state, starts around the first unread
+    // row, then scrolls down until the app loads the final newer page. This
+    // maps to the suspected blink: the unread window is still conceptually an
+    // around/top-preferred view, but the final page reaches latest and queues a
+    // live-edge settle. The test captures the first frame that renders the new
+    // page before post-frame settle can hide a one-frame anchor jump.
+    testWidgets(
+      'unread newer page reaching latest does not paint a bottom-anchor frame',
+      (tester) async {
+        final api = _FakeMessageApiService(
+          const [],
+          aroundResponses: {
+            20: _response(
+              messages: _messages(21, 40),
+              nextCursor: '20',
+              prevCursor: '41',
+            ),
+          },
+          afterResponses: {
+            40: _response(messages: _messages(41, 60), prevCursor: null),
+          },
+          responseDelay: const Duration(milliseconds: 50),
+        );
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(
+          tester,
+          container: container,
+          viewportHeight: 360,
+          launchRequest: const LaunchRequest.unread(lastReadMessageId: 20),
+        );
+        await tester.pumpAndSettle();
+        _expectRowVisibleInViewport(tester, 21);
+
+        _jumpToCurrentBottom(tester);
+        await tester.pump();
+        expect(api.requests.any((request) => request.after == 40), isTrue);
+        final row40BeforeLatestPage = tester.getRect(_rowFinder(40));
+
+        // Resolve the delayed after=40 response. Depending on exactly when the
+        // future completes, this pump may only schedule the rebuild; the next
+        // captured frame is the one that matters for the visual glitch.
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final firstLatestFrame = await _captureNextFrameLayout(
+          tester,
+          rowFinder: _rowFinder(40),
+        );
+
+        expect(firstLatestFrame.scrollAnchor, lessThan(0.99));
+        expect(
+          firstLatestFrame.rowRect?.top,
+          closeTo(row40BeforeLatestPage.top, 2),
+        );
+
+        await _flushHighlightClearTimer(tester);
+      },
+    );
+
+    // Use case:
+    // Same unread-to-latest transition as above, but this assertion focuses on
+    // the actual blink the user sees. Message 40 is visible before the final
+    // newer page arrives; the first frame that includes messages 41..60 should
+    // not move row 40 far away and rely on a later post-frame jump to correct
+    // the viewport.
+    testWidgets(
+      'unread newer page reaching latest keeps stable row in place on first frame',
+      (tester) async {
+        final api = _FakeMessageApiService(
+          const [],
+          aroundResponses: {
+            20: _response(
+              messages: _messages(21, 40),
+              nextCursor: '20',
+              prevCursor: '41',
+            ),
+          },
+          afterResponses: {
+            40: _response(messages: _messages(41, 60), prevCursor: null),
+          },
+          responseDelay: const Duration(milliseconds: 50),
+        );
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(
+          tester,
+          container: container,
+          viewportHeight: 360,
+          launchRequest: const LaunchRequest.unread(lastReadMessageId: 20),
+        );
+        await tester.pumpAndSettle();
+        _expectRowVisibleInViewport(tester, 21);
+
+        _jumpToCurrentBottom(tester);
+        await tester.pump();
+        expect(api.requests.any((request) => request.after == 40), isTrue);
+        final row40BeforeLatestPage = tester.getRect(_rowFinder(40));
+
+        // Resolve after=40, then inspect the very next painted frame. A large
+        // delta here maps to the one-frame visual jump before settleToLiveEdge
+        // corrects the scroll offset.
+        await tester.pump(const Duration(milliseconds: 50));
+
+        final firstLatestFrame = await _captureNextFrameLayout(
+          tester,
+          rowFinder: _rowFinder(40),
+        );
+
+        expect(firstLatestFrame.rowRect, isNotNull);
+        expect(
+          firstLatestFrame.rowRect!.top,
+          closeTo(row40BeforeLatestPage.top, 2),
+        );
+
         await _flushHighlightClearTimer(tester);
       },
     );
@@ -869,6 +992,13 @@ Future<void> _moveSlightlyAwayFromLiveEdge(WidgetTester tester) async {
   await tester.pump();
 }
 
+void _jumpToCurrentBottom(WidgetTester tester) {
+  final position = tester
+      .state<ScrollableState>(find.byType(Scrollable))
+      .position;
+  position.jumpTo(position.maxScrollExtent);
+}
+
 void _expectRowBottomPinnedToViewport(WidgetTester tester, int messageId) {
   final viewport = tester.getRect(find.byKey(_viewportKey));
   final row = tester.getRect(_rowFinder(messageId));
@@ -896,6 +1026,26 @@ void _expectRowVisibleInViewport(WidgetTester tester, int messageId) {
   final row = tester.getRect(finder);
   expect(row.bottom, greaterThan(viewport.top));
   expect(row.top, lessThan(viewport.bottom));
+}
+
+Future<({Rect? rowRect, double scrollAnchor})> _captureNextFrameLayout(
+  WidgetTester tester, {
+  required Finder rowFinder,
+}) async {
+  Rect? rowRect;
+  double? scrollAnchor;
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (rowFinder.evaluate().length == 1) {
+      rowRect = tester.getRect(rowFinder);
+    }
+    scrollAnchor = tester
+        .widget<CustomScrollView>(find.byType(CustomScrollView))
+        .anchor;
+  });
+
+  await tester.pump();
+  return (rowRect: rowRect, scrollAnchor: scrollAnchor!);
 }
 
 Finder _rowFinder(int messageId) {

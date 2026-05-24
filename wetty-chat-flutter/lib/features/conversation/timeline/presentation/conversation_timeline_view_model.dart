@@ -131,6 +131,8 @@ class ConversationTimelineViewModel
   _TimelineRenderSplitPolicy _renderSplitPolicy =
       const _TimelineRenderSplitPolicy.none();
   bool _shouldCaptureLatestTailSplit = false;
+  bool _shouldSettleLiveEdgeAfterPagination = false;
+  Timer? _paginationSettleTimer;
 
   /// Generation of the viewport command, incremented on each issuance
   int _viewportCommandGeneration = 0;
@@ -149,7 +151,10 @@ class ConversationTimelineViewModel
   @override
   ConversationTimelineState build() {
     if (!_didRegisterDispose) {
-      ref.onDispose(_cancelHighlightClearTimer);
+      ref.onDispose(() {
+        _cancelHighlightClearTimer();
+        _cancelPaginationSettleTimer();
+      });
       _didRegisterDispose = true;
     }
     _repository = ref.read(conversationTimelineV2RepositoryProvider(identity));
@@ -228,6 +233,12 @@ class ConversationTimelineViewModel
     }
     if (snapshot.isNearBottom && state.canLoadNewer && !state.isLoadingNewer) {
       unawaited(loadNewer());
+    }
+    if (_shouldSettleLiveEdgeAfterPagination) {
+      _shouldSettleLiveEdgeAfterPagination = false;
+      if (!snapshot.viewportAtLiveEdge) {
+        _schedulePaginationSettleToLiveEdge();
+      }
     }
     final viewportExtentChanged =
         previousSnapshot != null &&
@@ -537,6 +548,14 @@ class ConversationTimelineViewModel
     final shouldSettleLiveEdge =
         canFollowLiveEdge &&
         segment.isLatestSlice &&
+        !state.isLoadingNewer &&
+        (_latestViewportSnapshot?.isNearBottom ?? false) &&
+        _lastRenderedTailStableKey != null &&
+        currentTailStableKey != null;
+    final shouldSettleAfterPagination =
+        canFollowLiveEdge &&
+        segment.isLatestSlice &&
+        state.isLoadingNewer &&
         (_latestViewportSnapshot?.isNearBottom ?? false) &&
         _lastRenderedTailStableKey != null &&
         currentTailStableKey != null;
@@ -550,10 +569,16 @@ class ConversationTimelineViewModel
       'pending=${_commandLabel(_pendingViewportCommand)} generation=$_viewportCommandGeneration',
       name: 'ConversationTimeline',
     );
+    if (shouldSettleAfterPagination) {
+      _shouldSettleLiveEdgeAfterPagination = true;
+    }
     if (shouldSettleLiveEdge) {
+      // settleToLiveEdge is a post-layout scroll correction. Preserve the
+      // existing placement so an unread/around window does not paint a
+      // bottom-anchored frame before the correction jump runs.
       _issueViewportCommand(
         kind: ConversationTimelineViewportCommandKind.settleToLiveEdge,
-        placement: ConversationTimelineViewportPlacement.bottomPreferred,
+        placement: _lastViewportCommand.placement,
       );
     }
     final viewportCommand = _takePendingViewportCommand(
@@ -625,6 +650,34 @@ class ConversationTimelineViewModel
   void _cancelHighlightClearTimer() {
     _highlightClearTimer?.cancel();
     _highlightClearTimer = null;
+  }
+
+  /// Cancels a deferred pagination settle that has not published yet.
+  void _cancelPaginationSettleTimer() {
+    _paginationSettleTimer?.cancel();
+    _paginationSettleTimer = null;
+  }
+
+  /// Publishes live-edge settle one frame after pagination reaches latest.
+  void _schedulePaginationSettleToLiveEdge() {
+    _paginationSettleTimer?.cancel();
+    _paginationSettleTimer = Timer(const Duration(milliseconds: 16), () {
+      _paginationSettleTimer = null;
+      final snapshot = _latestViewportSnapshot;
+      final canFollowLiveEdge =
+          (_activeSegmentMode?.isLatest ?? false) ||
+          _highlightFirstServerMessageIdAfter != null;
+      if (!canFollowLiveEdge ||
+          !(_activeSegment?.isLatestSlice ?? false) ||
+          snapshot == null ||
+          snapshot.viewportAtLiveEdge) {
+        return;
+      }
+      _publishViewportCommand(
+        kind: ConversationTimelineViewportCommandKind.settleToLiveEdge,
+        placement: _lastViewportCommand.placement,
+      );
+    });
   }
 
   ({ConversationTimelineViewportCommand command, int generation})?
