@@ -39,6 +39,8 @@ import {
 import styles from './ChatVirtualScroll.module.scss';
 import { Trans } from '@lingui/react/macro';
 import { useNativeScrollActivity } from '@/hooks/useNativeScrollActivity';
+import { usePageVisible } from '@/hooks/usePageVisible';
+import { isPageHidden } from '@/utils/dom';
 import {
   USER_SCROLL_ACTIVITY_GRACE_MS,
   TOP_DATE_FLOATING_GAP_PX,
@@ -1231,7 +1233,8 @@ export function ChatVirtualScroll({
       const rowNode = rowRefsMap.current.get(key);
       if (!container || !rowNode) return;
 
-      if (isAtBottomRef.current) {
+      // Skip auto-scroll while backgrounded to preserve read position.
+      if (isAtBottomRef.current && !isPageHidden()) {
         logVirtualScroll('mounted-row-resize', {
           key,
           index,
@@ -1647,6 +1650,7 @@ export function ChatVirtualScroll({
     } else if (
       mutation === 'append' &&
       (isAtBottomRef.current || pendingScrollToBottomRef.current) &&
+      !isPageHidden() && // skip auto-scroll while backgrounded
       !intent?.scrollToKey
     ) {
       logVirtualScroll('append-bottom-lock', {
@@ -2458,6 +2462,9 @@ export function ChatVirtualScroll({
   const contentPaddingTop = showTopEdgeHint ? EDGE_HINT_HEIGHT : 0;
   const contentPaddingBottom = bottomPadding + (showBottomEdgeHint ? EDGE_HINT_HEIGHT : 0);
 
+  // Recalculate atBottom when the page becomes visible again, since the scroll
+  // position may have been affected while the tab was in the background.
+  usePageVisible(updateAtBottom);
   return (
     <div
       ref={containerRef}

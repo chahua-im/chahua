@@ -1,5 +1,7 @@
 import { MAX_PINNED_REACTIONS } from '@/constants/emojiAndStickers';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isPageHidden } from '@/utils/dom';
+import { usePageVisible } from '@/hooks/usePageVisible';
 import { useFloatingDateVisibility } from '@/hooks/useFloatingDate';
 import {
   IonButton,
@@ -672,6 +674,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
 
   const flushPendingReadTarget = useCallback(() => {
     if (threadId || !chatId) return;
+    if (isPageHidden()) return;
 
     const targetMessageId = pendingReadTargetIdRef.current;
     if (!targetMessageId) return;
@@ -755,11 +758,39 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     threadId,
   ]);
 
+  // Flush pending read targets when the user returns to the app.
+  usePageVisible(() => {
+    if (!chatId) return;
+    if (threadId) {
+      flushPendingThreadRead();
+    } else {
+      flushPendingReadTarget();
+    }
+  });
+
   // Thread-specific mark-as-read: fires when viewing a thread and messages become visible.
   // Unlike chat read tracking (which is purely scroll-based), this also fires on mount
   // once the initial messages are rendered and the last visible message is known.
   const threadReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastThreadReadIdRef = useRef<string | null>(null);
+  const pendingThreadReadIdRef = useRef<string | null>(null);
+
+  const flushPendingThreadRead = useCallback(() => {
+    if (!threadId || !chatId) return;
+    const targetId = pendingThreadReadIdRef.current;
+    if (!targetId || isPageHidden()) return;
+    pendingThreadReadIdRef.current = null;
+    threadReadTimerRef.current = null;
+    lastThreadReadIdRef.current = targetId;
+    apiMarkThreadAsRead(threadId, targetId)
+      .then(() => {
+        dispatch(markThreadReadAction({ threadRootId: threadId }));
+      })
+      .catch((err) => {
+        console.error('Failed to mark thread as read', err);
+        lastThreadReadIdRef.current = null;
+      });
+  }, [chatId, threadId, dispatch]);
 
   useEffect(() => {
     if (!threadId || !chatId) return;
@@ -769,23 +800,12 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     const targetComparableId = parseComparableMessageId(lastFullyVisibleMessageId);
     if (targetComparableId == null) return;
 
-    // Debounce to avoid excessive API calls during rapid scrolling
     if (threadReadTimerRef.current) {
       clearTimeout(threadReadTimerRef.current);
     }
 
-    threadReadTimerRef.current = setTimeout(() => {
-      threadReadTimerRef.current = null;
-      lastThreadReadIdRef.current = lastFullyVisibleMessageId;
-      apiMarkThreadAsRead(threadId, lastFullyVisibleMessageId)
-        .then(() => {
-          dispatch(markThreadReadAction({ threadRootId: threadId }));
-        })
-        .catch((err) => {
-          console.error('Failed to mark thread as read', err);
-          lastThreadReadIdRef.current = null;
-        });
-    }, READ_REQUEST_COOLDOWN_MS);
+    pendingThreadReadIdRef.current = lastFullyVisibleMessageId;
+    threadReadTimerRef.current = setTimeout(flushPendingThreadRead, READ_REQUEST_COOLDOWN_MS);
 
     return () => {
       if (threadReadTimerRef.current) {
@@ -793,11 +813,12 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
         threadReadTimerRef.current = null;
       }
     };
-  }, [chatId, threadId, lastFullyVisibleMessageId, dispatch]);
+  }, [chatId, threadId, lastFullyVisibleMessageId, flushPendingThreadRead]);
 
   // Reset thread read state when switching threads
   useEffect(() => {
     lastThreadReadIdRef.current = null;
+    pendingThreadReadIdRef.current = null;
     if (threadReadTimerRef.current) {
       clearTimeout(threadReadTimerRef.current);
       threadReadTimerRef.current = null;
