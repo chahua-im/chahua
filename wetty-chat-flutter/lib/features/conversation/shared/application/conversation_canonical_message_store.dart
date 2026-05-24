@@ -216,6 +216,16 @@ class ConversationTimelineMessageStore
         ? null
         : existingScope.segments.last;
     if (latestSegment == null) {
+      putScope(
+        identity,
+        existingScope.copyWith(
+          optimisticMessages: optimisticMessages,
+          segments: [
+            ConversationTimelineCanonicalSegment(orderedMessages: [message]),
+          ],
+          hasReachedLatest: true,
+        ),
+      );
       return;
     }
 

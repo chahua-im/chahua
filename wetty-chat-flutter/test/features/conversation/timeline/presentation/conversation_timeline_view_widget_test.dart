@@ -8,6 +8,7 @@ import 'package:chahua/features/conversation/shared/domain/conversation_identity
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/conversation/timeline/presentation/conversation_timeline_view.dart';
 import 'package:chahua/features/conversation/timeline/presentation/conversation_timeline_view_model.dart';
+import 'package:chahua/features/conversation/timeline/presentation/jump_to_latest_fab.dart';
 import 'package:chahua/features/shared/data/read_state_repository.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:chahua/l10n/app_localizations.dart';
@@ -667,6 +668,157 @@ void main() {
     );
 
     // Use case:
+    // A realtime message from another user arrives while latest mode is already
+    // bottom anchored. This should follow the live edge just like a self-send
+    // would, even though there is no explicit composer scroll command.
+    testWidgets(
+      'pins other-user incoming message when latest live edge is bottom anchored',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 20));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 600);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 20);
+
+        _appendMessage(container, _message(21, senderUid: 99));
+        await tester.pump();
+        await tester.pump();
+
+        _expectRowBottomPinnedToViewport(tester, 21);
+        _expectJumpToLatestHidden();
+      },
+    );
+
+    // Use case:
+    // Unread launch can start in an around window, then the user scrolls down
+    // until the newer page reaches latest. Once the timeline has settled to
+    // that unread tail, a realtime message from another user should still
+    // follow live edge even though the active mode is not literal latest mode.
+    testWidgets(
+      'pins other-user incoming message after unread pagination reaches latest tail',
+      (tester) async {
+        final api = _FakeMessageApiService(
+          const [],
+          aroundResponses: {
+            20: _response(
+              messages: _messages(21, 40),
+              nextCursor: '20',
+              prevCursor: '41',
+            ),
+          },
+          afterResponses: {
+            40: _response(messages: _messages(41, 60), prevCursor: null),
+          },
+        );
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(
+          tester,
+          container: container,
+          viewportHeight: 360,
+          launchRequest: const LaunchRequest.unread(lastReadMessageId: 20),
+        );
+        await tester.pumpAndSettle();
+        _jumpToCurrentBottom(tester);
+        await tester.pumpAndSettle();
+        expect(api.requests.any((request) => request.after == 40), isTrue);
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.pumpAndSettle();
+        _expectRowBottomPinnedToViewport(tester, 60);
+
+        _appendMessage(container, _message(61, senderUid: 99));
+        await tester.pump();
+        await tester.pump();
+
+        _expectRowBottomPinnedToViewport(tester, 61);
+        _expectJumpToLatestHidden();
+        await _flushHighlightClearTimer(tester);
+      },
+    );
+
+    // Use case:
+    // The chat is open on an empty latest timeline and the first realtime
+    // message arrives from another user. The row should appear and be treated
+    // as live edge, not be dropped because there was no prior latest segment.
+    testWidgets(
+      'renders first other-user incoming message in empty latest conversation',
+      (tester) async {
+        final api = _FakeMessageApiService(const []);
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 600);
+        await _settleTimeline(tester);
+        expect(find.byType(CupertinoActivityIndicator), findsNothing);
+
+        _appendMessage(container, _message(1, senderUid: 99));
+        await tester.pump();
+        await tester.pump();
+
+        _expectRowBottomPinnedToViewport(tester, 1);
+        _expectJumpToLatestHidden();
+      },
+    );
+
+    // Use case:
+    // A larger incoming message can push the old tail out of view on the first
+    // layout pass. If the user was already at live edge, the timeline should
+    // settle to the new tall row instead of leaving the jump-to-bottom control.
+    testWidgets(
+      'pins tall other-user incoming message when latest live edge is bottom anchored',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 20));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 360);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 20);
+
+        _appendMessage(
+          container,
+          _message(21, senderUid: 99, text: _multiLineText('message 21', 8)),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        _expectRowBottomPinnedToViewport(tester, 21);
+        _expectJumpToLatestHidden();
+      },
+    );
+
+    // Use case:
+    // The user is still inside the live-edge follow threshold but not exactly
+    // tail-pinned. A larger incoming message should still follow; otherwise the
+    // new row remains below the viewport and only the jump-to-bottom FAB shows.
+    testWidgets(
+      'pins tall other-user incoming message when viewport is near live edge',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 20));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 360);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 20);
+        await _moveSlightlyAwayFromLiveEdge(tester);
+
+        _appendMessage(
+          container,
+          _message(21, senderUid: 99, text: _multiLineText('message 21', 8)),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        _expectRowBottomPinnedToViewport(tester, 21);
+        _expectJumpToLatestHidden();
+      },
+    );
+
+    // Use case:
     // Combine unread live-edge mode, viewport shrink, and a newly incoming
     // message. The timeline should preserve tail visibility after the resize and
     // then pin the appended row.
@@ -758,6 +910,54 @@ void main() {
 
       _expectRowBottomPinnedToViewport(tester, 21);
     });
+
+    // Use case:
+    // A local optimistic send happens while the user is already at live edge.
+    // The timeline should hand that case to scrollToBottom's animation rather
+    // than first jumping directly to the new max scroll extent.
+    testWidgets(
+      'animates own optimistic message to bottom when already at live edge',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 20));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 600);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 20);
+        final beforeSend = _scrollMetrics(tester);
+
+        final notifier = container.read(
+          conversationTimelineViewModelProvider(_identity).notifier,
+        );
+        final intent = notifier.captureLocalSendViewportIntent();
+        _appendConversationMessage(
+          container,
+          _optimisticTextMessage(
+            clientGeneratedId: 'local-send-21',
+            senderUid: 1,
+            text: 'local send 21',
+          ),
+        );
+        container
+            .read(conversationTimelineViewModelProvider(_identity).notifier)
+            .applyLocalSendViewportIntent(intent);
+        await tester.pump();
+
+        final firstFrame = _scrollMetrics(tester);
+        expect(firstFrame.max, greaterThan(beforeSend.max));
+        expect(firstFrame.pixels, lessThan(firstFrame.max - 1));
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 80));
+        final animationFrame = _scrollMetrics(tester);
+        expect(animationFrame.pixels, greaterThan(firstFrame.pixels));
+        expect(animationFrame.pixels, lessThan(animationFrame.max - 1));
+
+        await tester.pumpAndSettle();
+        _expectClientRowBottomPinnedToViewport(tester, 'local-send-21');
+      },
+    );
 
     // Use case:
     // The user is still within the near-bottom threshold, not exactly pinned,
@@ -987,6 +1187,15 @@ void _appendMessage(ProviderContainer container, MessageItemDto dto) {
       .newMessage(_identity, ConversationMessageV2.fromMessageItemDto(dto));
 }
 
+void _appendConversationMessage(
+  ProviderContainer container,
+  ConversationMessageV2 message,
+) {
+  container
+      .read(conversationTimelineMessageStoreProvider.notifier)
+      .newMessage(_identity, message);
+}
+
 Future<void> _moveSlightlyAwayFromLiveEdge(WidgetTester tester) async {
   await tester.drag(find.byType(CustomScrollView), const Offset(0, 48));
   await tester.pump();
@@ -1004,6 +1213,20 @@ void _expectRowBottomPinnedToViewport(WidgetTester tester, int messageId) {
   final row = tester.getRect(_rowFinder(messageId));
   expect(row.bottom, closeTo(viewport.bottom, 1));
   expect(row.top < viewport.bottom, isTrue);
+}
+
+void _expectClientRowBottomPinnedToViewport(
+  WidgetTester tester,
+  String clientGeneratedId,
+) {
+  final viewport = tester.getRect(find.byKey(_viewportKey));
+  final row = tester.getRect(_clientRowFinder(clientGeneratedId));
+  expect(row.bottom, closeTo(viewport.bottom, 1));
+  expect(row.top < viewport.bottom, isTrue);
+}
+
+void _expectJumpToLatestHidden() {
+  expect(find.byType(JumpToLatestFab), findsNothing);
 }
 
 void _expectRowBottomBelowViewport(WidgetTester tester, int messageId) {
@@ -1026,6 +1249,13 @@ void _expectRowVisibleInViewport(WidgetTester tester, int messageId) {
   final row = tester.getRect(finder);
   expect(row.bottom, greaterThan(viewport.top));
   expect(row.top, lessThan(viewport.bottom));
+}
+
+({double pixels, double max}) _scrollMetrics(WidgetTester tester) {
+  final position = tester
+      .state<ScrollableState>(find.byType(Scrollable))
+      .position;
+  return (pixels: position.pixels, max: position.maxScrollExtent);
 }
 
 Future<({Rect? rowRect, double scrollAnchor})> _captureNextFrameLayout(
@@ -1057,21 +1287,56 @@ Finder _rowFinder(int messageId) {
   );
 }
 
+Finder _clientRowFinder(String clientGeneratedId) {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is MessageRowV2 &&
+        widget.message.clientGeneratedId == clientGeneratedId,
+    description: 'MessageRowV2 for client message $clientGeneratedId',
+    skipOffstage: false,
+  );
+}
+
 List<MessageItemDto> _messages(int start, int end) {
   return [for (var id = start; id <= end; id++) _message(id)];
 }
 
-MessageItemDto _message(int id, {int reactionCount = 0, String? text}) {
+String _multiLineText(String prefix, int lineCount) {
+  return [
+    for (var index = 1; index <= lineCount; index++) '$prefix line $index',
+  ].join('\n');
+}
+
+MessageItemDto _message(
+  int id, {
+  int reactionCount = 0,
+  int senderUid = 7,
+  String? text,
+}) {
   return MessageItemDto(
     id: id,
     message: text ?? 'message $id',
-    sender: const UserDto(uid: 7, name: 'Sender'),
+    sender: UserDto(uid: senderUid, name: 'Sender $senderUid'),
     chatId: _identity.chatId,
     clientGeneratedId: 'client-$id',
     reactions: [
       for (var i = 0; i < reactionCount; i++)
         ReactionSummaryDto(emoji: 'r$i', count: i + 1),
     ],
+  );
+}
+
+ConversationMessageV2 _optimisticTextMessage({
+  required String clientGeneratedId,
+  required int senderUid,
+  required String text,
+}) {
+  return ConversationMessageV2(
+    clientGeneratedId: clientGeneratedId,
+    sender: User(uid: senderUid, name: 'Sender $senderUid'),
+    createdAt: DateTime(2026, 1, 1),
+    deliveryState: ConversationDeliveryState.sending,
+    content: TextMessageContent(text: text),
   );
 }
 

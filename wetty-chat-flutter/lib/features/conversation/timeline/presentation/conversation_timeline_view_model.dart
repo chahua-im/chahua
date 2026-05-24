@@ -542,6 +542,9 @@ class ConversationTimelineViewModel
     final currentTailStableKey = segment.orderedMessages.isEmpty
         ? null
         : segment.orderedMessages.last.stableKey;
+    final currentTailIsOptimistic =
+        segment.orderedMessages.isNotEmpty &&
+        segment.orderedMessages.last.serverMessageId == null;
     final canFollowLiveEdge =
         (_activeSegmentMode?.isLatest ?? false) ||
         _highlightFirstServerMessageIdAfter != null;
@@ -549,6 +552,7 @@ class ConversationTimelineViewModel
         canFollowLiveEdge &&
         segment.isLatestSlice &&
         !state.isLoadingNewer &&
+        !currentTailIsOptimistic &&
         (_latestViewportSnapshot?.isNearBottom ?? false) &&
         _lastRenderedTailStableKey != null &&
         currentTailStableKey != null;
@@ -556,6 +560,7 @@ class ConversationTimelineViewModel
         canFollowLiveEdge &&
         segment.isLatestSlice &&
         state.isLoadingNewer &&
+        !currentTailIsOptimistic &&
         (_latestViewportSnapshot?.isNearBottom ?? false) &&
         _lastRenderedTailStableKey != null &&
         currentTailStableKey != null;
