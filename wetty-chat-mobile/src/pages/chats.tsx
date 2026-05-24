@@ -41,7 +41,9 @@ export default function Chats() {
       </IonHeader>
       <ChatList
         onChatSelect={(chatId, resumeHash) => history.push({ pathname: `/chats/chat/${chatId}`, hash: resumeHash })}
-        onThreadSelect={(chatId, threadRootId) => history.push(`/chats/chat/${chatId}/thread/${threadRootId}`)}
+        onThreadSelect={(chatId, threadRootId, resumeHash) =>
+          history.push({ pathname: `/chats/chat/${chatId}/thread/${threadRootId}`, hash: resumeHash })
+        }
       />
     </IonPage>
   );

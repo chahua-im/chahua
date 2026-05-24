@@ -17,6 +17,9 @@ pub struct ThreadListItem {
     pub reply_count: i64,
     pub last_reply_at: DateTime<Utc>,
     pub unread_count: i64,
+    #[serde(with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub last_read_message_id: Option<i64>,
     pub subscribed_at: DateTime<Utc>,
     pub archived: bool,
 }

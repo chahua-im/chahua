@@ -125,9 +125,9 @@ import {
   unarchiveThread,
 } from '@/api/threads';
 import {
-  markThreadRead as markThreadReadAction,
   selectThreadArchivedStatus,
   selectThreadSubscriptionStatus,
+  setThreadReadState,
   setThreadSubscriptionStatus,
   setThreadsList,
 } from '@/store/threadsSlice';
@@ -225,7 +225,6 @@ function hasLoadedThreadChatMeta(cachedMeta?: { name?: string | null; myRole?: G
 
 function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const storeChatId = threadId ? `${chatId}_thread_${threadId}` : chatId;
-  const defaultAnchorType = threadId ? ('top' as const) : ('bottom' as const);
   const history = useHistory();
   const location = useLocation();
   const initialResumeMessageIdRef = useRef<string | null>(parseResumeHash(location.hash));
@@ -233,7 +232,6 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const lastHandledResumeKeyRef = useRef<string | null>(
     initialResumeMessageId ? `${storeChatId}:${initialResumeMessageId}` : null,
   );
-
   const dispatch = useDispatch();
   const currentUserId = useSelector((state: RootState) => state.user.uid);
   const currentUserName = useSelector((state: RootState) => state.user.username);
@@ -323,7 +321,13 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const [loadingNewer, setLoadingNewer] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadingNewerRef = useRef(false);
-  const [initialAnchor, setInitialAnchor] = useState<VirtualScrollAnchor>({ type: defaultAnchorType, token: 0 });
+  const [initialAnchor, setInitialAnchor] = useState<VirtualScrollAnchor>(() => {
+    if (initialResumeMessageId) {
+      return { type: 'message', messageId: initialResumeMessageId, token: 0 };
+    }
+    // For threads without a resume message, default to top (first visit).
+    return { type: threadId ? 'top' : 'bottom', token: 0 } as VirtualScrollAnchor;
+  });
   const [pendingResumeMessageId, setPendingResumeMessageId] = useState<string | null>(initialResumeMessageId);
   const [lastFullyVisibleMessageId, setLastFullyVisibleMessageId] = useState<string | null>(null);
   const [firstVisibleMessageId, setFirstVisibleMessageId] = useState<string | null>(null);
@@ -489,7 +493,11 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
       .catch(() => {});
   }, [chatId, threadId, pinsLoaded, dispatch]);
 
-  const [atBottom, setAtBottom] = useState(() => !threadId && initialResumeMessageId == null);
+  const [atBottom, setAtBottom] = useState(() => {
+    if (threadId) return false;
+    if (initialResumeMessageId) return false;
+    return true;
+  });
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null);
   const [profileSender, setProfileSender] = useState<User | null>(null);
   const [reactionDetail, setReactionDetail] = useState<{ messageId: string; emoji?: string } | null>(null);
@@ -784,8 +792,14 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     threadReadTimerRef.current = null;
     lastThreadReadIdRef.current = targetId;
     apiMarkThreadAsRead(threadId, targetId)
-      .then(() => {
-        dispatch(markThreadReadAction({ threadRootId: threadId }));
+      .then((res) => {
+        dispatch(
+          setThreadReadState({
+            threadRootId: threadId,
+            lastReadMessageId: res.data.lastReadMessageId,
+            unreadCount: res.data.unreadCount,
+          }),
+        );
       })
       .catch((err) => {
         console.error('Failed to mark thread as read', err);
@@ -848,6 +862,26 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
           forceReopen,
         });
       }
+      const resetAnchor = (resumeMessageId: string | null | undefined) => {
+        const effectiveAnchorType: VirtualScrollAnchor['type'] = threadId
+          ? resumeMessageId
+            ? 'message'
+            : 'top'
+          : 'bottom';
+
+        setInitialAnchor((currentAnchor) => {
+          let nextAnchor: VirtualScrollAnchor;
+          if (effectiveAnchorType === 'message' && currentAnchor.type === 'message') {
+            nextAnchor = { type: 'message', messageId: currentAnchor.messageId, token: currentAnchor.token + 1 };
+          } else if (effectiveAnchorType === 'message' && resumeMessageId) {
+            nextAnchor = { type: 'message', messageId: resumeMessageId, token: currentAnchor.token + 1 };
+          } else {
+            nextAnchor = { type: effectiveAnchorType, token: currentAnchor.token + 1 } as VirtualScrollAnchor;
+          }
+          return nextAnchor;
+        });
+      };
+
       getMessages(chatId, threadId ? { threadId } : undefined)
         .then((res) => {
           const list = res.data.messages ?? [];
@@ -898,19 +932,8 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
           dispatch(setTimelineMode({ chatId: storeChatId, mode: { type: 'latest' } }));
 
           if (shouldResetAnchor) {
-            setInitialAnchor((currentAnchor) => {
-              const nextAnchor = { type: defaultAnchorType, token: currentAnchor.token + 1 };
-              if (import.meta.env.DEV) {
-                console.log('[ChatThread] initialAnchor-reset', {
-                  reason: forceReopen ? 'fetchLatestWindow-forceReopen' : 'fetchLatestWindow-dataChanged',
-                  previous: currentAnchor,
-                  next: nextAnchor,
-                  chatId,
-                  storeChatId,
-                });
-              }
-              return nextAnchor;
-            });
+            const resumeId: string | null | undefined = initialResumeMessageId ?? res.data.lastReadMessageId;
+            resetAnchor(resumeId);
           } else if (import.meta.env.DEV) {
             console.log('[ChatThread] initialAnchor-preserved', {
               reason: 'fetchLatestWindow-equivalentWindow',
@@ -925,23 +948,11 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
             error: err.message,
           });
           dispatch(resetChat({ chatId: storeChatId, messages: [], nextCursor: null, prevCursor: null }));
-          setInitialAnchor((currentAnchor) => {
-            const nextAnchor = { type: defaultAnchorType, token: currentAnchor.token + 1 };
-            if (import.meta.env.DEV) {
-              console.log('[ChatThread] initialAnchor-reset', {
-                reason: 'fetchLatestWindow-error',
-                previous: currentAnchor,
-                next: nextAnchor,
-                chatId,
-                storeChatId,
-              });
-            }
-            return nextAnchor;
-          });
+          resetAnchor(initialResumeMessageId);
           showToast(err.message || t`Failed to load messages`);
         });
     },
-    [chatId, defaultAnchorType, dispatch, showToast, storeChatId, threadId],
+    [chatId, dispatch, initialResumeMessageId, showToast, storeChatId, threadId],
   );
 
   // Initial load — open at an explicitly requested resume point when navigated from chat list
@@ -1422,8 +1433,15 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
 
             // Mark as read up to the message we just sent
             if (threadId) {
-              dispatch(markThreadReadAction({ threadRootId: threadId }));
-              void apiMarkThreadAsRead(threadId, confirmed.id);
+              void apiMarkThreadAsRead(threadId, confirmed.id).then((res) => {
+                dispatch(
+                  setThreadReadState({
+                    threadRootId: threadId,
+                    lastReadMessageId: res.data.lastReadMessageId,
+                    unreadCount: res.data.unreadCount,
+                  }),
+                );
+              });
             } else {
               dispatch(setChatUnreadCount({ chatId, unreadCount: 0 }));
               dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: confirmed.id }));
@@ -1536,8 +1554,15 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
 
             // Mark as read up to the message we just sent
             if (threadId) {
-              dispatch(markThreadReadAction({ threadRootId: threadId }));
-              void apiMarkThreadAsRead(threadId, confirmed.id);
+              void apiMarkThreadAsRead(threadId, confirmed.id).then((res) => {
+                dispatch(
+                  setThreadReadState({
+                    threadRootId: threadId,
+                    lastReadMessageId: res.data.lastReadMessageId,
+                    unreadCount: res.data.unreadCount,
+                  }),
+                );
+              });
             } else {
               dispatch(setChatUnreadCount({ chatId, unreadCount: 0 }));
               dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: confirmed.id }));
@@ -1648,8 +1673,15 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
 
           // Mark as read up to the message we just sent
           if (threadId) {
-            dispatch(markThreadReadAction({ threadRootId: threadId }));
-            void apiMarkThreadAsRead(threadId, confirmed.id);
+            void apiMarkThreadAsRead(threadId, confirmed.id).then((res) => {
+              dispatch(
+                setThreadReadState({
+                  threadRootId: threadId,
+                  lastReadMessageId: res.data.lastReadMessageId,
+                  unreadCount: res.data.unreadCount,
+                }),
+              );
+            });
           } else {
             dispatch(setChatUnreadCount({ chatId, unreadCount: 0 }));
             dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: confirmed.id }));

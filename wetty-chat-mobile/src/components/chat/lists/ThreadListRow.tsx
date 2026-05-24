@@ -43,7 +43,7 @@ interface ThreadListRowProps {
   locale: string;
   isActive?: boolean;
   draftText?: string;
-  onSelect: (chatId: string, threadRootId: string) => void;
+  onSelect: (chatId: string, threadRootId: string, thread: StoredThreadListItem) => void;
   endAction?: {
     color: string;
     icon: string;
@@ -74,7 +74,7 @@ export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, e
       button
       detail={false}
       className={`${styles.threadRow} ${thread.unreadCount > 0 ? styles.unread : ''} ${isActive ? styles.active : ''}`}
-      onClick={() => onSelect(thread.chatId, rootMsg.id)}
+      onClick={() => onSelect(thread.chatId, rootMsg.id, thread)}
     >
       {/* Rows 2-4: avatar + content */}
       <span slot="start">

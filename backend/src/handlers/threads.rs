@@ -122,8 +122,14 @@ async fn mark_thread_read(
 ) -> Result<Json<MarkThreadReadResponse>, AppError> {
     let conn = &mut *conn;
 
+    // Look up chat_id from the root message
+    let chat_id: i64 = messages::table
+        .filter(messages::id.eq(thread_root_id))
+        .select(messages::chat_id)
+        .first(conn)?;
+
     let read_state =
-        thread_svc::mark_thread_as_read_state(conn, thread_root_id, uid, body.message_id)?;
+        thread_svc::mark_thread_as_read_state(conn, chat_id, thread_root_id, uid, body.message_id)?;
 
     Ok(Json(MarkThreadReadResponse {
         last_read_message_id: read_state.last_read_message_id,

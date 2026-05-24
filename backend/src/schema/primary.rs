@@ -354,11 +354,19 @@ diesel::table! {
 }
 
 diesel::table! {
-    thread_subscriptions (chat_id, thread_root_id, uid) {
+    thread_read_state (chat_id, thread_root_id, uid) {
         chat_id -> Int8,
         thread_root_id -> Int8,
         uid -> Int4,
         last_read_message_id -> Nullable<Int8>,
+    }
+}
+
+diesel::table! {
+    thread_subscriptions (chat_id, thread_root_id, uid) {
+        chat_id -> Int8,
+        thread_root_id -> Int8,
+        uid -> Int4,
         subscribed_at -> Timestamptz,
         archived -> Bool,
     }
@@ -440,6 +448,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     sticker_packs,
     stickers,
     thread_meta,
+    thread_read_state,
     thread_subscriptions,
     user_extra,
     user_favorite_stickers,

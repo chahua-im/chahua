@@ -14,6 +14,7 @@ export interface ThreadListItem {
   replyCount: number;
   lastReplyAt: string;
   unreadCount: number;
+  lastReadMessageId: string | null;
   subscribedAt: string;
   archived: boolean;
 }

@@ -235,7 +235,7 @@ export function DesktopSplitLayout() {
   const groupInfoSavedMessagesMatch = savedMessagesEnabled ? routeGroupInfoSavedMessagesMatch : null;
   const disabledGroupSavedMessagesChatId = savedMessagesEnabled ? null : routeGroupInfoSavedMessagesMatch?.id;
   const disabledSavedMessagesSettings = !savedMessagesEnabled && currentRoute.savedMessagesSettings;
-  useDocumentTitle(activeChatId);
+  useDocumentTitle(activeChatId, threadMatch?.threadId);
   const globalSettingsOpen = currentRoute.globalSettings;
   const initialArchivedTab: ChatListTab | null =
     archivedMatch?.tab === 'threads' || archivedMatch?.tab === 'groups' || archivedMatch?.tab === 'all'

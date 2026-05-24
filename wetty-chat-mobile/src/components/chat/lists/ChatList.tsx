@@ -147,7 +147,7 @@ interface ChatListProps {
   initialTab?: ChatListTab;
   onOpenArchived?: (tab: ChatListTab) => void;
   onChatSelect: (chatId: string, resumeHash?: string) => void;
-  onThreadSelect?: (chatId: string, threadRootId: string) => void;
+  onThreadSelect?: (chatId: string, threadRootId: string, resumeHash?: string) => void;
 }
 
 export function ChatList({
@@ -371,8 +371,11 @@ export function ChatList({
   }, [chats, threads]);
 
   const handleThreadSelect = useCallback(
-    (chatId: string, threadRootId: string) => {
-      onThreadSelect?.(chatId, threadRootId);
+    (chatId: string, threadRootId: string, thread: StoredThreadListItem) => {
+      const resumeHash = buildResumeHash({
+        lastReadMessageId: thread.lastReadMessageId,
+      });
+      onThreadSelect?.(chatId, threadRootId, resumeHash || undefined);
     },
     [onThreadSelect],
   );
@@ -463,7 +466,6 @@ export function ChatList({
           onChatSelect(
             chat.id,
             buildResumeHash({
-              unreadCount: chat.unreadCount,
               lastReadMessageId: chat.lastReadMessageId,
             }) || undefined,
           )

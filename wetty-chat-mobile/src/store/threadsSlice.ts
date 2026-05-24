@@ -124,6 +124,16 @@ const threadsSlice = createSlice({
         thread.unreadCount = 0;
       }
     },
+    setThreadReadState(
+      state,
+      action: PayloadAction<{ threadRootId: string; lastReadMessageId: string | null; unreadCount: number }>,
+    ) {
+      const thread = state.items.find((t) => t.threadRootMessage.id === action.payload.threadRootId);
+      if (thread) {
+        thread.lastReadMessageId = action.payload.lastReadMessageId;
+        thread.unreadCount = action.payload.unreadCount;
+      }
+    },
     setThreadSubscriptionStatus(
       state,
       action: PayloadAction<{ threadRootId: string; subscribed: boolean; archived?: boolean }>,
@@ -166,6 +176,7 @@ export const {
   patchThreadCachedLastReply,
   incrementThreadUnread,
   markThreadRead,
+  setThreadReadState,
   setThreadSubscriptionStatus,
   removeThread,
   patchThreadRootMessage,
@@ -197,6 +208,10 @@ export const selectThreadSubscriptionStatus = (state: RootState, threadRootId: s
   state.threads.subscriptionByThreadId[threadRootId] ?? null;
 export const selectThreadArchivedStatus = (state: RootState, threadRootId: string) =>
   state.threads.archivedByThreadId[threadRootId] ?? null;
+export const selectThreadUnreadCount = (state: RootState, threadRootId: string): number => {
+  const thread = state.threads.items.find((t) => t.threadRootMessage.id === threadRootId);
+  return thread?.unreadCount ?? 0;
+};
 export const selectShouldShowThreadsRow = (state: RootState) =>
   selectTotalUnreadThreadCount(state) > 0 ||
   (selectThreadsLoaded(state, false) && selectActiveThreads(state).length > 0);

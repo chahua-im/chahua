@@ -1,4 +1,5 @@
 import { getUnreadCount } from '@/api/chats';
+import { getUnreadThreadCount } from '@/api/threads';
 
 type BadgeCapable = {
   setAppBadge?: (contents?: number) => Promise<void>;
@@ -19,11 +20,12 @@ export async function syncAppBadgeCount(target: BadgeCapable | undefined = globa
   const requestId = ++latestBadgeSyncRequestId;
 
   try {
-    const res = await getUnreadCount();
+    const [chatRes, threadRes] = await Promise.all([getUnreadCount(), getUnreadThreadCount()]);
     if (requestId !== latestBadgeSyncRequestId) return;
 
-    if (res.data.unreadCount > 0) {
-      await setAppBadgeCount(target ?? {}, res.data.unreadCount);
+    const totalUnread = chatRes.data.unreadCount + threadRes.data.unreadThreadCount;
+    if (totalUnread > 0) {
+      await setAppBadgeCount(target ?? {}, totalUnread);
       return;
     }
 

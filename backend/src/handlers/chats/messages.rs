@@ -23,6 +23,7 @@ use crate::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchSort,
         SearchCandidateDropCounts,
     },
+    services::threads as thread_svc,
     utils::{auth::CurrentUid, pagination::validate_limit},
     AppState, MAX_MESSAGES_LIMIT,
 };
@@ -184,6 +185,14 @@ async fn get_messages(
 
     check_membership(conn, chat_id, uid)?;
 
+    // When fetching a thread's messages, ensure read-state tracking and return the last read position
+    let last_read_message_id: Option<i64> = if let Some(tid) = q.thread_id {
+        let _ = thread_svc::ensure_thread_read_state(conn, chat_id, tid, uid)?;
+        thread_svc::get_thread_read_state_last_read(conn, chat_id, tid, uid)?
+    } else {
+        None
+    };
+
     let max = validate_limit(q.max, MAX_MESSAGES_LIMIT);
 
     use crate::schema::messages::dsl;
@@ -250,6 +259,7 @@ async fn get_messages(
             messages: messages_vec,
             next_cursor,
             prev_cursor,
+            last_read_message_id,
         }));
     }
 
@@ -274,6 +284,7 @@ async fn get_messages(
             messages: messages_vec,
             next_cursor: None,
             prev_cursor,
+            last_read_message_id,
         }));
     }
 
@@ -307,6 +318,7 @@ async fn get_messages(
         messages: messages_vec,
         next_cursor,
         prev_cursor: None,
+        last_read_message_id,
     }))
 }
 
@@ -667,9 +679,16 @@ pub(super) async fn post_thread_message(
         let msg_side_effects = send_result.side_effects;
         let publish_now = publish_immediately;
 
-        // Auto-subscribe the replying user and mark as read
+        // Auto-subscribe the replying user and track read position
         crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)?;
-        crate::services::threads::mark_thread_as_read(conn, thread_id, uid, response.id)?;
+        crate::services::threads::ensure_thread_read_state(conn, chat_id, thread_id, uid)?;
+        crate::services::threads::update_thread_read_state_last_read(
+            conn,
+            chat_id,
+            thread_id,
+            uid,
+            response.id,
+        )?;
 
         // Auto-subscribe the root message author
         if root_msg.sender_uid != uid {

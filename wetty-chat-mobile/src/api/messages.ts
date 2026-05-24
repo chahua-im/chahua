@@ -142,6 +142,7 @@ export interface ListMessagesResponse {
   messages: MessageResponse[];
   nextCursor: string | null;
   prevCursor?: string | null;
+  lastReadMessageId?: string | null;
 }
 
 export interface SearchMessagesResponse {

@@ -14,7 +14,9 @@ use crate::dto::{
 };
 use crate::handlers::chats::{build_mention_info, build_sender, extract_mention_uids};
 use crate::models::{Attachment, Message, MessageType};
-use crate::schema::{attachments, messages, stickers, thread_meta, thread_subscriptions};
+use crate::schema::{
+    attachments, messages, stickers, thread_meta, thread_read_state, thread_subscriptions,
+};
 use crate::services::media::build_public_object_url;
 use crate::services::user::{lookup_user_avatars, lookup_user_profiles};
 use crate::services::ws_registry::ConnectionRegistry;
@@ -41,27 +43,67 @@ pub fn ensure_thread_subscription(
     Ok(inserted > 0)
 }
 
-fn latest_visible_thread_message_id(
+/// Ensure a thread_read_state row exists (upsert — called when user enters a thread).
+pub fn ensure_thread_read_state(
     conn: &mut PgConnection,
     chat_id: i64,
     thread_root_id: i64,
-) -> Result<Option<i64>, diesel::result::Error> {
-    messages::table
-        .filter(
-            messages::chat_id
-                .eq(chat_id)
-                .and(messages::deleted_at.is_null())
-                .and(messages::is_published.eq(true))
-                .and(
-                    messages::id
-                        .eq(thread_root_id)
-                        .or(messages::reply_root_id.eq(thread_root_id)),
-                ),
-        )
-        .select(diesel::dsl::max(messages::id))
-        .first(conn)
+    uid: i32,
+) -> Result<bool, diesel::result::Error> {
+    let inserted = diesel::insert_into(thread_read_state::table)
+        .values((
+            thread_read_state::chat_id.eq(chat_id),
+            thread_read_state::thread_root_id.eq(thread_root_id),
+            thread_read_state::uid.eq(uid),
+        ))
+        .on_conflict_do_nothing()
+        .execute(conn)?;
+    Ok(inserted > 0)
 }
 
+/// Update `last_read_message_id` on the thread_read_state row.
+pub fn update_thread_read_state_last_read(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    thread_root_id: i64,
+    uid: i32,
+    message_id: i64,
+) -> Result<bool, diesel::result::Error> {
+    let updated = diesel::update(
+        thread_read_state::table.filter(
+            thread_read_state::chat_id
+                .eq(chat_id)
+                .and(thread_read_state::thread_root_id.eq(thread_root_id))
+                .and(thread_read_state::uid.eq(uid))
+                .and(
+                    thread_read_state::last_read_message_id
+                        .is_null()
+                        .or(thread_read_state::last_read_message_id.lt(message_id)),
+                ),
+        ),
+    )
+    .set(thread_read_state::last_read_message_id.eq(Some(message_id)))
+    .execute(conn)?;
+    Ok(updated > 0)
+}
+
+/// Read `last_read_message_id` from the thread_read_state table.
+pub fn get_thread_read_state_last_read(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    thread_root_id: i64,
+    uid: i32,
+) -> Result<Option<i64>, diesel::result::Error> {
+    thread_read_state::table
+        .filter(
+            thread_read_state::chat_id
+                .eq(chat_id)
+                .and(thread_read_state::thread_root_id.eq(thread_root_id))
+                .and(thread_read_state::uid.eq(uid)),
+        )
+        .select(thread_read_state::last_read_message_id)
+        .first(conn)
+}
 /// Explicit subscribe (for "Follow thread" button).
 pub fn subscribe_to_thread(
     conn: &mut PgConnection,
@@ -75,8 +117,6 @@ pub fn subscribe_to_thread(
         return Ok(false);
     }
 
-    let last_read_message_id = latest_visible_thread_message_id(conn, chat_id, thread_root_id)?;
-
     if matches!(existing_archived, Some(true)) {
         let updated = diesel::update(
             thread_subscriptions::table.filter(
@@ -87,7 +127,6 @@ pub fn subscribe_to_thread(
             ),
         )
         .set((
-            thread_subscriptions::last_read_message_id.eq(last_read_message_id),
             thread_subscriptions::subscribed_at.eq(Utc::now()),
             thread_subscriptions::archived.eq(false),
         ))
@@ -100,7 +139,6 @@ pub fn subscribe_to_thread(
             thread_subscriptions::chat_id.eq(chat_id),
             thread_subscriptions::thread_root_id.eq(thread_root_id),
             thread_subscriptions::uid.eq(uid),
-            thread_subscriptions::last_read_message_id.eq(last_read_message_id),
             thread_subscriptions::subscribed_at.eq(Utc::now()),
             thread_subscriptions::archived.eq(false),
         ))
@@ -145,46 +183,6 @@ pub fn get_subscription_state(
         .first(conn)
         .optional()
 }
-
-/// Update `last_read_message_id` for an existing subscription only.
-pub fn mark_thread_as_read(
-    conn: &mut PgConnection,
-    thread_root_id: i64,
-    uid: i32,
-    message_id: i64,
-) -> Result<bool, diesel::result::Error> {
-    let updated = diesel::update(
-        thread_subscriptions::table.filter(
-            thread_subscriptions::thread_root_id
-                .eq(thread_root_id)
-                .and(thread_subscriptions::uid.eq(uid))
-                .and(
-                    thread_subscriptions::last_read_message_id
-                        .is_null()
-                        .or(thread_subscriptions::last_read_message_id.lt(message_id)),
-                ),
-        ),
-    )
-    .set(thread_subscriptions::last_read_message_id.eq(Some(message_id)))
-    .execute(conn)?;
-    Ok(updated > 0)
-}
-
-pub fn get_thread_last_read_message_id(
-    conn: &mut PgConnection,
-    thread_root_id: i64,
-    uid: i32,
-) -> Result<Option<i64>, diesel::result::Error> {
-    thread_subscriptions::table
-        .filter(
-            thread_subscriptions::thread_root_id
-                .eq(thread_root_id)
-                .and(thread_subscriptions::uid.eq(uid)),
-        )
-        .select(thread_subscriptions::last_read_message_id)
-        .first(conn)
-}
-
 #[derive(QueryableByName)]
 struct ThreadUnreadCountRow {
     #[diesel(sql_type = diesel::sql_types::BigInt)]
@@ -229,13 +227,17 @@ pub fn get_thread_unread_count(
 
 pub fn mark_thread_as_read_state(
     conn: &mut PgConnection,
+    chat_id: i64,
     thread_root_id: i64,
     uid: i32,
     message_id: i64,
 ) -> Result<ThreadReadState, diesel::result::Error> {
-    mark_thread_as_read(conn, thread_root_id, uid, message_id)?;
+    // Ensure the thread_read_state row exists (for both subscribed and unsubscribed users)
+    let _ = ensure_thread_read_state(conn, chat_id, thread_root_id, uid)?;
+    // Update thread_read_state (primary read-position store for all users)
+    let _ = update_thread_read_state_last_read(conn, chat_id, thread_root_id, uid, message_id)?;
 
-    let last_read_message_id = get_thread_last_read_message_id(conn, thread_root_id, uid)?;
+    let last_read_message_id = get_thread_read_state_last_read(conn, chat_id, thread_root_id, uid)?;
     let unread_count = get_thread_unread_count(conn, thread_root_id, uid, last_read_message_id)?;
 
     Ok(ThreadReadState {
@@ -429,6 +431,7 @@ pub fn broadcast_thread_membership_changed_to_user(
 }
 
 #[derive(QueryableByName)]
+#[diesel(table_name = thread_subscriptions)]
 pub struct ThreadListRow {
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     pub chat_id: i64,
@@ -446,6 +449,8 @@ pub struct ThreadListRow {
     pub subscribed_at: DateTime<Utc>,
     #[diesel(sql_type = diesel::sql_types::Bool)]
     pub archived: bool,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::BigInt>)]
+    pub read_state_last_read_message_id: Option<i64>,
 }
 
 /// List threads the user is subscribed to, ordered by most recent reply.
@@ -465,12 +470,14 @@ pub fn get_user_threads(
             COALESCE(tm.reply_count, 0)::bigint AS reply_count,
             COALESCE(tm.last_reply_at, ts.subscribed_at) AS last_reply_at,
             ts.subscribed_at,
-            ts.archived
+            ts.archived,
+            trs.last_read_message_id AS read_state_last_read_message_id
         FROM thread_subscriptions ts
         LEFT JOIN thread_meta tm ON tm.chat_id = ts.chat_id AND tm.thread_root_id = ts.thread_root_id
         JOIN groups g ON g.id = ts.chat_id
         LEFT JOIN media avatar_media ON g.avatar_image_id = avatar_media.id AND avatar_media.deleted_at IS NULL
         JOIN messages root_msg ON root_msg.id = ts.thread_root_id
+        LEFT JOIN thread_read_state trs ON trs.chat_id = ts.chat_id AND trs.thread_root_id = ts.thread_root_id AND trs.uid = ts.uid
         WHERE ts.uid = $1
           AND ts.archived = $2
           AND root_msg.deleted_at IS NULL
@@ -515,8 +522,10 @@ pub fn get_unread_summary_counts(
 ) -> Result<UnreadThreadSummaryCounts, diesel::result::Error> {
     let query = sql_query(
         "WITH qualified_subscriptions AS MATERIALIZED (
-             SELECT ts.thread_root_id, ts.last_read_message_id, ts.archived
+             SELECT ts.thread_root_id, ts.archived,
+                    COALESCE(trs.last_read_message_id, 0) AS last_read_message_id
              FROM thread_subscriptions ts
+             LEFT JOIN thread_read_state trs ON trs.chat_id = ts.chat_id AND trs.thread_root_id = ts.thread_root_id AND trs.uid = ts.uid
              JOIN messages root_msg ON root_msg.id = ts.thread_root_id
              WHERE ts.uid = $1
                AND root_msg.deleted_at IS NULL
@@ -532,7 +541,7 @@ pub fn get_unread_summary_counts(
                  WHERE m.reply_root_id = ts.thread_root_id
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
-                   AND m.id > COALESCE(ts.last_read_message_id, 0)
+                   AND m.id > ts.last_read_message_id
                )
          ),
          archived_unread_threads AS (
@@ -545,7 +554,7 @@ pub fn get_unread_summary_counts(
                  WHERE m.reply_root_id = ts.thread_root_id
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
-                   AND m.id > COALESCE(ts.last_read_message_id, 0)
+                   AND m.id > ts.last_read_message_id
                )
          ),
          active_unread_messages AS (
@@ -557,7 +566,7 @@ pub fn get_unread_summary_counts(
                  WHERE m.reply_root_id = ts.thread_root_id
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
-                   AND m.id > COALESCE(ts.last_read_message_id, 0)
+                   AND m.id > ts.last_read_message_id
                  LIMIT $2
              ) unread_message ON TRUE
              WHERE ts.archived = FALSE
@@ -572,7 +581,7 @@ pub fn get_unread_summary_counts(
                  WHERE m.reply_root_id = ts.thread_root_id
                    AND m.deleted_at IS NULL
                    AND m.is_published = TRUE
-                   AND m.id > COALESCE(ts.last_read_message_id, 0)
+                   AND m.id > ts.last_read_message_id
                  LIMIT $2
              ) unread_message ON TRUE
              WHERE ts.archived = TRUE
@@ -655,15 +664,11 @@ pub fn enrich_thread_list(
         "SELECT ts.thread_root_id,
                 COUNT(unread_messages.marker)::bigint AS unread_count
          FROM thread_subscriptions ts
-         LEFT JOIN LATERAL (
-             SELECT 1 AS marker
-             FROM messages m
-             WHERE m.reply_root_id = ts.thread_root_id
-               AND m.deleted_at IS NULL
-               AND m.is_published = TRUE
-               AND m.id > COALESCE(ts.last_read_message_id, 0)
-             LIMIT $4
-         ) AS unread_messages ON TRUE
+         LEFT JOIN thread_read_state trs ON trs.chat_id = ts.chat_id AND trs.thread_root_id = ts.thread_root_id AND trs.uid = ts.uid
+         JOIN messages m ON m.reply_root_id = ts.thread_root_id
+                        AND m.deleted_at IS NULL
+                        AND m.is_published = TRUE
+                        AND m.id > COALESCE(trs.last_read_message_id, 0)
          WHERE ts.uid = $1
            AND ts.archived = $2
            AND ts.thread_root_id = ANY($3)
@@ -914,6 +919,7 @@ pub fn enrich_thread_list(
                 reply_count: row.reply_count,
                 last_reply_at: row.last_reply_at,
                 unread_count: unread_map.get(&row.thread_root_id).copied().unwrap_or(0),
+                last_read_message_id: row.read_state_last_read_message_id,
                 subscribed_at: row.subscribed_at,
                 archived: row.archived,
             })

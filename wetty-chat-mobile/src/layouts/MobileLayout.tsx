@@ -28,6 +28,7 @@ import { safariSafeRouteAnimation } from '@/utils/navigationHistory';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { featureGatedList, whenFeature } from '@/features';
 import { selectTotalUnreadChatCount } from '@/store/chatsSlice';
+import { selectTotalUnreadThreadCount } from '@/store/threadsSlice';
 import styles from './MobileLayout.module.scss';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
@@ -36,9 +37,15 @@ const TAB_ROOT_PATHS = ['/', '/chats', '/settings', '/demo'];
 const MobileLayout: React.FC = () => {
   const location = useLocation();
   const unreadChatCount = useSelector(selectTotalUnreadChatCount);
+  const unreadThreadCount = useSelector(selectTotalUnreadThreadCount);
+  const totalUnreadCount = unreadChatCount + unreadThreadCount;
   const isTabRoot = TAB_ROOT_PATHS.includes(location.pathname);
   const chatMatch = matchPath<{ id: string }>(location.pathname, { path: '/chats/chat/:id', exact: true });
-  useDocumentTitle(chatMatch?.params.id);
+  const threadMatch = matchPath<{ id: string; threadId: string }>(location.pathname, {
+    path: '/chats/chat/:id/thread/:threadId',
+    exact: true,
+  });
+  useDocumentTitle(chatMatch?.params.id, threadMatch?.params.threadId);
 
   const tabBarButtons = useMemo(() => {
     return featureGatedList([
@@ -47,7 +54,7 @@ const MobileLayout: React.FC = () => {
         <IonLabel>
           <Trans>Chats</Trans>
         </IonLabel>
-        {unreadChatCount > 0 && <IonBadge color="primary">{formatUnreadBadge(unreadChatCount)}</IonBadge>}
+        {totalUnreadCount > 0 && <IonBadge color="primary">{formatUnreadBadge(totalUnreadCount)}</IonBadge>}
       </IonTabButton>,
       <IonTabButton tab="settings" href="/settings" key="settings">
         <IonIcon icon={settings} />
@@ -63,7 +70,7 @@ const MobileLayout: React.FC = () => {
         </IonTabButton>,
       ),
     ]);
-  }, [unreadChatCount]);
+  }, [totalUnreadCount]);
 
   return (
     <IonTabs className={`${isTabRoot ? '' : styles.tabBarHidden}`}>
