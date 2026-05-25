@@ -618,8 +618,7 @@ void main() {
         _expectRowBottomPinnedToViewport(tester, 21);
 
         _appendMessage(container, _message(22));
-        await tester.pump();
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
 
         _expectRowBottomPinnedToViewport(tester, 22);
         await _flushHighlightClearTimer(tester);
@@ -683,9 +682,43 @@ void main() {
         _expectRowBottomPinnedToViewport(tester, 20);
 
         _appendMessage(container, _message(21, senderUid: 99));
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
+
+        _expectRowBottomPinnedToViewport(tester, 21);
+        _expectJumpToLatestHidden();
+      },
+    );
+
+    // Use case:
+    // A realtime message from another user arrives while latest mode is already
+    // bottom anchored. It should move into view with the same scroll animation
+    // shape as a local send, not jump directly to the new max scroll extent.
+    testWidgets(
+      'animates other-user incoming message when latest live edge is bottom anchored',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 20));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 600);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 20);
+        final beforeAppend = _scrollMetrics(tester);
+
+        _appendMessage(container, _message(21, senderUid: 99));
         await tester.pump();
 
+        final firstFrame = _scrollMetrics(tester);
+        expect(firstFrame.max, greaterThan(beforeAppend.max));
+        expect(firstFrame.pixels, lessThan(firstFrame.max - 1));
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 80));
+        final animationFrame = _scrollMetrics(tester);
+        expect(animationFrame.pixels, greaterThan(firstFrame.pixels));
+        expect(animationFrame.pixels, lessThan(animationFrame.max - 1));
+
+        await tester.pumpAndSettle();
         _expectRowBottomPinnedToViewport(tester, 21);
         _expectJumpToLatestHidden();
       },
@@ -730,9 +763,67 @@ void main() {
         _expectRowBottomPinnedToViewport(tester, 60);
 
         _appendMessage(container, _message(61, senderUid: 99));
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
+
+        _expectRowBottomPinnedToViewport(tester, 61);
+        _expectJumpToLatestHidden();
+        await _flushHighlightClearTimer(tester);
+      },
+    );
+
+    // Use case:
+    // Unread/history launch can still become live edge after the user scrolls
+    // down and newer pagination reaches latest. A realtime message from another
+    // user should animate into view there too, even though the active mode is
+    // history-shaped rather than plain latest mode.
+    testWidgets(
+      'animates other-user incoming message after unread pagination reaches latest tail',
+      (tester) async {
+        final api = _FakeMessageApiService(
+          const [],
+          aroundResponses: {
+            20: _response(
+              messages: _messages(21, 40),
+              nextCursor: '20',
+              prevCursor: '41',
+            ),
+          },
+          afterResponses: {
+            40: _response(messages: _messages(41, 60), prevCursor: null),
+          },
+        );
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(
+          tester,
+          container: container,
+          viewportHeight: 360,
+          launchRequest: const LaunchRequest.unread(lastReadMessageId: 20),
+        );
+        await tester.pumpAndSettle();
+        _jumpToCurrentBottom(tester);
+        await tester.pumpAndSettle();
+        expect(api.requests.any((request) => request.after == 40), isTrue);
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.pumpAndSettle();
+        _expectRowBottomPinnedToViewport(tester, 60);
+        final beforeAppend = _scrollMetrics(tester);
+
+        _appendMessage(container, _message(61, senderUid: 99));
         await tester.pump();
 
+        final firstFrame = _scrollMetrics(tester);
+        expect(firstFrame.max, greaterThan(beforeAppend.max));
+        expect(firstFrame.pixels, lessThan(firstFrame.max - 1));
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 80));
+        final animationFrame = _scrollMetrics(tester);
+        expect(animationFrame.pixels, greaterThan(firstFrame.pixels));
+        expect(animationFrame.pixels, lessThan(animationFrame.max - 1));
+
+        await tester.pumpAndSettle();
         _expectRowBottomPinnedToViewport(tester, 61);
         _expectJumpToLatestHidden();
         await _flushHighlightClearTimer(tester);
@@ -755,8 +846,7 @@ void main() {
         expect(find.byType(CupertinoActivityIndicator), findsNothing);
 
         _appendMessage(container, _message(1, senderUid: 99));
-        await tester.pump();
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
 
         _expectRowBottomPinnedToViewport(tester, 1);
         _expectJumpToLatestHidden();
@@ -782,8 +872,7 @@ void main() {
           container,
           _message(21, senderUid: 99, text: _multiLineText('message 21', 8)),
         );
-        await tester.pump();
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
 
         _expectRowBottomPinnedToViewport(tester, 21);
         _expectJumpToLatestHidden();
@@ -810,8 +899,7 @@ void main() {
           container,
           _message(21, senderUid: 99, text: _multiLineText('message 21', 8)),
         );
-        await tester.pump();
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
 
         _expectRowBottomPinnedToViewport(tester, 21);
         _expectJumpToLatestHidden();
@@ -856,8 +944,7 @@ void main() {
         _expectRowBottomPinnedToViewport(tester, 21);
 
         _appendMessage(container, _message(22));
-        await tester.pump();
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
 
         _expectRowBottomPinnedToViewport(tester, 22);
         await _flushHighlightClearTimer(tester);
@@ -880,8 +967,7 @@ void main() {
         _expectRowBottomPinnedToViewport(tester, 20);
 
         _appendMessage(container, _message(21));
-        await tester.pump();
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
 
         _expectRowBottomPinnedToViewport(tester, 21);
       },
@@ -905,8 +991,7 @@ void main() {
       await _pumpTimeline(tester, container: container, viewportHeight: 360);
       await tester.pump();
       _appendMessage(container, _message(21));
-      await tester.pump();
-      await tester.pump();
+      await _settleLiveEdgeAnimation(tester);
 
       _expectRowBottomPinnedToViewport(tester, 21);
     });
@@ -1088,8 +1173,7 @@ void main() {
       await _moveSlightlyAwayFromLiveEdge(tester);
 
       _appendMessage(container, _message(21));
-      await tester.pump();
-      await tester.pump();
+      await _settleLiveEdgeAnimation(tester);
 
       _expectRowBottomPinnedToViewport(tester, 21);
     });
@@ -1112,8 +1196,7 @@ void main() {
 
         await _pumpTimeline(tester, container: container, viewportHeight: 360);
         _appendMessage(container, _message(21));
-        await tester.pump();
-        await tester.pump();
+        await _settleLiveEdgeAnimation(tester);
 
         _expectRowBottomPinnedToViewport(tester, 21);
       },
@@ -1169,6 +1252,11 @@ Future<void> _pumpTimeline(
 Future<void> _settleTimeline(WidgetTester tester) async {
   await tester.pump();
   await tester.pump();
+}
+
+Future<void> _settleLiveEdgeAnimation(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pumpAndSettle();
 }
 
 Future<void> _flushHighlightClearTimer(WidgetTester tester) async {

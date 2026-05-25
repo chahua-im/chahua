@@ -542,6 +542,10 @@ class ConversationTimelineViewModel
     final currentTailStableKey = segment.orderedMessages.isEmpty
         ? null
         : segment.orderedMessages.last.stableKey;
+    final liveTailChanged =
+        currentTailStableKey != null &&
+        _lastRenderedTailStableKey != null &&
+        currentTailStableKey != _lastRenderedTailStableKey;
     final currentTailIsOptimistic =
         segment.orderedMessages.isNotEmpty &&
         segment.orderedMessages.last.serverMessageId == null;
@@ -570,7 +574,8 @@ class ConversationTimelineViewModel
       'split=${_splitLabel(_renderSplitPolicy)} '
       'before=${beforeMessages.length} after=${afterMessages.length} '
       'lastTail=$_lastRenderedTailStableKey currentTail=$currentTailStableKey '
-      'latestSnapshot=$_latestViewportSnapshot shouldSettleLiveEdge=$shouldSettleLiveEdge '
+      'liveTailChanged=$liveTailChanged latestSnapshot=$_latestViewportSnapshot '
+      'shouldSettleLiveEdge=$shouldSettleLiveEdge '
       'pending=${_commandLabel(_pendingViewportCommand)} generation=$_viewportCommandGeneration',
       name: 'ConversationTimeline',
     );
@@ -578,11 +583,13 @@ class ConversationTimelineViewModel
       _shouldSettleLiveEdgeAfterPagination = true;
     }
     if (shouldSettleLiveEdge) {
-      // settleToLiveEdge is a post-layout scroll correction. Preserve the
-      // existing placement so an unread/around window does not paint a
-      // bottom-anchored frame before the correction jump runs.
+      // New live-tail rows should animate into view. Same-tail mutations and
+      // viewport corrections keep the non-animated settle path to avoid
+      // acceleration artifacts while preserving the user's live-edge contract.
       _issueViewportCommand(
-        kind: ConversationTimelineViewportCommandKind.settleToLiveEdge,
+        kind: liveTailChanged
+            ? ConversationTimelineViewportCommandKind.scrollToBottom
+            : ConversationTimelineViewportCommandKind.settleToLiveEdge,
         placement: _lastViewportCommand.placement,
       );
     }
