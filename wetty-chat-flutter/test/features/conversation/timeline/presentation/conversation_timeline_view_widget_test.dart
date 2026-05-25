@@ -591,6 +591,45 @@ void main() {
     );
 
     // Use case:
+    // Unread launch can return only unread rows and still already be at the
+    // latest slice. If the keyboard opens in that state, the tail should move
+    // above the compose area instead of staying below the shrunken viewport.
+    testWidgets(
+      'keeps omitted-boundary unread tail pinned when viewport shrinks',
+      (tester) async {
+        final api = _FakeMessageApiService(
+          const [],
+          aroundResponses: {
+            20: _response(messages: _messages(21, 30), nextCursor: '20'),
+          },
+        );
+        final container = await _container(api);
+        addTearDown(container.dispose);
+        const launchRequest = LaunchRequest.unread(lastReadMessageId: 20);
+
+        await _pumpTimeline(
+          tester,
+          container: container,
+          viewportHeight: 600,
+          launchRequest: launchRequest,
+        );
+        await tester.pumpAndSettle();
+        _expectRowBottomPinnedToViewport(tester, 30);
+
+        await _pumpTimeline(
+          tester,
+          container: container,
+          viewportHeight: 360,
+          launchRequest: launchRequest,
+        );
+        await tester.pumpAndSettle();
+
+        _expectRowBottomPinnedToViewport(tester, 30);
+        await _flushHighlightClearTimer(tester);
+      },
+    );
+
+    // Use case:
     // Unread launch can land on a window that already reaches latest. If the
     // user is at that unread live edge, a new incoming message should pin to the
     // bottom like latest mode.
@@ -659,7 +698,7 @@ void main() {
           viewportHeight: 360,
           launchRequest: launchRequest,
         );
-        await tester.pump();
+        await tester.pumpAndSettle();
 
         _expectRowBottomPinnedToViewport(tester, 21);
         await _flushHighlightClearTimer(tester);
@@ -940,7 +979,7 @@ void main() {
           viewportHeight: 360,
           launchRequest: launchRequest,
         );
-        await tester.pump();
+        await tester.pumpAndSettle();
         _expectRowBottomPinnedToViewport(tester, 21);
 
         _appendMessage(container, _message(22));
@@ -1201,6 +1240,289 @@ void main() {
         _expectRowBottomPinnedToViewport(tester, 21);
       },
     );
+
+    // Use case:
+    // The user is intentionally reading history, well outside the live-edge
+    // follow threshold, when another user sends a new message. The new message
+    // should not yank the viewport away from the historical row being read.
+    testWidgets(
+      'keeps browsing position when incoming message arrives away from live edge',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 60));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 360);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 60);
+
+        await tester.drag(find.byType(CustomScrollView), const Offset(0, 520));
+        await tester.pumpAndSettle();
+        final beforeAppend = _scrollMetrics(tester);
+        final anchorBefore = _visibleServerRowClosestToCenter(
+          tester,
+          List<int>.generate(60, (index) => index + 1),
+        );
+
+        _appendMessage(container, _message(61, senderUid: 99));
+        await tester.pumpAndSettle();
+
+        final afterAppend = _scrollMetrics(tester);
+        final anchorAfter = tester.getRect(_rowFinder(anchorBefore.messageId));
+        expect(afterAppend.pixels, closeTo(beforeAppend.pixels, 1));
+        expect(anchorAfter.top, closeTo(anchorBefore.rect.top, 1));
+        _expectJumpToLatestVisible();
+      },
+    );
+
+    // Use case:
+    // Several realtime messages arrive as one burst while the user is at live
+    // edge. The timeline should animate once toward the final newest row and
+    // settle on that final tail, not stop on an intermediate message.
+    testWidgets('animates a burst of incoming messages to the final tail', (
+      tester,
+    ) async {
+      final api = _FakeMessageApiService(_messages(1, 20));
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+      _expectRowBottomPinnedToViewport(tester, 20);
+      final beforeAppend = _scrollMetrics(tester);
+
+      _appendMessage(container, _message(21, senderUid: 99));
+      _appendMessage(container, _message(22, senderUid: 99));
+      _appendMessage(container, _message(23, senderUid: 99));
+      await tester.pump();
+
+      final firstFrame = _scrollMetrics(tester);
+      expect(firstFrame.max, greaterThan(beforeAppend.max));
+      expect(firstFrame.pixels, lessThan(firstFrame.max - 1));
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      final animationFrame = _scrollMetrics(tester);
+      expect(animationFrame.pixels, greaterThan(firstFrame.pixels));
+      expect(animationFrame.pixels, lessThan(animationFrame.max - 1));
+
+      await tester.pumpAndSettle();
+      _expectRowBottomPinnedToViewport(tester, 23);
+      _expectJumpToLatestHidden();
+    });
+
+    // Use case:
+    // A realtime live-edge animation starts, but the user immediately scrolls
+    // away to keep reading. User intent should cancel the auto-follow animation
+    // instead of snapping back to the tail after the gesture ends.
+    testWidgets('lets user scroll away during incoming-message animation', (
+      tester,
+    ) async {
+      final api = _FakeMessageApiService(_messages(1, 20));
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+      _expectRowBottomPinnedToViewport(tester, 20);
+
+      _appendMessage(container, _message(21, senderUid: 99));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 240));
+      await tester.pumpAndSettle();
+
+      final metrics = _scrollMetrics(tester);
+      expect(metrics.pixels, lessThan(metrics.max - 1));
+      _expectJumpToLatestVisible();
+    });
+
+    // Use case:
+    // A local optimistic send starts its scroll animation, then the server echo
+    // arrives with the same clientGeneratedId. Reconciliation should replace the
+    // optimistic row in place without duplicating the message or jumping to the
+    // final offset before the animation completes.
+    testWidgets(
+      'keeps self-send animation stable during server echo reconcile',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 20));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 600);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 20);
+
+        final notifier = container.read(
+          conversationTimelineViewModelProvider(_identity).notifier,
+        );
+        final intent = notifier.captureLocalSendViewportIntent();
+        _appendConversationMessage(
+          container,
+          _optimisticTextMessage(
+            clientGeneratedId: 'local-send-21',
+            senderUid: 1,
+            text: 'local send 21',
+          ),
+        );
+        notifier.applyLocalSendViewportIntent(intent);
+        await tester.pump();
+
+        final firstFrame = _scrollMetrics(tester);
+        expect(firstFrame.pixels, lessThan(firstFrame.max - 1));
+
+        _appendMessage(
+          container,
+          _message(
+            21,
+            senderUid: 1,
+            text: 'local send 21',
+            clientGeneratedId: 'local-send-21',
+          ),
+        );
+        await tester.pump();
+
+        final reconcileFrame = _scrollMetrics(tester);
+        expect(reconcileFrame.pixels, lessThan(reconcileFrame.max - 1));
+        expect(_clientRowFinder('local-send-21'), findsOneWidget);
+
+        await tester.pumpAndSettle();
+        expect(_clientRowFinder('local-send-21'), findsOneWidget);
+        expect(_rowFinder(21), findsOneWidget);
+        _expectRowBottomPinnedToViewport(tester, 21);
+      },
+    );
+
+    // Use case:
+    // The latest message is recalled or deleted while the user is at live edge.
+    // The removed tail should disappear and the previous row should become the
+    // pinned live edge without leaving the scrollable in an invalid state.
+    testWidgets('pins previous row when live tail is deleted', (tester) async {
+      final api = _FakeMessageApiService(_messages(1, 20));
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+      _expectRowBottomPinnedToViewport(tester, 20);
+
+      _deleteMessage(container, 20);
+      await tester.pumpAndSettle();
+
+      expect(_rowFinder(20), findsNothing);
+      _expectRowBottomPinnedToViewport(tester, 19);
+      expect(find.byType(CupertinoActivityIndicator), findsNothing);
+    });
+
+    // Use case:
+    // The user is reading the unread/history window and has not reached live
+    // edge yet. Fresh live traffic should not steal the viewport away from the
+    // unread row being read.
+    testWidgets(
+      'keeps unread browsing position when incoming message arrives before live edge',
+      (tester) async {
+        final api = _FakeMessageApiService(
+          const [],
+          aroundResponses: {
+            20: _response(
+              messages: _messages(21, 40),
+              nextCursor: '20',
+              prevCursor: '41',
+            ),
+          },
+        );
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(
+          tester,
+          container: container,
+          viewportHeight: 360,
+          launchRequest: const LaunchRequest.unread(lastReadMessageId: 20),
+        );
+        await tester.pumpAndSettle();
+        _expectRowVisibleInViewport(tester, 21);
+        final anchorBefore = _visibleServerRowClosestToCenter(
+          tester,
+          List<int>.generate(20, (index) => index + 21),
+        );
+
+        _appendMessage(container, _message(61, senderUid: 99));
+        await tester.pumpAndSettle();
+
+        final anchorAfter = tester.getRect(_rowFinder(anchorBefore.messageId));
+        expect(anchorAfter.top, closeTo(anchorBefore.rect.top, 1));
+        _expectJumpToLatestVisible();
+        await _flushHighlightClearTimer(tester);
+      },
+    );
+
+    // Use case:
+    // The user is reading a visible latest-window row while older history loads
+    // above it. Inserting older rows should preserve the visible row's viewport
+    // position in the production widget, not only in the sliver harness.
+    testWidgets('preserves visible row when older messages load above it', (
+      tester,
+    ) async {
+      final api = _FakeMessageApiService(
+        const [],
+        latestResponse: _response(
+          messages: _messages(21, 40),
+          nextCursor: '20',
+        ),
+        beforeResponses: {
+          21: _response(messages: _messages(1, 20), nextCursor: null),
+        },
+      );
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+      _expectRowVisibleInViewport(tester, 30);
+      final row30Before = tester.getRect(_rowFinder(30));
+
+      await container
+          .read(conversationTimelineViewModelProvider(_identity).notifier)
+          .loadOlder();
+      await tester.pumpAndSettle();
+
+      expect(api.requests.any((request) => request.before == 21), isTrue);
+      final row30After = tester.getRect(_rowFinder(30));
+      expect(row30After.top, closeTo(row30Before.top, 1));
+    });
+
+    // Use case:
+    // A realtime append starts animating toward live edge, then the keyboard
+    // opens and shrinks the viewport before the animation completes. The final
+    // target should account for the new viewport size and keep the new tail
+    // pinned.
+    testWidgets(
+      'keeps appended tail pinned when viewport shrinks mid-animation',
+      (tester) async {
+        final api = _FakeMessageApiService(_messages(1, 20));
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 600);
+        await _settleTimeline(tester);
+        _expectRowBottomPinnedToViewport(tester, 20);
+
+        _appendMessage(container, _message(21, senderUid: 99));
+        await tester.pump();
+        final firstFrame = _scrollMetrics(tester);
+        expect(firstFrame.pixels, lessThan(firstFrame.max - 1));
+
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 80));
+        await _pumpTimeline(tester, container: container, viewportHeight: 360);
+        await tester.pumpAndSettle();
+
+        _expectRowBottomPinnedToViewport(tester, 21);
+        _expectJumpToLatestHidden();
+      },
+    );
   });
 }
 
@@ -1283,6 +1605,12 @@ void _appendConversationMessage(
       .newMessage(_identity, message);
 }
 
+void _deleteMessage(ProviderContainer container, int serverMessageId) {
+  container
+      .read(conversationTimelineMessageStoreProvider.notifier)
+      .deleteMessage(_identity, serverMessageId);
+}
+
 Future<void> _moveSlightlyAwayFromLiveEdge(WidgetTester tester) async {
   await tester.drag(find.byType(CustomScrollView), const Offset(0, 48));
   await tester.pump();
@@ -1316,6 +1644,10 @@ void _expectJumpToLatestHidden() {
   expect(find.byType(JumpToLatestFab), findsNothing);
 }
 
+void _expectJumpToLatestVisible() {
+  expect(find.byType(JumpToLatestFab), findsOneWidget);
+}
+
 void _expectRowBottomBelowViewport(WidgetTester tester, int messageId) {
   final viewport = tester.getRect(find.byKey(_viewportKey));
   final row = tester.getRect(_rowFinder(messageId));
@@ -1336,6 +1668,30 @@ void _expectRowVisibleInViewport(WidgetTester tester, int messageId) {
   final row = tester.getRect(finder);
   expect(row.bottom, greaterThan(viewport.top));
   expect(row.top, lessThan(viewport.bottom));
+}
+
+({int messageId, Rect rect}) _visibleServerRowClosestToCenter(
+  WidgetTester tester,
+  Iterable<int> messageIds,
+) {
+  final viewport = tester.getRect(find.byKey(_viewportKey));
+  ({int messageId, Rect rect, double distance})? best;
+  for (final messageId in messageIds) {
+    final finder = _rowFinder(messageId);
+    if (finder.evaluate().length != 1) {
+      continue;
+    }
+    final rect = tester.getRect(finder);
+    if (rect.bottom <= viewport.top || rect.top >= viewport.bottom) {
+      continue;
+    }
+    final distance = (rect.center.dy - viewport.center.dy).abs();
+    if (best == null || distance < best.distance) {
+      best = (messageId: messageId, rect: rect, distance: distance);
+    }
+  }
+  expect(best, isNotNull);
+  return (messageId: best!.messageId, rect: best.rect);
 }
 
 ({double pixels, double max}) _scrollMetrics(WidgetTester tester) {
@@ -1399,13 +1755,14 @@ MessageItemDto _message(
   int reactionCount = 0,
   int senderUid = 7,
   String? text,
+  String? clientGeneratedId,
 }) {
   return MessageItemDto(
     id: id,
     message: text ?? 'message $id',
     sender: UserDto(uid: senderUid, name: 'Sender $senderUid'),
     chatId: _identity.chatId,
-    clientGeneratedId: 'client-$id',
+    clientGeneratedId: clientGeneratedId ?? 'client-$id',
     reactions: [
       for (var i = 0; i < reactionCount; i++)
         ReactionSummaryDto(emoji: 'r$i', count: i + 1),
@@ -1430,14 +1787,19 @@ ConversationMessageV2 _optimisticTextMessage({
 class _FakeMessageApiService extends MessageApiServiceV2 {
   _FakeMessageApiService(
     this.messages, {
+    this.latestResponse,
+    Map<int, ListMessagesResponseDto>? beforeResponses,
     Map<int, ListMessagesResponseDto>? aroundResponses,
     Map<int, ListMessagesResponseDto>? afterResponses,
     this.responseDelay,
-  }) : aroundResponses = aroundResponses ?? const {},
+  }) : beforeResponses = beforeResponses ?? const {},
+       aroundResponses = aroundResponses ?? const {},
        afterResponses = afterResponses ?? const {},
        super(Dio(), 7);
 
   final List<MessageItemDto> messages;
+  final ListMessagesResponseDto? latestResponse;
+  final Map<int, ListMessagesResponseDto> beforeResponses;
   final Map<int, ListMessagesResponseDto> aroundResponses;
   final Map<int, ListMessagesResponseDto> afterResponses;
   final Duration? responseDelay;
@@ -1452,6 +1814,10 @@ class _FakeMessageApiService extends MessageApiServiceV2 {
     int? around,
   }) async {
     requests.add((before: before, after: after, around: around, max: max));
+    final beforeResponse = beforeResponses[before];
+    if (beforeResponse != null) {
+      return _maybeDelay(beforeResponse);
+    }
     final aroundResponse = aroundResponses[around];
     if (aroundResponse != null) {
       return aroundResponse;
@@ -1464,7 +1830,23 @@ class _FakeMessageApiService extends MessageApiServiceV2 {
       }
       return afterResponse;
     }
-    return ListMessagesResponseDto(messages: messages);
+    if (before == null && after == null && around == null) {
+      final response = latestResponse;
+      if (response != null) {
+        return _maybeDelay(response);
+      }
+    }
+    return _maybeDelay(ListMessagesResponseDto(messages: messages));
+  }
+
+  Future<ListMessagesResponseDto> _maybeDelay(
+    ListMessagesResponseDto response,
+  ) async {
+    final delay = responseDelay;
+    if (delay != null) {
+      await Future<void>.delayed(delay);
+    }
+    return response;
   }
 
   @override

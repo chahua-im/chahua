@@ -243,9 +243,12 @@ class ConversationTimelineViewModel
     final viewportExtentChanged =
         previousSnapshot != null &&
         (previousSnapshot.viewportExtent - snapshot.viewportExtent).abs() > 0.5;
+    final wasFollowingLiveEdge =
+        previousSnapshot != null &&
+        (previousSnapshot.viewportAtLiveEdge || previousSnapshot.isNearBottom);
     if (viewportExtentChanged &&
-        (_activeSegmentMode?.isLatest ?? false) &&
-        snapshot.isNearBottom &&
+        (_activeSegment?.isLatestSlice ?? false) &&
+        wasFollowingLiveEdge &&
         !snapshot.viewportAtLiveEdge) {
       _publishViewportCommand(
         kind: ConversationTimelineViewportCommandKind.settleToLiveEdge,

@@ -222,11 +222,13 @@ class _ConversationTimelineViewState
       maxScrollExtent: position.maxScrollExtent,
       edgeThreshold: _edgeThreshold,
     );
+    final previousSnapshot = _latestViewportSnapshot;
     final viewportExtentChanged =
         _hasReportedViewportFacts &&
-        (_latestViewportSnapshot.viewportExtent - snapshot.viewportExtent)
-                .abs() >
-            0.5;
+        (previousSnapshot.viewportExtent - snapshot.viewportExtent).abs() > 0.5;
+    final wasFollowingLiveEdge =
+        _hasReportedViewportFacts &&
+        (previousSnapshot.viewportAtLiveEdge || previousSnapshot.isNearBottom);
 
     final shouldReport =
         !_hasReportedViewportFacts || snapshot != _latestViewportSnapshot;
@@ -253,8 +255,17 @@ class _ConversationTimelineViewState
     }
 
     _updateMessageVisibilityWindow(measurements, viewportTop, viewportBottom);
+    final timelineState = ref.read(
+      conversationTimelineViewModelProvider(widget._identity),
+    );
     if (viewportExtentChanged &&
-        snapshot.isNearBottom &&
+        timelineState.viewportCommand.placement ==
+            ConversationTimelineViewportPlacement.topPreferred &&
+        wasFollowingLiveEdge) {
+      _scheduleTopPreferredMeasurement(resetResolution: true);
+    }
+    if (viewportExtentChanged &&
+        (snapshot.isNearBottom || wasFollowingLiveEdge) &&
         !snapshot.viewportAtLiveEdge) {
       _settleToLiveEdge();
     }
