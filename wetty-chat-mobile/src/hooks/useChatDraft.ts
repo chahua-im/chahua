@@ -6,6 +6,7 @@ import { DRAFT_KEY_PREFIX } from '@/utils/draftSync';
 export interface ChatDraft {
   text: string;
   replyToMessageId?: string;
+  replyToUsername?: string;
 }
 
 const SAVE_DEBOUNCE_MS = 500;

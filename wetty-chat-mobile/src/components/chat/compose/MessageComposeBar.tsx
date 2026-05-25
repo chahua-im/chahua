@@ -31,7 +31,7 @@ export type {
 interface MessageComposeBarProps {
   chatId?: string | number;
   draftKey?: string;
-  onRestoreReply?: (replyToMessageId: string) => void;
+  onRestoreReply?: (replyToMessageId: string, replyToUsername?: string) => void;
   onSend: (payload: ComposeSendPayload) => void;
   uploadAttachment: (input: ComposeUploadInput) => Promise<ComposeUploadResult>;
   replyTo?: ReplyTo;
@@ -101,7 +101,7 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
         if (draft) {
           setText(draft.text);
           if (draft.replyToMessageId) {
-            onRestoreReply?.(draft.replyToMessageId);
+            onRestoreReply?.(draft.replyToMessageId, draft.replyToUsername);
           }
         }
         setDraftLoaded(true);
@@ -118,8 +118,9 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       saveDebounced({
         text,
         replyToMessageId: replyTo?.messageId,
+        replyToUsername: replyTo?.username,
       });
-    }, [text, replyTo?.messageId, draftLoaded, isEditing, saveDebounced]);
+    }, [text, replyTo?.messageId, replyTo?.username, draftLoaded, isEditing, saveDebounced]);
 
     const {
       mentionState,

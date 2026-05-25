@@ -38,6 +38,7 @@ import {
   type Attachment,
   deleteMessage,
   deleteReaction,
+  getMessage,
   getMessages,
   markMessagesAsRead,
   type MessageResponse,
@@ -1968,10 +1969,31 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
             ref={composeBarRef}
             chatId={chatId}
             draftKey={storeChatId}
-            onRestoreReply={(replyToMessageId) => {
+            onRestoreReply={async (replyToMessageId, replyToUsername) => {
               const message = messageLookup.get(replyToMessageId);
               if (message) {
                 setReplyingTo(message);
+                return;
+              }
+              try {
+                const res = await getMessage(chatId, replyToMessageId);
+                setReplyingTo(res.data);
+              } catch (e: any) {
+                if (e?.response?.status !== 404) return;
+                // Message hard-deleted — show [Deleted] in reply banner, preserving username
+                setReplyingTo({
+                  id: replyToMessageId,
+                  message: null,
+                  messageType: 'text',
+                  replyRootId: null,
+                  clientGeneratedId: '',
+                  sender: { uid: 0, name: replyToUsername ?? null, gender: 0 },
+                  chatId,
+                  createdAt: '',
+                  isEdited: false,
+                  isDeleted: true,
+                  hasAttachments: false,
+                });
               }
             }}
             onSend={handleSend}
