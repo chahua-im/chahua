@@ -3,6 +3,7 @@ import { t } from '@lingui/core/macro';
 import { closeCircle } from 'ionicons/icons';
 import { useSelector } from 'react-redux';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
+import { useChatContext } from '@/components/chat/messages/ChatContext';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import type { EditingMessage, ReplyTo } from './types';
 import styles from './MessageComposeBar.module.scss';
@@ -16,6 +17,8 @@ interface ComposeContextBannerProps {
 
 export function ComposeContextBanner({ editing, replyTo, onCancelEdit, onCancelReply }: ComposeContextBannerProps) {
   const locale = useSelector(selectEffectiveLocale);
+
+  const ctx = useChatContext();
 
   if (editing) {
     return (
@@ -35,9 +38,13 @@ export function ComposeContextBanner({ editing, replyTo, onCancelEdit, onCancelR
     return null;
   }
 
+  const handleJumpToReply = () => {
+    ctx?.jumpToMessage(replyTo.messageId);
+  };
+
   return (
     <div className={styles.replyPreview}>
-      <div className={styles.replyText}>
+      <div className={`${styles.replyText} ${styles.replyPreviewTappable}`} onClick={handleJumpToReply}>
         <span className={styles.replyUsername}>{t`Replying to ${replyTo.username}`}</span>
         <span className={styles.replySnippet}>
           {formatMessagePreview(replyTo, getNotificationPreviewLabels(locale))}
