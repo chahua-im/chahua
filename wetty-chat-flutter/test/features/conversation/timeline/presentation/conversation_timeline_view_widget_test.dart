@@ -16,7 +16,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 void main() {
   group('ConversationTimelineView live edge behavior', () {
@@ -1208,8 +1208,7 @@ const _identity = (chatId: 42, threadRootId: null);
 const _viewportKey = ValueKey<String>('conversation-timeline-test-viewport');
 
 Future<ProviderContainer> _container(_FakeMessageApiService api) async {
-  SharedPreferences.setMockInitialValues({});
-  final preferences = await SharedPreferences.getInstance();
+  final preferences = AppPreferences.withData(const <String, Object>{});
   return ProviderContainer(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(preferences),

@@ -62,7 +62,7 @@ You are an expert Flutter and Dart developer. Your goal is to build beautiful, p
   - `StreamProvider<T>` for streams (WebSocket events)
 * **Widgets:** Use `ConsumerWidget` or `ConsumerStatefulWidget` (when local controllers needed). Access state via `ref.watch()` for reactive rebuilds, `ref.read()` for one-off reads/mutations.
 * **Architecture:** Providers → API Services → Repositories (Notifiers) → ViewModels (AsyncNotifiers) → ConsumerWidgets
-* **SharedPreferences:** Pre-initialized in `main()` and passed via `ProviderScope(overrides:)`.
+* **AppPreferences:** Async-backed preferences are migrated/preloaded in `main()` and passed via `ProviderScope(overrides:)`.
 * **ApiSession bridge:** `ApiSession.updateUserId()` is kept in sync via the app widget for deep presentation-layer code (image loading headers) that cannot access `ref`.
 
 ## Routing (GoRouter)

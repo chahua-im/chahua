@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 import 'package:chahua/core/notifications/push_api_service.dart';
 import 'package:chahua/core/notifications/push_notification_provider.dart';
@@ -16,8 +16,7 @@ void main() {
 
   group('PushNotificationNotifier', () {
     test('unsupported platform starts unavailable and no-ops', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = AppPreferences.withData(const <String, Object>{});
       final api = _RecordingPushApiService();
       final container = ProviderContainer(
         overrides: [
@@ -45,8 +44,7 @@ void main() {
     });
 
     test('subscribes received platform token with descriptor', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = AppPreferences.withData(const <String, Object>{});
       final platform = _FakePushPlatformClient(
         permissionStatus: 'authorized',
         descriptor: const PushSubscriptionDescriptor(
@@ -81,8 +79,7 @@ void main() {
     });
 
     test('authorized retry registers when token is missing', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = AppPreferences.withData(const <String, Object>{});
       final platform = _FakePushPlatformClient(permissionStatus: 'authorized');
       final container = ProviderContainer(
         overrides: [

@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 import 'package:chahua/core/api/models/chats_api_models.dart';
 import 'package:chahua/core/api/models/messages_api_models.dart';
@@ -23,8 +23,7 @@ void main() {
 
   group('ChatInboxReconciler', () {
     test('reconcile loads inbox state and refreshes badge totals', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = AppPreferences.withData(const <String, Object>{});
       final chatService = _FakeChatApiService(
         unreadCount: 4,
         chatResponses: [
@@ -92,8 +91,7 @@ void main() {
     test(
       'reconcileGroups refreshes only groups and chat unread total',
       () async {
-        SharedPreferences.setMockInitialValues({});
-        final prefs = await SharedPreferences.getInstance();
+        final prefs = AppPreferences.withData(const <String, Object>{});
         final chatService = _FakeChatApiService(
           unreadCount: 4,
           chatResponses: [
@@ -142,8 +140,7 @@ void main() {
     );
 
     test('reconcileThreads refreshes only threads', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = AppPreferences.withData(const <String, Object>{});
       final chatService = _FakeChatApiService(
         unreadCount: 4,
         chatResponses: [
@@ -191,8 +188,7 @@ void main() {
     });
 
     test('reconcileThreads refreshes active and archived threads', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = AppPreferences.withData(const <String, Object>{});
       final chatService = _FakeChatApiService(
         unreadCount: 0,
         chatResponses: [const ListChatsResponseDto(chats: [])],

@@ -2,10 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:chahua/core/api/services/sticker_api_service.dart';
 import '../../../core/api/models/websocket_api_models.dart';
+import '../../../core/preferences/app_preferences.dart';
 import '../../../core/providers/shared_preferences_provider.dart';
 
 class StickerPackOrderItem {
@@ -53,7 +53,7 @@ class StickerPackOrderNotifier extends Notifier<StickerPackOrderState> {
   static const _orderKey = 'sticker_pack_order';
   static const _autoSortKey = 'sticker_auto_sort_enabled';
 
-  late SharedPreferences _prefs;
+  late AppPreferences _prefs;
 
   @override
   StickerPackOrderState build() {

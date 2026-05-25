@@ -8,7 +8,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -51,8 +51,7 @@ void main() {
 }
 
 Future<Widget> _buildTestApp({AuthBootstrapApi? authApi}) async {
-  SharedPreferences.setMockInitialValues({});
-  final prefs = await SharedPreferences.getInstance();
+  final prefs = AppPreferences.withData(const <String, Object>{});
   return ProviderScope(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(prefs),

@@ -9,7 +9,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show SelectionArea;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 void main() {
   testWidgets('overlay bubble renders main message text as selectable', (
@@ -48,8 +48,7 @@ void main() {
 }
 
 Future<void> _pumpWithSettings(WidgetTester tester, Widget child) async {
-  SharedPreferences.setMockInitialValues({});
-  final preferences = await SharedPreferences.getInstance();
+  final preferences = AppPreferences.withData(const <String, Object>{});
   await tester.pumpWidget(
     ProviderScope(
       overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],

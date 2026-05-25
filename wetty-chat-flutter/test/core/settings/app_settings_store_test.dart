@@ -4,7 +4,7 @@ import 'package:chahua/core/settings/app_settings_store.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -15,8 +15,7 @@ void main() {
   Future<ProviderContainer> containerWithPrefs(
     Map<String, Object> initialValues,
   ) async {
-    SharedPreferences.setMockInitialValues(initialValues);
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = AppPreferences.withData(initialValues);
     final container = ProviderContainer(
       overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
     );

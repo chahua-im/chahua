@@ -1,8 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-/// Overridden in main.dart with a pre-initialized instance.
-final sharedPreferencesProvider = Provider<SharedPreferences>(
+import '../preferences/app_preferences.dart';
+
+/// Overridden in main.dart with a preloaded async-backed instance.
+final sharedPreferencesProvider = Provider<AppPreferences>(
   (ref) => throw UnimplementedError(
     'sharedPreferencesProvider must be overridden in ProviderScope',
   ),

@@ -3,9 +3,9 @@ import 'dart:ui';
 
 import 'package:chahua/app/theme/style_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../preferences/app_preferences.dart';
 import '../providers/shared_preferences_provider.dart';
 
 enum AppLanguage {
@@ -65,7 +65,7 @@ class AppSettingsNotifier extends Notifier<AppSettingsState> {
   static const int chatMessageFontSizeSteps = 5;
   static const double defaultChatMessageFontSize = 16;
 
-  late SharedPreferences _prefs;
+  late AppPreferences _prefs;
 
   @override
   AppSettingsState build() {

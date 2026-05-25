@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 import 'package:chahua/core/providers/shared_preferences_provider.dart';
 import 'package:chahua/core/session/dev_session_store.dart';
 
@@ -13,8 +13,7 @@ void main() {
   late ProviderContainer container;
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = AppPreferences.withData(const <String, Object>{});
     container = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(prefs),
@@ -47,7 +46,7 @@ void main() {
     container = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(
-          await SharedPreferences.getInstance(),
+          AppPreferences.withData(const <String, Object>{}),
         ),
         authBootstrapApiProvider.overrideWithValue(
           _FakeAuthBootstrapApi(
@@ -82,10 +81,9 @@ void main() {
   test(
     'bootstrap prefers developer UID auth over persisted jwt restore',
     () async {
-      SharedPreferences.setMockInitialValues({
+      final prefs = AppPreferences.withData({
         'auth_session_jwt_token': 'persisted-token',
       });
-      final prefs = await SharedPreferences.getInstance();
       var jwtValidationAttempted = false;
       container = ProviderContainer(
         overrides: [
@@ -117,10 +115,9 @@ void main() {
   test(
     'bootstrap restores persisted jwt after developer UID auth fails',
     () async {
-      SharedPreferences.setMockInitialValues({
+      final prefs = AppPreferences.withData({
         'auth_session_jwt_token': 'persisted-token',
       });
-      final prefs = await SharedPreferences.getInstance();
       final requests = <String>[];
       container = ProviderContainer(
         overrides: [
@@ -166,7 +163,7 @@ void main() {
     container = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(
-          await SharedPreferences.getInstance(),
+          AppPreferences.withData(const <String, Object>{}),
         ),
         authBootstrapApiProvider.overrideWithValue(
           _FakeAuthBootstrapApi(
@@ -196,7 +193,7 @@ void main() {
       container = ProviderContainer(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(
-            await SharedPreferences.getInstance(),
+            AppPreferences.withData(const <String, Object>{}),
           ),
           authBootstrapApiProvider.overrideWithValue(
             _FakeAuthBootstrapApi(
@@ -225,7 +222,7 @@ void main() {
       container = ProviderContainer(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(
-            await SharedPreferences.getInstance(),
+            AppPreferences.withData(const <String, Object>{}),
           ),
           authBootstrapApiProvider.overrideWithValue(
             _FakeAuthBootstrapApi(
@@ -254,7 +251,7 @@ void main() {
     container = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(
-          await SharedPreferences.getInstance(),
+          AppPreferences.withData(const <String, Object>{}),
         ),
         authBootstrapApiProvider.overrideWithValue(
           _FakeAuthBootstrapApi(
@@ -293,10 +290,9 @@ void main() {
   test(
     'clearJwt re-runs bootstrap and becomes unauthenticated when dev probe fails',
     () async {
-      SharedPreferences.setMockInitialValues({
+      final prefs = AppPreferences.withData({
         'auth_session_jwt_token': 'persisted-token',
       });
-      final prefs = await SharedPreferences.getInstance();
       final requests = <Uri>[];
       container = ProviderContainer(
         overrides: [
@@ -328,10 +324,9 @@ void main() {
   test(
     'bootstrap preserves stored jwt when verification request fails',
     () async {
-      SharedPreferences.setMockInitialValues({
+      final prefs = AppPreferences.withData({
         'auth_session_jwt_token': 'persisted-token',
       });
-      final prefs = await SharedPreferences.getInstance();
       container = ProviderContainer(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
@@ -361,7 +356,7 @@ void main() {
       container = ProviderContainer(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(
-            await SharedPreferences.getInstance(),
+            AppPreferences.withData(const <String, Object>{}),
           ),
           authBootstrapApiProvider.overrideWithValue(
             _FakeAuthBootstrapApi(

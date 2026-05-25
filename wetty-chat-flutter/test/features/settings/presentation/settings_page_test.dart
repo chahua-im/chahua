@@ -3,7 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 import 'package:chahua/core/providers/shared_preferences_provider.dart';
 import 'package:chahua/core/settings/app_settings_store.dart';
@@ -24,8 +24,7 @@ void main() {
   testWidgets('settings page opens general submenu and cache page', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = AppPreferences.withData(const <String, Object>{});
     final container = ProviderContainer(
       overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],
     );
@@ -86,8 +85,7 @@ void main() {
   testWidgets('settings modal opens subpages in its local navigator', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = AppPreferences.withData(const <String, Object>{});
     final container = ProviderContainer(
       overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],
     );
@@ -122,8 +120,7 @@ void main() {
   });
 
   testWidgets('appearance page shows badge color swatch', (tester) async {
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = AppPreferences.withData(const <String, Object>{});
     final container = ProviderContainer(
       overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],
     );
@@ -149,10 +146,9 @@ void main() {
   });
 
   testWidgets('badge color page reset clears custom override', (tester) async {
-    SharedPreferences.setMockInitialValues({
+    final preferences = AppPreferences.withData({
       'appearance_color_theme_overrides': '{"unreadBadge": 4282682060}',
     });
-    final preferences = await SharedPreferences.getInstance();
     final container = ProviderContainer(
       overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],
     );

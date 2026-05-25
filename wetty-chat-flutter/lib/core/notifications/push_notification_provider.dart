@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../preferences/app_preferences.dart';
 import '../providers/shared_preferences_provider.dart';
 import '../session/dev_session_store.dart';
 import 'push_api_service.dart';
@@ -68,7 +68,7 @@ class PushNotificationState {
 }
 
 class PushNotificationNotifier extends Notifier<PushNotificationState> {
-  late SharedPreferences _prefs;
+  late AppPreferences _prefs;
   late PushPlatformClient _pushClient;
   late PushApiService _api;
   StreamSubscription<String>? _tokenSub;

@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../network/dio_client.dart';
 import '../network/api_config.dart';
+import '../preferences/app_preferences.dart';
 import '../providers/shared_preferences_provider.dart';
 
 const String _credentialLoginUrl =
@@ -66,7 +66,7 @@ class AuthSessionNotifier extends Notifier<AuthSessionState> {
   static const String _userIdStorageKey = 'dev_session_user_id';
   static const String _jwtTokenStorageKey = 'auth_session_jwt_token';
 
-  late SharedPreferences _prefs;
+  late AppPreferences _prefs;
   late AuthBootstrapApi _authApi;
 
   Future<void>? _bootstrapFuture;

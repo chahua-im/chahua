@@ -12,7 +12,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 const _overlayBoundaryKey = ValueKey('message-overlay-v2-boundary');
 
@@ -149,8 +149,7 @@ Future<void> _pumpWithSettings(
   Widget child, {
   Size size = const Size(390, 780),
 }) async {
-  SharedPreferences.setMockInitialValues({});
-  final preferences = await SharedPreferences.getInstance();
+  final preferences = AppPreferences.withData(const <String, Object>{});
   await tester.pumpWidget(
     ProviderScope(
       overrides: [sharedPreferencesProvider.overrideWithValue(preferences)],

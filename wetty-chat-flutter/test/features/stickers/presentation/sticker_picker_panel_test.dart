@@ -3,7 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chahua/core/preferences/app_preferences.dart';
 
 import 'package:chahua/core/api/services/sticker_api_service.dart';
 import 'package:chahua/core/api/models/messages_api_models.dart';
@@ -21,8 +21,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = AppPreferences.withData(const <String, Object>{});
     final container = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(preferences),
@@ -71,8 +70,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    SharedPreferences.setMockInitialValues(const <String, Object>{});
-    final preferences = await SharedPreferences.getInstance();
+    final preferences = AppPreferences.withData(const <String, Object>{});
     final stickers = List.generate(3, (index) => _stickerDto('s$index'));
     final stickerApiService = _FakeStickerApiService(favorites: stickers);
     final container = ProviderContainer(
