@@ -5,6 +5,7 @@ import 'package:chahua/core/api/models/messages_api_models.dart';
 import 'package:chahua/features/conversation/search/application/message_search_view_model.dart';
 import 'package:chahua/features/conversation/search/data/message_search_api_service.dart';
 import 'package:chahua/features/conversation/search/domain/message_search_state.dart';
+import 'package:chahua/features/conversation/search/domain/message_search_sort.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,6 +54,7 @@ void main() {
           const _SearchRequest(
             chatId: 42,
             query: 'hello',
+            sort: MessageSearchSort.best,
             limit: 20,
             offset: 0,
           ),
@@ -113,10 +115,60 @@ void main() {
 
       final state = container.read(messageSearchViewModelProvider(42)).value!;
       expect(api.requests, [
-        const _SearchRequest(chatId: 42, query: 'hello', limit: 20, offset: 0),
-        const _SearchRequest(chatId: 42, query: 'hello', limit: 20, offset: 20),
+        const _SearchRequest(
+          chatId: 42,
+          query: 'hello',
+          sort: MessageSearchSort.best,
+          limit: 20,
+          offset: 0,
+        ),
+        const _SearchRequest(
+          chatId: 42,
+          query: 'hello',
+          sort: MessageSearchSort.best,
+          limit: 20,
+          offset: 20,
+        ),
       ]);
       expect(state.results.map((result) => result.message.id), [1, 2]);
+      expect(state.hasMore, false);
+    });
+
+    test('changing sort resets results and reruns a ready query', () async {
+      final api = _FakeMessageSearchApiService(
+        responses: [
+          SearchMessagesResponseDto(messages: [_message(1)], nextOffset: 20),
+          SearchMessagesResponseDto(messages: [_message(2)], nextOffset: null),
+        ],
+      );
+      final container = _container(api);
+      addTearDown(container.dispose);
+      final notifier = container.read(
+        messageSearchViewModelProvider(42).notifier,
+      );
+
+      await notifier.updateQuery('hello');
+      await notifier.updateSort(MessageSearchSort.recent);
+
+      final state = container.read(messageSearchViewModelProvider(42)).value!;
+      expect(api.requests, [
+        const _SearchRequest(
+          chatId: 42,
+          query: 'hello',
+          sort: MessageSearchSort.best,
+          limit: 20,
+          offset: 0,
+        ),
+        const _SearchRequest(
+          chatId: 42,
+          query: 'hello',
+          sort: MessageSearchSort.recent,
+          limit: 20,
+          offset: 0,
+        ),
+      ]);
+      expect(state.sort, MessageSearchSort.recent);
+      expect(state.results.map((result) => result.message.id), [2]);
       expect(state.hasMore, false);
     });
 
@@ -170,12 +222,14 @@ final class _SearchRequest {
   const _SearchRequest({
     required this.chatId,
     required this.query,
+    required this.sort,
     required this.limit,
     required this.offset,
   });
 
   final int chatId;
   final String query;
+  final MessageSearchSort sort;
   final int limit;
   final int offset;
 
@@ -184,17 +238,18 @@ final class _SearchRequest {
     return other is _SearchRequest &&
         other.chatId == chatId &&
         other.query == query &&
+        other.sort == sort &&
         other.limit == limit &&
         other.offset == offset;
   }
 
   @override
-  int get hashCode => Object.hash(chatId, query, limit, offset);
+  int get hashCode => Object.hash(chatId, query, sort, limit, offset);
 
   @override
   String toString() {
     return '_SearchRequest(chatId: $chatId, query: $query, '
-        'limit: $limit, offset: $offset)';
+        'sort: $sort, limit: $limit, offset: $offset)';
   }
 }
 
@@ -214,6 +269,7 @@ class _FakeMessageSearchApiService extends MessageSearchApiService {
   Future<SearchMessagesResponseDto> searchMessages(
     int chatId, {
     required String query,
+    MessageSearchSort sort = MessageSearchSort.best,
     int limit = 20,
     int offset = 0,
   }) async {
@@ -221,6 +277,7 @@ class _FakeMessageSearchApiService extends MessageSearchApiService {
       _SearchRequest(
         chatId: chatId,
         query: query,
+        sort: sort,
         limit: limit,
         offset: offset,
       ),

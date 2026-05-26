@@ -1,6 +1,7 @@
 import 'package:chahua/core/api/models/messages_api_models.dart';
 
 import 'message_search_target.dart';
+import 'message_search_sort.dart';
 
 enum MessageSearchStatus { idle, searching, ready, error }
 
@@ -14,6 +15,7 @@ class MessageSearchResult {
 class MessageSearchState {
   const MessageSearchState({
     required this.query,
+    required this.sort,
     required this.results,
     required this.status,
     this.nextOffset,
@@ -23,6 +25,7 @@ class MessageSearchState {
 
   const MessageSearchState.initial()
     : query = '',
+      sort = MessageSearchSort.best,
       results = const [],
       status = MessageSearchStatus.idle,
       nextOffset = null,
@@ -30,6 +33,7 @@ class MessageSearchState {
       error = null;
 
   final String query;
+  final MessageSearchSort sort;
   final List<MessageSearchResult> results;
   final MessageSearchStatus status;
   final int? nextOffset;
@@ -40,6 +44,7 @@ class MessageSearchState {
 
   MessageSearchState copyWith({
     String? query,
+    MessageSearchSort? sort,
     List<MessageSearchResult>? results,
     MessageSearchStatus? status,
     Object? nextOffset = _sentinel,
@@ -48,6 +53,7 @@ class MessageSearchState {
   }) {
     return MessageSearchState(
       query: query ?? this.query,
+      sort: sort ?? this.sort,
       results: results ?? this.results,
       status: status ?? this.status,
       nextOffset: nextOffset == _sentinel

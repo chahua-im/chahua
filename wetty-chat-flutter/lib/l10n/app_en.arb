@@ -115,6 +115,21 @@
   "messageSearchLoadMore": "Load More",
   "@messageSearchLoadMore": { "description": "Button label for loading more message search results" },
 
+  "messageSearchSortBest": "Best",
+  "@messageSearchSortBest": { "description": "Sort option for message search relevance ranking" },
+
+  "messageSearchSortRecent": "Recent",
+  "@messageSearchSortRecent": { "description": "Sort option for newest message search results first" },
+
+  "messageSearchSortPickerTitle": "Sort messages",
+  "@messageSearchSortPickerTitle": { "description": "Title for the message search sort picker" },
+
+  "messageSearchAddFilter": "Add filter",
+  "@messageSearchAddFilter": { "description": "Accessibility label for adding a message search filter" },
+
+  "messageSearchFromFilter": "From someone",
+  "@messageSearchFromFilter": { "description": "Label for adding a sender filter in message search" },
+
   "reactionPickerNoRecents": "No Recents",
   "@reactionPickerNoRecents": { "description": "Empty state shown when the reaction emoji picker has no recently used emoji" },
 

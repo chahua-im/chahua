@@ -327,6 +327,36 @@ abstract class AppLocalizations {
   /// **'Load More'**
   String get messageSearchLoadMore;
 
+  /// Sort option for message search relevance ranking
+  ///
+  /// In en, this message translates to:
+  /// **'Best'**
+  String get messageSearchSortBest;
+
+  /// Sort option for newest message search results first
+  ///
+  /// In en, this message translates to:
+  /// **'Recent'**
+  String get messageSearchSortRecent;
+
+  /// Title for the message search sort picker
+  ///
+  /// In en, this message translates to:
+  /// **'Sort messages'**
+  String get messageSearchSortPickerTitle;
+
+  /// Accessibility label for adding a message search filter
+  ///
+  /// In en, this message translates to:
+  /// **'Add filter'**
+  String get messageSearchAddFilter;
+
+  /// Label for adding a sender filter in message search
+  ///
+  /// In en, this message translates to:
+  /// **'From someone'**
+  String get messageSearchFromFilter;
+
   /// Empty state shown when the reaction emoji picker has no recently used emoji
   ///
   /// In en, this message translates to:

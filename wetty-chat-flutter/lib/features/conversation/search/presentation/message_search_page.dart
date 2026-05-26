@@ -3,8 +3,11 @@ import 'dart:async';
 import 'package:chahua/app/routing/route_names.dart';
 import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/core/api/models/messages_api_models.dart';
+import 'package:chahua/core/feature_gates/feature_gates.dart';
 import 'package:chahua/features/conversation/search/application/message_search_view_model.dart';
 import 'package:chahua/features/conversation/search/domain/message_search_state.dart';
+import 'package:chahua/features/conversation/search/domain/message_search_sort.dart';
+import 'package:chahua/features/conversation/search/presentation/message_search_controls.dart';
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:chahua/features/shared/presentation/app_avatar.dart';
@@ -74,6 +77,10 @@ class _MessageSearchPageState extends ConsumerState<MessageSearchPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(messageSearchViewModelProvider(widget.chatId));
+    final data = state.value;
+    final inlineTagsEnabled = ref.watch(
+      featureGateProvider(AppFeatureGate.messageSearchInlineTags),
+    );
 
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
@@ -84,11 +91,20 @@ class _MessageSearchPageState extends ConsumerState<MessageSearchPage> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: CupertinoSearchTextField(
+              child: MessageSearchControls(
+                chatId: widget.chatId,
                 controller: _searchController,
-                placeholder: l10n.messageSearchPlaceholder,
-                onChanged: _onSearchChanged,
-                onSubmitted: _submitSearch,
+                sort: data?.sort ?? MessageSearchSort.best,
+                inlineTagsEnabled: inlineTagsEnabled,
+                onQueryChanged: _onSearchChanged,
+                onQuerySubmitted: (value) => unawaited(_submitSearch(value)),
+                onSortChanged: (sort) => unawaited(
+                  ref
+                      .read(
+                        messageSearchViewModelProvider(widget.chatId).notifier,
+                      )
+                      .updateSort(sort),
+                ),
               ),
             ),
             Expanded(

@@ -123,6 +123,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get messageSearchLoadMore => '加载更多';
 
   @override
+  String get messageSearchSortBest => '最佳';
+
+  @override
+  String get messageSearchSortRecent => '最近';
+
+  @override
+  String get messageSearchSortPickerTitle => '消息排序';
+
+  @override
+  String get messageSearchAddFilter => '添加筛选';
+
+  @override
+  String get messageSearchFromFilter => '来自某人';
+
+  @override
   String get reactionPickerNoRecents => '暂无最近使用的表情';
 
   @override
@@ -606,6 +621,21 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get messageSearchLoadMore => '載入更多';
+
+  @override
+  String get messageSearchSortBest => '最佳';
+
+  @override
+  String get messageSearchSortRecent => '最近';
+
+  @override
+  String get messageSearchSortPickerTitle => '訊息排序';
+
+  @override
+  String get messageSearchAddFilter => '新增篩選';
+
+  @override
+  String get messageSearchFromFilter => '來自某人';
 
   @override
   String get reactionPickerNoRecents => '暫無最近使用的表情';

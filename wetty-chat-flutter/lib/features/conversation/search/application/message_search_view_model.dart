@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/message_search_api_service.dart';
 import '../domain/message_search_state.dart';
+import '../domain/message_search_sort.dart';
 import '../domain/message_search_target.dart';
 
 class MessageSearchViewModel extends AsyncNotifier<MessageSearchState> {
@@ -20,12 +21,14 @@ class MessageSearchViewModel extends AsyncNotifier<MessageSearchState> {
 
   Future<void> updateQuery(String query) async {
     final normalizedQuery = query.trim();
-    final generation = ++_generation;
+    final sort = state.value?.sort ?? MessageSearchSort.best;
 
     if (!_isQueryReady(normalizedQuery)) {
+      _generation += 1;
       state = AsyncData(
         MessageSearchState(
           query: normalizedQuery,
+          sort: sort,
           results: const [],
           status: MessageSearchStatus.idle,
         ),
@@ -33,9 +36,42 @@ class MessageSearchViewModel extends AsyncNotifier<MessageSearchState> {
       return;
     }
 
+    await _search(query: normalizedQuery, sort: sort);
+  }
+
+  Future<void> updateSort(MessageSearchSort sort) async {
+    final current = state.value ?? const MessageSearchState.initial();
+    if (current.sort == sort) {
+      return;
+    }
+
+    if (!_isQueryReady(current.query)) {
+      _generation += 1;
+      state = AsyncData(
+        current.copyWith(
+          sort: sort,
+          results: const [],
+          status: MessageSearchStatus.idle,
+          nextOffset: null,
+          isLoadingMore: false,
+          error: null,
+        ),
+      );
+      return;
+    }
+
+    await _search(query: current.query, sort: sort);
+  }
+
+  Future<void> _search({
+    required String query,
+    required MessageSearchSort sort,
+  }) async {
+    final generation = ++_generation;
     state = AsyncData(
       MessageSearchState(
-        query: normalizedQuery,
+        query: query,
+        sort: sort,
         results: const [],
         status: MessageSearchStatus.searching,
       ),
@@ -44,13 +80,14 @@ class MessageSearchViewModel extends AsyncNotifier<MessageSearchState> {
     try {
       final response = await ref
           .read(messageSearchApiServiceProvider)
-          .searchMessages(arg, query: normalizedQuery, limit: pageSize);
+          .searchMessages(arg, query: query, sort: sort, limit: pageSize);
       if (generation != _generation) {
         return;
       }
       state = AsyncData(
         MessageSearchState(
-          query: normalizedQuery,
+          query: query,
+          sort: sort,
           results: _toResults(response.messages),
           status: MessageSearchStatus.ready,
           nextOffset: response.nextOffset,
@@ -82,6 +119,7 @@ class MessageSearchViewModel extends AsyncNotifier<MessageSearchState> {
           .searchMessages(
             arg,
             query: current.query,
+            sort: current.sort,
             limit: pageSize,
             offset: current.nextOffset!,
           );

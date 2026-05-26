@@ -3,6 +3,8 @@ import 'package:chahua/core/network/dio_client.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../domain/message_search_sort.dart';
+
 class MessageSearchApiService {
   MessageSearchApiService(this._dio);
 
@@ -11,6 +13,7 @@ class MessageSearchApiService {
   Future<SearchMessagesResponseDto> searchMessages(
     int chatId, {
     required String query,
+    MessageSearchSort sort = MessageSearchSort.best,
     int limit = 20,
     int offset = 0,
   }) async {
@@ -18,6 +21,7 @@ class MessageSearchApiService {
       '/chats/$chatId/messages/search',
       queryParameters: <String, Object>{
         'q': query,
+        'sort': sort.wireValue,
         'limit': limit,
         'offset': offset,
       },

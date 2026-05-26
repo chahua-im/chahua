@@ -123,6 +123,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get messageSearchLoadMore => 'Load More';
 
   @override
+  String get messageSearchSortBest => 'Best';
+
+  @override
+  String get messageSearchSortRecent => 'Recent';
+
+  @override
+  String get messageSearchSortPickerTitle => 'Sort messages';
+
+  @override
+  String get messageSearchAddFilter => 'Add filter';
+
+  @override
+  String get messageSearchFromFilter => 'From someone';
+
+  @override
   String get reactionPickerNoRecents => 'No Recents';
 
   @override
