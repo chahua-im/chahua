@@ -13,7 +13,7 @@ import styles from './PinBanner.module.scss';
 
 interface PinBannerProps {
   chatId: string;
-  topVisibleMessageDate?: string | null;
+  bottomVisibleMessageDate?: string | null;
   onClickPin: (messageId: string) => void;
   onClickThread: (messageId: string) => void;
   onClickCounter: () => void;
@@ -21,7 +21,7 @@ interface PinBannerProps {
 
 export function PinBanner({
   chatId,
-  topVisibleMessageDate,
+  bottomVisibleMessageDate,
   onClickPin,
   onClickThread,
   onClickCounter,
@@ -34,19 +34,19 @@ export function PinBanner({
 
   const activePin = useMemo(() => {
     if (pins.length === 0) return null;
-    if (!topVisibleMessageDate) return pins[0];
+    if (!bottomVisibleMessageDate) return pins[0];
 
-    const visibleTime = new Date(topVisibleMessageDate).getTime();
+    const visibleTime = new Date(bottomVisibleMessageDate).getTime();
     // Assuming pins are already sorted descending by message.createdAt in Redux (newest at index 0)
     for (const p of pins) {
-      // Find the most recent pin that is older than or equal to the current top visible message
+      // Find the most recent pin that is at or above the bottom of the visible viewport
       if (new Date(p.message.createdAt).getTime() <= visibleTime) {
         return p;
       }
     }
     // If all pins are newer than our current viewport, maybe just show the oldest one
     return pins[pins.length - 1];
-  }, [pins, topVisibleMessageDate]);
+  }, [pins, bottomVisibleMessageDate]);
 
   const handleUnpin = useCallback(
     (e: React.MouseEvent) => {

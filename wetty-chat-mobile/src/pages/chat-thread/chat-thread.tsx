@@ -331,6 +331,11 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     const msg = messages.find((m) => m.id === firstVisibleMessageId);
     return msg?.createdAt ?? null;
   }, [firstVisibleMessageId, messages]);
+  const bottomVisibleMessageDate = useMemo(() => {
+    if (!lastFullyVisibleMessageId) return null;
+    const msg = messages.find((m) => m.id === lastFullyVisibleMessageId);
+    return msg?.createdAt ?? null;
+  }, [lastFullyVisibleMessageId, messages]);
   const { visible: floatingDateVisible, fading: floatingDateFading } = useFloatingDateVisibility(
     !!topVisibleMessageDate,
     messageListScrolling,
@@ -1945,7 +1950,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
         {!threadId && (
           <PinBanner
             chatId={chatId}
-            topVisibleMessageDate={topVisibleMessageDate}
+            bottomVisibleMessageDate={bottomVisibleMessageDate}
             onClickPin={jumpToMessage}
             onClickThread={(messageId) => history.push(`/chats/chat/${chatId}/thread/${messageId}`)}
             onClickCounter={() => setPinListOpen(true)}
