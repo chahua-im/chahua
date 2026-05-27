@@ -9,6 +9,7 @@ use diesel::prelude::*;
 use std::time::Instant;
 use utoipa_axum::router::OpenApiRouter;
 
+use crate::schema::messages::dsl;
 use crate::{
     dto::{
         messages::{ListMessagesResponse, MessageResponse, SearchMessagesResponse},
@@ -185,17 +186,14 @@ async fn get_messages(
 
     check_membership(conn, chat_id, uid)?;
 
-    // When fetching a thread's messages, ensure read-state tracking and return the last read position
+    // When fetching a thread's messages, return the last read position
     let last_read_message_id: Option<i64> = if let Some(tid) = q.thread_id {
-        let _ = thread_svc::ensure_thread_read_state(conn, chat_id, tid, uid)?;
-        thread_svc::get_thread_read_state_last_read(conn, chat_id, tid, uid)?
+        thread_svc::get_thread_last_read_message_id(conn, chat_id, tid, uid)?
     } else {
         None
     };
 
     let max = validate_limit(q.max, MAX_MESSAGES_LIMIT);
-
-    use crate::schema::messages::dsl;
 
     let q_thread_id = q.thread_id;
     macro_rules! base_query {
@@ -401,7 +399,6 @@ async fn search_messages(
         }));
     }
 
-    use crate::schema::messages::dsl;
     let candidate_ids = candidate_page
         .candidates
         .iter()
@@ -486,7 +483,6 @@ async fn get_message(
 
     check_membership(conn, chat_id, uid)?;
 
-    use crate::schema::messages::dsl;
     let message: Message = messages::table
         .filter(
             dsl::id
@@ -621,7 +617,7 @@ pub(super) async fn post_thread_message(
     validate_client_message_type(&body.message_type)?;
 
     // Load root message: validate existence and message type
-    use crate::schema::messages::dsl;
+
     let root_msg: Message = messages::table
         .filter(
             dsl::id
@@ -681,14 +677,7 @@ pub(super) async fn post_thread_message(
 
         // Auto-subscribe the replying user and track read position
         crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)?;
-        crate::services::threads::ensure_thread_read_state(conn, chat_id, thread_id, uid)?;
-        crate::services::threads::update_thread_read_state_last_read(
-            conn,
-            chat_id,
-            thread_id,
-            uid,
-            response.id,
-        )?;
+        crate::services::threads::mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
 
         // Auto-subscribe the root message author
         if root_msg.sender_uid != uid {
@@ -819,7 +808,7 @@ async fn patch_message(
     check_membership(conn, chat_id, uid)?;
 
     // Verify message exists and belongs to the user
-    use crate::schema::messages::dsl;
+
     let message: Message = messages::table
         .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
         .select(Message::as_select())
@@ -928,7 +917,6 @@ async fn delete_message(
     check_membership(conn, chat_id, uid)?;
 
     // Verify message exists and belongs to the user
-    use crate::schema::messages::dsl;
     let message: Message = messages::table
         .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
         .select(Message::as_select())

@@ -126,10 +126,21 @@ async fn mark_thread_read(
     let chat_id: i64 = messages::table
         .filter(messages::id.eq(thread_root_id))
         .select(messages::chat_id)
-        .first(conn)?;
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Thread root message not found"))?;
+    // If the client reports reading the root message itself (no replies),
+    // there is nothing to track — skip the write.
+    if body.message_id == thread_root_id {
+        return Ok(Json(MarkThreadReadResponse {
+            last_read_message_id: None,
+            unread_count: 0,
+        }));
+    }
 
+    let _ = thread_svc::ensure_thread_user_state(conn, chat_id, thread_root_id, uid)?;
     let read_state =
-        thread_svc::mark_thread_as_read_state(conn, chat_id, thread_root_id, uid, body.message_id)?;
+        thread_svc::mark_thread_read(conn, chat_id, thread_root_id, uid, body.message_id)?;
 
     Ok(Json(MarkThreadReadResponse {
         last_read_message_id: read_state.last_read_message_id,
@@ -300,12 +311,15 @@ async fn get_subscription_status(
 
     check_membership(conn, chat_id, uid)?;
 
-    let archived = thread_svc::get_subscription_state(conn, chat_id, thread_root_id, uid)?;
-    let subscribed = archived.is_some();
+    let state = thread_svc::get_subscription_state(conn, chat_id, thread_root_id, uid)?;
+    let (subscribed, archived) = match state {
+        Some((archived, subscribed)) => (subscribed, archived),
+        None => (false, false),
+    };
 
     Ok(Json(ThreadSubscriptionStatusResponse {
         subscribed,
-        archived: archived.unwrap_or(false),
+        archived,
     }))
 }
 

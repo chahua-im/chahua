@@ -776,32 +776,27 @@ pub struct NewUserGroupExtra {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
-#[diesel(table_name = schema::thread_subscriptions)]
-pub struct ThreadSubscription {
+#[diesel(table_name = schema::thread_user_states)]
+pub struct ThreadUserState {
     pub chat_id: i64,
     pub thread_root_id: i64,
     pub uid: i32,
     pub subscribed_at: DateTime<Utc>,
     pub archived: bool,
+    pub last_read_message_id: Option<i64>,
+    pub subscribed: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = schema::thread_subscriptions)]
-pub struct NewThreadSubscription {
+#[diesel(table_name = schema::thread_user_states)]
+pub struct NewThreadUserState {
     pub chat_id: i64,
     pub thread_root_id: i64,
     pub uid: i32,
     pub subscribed_at: DateTime<Utc>,
     pub archived: bool,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
-#[diesel(table_name = schema::thread_read_state)]
-pub struct ThreadReadState {
-    pub chat_id: i64,
-    pub thread_root_id: i64,
-    pub uid: i32,
     pub last_read_message_id: Option<i64>,
+    pub subscribed: bool,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]

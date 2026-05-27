@@ -145,10 +145,10 @@ fn load_recipient_candidates(
     let mut candidates = std::collections::HashMap::<i32, RecipientCandidate>::new();
 
     if let Some(thread_root_id) = job.thread_root_id {
-        use crate::schema::thread_subscriptions::dsl as ts_dsl;
+        use crate::schema::thread_user_states::dsl as ts_dsl;
 
         let rows: Vec<(i32, bool, Option<chrono::DateTime<chrono::Utc>>, bool)> =
-            ts_dsl::thread_subscriptions
+            ts_dsl::thread_user_states
                 .inner_join(
                     group_membership::table.on(gm_dsl::chat_id
                         .eq(ts_dsl::chat_id)
@@ -156,6 +156,7 @@ fn load_recipient_candidates(
                 )
                 .filter(ts_dsl::chat_id.eq(job.chat_id))
                 .filter(ts_dsl::thread_root_id.eq(thread_root_id))
+                .filter(ts_dsl::subscribed.eq(true))
                 .select((
                     ts_dsl::uid,
                     ts_dsl::archived,
