@@ -992,6 +992,15 @@ msgstr "Revoke invite"
 msgid "Save"
 msgstr "Save"
 
+msgid "Favorite Sticker"
+msgstr "Favorite Sticker"
+
+msgid "Failed to add sticker to favorites"
+msgstr "Failed to add sticker to favorites"
+
+msgid "Sticker added to favorites"
+msgstr "Sticker added to favorites"
+
 msgid "Save Settings"
 msgstr "Save Settings"
 

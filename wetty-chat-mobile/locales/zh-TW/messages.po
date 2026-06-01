@@ -992,6 +992,15 @@ msgstr "撤銷邀請"
 msgid "Save"
 msgstr "收藏"
 
+msgid "Favorite Sticker"
+msgstr "收藏貼紙"
+
+msgid "Failed to add sticker to favorites"
+msgstr "添加貼紙到收藏失敗"
+
+msgid "Sticker added to favorites"
+msgstr "貼紙已添加到收藏"
+
 msgid "Save Settings"
 msgstr "儲存設定"
 

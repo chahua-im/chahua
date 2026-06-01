@@ -28,6 +28,7 @@ import {
   informationCircleOutline,
   notificationsOffOutline,
   linkOutline,
+  starOutline,
   notifications,
   people,
   pin as pinIcon,
@@ -139,6 +140,7 @@ import {
   addRecentReaction,
 } from '@/store/settingsSlice';
 import { MAX_REACTIONS_PER_USER_PER_MESSAGE } from '@/constants/emojiAndStickers';
+import { favoriteSticker } from '@/api/stickers';
 import { saveMessage } from '@/api/savedMessages';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 
@@ -1689,8 +1691,9 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     const audioMessage = isAudioMessage(msg);
     const stickerMessage = msg.messageType === 'sticker';
     const isOwn = msg.sender.uid === currentUserId;
-    const canSaveMessage =
-      savedMessagesEnabled && !msg.isDeleted && msg.messageType !== 'system' && !msg.id.startsWith('cg_');
+    const isDeletableAction = !msg.isDeleted && !msg.id.startsWith('cg_');
+    const canSaveMessage = savedMessagesEnabled && isDeletableAction && msg.messageType !== 'system';
+    const canFavoriteSticker = isDeletableAction;
     const actions: MessageOverlayAction[] = [];
 
     if (!audioMessage && !stickerMessage) {
@@ -1736,7 +1739,22 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
       },
     });
 
-    if (canSaveMessage) {
+    if (stickerMessage && canFavoriteSticker) {
+      actions.push({
+        key: 'favorite',
+        label: t`Favorite Sticker`,
+        icon: starOutline,
+        handler: () => {
+          favoriteSticker(msg.sticker!.id)
+            .then(() => {
+              showToast(t`Sticker added to favorites`, 2000);
+            })
+            .catch((e: Error) => {
+              showToast(e.message || t`Failed to add sticker to favorites`);
+            });
+        },
+      });
+    } else if (!stickerMessage && canSaveMessage) {
       actions.push({
         key: 'save',
         label: t`Save`,
@@ -1854,7 +1872,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     }
     if (stickerMessage) {
       return actions.filter(
-        (a) => a.key === 'reply' || a.key === 'delete' || a.key === 'copy-link' || a.key === 'save',
+        (a) => a.key === 'reply' || a.key === 'delete' || a.key === 'copy-link' || a.key === 'favorite',
       );
     }
     return actions;
