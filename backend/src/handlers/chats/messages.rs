@@ -793,6 +793,13 @@ pub struct ForwardMessageBody {
     #[schema(value_type = String)]
     pub source_chat_id: i64,
     pub client_generated_id: String,
+    /// Optional: forward into a thread instead of top-level chat.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub thread_id: Option<i64>,
 }
 
 /// POST /chats/:target_chat_id/messages/:message_id/forward — Forward a message to a chat.
@@ -821,13 +828,10 @@ async fn forward_message(
     Json(body): Json<ForwardMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
-
     let source_chat_id = body.source_chat_id;
-
     // Forwarder must be a member of both source and target chats.
     check_membership(conn, source_chat_id, uid)?;
     check_membership(conn, target_chat_id, uid)?;
-
     // Load the original message from the source chat.
     use crate::schema::messages::dsl;
     let original: Message = messages::table
@@ -842,6 +846,29 @@ async fn forward_message(
         .first(conn)
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
+    // If forwarding into a thread, validate the root message exists and is a text message.
+    let thread_root: Option<Message> = if let Some(thread_id) = body.thread_id {
+        let root: Message = messages::table
+            .filter(
+                dsl::id
+                    .eq(thread_id)
+                    .and(dsl::chat_id.eq(target_chat_id))
+                    .and(dsl::deleted_at.is_null())
+                    .and(dsl::is_published.eq(true)),
+            )
+            .select(Message::as_select())
+            .first(conn)
+            .optional()?
+            .ok_or(AppError::NotFound("Thread root message not found"))?;
+        if root.message_type != MessageType::Text {
+            return Err(AppError::BadRequest(
+                "Threads can only be created on text messages",
+            ));
+        }
+        Some(root)
+    } else {
+        None
+    };
 
     // Keep message creation and side effects atomic.
     diesel::sql_query("BEGIN").execute(conn)?;
@@ -871,7 +898,7 @@ async fn forward_message(
                 message_type: original.message_type.clone(),
                 sticker_id: original.sticker_id,
                 reply_to_id: None,
-                reply_root_id: None,
+                reply_root_id: body.thread_id,
                 client_generated_id: body.client_generated_id,
                 attachment_ids: vec![],
                 publish_immediately: true,
@@ -935,7 +962,40 @@ async fn forward_message(
             uid,
             send_result.response.id,
         )?;
-
+        // If forwarding into a thread, fire thread-specific side effects.
+        if let (Some(thread_id), Some(_root)) = (body.thread_id, &thread_root) {
+            crate::services::threads::ensure_thread_subscription(
+                conn,
+                target_chat_id,
+                thread_id,
+                uid,
+            )?;
+            crate::services::threads::mark_thread_as_read(
+                conn,
+                thread_id,
+                uid,
+                send_result.response.id,
+            )?;
+            // Auto-subscribe the root message author if different from forwarder.
+            if _root.sender_uid != uid {
+                crate::services::threads::ensure_thread_subscription(
+                    conn,
+                    target_chat_id,
+                    thread_id,
+                    _root.sender_uid,
+                )?;
+            }
+            crate::services::threads::increment_thread_meta(
+                conn,
+                target_chat_id,
+                thread_id,
+                send_result.response.created_at,
+            )?;
+            // Mark the root message as having a thread.
+            diesel::update(messages::table.filter(dsl::id.eq(thread_id)))
+                .set(dsl::has_thread.eq(true))
+                .execute(conn)?;
+        }
         Ok(send_result)
     }
     .await;
@@ -952,6 +1012,22 @@ async fn forward_message(
     };
 
     send_result.side_effects.fire(&state);
+    // If forwarding into a thread, broadcast thread update to subscribers.
+    if let Some(thread_id) = body.thread_id {
+        if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
+            conn,
+            &state.ws_registry,
+            target_chat_id,
+            thread_id,
+        ) {
+            tracing::warn!(
+                target_chat_id,
+                thread_id,
+                ?err,
+                "failed to broadcast thread update after forward"
+            );
+        }
+    }
     if let Some(search_service) = state.message_search.clone() {
         search_service.upsert_message_best_effort(send_result.inserted_message);
     }

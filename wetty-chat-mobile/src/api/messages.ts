@@ -217,7 +217,11 @@ export function sendThreadMessage(
 export function forwardMessage(
   targetChatId: string | number,
   messageId: string,
-  body: { sourceChatId: string | number; clientGeneratedId: string },
+  body: {
+    sourceChatId: string | number;
+    clientGeneratedId: string;
+    threadId?: string | number;
+  },
 ): Promise<AxiosResponse<MessageResponse>> {
   return apiClient.post(`/chats/${targetChatId}/messages/${messageId}/forward`, body);
 }
