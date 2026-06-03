@@ -12,7 +12,7 @@ import {
   useIonAlert,
   useIonToast,
 } from '@ionic/react';
-import { trashOutline, pencilOutline } from 'ionicons/icons';
+import { trashOutline, createOutline } from 'ionicons/icons';
 import { useParams, useHistory } from 'react-router-dom';
 import { t } from '@lingui/core/macro';
 import { StickerImage } from '@/components/shared/StickerImage';
@@ -236,7 +236,7 @@ export function StickerPackDetailCore({ packId, backAction }: StickerPackDetailC
           {owned && (
             <IonButtons slot="end">
               <IonButton onClick={handleRenamePack} aria-label={t`Rename pack`}>
-                <IonIcon slot="icon-only" icon={pencilOutline} />
+                <IonIcon slot="icon-only" icon={createOutline} />
               </IonButton>
               <IonButton color="danger" onClick={handleDeletePack} aria-label={t`Delete pack`}>
                 <IonIcon slot="icon-only" icon={trashOutline} />
