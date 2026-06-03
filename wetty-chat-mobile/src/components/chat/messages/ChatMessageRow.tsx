@@ -126,6 +126,7 @@ export function ChatMessageRow({
       mentions={msg.mentions}
       currentUserUid={typeof currentUserId === 'number' ? currentUserId : null}
       onMentionClick={(uid) => onAvatarClick(mentionToUser(msg.mentions, uid))}
+      forwardedFrom={msg.forwardedFrom}
     />
   );
 }

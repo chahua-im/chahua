@@ -51,6 +51,23 @@ pub struct MessageResponse {
     pub reactions: Vec<ReactionSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarded_from: Option<ForwardedFromInfo>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedFromInfo {
+    pub sender: User,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    /// Original message's reply_to preview (non-navigable in target chat)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_reply_to: Option<Box<MessagePreview>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

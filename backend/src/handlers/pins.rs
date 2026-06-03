@@ -224,6 +224,9 @@ async fn create_pin(
             client_generated_id: Uuid::new_v4().to_string(),
             attachment_ids: vec![],
             publish_immediately: true,
+            forwarded_from_message_id: None,
+            forwarded_from_chat_id: None,
+            forwarded_from_sender_uid: None,
         },
     )
     .await
@@ -299,6 +302,9 @@ async fn delete_pin(
             client_generated_id: Uuid::new_v4().to_string(),
             attachment_ids: vec![],
             publish_immediately: true,
+            forwarded_from_message_id: None,
+            forwarded_from_chat_id: None,
+            forwarded_from_sender_uid: None,
         },
     )
     .await

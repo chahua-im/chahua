@@ -574,6 +574,9 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_from_message_id: None,
+            forwarded_from_chat_id: None,
+            forwarded_from_sender_uid: None,
         }
     }
 

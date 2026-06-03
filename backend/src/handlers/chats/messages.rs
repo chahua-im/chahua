@@ -558,6 +558,9 @@ async fn post_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
+                forwarded_from_message_id: None,
+                forwarded_from_chat_id: None,
+                forwarded_from_sender_uid: None,
             },
         )
         .await?;
@@ -668,6 +671,9 @@ pub(super) async fn post_thread_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
+                forwarded_from_message_id: None,
+                forwarded_from_chat_id: None,
+                forwarded_from_sender_uid: None,
             },
         )
         .await?;
@@ -779,6 +785,256 @@ pub(super) async fn post_thread_message(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Request body for forwarding a message.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardMessageBody {
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    #[schema(value_type = String)]
+    pub source_chat_id: i64,
+    pub client_generated_id: String,
+    /// Optional: forward into a thread instead of top-level chat.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub thread_id: Option<i64>,
+}
+
+/// POST /chats/:target_chat_id/messages/:message_id/forward — Forward a message to a chat.
+#[utoipa::path(
+    post,
+    path = "/{message_id}/forward",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Target chat ID"),
+        ("message_id" = i64, Path, description = "Source message ID"),
+    ),
+    request_body = ForwardMessageBody,
+    responses(
+        (status = 201, description = "Message forwarded", body = MessageResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn forward_message(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(MessageIdPath {
+        chat_id: target_chat_id,
+        message_id,
+    }): Path<MessageIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<ForwardMessageBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let conn = &mut *conn;
+    let source_chat_id = body.source_chat_id;
+    // Forwarder must be a member of both source and target chats.
+    check_membership(conn, source_chat_id, uid)?;
+    check_membership(conn, target_chat_id, uid)?;
+    // Load the original message from the source chat.
+    use crate::schema::messages::dsl;
+    let original: Message = messages::table
+        .filter(
+            dsl::id
+                .eq(message_id)
+                .and(dsl::chat_id.eq(source_chat_id))
+                .and(dsl::deleted_at.is_null())
+                .and(dsl::is_published.eq(true)),
+        )
+        .select(Message::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Message not found"))?;
+    // If forwarding into a thread, validate the root message exists and is a text message.
+    let thread_root: Option<Message> = if let Some(thread_id) = body.thread_id {
+        let root: Message = messages::table
+            .filter(
+                dsl::id
+                    .eq(thread_id)
+                    .and(dsl::chat_id.eq(target_chat_id))
+                    .and(dsl::deleted_at.is_null())
+                    .and(dsl::is_published.eq(true)),
+            )
+            .select(Message::as_select())
+            .first(conn)
+            .optional()?
+            .ok_or(AppError::NotFound("Thread root message not found"))?;
+        if root.message_type != MessageType::Text {
+            return Err(AppError::BadRequest(
+                "Threads can only be created on text messages",
+            ));
+        }
+        Some(root)
+    } else {
+        None
+    };
+
+    // Keep message creation and side effects atomic.
+    diesel::sql_query("BEGIN").execute(conn)?;
+
+    let tx_result: Result<_, AppError> = async {
+        // Trace to the root source for chained forwards (C forwards B's forward of A → show A).
+        let (root_sender_uid, root_message_id, root_chat_id) =
+            if original.forwarded_from_sender_uid.is_some() {
+                (
+                    original
+                        .forwarded_from_sender_uid
+                        .unwrap_or(original.sender_uid),
+                    original.forwarded_from_message_id.unwrap_or(original.id),
+                    original.forwarded_from_chat_id.unwrap_or(source_chat_id),
+                )
+            } else {
+                (original.sender_uid, original.id, source_chat_id)
+            };
+
+        let send_result = send_prepared_message(
+            conn,
+            &state,
+            PreparedMessageSend {
+                chat_id: target_chat_id,
+                sender_uid: uid,
+                message: original.message.clone(),
+                message_type: original.message_type.clone(),
+                sticker_id: original.sticker_id,
+                reply_to_id: None,
+                reply_root_id: body.thread_id,
+                client_generated_id: body.client_generated_id,
+                attachment_ids: vec![],
+                publish_immediately: true,
+                forwarded_from_message_id: Some(root_message_id),
+                forwarded_from_chat_id: Some(root_chat_id),
+                forwarded_from_sender_uid: Some(root_sender_uid),
+            },
+        )
+        .await?;
+        // Clone attachments from the original message to the new message.
+        use crate::schema::attachments::dsl as a_dsl;
+        let original_attachments: Vec<crate::models::Attachment> = attachments::table
+            .filter(a_dsl::message_id.eq(original.id))
+            .select(crate::models::Attachment::as_select())
+            .load(conn)?;
+
+        if !original_attachments.is_empty() {
+            let now = chrono::Utc::now();
+            let new_attachments: Vec<crate::models::NewAttachment> = original_attachments
+                .iter()
+                .map(|att| {
+                    crate::models::NewAttachment {
+                        id: 0, // Will be replaced below
+                        message_id: Some(send_result.inserted_message.id),
+                        file_name: att.file_name.clone(),
+                        kind: att.kind.clone(),
+                        external_reference: att.external_reference.clone(),
+                        size: att.size,
+                        created_at: now,
+                        deleted_at: None,
+                        width: att.width,
+                        height: att.height,
+                        order: att.order,
+                    }
+                })
+                .collect();
+
+            // Generate IDs for cloned attachments and insert them.
+            for mut new_att in new_attachments {
+                let new_id = crate::utils::ids::next_id(state.id_gen.as_ref())
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("ferroid next_attachment_id: {:?}", e);
+                        AppError::Internal("ID generation failed")
+                    })?;
+                new_att.id = new_id;
+                diesel::insert_into(attachments::table)
+                    .values(&new_att)
+                    .execute(conn)?;
+            }
+
+            // Mark the new message as having attachments.
+            diesel::update(messages::table.filter(dsl::id.eq(send_result.inserted_message.id)))
+                .set(dsl::has_attachments.eq(true))
+                .execute(conn)?;
+        }
+
+        crate::services::chat::mark_chat_as_read(
+            conn,
+            target_chat_id,
+            uid,
+            send_result.response.id,
+        )?;
+        // If forwarding into a thread, fire thread-specific side effects.
+        if let (Some(thread_id), Some(root)) = (body.thread_id, &thread_root) {
+            crate::services::threads::ensure_thread_subscription(
+                conn,
+                target_chat_id,
+                thread_id,
+                uid,
+            )?;
+            crate::services::threads::mark_thread_as_read(
+                conn,
+                thread_id,
+                uid,
+                send_result.response.id,
+            )?;
+            // Auto-subscribe the root message author if different from forwarder.
+            if root.sender_uid != uid {
+                crate::services::threads::ensure_thread_subscription(
+                    conn,
+                    target_chat_id,
+                    thread_id,
+                    root.sender_uid,
+                )?;
+            }
+            crate::services::threads::increment_thread_meta(
+                conn,
+                target_chat_id,
+                thread_id,
+                send_result.response.created_at,
+            )?;
+            // Mark the root message as having a thread.
+            diesel::update(messages::table.filter(dsl::id.eq(thread_id)))
+                .set(dsl::has_thread.eq(true))
+                .execute(conn)?;
+        }
+        Ok(send_result)
+    }
+    .await;
+
+    let send_result = match tx_result {
+        Ok(send_result) => {
+            diesel::sql_query("COMMIT").execute(conn)?;
+            send_result
+        }
+        Err(err) => {
+            let _ = diesel::sql_query("ROLLBACK").execute(conn);
+            return Err(err);
+        }
+    };
+
+    send_result.side_effects.fire(&state);
+    // If forwarding into a thread, broadcast thread update to subscribers.
+    if let Some(thread_id) = body.thread_id {
+        if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
+            conn,
+            &state.ws_registry,
+            target_chat_id,
+            thread_id,
+        ) {
+            tracing::warn!(
+                target_chat_id,
+                thread_id,
+                ?err,
+                "failed to broadcast thread update after forward"
+            );
+        }
+    }
+    if let Some(search_service) = state.message_search.clone() {
+        search_service.upsert_message_best_effort(send_result.inserted_message);
+    }
+
+    Ok((StatusCode::CREATED, Json(send_result.response)))
+}
+
 /// PATCH /chats/:chat_id/messages/:message_id — Edit a message.
 #[utoipa::path(
     patch,
@@ -821,6 +1077,9 @@ async fn patch_message(
         return Err(AppError::Forbidden("You can only edit your own messages"));
     }
 
+    if message.forwarded_from_message_id.is_some() {
+        return Err(AppError::Forbidden("Forwarded messages cannot be edited"));
+    }
     if message.deleted_at.is_some() {
         return Err(AppError::BadRequest("Cannot edit deleted message"));
     }
@@ -1024,7 +1283,8 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(
             get_message,
             patch_message,
-            delete_message
+            delete_message,
+            forward_message
         ))
 }
 

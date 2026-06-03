@@ -17,7 +17,7 @@ use crate::{
         attachments::AttachmentResponse,
         chats::{ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse},
         messages::{
-            MentionInfo, MessagePreview, MessagePreviewSticker, MessageResponse,
+            ForwardedFromInfo, MentionInfo, MessagePreview, MessagePreviewSticker, MessageResponse,
             MessageStickerResponse, ReactionReactor, ReactionSummary, StickerMediaResponse,
             ThreadInfo,
         },
@@ -111,6 +111,9 @@ pub(crate) struct PreparedMessageSend {
     pub client_generated_id: String,
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
+    pub forwarded_from_message_id: Option<i64>,
+    pub forwarded_from_chat_id: Option<i64>,
+    pub forwarded_from_sender_uid: Option<i32>,
 }
 
 pub(crate) struct SendMessageResult {
@@ -586,6 +589,9 @@ pub(crate) async fn send_prepared_message(
         has_reactions: false,
         is_published: prepared.publish_immediately,
         transcode_status,
+        forwarded_from_message_id: prepared.forwarded_from_message_id,
+        forwarded_from_chat_id: prepared.forwarded_from_chat_id,
+        forwarded_from_sender_uid: prepared.forwarded_from_sender_uid,
     };
 
     let inserted_msg: Message = diesel::insert_into(messages_schema::table)
@@ -679,6 +685,12 @@ pub async fn attach_metadata(
     }
     for reply_msg in reply_messages_map.values() {
         avatar_uids.insert(reply_msg.sender_uid);
+    }
+    // Also collect forwarded-from sender UIDs for avatar resolution.
+    for m in &messages_to_process {
+        if let Some(fwd_uid) = m.forwarded_from_sender_uid {
+            avatar_uids.insert(fwd_uid);
+        }
     }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
     let mut user_avatars = lookup_user_avatars(state, &target_uids);
@@ -883,6 +895,30 @@ pub async fn attach_metadata(
         user_avatars.extend(lookup_user_avatars(state, &extra_mention_uids));
     }
 
+    // Load forwarded-from messages' reply_to for preview building.
+    let fwd_message_ids: Vec<i64> = messages_to_process
+        .iter()
+        .filter_map(|m| m.forwarded_from_message_id)
+        .collect();
+    let fwd_messages_map: std::collections::HashMap<i64, Message> = if !fwd_message_ids.is_empty() {
+        use crate::schema::messages::dsl as m_dsl;
+        messages_schema::table
+            .filter(m_dsl::id.eq_any(&fwd_message_ids))
+            .select(Message::as_select())
+            .load(conn)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m: Message| (m.id, m))
+            .collect()
+    } else {
+        std::collections::HashMap::new()
+    };
+    let fwd_reply_ids: Vec<i64> = fwd_messages_map
+        .values()
+        .filter_map(|m| m.reply_to_id)
+        .collect();
+    let fwd_reply_messages_map = load_reply_messages(conn, &fwd_reply_ids).unwrap_or_default();
+
     let mut responses = Vec::with_capacity(messages_to_process.len());
     for (idx, m) in messages_to_process.into_iter().enumerate() {
         let reply_to_message = m.reply_to_id.and_then(|reply_id| {
@@ -997,6 +1033,54 @@ pub async fn attach_metadata(
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
             },
+            forwarded_from: m.forwarded_from_message_id.and_then(|fwd_msg_id| {
+                let fwd_chat_id = m.forwarded_from_chat_id?;
+                let fwd_sender_uid = m.forwarded_from_sender_uid?;
+                let original_reply_to = fwd_messages_map
+                    .get(&fwd_msg_id)
+                    .and_then(|fwd_msg| fwd_msg.reply_to_id)
+                    .and_then(|reply_id| {
+                        fwd_reply_messages_map.get(&reply_id).map(|reply_msg| {
+                            Box::new(MessagePreview {
+                                id: reply_msg.id,
+                                client_generated_id: reply_msg.client_generated_id.clone(),
+                                created_at: reply_msg.created_at,
+                                sender: build_sender(
+                                    reply_msg.sender_uid,
+                                    &user_avatars,
+                                    &user_profiles,
+                                ),
+                                message: if reply_msg.deleted_at.is_some() {
+                                    None
+                                } else {
+                                    reply_msg.message.clone()
+                                },
+                                message_type: reply_msg.message_type.clone(),
+                                sticker: reply_msg.sticker_id.and_then(|sticker_id| {
+                                    sticker_rows.get(&sticker_id).and_then(|(sticker, _)| {
+                                        (reply_msg.deleted_at.is_none()).then_some(
+                                            MessagePreviewSticker {
+                                                emoji: sticker.emoji.clone(),
+                                            },
+                                        )
+                                    })
+                                }),
+                                first_attachment_kind: first_attachment_kind(
+                                    &message_attachments_map,
+                                    reply_msg.id,
+                                ),
+                                is_deleted: reply_msg.deleted_at.is_some(),
+                                mentions: Vec::new(),
+                            })
+                        })
+                    });
+                Some(ForwardedFromInfo {
+                    sender: build_sender(fwd_sender_uid, &user_avatars, &user_profiles),
+                    original_chat_id: fwd_chat_id,
+                    original_message_id: fwd_msg_id,
+                    original_reply_to,
+                })
+            }),
         });
     }
     responses
@@ -1730,6 +1814,7 @@ mod tests {
             attachments: Vec::new(),
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_from: None,
         };
 
         let preview = build_push_preview_bundle(&response);
@@ -1772,6 +1857,7 @@ mod tests {
             }],
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_from: None,
         };
 
         let preview = build_push_preview_bundle(&response);

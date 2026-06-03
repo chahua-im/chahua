@@ -35,6 +35,10 @@ export const FEATURES = {
     enabled: false,
     description: 'Stores landing auth/invite state for PWA handoff and shows pending invites inside the installed app.',
   },
+  messageForward: {
+    enabled: true,
+    description: 'Allows users to forward messages to other chats.',
+  },
 } as const;
 
 export type Feature = keyof typeof FEATURES;
