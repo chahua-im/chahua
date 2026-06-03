@@ -2121,6 +2121,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
               },
               mentions: msg.mentions ?? undefined,
               currentUserUid: currentUserId,
+              forwardedFrom: msg.forwardedFrom ?? undefined,
               onMentionClick: (uid: number) => setProfileSender(mentionToUser(msg.mentions, uid)),
             } as const;
 

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { IonIcon, useIonToast } from '@ionic/react';
 import { addOutline } from 'ionicons/icons';
 import EmojiPicker, { EmojiStyle, Theme, type EmojiClickData } from 'emoji-picker-react';
-import type { Attachment, MentionInfo } from '@/api/messages';
+import type { Attachment, MentionInfo, ReplyToMessage } from '@/api/messages';
 import type { PreviewMessage } from '@/utils/messagePreview';
 import { ChatBubbleBase } from './ChatBubbleBase';
 import { StickerBubble } from './StickerBubble';
@@ -41,8 +41,12 @@ interface MessageOverlayBaseProps {
     onReact: (emoji: string) => void;
     currentMessageReactions?: string[];
   };
-  onClose: () => void;
   mentions?: MentionInfo[];
+  onClose: () => void;
+  forwardedFrom?: {
+    sender: { name: string | null };
+    originalReplyTo?: ReplyToMessage;
+  } | null;
   currentUserUid?: number | null;
   onMentionClick?: (uid: number) => void;
 }
@@ -80,6 +84,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     onClose,
     mentions,
     currentUserUid,
+    forwardedFrom,
     onMentionClick,
   } = props;
   const isSticker = props.messageType === 'sticker';
@@ -344,6 +349,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
         bubbleProps={bubbleCloneProps}
         mentions={mentions}
         currentUserUid={currentUserUid}
+        forwardedFrom={forwardedFrom}
         onMentionClick={onMentionClick}
       />
     );
