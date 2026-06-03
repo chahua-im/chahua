@@ -118,6 +118,7 @@ import { getUploadMimeType } from '@/utils/heicMedia';
 import { READ_REQUEST_COOLDOWN_MS } from '@/constants/chatTiming';
 import {
   archiveThread,
+  getThreadReadState,
   markThreadAsRead as apiMarkThreadAsRead,
   getThreadSubscriptionStatus,
   getThreads,
@@ -246,6 +247,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const storedName = useSelector((state: RootState) => selectChatName(state, chatId));
   const isMuted = useSelector((state: RootState) => selectIsChatMuted(state, chatId));
   const lastReadMessageId = useSelector((state: RootState) => selectChatLastReadMessageId(state, chatId));
+  const threadLastReadMessageIdRef = useRef<string | null>(null);
   const scrollToBottomUnreadCount = useSelector((state: RootState) =>
     threadId ? 0 : selectChatUnreadCount(state, chatId),
   );
@@ -932,7 +934,8 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
           dispatch(setTimelineMode({ chatId: storeChatId, mode: { type: 'latest' } }));
 
           if (shouldResetAnchor) {
-            const resumeId: string | null | undefined = initialResumeMessageId ?? res.data.lastReadMessageId;
+            const resumeId: string | null | undefined =
+              initialResumeMessageId ?? (threadId ? threadLastReadMessageIdRef.current : lastReadMessageId);
             resetAnchor(resumeId);
           } else if (import.meta.env.DEV) {
             console.log('[ChatThread] initialAnchor-preserved', {
@@ -986,7 +989,20 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
         });
     } else if (!initialLoadCompletedRef.current) {
       initialLoadCompletedRef.current = true;
-      fetchLatestWindow();
+      if (threadId) {
+        getThreadReadState(threadId)
+          .then((res) => {
+            threadLastReadMessageIdRef.current = res.data.lastReadMessageId;
+          })
+          .catch((err) => {
+            console.debug('[ChatThread] getThreadReadState failed, falling back', err);
+          })
+          .finally(() => {
+            fetchLatestWindow();
+          });
+      } else {
+        fetchLatestWindow();
+      }
     }
   }, [chatId, fetchLatestWindow, dispatch, pendingResumeMessageId, storeChatId, threadId]);
 

@@ -208,9 +208,16 @@ export const selectThreadSubscriptionStatus = (state: RootState, threadRootId: s
   state.threads.subscriptionByThreadId[threadRootId] ?? null;
 export const selectThreadArchivedStatus = (state: RootState, threadRootId: string) =>
   state.threads.archivedByThreadId[threadRootId] ?? null;
+const selectThreadByRootId = (state: RootState, threadId: string | undefined): StoredThreadListItem | undefined => {
+  if (!threadId) return undefined;
+  return state.threads.items.find((t) => t.threadRootMessage.id === threadId);
+};
 export const selectThreadUnreadCount = (state: RootState, threadRootId: string): number => {
-  const thread = state.threads.items.find((t) => t.threadRootMessage.id === threadRootId);
-  return thread?.unreadCount ?? 0;
+  return selectThreadByRootId(state, threadRootId)?.unreadCount ?? 0;
+};
+// Currently unused — kept for future thread detail UI that may need store-side read position.
+export const selectThreadLastReadMessageId = (state: RootState, threadId: string | undefined): string | null => {
+  return selectThreadByRootId(state, threadId)?.lastReadMessageId ?? null;
 };
 export const selectShouldShowThreadsRow = (state: RootState) =>
   selectTotalUnreadThreadCount(state) > 0 ||

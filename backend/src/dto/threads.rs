@@ -55,3 +55,11 @@ pub struct ThreadSubscriptionStatusResponse {
     pub subscribed: bool,
     pub archived: bool,
 }
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadReadStateResponse {
+    #[serde(serialize_with = "crate::serde_i64_string::opt::serialize")]
+    #[schema(value_type = Option<String>)]
+    pub last_read_message_id: Option<i64>,
+}

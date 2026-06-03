@@ -95,3 +95,11 @@ export function archiveThread(chatId: string | number, threadRootId: string | nu
 export function unarchiveThread(chatId: string | number, threadRootId: string | number): Promise<AxiosResponse<void>> {
   return apiClient.delete(`/chats/${chatId}/threads/${threadRootId}/archive`);
 }
+
+export interface ThreadReadStateResponse {
+  lastReadMessageId: string | null;
+}
+
+export function getThreadReadState(threadRootId: string): Promise<AxiosResponse<ThreadReadStateResponse>> {
+  return apiClient.get(`/threads/${threadRootId}/read-state`);
+}

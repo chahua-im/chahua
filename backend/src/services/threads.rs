@@ -150,7 +150,7 @@ struct ThreadUnreadCountRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ThreadReadStateResponse {
+pub struct ThreadReadState {
     pub last_read_message_id: Option<i64>,
     pub unread_count: i64,
 }
@@ -189,12 +189,12 @@ pub fn mark_thread_read(
     thread_root_id: i64,
     uid: i32,
     message_id: i64,
-) -> Result<ThreadReadStateResponse, diesel::result::Error> {
+) -> Result<ThreadReadState, diesel::result::Error> {
     let _ = mark_thread_as_read(conn, chat_id, thread_root_id, uid, message_id)?;
     let last_read_message_id = get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
     let unread_count = get_thread_unread_count(conn, thread_root_id, uid, last_read_message_id)?;
 
-    Ok(ThreadReadStateResponse {
+    Ok(ThreadReadState {
         last_read_message_id,
         unread_count,
     })

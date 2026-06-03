@@ -9,8 +9,8 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::threads::{
-        ListThreadsResponse, MarkThreadReadResponse, ThreadSubscriptionStatusResponse,
-        UnreadThreadCountResponse,
+        ListThreadsResponse, MarkThreadReadResponse, ThreadReadStateResponse,
+        ThreadSubscriptionStatusResponse, UnreadThreadCountResponse,
     },
     errors::AppError,
     extractors::DbConn,
@@ -100,6 +100,19 @@ pub struct ThreadRootIdPath {
     thread_root_id: i64,
 }
 
+/// Resolve `chat_id` from a thread root message ID, or return 404.
+fn resolve_chat_id_for_thread(
+    conn: &mut PgConnection,
+    thread_root_id: i64,
+) -> Result<i64, AppError> {
+    messages::table
+        .filter(messages::id.eq(thread_root_id))
+        .select(messages::chat_id)
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Thread root message not found"))
+}
+
 /// POST /threads/:thread_root_id/read — Mark a thread as read.
 #[utoipa::path(
     post,
@@ -122,13 +135,7 @@ async fn mark_thread_read(
 ) -> Result<Json<MarkThreadReadResponse>, AppError> {
     let conn = &mut *conn;
 
-    // Look up chat_id from the root message
-    let chat_id: i64 = messages::table
-        .filter(messages::id.eq(thread_root_id))
-        .select(messages::chat_id)
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Thread root message not found"))?;
+    let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
     // If the client reports reading the root message itself (no replies),
     // there is nothing to track — skip the write.
     if body.message_id == thread_root_id {
@@ -148,6 +155,35 @@ async fn mark_thread_read(
     }))
 }
 
+/// GET /threads/:thread_root_id/read-state — Get the user's read position for a thread.
+#[utoipa::path(
+    get,
+    path = "/{thread_root_id}/read-state",
+    tag = "threads",
+    params(
+        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+    ),
+    responses(
+        (status = OK, body = ThreadReadStateResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn get_thread_read_state(
+    CurrentUid(uid): CurrentUid,
+    Path(ThreadRootIdPath { thread_root_id }): Path<ThreadRootIdPath>,
+    mut conn: DbConn,
+) -> Result<Json<ThreadReadStateResponse>, AppError> {
+    let conn = &mut *conn;
+
+    let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
+
+    let last_read_message_id =
+        thread_svc::get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
+
+    Ok(Json(ThreadReadStateResponse {
+        last_read_message_id,
+    }))
+}
 /// GET /threads/unread — Get total unread thread and message counts for the current user.
 #[utoipa::path(
     get,
@@ -408,8 +444,8 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(get_threads))
         .routes(utoipa_axum::routes!(get_unread_thread_count))
         .routes(utoipa_axum::routes!(mark_thread_read))
+        .routes(utoipa_axum::routes!(get_thread_read_state))
 }
-
 /// Routes that are nested under /chats/:chat_id/threads/:thread_root_id
 pub fn subscribe_router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()

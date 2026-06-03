@@ -24,7 +24,6 @@ use crate::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchSort,
         SearchCandidateDropCounts,
     },
-    services::threads as thread_svc,
     utils::{auth::CurrentUid, pagination::validate_limit},
     AppState, MAX_MESSAGES_LIMIT,
 };
@@ -186,13 +185,6 @@ async fn get_messages(
 
     check_membership(conn, chat_id, uid)?;
 
-    // When fetching a thread's messages, return the last read position
-    let last_read_message_id: Option<i64> = if let Some(tid) = q.thread_id {
-        thread_svc::get_thread_last_read_message_id(conn, chat_id, tid, uid)?
-    } else {
-        None
-    };
-
     let max = validate_limit(q.max, MAX_MESSAGES_LIMIT);
 
     let q_thread_id = q.thread_id;
@@ -257,7 +249,6 @@ async fn get_messages(
             messages: messages_vec,
             next_cursor,
             prev_cursor,
-            last_read_message_id,
         }));
     }
 
@@ -282,7 +273,6 @@ async fn get_messages(
             messages: messages_vec,
             next_cursor: None,
             prev_cursor,
-            last_read_message_id,
         }));
     }
 
@@ -316,7 +306,6 @@ async fn get_messages(
         messages: messages_vec,
         next_cursor,
         prev_cursor: None,
-        last_read_message_id,
     }))
 }
 

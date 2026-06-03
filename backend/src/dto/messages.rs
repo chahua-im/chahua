@@ -63,9 +63,6 @@ pub struct ListMessagesResponse {
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
     pub prev_cursor: Option<i64>,
-    #[serde(with = "crate::serde_i64_string::opt")]
-    #[schema(value_type = Option<String>)]
-    pub last_read_message_id: Option<i64>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
