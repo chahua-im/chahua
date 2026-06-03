@@ -1019,6 +1019,10 @@ msgstr "Revoke invite"
 msgid "Save"
 msgstr "Save"
 
+msgctxt "bookmark a message"
+msgid "Save"
+msgstr "Save"
+
 msgid "Save Settings"
 msgstr "Save Settings"
 

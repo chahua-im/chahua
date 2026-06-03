@@ -192,7 +192,9 @@ export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, o
               />
             </IonItem>
             <IonItem button onClick={handleSave} detail={false}>
-              <IonLabel color="primary">Save</IonLabel>
+              <IonLabel color="primary">
+                <Trans>Save</Trans>
+              </IonLabel>
             </IonItem>
           </IonList>
         </FeatureGate>

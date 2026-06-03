@@ -1757,7 +1757,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     } else if (!stickerMessage && canSaveMessage) {
       actions.push({
         key: 'save',
-        label: t`Save`,
+        label: t({ message: 'Save', context: 'bookmark a message' }),
         icon: bookmarkOutline,
         handler: () => {
           saveMessage(msg.id)

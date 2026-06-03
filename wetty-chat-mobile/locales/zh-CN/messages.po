@@ -974,7 +974,7 @@ msgid "Remove Sticker"
 msgstr "移除贴纸"
 
 msgid "Remove this message from saved messages?"
-msgstr "从已保存消息中移除此消息？"
+msgstr "从已收藏消息中移除此消息？"
 
 msgid "Remove this pack from your collection?"
 msgstr "要将这个表情包从你的收藏中移除吗？"
@@ -1019,6 +1019,10 @@ msgstr "撤销邀请"
 msgid "Save"
 msgstr "保存"
 
+msgctxt "bookmark a message"
+msgid "Save"
+msgstr "收藏"
+
 msgid "Save Settings"
 msgstr "保存设置"
 
@@ -1029,7 +1033,7 @@ msgid "Saved Messages"
 msgstr "收藏消息"
 
 msgid "Saved on {savedTimestamp}"
-msgstr "保存于 {savedTimestamp}"
+msgstr "收藏于 {savedTimestamp}"
 
 msgid "Saving..."
 msgstr "保存中..."
@@ -1229,7 +1233,7 @@ msgid "Unsave"
 msgstr "取消收藏"
 
 msgid "Unsave Message"
-msgstr "取消保存消息"
+msgstr "取消收藏消息"
 
 msgid "Unsubscribe"
 msgstr "取消订阅"
