@@ -16,6 +16,10 @@ msgstr ""
 msgid "[Deleted]"
 msgstr "[Deleted]"
 
+#. placeholder {0}: thread.replyCount
+msgid "{0} replies"
+msgstr "{0} replies"
+
 msgid "{count} attachments"
 msgstr "{count} attachments"
 
@@ -387,6 +391,9 @@ msgstr "Failed to delete sticker pack"
 msgid "Failed to edit message"
 msgstr "Failed to edit message"
 
+msgid "Failed to forward message"
+msgstr "Failed to forward message"
+
 msgid "Failed to jump to message"
 msgstr "Failed to jump to message"
 
@@ -509,6 +516,19 @@ msgstr "File is too large. Maximum sticker size is 10 MB."
 
 msgid "Forever"
 msgstr "Forever"
+
+msgid "Forward"
+msgstr "Forward"
+
+msgid "Forward to"
+msgstr "Forward to"
+
+#. placeholder {0}: forwardedFrom.sender.name || 'Unknown'
+msgid "Forwarded from {0}"
+msgstr "Forwarded from {0}"
+
+#~ msgid "From {0}"
+#~ msgstr "From {0}"
 
 msgid "General"
 msgstr "General"
@@ -668,6 +688,9 @@ msgstr "Message"
 msgid "Message cannot be empty"
 msgstr "Message cannot be empty"
 
+msgid "Message forwarded"
+msgstr "Message forwarded"
+
 msgid "Message not found"
 msgstr "Message not found"
 
@@ -721,6 +744,9 @@ msgstr "No archived conversations"
 
 msgid "No archived threads"
 msgstr "No archived threads"
+
+msgid "No chats available"
+msgstr "No chats available"
 
 msgid "No chats yet"
 msgstr "No chats yet"
@@ -1012,6 +1038,12 @@ msgstr "Search"
 
 msgid "Search by username or UID"
 msgstr "Search by username or UID"
+
+msgid "Search chats"
+msgstr "Search chats"
+
+#~ msgid "Search chats and threads"
+#~ msgstr "Search chats and threads"
 
 msgid "Search emoji"
 msgstr "Search emoji"

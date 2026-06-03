@@ -963,7 +963,7 @@ async fn forward_message(
             send_result.response.id,
         )?;
         // If forwarding into a thread, fire thread-specific side effects.
-        if let (Some(thread_id), Some(_root)) = (body.thread_id, &thread_root) {
+        if let (Some(thread_id), Some(root)) = (body.thread_id, &thread_root) {
             crate::services::threads::ensure_thread_subscription(
                 conn,
                 target_chat_id,
@@ -977,12 +977,12 @@ async fn forward_message(
                 send_result.response.id,
             )?;
             // Auto-subscribe the root message author if different from forwarder.
-            if _root.sender_uid != uid {
+            if root.sender_uid != uid {
                 crate::services::threads::ensure_thread_subscription(
                     conn,
                     target_chat_id,
                     thread_id,
-                    _root.sender_uid,
+                    root.sender_uid,
                 )?;
             }
             crate::services::threads::increment_thread_meta(

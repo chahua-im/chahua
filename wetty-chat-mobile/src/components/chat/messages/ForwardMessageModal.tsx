@@ -24,6 +24,7 @@ import { getChatDisplayName } from '@/utils/chatDisplay';
 import { forwardMessage, type MessageResponse } from '@/api/messages';
 import { getThreads, type ThreadListItem } from '@/api/threads';
 import { useIsDesktop } from '@/hooks/platformHooks';
+import styles from './ForwardMessageModal.module.scss';
 
 interface ForwardMessageModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ interface ForwardMessageModalProps {
 type UnifiedItem =
   | { type: 'group'; item: GroupSelectorItem; sortTime: number }
   | { type: 'thread'; item: ThreadListItem; sortTime: number };
+
 export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: ForwardMessageModalProps) {
   const [presentToast] = useIonToast();
   const [forwarding, setForwarding] = useState(false);
@@ -70,8 +72,8 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
           setThreads(threadRes.data.threads);
         }
       })
-      .catch(() => {
-        // Silently fail — empty list will be shown.
+      .catch((err) => {
+        console.warn('Failed to load chats for forward modal', err);
       })
       .finally(() => {
         if (!cancelled) {
@@ -131,36 +133,15 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
     });
   }, [mergedItems, searchText]);
 
-  const handleGroupSelect = useCallback(
-    async (group: GroupSelectorItem) => {
+  const handleSelect = useCallback(
+    async (chatId: string, threadId?: string) => {
       if (forwarding) return;
       setForwarding(true);
       try {
-        await forwardMessage(group.id, message.id, {
+        await forwardMessage(chatId, message.id, {
           sourceChatId,
           clientGeneratedId: `cg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-        });
-        showToast(t`Message forwarded`, 2000);
-        onClose();
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : t`Failed to forward message`;
-        showToast(msg);
-      } finally {
-        setForwarding(false);
-      }
-    },
-    [forwarding, message.id, onClose, showToast, sourceChatId],
-  );
-
-  const handleThreadSelect = useCallback(
-    async (thread: ThreadListItem) => {
-      if (forwarding) return;
-      setForwarding(true);
-      try {
-        await forwardMessage(thread.chatId, message.id, {
-          sourceChatId,
-          clientGeneratedId: `cg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          threadId: thread.threadRootMessage.id,
+          ...(threadId !== undefined ? { threadId } : {}),
         });
         showToast(t`Message forwarded`, 2000);
         onClose();
@@ -192,14 +173,14 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
       </IonHeader>
       <IonContent color="light">
         <IonSearchbar
-          placeholder={t`Search chats and threads`}
+          placeholder={t`Search chats`}
           value={searchText}
           onIonInput={(e) => setSearchText(e.detail.value ?? '')}
           debounce={200}
         />
 
         {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
+          <div className={styles.spinnerContainer}>
             <IonSpinner />
           </div>
         ) : filteredItems.length === 0 ? (
@@ -220,7 +201,7 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
                     key={`group-${group.id}`}
                     button
                     disabled={forwarding}
-                    onClick={() => handleGroupSelect(group)}
+                    onClick={() => handleSelect(group.id)}
                   >
                     <span slot="start">
                       <UserAvatar name={getChatDisplayName(group.id, group.name)} avatarUrl={group.avatar} size={40} />
@@ -239,7 +220,7 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
                   key={`thread-${thread.threadRootMessage.id}`}
                   button
                   disabled={forwarding}
-                  onClick={() => handleThreadSelect(thread)}
+                  onClick={() => handleSelect(thread.chatId, thread.threadRootMessage.id)}
                 >
                   <span slot="start">
                     <UserAvatar
@@ -251,8 +232,8 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
                   <IonLabel>
                     <h3>{thread.chatName}</h3>
                     <p>{thread.threadRootMessage.message?.slice(0, 60) ?? t`Sticker`}</p>
-                    <p style={{ fontSize: '0.85em', opacity: 0.7 }}>
-                      <IonIcon icon={chatbubbleOutline} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                    <p className={styles.threadReplyCount}>
+                      <IonIcon icon={chatbubbleOutline} className={styles.threadReplyIcon} />
                       {t`${thread.replyCount} replies`}
                     </p>
                   </IonLabel>

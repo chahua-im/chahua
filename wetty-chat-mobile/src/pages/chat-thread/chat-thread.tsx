@@ -143,7 +143,6 @@ import { MAX_REACTIONS_PER_USER_PER_MESSAGE } from '@/constants/emojiAndStickers
 import { saveMessage } from '@/api/savedMessages';
 import { ForwardMessageModal } from '@/components/chat/messages/ForwardMessageModal';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
-
 function generateClientId(): string {
   return `cg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
@@ -1868,7 +1867,8 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
     }
     if (stickerMessage) {
       return actions.filter(
-        (a) => a.key === 'reply' || a.key === 'delete' || a.key === 'copy-link' || a.key === 'save',
+        (a) =>
+          a.key === 'reply' || a.key === 'delete' || a.key === 'copy-link' || a.key === 'save' || a.key === 'forward',
       );
     }
     return actions;
