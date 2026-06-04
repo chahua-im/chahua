@@ -665,6 +665,9 @@ class ConversationTimelineViewModel
     _highlightClearTimer = Timer(
       ConversationMessageHighlight.totalDuration,
       () {
+        if (!ref.mounted) {
+          return;
+        }
         if (_activeHighlight?.generation != generation) {
           return;
         }
@@ -697,6 +700,9 @@ class ConversationTimelineViewModel
     _paginationSettleTimer?.cancel();
     _paginationSettleTimer = Timer(const Duration(milliseconds: 16), () {
       _paginationSettleTimer = null;
+      if (!ref.mounted) {
+        return;
+      }
       final snapshot = _latestViewportSnapshot;
       final canFollowLiveEdge =
           (_activeSegmentMode?.isLatest ?? false) ||
