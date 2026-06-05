@@ -521,9 +521,11 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   } | null>(null);
 
   // When a long-press happens while the keyboard is open we defer showing the
-  // overlay until the keyboard has fully closed so the DOM rect is correct.
+  // overlay until the keyboard has fully closed, while preserving the press-time
+  // rect so the menu stays anchored to the originally pressed message.
   const deferredOverlayRef = useRef<{
     message: MessageResponse;
+    sourceRect: DOMRect;
     interactionPos?: { x: number; y: number };
   } | null>(null);
 
@@ -590,13 +592,9 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   // When the keyboard finishes closing after a deferred long-press, show the overlay.
   useEffect(() => {
     if (!keyboardFullyClosed || !deferredOverlayRef.current) return;
-    const { message, interactionPos } = deferredOverlayRef.current;
+    const { message, sourceRect, interactionPos } = deferredOverlayRef.current;
     deferredOverlayRef.current = null;
-    const el = document.querySelector(`[data-message-id="${CSS.escape(message.id)}"]`);
-    const rect = el?.getBoundingClientRect();
-    if (rect) {
-      setOverlayMessage({ message, sourceRect: rect, interactionPos });
-    }
+    setOverlayMessage({ message, sourceRect, interactionPos });
   }, [keyboardFullyClosed]);
 
   useEffect(() => {
@@ -1742,9 +1740,9 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
   const onClickChatItem = useCallback(
     (msg: MessageResponse, sourceRect: DOMRect, interactionPos?: { x: number; y: number }) => {
       if (isKeyboardOpen) {
-        // Defer: dismiss keyboard now, show overlay after it's fully closed
-        // so we get the correct DOM rect for the message.
-        deferredOverlayRef.current = { message: msg, interactionPos };
+        // Defer: dismiss keyboard now, then show the overlay after close while
+        // preserving the original press-time source rect.
+        deferredOverlayRef.current = { message: msg, sourceRect, interactionPos };
         composeBarRef.current?.blurInput();
         return;
       }
