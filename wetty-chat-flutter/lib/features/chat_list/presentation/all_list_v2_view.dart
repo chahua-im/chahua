@@ -1,7 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import 'package:chahua/app/routing/route_names.dart';
 import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_models.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_projection.dart';
@@ -12,7 +10,7 @@ import 'package:chahua/features/chat_list/application/group_list_v2_store.dart';
 import 'package:chahua/features/chat_list/application/group_list_v2_view_model.dart';
 import 'package:chahua/features/chat_list/application/thread_list_v2_store.dart';
 import 'package:chahua/features/chat_list/application/thread_list_v2_view_model.dart';
-import 'package:chahua/features/chat_list/presentation/chat_workspace_layout_scope.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/chat_list_detail_navigation.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/group_list_v2_row.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/list_row_interaction_surface.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/thread_list_v2_row.dart';
@@ -107,24 +105,15 @@ final _showAllArchivedFolderProvider = Provider<bool>((ref) {
   return hasArchivedGroups || hasArchivedThreads;
 });
 
-class _AllArchivedFolderRow extends StatelessWidget {
+class _AllArchivedFolderRow extends ConsumerWidget {
   const _AllArchivedFolderRow();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     return ListRowInteractionSurface(
       isActive: false,
-      onTap: () {
-        context.push(
-          AppRoutes.archivedChats,
-          extra: {
-            'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
-              context,
-            ),
-          },
-        );
-      },
+      onTap: () => openArchivedChatList(context: context, ref: ref),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

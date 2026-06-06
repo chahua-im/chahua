@@ -75,6 +75,7 @@ class GroupListV2Row extends StatelessWidget {
           onTap: () {
             openChatListDetail(
               context: context,
+              ref: ref,
               scope: scope,
               route: AppRoutes.chatDetail(chat.id),
               extra: {

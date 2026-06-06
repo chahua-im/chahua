@@ -1,13 +1,11 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 
-import '../../../app/routing/route_names.dart';
 import '../../../app/theme/style_config.dart';
 import '../application/chat_list_v2_scope.dart';
 import '../application/thread_list_v2_store.dart';
-import 'chat_workspace_layout_scope.dart';
+import 'widgets/chat_list_detail_navigation.dart';
 import 'widgets/list_row_interaction_surface.dart';
 import 'widgets/unread_badge_formatter.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/thread_list_v2_row.dart';
@@ -141,16 +139,7 @@ class _ArchivedThreadsFolderRow extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     return ListRowInteractionSurface(
       isActive: false,
-      onTap: () {
-        context.push(
-          AppRoutes.archivedChats,
-          extra: {
-            'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
-              context,
-            ),
-          },
-        );
-      },
+      onTap: () => openArchivedChatList(context: context, ref: ref),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

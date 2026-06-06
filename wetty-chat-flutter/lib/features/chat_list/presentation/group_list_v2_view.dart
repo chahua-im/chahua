@@ -1,11 +1,9 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 
-import '../../../app/routing/route_names.dart';
-import 'chat_workspace_layout_scope.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/chat_list_detail_navigation.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/group_list_v2_row.dart';
 import 'widgets/list_row_interaction_surface.dart';
 import '../application/chat_list_v2_scope.dart';
@@ -98,24 +96,15 @@ class GroupListV2View extends ConsumerWidget {
   }
 }
 
-class _ArchivedGroupsFolderRow extends StatelessWidget {
+class _ArchivedGroupsFolderRow extends ConsumerWidget {
   const _ArchivedGroupsFolderRow();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     return ListRowInteractionSurface(
       isActive: false,
-      onTap: () {
-        context.push(
-          AppRoutes.archivedChats,
-          extra: {
-            'disableTransition': ChatWorkspaceLayoutScope.isSplitLayout(
-              context,
-            ),
-          },
-        );
-      },
+      onTap: () => openArchivedChatList(context: context, ref: ref),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

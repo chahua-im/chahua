@@ -51,6 +51,7 @@ class ThreadListV2Row extends StatelessWidget {
           onTap: () {
             openChatListDetail(
               context: context,
+              ref: ref,
               scope: scope,
               route: AppRoutes.threadDetail(
                 thread.chatId,

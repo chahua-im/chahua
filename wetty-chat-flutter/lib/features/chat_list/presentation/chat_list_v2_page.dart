@@ -39,6 +39,7 @@ class ChatListV2Page extends ConsumerStatefulWidget {
     this.selectedChatId,
     this.selectedThreadRootId,
     this.onOpenSettings,
+    this.onLeaveArchived,
   });
 
   final ChatListV2Scope scope;
@@ -46,6 +47,7 @@ class ChatListV2Page extends ConsumerStatefulWidget {
   final String? selectedChatId;
   final int? selectedThreadRootId;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onLeaveArchived;
 
   @override
   ConsumerState<ChatListV2Page> createState() => _ChatListV2PageState();
@@ -221,12 +223,7 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
           children: [
             CupertinoNavigationBar(
               backgroundColor: chromeBackgroundColor,
-              leading: widget.onOpenSettings == null
-                  ? null
-                  : _CurrentUserSettingsButton(
-                      semanticLabel: l10n.tabSettings,
-                      onPressed: widget.onOpenSettings!,
-                    ),
+              leading: _embeddedLeading(l10n),
               middle: Text(title),
             ),
             Expanded(
@@ -243,6 +240,28 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
         middle: Text(title),
       ),
       child: SafeArea(bottom: false, child: scrollView),
+    );
+  }
+
+  Widget? _embeddedLeading(AppLocalizations l10n) {
+    if (widget.onLeaveArchived != null) {
+      return CupertinoButton(
+        padding: EdgeInsets.zero,
+        minimumSize: const Size.square(44),
+        onPressed: widget.onLeaveArchived,
+        child: Semantics(
+          label: l10n.tabChats,
+          button: true,
+          child: const Icon(CupertinoIcons.back),
+        ),
+      );
+    }
+    if (widget.onOpenSettings == null) {
+      return null;
+    }
+    return _CurrentUserSettingsButton(
+      semanticLabel: l10n.tabSettings,
+      onPressed: widget.onOpenSettings!,
     );
   }
 }

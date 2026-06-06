@@ -1,12 +1,15 @@
 import 'package:chahua/app/routing/route_names.dart';
 import 'package:chahua/app/theme/style_config.dart';
+import 'package:chahua/features/chat_list/application/chat_list_v2_scope.dart';
+import 'package:chahua/features/chat_list/application/chat_workspace_list_scope.dart';
 import 'package:chahua/features/chat_list/presentation/chat_list_v2_page.dart';
 import 'package:chahua/features/chat_list/presentation/chat_workspace_layout_scope.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-class ChatWorkspaceShell extends StatelessWidget {
+class ChatWorkspaceShell extends ConsumerWidget {
   const ChatWorkspaceShell({
     super.key,
     required this.location,
@@ -20,12 +23,16 @@ class ChatWorkspaceShell extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < desktopBreakpoint) {
           return ChatWorkspaceLayoutScope(isSplit: false, child: child);
         }
+        final rememberedScope = ref.watch(chatWorkspaceListScopeProvider);
+        final listScope = _isArchivedRoot(location)
+            ? ChatListV2Scope.archived
+            : rememberedScope;
 
         return ChatWorkspaceLayoutScope(
           isSplit: true,
@@ -38,10 +45,21 @@ class ChatWorkspaceShell extends StatelessWidget {
                   width: listPaneWidth,
                   child: ChatListV2Page(
                     embedded: true,
+                    scope: listScope,
                     selectedChatId: _selectedChatId(location),
                     selectedThreadRootId: _selectedThreadRootId(location),
                     onOpenSettings: () =>
                         context.push(AppRoutes.splitSettingsModal),
+                    onLeaveArchived: listScope == ChatListV2Scope.archived
+                        ? () {
+                            ref
+                                .read(chatWorkspaceListScopeProvider.notifier)
+                                .select(ChatListV2Scope.active);
+                            if (_isArchivedRoot(location)) {
+                              context.go(AppRoutes.chats);
+                            }
+                          }
+                        : null,
                   ),
                 ),
               ),
@@ -50,7 +68,7 @@ class ChatWorkspaceShell extends StatelessWidget {
                 child: ColoredBox(color: context.appColors.separator),
               ),
               Expanded(
-                child: _isChatsRoot(location)
+                child: _isChatsRoot(location) || _isArchivedRoot(location)
                     ? const _EmptyDetailPane()
                     : DecoratedBox(
                         decoration: BoxDecoration(
@@ -69,6 +87,12 @@ class ChatWorkspaceShell extends StatelessWidget {
   static bool _isChatsRoot(String location) {
     final uri = Uri.parse(location);
     return uri.path == AppRoutes.chats;
+  }
+
+  static bool _isArchivedRoot(String location) {
+    final uri = Uri.parse(location);
+    return uri.path == AppRoutes.archivedChats ||
+        uri.path == AppRoutes.archivedThreads;
   }
 
   static String? _selectedChatId(String location) {
