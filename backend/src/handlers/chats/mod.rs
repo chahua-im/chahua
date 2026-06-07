@@ -216,6 +216,37 @@ fn load_reply_messages(
         .map(|rows| rows.into_iter().map(|msg| (msg.id, msg)).collect())
 }
 
+fn validate_reply_target(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    reply_to_id: i64,
+) -> Result<(), AppError> {
+    let reply_msg = messages_schema::table
+        .filter(messages_schema::id.eq(reply_to_id))
+        .filter(messages_schema::chat_id.eq(chat_id))
+        .filter(messages_schema::deleted_at.is_null())
+        .filter(messages_schema::is_published.eq(true))
+        .select(Message::as_select())
+        .first::<Message>(conn)
+        .optional()?;
+
+    let Some(reply_msg) = reply_msg else {
+        return Err(AppError::NotFound("Reply target message not found"));
+    };
+
+    let matches_thread_context = match thread_id {
+        Some(thread_id) => reply_msg.id == thread_id || reply_msg.reply_root_id == Some(thread_id),
+        None => reply_msg.reply_root_id.is_none(),
+    };
+
+    if !matches_thread_context {
+        return Err(AppError::NotFound("Reply target message not found"));
+    }
+
+    Ok(())
+}
+
 fn load_sticker_rows(
     conn: &mut PgConnection,
     sticker_ids: &[i64],
@@ -628,6 +659,10 @@ pub(crate) async fn send_prepared_message(
     state: &AppState,
     prepared: PreparedMessageSend,
 ) -> Result<SendMessageOutcome, AppError> {
+    if let Some(reply_to_id) = prepared.reply_to_id {
+        validate_reply_target(conn, prepared.chat_id, prepared.reply_root_id, reply_to_id)?;
+    }
+
     let id = ids::next_message_id(state.id_gen.as_ref())
         .await
         .map_err(|e| {
@@ -807,12 +842,35 @@ pub async fn attach_metadata(
     state: &AppState,
     current_user_uid: i32,
 ) -> Vec<MessageResponse> {
-    let reply_ids: Vec<i64> = messages_to_process
-        .iter()
-        .filter_map(|m| m.reply_to_id)
-        .collect();
+    let mut reply_target_contexts: std::collections::HashMap<
+        i64,
+        std::collections::HashSet<(i64, Option<i64>)>,
+    > = std::collections::HashMap::new();
+    for message in &messages_to_process {
+        if let Some(reply_to_id) = message.reply_to_id {
+            reply_target_contexts
+                .entry(reply_to_id)
+                .or_default()
+                .insert((message.chat_id, message.reply_root_id));
+        }
+    }
+    let reply_ids: Vec<i64> = reply_target_contexts.keys().copied().collect();
 
-    let reply_messages_map = load_reply_messages(conn, &reply_ids).unwrap_or_default();
+    let mut reply_messages_map = load_reply_messages(conn, &reply_ids).unwrap_or_default();
+    reply_messages_map.retain(|reply_id, reply_msg| {
+        reply_target_contexts.get(reply_id).is_some_and(|contexts| {
+            contexts.iter().any(|(chat_id, thread_id)| {
+                reply_msg.chat_id == *chat_id
+                    && match thread_id {
+                        Some(thread_id) => {
+                            reply_msg.id == *thread_id
+                                || reply_msg.reply_root_id == Some(*thread_id)
+                        }
+                        None => reply_msg.reply_root_id.is_none(),
+                    }
+            })
+        })
+    });
 
     let mut avatar_uids = std::collections::HashSet::new();
     for m in &messages_to_process {
@@ -831,7 +889,7 @@ pub async fn attach_metadata(
         .iter()
         .filter(|message| message.deleted_at.is_none())
         .map(|message| message.id)
-        .chain(reply_ids.iter().copied())
+        .chain(reply_messages_map.keys().copied())
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
@@ -1029,8 +1087,19 @@ pub async fn attach_metadata(
 
     let mut responses = Vec::with_capacity(messages_to_process.len());
     for (idx, m) in messages_to_process.into_iter().enumerate() {
-        let reply_to_message = m.reply_to_id.and_then(|reply_id| {
-            reply_messages_map.get(&reply_id).map(|reply_msg| {
+        let reply_to_message = m
+            .reply_to_id
+            .and_then(|reply_id| reply_messages_map.get(&reply_id))
+            .filter(|reply_msg| {
+                reply_msg.chat_id == m.chat_id
+                    && match m.reply_root_id {
+                        Some(thread_id) => {
+                            reply_msg.id == thread_id || reply_msg.reply_root_id == Some(thread_id)
+                        }
+                        None => reply_msg.reply_root_id.is_none(),
+                    }
+            })
+            .map(|reply_msg| {
                 if reply_msg.deleted_at.is_none()
                     && reply_msg.has_attachments
                     && message_attachments_map
@@ -1068,8 +1137,7 @@ pub async fn attach_metadata(
                     &user_profiles,
                 );
                 Box::new(preview)
-            })
-        });
+            });
 
         let mut attachments = Vec::new();
         if m.deleted_at.is_none() {
