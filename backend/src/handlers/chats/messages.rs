@@ -99,6 +99,7 @@ pub struct UpdateMessageBody {
 const SYSTEM_MESSAGE_TYPE_FORBIDDEN: &str = "System messages cannot be sent by clients";
 const INVITE_MESSAGE_TYPE_FORBIDDEN: &str = "Invite messages must be sent through invite APIs";
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
+const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
 
 fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppError> {
     if matches!(message_type, MessageType::System) {
@@ -117,6 +118,18 @@ fn search_limit(limit: Option<i64>) -> usize {
         Some(limit.unwrap_or(DEFAULT_SEARCH_LIMIT)),
         MAX_MESSAGES_LIMIT,
     ) as usize
+}
+
+fn search_offset(offset: Option<usize>, limit: usize) -> Result<usize, AppError> {
+    let offset = offset.unwrap_or(0);
+    if offset.saturating_add(limit) > MAX_SEARCH_RESULT_WINDOW {
+        return Err(AppError::BadRequest("Search offset is too large"));
+    }
+    Ok(offset)
+}
+
+fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize> {
+    next_offset.filter(|offset| offset.saturating_add(limit) <= MAX_SEARCH_RESULT_WINDOW)
 }
 
 const MAX_ATTACHMENTS_PER_MESSAGE: usize = 20;
@@ -358,7 +371,13 @@ async fn search_messages(
         }
     };
     let limit = search_limit(params.limit);
-    let offset = params.offset.unwrap_or(0);
+    let offset = match search_offset(params.offset, limit) {
+        Ok(offset) => offset,
+        Err(err) => {
+            record_search_query_metrics(&state.metrics, sort_label, "failure", started_at);
+            return Err(err);
+        }
+    };
 
     let Some(search_service) = state.message_search.clone() else {
         record_search_query_metrics(&state.metrics, sort_label, "failure", started_at);
@@ -384,13 +403,14 @@ async fn search_messages(
     state
         .metrics
         .observe_message_search_candidates(sort_label, candidate_page.candidates.len());
+    let next_offset = search_next_offset(candidate_page.next_offset, limit);
 
     if candidate_page.candidates.is_empty() {
         state.metrics.observe_message_search_results(sort_label, 0);
         record_search_query_metrics(&state.metrics, sort_label, "success", started_at);
         return Ok(Json(SearchMessagesResponse {
             messages: Vec::new(),
-            next_offset: candidate_page.next_offset,
+            next_offset,
         }));
     }
 
@@ -423,7 +443,7 @@ async fn search_messages(
 
     Ok(Json(SearchMessagesResponse {
         messages,
-        next_offset: candidate_page.next_offset,
+        next_offset,
     }))
 }
 
@@ -1062,8 +1082,8 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        search_limit, validate_client_message_type, INVITE_MESSAGE_TYPE_FORBIDDEN,
-        SYSTEM_MESSAGE_TYPE_FORBIDDEN,
+        search_limit, search_next_offset, search_offset, validate_client_message_type,
+        INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
     use crate::errors::AppError;
     use crate::models::MessageType;
@@ -1096,6 +1116,32 @@ mod tests {
         assert_eq!(search_limit(None), 20);
         assert_eq!(search_limit(Some(500)), 100);
         assert_eq!(search_limit(Some(0)), 1);
+    }
+
+    #[test]
+    fn search_offset_rejects_requests_outside_result_window() {
+        assert_eq!(search_offset(None, 20).unwrap(), 0);
+        assert_eq!(
+            search_offset(Some(MAX_SEARCH_RESULT_WINDOW - 20), 20).unwrap(),
+            980
+        );
+        assert!(matches!(
+            search_offset(Some(MAX_SEARCH_RESULT_WINDOW - 19), 20),
+            Err(AppError::BadRequest("Search offset is too large"))
+        ));
+    }
+
+    #[test]
+    fn search_next_offset_stops_at_result_window() {
+        assert_eq!(
+            search_next_offset(Some(MAX_SEARCH_RESULT_WINDOW - 20), 20),
+            Some(980)
+        );
+        assert_eq!(
+            search_next_offset(Some(MAX_SEARCH_RESULT_WINDOW - 19), 20),
+            None
+        );
+        assert_eq!(search_next_offset(None, 20), None);
     }
 
     #[test]
