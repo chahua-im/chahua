@@ -236,14 +236,8 @@ export function DesktopSplitLayout() {
     isJoinChat,
   } = baseRoute;
   const activeThreadPane = threadMatch ? createCachedThreadPane(threadMatch.id, threadMatch.threadId) : null;
-  const [cachedThreadPanesState, setCachedThreadPanes] = useState(() =>
-    activeThreadPane ? [activeThreadPane] : [],
-  );
-  const cachedThreadPanes = updateCachedThreadPanes(
-    cachedThreadPanesState,
-    activeThreadPane,
-    MAX_CACHED_THREAD_PANES,
-  );
+  const [cachedThreadPanesState, setCachedThreadPanes] = useState(() => (activeThreadPane ? [activeThreadPane] : []));
+  const cachedThreadPanes = updateCachedThreadPanes(cachedThreadPanesState, activeThreadPane, MAX_CACHED_THREAD_PANES);
   useDocumentTitle(activeChatId, threadMatch?.threadId);
   const groupInfoSavedMessagesMatch = savedMessagesEnabled ? routeGroupInfoSavedMessagesMatch : null;
   const disabledGroupSavedMessagesChatId = savedMessagesEnabled ? null : routeGroupInfoSavedMessagesMatch?.id;
