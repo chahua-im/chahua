@@ -955,7 +955,7 @@ function ChatThreadCore({ chatId, threadId, backAction }: ChatThreadCoreProps) {
           showToast(err.message || t`Failed to load messages`);
         });
     },
-    [chatId, dispatch, initialResumeMessageId, showToast, storeChatId, threadId],
+    [chatId, dispatch, initialResumeMessageId, lastReadMessageId, showToast, storeChatId, threadId],
   );
 
   // Initial load — open at an explicitly requested resume point when navigated from chat list
