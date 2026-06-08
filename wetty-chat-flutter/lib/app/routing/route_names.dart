@@ -10,6 +10,10 @@ abstract final class AppRoutes {
       '/chat/$chatId/settings/search';
   static String chatSavedMessages(String chatId) =>
       '/chat/$chatId/settings/saved-messages';
+  static String savedMessageChatDetail(String chatId) =>
+      '/saved-message/chat/$chatId';
+  static String savedMessageThreadDetail(String chatId, String threadRootId) =>
+      '/saved-message/chat/$chatId/thread/$threadRootId';
   static String nestedThreadDetail(String chatId, String threadRootId) =>
       '/chat/$chatId/thread/$threadRootId';
   static String nestedNewThread(String chatId, String threadRootId) =>
@@ -33,4 +37,9 @@ abstract final class AppRoutes {
   static String settingsStickerPackDetail(String packId) =>
       '/settings/stickers/$packId';
   static const attachmentViewer = '/attachment-viewer';
+}
+
+abstract final class AppRouteExtraKeys {
+  static const launchRequest = 'launchRequest';
+  static const showBackButton = 'showBackButton';
 }

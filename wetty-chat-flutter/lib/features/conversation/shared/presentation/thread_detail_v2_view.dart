@@ -16,6 +16,7 @@ class ThreadDetailV2Page extends ConsumerStatefulWidget {
     this.launchRequest = const LaunchRequest.latest(),
     this.isNewThread = false,
     this.implyLeadingInSplit = false,
+    this.showBackButton = false,
   });
 
   final int chatId;
@@ -23,6 +24,7 @@ class ThreadDetailV2Page extends ConsumerStatefulWidget {
   final LaunchRequest launchRequest;
   final bool isNewThread;
   final bool implyLeadingInSplit;
+  final bool showBackButton;
 
   @override
   ConsumerState<ThreadDetailV2Page> createState() => _ThreadDetailV2PageState();
@@ -63,7 +65,10 @@ class _ThreadDetailV2PageState extends ConsumerState<ThreadDetailV2Page> {
     return CupertinoPageScaffold(
       resizeToAvoidBottomInset: false,
       navigationBar: CupertinoNavigationBar(
-        automaticallyImplyLeading: !isSplitLayout || widget.implyLeadingInSplit,
+        automaticallyImplyLeading:
+            widget.showBackButton ||
+            !isSplitLayout ||
+            widget.implyLeadingInSplit,
         middle: Text(_isNewThread ? l10n.newThread : l10n.thread),
         trailing: _ThreadMembershipButton(identity: _membershipIdentity),
       ),

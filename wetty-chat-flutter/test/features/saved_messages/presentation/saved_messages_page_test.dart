@@ -25,7 +25,7 @@ void main() {
     expect(find.text('No saved messages'), findsOneWidget);
   });
 
-  testWidgets('renders rows, disabled open button, and pagination', (
+  testWidgets('renders rows without open buttons and pagination', (
     tester,
   ) async {
     final api = _FakeSavedMessagesApiService(
@@ -51,7 +51,15 @@ void main() {
     expect(find.text('Alice'), findsWidgets);
     expect(find.text('General'), findsWidgets);
     expect(find.text('message 1'), findsOneWidget);
-    expect(find.text('Original unavailable'), findsOneWidget);
+    expect(find.text('Open Original'), findsNothing);
+    expect(find.text('Original unavailable'), findsNothing);
+
+    await tester.tap(find.text('message 1'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Saved Messages'), findsOneWidget);
+    expect(find.text('chat 42 launch 101'), findsNothing);
 
     await tester.tap(find.text('Load More'));
     await tester.pump();
@@ -77,11 +85,42 @@ void main() {
     addTearDown(container.dispose);
 
     await _pump(tester, container, router);
-    await tester.tap(find.text('Open Original'));
+    expect(find.text('Open Original'), findsNothing);
+
+    await tester.tap(find.text('message 4'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('chat 42 launch 104'), findsOneWidget);
+    expect(find.text('chat 42 launch 104 back true'), findsOneWidget);
+
+    router.pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Saved Messages'), findsOneWidget);
+    expect(find.text('message 4'), findsOneWidget);
+  });
+
+  testWidgets('bookmark tap opens unsave confirmation without navigating', (
+    tester,
+  ) async {
+    final api = _FakeSavedMessagesApiService(
+      responses: [
+        ListSavedMessagesResponseDto(savedMessages: [_savedMessage(6)]),
+      ],
+    );
+    final router = _router();
+    final container = _container(api);
+    addTearDown(container.dispose);
+
+    await _pump(tester, container, router);
+
+    await tester.tap(find.byIcon(CupertinoIcons.bookmark_fill));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Unsave message?'), findsOneWidget);
+    expect(find.text('chat 42 launch 106 back true'), findsNothing);
   });
 
   testWidgets('opens thread saved messages with LaunchRequest.message', (
@@ -99,11 +138,20 @@ void main() {
     addTearDown(container.dispose);
 
     await _pump(tester, container, router);
-    await tester.tap(find.text('Open Original'));
+    expect(find.text('Open Original'), findsNothing);
+
+    await tester.tap(find.text('message 5'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('thread 99 launch 105'), findsOneWidget);
+    expect(find.text('thread 99 launch 105 back true'), findsOneWidget);
+
+    router.pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Saved Messages'), findsOneWidget);
+    expect(find.text('message 5'), findsOneWidget);
   });
 }
 
@@ -122,14 +170,14 @@ GoRouter _router() {
         builder: (context, state) => const SavedMessagesPage(),
       ),
       GoRoute(
-        path: '/chat/:chatId',
+        path: '/saved-message/chat/:chatId',
         builder: (context, state) {
           final launchRequest = _launchRequest(state);
           return CupertinoPageScaffold(
             child: Center(
               child: Text(
                 'chat ${state.pathParameters['chatId']} launch '
-                '${_messageId(launchRequest)}',
+                '${_messageId(launchRequest)} back true',
               ),
             ),
           );
@@ -143,7 +191,38 @@ GoRouter _router() {
                 child: Center(
                   child: Text(
                     'thread ${state.pathParameters['threadId']} launch '
-                    '${_messageId(launchRequest)}',
+                    '${_messageId(launchRequest)} back true',
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      GoRoute(
+        path: '/chat/:chatId',
+        builder: (context, state) {
+          final launchRequest = _launchRequest(state);
+          return CupertinoPageScaffold(
+            child: Center(
+              child: Text(
+                'shell chat ${state.pathParameters['chatId']} launch '
+                '${_messageId(launchRequest)} back ${_showBackButton(state)}',
+              ),
+            ),
+          );
+        },
+        routes: [
+          GoRoute(
+            path: 'thread/:threadId',
+            builder: (context, state) {
+              final launchRequest = _launchRequest(state);
+              return CupertinoPageScaffold(
+                child: Center(
+                  child: Text(
+                    'shell thread ${state.pathParameters['threadId']} launch '
+                    '${_messageId(launchRequest)} back '
+                    '${_showBackButton(state)}',
                   ),
                 ),
               );
@@ -187,6 +266,14 @@ int? _messageId(LaunchRequest? launchRequest) {
     MessageLaunchRequest(:final messageId) => messageId,
     _ => null,
   };
+}
+
+bool _showBackButton(GoRouterState state) {
+  final extra = state.extra;
+  if (extra is Map<String, dynamic>) {
+    return extra['showBackButton'] == true;
+  }
+  return false;
 }
 
 SavedMessageResponseDto _savedMessage(

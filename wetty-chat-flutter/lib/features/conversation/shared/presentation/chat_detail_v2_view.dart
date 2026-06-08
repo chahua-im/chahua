@@ -15,10 +15,12 @@ class ChatDetailV2Page extends StatelessWidget {
     super.key,
     required this.chatId,
     this.launchRequest = const LaunchRequest.latest(),
+    this.showBackButton = false,
   });
 
   final int chatId;
   final LaunchRequest launchRequest;
+  final bool showBackButton;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +29,7 @@ class ChatDetailV2Page extends StatelessWidget {
     return CupertinoPageScaffold(
       resizeToAvoidBottomInset: false,
       navigationBar: CupertinoNavigationBar(
-        automaticallyImplyLeading: !isSplitLayout,
+        automaticallyImplyLeading: showBackButton || !isSplitLayout,
         middle: _ChatDetailTitle(chatId: chatId),
         trailing: _ChatDetailActions(chatId: chatId),
       ),

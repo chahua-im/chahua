@@ -135,6 +135,38 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           );
         },
       ),
+      GoRoute(
+        path: '/saved-message/chat/:chatId',
+        pageBuilder: (context, state) {
+          final chatId = int.parse(state.pathParameters['chatId']!);
+          return CupertinoPage(
+            key: state.pageKey,
+            child: ChatDetailV2Page(
+              chatId: chatId,
+              launchRequest: _launchRequest(state),
+              showBackButton: true,
+            ),
+          );
+        },
+        routes: [
+          GoRoute(
+            path: 'thread/:threadId',
+            pageBuilder: (context, state) {
+              final chatId = int.parse(state.pathParameters['chatId']!);
+              final threadId = int.parse(state.pathParameters['threadId']!);
+              return CupertinoPage(
+                key: state.pageKey,
+                child: ThreadDetailV2Page(
+                  chatId: chatId,
+                  threadRootId: threadId,
+                  launchRequest: _launchRequest(state),
+                  showBackButton: true,
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => HomeShell(
           navigationShell: navigationShell,
@@ -171,8 +203,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                             child: ChatDetailV2Page(
                               chatId: chatId,
                               launchRequest:
-                                  extra?['launchRequest'] as LaunchRequest? ??
+                                  extra?[AppRouteExtraKeys.launchRequest]
+                                      as LaunchRequest? ??
                                   const LaunchRequest.latest(),
+                              showBackButton:
+                                  extra?[AppRouteExtraKeys.showBackButton] ==
+                                  true,
                             ),
                           );
                         },
@@ -254,9 +290,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                                   chatId: chatId,
                                   threadRootId: threadId,
                                   launchRequest:
-                                      extra?['launchRequest']
+                                      extra?[AppRouteExtraKeys.launchRequest]
                                           as LaunchRequest? ??
                                       const LaunchRequest.latest(),
+                                  showBackButton:
+                                      extra?[AppRouteExtraKeys
+                                          .showBackButton] ==
+                                      true,
                                   isNewThread: true,
                                   implyLeadingInSplit: true,
                                 ),
@@ -280,9 +320,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                                   chatId: chatId,
                                   threadRootId: threadId,
                                   launchRequest:
-                                      extra?['launchRequest']
+                                      extra?[AppRouteExtraKeys.launchRequest]
                                           as LaunchRequest? ??
                                       const LaunchRequest.latest(),
+                                  showBackButton:
+                                      extra?[AppRouteExtraKeys
+                                          .showBackButton] ==
+                                      true,
                                   implyLeadingInSplit: true,
                                 ),
                               );
@@ -315,8 +359,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                               chatId: chatId,
                               threadRootId: threadId,
                               launchRequest:
-                                  extra?['launchRequest'] as LaunchRequest? ??
+                                  extra?[AppRouteExtraKeys.launchRequest]
+                                      as LaunchRequest? ??
                                   const LaunchRequest.latest(),
+                              showBackButton:
+                                  extra?[AppRouteExtraKeys.showBackButton] ==
+                                  true,
                             ),
                           );
                         },
@@ -482,4 +530,13 @@ Page<void> _chatWorkspacePage({
 bool _disableTransition(GoRouterState state) {
   final extra = state.extra;
   return extra is Map<String, dynamic> && extra['disableTransition'] == true;
+}
+
+LaunchRequest _launchRequest(GoRouterState state) {
+  final extra = state.extra;
+  if (extra is Map<String, dynamic>) {
+    return extra[AppRouteExtraKeys.launchRequest] as LaunchRequest? ??
+        const LaunchRequest.latest();
+  }
+  return const LaunchRequest.latest();
 }

@@ -41,15 +41,17 @@ class _SavedMessagesPageState extends ConsumerState<SavedMessagesPage> {
     final launchRequest = LaunchRequest.message(messageId: target.messageId);
     final threadRootId = target.threadRootId;
     if (threadRootId == null) {
-      context.go(
-        AppRoutes.chatDetail('${target.chatId}'),
-        extra: <String, dynamic>{'launchRequest': launchRequest},
+      context.push(
+        AppRoutes.savedMessageChatDetail('${target.chatId}'),
+        extra: <String, dynamic>{
+          AppRouteExtraKeys.launchRequest: launchRequest,
+        },
       );
       return;
     }
-    context.go(
-      AppRoutes.nestedThreadDetail('${target.chatId}', '$threadRootId'),
-      extra: <String, dynamic>{'launchRequest': launchRequest},
+    context.push(
+      AppRoutes.savedMessageThreadDetail('${target.chatId}', '$threadRootId'),
+      extra: <String, dynamic>{AppRouteExtraKeys.launchRequest: launchRequest},
     );
   }
 
@@ -227,131 +229,125 @@ class _SavedMessageCard extends StatelessWidget {
         ? null
         : l10n.savedMessageAttachmentCount(saved.attachments.length);
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemBackground.resolveFrom(context),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+    final canOpen = saved.canLocateContext;
+
+    return Semantics(
+      button: canOpen,
+      enabled: canOpen,
+      onTap: canOpen ? onOpen : null,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: canOpen ? onOpen : null,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: CupertinoColors.systemBackground.resolveFrom(context),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AppAvatar(
-                  name: senderName,
-                  imageUrl: saved.sender.avatarUrl,
-                  size: 40,
-                  memCacheWidth: 80,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AppAvatar(
+                      name: senderName,
+                      imageUrl: saved.sender.avatarUrl,
+                      size: 40,
+                      memCacheWidth: 80,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Text(
-                              senderName,
-                              style: appBodyTextStyle(
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  senderName,
+                                  style: appBodyTextStyle(
+                                    context,
+                                    fontWeight: AppFontWeights.semibold,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                originalTimestamp,
+                                style: appCaptionTextStyle(context),
+                              ),
+                            ],
+                          ),
+                          if (showChatName) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              chatName,
+                              style: appCaptionTextStyle(
                                 context,
-                                fontWeight: AppFontWeights.semibold,
+                                color: CupertinoColors.systemBlue.resolveFrom(
+                                  context,
+                                ),
+                                fontWeight: AppFontWeights.medium,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            originalTimestamp,
-                            style: appCaptionTextStyle(context),
-                          ),
+                          ],
                         ],
                       ),
-                      if (showChatName) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          chatName,
-                          style: appCaptionTextStyle(
-                            context,
-                            color: CupertinoColors.systemBlue.resolveFrom(
-                              context,
-                            ),
-                            fontWeight: AppFontWeights.medium,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              preview.isEmpty ? l10n.message : preview,
-              style: appSecondaryTextStyle(context),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (attachmentSummary != null) ...[
-              const SizedBox(height: 6),
-              Text(attachmentSummary, style: appCaptionTextStyle(context)),
-            ],
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    l10n.savedMessageSavedOn(savedDate),
-                    style: appCaptionTextStyle(context),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                CupertinoButton(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(32, 32),
-                  onPressed: saved.canLocateContext ? onOpen : null,
-                  child: Text(
-                    saved.canLocateContext
-                        ? l10n.savedMessageOpenOriginal
-                        : l10n.savedMessageOriginalUnavailable,
-                    style: appCaptionTextStyle(
-                      context,
-                      color: saved.canLocateContext
-                          ? CupertinoColors.activeBlue.resolveFrom(context)
-                          : CupertinoColors.inactiveGray.resolveFrom(context),
-                      fontWeight: AppFontWeights.medium,
                     ),
-                  ),
+                  ],
                 ),
-                Semantics(
-                  button: true,
-                  label: l10n.savedMessageUnsave,
-                  child: CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(32, 32),
-                    onPressed: isUnsaving ? null : onUnsave,
-                    child: isUnsaving
-                        ? const CupertinoActivityIndicator(radius: 9)
-                        : Icon(
-                            CupertinoIcons.bookmark_fill,
-                            size: 22,
-                            color: CupertinoColors.activeBlue.resolveFrom(
-                              context,
-                            ),
-                          ),
-                  ),
+                const SizedBox(height: 10),
+                Text(
+                  preview.isEmpty ? l10n.message : preview,
+                  style: appSecondaryTextStyle(context),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (attachmentSummary != null) ...[
+                  const SizedBox(height: 6),
+                  Text(attachmentSummary, style: appCaptionTextStyle(context)),
+                ],
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l10n.savedMessageSavedOn(savedDate),
+                        style: appCaptionTextStyle(context),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Semantics(
+                      button: true,
+                      label: l10n.savedMessageUnsave,
+                      child: CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(32, 32),
+                        onPressed: isUnsaving ? null : onUnsave,
+                        child: isUnsaving
+                            ? const CupertinoActivityIndicator(radius: 9)
+                            : Icon(
+                                CupertinoIcons.bookmark_fill,
+                                size: 22,
+                                color: CupertinoColors.activeBlue.resolveFrom(
+                                  context,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
