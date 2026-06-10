@@ -276,6 +276,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get deleteMessageAction => 'Delete';
 
   @override
+  String get deleteFailedMessageAction => 'Delete Message';
+
+  @override
+  String get failedMessageActionsTitle => 'Message failed to send';
+
+  @override
   String get deleteMessageTitle => 'Delete message?';
 
   @override

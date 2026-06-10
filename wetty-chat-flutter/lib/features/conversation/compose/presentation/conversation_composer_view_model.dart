@@ -18,8 +18,8 @@ import 'package:chahua/features/conversation/compose/presentation/conversation_l
 import 'package:chahua/features/conversation/shared/application/conversation_canonical_message_store.dart';
 import 'package:chahua/features/conversation/compose/data/attachment_picker_service.dart';
 import 'package:chahua/features/conversation/compose/data/message_api_service_v2.dart';
+import 'package:chahua/features/conversation/shared/data/conversation_outbound_message_queue.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
-import 'package:chahua/features/conversation/shared/data/conversation_timeline_v2_repository.dart';
 import 'package:chahua/features/shared/data/attachment_service.dart';
 import 'package:chahua/features/conversation/compose/application/audio_recorder_service.dart';
 import 'package:chahua/features/audio/application/audio_waveform_cache_service.dart';
@@ -337,7 +337,7 @@ class ConversationComposerViewModel
 
   ConversationComposerViewModel(this.arg);
 
-  late final ConversationTimelineV2Repository _timelineRepository;
+  late final ConversationOutboundMessageQueue _outboundMessageQueue;
   late final ConversationTimelineMessageStore _messageStore;
   late final ConversationDraftStore _draftStore;
   late final AttachmentService _attachmentService;
@@ -349,11 +349,12 @@ class ConversationComposerViewModel
   Timer? _audioDurationTimer;
   DateTime? _audioRecordingStartedAt;
   bool _cancelPendingAudioStart = false;
+  int _clientGeneratedIdCounter = 0;
 
   @override
   ConversationComposerState build() {
-    _timelineRepository = ref.read(
-      conversationTimelineV2RepositoryProvider(arg),
+    _outboundMessageQueue = ref.read(
+      conversationOutboundMessageQueueProvider(arg),
     );
     _messageStore = ref.read(conversationTimelineMessageStoreProvider.notifier);
     _draftStore = ref.read(conversationDraftProvider);
@@ -1004,7 +1005,7 @@ class ConversationComposerViewModel
       deliveryState: ConversationDeliveryState.sending,
       content: _optimisticContent(request),
     );
-    final sendFuture = _timelineRepository.sendMessage(
+    final sendFuture = _outboundMessageQueue.enqueue(
       optimisticMessage: optimisticMessage,
       attachmentIds: request.attachmentIds,
     );
@@ -1097,7 +1098,8 @@ class ConversationComposerViewModel
 
   String _newClientGeneratedId() {
     final currentUserId = ref.read(authSessionProvider).currentUserId;
-    return '${DateTime.now().microsecondsSinceEpoch}-$currentUserId-${_storageKeyFor(arg)}';
+    final sequence = _clientGeneratedIdCounter++;
+    return '${DateTime.now().microsecondsSinceEpoch}-$sequence-$currentUserId-${_storageKeyFor(arg)}';
   }
 
   String _consumeNextClientGeneratedId() {

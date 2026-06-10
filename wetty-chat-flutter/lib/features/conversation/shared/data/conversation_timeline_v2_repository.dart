@@ -35,37 +35,47 @@ class ConversationTimelineV2Repository {
     // Optimistically insert the message into the timeline.
     _store.newMessage(identity, optimisticMessage);
 
-    // TODO(conversation_v2): catch POST failures here, mark the optimistic
-    // row as failed in the v2 store, and keep the same clientGeneratedId for
-    // later retry/discard actions.
-    // Send the message to the server.
-    final postFuture = ref
-        .read(messageApiServiceV2Provider)
-        .sendConversationMessage(
+    try {
+      final response = await ref
+          .read(messageApiServiceV2Provider)
+          .sendConversationMessage(
+            identity,
+            _textFor(optimisticMessage),
+            messageType: _messageTypeFor(optimisticMessage),
+            replyToId: optimisticMessage.replyToMessage?.id,
+            attachmentIds: attachmentIds,
+            clientGeneratedId: optimisticMessage.clientGeneratedId,
+            stickerId: _stickerIdFor(optimisticMessage),
+          );
+      _store.newMessage(
+        identity,
+        ConversationMessageV2.fromMessageItemDto(response),
+      );
+      log(
+        'sendMessage post accepted: identity=$identity '
+        'clientId=${optimisticMessage.clientGeneratedId}',
+        name: 'ConversationTimeline',
+      );
+    } catch (error, stackTrace) {
+      final current = _store.messageForClientGeneratedId(
+        identity,
+        optimisticMessage.clientGeneratedId,
+      );
+      if (current != null && current.serverMessageId == null) {
+        _store.updateLocalMessage(
           identity,
-          _textFor(optimisticMessage),
-          messageType: _messageTypeFor(optimisticMessage),
-          replyToId: optimisticMessage.replyToMessage?.id,
-          attachmentIds: attachmentIds,
-          clientGeneratedId: optimisticMessage.clientGeneratedId,
-          stickerId: _stickerIdFor(optimisticMessage),
+          current.copyWith(deliveryState: ConversationDeliveryState.failed),
         );
-    unawaited(
-      postFuture.then(
-        (_) => log(
-          'sendMessage post accepted: identity=$identity '
-          'clientId=${optimisticMessage.clientGeneratedId}',
-          name: 'ConversationTimeline',
-        ),
-        onError: (Object error, StackTrace stackTrace) => log(
-          'sendMessage post failed: identity=$identity '
-          'clientId=${optimisticMessage.clientGeneratedId}',
-          name: 'ConversationTimeline',
-          error: error,
-          stackTrace: stackTrace,
-        ),
-      ),
-    );
+      }
+      log(
+        'sendMessage post failed: identity=$identity '
+        'clientId=${optimisticMessage.clientGeneratedId}',
+        name: 'ConversationTimeline',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   Future<void> toggleReaction({
@@ -241,7 +251,7 @@ class ConversationTimelineV2Repository {
 
     ref
         .read(conversationTimelineMessageStoreProvider.notifier)
-        .insertLatest(identity, latestSegment);
+        .insertLatestSegment(identity, latestSegment);
 
     if (!hasMoreOlder) {
       ref

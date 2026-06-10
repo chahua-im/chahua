@@ -46,6 +46,32 @@ class ConversationTimelineMessageStore
     return null;
   }
 
+  ConversationMessageV2? messageForClientGeneratedId(
+    ConversationIdentity identity,
+    String clientGeneratedId,
+  ) {
+    final existingScope = scopeFor(identity);
+    if (existingScope == null || clientGeneratedId.isEmpty) {
+      return null;
+    }
+
+    for (final message in existingScope.optimisticMessages) {
+      if (message.clientGeneratedId == clientGeneratedId) {
+        return message;
+      }
+    }
+
+    for (final segment in existingScope.segments) {
+      for (final message in segment.orderedMessages) {
+        if (message.clientGeneratedId == clientGeneratedId) {
+          return message;
+        }
+      }
+    }
+
+    return null;
+  }
+
   void putScope(
     ConversationIdentity identity,
     ConversationTimelineCanonicalScope scope,
@@ -155,7 +181,8 @@ class ConversationTimelineMessageStore
     );
   }
 
-  void insertLatest(
+  /// Inserts a new segment at the end as the latest segment.
+  void insertLatestSegment(
     ConversationIdentity identity,
     ConversationTimelineCanonicalSegment segment,
   ) {
@@ -166,15 +193,25 @@ class ConversationTimelineMessageStore
       'existingOptimistic=${existingScope?.optimisticMessages.length ?? 0}',
       name: 'ConversationTimeline',
     );
+    final optimisticMessages =
+        existingScope?.optimisticMessages ?? const <ConversationMessageV2>[];
+    final segmentWithLocalOrder = _preserveLocalSendOrder(
+      segment,
+      optimisticMessages,
+    );
     final segments = _normalizeLatestSegments(
       existingScope?.segments ?? const <ConversationTimelineCanonicalSegment>[],
-      incoming: segment,
+      incoming: segmentWithLocalOrder,
     );
 
     putScope(
       identity,
       (existingScope ?? const ConversationTimelineCanonicalScope()).copyWith(
         segments: segments,
+        optimisticMessages: _withoutConfirmedOptimisticMessages(
+          optimisticMessages,
+          segmentWithLocalOrder,
+        ),
         hasReachedLatest: true,
       ),
     );
@@ -209,9 +246,21 @@ class ConversationTimelineMessageStore
       return;
     }
 
+    ConversationMessageV2? matchingOptimisticMessage;
     final optimisticMessages = existingScope.optimisticMessages
-        .where((item) => item.clientGeneratedId != message.clientGeneratedId)
+        .where((item) {
+          final isMatch = item.clientGeneratedId == message.clientGeneratedId;
+          if (isMatch) {
+            matchingOptimisticMessage = item;
+          }
+          return !isMatch;
+        })
         .toList(growable: false);
+    final serverBackedMessage = matchingOptimisticMessage == null
+        ? message
+        : message.copyWith(
+            localSendOrder: matchingOptimisticMessage!.localSendOrder,
+          );
     final latestSegment = existingScope.segments.isEmpty
         ? null
         : existingScope.segments.last;
@@ -221,7 +270,9 @@ class ConversationTimelineMessageStore
         existingScope.copyWith(
           optimisticMessages: optimisticMessages,
           segments: [
-            ConversationTimelineCanonicalSegment(orderedMessages: [message]),
+            ConversationTimelineCanonicalSegment(
+              orderedMessages: [serverBackedMessage],
+            ),
           ],
           hasReachedLatest: true,
         ),
@@ -231,7 +282,7 @@ class ConversationTimelineMessageStore
 
     final updatedLatestMessages = _mergeLatestMessages(
       latestSegment.orderedMessages,
-      message,
+      serverBackedMessage,
     );
 
     putScope(
@@ -364,6 +415,73 @@ class ConversationTimelineMessageStore
     return true;
   }
 
+  bool updateLocalMessage(
+    ConversationIdentity identity,
+    ConversationMessageV2 message,
+  ) {
+    assert(
+      message.serverMessageId == null,
+      'updateLocalMessage requires a local-only message',
+    );
+
+    final existingScope = scopeFor(identity);
+    if (existingScope == null) {
+      return false;
+    }
+
+    var replaced = false;
+    final optimisticMessages = existingScope.optimisticMessages
+        .map((item) {
+          if (item.clientGeneratedId != message.clientGeneratedId) {
+            return item;
+          }
+          replaced = true;
+          return message;
+        })
+        .toList(growable: false);
+
+    if (!replaced) {
+      return false;
+    }
+
+    putScope(
+      identity,
+      existingScope.copyWith(optimisticMessages: optimisticMessages),
+    );
+    return true;
+  }
+
+  bool discardLocalMessage(
+    ConversationIdentity identity,
+    String clientGeneratedId,
+  ) {
+    final existingScope = scopeFor(identity);
+    if (existingScope == null || clientGeneratedId.isEmpty) {
+      return false;
+    }
+
+    var removed = false;
+    final optimisticMessages = existingScope.optimisticMessages
+        .where((item) {
+          final keep = item.clientGeneratedId != clientGeneratedId;
+          if (!keep) {
+            removed = true;
+          }
+          return keep;
+        })
+        .toList(growable: false);
+
+    if (!removed) {
+      return false;
+    }
+
+    putScope(
+      identity,
+      existingScope.copyWith(optimisticMessages: optimisticMessages),
+    );
+    return true;
+  }
+
   bool deleteMessage(ConversationIdentity identity, int serverMessageId) {
     final existingScope = scopeFor(identity);
     if (existingScope == null) {
@@ -440,6 +558,63 @@ class ConversationTimelineMessageStore
 
     updated.insert(0, incoming);
     return updated.toList(growable: false);
+  }
+
+  List<ConversationMessageV2> _withoutConfirmedOptimisticMessages(
+    List<ConversationMessageV2> optimisticMessages,
+    ConversationTimelineCanonicalSegment confirmedSegment,
+  ) {
+    if (optimisticMessages.isEmpty) {
+      return optimisticMessages;
+    }
+    final confirmedClientIds = confirmedSegment.orderedMessages
+        .map((message) => message.clientGeneratedId)
+        .where((clientGeneratedId) => clientGeneratedId.isNotEmpty)
+        .toSet();
+    if (confirmedClientIds.isEmpty) {
+      return optimisticMessages;
+    }
+    return optimisticMessages
+        .where(
+          (message) => !confirmedClientIds.contains(message.clientGeneratedId),
+        )
+        .toList(growable: false);
+  }
+
+  ConversationTimelineCanonicalSegment _preserveLocalSendOrder(
+    ConversationTimelineCanonicalSegment segment,
+    List<ConversationMessageV2> optimisticMessages,
+  ) {
+    if (optimisticMessages.isEmpty) {
+      return segment;
+    }
+    final optimisticByClientId = <String, ConversationMessageV2>{
+      for (final message in optimisticMessages)
+        if (message.clientGeneratedId.isNotEmpty)
+          message.clientGeneratedId: message,
+    };
+    if (optimisticByClientId.isEmpty) {
+      return segment;
+    }
+
+    var changed = false;
+    final orderedMessages = segment.orderedMessages
+        .map((message) {
+          final optimistic = optimisticByClientId[message.clientGeneratedId];
+          if (optimistic?.localSendOrder == null) {
+            return message;
+          }
+          changed = true;
+          return message.copyWith(localSendOrder: optimistic!.localSendOrder);
+        })
+        .toList(growable: false);
+
+    if (!changed) {
+      return segment;
+    }
+    return ConversationTimelineCanonicalSegment(
+      orderedMessages: orderedMessages,
+    );
   }
 
   List<ConversationTimelineCanonicalSegment> _normalizeBeforeAnchorSegments(
@@ -750,5 +925,39 @@ List<ConversationMessageV2> _mergeLatestSliceMessages(
     return canonicalMessages;
   }
 
-  return [...canonicalMessages, ...mergedOptimisticMessages];
+  mergedOptimisticMessages.sort((left, right) {
+    final leftOrder = left.localSendOrder;
+    final rightOrder = right.localSendOrder;
+    if (leftOrder == null && rightOrder == null) {
+      return 0;
+    }
+    if (leftOrder == null) {
+      return 1;
+    }
+    if (rightOrder == null) {
+      return -1;
+    }
+    return leftOrder.compareTo(rightOrder);
+  });
+
+  final result = <ConversationMessageV2>[];
+  var optimisticIndex = 0;
+  for (final canonicalMessage in canonicalMessages) {
+    final canonicalOrder = canonicalMessage.localSendOrder;
+    if (canonicalOrder != null) {
+      while (optimisticIndex < mergedOptimisticMessages.length) {
+        final optimisticMessage = mergedOptimisticMessages[optimisticIndex];
+        final optimisticOrder = optimisticMessage.localSendOrder;
+        if (optimisticOrder == null || optimisticOrder >= canonicalOrder) {
+          break;
+        }
+        result.add(optimisticMessage);
+        optimisticIndex++;
+      }
+    }
+    result.add(canonicalMessage);
+  }
+
+  result.addAll(mergedOptimisticMessages.skip(optimisticIndex));
+  return result;
 }

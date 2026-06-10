@@ -16,7 +16,7 @@ use crate::dto::{
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::handlers::chats::{attach_metadata, PreparedMessageSend};
+use crate::handlers::chats::{attach_metadata, PreparedMessageSend, SendMessageOutcome};
 use crate::handlers::members::{check_membership, require_admin_role};
 use crate::models::{Message, MessageType, NewPinnedMessage, PinnedMessage};
 use crate::schema::{group_membership, messages, pinned_messages};
@@ -210,24 +210,26 @@ async fn create_pin(
     };
 
     // Send system message (best-effort — pin already saved)
-    if let Ok(send_result) = crate::handlers::chats::send_prepared_message(
-        conn,
-        &state,
-        PreparedMessageSend {
-            chat_id: path.chat_id,
-            sender_uid: uid,
-            message: Some("pinned a message".to_string()),
-            message_type: MessageType::System,
-            sticker_id: None,
-            reply_to_id: None,
-            reply_root_id: None,
-            client_generated_id: Uuid::new_v4().to_string(),
-            attachment_ids: vec![],
-            publish_immediately: true,
-        },
-    )
-    .await
+    if let Ok(SendMessageOutcome::Created(send_result)) =
+        crate::handlers::chats::send_prepared_message(
+            conn,
+            &state,
+            PreparedMessageSend {
+                chat_id: path.chat_id,
+                sender_uid: uid,
+                message: Some("pinned a message".to_string()),
+                message_type: MessageType::System,
+                sticker_id: None,
+                reply_to_id: None,
+                reply_root_id: None,
+                client_generated_id: Uuid::new_v4().to_string(),
+                attachment_ids: vec![],
+                publish_immediately: true,
+            },
+        )
+        .await
     {
+        let send_result = *send_result;
         send_result.side_effects.fire(&state);
     }
 
@@ -285,24 +287,26 @@ async fn delete_pin(
         .execute(conn)?;
 
     // Send system message (best-effort — unpin already saved)
-    if let Ok(send_result) = crate::handlers::chats::send_prepared_message(
-        conn,
-        &state,
-        PreparedMessageSend {
-            chat_id: path.chat_id,
-            sender_uid: uid,
-            message: Some("unpinned a message".to_string()),
-            message_type: MessageType::System,
-            sticker_id: None,
-            reply_to_id: None,
-            reply_root_id: None,
-            client_generated_id: Uuid::new_v4().to_string(),
-            attachment_ids: vec![],
-            publish_immediately: true,
-        },
-    )
-    .await
+    if let Ok(SendMessageOutcome::Created(send_result)) =
+        crate::handlers::chats::send_prepared_message(
+            conn,
+            &state,
+            PreparedMessageSend {
+                chat_id: path.chat_id,
+                sender_uid: uid,
+                message: Some("unpinned a message".to_string()),
+                message_type: MessageType::System,
+                sticker_id: None,
+                reply_to_id: None,
+                reply_root_id: None,
+                client_generated_id: Uuid::new_v4().to_string(),
+                attachment_ids: vec![],
+                publish_immediately: true,
+            },
+        )
+        .await
     {
+        let send_result = *send_result;
         send_result.side_effects.fire(&state);
     }
 

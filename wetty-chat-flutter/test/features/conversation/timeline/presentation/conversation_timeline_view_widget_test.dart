@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:chahua/core/api/models/chats_api_models.dart';
 import 'package:chahua/core/api/models/messages_api_models.dart';
+import 'package:chahua/core/network/api_config.dart';
 import 'package:chahua/core/providers/shared_preferences_provider.dart';
 import 'package:chahua/features/conversation/compose/data/message_api_service_v2.dart';
 import 'package:chahua/features/conversation/compose/presentation/conversation_compose_v2.dart';
 import 'package:chahua/features/conversation/message_bubble/presentation/message_row_v2.dart';
 import 'package:chahua/features/conversation/shared/application/conversation_canonical_message_store.dart';
+import 'package:chahua/features/conversation/shared/data/conversation_outbound_message_queue.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
@@ -1547,6 +1551,96 @@ void main() {
       },
     );
 
+    testWidgets('failed local message action sheet retries the send', (
+      tester,
+    ) async {
+      ApiSession.updateSession(
+        userId: 1,
+        authHeaders: legacyApiAuthHeadersForUser(1),
+      );
+      final api = _FakeMessageApiService(const []);
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+      await container
+          .read(conversationOutboundMessageQueueProvider(_identity))
+          .enqueue(
+            optimisticMessage: _optimisticTextMessage(
+              clientGeneratedId: 'failed-local-1',
+              senderUid: 1,
+              text: 'retry me',
+            ),
+            attachmentIds: const <String>[],
+          );
+      await tester.pump();
+      expect(api.sendRequests.map((request) => request.clientGeneratedId), [
+        'failed-local-1',
+      ]);
+
+      api.failNextSend();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(messageRowFailedActionKey), findsOneWidget);
+
+      await tester.tap(find.byKey(messageRowFailedActionKey));
+      await tester.pumpAndSettle();
+      expect(find.text('Message failed to send'), findsOneWidget);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(api.sendRequests.map((request) => request.clientGeneratedId), [
+        'failed-local-1',
+        'failed-local-1',
+      ]);
+      expect(find.byKey(messageRowFailedActionKey), findsNothing);
+
+      api.completeNextSend(id: 21);
+      await tester.pumpAndSettle();
+
+      expect(_clientRowFinder('failed-local-1'), findsOneWidget);
+      expect(_rowFinder(21), findsOneWidget);
+    });
+
+    testWidgets('failed local message action sheet discards the send', (
+      tester,
+    ) async {
+      ApiSession.updateSession(
+        userId: 1,
+        authHeaders: legacyApiAuthHeadersForUser(1),
+      );
+      final api = _FakeMessageApiService(const []);
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+      await container
+          .read(conversationOutboundMessageQueueProvider(_identity))
+          .enqueue(
+            optimisticMessage: _optimisticTextMessage(
+              clientGeneratedId: 'failed-local-2',
+              senderUid: 1,
+              text: 'discard me',
+            ),
+            attachmentIds: const <String>[],
+          );
+      await tester.pump();
+      api.failNextSend();
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.byKey(messageRowFailedActionKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete Message'));
+      await tester.pumpAndSettle();
+
+      expect(_clientRowFinder('failed-local-2'), findsNothing);
+    });
+
     // Use case:
     // The latest message is recalled or deleted while the user is at live edge.
     // The removed tail should disappear and the previous row should become the
@@ -2039,6 +2133,8 @@ class _FakeMessageApiService extends MessageApiServiceV2 {
   final Map<int, ListMessagesResponseDto> afterResponses;
   final Duration? responseDelay;
   final requests = <({int? before, int? after, int? around, int? max})>[];
+  final sendRequests = <_SendRequest>[];
+  final _pendingSends = <Completer<MessageItemDto>>[];
 
   @override
   Future<ListMessagesResponseDto> fetchConversationMessages(
@@ -2093,7 +2189,53 @@ class _FakeMessageApiService extends MessageApiServiceV2 {
       lastReadMessageId: messageId.toString(),
     );
   }
+
+  @override
+  Future<MessageItemDto> sendConversationMessage(
+    ConversationIdentity identity,
+    String text, {
+    required String messageType,
+    int? replyToId,
+    List<String> attachmentIds = const <String>[],
+    required String clientGeneratedId,
+    String? stickerId,
+  }) {
+    sendRequests.add((
+      text: text,
+      messageType: messageType,
+      clientGeneratedId: clientGeneratedId,
+    ));
+    final completer = Completer<MessageItemDto>();
+    _pendingSends.add(completer);
+    return completer.future;
+  }
+
+  void failNextSend() {
+    _pendingSends.removeAt(0).completeError(Exception('offline'));
+  }
+
+  void completeNextSend({required int id}) {
+    final request = sendRequests[sendRequests.length - _pendingSends.length];
+    _pendingSends
+        .removeAt(0)
+        .complete(
+          MessageItemDto(
+            id: id,
+            message: request.text,
+            messageType: request.messageType,
+            sender: const UserDto(uid: 1, name: 'Sender 1'),
+            chatId: _identity.chatId,
+            clientGeneratedId: request.clientGeneratedId,
+          ),
+        );
+  }
 }
+
+typedef _SendRequest = ({
+  String text,
+  String messageType,
+  String clientGeneratedId,
+});
 
 class _NoopReadStateRepository extends ReadStateRepository {
   _NoopReadStateRepository(super.ref);

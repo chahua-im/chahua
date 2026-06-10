@@ -627,6 +627,18 @@ abstract class AppLocalizations {
   /// **'Delete'**
   String get deleteMessageAction;
 
+  /// Action label for discarding a failed local-only chat message
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Message'**
+  String get deleteFailedMessageAction;
+
+  /// Action sheet title for a failed local-only chat message
+  ///
+  /// In en, this message translates to:
+  /// **'Message failed to send'**
+  String get failedMessageActionsTitle;
+
   /// Delete confirmation title for a message
   ///
   /// In en, this message translates to:

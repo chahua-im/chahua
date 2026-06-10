@@ -15,9 +15,14 @@ import 'message_item.dart';
 @visibleForTesting
 const messageRowHighlightKey = ValueKey<String>('message-row-highlight');
 
+@visibleForTesting
+const messageRowFailedActionKey = ValueKey<String>('message-row-failed-action');
+
 const double _bottomSpacing = 12;
 const double _avatarSlotWidth = 36;
 const double _avatarGap = 8;
+const double _failedActionGap = 6;
+const double _failedActionSize = 28;
 
 /// Private bubble layout alignment
 enum _BubbleLayout { centered, aligned }
@@ -34,6 +39,7 @@ class MessageRowV2 extends StatefulWidget {
     this.onOpenThread,
     this.onOpenAttachment,
     this.onOpenSticker,
+    this.onFailedMessageAction,
     this.showSenderName = true,
     this.showAvatar = true,
   });
@@ -47,6 +53,7 @@ class MessageRowV2 extends StatefulWidget {
   final VoidCallback? onOpenThread;
   final ValueChanged<MessageAttachmentOpenRequest>? onOpenAttachment;
   final ValueChanged<String>? onOpenSticker;
+  final ValueChanged<ConversationMessageV2>? onFailedMessageAction;
   final bool showSenderName;
   final bool showAvatar;
 
@@ -64,6 +71,11 @@ class _MessageRowV2State extends State<MessageRowV2>
   ConversationMessageHighlight? _activeHighlight;
 
   bool get _isMe => widget.message.sender.uid == ApiSession.currentUserId;
+  bool get _showsFailedAction =>
+      _isMe &&
+      widget.message.serverMessageId == null &&
+      widget.message.deliveryState == ConversationDeliveryState.failed &&
+      widget.onFailedMessageAction != null;
   bool get _canReply =>
       widget.onReply != null &&
       !widget.message.isDeleted &&
@@ -196,6 +208,11 @@ class _MessageRowV2State extends State<MessageRowV2>
                 )
               : const SizedBox.square(dimension: _avatarSlotWidth),
         );
+        final failedAction = _showsFailedAction
+            ? _FailedMessageActionButton(
+                onPressed: () => widget.onFailedMessageAction!(widget.message),
+              )
+            : null;
 
         return GestureDetector(
           onLongPress: _isDesktopPlatform ? null : _handleLongPress,
@@ -229,6 +246,10 @@ class _MessageRowV2State extends State<MessageRowV2>
                   children: [
                     avatar,
                     Flexible(child: item),
+                    if (failedAction != null) ...[
+                      const SizedBox(width: _failedActionGap),
+                      failedAction,
+                    ],
                   ],
                 ),
               ),
@@ -236,6 +257,36 @@ class _MessageRowV2State extends State<MessageRowV2>
           ),
         );
       },
+    );
+  }
+}
+
+class _FailedMessageActionButton extends StatelessWidget {
+  const _FailedMessageActionButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoButton(
+      key: messageRowFailedActionKey,
+      minimumSize: Size.zero,
+      padding: EdgeInsets.zero,
+      onPressed: onPressed,
+      child: Container(
+        width: _failedActionSize,
+        height: _failedActionSize,
+        decoration: BoxDecoration(
+          color: CupertinoColors.systemRed.resolveFrom(context),
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        child: const Icon(
+          CupertinoIcons.exclamationmark,
+          size: 18,
+          color: CupertinoColors.white,
+        ),
+      ),
     );
   }
 }

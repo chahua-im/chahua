@@ -11,7 +11,9 @@ use crate::dto::{
     users::User,
     ws::{ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload},
 };
-use crate::handlers::chats::{build_mention_info, build_sender, extract_mention_uids};
+use crate::handlers::chats::{
+    build_mention_info, build_sender, extract_mention_uids, redact_deleted_message_preview,
+};
 use crate::models::{Attachment, Message, MessageType};
 use crate::schema::{attachments, messages, stickers, thread_meta, thread_user_states};
 use crate::services::media::build_public_object_url;
@@ -350,7 +352,8 @@ pub fn build_thread_update_payload(
             messages::id
                 .eq(thread_root_id)
                 .and(messages::chat_id.eq(chat_id))
-                .and(messages::deleted_at.is_null())
+                .and(messages::reply_root_id.is_null())
+                .and(messages::has_thread.eq(true))
                 .and(messages::is_published.eq(true)),
         )
         .select(messages::created_at)
@@ -480,7 +483,8 @@ pub fn get_user_threads(
         WHERE ts.uid = $1
           AND ts.archived = $2
           AND ts.subscribed = TRUE
-          AND root_msg.deleted_at IS NULL
+          AND root_msg.reply_root_id IS NULL
+          AND root_msg.has_thread = TRUE
           AND root_msg.is_published = TRUE
           AND ($3::timestamptz IS NULL OR COALESCE(tm.last_reply_at, ts.subscribed_at) < $3)
         ORDER BY COALESCE(tm.last_reply_at, ts.subscribed_at) DESC
@@ -522,7 +526,8 @@ pub fn get_unread_summary_counts(
              JOIN messages root_msg ON root_msg.id = ts.thread_root_id
              WHERE ts.uid = $1
                AND ts.subscribed = TRUE
-               AND root_msg.deleted_at IS NULL
+               AND root_msg.reply_root_id IS NULL
+               AND root_msg.has_thread = TRUE
                AND root_msg.is_published = TRUE
          ),
          active_unread_threads AS (
@@ -688,7 +693,8 @@ pub fn enrich_thread_list(
             SELECT root.id AS reply_root_id, root.sender_uid
             FROM messages root
             WHERE root.id = ANY($1)
-              AND root.deleted_at IS NULL
+              AND root.reply_root_id IS NULL
+              AND root.has_thread = TRUE
               AND root.is_published = TRUE
          ) combined
          ORDER BY reply_root_id, sender_uid",
@@ -744,6 +750,9 @@ pub fn enrich_thread_list(
     let mut mention_uids_per_root: HashMap<i64, Vec<i32>> = HashMap::new();
     let mut mention_uids_per_reply: HashMap<i64, Vec<i32>> = HashMap::new();
     for msg in &root_messages {
+        if msg.deleted_at.is_some() {
+            continue;
+        }
         if let Some(ref text) = msg.message {
             let uids = extract_mention_uids(text);
             all_uids.extend(&uids);
@@ -780,7 +789,12 @@ pub fn enrich_thread_list(
     let sticker_ids: Vec<i64> = latest_reply_rows
         .iter()
         .filter_map(|r| r.sticker_id)
-        .chain(root_messages.iter().filter_map(|m| m.sticker_id))
+        .chain(
+            root_messages
+                .iter()
+                .filter(|m| m.deleted_at.is_none())
+                .filter_map(|m| m.sticker_id),
+        )
         .collect();
     let sticker_emoji_map: HashMap<i64, String> = if sticker_ids.is_empty() {
         HashMap::new()
@@ -801,7 +815,7 @@ pub fn enrich_thread_list(
         .map(|r| r.id)
         .collect();
     for msg in &root_messages {
-        if msg.has_attachments {
+        if msg.deleted_at.is_none() && msg.has_attachments {
             attachment_msg_ids.push(msg.id);
         }
     }
@@ -810,6 +824,7 @@ pub fn enrich_thread_list(
     } else {
         let atts: Vec<Attachment> = attachments::table
             .filter(attachments::message_id.eq_any(&attachment_msg_ids))
+            .filter(attachments::deleted_at.is_null())
             .order((
                 attachments::message_id.asc(),
                 attachments::order.asc(),
@@ -868,25 +883,34 @@ pub fn enrich_thread_list(
         .into_iter()
         .filter_map(|row| {
             let root_msg = root_msg_map.get(&row.thread_root_id)?;
-            let root_preview = MessagePreview {
+            let mut root_preview = MessagePreview {
                 id: root_msg.id,
                 client_generated_id: root_msg.client_generated_id.clone(),
                 created_at: root_msg.created_at,
                 sender: make_sender(root_msg.sender_uid),
-                message: root_msg.message.clone(),
+                message: if root_msg.deleted_at.is_some() {
+                    None
+                } else {
+                    root_msg.message.clone()
+                },
                 message_type: root_msg.message_type.clone(),
                 sticker: root_msg.sticker_id.and_then(|sid| {
-                    sticker_emoji_map
-                        .get(&sid)
-                        .cloned()
-                        .map(|emoji| MessagePreviewSticker { emoji })
+                    (root_msg.deleted_at.is_none())
+                        .then(|| {
+                            sticker_emoji_map
+                                .get(&sid)
+                                .cloned()
+                                .map(|emoji| MessagePreviewSticker { emoji })
+                        })
+                        .flatten()
                 }),
-                first_attachment_kind: if root_msg.has_attachments {
+                first_attachment_kind: if root_msg.deleted_at.is_none() && root_msg.has_attachments
+                {
                     first_attachment_map.get(&root_msg.id).cloned()
                 } else {
                     None
                 },
-                is_deleted: false,
+                is_deleted: root_msg.deleted_at.is_some(),
                 mentions: mention_uids_per_root
                     .get(&root_msg.id)
                     .map(|uids| {
@@ -896,6 +920,7 @@ pub fn enrich_thread_list(
                     })
                     .unwrap_or_default(),
             };
+            redact_deleted_message_preview(&mut root_preview);
             Some(ThreadListItem {
                 chat_id: row.chat_id,
                 chat_name: row.chat_name,

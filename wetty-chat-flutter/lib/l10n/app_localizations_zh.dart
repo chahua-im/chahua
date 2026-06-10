@@ -273,6 +273,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get deleteMessageAction => '撤回';
 
   @override
+  String get deleteFailedMessageAction => '删除消息';
+
+  @override
+  String get failedMessageActionsTitle => '消息发送失败';
+
+  @override
   String get deleteMessageTitle => '撤回消息？';
 
   @override
@@ -771,6 +777,12 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get deleteMessageAction => '撤回';
+
+  @override
+  String get deleteFailedMessageAction => '刪除訊息';
+
+  @override
+  String get failedMessageActionsTitle => '訊息傳送失敗';
 
   @override
   String get deleteMessageTitle => '撤回訊息？';

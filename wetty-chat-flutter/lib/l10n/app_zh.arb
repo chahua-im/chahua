@@ -94,6 +94,8 @@
   "edit": "编辑",
   "delete": "删除",
   "deleteMessageAction": "撤回",
+  "deleteFailedMessageAction": "删除消息",
+  "failedMessageActionsTitle": "消息发送失败",
   "deleteMessageTitle": "撤回消息？",
   "deleteMessageBody": "此操作无法撤销。",
   "all": "全部",

@@ -18,7 +18,7 @@ use crate::dto::invites::{
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::handlers::chats::{send_prepared_message, PreparedMessageSend};
+use crate::handlers::chats::{send_prepared_message, PreparedMessageSend, SendMessageOutcome};
 use crate::handlers::groups::load_group_info;
 use crate::handlers::members::{check_membership, require_admin_role};
 use crate::models::{
@@ -371,13 +371,20 @@ async fn post_send_invite_message(
         },
     )
     .await?;
-    send_result.side_effects.fire(&state);
+    let message = match send_result {
+        SendMessageOutcome::Created(send_result) => {
+            let send_result = *send_result;
+            send_result.side_effects.fire(&state);
+            send_result.response
+        }
+        SendMessageOutcome::Duplicate(response) => *response,
+    };
 
     Ok((
         StatusCode::CREATED,
         Json(SendInviteMessageResponse {
             invite: invite_service::invite_to_response(invite),
-            message: send_result.response,
+            message,
         }),
     ))
 }
@@ -703,24 +710,26 @@ async fn post_redeem_invite(
         }
     };
 
-    if let Ok(send_result) = crate::handlers::chats::send_prepared_message(
-        conn,
-        &state,
-        crate::handlers::chats::PreparedMessageSend {
-            chat_id,
-            sender_uid: uid,
-            message: Some("joined the chat".to_string()),
-            message_type: crate::models::MessageType::System,
-            sticker_id: None,
-            reply_to_id: None,
-            reply_root_id: None,
-            client_generated_id: uuid::Uuid::new_v4().to_string(),
-            attachment_ids: vec![],
-            publish_immediately: true,
-        },
-    )
-    .await
+    if let Ok(SendMessageOutcome::Created(send_result)) =
+        crate::handlers::chats::send_prepared_message(
+            conn,
+            &state,
+            crate::handlers::chats::PreparedMessageSend {
+                chat_id,
+                sender_uid: uid,
+                message: Some("joined the chat".to_string()),
+                message_type: crate::models::MessageType::System,
+                sticker_id: None,
+                reply_to_id: None,
+                reply_root_id: None,
+                client_generated_id: uuid::Uuid::new_v4().to_string(),
+                attachment_ids: vec![],
+                publish_immediately: true,
+            },
+        )
+        .await
     {
+        let send_result = *send_result;
         send_result.side_effects.fire(&state);
     }
 
