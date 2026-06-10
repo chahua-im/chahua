@@ -265,7 +265,7 @@ describe('ChatVirtualScroll realtime appends', () => {
     expect(scrollContainer!.scrollTop).toBe(currentRowCount * ROW_HEIGHT - currentViewportHeight);
   });
 
-  it('hides native vertical overflow while bootstrap measurements are settling', async () => {
+  it('keeps native vertical overflow reserved while bootstrap measurements are settling', async () => {
     const scrollApiRef = { current: null } as MutableRefObject<VirtualScrollHandle | null>;
 
     await act(async () => {
@@ -273,7 +273,7 @@ describe('ChatVirtualScroll realtime appends', () => {
     });
     scrollContainer = host.firstElementChild as HTMLElement;
 
-    expect(scrollContainer.className).toContain(styles.containerNonReady);
+    expect(scrollContainer.className).not.toContain(styles.containerNonReady);
 
     currentViewportHeight = VIEWPORT_HEIGHT + 1;
     await flushLayout(2);

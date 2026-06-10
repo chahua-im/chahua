@@ -2480,7 +2480,8 @@ export function ChatVirtualScroll({
   const isLoading = !!loadOlder.loading || !!loadNewer?.loading;
   const topSpacer = mounted ? topSpacerHeight() : phase === 'RECENTERING' ? totalHeight() : 0;
   const bottomSpacer = mounted ? bottomSpacerHeight() : 0;
-  const showLoadingScrim = phase === 'WAITING_VIEWPORT' || phase === 'BOOTSTRAP' || phase === 'RECENTERING';
+  const isSettlingLayout = phase === 'WAITING_VIEWPORT' || phase === 'BOOTSTRAP' || phase === 'RECENTERING';
+  const showLoadingScrim = isSettlingLayout && rowKeys.length === 0;
   const containerClassName = [styles.container, showLoadingScrim ? styles.containerNonReady : null]
     .filter(Boolean)
     .join(' ');
