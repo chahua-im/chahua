@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_models.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_projection.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_view_model.dart';
@@ -10,9 +9,8 @@ import 'package:chahua/features/chat_list/application/group_list_v2_store.dart';
 import 'package:chahua/features/chat_list/application/group_list_v2_view_model.dart';
 import 'package:chahua/features/chat_list/application/thread_list_v2_store.dart';
 import 'package:chahua/features/chat_list/application/thread_list_v2_view_model.dart';
-import 'package:chahua/features/chat_list/presentation/widgets/chat_list_detail_navigation.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/chat_list_archived_folder_row.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/group_list_v2_row.dart';
-import 'package:chahua/features/chat_list/presentation/widgets/list_row_interaction_surface.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/thread_list_v2_row.dart';
 
 class AllListV2View extends ConsumerWidget {
@@ -105,63 +103,16 @@ final _showAllArchivedFolderProvider = Provider<bool>((ref) {
   return hasArchivedGroups || hasArchivedThreads;
 });
 
-class _AllArchivedFolderRow extends ConsumerWidget {
+class _AllArchivedFolderRow extends StatelessWidget {
   const _AllArchivedFolderRow();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return ListRowInteractionSurface(
-      isActive: false,
-      onTap: () => openArchivedChatList(context: context, ref: ref),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: CupertinoColors.systemGrey5.resolveFrom(context),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    CupertinoIcons.archivebox,
-                    color: CupertinoColors.systemGrey.resolveFrom(context),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    l10n.archived,
-                    style: appTextStyle(
-                      context,
-                      fontSize: AppFontSizes.body,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Icon(
-                  CupertinoIcons.chevron_right,
-                  size: 16,
-                  color: CupertinoColors.systemGrey3,
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(left: 76),
-            child: Container(
-              height: 0.5,
-              color: CupertinoColors.separator.resolveFrom(context),
-            ),
-          ),
-        ],
-      ),
+    return ChatListArchivedFolderRow(
+      title: l10n.archived,
+      subtitle: l10n.archivedFolderSubtitle,
+      // TODO: pass combined archived group/thread unread count.
     );
   }
 }

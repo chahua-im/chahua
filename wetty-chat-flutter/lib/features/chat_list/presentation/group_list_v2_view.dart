@@ -1,11 +1,9 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 
-import 'package:chahua/features/chat_list/presentation/widgets/chat_list_detail_navigation.dart';
+import 'package:chahua/features/chat_list/presentation/widgets/chat_list_archived_folder_row.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/group_list_v2_row.dart';
-import 'widgets/list_row_interaction_surface.dart';
 import '../application/chat_list_v2_scope.dart';
 import '../application/group_list_v2_store.dart';
 import '../application/group_list_v2_view_model.dart';
@@ -96,63 +94,15 @@ class GroupListV2View extends ConsumerWidget {
   }
 }
 
-class _ArchivedGroupsFolderRow extends ConsumerWidget {
+class _ArchivedGroupsFolderRow extends StatelessWidget {
   const _ArchivedGroupsFolderRow();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return ListRowInteractionSurface(
-      isActive: false,
-      onTap: () => openArchivedChatList(context: context, ref: ref),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: CupertinoColors.systemGrey5.resolveFrom(context),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    CupertinoIcons.archivebox,
-                    color: CupertinoColors.systemGrey.resolveFrom(context),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    l10n.archivedGroups,
-                    style: appTextStyle(
-                      context,
-                      fontSize: AppFontSizes.body,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Icon(
-                  CupertinoIcons.chevron_right,
-                  size: 16,
-                  color: CupertinoColors.systemGrey3,
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(left: 76),
-            child: Container(
-              height: 0.5,
-              color: CupertinoColors.separator.resolveFrom(context),
-            ),
-          ),
-        ],
-      ),
+    return ChatListArchivedFolderRow(
+      title: l10n.archivedGroups,
+      // TODO: pass archived group unread count.
     );
   }
 }

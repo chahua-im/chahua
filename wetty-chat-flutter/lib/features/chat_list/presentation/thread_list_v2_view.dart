@@ -5,9 +5,7 @@ import 'package:chahua/l10n/app_localizations.dart';
 import '../../../app/theme/style_config.dart';
 import '../application/chat_list_v2_scope.dart';
 import '../application/thread_list_v2_store.dart';
-import 'widgets/chat_list_detail_navigation.dart';
-import 'widgets/list_row_interaction_surface.dart';
-import 'widgets/unread_badge_formatter.dart';
+import 'widgets/chat_list_archived_folder_row.dart';
 import 'package:chahua/features/chat_list/presentation/widgets/thread_list_v2_row.dart';
 import '../application/thread_list_v2_view_model.dart';
 
@@ -137,86 +135,9 @@ class _ArchivedThreadsFolderRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    return ListRowInteractionSurface(
-      isActive: false,
-      onTap: () => openArchivedChatList(context: context, ref: ref),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: CupertinoColors.systemGrey5.resolveFrom(context),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    CupertinoIcons.archivebox,
-                    color: CupertinoColors.systemGrey.resolveFrom(context),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    l10n.archivedThreads,
-                    style: appTextStyle(
-                      context,
-                      fontSize: AppFontSizes.body,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (unreadCount > 0) _UnreadBadge(count: unreadCount),
-                const SizedBox(width: 8),
-                const Icon(
-                  CupertinoIcons.chevron_right,
-                  size: 16,
-                  color: CupertinoColors.systemGrey3,
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(left: 76),
-            child: Container(
-              height: 0.5,
-              color: CupertinoColors.separator.resolveFrom(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _UnreadBadge extends StatelessWidget {
-  const _UnreadBadge({required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(left: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemRed,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      constraints: const BoxConstraints(minWidth: 20),
-      child: Text(
-        formatUnreadBadgeCount(count),
-        textAlign: TextAlign.center,
-        style: appOnDarkTextStyle(
-          context,
-          fontSize: AppFontSizes.unreadBadge,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+    return ChatListArchivedFolderRow(
+      title: l10n.archivedThreads,
+      // TODO: pass archived thread unread count.
     );
   }
 }

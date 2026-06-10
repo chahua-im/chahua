@@ -783,6 +783,12 @@ abstract class AppLocalizations {
   /// **'Archived'**
   String get archived;
 
+  /// Subtitle for the archived folder row in the All chat list tab
+  ///
+  /// In en, this message translates to:
+  /// **'View archived chats and threads'**
+  String get archivedFolderSubtitle;
+
   /// Title and folder row label for archived threads
   ///
   /// In en, this message translates to:

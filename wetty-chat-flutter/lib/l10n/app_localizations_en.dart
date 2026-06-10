@@ -357,6 +357,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get archived => 'Archived';
 
   @override
+  String get archivedFolderSubtitle => 'View archived chats and threads';
+
+  @override
   String get archivedThreads => 'Archived threads';
 
   @override

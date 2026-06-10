@@ -341,6 +341,9 @@
   "archived": "Archived",
   "@archived": { "description": "Navigation title for the archived chats and threads page" },
 
+  "archivedFolderSubtitle": "View archived chats and threads",
+  "@archivedFolderSubtitle": { "description": "Subtitle for the archived folder row in the All chat list tab" },
+
   "archivedThreads": "Archived threads",
   "@archivedThreads": { "description": "Title and folder row label for archived threads" },
 

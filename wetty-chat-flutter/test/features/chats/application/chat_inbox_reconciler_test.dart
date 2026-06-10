@@ -231,8 +231,7 @@ void main() {
     });
 
     test('reconcileGroups refreshes active and archived groups', () async {
-      SharedPreferences.setMockInitialValues({});
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = AppPreferences.withData(const <String, Object>{});
       final chatService = _FakeChatApiService(
         unreadCount: 3,
         chatResponses: [
