@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageResponse } from '@/api/messages';
 import { ChatVirtualScroll } from './ChatVirtualScroll';
 import type { ChatRow, VirtualScrollHandle } from './types';
+import styles from './ChatVirtualScroll.module.scss';
 
 vi.mock('@lingui/core/macro', () => ({
   t: (strings: TemplateStringsArray | string) => (typeof strings === 'string' ? strings : strings.join('')),
@@ -262,5 +263,25 @@ describe('ChatVirtualScroll realtime appends', () => {
     });
 
     expect(scrollContainer!.scrollTop).toBe(currentRowCount * ROW_HEIGHT - currentViewportHeight);
+  });
+
+  it('keeps native vertical overflow reserved while bootstrap measurements are settling', async () => {
+    const scrollApiRef = { current: null } as MutableRefObject<VirtualScrollHandle | null>;
+
+    await act(async () => {
+      renderVirtualScroll(root, rows(40), scrollApiRef);
+    });
+    scrollContainer = host.firstElementChild as HTMLElement;
+
+    expect(scrollContainer.className).not.toContain(styles.containerNonReady);
+
+    currentViewportHeight = VIEWPORT_HEIGHT + 1;
+    await flushLayout(2);
+    expect(scrollContainer.scrollTop).toBe(currentRowCount * ROW_HEIGHT - currentViewportHeight);
+    currentViewportHeight = VIEWPORT_HEIGHT;
+    await flushLayout(8);
+
+    expect(scrollContainer.className).not.toContain(styles.containerNonReady);
+    expect(scrollContainer.scrollTop).toBe(currentRowCount * ROW_HEIGHT - currentViewportHeight);
   });
 });

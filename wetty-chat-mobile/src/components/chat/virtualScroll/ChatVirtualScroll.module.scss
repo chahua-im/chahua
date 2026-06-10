@@ -2,10 +2,15 @@
   position: relative;
   width: 100%;
   height: 100%;
-  overflow-y: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
   overflow-anchor: none;
   background: inherit;
+}
+
+.containerNonReady {
+  overflow-y: scroll;
 }
 
 .flowContent {

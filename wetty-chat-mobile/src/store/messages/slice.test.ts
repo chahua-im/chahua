@@ -6,6 +6,7 @@ import reducer, {
   insertAround,
   insertBeforeAnchor,
   markOptimisticFailed,
+  mergeLatestPreserveView,
   refreshLatest,
 } from './slice';
 import { selectActiveTimelineMessages, selectCanLoadNewer, selectPendingLiveCount } from './selectors';
@@ -75,6 +76,80 @@ describe('messages slice canonical reducers', () => {
     next = reducer(
       next,
       refreshLatest({
+        chatId: '1',
+        messages: [testMessage('10'), testMessage('11', 'client-11')],
+        nextCursor: '10',
+        prevCursor: null,
+      }),
+    );
+
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['10', '11']);
+    expect(next.chats['1'].optimisticMessages).toEqual([]);
+  });
+
+  it('merges latest without replacing the active around window for passive refreshes', () => {
+    let next = reducer(
+      undefined,
+      refreshLatest({
+        chatId: '1',
+        messages: [testMessage('20'), testMessage('21')],
+        nextCursor: '20',
+        prevCursor: null,
+      }),
+    );
+    next = reducer(
+      next,
+      insertAround({
+        chatId: '1',
+        targetMessageId: '10',
+        messages: [testMessage('9'), testMessage('10'), testMessage('11')],
+        nextCursor: '9',
+        prevCursor: '11',
+      }),
+    );
+    next = reducer(
+      next,
+      mergeLatestPreserveView({
+        chatId: '1',
+        messages: [testMessage('22'), testMessage('23')],
+        nextCursor: '22',
+        prevCursor: null,
+      }),
+    );
+
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['9', '10', '11']);
+    expect(segmentIds(next)).toEqual([
+      ['9', '10', '11'],
+      ['20', '21'],
+      ['22', '23'],
+    ]);
+  });
+
+  it('keeps generation stable when passive latest refresh is equivalent', () => {
+    let next = reducer(
+      undefined,
+      refreshLatest({ chatId: '1', messages: [testMessage('10')], nextCursor: '10', prevCursor: null }),
+    );
+    const generation = next.chats['1'].generation;
+
+    next = reducer(
+      next,
+      mergeLatestPreserveView({ chatId: '1', messages: [testMessage('10')], nextCursor: '10', prevCursor: null }),
+    );
+
+    expect(next.chats['1'].generation).toBe(generation);
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['10']);
+  });
+
+  it('reconciles optimistic messages during passive latest refreshes', () => {
+    let next = reducer(
+      undefined,
+      refreshLatest({ chatId: '1', messages: [testMessage('10')], nextCursor: '10', prevCursor: null }),
+    );
+    next = addOptimistic(next, testOptimisticMessage('client-11'));
+    next = reducer(
+      next,
+      mergeLatestPreserveView({
         chatId: '1',
         messages: [testMessage('10'), testMessage('11', 'client-11')],
         nextCursor: '10',

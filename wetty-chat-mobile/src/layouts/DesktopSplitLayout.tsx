@@ -31,6 +31,8 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 type DesktopRouteState = ChatThreadRouteState;
 
+const MAX_CACHED_THREAD_PANES = 4;
+
 interface DesktopRouteMatches {
   activeChatId: string | undefined;
   archivedMatch: { tab?: string } | null;
@@ -351,29 +353,32 @@ export function DesktopSplitLayout() {
     [backgroundPath, history],
   );
 
+  const [cachedThreadPanes, setCachedThreadPanes] = useState<Array<{ key: string; chatId: string; threadId: string }>>(
+    [],
+  );
+  const cacheThreadPane = useCallback((chatId: string, threadId: string) => {
+    const nextPane = { key: `${chatId}:${threadId}`, chatId, threadId };
+    setCachedThreadPanes((current) => {
+      if (current[0]?.key === nextPane.key) return current;
+      const sameChatPanes = current.filter((pane) => pane.chatId === chatId && pane.key !== nextPane.key);
+      return [nextPane, ...sameChatPanes].slice(0, MAX_CACHED_THREAD_PANES);
+    });
+  }, []);
   const handleThreadSelect = useCallback(
     (chatId: string, threadRootId: string) => {
+      cacheThreadPane(chatId, threadRootId);
       history.replace(`/chats/chat/${chatId}/thread/${threadRootId}`);
     },
-    [history],
+    [cacheThreadPane, history],
   );
-
-  let subPageOverlay: ReactNode = null;
-
-  if (threadMatch) {
-    const { id, threadId } = threadMatch;
-    subPageOverlay = (
-      <ChatThreadCore
-        key={threadId}
-        chatId={id}
-        threadId={threadId}
-        backAction={{
-          type: 'callback',
-          onBack: () => history.replace(`/chats/chat/${id}`),
-        }}
-      />
-    );
-  }
+  const activeThreadPane = threadMatch
+    ? { key: `${threadMatch.id}:${threadMatch.threadId}`, chatId: threadMatch.id, threadId: threadMatch.threadId }
+    : null;
+  const activeThreadPaneKey = activeThreadPane?.key ?? null;
+  const renderedThreadPanes =
+    activeThreadPane && !cachedThreadPanes.some((pane) => pane.key === activeThreadPane.key)
+      ? [activeThreadPane, ...cachedThreadPanes.filter((pane) => pane.chatId === activeThreadPane.chatId)]
+      : cachedThreadPanes;
 
   return (
     <div className={styles.desktopSplitLayout}>
@@ -417,13 +422,42 @@ export function DesktopSplitLayout() {
       <div className={styles.desktopSplitRight}>
         {/* Base layer: always render ChatThreadCore when a chat is selected */}
         {activeChatId && !isNewChat && !joinPreviewMatch && (
-          <div style={{ display: subPageOverlay ? 'none' : undefined }} className={styles.desktopSplitPane}>
+          <div
+            className={[
+              styles.desktopSplitPane,
+              activeThreadPaneKey ? styles.desktopSplitPaneHidden : styles.desktopSplitPaneActive,
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
             <ChatThreadCore key={activeChatId} chatId={activeChatId} />
           </div>
         )}
 
         {/* Overlay layer: sub-page (thread) */}
-        {subPageOverlay && <div className={styles.desktopSplitPane}>{subPageOverlay}</div>}
+        {renderedThreadPanes.map((pane) => {
+          const active = pane.key === activeThreadPaneKey;
+          return (
+            <div
+              key={pane.key}
+              className={[
+                styles.desktopSplitPane,
+                active ? styles.desktopSplitPaneActive : styles.desktopSplitPaneHidden,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <ChatThreadCore
+                chatId={pane.chatId}
+                threadId={pane.threadId}
+                backAction={{
+                  type: 'callback',
+                  onBack: () => history.replace(`/chats/chat/${pane.chatId}`),
+                }}
+              />
+            </div>
+          );
+        })}
 
         {/* Group info modal */}
         <ChatModal chatId={groupInfoModalChatId} routePath={groupInfoModalRoutePath}>

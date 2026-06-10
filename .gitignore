@@ -23,3 +23,18 @@
 *.log
 *.err
 .repo-ssh
+
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+*.pyzwz
+*.pyzwzw
+*.pyzwzwz

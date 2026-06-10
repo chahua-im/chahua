@@ -28,6 +28,24 @@ import {
 } from './timelineAlgorithms';
 import type { ChatTimelineState, MessagesState, TimelineMode, TimelineViewState } from './types';
 
+function areSegmentsEquivalent(
+  left: { messages: MessageResponse[]; nextCursor: string | null; prevCursor: string | null } | undefined,
+  right: { messages: MessageResponse[]; nextCursor: string | null; prevCursor: string | null } | null,
+): boolean {
+  if (!left || !right) return !left && !right;
+  return (
+    left.nextCursor === right.nextCursor &&
+    left.prevCursor === right.prevCursor &&
+    left.messages.length === right.messages.length &&
+    left.messages.every((message, index) => {
+      const candidate = right.messages[index];
+      return (
+        candidate != null && message.id === candidate.id && message.clientGeneratedId === candidate.clientGeneratedId
+      );
+    })
+  );
+}
+
 function isActiveViewAtLatestEdge(chat: ChatTimelineState, view: TimelineViewState): boolean {
   if (!chat.hasReachedLatest) return false;
   if (view.mode.type === 'latest') return true;
@@ -96,6 +114,42 @@ const messagesSlice = createSlice({
       const view = getView(state, chatId);
       view.mode = DEFAULT_TIMELINE_MODE;
       clearPendingLiveForLoadedMessages(view, chat);
+    },
+
+    mergeLatestPreserveView(
+      state,
+      action: {
+        payload: { chatId: string; messages: MessageResponse[]; nextCursor: string | null; prevCursor: string | null };
+      },
+    ) {
+      const { chatId, messages, nextCursor, prevCursor } = action.payload;
+      const chat = getChat(state, chatId);
+      const segment = makeServerSegment(messages, nextCursor, prevCursor);
+      const fetchedClientIds = new Set(messages.map((message) => message.clientGeneratedId).filter(Boolean));
+      const nextOptimisticMessages = chat.optimisticMessages.filter(
+        (message) => !message.clientGeneratedId || !fetchedClientIds.has(message.clientGeneratedId),
+      );
+      const equivalent =
+        areSegmentsEquivalent(chat.segments[chat.segments.length - 1], segment) &&
+        nextOptimisticMessages.length === chat.optimisticMessages.length;
+
+      if (equivalent) {
+        chat.hasReachedLatest = true;
+        chat.hasReachedOldest = nextCursor === null || chat.hasReachedOldest;
+        return;
+      }
+
+      chat.optimisticMessages = nextOptimisticMessages;
+      if (segment) {
+        chat.segments = normalizeLatestSegments(chat.segments, segment);
+      }
+      chat.hasReachedLatest = true;
+      chat.hasReachedOldest = nextCursor === null || chat.hasReachedOldest;
+      chat.generation++;
+      const view = getView(state, chatId);
+      if (view.mode.type === 'latest') {
+        clearPendingLiveForLoadedMessages(view, chat);
+      }
     },
 
     insertAround(
@@ -331,6 +385,7 @@ export const {
   setTimelineMode,
   clearPendingLiveMessages,
   refreshLatest,
+  mergeLatestPreserveView,
   insertAround,
   insertBeforeAnchor,
   insertAfterAnchor,
