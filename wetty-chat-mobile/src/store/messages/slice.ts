@@ -39,7 +39,9 @@ function areSegmentsEquivalent(
     left.messages.length === right.messages.length &&
     left.messages.every((message, index) => {
       const candidate = right.messages[index];
-      return candidate != null && message.id === candidate.id && message.clientGeneratedId === candidate.clientGeneratedId;
+      return (
+        candidate != null && message.id === candidate.id && message.clientGeneratedId === candidate.clientGeneratedId
+      );
     })
   );
 }
