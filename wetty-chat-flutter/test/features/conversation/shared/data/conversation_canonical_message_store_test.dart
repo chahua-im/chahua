@@ -673,7 +673,7 @@ void main() {
           conversationTimelineMessageStoreProvider.notifier,
         );
 
-        store.insertLatest(_identity, _segment(3, 4));
+        store.insertLatestSegment(_identity, _segment(3, 4));
 
         final scope = container.read(
           conversationTimelineMessageStoreProvider,
@@ -695,7 +695,7 @@ void main() {
 
         store.putScope(_identity, _scope([_segment(1, 5)]));
 
-        store.insertLatest(_identity, _segment(3, 4));
+        store.insertLatestSegment(_identity, _segment(3, 4));
 
         final scope = container.read(
           conversationTimelineMessageStoreProvider,
@@ -718,7 +718,7 @@ void main() {
 
         store.putScope(_identity, _scope([_segment(1, 5)]));
 
-        store.insertLatest(_identity, _segment(7, 10));
+        store.insertLatestSegment(_identity, _segment(7, 10));
 
         final scope = container.read(
           conversationTimelineMessageStoreProvider,
@@ -743,7 +743,7 @@ void main() {
 
           store.putScope(_identity, _scope([_segment(1, 2), _segment(5, 6)]));
 
-          store.insertLatest(_identity, _segment(3, 4));
+          store.insertLatestSegment(_identity, _segment(3, 4));
 
           final scope = container.read(
             conversationTimelineMessageStoreProvider,
@@ -767,7 +767,7 @@ void main() {
 
         store.putScope(_identity, _scope([_segment(1, 2), _segment(7, 8)]));
 
-        store.insertLatest(_identity, _segment(4, 5));
+        store.insertLatestSegment(_identity, _segment(4, 5));
 
         final scope = container.read(
           conversationTimelineMessageStoreProvider,
@@ -790,7 +790,7 @@ void main() {
 
         store.putScope(_identity, _scope([_segment(1, 3), _segment(4, 6)]));
 
-        store.insertLatest(_identity, _segment(3, 4));
+        store.insertLatestSegment(_identity, _segment(3, 4));
 
         final scope = container.read(
           conversationTimelineMessageStoreProvider,
@@ -813,7 +813,7 @@ void main() {
 
         store.putScope(_identity, _scope([_segment(1, 3), _segment(4, 6)]));
 
-        store.insertLatest(_identity, _segment(1, 10));
+        store.insertLatestSegment(_identity, _segment(1, 10));
 
         final scope = container.read(
           conversationTimelineMessageStoreProvider,
@@ -1175,6 +1175,140 @@ void main() {
             [1, 2, 3, 4],
           ]);
           expect(scope.optimisticMessages, isEmpty);
+        },
+      );
+
+      test(
+        'reconciles multiple optimistic messages when server echoes arrive out of order',
+        () {
+          final container = ProviderContainer();
+          addTearDown(container.dispose);
+          final store = container.read(
+            conversationTimelineMessageStoreProvider.notifier,
+          );
+
+          store.putScope(
+            _identity,
+            _scope(
+              [_segment(1, 3)],
+              hasReachedLatest: true,
+              optimisticMessages: [
+                _optimisticMessage('client-4'),
+                _optimisticMessage('client-5'),
+              ],
+            ),
+          );
+
+          store.newMessage(
+            _identity,
+            _messageWithText(5, 'client-5', 'second'),
+          );
+          store.newMessage(_identity, _messageWithText(4, 'client-4', 'first'));
+
+          final scope = container.read(
+            conversationTimelineMessageStoreProvider,
+          )[_identity]!;
+          expect(_segmentIds(scope.segments), [
+            [1, 2, 3, 4, 5],
+          ]);
+          expect(scope.optimisticMessages, isEmpty);
+        },
+      );
+
+      test(
+        'keeps server-id order when another message arrives before local echo',
+        () {
+          final container = ProviderContainer();
+          addTearDown(container.dispose);
+          final store = container.read(
+            conversationTimelineMessageStoreProvider.notifier,
+          );
+
+          store.putScope(
+            _identity,
+            _scope(
+              [_segment(1, 3)],
+              hasReachedLatest: true,
+              optimisticMessages: [_optimisticMessage('client-5')],
+            ),
+          );
+
+          store.newMessage(
+            _identity,
+            _messageWithText(6, 'client-other-6', 'other user'),
+          );
+          store.newMessage(
+            _identity,
+            _messageWithText(5, 'client-5', 'local echo'),
+          );
+
+          final scope = container.read(
+            conversationTimelineMessageStoreProvider,
+          )[_identity]!;
+          final activeSegment = container.read(
+            conversationTimelineActiveSegmentProvider((
+              identity: _identity,
+              mode: const ConversationTimelineActiveSegmentMode.latest(),
+            )),
+          )!;
+          expect(_segmentIds(scope.segments), [
+            [1, 2, 3, 5, 6],
+          ]);
+          expect(scope.optimisticMessages, isEmpty);
+          expect(
+            activeSegment.orderedMessages.map(
+              (message) => message.clientGeneratedId,
+            ),
+            ['client-1', 'client-2', 'client-3', 'client-5', 'client-other-6'],
+          );
+        },
+      );
+
+      test(
+        'clears optimistic messages that are confirmed by a latest refresh',
+        () {
+          final container = ProviderContainer();
+          addTearDown(container.dispose);
+          final store = container.read(
+            conversationTimelineMessageStoreProvider.notifier,
+          );
+
+          store.putScope(
+            _identity,
+            _scope(
+              [_segment(1, 3)],
+              hasReachedLatest: true,
+              optimisticMessages: [_optimisticMessage('client-4')],
+            ),
+          );
+
+          store.insertLatestSegment(
+            _identity,
+            ConversationTimelineCanonicalSegment(
+              orderedMessages: [
+                _message(2),
+                _message(3),
+                _messageWithText(4, 'client-4', 'confirmed by refresh'),
+              ],
+            ),
+          );
+
+          final scope = container.read(
+            conversationTimelineMessageStoreProvider,
+          )[_identity]!;
+          final activeSegment = container.read(
+            conversationTimelineActiveSegmentProvider((
+              identity: _identity,
+              mode: const ConversationTimelineActiveSegmentMode.latest(),
+            )),
+          )!;
+          expect(scope.optimisticMessages, isEmpty);
+          expect(
+            activeSegment.orderedMessages.map(
+              (message) => message.clientGeneratedId,
+            ),
+            ['client-2', 'client-3', 'client-4'],
+          );
         },
       );
     });

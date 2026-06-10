@@ -15,7 +15,6 @@ import stickerPreferencesReducer, {
 } from './stickerPreferencesSlice';
 import threadsReducer, {
   incrementThreadUnread,
-  removeThread,
   updateThreadCachedLastReply,
   patchThreadCachedLastReply,
   patchThreadRootMessage,
@@ -27,7 +26,7 @@ import chatsReducer, {
 } from './chatsSlice';
 import pinsReducer from './pinsSlice';
 import userReducer, { fetchCurrentUser } from './userSlice';
-import { toMessagePreview, type MessageResponse } from '@/api/messages';
+import { toMessagePreview, type MessagePreview, type MessageResponse } from '@/api/messages';
 import { messageAdded, messageConfirmed, messagePatched, messagesBulkDeleted } from './messageEvents';
 import { findLatestEligibleRootMessage, isOptimisticMessageId } from './messageProjection';
 import { selectHasLoadedTimeline } from './messages/selectors';
@@ -35,6 +34,17 @@ import { kvSet } from '@/utils/db';
 import { isAnyOf } from '@reduxjs/toolkit';
 
 const listenerMiddleware = createListenerMiddleware();
+
+function deletedThreadRootPreviewPatch(): Partial<MessagePreview> {
+  return {
+    isDeleted: true,
+    message: null,
+    sticker: null,
+    attachments: [],
+    firstAttachmentKind: null,
+    mentions: [],
+  };
+}
 
 listenerMiddleware.startListening({
   actionCreator: messageAdded,
@@ -134,11 +144,16 @@ listenerMiddleware.startListening({
       }),
     );
 
-    // Handle thread root deletion — remove the thread entirely
+    // Handle thread root deletion — keep the thread reachable with a redacted root preview.
     if (action.payload.message.isDeleted && !action.payload.message.replyRootId) {
       const thread = state.threads.items.find((t) => t.threadRootMessage.id === action.payload.messageId);
       if (thread) {
-        api.dispatch(removeThread({ threadRootId: action.payload.messageId }));
+        api.dispatch(
+          patchThreadRootMessage({
+            threadRootId: action.payload.messageId,
+            message: deletedThreadRootPreviewPatch(),
+          }),
+        );
       }
     }
 
@@ -201,10 +216,15 @@ listenerMiddleware.startListening({
       );
     }
 
-    // Remove threads whose root was deleted
+    // Mark deleted thread roots without clearing their subscription/list entries.
     for (const thread of state.threads.items) {
       if (idSet.has(thread.threadRootMessage.id)) {
-        api.dispatch(removeThread({ threadRootId: thread.threadRootMessage.id }));
+        api.dispatch(
+          patchThreadRootMessage({
+            threadRootId: thread.threadRootMessage.id,
+            message: deletedThreadRootPreviewPatch(),
+          }),
+        );
       }
     }
   },

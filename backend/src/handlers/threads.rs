@@ -75,7 +75,8 @@ async fn get_threads(
     // Load raw root messages (no heavy attach_metadata — enrich_thread_list builds lightweight previews)
     let root_messages: Vec<Message> = messages::table
         .filter(messages::id.eq_any(&root_ids))
-        .filter(messages::deleted_at.is_null())
+        .filter(messages::reply_root_id.is_null())
+        .filter(messages::has_thread.eq(true))
         .filter(messages::is_published.eq(true))
         .select(Message::as_select())
         .load(conn)?;

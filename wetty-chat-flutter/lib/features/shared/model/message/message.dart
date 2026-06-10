@@ -41,6 +41,7 @@ class ConversationMessageV2 {
     this.reactions = const <ReactionSummary>[],
     this.threadInfo,
     this.deliveryState = ConversationDeliveryState.confirmed,
+    this.localSendOrder,
   });
 
   factory ConversationMessageV2.fromMessageItemDto(MessageItemDto dto) {
@@ -92,6 +93,7 @@ class ConversationMessageV2 {
   final ThreadInfo? threadInfo;
   final ConversationDeliveryState deliveryState;
   final MessageContent content;
+  final int? localSendOrder;
 
   ConversationMessageV2 copyWith({
     int? serverMessageId,
@@ -105,6 +107,7 @@ class ConversationMessageV2 {
     ThreadInfo? threadInfo,
     ConversationDeliveryState? deliveryState,
     MessageContent? content,
+    int? localSendOrder,
   }) {
     return ConversationMessageV2(
       serverMessageId: serverMessageId ?? this.serverMessageId,
@@ -118,6 +121,7 @@ class ConversationMessageV2 {
       threadInfo: threadInfo ?? this.threadInfo,
       deliveryState: deliveryState ?? this.deliveryState,
       content: content ?? this.content,
+      localSendOrder: localSendOrder ?? this.localSendOrder,
     );
   }
 

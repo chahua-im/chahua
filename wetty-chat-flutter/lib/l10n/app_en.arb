@@ -264,6 +264,10 @@
 
   "deleteMessageAction": "Delete",
   "@deleteMessageAction": { "description": "Action label for deleting/recalling a chat message" },
+  "deleteFailedMessageAction": "Delete Message",
+  "@deleteFailedMessageAction": { "description": "Action label for discarding a failed local-only chat message" },
+  "failedMessageActionsTitle": "Message failed to send",
+  "@failedMessageActionsTitle": { "description": "Action sheet title for a failed local-only chat message" },
 
   "deleteMessageTitle": "Delete message?",
   "@deleteMessageTitle": { "description": "Delete confirmation title for a message" },

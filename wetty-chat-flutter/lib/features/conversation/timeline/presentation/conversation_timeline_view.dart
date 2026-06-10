@@ -4,6 +4,7 @@ import 'dart:developer';
 import 'package:chahua/app/routing/route_names.dart';
 import 'package:chahua/features/conversation/compose/presentation/conversation_composer_view_model.dart';
 import 'package:chahua/features/conversation/media/presentation/attachment_viewer_request.dart';
+import 'package:chahua/features/conversation/shared/data/conversation_outbound_message_queue.dart';
 import 'package:chahua/features/conversation/timeline/presentation/conversation_timeline_view_model.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
@@ -507,6 +508,51 @@ class _ConversationTimelineViewState
     widget.onMessageLongPress?.call(details);
   }
 
+  Future<void> _openFailedMessageActions(ConversationMessageV2 message) async {
+    final l10n = AppLocalizations.of(context)!;
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (actionSheetContext) {
+        return CupertinoActionSheet(
+          title: Text(l10n.failedMessageActionsTitle),
+          actions: [
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.of(actionSheetContext).pop();
+                ref
+                    .read(
+                      conversationOutboundMessageQueueProvider(
+                        widget._identity,
+                      ),
+                    )
+                    .retryFailed(message.clientGeneratedId);
+              },
+              child: Text(l10n.retry),
+            ),
+            CupertinoActionSheetAction(
+              isDestructiveAction: true,
+              onPressed: () {
+                Navigator.of(actionSheetContext).pop();
+                ref
+                    .read(
+                      conversationOutboundMessageQueueProvider(
+                        widget._identity,
+                      ),
+                    )
+                    .discardFailed(message.clientGeneratedId);
+              },
+              child: Text(l10n.deleteFailedMessageAction),
+            ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(actionSheetContext).pop(),
+            child: Text(l10n.cancel),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _toggleReaction(
     ConversationMessageV2 message,
     String emoji,
@@ -653,6 +699,7 @@ class _ConversationTimelineViewState
                 : null,
             onOpenAttachment: _openAttachment,
             onOpenSticker: _openSticker,
+            onFailedMessageAction: _openFailedMessageActions,
           ),
         );
       },

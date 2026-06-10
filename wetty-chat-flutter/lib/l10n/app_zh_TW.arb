@@ -94,6 +94,8 @@
   "edit": "編輯",
   "delete": "刪除",
   "deleteMessageAction": "撤回",
+  "deleteFailedMessageAction": "刪除訊息",
+  "failedMessageActionsTitle": "訊息傳送失敗",
   "deleteMessageTitle": "撤回訊息？",
   "deleteMessageBody": "此操作無法復原。",
   "all": "全部",

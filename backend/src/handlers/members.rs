@@ -275,24 +275,26 @@ async fn post_add_member(
         .and_then(|p| p.username.clone())
         .unwrap_or_else(|| "Someone".to_string());
 
-    if let Ok(send_result) = crate::handlers::chats::send_prepared_message(
-        conn,
-        &state,
-        crate::handlers::chats::PreparedMessageSend {
-            chat_id,
-            sender_uid: uid,
-            message: Some(format!("added {}", target_username)),
-            message_type: crate::models::MessageType::System,
-            sticker_id: None,
-            reply_to_id: None,
-            reply_root_id: None,
-            client_generated_id: uuid::Uuid::new_v4().to_string(),
-            attachment_ids: vec![],
-            publish_immediately: true,
-        },
-    )
-    .await
+    if let Ok(crate::handlers::chats::SendMessageOutcome::Created(send_result)) =
+        crate::handlers::chats::send_prepared_message(
+            conn,
+            &state,
+            crate::handlers::chats::PreparedMessageSend {
+                chat_id,
+                sender_uid: uid,
+                message: Some(format!("added {}", target_username)),
+                message_type: crate::models::MessageType::System,
+                sticker_id: None,
+                reply_to_id: None,
+                reply_root_id: None,
+                client_generated_id: uuid::Uuid::new_v4().to_string(),
+                attachment_ids: vec![],
+                publish_immediately: true,
+            },
+        )
+        .await
     {
+        let send_result = *send_result;
         send_result.side_effects.fire(&state);
     }
 
@@ -403,24 +405,26 @@ async fn delete_remove_member(
         (target_uid, "left the chat".to_string())
     };
 
-    if let Ok(send_result) = crate::handlers::chats::send_prepared_message(
-        conn,
-        &state,
-        crate::handlers::chats::PreparedMessageSend {
-            chat_id,
-            sender_uid: sys_sender_uid,
-            message: Some(sys_msg),
-            message_type: crate::models::MessageType::System,
-            sticker_id: None,
-            reply_to_id: None,
-            reply_root_id: None,
-            client_generated_id: uuid::Uuid::new_v4().to_string(),
-            attachment_ids: vec![],
-            publish_immediately: true,
-        },
-    )
-    .await
+    if let Ok(crate::handlers::chats::SendMessageOutcome::Created(send_result)) =
+        crate::handlers::chats::send_prepared_message(
+            conn,
+            &state,
+            crate::handlers::chats::PreparedMessageSend {
+                chat_id,
+                sender_uid: sys_sender_uid,
+                message: Some(sys_msg),
+                message_type: crate::models::MessageType::System,
+                sticker_id: None,
+                reply_to_id: None,
+                reply_root_id: None,
+                client_generated_id: uuid::Uuid::new_v4().to_string(),
+                attachment_ids: vec![],
+                publish_immediately: true,
+            },
+        )
+        .await
     {
+        let send_result = *send_result;
         send_result.side_effects.fire(&state);
     }
 
