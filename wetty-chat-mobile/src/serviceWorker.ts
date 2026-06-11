@@ -220,7 +220,7 @@ cleanupOutdatedCaches();
 // Workaround for dev server: only register navigation route if index.html is precached
 const hasPrecachedIndex = manifest.some((entry) => (typeof entry === 'string' ? entry : entry.url) === 'index.html');
 
-if (hasPrecachedIndex) {
+if (!import.meta.env.DEV && hasPrecachedIndex) {
   registerRoute(({ request, url }) => {
     if (request.mode !== 'navigate') {
       return false;

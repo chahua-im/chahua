@@ -33,7 +33,7 @@ export default mergeConfig(
         '/_api/ws': {
           target: API_PROXY_TARGET,
           ws: true,
-          secure: false,
+          changeOrigin: true,
           rewrite: (p) => p.replace(/^\/_api/, ''),
         },
         '^/_api/': {
