@@ -14,25 +14,71 @@ import 'apns_channel.dart';
 
 class UnreadBadgeState {
   const UnreadBadgeState({
-    this.chatUnreadTotal = 0,
-    this.threadUnreadTotal = 0,
+    this.chatUnreadMessageCount = 0,
+    this.archivedChatUnreadMessageCount = 0,
+    this.threadUnreadMessageCount = 0,
+    this.archivedThreadUnreadMessageCount = 0,
+    this.chatUnreadItemCount = 0,
+    this.archivedChatUnreadItemCount = 0,
+    this.threadUnreadItemCount = 0,
+    this.archivedThreadUnreadItemCount = 0,
     this.isRefreshing = false,
   });
 
-  final int chatUnreadTotal;
-  final int threadUnreadTotal;
+  final int chatUnreadMessageCount;
+  final int archivedChatUnreadMessageCount;
+  final int threadUnreadMessageCount;
+  final int archivedThreadUnreadMessageCount;
+  final int chatUnreadItemCount;
+  final int archivedChatUnreadItemCount;
+  final int threadUnreadItemCount;
+  final int archivedThreadUnreadItemCount;
   final bool isRefreshing;
 
+  int get activeUnreadMessageCount =>
+      chatUnreadMessageCount + threadUnreadMessageCount;
+
+  int get archivedUnreadMessageCount =>
+      archivedChatUnreadMessageCount + archivedThreadUnreadMessageCount;
+
+  int get activeUnreadItemCount => chatUnreadItemCount + threadUnreadItemCount;
+
+  int get archivedUnreadItemCount =>
+      archivedChatUnreadItemCount + archivedThreadUnreadItemCount;
+
+  // TODO: Move existing callers to the explicit message/item count fields.
+  int get chatUnreadTotal => chatUnreadMessageCount;
+  int get threadUnreadTotal => threadUnreadItemCount;
   int get combinedUnreadTotal => chatUnreadTotal + threadUnreadTotal;
 
   UnreadBadgeState copyWith({
-    int? chatUnreadTotal,
-    int? threadUnreadTotal,
+    int? chatUnreadMessageCount,
+    int? archivedChatUnreadMessageCount,
+    int? threadUnreadMessageCount,
+    int? archivedThreadUnreadMessageCount,
+    int? chatUnreadItemCount,
+    int? archivedChatUnreadItemCount,
+    int? threadUnreadItemCount,
+    int? archivedThreadUnreadItemCount,
     bool? isRefreshing,
   }) {
     return UnreadBadgeState(
-      chatUnreadTotal: chatUnreadTotal ?? this.chatUnreadTotal,
-      threadUnreadTotal: threadUnreadTotal ?? this.threadUnreadTotal,
+      chatUnreadMessageCount:
+          chatUnreadMessageCount ?? this.chatUnreadMessageCount,
+      archivedChatUnreadMessageCount:
+          archivedChatUnreadMessageCount ?? this.archivedChatUnreadMessageCount,
+      threadUnreadMessageCount:
+          threadUnreadMessageCount ?? this.threadUnreadMessageCount,
+      archivedThreadUnreadMessageCount:
+          archivedThreadUnreadMessageCount ??
+          this.archivedThreadUnreadMessageCount,
+      chatUnreadItemCount: chatUnreadItemCount ?? this.chatUnreadItemCount,
+      archivedChatUnreadItemCount:
+          archivedChatUnreadItemCount ?? this.archivedChatUnreadItemCount,
+      threadUnreadItemCount:
+          threadUnreadItemCount ?? this.threadUnreadItemCount,
+      archivedThreadUnreadItemCount:
+          archivedThreadUnreadItemCount ?? this.archivedThreadUnreadItemCount,
       isRefreshing: isRefreshing ?? this.isRefreshing,
     );
   }
@@ -108,12 +154,26 @@ class UnreadBadgeNotifier extends Notifier<UnreadBadgeState> {
         return;
       }
       final nextState = state.copyWith(
-        chatUnreadTotal: chatResult.unreadCount,
-        threadUnreadTotal: threadResult.unreadThreadCount,
+        chatUnreadMessageCount: _clampUnread(chatResult.unreadCount),
+        archivedChatUnreadMessageCount: _clampUnread(
+          chatResult.archivedUnreadCount,
+        ),
+        threadUnreadMessageCount: _clampUnread(threadResult.unreadMessageCount),
+        archivedThreadUnreadMessageCount: _clampUnread(
+          threadResult.archivedUnreadMessageCount,
+        ),
+        chatUnreadItemCount: _clampUnread(chatResult.unreadChatCount),
+        archivedChatUnreadItemCount: _clampUnread(
+          chatResult.archivedUnreadChatCount,
+        ),
+        threadUnreadItemCount: _clampUnread(threadResult.unreadThreadCount),
+        archivedThreadUnreadItemCount: _clampUnread(
+          threadResult.archivedUnreadThreadCount,
+        ),
         isRefreshing: false,
       );
       _replaceState(nextState);
-      await _syncNativeBadge(nextState.combinedUnreadTotal);
+      await _syncNativeBadge(nextState.activeUnreadMessageCount);
     } catch (error, stackTrace) {
       developer.log(
         'Failed to refresh unread badge totals: $error',
@@ -136,7 +196,16 @@ class UnreadBadgeNotifier extends Notifier<UnreadBadgeState> {
         return;
       }
       _replaceState(
-        state.copyWith(chatUnreadTotal: _clampUnread(result.unreadCount)),
+        state.copyWith(
+          chatUnreadMessageCount: _clampUnread(result.unreadCount),
+          archivedChatUnreadMessageCount: _clampUnread(
+            result.archivedUnreadCount,
+          ),
+          chatUnreadItemCount: _clampUnread(result.unreadChatCount),
+          archivedChatUnreadItemCount: _clampUnread(
+            result.archivedUnreadChatCount,
+          ),
+        ),
       );
     } catch (error, stackTrace) {
       developer.log(
@@ -156,7 +225,18 @@ class UnreadBadgeNotifier extends Notifier<UnreadBadgeState> {
       if (_isDisposed) {
         return;
       }
-      replaceThreadUnreadTotal(result.unreadThreadCount);
+      _replaceState(
+        state.copyWith(
+          threadUnreadMessageCount: _clampUnread(result.unreadMessageCount),
+          archivedThreadUnreadMessageCount: _clampUnread(
+            result.archivedUnreadMessageCount,
+          ),
+          threadUnreadItemCount: _clampUnread(result.unreadThreadCount),
+          archivedThreadUnreadItemCount: _clampUnread(
+            result.archivedUnreadThreadCount,
+          ),
+        ),
+      );
     } catch (error, stackTrace) {
       developer.log(
         'Failed to refresh thread unread badge total: $error',
@@ -180,7 +260,9 @@ class UnreadBadgeNotifier extends Notifier<UnreadBadgeState> {
     }
     _replaceState(
       state.copyWith(
-        chatUnreadTotal: _clampUnread(state.chatUnreadTotal + delta),
+        chatUnreadMessageCount: _clampUnread(
+          state.chatUnreadMessageCount + delta,
+        ),
       ),
     );
   }
@@ -191,14 +273,19 @@ class UnreadBadgeNotifier extends Notifier<UnreadBadgeState> {
     }
     _replaceState(
       state.copyWith(
-        threadUnreadTotal: _clampUnread(state.threadUnreadTotal + delta),
+        threadUnreadMessageCount: _clampUnread(
+          state.threadUnreadMessageCount + delta,
+        ),
+        threadUnreadItemCount: _clampUnread(
+          state.threadUnreadItemCount + delta,
+        ),
       ),
     );
   }
 
   void replaceThreadUnreadTotal(int totalUnreadCount) {
     _replaceState(
-      state.copyWith(threadUnreadTotal: _clampUnread(totalUnreadCount)),
+      state.copyWith(threadUnreadItemCount: _clampUnread(totalUnreadCount)),
     );
   }
 
@@ -206,9 +293,9 @@ class UnreadBadgeNotifier extends Notifier<UnreadBadgeState> {
     if (_isDisposed) {
       return;
     }
-    final previousCount = state.combinedUnreadTotal;
+    final previousCount = state.activeUnreadMessageCount;
     state = next;
-    final nextCount = next.combinedUnreadTotal;
+    final nextCount = next.activeUnreadMessageCount;
     if (previousCount != nextCount) {
       unawaited(_syncNativeBadge(nextCount));
     }
