@@ -172,9 +172,15 @@ class _ChatListV2PageState extends ConsumerState<ChatListV2Page> {
 
     final unreadState = ref.watch(unreadBadgeProvider);
 
-    final groupsUnread = unreadState.chatUnreadTotal;
-    final threadsUnread = unreadState.threadUnreadTotal;
-    final allUnread = unreadState.combinedUnreadTotal;
+    final groupsUnread = switch (widget.scope) {
+      ChatListV2Scope.active => unreadState.chatUnreadItemCount,
+      ChatListV2Scope.archived => unreadState.archivedChatUnreadItemCount,
+    };
+    final threadsUnread = switch (widget.scope) {
+      ChatListV2Scope.active => unreadState.threadUnreadItemCount,
+      ChatListV2Scope.archived => unreadState.archivedThreadUnreadItemCount,
+    };
+    final allUnread = groupsUnread + threadsUnread;
     final chromeBackgroundColor = _isScrolledUnder
         ? CupertinoTheme.of(context).barBackgroundColor
         : CupertinoColors.systemBackground;
