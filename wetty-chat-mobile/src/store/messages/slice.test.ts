@@ -114,7 +114,7 @@ describe('messages slice canonical reducers', () => {
     ]);
   });
 
-  it('ignores around fetches that do not contain the target message', () => {
+  it('retains non-empty around fetches that do not contain the target message', () => {
     const next = reducer(
       undefined,
       insertAround({
@@ -126,7 +126,8 @@ describe('messages slice canonical reducers', () => {
       }),
     );
 
-    expect(next.chats['1']).toBeUndefined();
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['8', '9']);
+    expect(segmentIds(next)).toEqual([['8', '9']]);
   });
 
   it('filters before-anchor fetches to messages older than the anchor', () => {
@@ -203,6 +204,23 @@ describe('messages slice canonical reducers', () => {
 
     expect(selectPendingLiveCount(testRootState(next), '1')).toBe(1);
     expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['9', '10', '11']);
+  });
+
+  it('treats missing-target around windows at the latest edge as realtime-visible', () => {
+    let next = reducer(
+      undefined,
+      insertAround({
+        chatId: '1',
+        targetMessageId: '10',
+        messages: [testMessage('8'), testMessage('9')],
+        nextCursor: '8',
+        prevCursor: null,
+      }),
+    );
+    next = reducer(next, applyRealtimeMessage({ chatId: '1', message: testMessage('11') }));
+
+    expect(selectPendingLiveCount(testRootState(next), '1')).toBe(0);
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['8', '9', '11']);
   });
 
   it('applies realtime messages in sorted order when latest is active', () => {

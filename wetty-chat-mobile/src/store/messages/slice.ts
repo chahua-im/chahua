@@ -111,7 +111,6 @@ const messagesSlice = createSlice({
       },
     ) {
       const { chatId, targetMessageId, messages, nextCursor, prevCursor } = action.payload;
-      if (!messages.some((message) => message.id === targetMessageId)) return;
       const segment = makeServerSegment(messages, nextCursor, prevCursor);
       if (!segment) return;
       const chat = getChat(state, chatId);
