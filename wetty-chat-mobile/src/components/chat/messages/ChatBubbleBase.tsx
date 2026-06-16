@@ -507,26 +507,28 @@ export function ChatBubbleBase({
   return (
     <>
       <div className={`${styles.chatRow} ${isSent ? styles.sent : styles.received}`}>
-        {showAvatar ? (
-          <UserAvatar
-            name={senderName}
-            avatarUrl={avatarUrl}
-            size={36}
-            className={styles.avatar}
-            onClick={interactive ? onAvatarClick : undefined}
-          />
-        ) : (
-          <div className={styles.avatarSpacer} />
-        )}
-        <div className={styles.bubbleWrapper}>
-          {bubble}
+        <div className={styles.messageColumn}>
+          <div className={styles.avatarBubbleRow}>
+            {showAvatar ? (
+              <UserAvatar
+                name={senderName}
+                avatarUrl={avatarUrl}
+                size={36}
+                className={styles.avatar}
+                onClick={interactive ? onAvatarClick : undefined}
+              />
+            ) : (
+              <div className={styles.avatarSpacer} />
+            )}
+            {bubble}
+            {interactive && onReply && (
+              <button className={styles.hoverReplyBtn} onClick={onReply} aria-label={t`Reply`}>
+                <IonIcon icon={arrowUndo} />
+              </button>
+            )}
+          </div>
           {reactionsContent}
         </div>
-        {interactive && onReply && (
-          <button className={styles.hoverReplyBtn} onClick={onReply} aria-label={t`Reply`}>
-            <IonIcon icon={arrowUndo} />
-          </button>
-        )}
       </div>
       {interactive && viewingAttachmentIndex !== null && imageAttachments.length > 0 && (
         <ImageViewer
