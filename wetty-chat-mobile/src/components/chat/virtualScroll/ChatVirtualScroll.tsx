@@ -1402,7 +1402,10 @@ export function ChatVirtualScroll({
           }
         }
         if (scrolled) {
-          triggerJumpTargetHighlight(target.key);
+          // Skip highlight when resuming the latest message — no jump is happening.
+          if (target.index < rowKeys.length - 1) {
+            triggerJumpTargetHighlight(target.key);
+          }
         }
       } else {
         logVirtualScroll('layout-intent-scroll-to-message-missed', {
@@ -1568,6 +1571,7 @@ export function ChatVirtualScroll({
     prevKeysRef.current = rowKeys;
   }, [
     rowKeys,
+    rowKeys.length,
     renderTick,
     cancelBatch,
     containerHeight,
@@ -2183,7 +2187,10 @@ export function ChatVirtualScroll({
         if (mounted && target.index >= mounted.start && target.index <= mounted.end) {
           const scrolled = scrollToKeyInternal(target.key, resolvedBehavior);
           if (scrolled) {
-            triggerJumpTargetHighlight(target.key);
+            // Skip highlight when resuming the latest message — no jump is happening.
+            if (target.index < rowKeys.length - 1) {
+              triggerJumpTargetHighlight(target.key);
+            }
             pendingScrollMessageIdRef.current = null;
           }
           return;
@@ -2209,6 +2216,7 @@ export function ChatVirtualScroll({
       }
     };
   }, [
+    rowKeys.length,
     ensureBottomMeasured,
     enterRecentering,
     keyToIndex,
