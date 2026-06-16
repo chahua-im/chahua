@@ -7,6 +7,7 @@ export interface ChatDraft {
   text: string;
   replyToMessageId?: string;
   replyToUsername?: string;
+  savedAt?: number;
 }
 
 const SAVE_DEBOUNCE_MS = 500;
@@ -25,7 +26,12 @@ export async function saveDraft(key: string, draft: ChatDraft): Promise<void> {
     await clearDraft(key);
     return;
   }
-  await kvSet(draftKey(key), draft);
+  const existing = await loadDraft(key);
+  if (existing && existing.text === draft.text && existing.replyToMessageId === draft.replyToMessageId) {
+    return;
+  }
+  const stamped: ChatDraft = { ...draft, savedAt: Date.now() };
+  await kvSet(draftKey(key), stamped);
   notifyDraftChange(key);
 }
 

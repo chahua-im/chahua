@@ -178,7 +178,7 @@ export function ChatList({
   const messageChats = useSelector((state: RootState) => state.messages.chats);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, { text: string; savedAt: number }>>({});
   const [activeTab, setActiveTab] = useState<ChatListTab>(initialTab ?? (showAllTab ? 'all' : 'groups'));
   const effectiveTab = activeTab === 'all' && !showAllTab ? 'groups' : activeTab;
   const chats = archivedMode ? archivedChats : activeChats;
@@ -238,7 +238,7 @@ export function ChatList({
         .then((draft) => {
           setDrafts((prev) => {
             if (draft) {
-              return { ...prev, [draftKey]: draft.text };
+              return { ...prev, [draftKey]: { text: draft.text, savedAt: draft.savedAt ?? 0 } };
             }
             // Draft was cleared — remove from map
             const next = { ...prev };
@@ -356,19 +356,34 @@ export function ChatList({
       items.push({
         type: 'group',
         chat,
-        sortTime: chat.lastMessageAt ? new Date(chat.lastMessageAt).getTime() : 0,
+        sortTime: Math.max(
+          chat.lastMessageAt ? new Date(chat.lastMessageAt).getTime() : 0,
+          drafts[chat.id]?.savedAt ?? 0,
+        ),
       });
     }
     for (const thread of threads) {
       items.push({
         type: 'thread',
         thread,
-        sortTime: thread.lastReplyAt ? new Date(thread.lastReplyAt).getTime() : 0,
+        sortTime: Math.max(
+          thread.lastReplyAt ? new Date(thread.lastReplyAt).getTime() : 0,
+          drafts[`${thread.chatId}_thread_${thread.threadRootMessage.id}`]?.savedAt ?? 0,
+        ),
       });
     }
     items.sort((a, b) => b.sortTime - a.sortTime);
     return items;
-  }, [chats, threads]);
+  }, [chats, threads, drafts]);
+
+  const sortedChats = useMemo(() => {
+    if (Object.keys(drafts).length === 0) return chats;
+    return [...chats].sort((a, b) => {
+      const aTime = Math.max(a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0, drafts[a.id]?.savedAt ?? 0);
+      const bTime = Math.max(b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0, drafts[b.id]?.savedAt ?? 0);
+      return bTime - aTime;
+    });
+  }, [chats, drafts]);
 
   const handleThreadSelect = useCallback(
     (chatId: string, threadRootId: string, thread: StoredThreadListItem) => {
@@ -490,7 +505,7 @@ export function ChatList({
             {chat.id in drafts ? (
               <>
                 <span className={styles.chatsListDraftLabel}>{t`Draft: `}</span>
-                {truncatePreview(drafts[chat.id])}
+                {truncatePreview(drafts[chat.id].text)}
               </>
             ) : (
               getMessagePreview(chat.lastMessage, locale)
@@ -520,7 +535,7 @@ export function ChatList({
         locale={locale}
         isActive={activeThreadId === thread.threadRootMessage.id}
         onSelect={handleThreadSelect}
-        draftText={drafts[threadDraftKey]}
+        draftText={drafts[threadDraftKey]?.text}
         endAction={{
           color: archivedMode ? 'success' : 'medium',
           icon: archivedMode ? arrowUndoOutline : archiveOutline,
@@ -606,7 +621,7 @@ export function ChatList({
       return (
         <IonList>
           {!archivedMode && archivedGroupsVisible ? renderArchivedEntry(archivedUnreadChats) : null}
-          {chats.map(renderChatItem)}
+          {sortedChats.map(renderChatItem)}
         </IonList>
       );
     }
