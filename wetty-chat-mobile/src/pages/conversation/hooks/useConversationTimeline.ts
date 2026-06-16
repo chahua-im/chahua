@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { t } from '@lingui/core/macro';
 import { useDispatch, useSelector } from 'react-redux';
+import { selectShowAllAvatars } from '@/store/settingsSlice';
 import { getMessages } from '@/api/messages';
 import { getThreadReadState } from '@/api/threads';
 import type { VirtualScrollAnchor, VirtualScrollHandle } from '@/components/chat/virtualScroll/types';
@@ -88,7 +89,8 @@ export function useConversationTimeline({
   const pendingLiveCount = useSelector((state: RootState) => selectPendingLiveCount(state, storeChatId));
 
   const messageLookup = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
-  const chatRows = useChatRows(messages, formatDateSeparator);
+  const showAllAvatars = useSelector(selectShowAllAvatars);
+  const chatRows = useChatRows(messages, formatDateSeparator, showAllAvatars);
 
   useEffect(() => {
     if (messages.length > 0 || pendingLiveCount === 0) {

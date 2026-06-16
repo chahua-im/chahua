@@ -32,6 +32,7 @@ export interface SettingsState {
   locale: string | null;
   messageFontSize: ChatFontSizeOption;
   showAllTab: boolean;
+  showAllAvatars: boolean;
   pinnedReactions: string[];
   recentReactions: string[];
 }
@@ -50,6 +51,7 @@ function persistSettings(state: SettingsState) {
     locale: currentState.locale,
     messageFontSize: currentState.messageFontSize,
     showAllTab: currentState.showAllTab,
+    showAllAvatars: currentState.showAllAvatars,
     pinnedReactions: currentState.pinnedReactions,
     recentReactions: currentState.recentReactions,
   });
@@ -68,6 +70,7 @@ const defaultSettings: SettingsState = {
   locale: null,
   messageFontSize: defaultChatFontSize,
   showAllTab: true,
+  showAllAvatars: false,
   pinnedReactions: normalizePinnedReactions(['👍']),
   recentReactions: ['❤️', '😂', '😮', '😢', '🎉'],
 };
@@ -99,6 +102,10 @@ const settingsSlice = createSlice({
       state.showAllTab = action.payload;
       persistSettings(state);
     },
+    setShowAllAvatars(state, action: PayloadAction<boolean>) {
+      state.showAllAvatars = action.payload;
+      persistSettings(state);
+    },
     setPinnedReactions(state, action: PayloadAction<string[]>) {
       state.pinnedReactions = normalizePinnedReactions(action.payload);
       persistSettings(state);
@@ -113,12 +120,19 @@ const settingsSlice = createSlice({
   },
 });
 
-export const { setLocale, setMessageFontSize, setShowAllTab, setPinnedReactions, addRecentReaction } =
-  settingsSlice.actions;
+export const {
+  setLocale,
+  setMessageFontSize,
+  setShowAllTab,
+  setShowAllAvatars,
+  setPinnedReactions,
+  addRecentReaction,
+} = settingsSlice.actions;
 export const selectLocale = (state: RootState) => state.settings.locale;
 export const selectEffectiveLocale = (state: RootState) => state.settings.locale ?? detectLocale();
 export const selectMessageFontSize = (state: RootState) => state.settings.messageFontSize;
 export const selectShowAllTab = (state: RootState) => state.settings.showAllTab;
+export const selectShowAllAvatars = (state: RootState) => state.settings.showAllAvatars;
 export const selectPinnedReactions = (state: RootState) => state.settings.pinnedReactions;
 export const selectRecentReactions = (state: RootState) => state.settings.recentReactions;
 export const selectChatFontSizeStyle = (state: RootState) => getChatFontSizeStyle(state.settings.messageFontSize);

@@ -24,9 +24,11 @@ import {
   chatFontSizeOptions,
   selectLocale,
   selectMessageFontSize,
+  selectShowAllAvatars,
   selectShowAllTab,
   setMessageFontSize,
   setShowAllTab,
+  setShowAllAvatars,
 } from '@/store/settingsSlice';
 import type { BackAction } from '@/types/back-action';
 import styles from './GeneralSettings.module.scss';
@@ -48,6 +50,7 @@ export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSetti
   const locale = useSelector(selectLocale);
   const messageFontSize = useSelector(selectMessageFontSize);
   const showAllTab = useSelector(selectShowAllTab);
+  const showAllAvatars = useSelector(selectShowAllAvatars);
   const sliderValue = chatFontSizeOptions.indexOf(messageFontSize);
 
   const handleOpenLanguage = () => {
@@ -83,6 +86,11 @@ export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSetti
           <IonItem>
             <IonToggle checked={showAllTab} onIonChange={(e) => dispatch(setShowAllTab(e.detail.checked))}>
               <Trans>Show "All" Tab in Chats</Trans>
+            </IonToggle>
+          </IonItem>
+          <IonItem>
+            <IonToggle checked={showAllAvatars} onIonChange={(e) => dispatch(setShowAllAvatars(e.detail.checked))}>
+              <Trans>Show Avatars Next to All Messages</Trans>
             </IonToggle>
           </IonItem>
         </IonList>

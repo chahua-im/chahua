@@ -1101,6 +1101,9 @@ msgstr "分享邀請"
 msgid "Show \"All\" Tab in Chats"
 msgstr "在聊天中顯示「全部」標籤"
 
+msgid "Show Avatars Next to All Messages"
+msgstr "在所有訊息旁顯示頭像"
+
 msgid "Small"
 msgstr "小"
 

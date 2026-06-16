@@ -23,7 +23,11 @@ function isSystemMessage(message: MessageResponse): boolean {
   return message.messageType === 'system';
 }
 
-export function useChatRows(messages: MessageResponse[], formatDateSeparator: (iso: string) => string): ChatRow[] {
+export function useChatRows(
+  messages: MessageResponse[],
+  formatDateSeparator: (iso: string) => string,
+  showAllAvatars: boolean,
+): ChatRow[] {
   return useMemo(() => {
     const rows: ChatRow[] = [];
     let prevSenderUid: number | string | null = null;
@@ -67,12 +71,12 @@ export function useChatRows(messages: MessageResponse[], formatDateSeparator: (i
         clientGeneratedId: msg.clientGeneratedId ?? null,
         message: msg,
         showName,
-        showAvatar: isLastInGroup,
+        showAvatar: showAllAvatars || isLastInGroup,
       });
 
       prevSenderUid = isSystem ? null : msg.sender.uid;
     }
 
     return rows;
-  }, [messages, formatDateSeparator]);
+  }, [messages, formatDateSeparator, showAllAvatars]);
 }

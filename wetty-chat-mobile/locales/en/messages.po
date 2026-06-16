@@ -1101,6 +1101,9 @@ msgstr "Share Invite"
 msgid "Show \"All\" Tab in Chats"
 msgstr "Show \"All\" Tab in Chats"
 
+msgid "Show Avatars Next to All Messages"
+msgstr "Show Avatars Next to All Messages"
+
 msgid "Small"
 msgstr "Small"
 
