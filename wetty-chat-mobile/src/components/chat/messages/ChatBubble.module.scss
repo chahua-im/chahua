@@ -30,7 +30,32 @@
 
   &.sent {
     flex-direction: row-reverse;
+
+    .avatarBubbleRow {
+      flex-direction: row-reverse;
+    }
+
+    .messageColumn > *:last-child:not(.avatarBubbleRow) {
+      margin-left: 0;
+      margin-right: calc(36px + 8px);
+    }
   }
+}
+
+.messageColumn {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+
+  > *:last-child:not(.avatarBubbleRow) {
+    margin-left: calc(36px + 8px);
+  }
+}
+
+.avatarBubbleRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
 }
 
 .bubbleOnly {
@@ -66,7 +91,6 @@
 .bubbleWrapper {
   display: flex;
   flex-direction: column;
-  max-width: 75%;
 }
 
 .sent .bubbleWrapper {
@@ -78,7 +102,7 @@
 }
 
 .bubble {
-  max-width: 100%;
+  max-width: 75%;
   padding: 8px 12px;
   line-height: 1.4;
   font-size: 14px;
@@ -427,7 +451,7 @@
   font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
-  align-self: center;
+  align-self: flex-end;
 
   &:hover {
     background: rgba(var(--ion-text-color-rgb, 0, 0, 0), 0.12);
