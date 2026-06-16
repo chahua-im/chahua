@@ -76,6 +76,9 @@ function emptyState(messages: MessageResponse[] = []): RootState {
           : {},
       views: {},
     },
+    settings: {
+      showAllAvatars: false,
+    },
   } as RootState;
 }
 
