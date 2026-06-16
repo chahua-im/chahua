@@ -163,6 +163,7 @@ export function ChatVirtualScroll({
   const pendingScrollToBottomBehaviorRef = useRef<ScrollBehavior>('auto');
   const pendingScrollToBottomSourceRef = useRef<string | null>(null);
   const pendingPrependRestoreRef = useRef<{ key: string; offsetTop: number } | null>(null);
+  const pendingDeleteRestoreRef = useRef<{ key: string; offsetTop: number } | null>(null);
   const pendingPrependCompensationRef = useRef<number | null>(null);
   const pendingLayoutAnchorRestoreRef = useRef<{
     source: string;
@@ -1499,6 +1500,31 @@ export function ChatVirtualScroll({
       }
     }
 
+    const pendingDeleteRestore = pendingDeleteRestoreRef.current;
+    if (pendingDeleteRestore) {
+      logVirtualScroll('delete-restore-attempt', {
+        key: pendingDeleteRestore.key,
+        offsetTop: pendingDeleteRestore.offsetTop,
+      });
+      let restored = restoreAnchorOffset(pendingDeleteRestore.key, pendingDeleteRestore.offsetTop);
+      if (!restored) {
+        // Anchor was deleted — walk backward to find nearest surviving key
+        const oldKeys = prevKeysRef.current;
+        const oldIndex = oldKeys.indexOf(pendingDeleteRestore.key);
+        for (let i = oldIndex - 1; i >= 0; i--) {
+          if (keyToIndex.has(oldKeys[i])) {
+            restored = restoreAnchorOffset(oldKeys[i], pendingDeleteRestore.offsetTop);
+            if (restored) logVirtualScroll('delete-restore-fallback', { key: oldKeys[i] });
+            break;
+          }
+        }
+      } else {
+        logVirtualScroll('delete-restore-complete');
+      }
+      pendingDeleteRestoreRef.current = null;
+      mutationSnapshotRef.current = null;
+    }
+
     const pendingAnchorDriftCheck = pendingAnchorDriftCheckRef.current;
     if (pendingAnchorDriftCheck) {
       const row = rowRefsMap.current.get(pendingAnchorDriftCheck.key);
@@ -1718,6 +1744,7 @@ export function ChatVirtualScroll({
     pendingScrollToBottomBehaviorRef.current = 'auto';
     pendingScrollToBottomSourceRef.current = null;
     pendingPrependRestoreRef.current = null;
+    pendingDeleteRestoreRef.current = null;
     pendingPrependCompensationRef.current = null;
     pendingLayoutAnchorRestoreRef.current = null;
     mutationSnapshotRef.current = null;
@@ -2320,6 +2347,39 @@ export function ChatVirtualScroll({
               previousMounted: mounted,
               nextMounted: mountedRef.current,
             });
+          }
+        }
+      } else if (mutation === 'delete') {
+        const anchor = captureVisibleAnchor();
+        mutationSnapshotRef.current = {
+          mutation,
+          anchor,
+          rowCountDelta: rowKeys.length - adjustPrevKeysRef.current.length,
+        };
+        logMutationSnapshot('delete-detected', {
+          previousCount: adjustPrevKeysRef.current.length,
+          nextCount: rowKeys.length,
+        });
+        if (anchor) {
+          pendingDeleteRestoreRef.current = anchor;
+        }
+        // Adjust mounted window for the reduced row count
+        const mounted = mountedRef.current;
+        if (mounted) {
+          const newEnd = Math.min(mounted.end, rowKeys.length - 1);
+          if (newEnd < mounted.start) {
+            // All mounted rows were deleted — recenter around anchor
+            const anchorIndex = anchor ? keyToIndex.get(anchor.key) : null;
+            if (anchorIndex != null) {
+              const halfWindow = Math.floor(WINDOW_CAP / 2);
+              mountedRef.current = normalizeRange(
+                anchorIndex - halfWindow,
+                anchorIndex + halfWindow,
+                rowKeys.length - 1,
+              );
+            }
+          } else if (newEnd !== mounted.end) {
+            mountedRef.current = { start: mounted.start, end: newEnd };
           }
         }
       }

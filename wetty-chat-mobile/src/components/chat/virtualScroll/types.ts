@@ -32,7 +32,7 @@ export type Phase = 'WAITING_VIEWPORT' | 'BOOTSTRAP' | 'READY' | 'RECENTERING';
 
 // ── Mutations ──
 
-export type MutationType = 'none' | 'prepend' | 'append' | 'reset';
+export type MutationType = 'none' | 'prepend' | 'append' | 'delete' | 'reset';
 export type BatchDirection = 'backward' | 'forward';
 export type BatchReason = 'bootstrap' | 'preload' | 'recenter' | 'jump';
 

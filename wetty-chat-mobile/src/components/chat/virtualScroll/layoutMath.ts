@@ -16,12 +16,22 @@ function isSuffix(suffix: string[], full: string[]): boolean {
   return suffix.every((value, index) => full[offset + index] === value);
 }
 
+function isSubsequence(sub: string[], full: string[]): boolean {
+  let i = 0;
+  for (let j = 0; j < full.length && i < sub.length; j++) {
+    if (sub[i] === full[j]) i++;
+  }
+  return i === sub.length;
+}
+
 export function classifyKeyMutation(prev: string[], next: string[]): MutationType {
   const prevMsgs = prev.filter((key) => key.startsWith('msg:'));
   const nextMsgs = next.filter((key) => key.startsWith('msg:'));
 
   if (arraysEqual(prevMsgs, nextMsgs)) return 'none';
-  if (prevMsgs.length === 0 || nextMsgs.length === 0 || nextMsgs.length < prevMsgs.length) return 'reset';
+  if (prevMsgs.length === 0 || nextMsgs.length === 0) return 'reset';
+  if (nextMsgs.length < prevMsgs.length && isSubsequence(nextMsgs, prevMsgs)) return 'delete';
+  if (nextMsgs.length < prevMsgs.length) return 'reset';
   if (isSuffix(prevMsgs, nextMsgs)) return 'prepend';
   if (isPrefix(prevMsgs, nextMsgs)) return 'append';
   return 'reset';
