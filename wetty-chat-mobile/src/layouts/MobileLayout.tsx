@@ -27,8 +27,8 @@ import ComponentDemoPage from '@/pages/component-demo';
 import { safariSafeRouteAnimation } from '@/utils/navigationHistory';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { featureGatedList, whenFeature } from '@/features';
-import { selectTotalUnreadChatCount } from '@/store/chatsSlice';
-import { selectTotalUnreadThreadCount } from '@/store/threadsSlice';
+import { selectChatsWithUnreadCount } from '@/store/chatsSlice';
+import { selectThreadsWithUnreadCount } from '@/store/threadsSlice';
 import styles from './MobileLayout.module.scss';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
@@ -36,8 +36,8 @@ const TAB_ROOT_PATHS = ['/', '/chats', '/settings', '/demo'];
 
 const MobileLayout: React.FC = () => {
   const location = useLocation();
-  const unreadChatCount = useSelector(selectTotalUnreadChatCount);
-  const unreadThreadCount = useSelector(selectTotalUnreadThreadCount);
+  const unreadChatCount = useSelector(selectChatsWithUnreadCount);
+  const unreadThreadCount = useSelector(selectThreadsWithUnreadCount);
   const totalUnreadCount = unreadChatCount + unreadThreadCount;
   const isTabRoot = TAB_ROOT_PATHS.includes(location.pathname);
   const chatMatch = matchPath<{ id: string }>(location.pathname, { path: '/chats/chat/:id', exact: true });
