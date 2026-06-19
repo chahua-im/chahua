@@ -339,6 +339,7 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       const files = Array.from(e.target.files ?? []);
       queueFiles(files);
       e.target.value = '';
+      textareaRef.current?.focus();
     };
 
     return (
@@ -413,7 +414,7 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
                   onMentionTextChange(value);
                 }}
                 onFocusChange={handleInputFocusChange}
-                onSubmit={handleSend}
+                onSubmit={canSend ? handleSend : () => {}}
                 canRequestRecentEdit={canRequestRecentEdit}
                 onRequestEditLastMessage={onRequestEditLastMessage}
                 editing={editing}
