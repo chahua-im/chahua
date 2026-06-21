@@ -14,6 +14,7 @@ import ChatInvitesCore from '@/pages/conversation/manage-invites';
 import CreateChatCore from '@/pages/create-chat';
 import { InvitePreviewCore } from '@/pages/invite-preview';
 import { AdvancedSettingsCore } from '@/pages/settings/advanced';
+import { useAdvancedSettingsUnlocked } from '@/store/advancedSettingsStore';
 import { JoinChatCore } from '@/pages/join-chat';
 import { SettingsCore } from '@/pages/settings';
 import { SavedMessagesCore } from '@/pages/saved-messages';
@@ -339,6 +340,16 @@ export function DesktopSplitLayout() {
       state: { backgroundPath },
     });
   }, [backgroundPath, history]);
+
+  const advancedUnlocked = useAdvancedSettingsUnlocked();
+  useEffect(() => {
+    if (!advancedUnlocked && currentRoute.advancedSettings) {
+      history.replace({
+        pathname: '/settings',
+        state: { backgroundPath },
+      });
+    }
+  }, [advancedUnlocked, currentRoute.advancedSettings, backgroundPath, history]);
 
   const openSavedMessages = useCallback(() => {
     if (!savedMessagesEnabled) {

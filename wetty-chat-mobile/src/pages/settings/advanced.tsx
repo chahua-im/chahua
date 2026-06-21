@@ -18,6 +18,8 @@ import { clipboardOutline } from 'ionicons/icons';
 import { useDeviceToken } from '@/hooks/useDeviceToken';
 import type { BackAction } from '@/types/back-action';
 import { BackButton } from '@/components/BackButton';
+import { useAdvancedSettingsUnlocked } from '@/store/advancedSettingsStore';
+import { useHistory } from 'react-router-dom';
 
 interface AdvancedSettingsCoreProps {
   backAction?: BackAction;
@@ -80,5 +82,11 @@ export function AdvancedSettingsCore({ backAction }: AdvancedSettingsCoreProps) 
 }
 
 export default function AdvancedSettingsPage() {
+  const history = useHistory();
+  const unlocked = useAdvancedSettingsUnlocked();
+  if (!unlocked) {
+    history.replace('/settings');
+    return null;
+  }
   return <AdvancedSettingsCore />;
 }
