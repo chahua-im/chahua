@@ -7,26 +7,34 @@ import {
   IonItem,
   IonLabel,
   IonList,
+  IonListHeader,
   IonPage,
   IonTitle,
   IonToolbar,
   useIonToast,
 } from '@ionic/react';
+import { useMemo } from 'react';
+import { useHistory } from 'react-router-dom';
 import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { clipboardOutline } from 'ionicons/icons';
 import { useDeviceToken } from '@/hooks/useDeviceToken';
+import { getLongPressPresets, useAdvancedSettingsUnlocked, useLongPressDelayMs } from '@/store/advancedSettingsStore';
 import type { BackAction } from '@/types/back-action';
 import { BackButton } from '@/components/BackButton';
-import { useAdvancedSettingsUnlocked } from '@/store/advancedSettingsStore';
-import { useHistory } from 'react-router-dom';
 
 interface AdvancedSettingsCoreProps {
   backAction?: BackAction;
+  onOpenLongPressDelay?: () => void;
 }
 
-export function AdvancedSettingsCore({ backAction }: AdvancedSettingsCoreProps) {
+export function AdvancedSettingsCore({ backAction, onOpenLongPressDelay }: AdvancedSettingsCoreProps) {
   const jwtToken = useDeviceToken();
+  const longPressDelay = useLongPressDelayMs();
+  const history = useHistory();
+  const currentPresetLabel = useMemo(() => {
+    return getLongPressPresets().find((p) => p.value === longPressDelay)?.label ?? `${longPressDelay}ms`;
+  }, [longPressDelay]);
   const [presentToast] = useIonToast();
 
   const handleCopyToken = async () => {
@@ -68,6 +76,29 @@ export function AdvancedSettingsCore({ backAction }: AdvancedSettingsCoreProps) 
         </IonToolbar>
       </IonHeader>
       <IonContent color="light" className="ion-no-padding">
+        <IonListHeader>
+          <IonLabel>
+            <Trans>Message Actions</Trans>
+          </IonLabel>
+        </IonListHeader>
+        <IonList inset>
+          <IonItem
+            button
+            detail={true}
+            onClick={onOpenLongPressDelay ?? (() => history.push('/settings/advanced/long-press-delay'))}
+          >
+            <IonLabel>
+              <Trans>Long Press Delay</Trans>
+              <p>{currentPresetLabel}</p>
+            </IonLabel>
+          </IonItem>
+        </IonList>
+
+        <IonListHeader>
+          <IonLabel>
+            <Trans>Developer</Trans>
+          </IonLabel>
+        </IonListHeader>
         <IonList inset>
           <IonItem button detail={false} onClick={handleCopyToken}>
             <IonIcon aria-hidden="true" icon={clipboardOutline} slot="start" color="medium" />

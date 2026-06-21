@@ -14,6 +14,7 @@ import ChatInvitesCore from '@/pages/conversation/manage-invites';
 import CreateChatCore from '@/pages/create-chat';
 import { InvitePreviewCore } from '@/pages/invite-preview';
 import { AdvancedSettingsCore } from '@/pages/settings/advanced';
+import { LongPressDelayCore } from '@/pages/settings/long-press-delay';
 import { useAdvancedSettingsUnlocked } from '@/store/advancedSettingsStore';
 import { JoinChatCore } from '@/pages/join-chat';
 import { SettingsCore } from '@/pages/settings';
@@ -52,6 +53,7 @@ interface DesktopRouteMatches {
   languageSettings: boolean;
   stickerSettings: boolean;
   advancedSettings: boolean;
+  longPressDelay: boolean;
   stickerPackSettings: { packId: string } | null;
 }
 
@@ -116,6 +118,10 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     path: '/settings/advanced',
     exact: true,
   });
+  const longPressDelay = !!matchPath(pathname, {
+    path: '/settings/advanced/long-press-delay',
+    exact: true,
+  });
   const stickerPackRaw = matchPath<{ packId: string }>(pathname, {
     path: '/settings/stickers/:packId',
     exact: true,
@@ -130,6 +136,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     savedMessagesSettings ||
     languageSettings ||
     advancedSettings ||
+    longPressDelay ||
     stickerSettings;
 
   return {
@@ -155,6 +162,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     globalSettings,
     generalSettings,
     advancedSettings,
+    longPressDelay,
     savedMessagesSettings,
     languageSettings,
     stickerSettings,
@@ -350,6 +358,13 @@ export function DesktopSplitLayout() {
       });
     }
   }, [advancedUnlocked, currentRoute.advancedSettings, backgroundPath, history]);
+
+  const openLongPressDelay = useCallback(() => {
+    history.push({
+      pathname: '/settings/advanced/long-press-delay',
+      state: { backgroundPath },
+    });
+  }, [backgroundPath, history]);
 
   const openSavedMessages = useCallback(() => {
     if (!savedMessagesEnabled) {
@@ -559,6 +574,17 @@ export function DesktopSplitLayout() {
               }}
               onOpenLanguage={openLanguageSettings}
             />
+          ) : currentRoute.longPressDelay ? (
+            <LongPressDelayCore
+              backAction={{
+                type: 'callback',
+                onBack: () =>
+                  history.push({
+                    pathname: '/settings/advanced',
+                    state: { backgroundPath },
+                  }),
+              }}
+            />
           ) : currentRoute.advancedSettings ? (
             <AdvancedSettingsCore
               backAction={{
@@ -569,6 +595,7 @@ export function DesktopSplitLayout() {
                     state: { backgroundPath },
                   }),
               }}
+              onOpenLongPressDelay={openLongPressDelay}
             />
           ) : (
             <SettingsCore

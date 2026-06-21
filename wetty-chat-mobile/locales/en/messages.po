@@ -209,12 +209,6 @@ msgstr "Copy code"
 msgid "Copy JWT Token"
 msgstr "Copy JWT Token"
 
-msgid "Copy Link"
-msgstr "Copy Link"
-
-msgid "Copy text"
-msgstr "Copy text"
-
 msgid "Copy the link below, or choose a group to send it to right now."
 msgstr "Copy the link below, or choose a group to send it to right now."
 
@@ -244,6 +238,15 @@ msgstr "Create new sticker pack"
 
 msgid "Creating…"
 msgstr "Creating…"
+
+msgid "Custom"
+msgstr "Custom"
+
+msgid "Default (350ms)"
+msgstr "Default (350ms)"
+
+msgid "Delay"
+msgstr "Delay"
 
 msgid "Delete"
 msgstr "Delete"
@@ -291,8 +294,8 @@ msgstr "Description"
 msgid "Destination Group"
 msgstr "Destination Group"
 
-msgid "Reactions"
-msgstr "Reactions"
+msgid "Developer"
+msgstr "Developer"
 
 msgid "Discard"
 msgstr "Discard"
@@ -531,6 +534,12 @@ msgstr "Failed to update role"
 msgid "Failed to upload avatar"
 msgstr "Failed to upload avatar"
 
+msgid "Fast"
+msgstr "Fast"
+
+msgid "Fast (150ms)"
+msgstr "Fast (150ms)"
+
 msgid "Fav"
 msgstr "Fav"
 
@@ -668,6 +677,9 @@ msgstr "Loading..."
 msgid "Loading…"
 msgstr "Loading…"
 
+msgid "Long Press Delay"
+msgstr "Long Press Delay"
+
 msgid "Manage"
 msgstr "Manage"
 
@@ -709,6 +721,9 @@ msgstr "Mention suggestions"
 
 msgid "Message"
 msgstr "Message"
+
+msgid "Message Actions"
+msgstr "Message Actions"
 
 msgid "Message cannot be empty"
 msgstr "Message cannot be empty"
@@ -957,6 +972,9 @@ msgstr "Push notifications enabled"
 msgid "Push notifications turned off"
 msgstr "Push notifications turned off"
 
+msgid "Reactions"
+msgstr "Reactions"
+
 msgid "Read"
 msgstr "Read"
 
@@ -1128,6 +1146,12 @@ msgstr "Show \"All\" Tab in Chats"
 msgid "Show Avatars Next to All Messages"
 msgstr "Show Avatars Next to All Messages"
 
+msgid "Slow"
+msgstr "Slow"
+
+msgid "Slow (600ms)"
+msgstr "Slow (600ms)"
+
 msgid "Small"
 msgstr "Small"
 
@@ -1298,6 +1322,9 @@ msgstr "User {uid}"
 
 msgid "User ID"
 msgstr "User ID"
+
+msgid "Very Slow (1000ms)"
+msgstr "Very Slow (1000ms)"
 
 msgid "Videos"
 msgstr "Videos"

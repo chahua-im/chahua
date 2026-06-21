@@ -2,12 +2,12 @@ import { useRef, useState } from 'react';
 import { IonIcon } from '@ionic/react';
 import { arrowUndo } from 'ionicons/icons';
 import styles from './ChatBubble.module.scss';
+import { getLongPressDelayMs } from '@/store/advancedSettingsStore';
 import { ChatBubbleBase, type ChatBubbleBaseProps } from './ChatBubbleBase';
 import { StickerBubble, type StickerBubbleProps } from './StickerBubble';
 
 const SWIPE_THRESHOLD = 60;
 const SWIPE_MAX = 80;
-const LONG_PRESS_DELAY_MS = 350;
 
 type StickerChatBubbleProps = StickerBubbleProps & {
   messageType: 'sticker';
@@ -88,7 +88,7 @@ export function ChatBubble(props: ChatBubbleProps) {
             y: startY.current,
           });
         }
-      }, LONG_PRESS_DELAY_MS);
+      }, getLongPressDelayMs());
     }
   }
 

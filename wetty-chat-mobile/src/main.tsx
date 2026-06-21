@@ -26,6 +26,7 @@ import { kvDelete, kvGet, kvSet } from '@/utils/db';
 import { hydrateSettings, type SettingsState } from '@/store/settingsSlice';
 import { hydrateStickerPreferences } from '@/store/stickerPreferencesSlice';
 import { installBootstrapRecoveryHandlers } from '@/bootstrapRecovery';
+import { initAdvancedSettings } from '@/store/advancedSettingsStore';
 import App from './App';
 import { setupIonicReact } from '@ionic/react';
 
@@ -48,6 +49,7 @@ async function bootstrap() {
       kvGet<unknown>('autoSortFavoriteStickers'),
       initializeClientId(),
       syncJwtTokenToIdb(),
+      initAdvancedSettings(),
     ]);
 
   const settings = hydrateSettings(savedSettings);

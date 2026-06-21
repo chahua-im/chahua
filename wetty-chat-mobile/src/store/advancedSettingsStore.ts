@@ -1,3 +1,4 @@
+import { t } from '@lingui/core/macro';
 import { useSyncExternalStore } from 'react';
 import { kvDelete, kvGet, kvSet } from '@/utils/db';
 
@@ -10,8 +11,37 @@ import { kvDelete, kvGet, kvSet } from '@/utils/db';
 
 // --- Advanced settings schema ---
 
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- populated by future commits
-interface AdvancedSettings {}
+interface AdvancedSettings {
+  longPressDelayMs: number;
+}
+
+const ADVANCED_DEFAULTS: Readonly<AdvancedSettings> = {
+  longPressDelayMs: 350,
+} as const;
+
+// --- Constants (importable by UI) ---
+
+export interface LongPressPreset {
+  value: number;
+  label: string;
+}
+
+export function getLongPressPresets(): LongPressPreset[] {
+  return [
+    { value: 150, label: t`Fast (150ms)` },
+    { value: 350, label: t`Default (350ms)` },
+    { value: 600, label: t`Slow (600ms)` },
+    { value: 1000, label: t`Very Slow (1000ms)` },
+  ];
+}
+
+export const LONG_PRESS_CUSTOM_MIN = 5;
+export const LONG_PRESS_CUSTOM_MAX = 1500;
+
+export function isCustomLongPressValue(ms: number): boolean {
+  return getLongPressPresets().every((p) => p.value !== ms);
+}
+
 // --- Pub/Sub ---
 
 type Listener = () => void;
@@ -31,13 +61,21 @@ function notify(): void {
 const SETTINGS_KEY = 'advanced_settings';
 const UNLOCK_KEY = 'advanced_settings_unlocked';
 
+// In-memory state
 let unlockedCache = false;
+let settingsCache: AdvancedSettings = { ...ADVANCED_DEFAULTS };
 
 // --- Init (call once in bootstrap) ---
 
 export async function initAdvancedSettings(): Promise<void> {
-  const [storedUnlock] = await Promise.all([kvGet<boolean>(UNLOCK_KEY), kvGet<AdvancedSettings>(SETTINGS_KEY)]);
+  const [storedUnlock, storedSettings] = await Promise.all([
+    kvGet<boolean>(UNLOCK_KEY),
+    kvGet<AdvancedSettings>(SETTINGS_KEY),
+  ]);
   unlockedCache = storedUnlock ?? false;
+  if (storedSettings) {
+    settingsCache = { ...ADVANCED_DEFAULTS, ...storedSettings };
+  }
 }
 
 // --- Unlock / Lock ---
@@ -60,6 +98,7 @@ export function unlockAdvancedSettings(): void {
 export function lockAdvancedSettings(): void {
   if (!unlockedCache) return;
   unlockedCache = false;
+  settingsCache = { ...ADVANCED_DEFAULTS };
   kvSet(UNLOCK_KEY, false);
   kvDelete(SETTINGS_KEY);
   notify();
@@ -75,4 +114,30 @@ export function toggleAdvancedSettings(): void {
 
 export function useAdvancedSettingsUnlocked(): boolean {
   return useSyncExternalStore(subscribe, getUnlockedSnapshot, () => false);
+}
+
+// --- Generic settings accessor ---
+
+function setSetting<K extends keyof AdvancedSettings>(key: K, value: AdvancedSettings[K]): void {
+  settingsCache = { ...settingsCache, [key]: value };
+  kvSet(SETTINGS_KEY, settingsCache);
+  notify();
+}
+
+// --- Long Press Delay ---
+
+function getLongPressDelaySnapshot(): number {
+  return settingsCache.longPressDelayMs;
+}
+
+export function getLongPressDelayMs(): number {
+  return getLongPressDelaySnapshot();
+}
+
+export function setLongPressDelayMs(ms: number): void {
+  setSetting('longPressDelayMs', ms);
+}
+
+export function useLongPressDelayMs(): number {
+  return useSyncExternalStore(subscribe, getLongPressDelaySnapshot, () => ADVANCED_DEFAULTS.longPressDelayMs);
 }

@@ -209,12 +209,6 @@ msgstr "复制代码"
 msgid "Copy JWT Token"
 msgstr "复制 JWT Token"
 
-msgid "Copy Link"
-msgstr "复制链接"
-
-msgid "Copy text"
-msgstr "复制文本"
-
 msgid "Copy the link below, or choose a group to send it to right now."
 msgstr "复制下方链接，或立即选择一个群组发送。"
 
@@ -244,6 +238,15 @@ msgstr "创建新的贴纸包"
 
 msgid "Creating…"
 msgstr "创建中…"
+
+msgid "Custom"
+msgstr "自定义"
+
+msgid "Default (350ms)"
+msgstr "默认 (350ms)"
+
+msgid "Delay"
+msgstr "延迟"
 
 msgid "Delete"
 msgstr "撤回"
@@ -291,8 +294,8 @@ msgstr "描述"
 msgid "Destination Group"
 msgstr "目标群组"
 
-msgid "Reactions"
-msgstr "回应"
+msgid "Developer"
+msgstr "开发者"
 
 msgid "Discard"
 msgstr "放弃"
@@ -531,6 +534,12 @@ msgstr "更新角色失败"
 msgid "Failed to upload avatar"
 msgstr "上传头像失败"
 
+msgid "Fast"
+msgstr "快速"
+
+msgid "Fast (150ms)"
+msgstr "快速 (150ms)"
+
 msgid "Fav"
 msgstr "收藏"
 
@@ -668,6 +677,9 @@ msgstr "正在加载..."
 msgid "Loading…"
 msgstr "正在加载…"
 
+msgid "Long Press Delay"
+msgstr "长按延迟"
+
 msgid "Manage"
 msgstr "管理"
 
@@ -709,6 +721,9 @@ msgstr "提及建议"
 
 msgid "Message"
 msgstr "消息"
+
+msgid "Message Actions"
+msgstr "消息操作"
 
 msgid "Message cannot be empty"
 msgstr "消息不能为空"
@@ -957,6 +972,9 @@ msgstr "推送通知已开启"
 msgid "Push notifications turned off"
 msgstr "推送通知已关闭"
 
+msgid "Reactions"
+msgstr "回应"
+
 msgid "Read"
 msgstr "标记已读"
 
@@ -1128,6 +1146,12 @@ msgstr "在聊天中显示\"全部\"标签"
 msgid "Show Avatars Next to All Messages"
 msgstr "在所有消息旁显示头像"
 
+msgid "Slow"
+msgstr "慢速"
+
+msgid "Slow (600ms)"
+msgstr "慢速 (600ms)"
+
 msgid "Small"
 msgstr "小"
 
@@ -1298,6 +1322,9 @@ msgstr "用户 {uid}"
 
 msgid "User ID"
 msgstr "用户 ID"
+
+msgid "Very Slow (1000ms)"
+msgstr "很慢 (1000ms)"
 
 msgid "Videos"
 msgstr "视频"
