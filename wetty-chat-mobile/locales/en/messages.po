@@ -273,8 +273,8 @@ msgstr "Description"
 msgid "Destination Group"
 msgstr "Destination Group"
 
-msgid "Details"
-msgstr "Details"
+msgid "Reactions"
+msgstr "Reactions"
 
 msgid "Discard"
 msgstr "Discard"

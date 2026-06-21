@@ -273,8 +273,8 @@ msgstr "描述"
 msgid "Destination Group"
 msgstr "目標群組"
 
-msgid "Details"
-msgstr "詳情"
+msgid "Reactions"
+msgstr "回應"
 
 msgid "Discard"
 msgstr "放棄"

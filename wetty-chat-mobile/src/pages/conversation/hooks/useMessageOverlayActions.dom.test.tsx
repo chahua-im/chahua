@@ -183,14 +183,14 @@ describe('useMessageOverlayActions', () => {
     renderHook(message());
 
     expect(state.actions.map((action) => action.key)).toEqual([
-      'copy',
-      'copy-link',
-      'save',
       'reply',
       'thread',
-      'edit',
-      'delete',
       'pin',
+      'copy',
+      'edit',
+      'save',
+      'copy-link',
+      'delete',
     ]);
   });
 

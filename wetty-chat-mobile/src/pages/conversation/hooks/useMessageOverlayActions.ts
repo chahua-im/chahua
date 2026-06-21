@@ -1,15 +1,14 @@
 import { useMemo } from 'react';
 import { t } from '@lingui/core/macro';
 import {
-  arrowUndo,
+  arrowUndoOutline,
   bookmarkOutline,
-  chatbubbles,
+  chatbubblesOutline,
   copyOutline,
   createOutline,
+  happyOutline,
   heartOutline,
-  informationCircleOutline,
   linkOutline,
-  pin as pinIcon,
   pinOutline,
   trashOutline,
 } from 'ionicons/icons';
@@ -166,7 +165,7 @@ export function useMessageOverlayActions({
           actions.push({
             key: 'reply',
             label: t`Reply`,
-            icon: arrowUndo,
+            icon: arrowUndoOutline,
             handler: () => {
               onReply(message);
             },
@@ -176,7 +175,7 @@ export function useMessageOverlayActions({
           actions.push({
             key: 'thread',
             label: t`Thread`,
-            icon: chatbubbles,
+            icon: chatbubblesOutline,
             handler: () => {
               onStartThread(message.id);
             },
@@ -225,7 +224,7 @@ export function useMessageOverlayActions({
           actions.push({
             key: 'pin',
             label: existingPin ? t`Unpin` : t`Pin`,
-            icon: existingPin ? pinIcon : pinOutline,
+            icon: pinOutline,
             handler: () => {
               presentAlert({
                 header: existingPin ? t`Unpin Message` : t`Pin Message`,
@@ -255,8 +254,8 @@ export function useMessageOverlayActions({
         case 'reaction-details':
           actions.push({
             key: 'reaction-details',
-            icon: informationCircleOutline,
-            label: t`Details`,
+            icon: happyOutline,
+            label: t`Reactions`,
             handler: () => {
               onOpenReactionDetails(message.id);
             },

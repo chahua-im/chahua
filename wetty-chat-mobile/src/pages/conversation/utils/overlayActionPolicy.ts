@@ -38,36 +38,45 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   const isDeletableAction = !input.isDeleted && !input.isOptimistic;
   const actions: OverlayActionPolicyItem[] = [];
 
+  // 1. Reply
+  actions.push({ key: 'reply' });
+
+  // 2. Thread
+  if (!input.isThreadView && !input.hasThreadInfo) {
+    actions.push({ key: 'thread' });
+  }
+
+  // 3. Pin
+  if (!input.isThreadView && !input.isDeleted && input.isAdmin) {
+    actions.push({ key: 'pin', pinState: input.isPinned ? 'pinned' : 'unpinned' });
+  }
+
+  // 4. Copy
   if (!audioMessage && !stickerMessage && input.text?.trim()) {
     actions.push({ key: 'copy', copyVariant: input.hasAttachments ? 'text' : 'message' });
   }
 
-  actions.push({ key: 'copy-link' });
+  // 5. Edit
+  if (input.isOwn && !audioMessage && !stickerMessage) {
+    actions.push({ key: 'edit' });
+  }
 
+  // 6. Save / Favorite
   if (stickerMessage && isDeletableAction) {
     actions.push({ key: 'favorite' });
   } else if (input.savedMessagesEnabled && isDeletableAction && input.messageType !== 'system') {
     actions.push({ key: 'save' });
   }
 
-  actions.push({ key: 'reply' });
+  // 7. Copy-link
+  actions.push({ key: 'copy-link' });
 
-  if (!input.isThreadView && !input.hasThreadInfo) {
-    actions.push({ key: 'thread' });
-  }
-
-  if (input.isOwn && !audioMessage && !stickerMessage) {
-    actions.push({ key: 'edit' });
-  }
-
+  // 8. Delete
   if (input.isOwn || input.isAdmin) {
     actions.push({ key: 'delete' });
   }
 
-  if (!input.isThreadView && !input.isDeleted && input.isAdmin) {
-    actions.push({ key: 'pin', pinState: input.isPinned ? 'pinned' : 'unpinned' });
-  }
-
+  // 9. Details
   if (input.hasReactions) {
     actions.push({ key: 'reaction-details' });
   }
