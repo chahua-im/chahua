@@ -85,7 +85,7 @@ msgstr "归档"
 msgid "Archived"
 msgstr "已归档"
 
-#. placeholder {0}: msg.sender.name ?? 'this user'
+#. placeholder {0}: message.sender.name ?? 'this user'
 msgid "Are you sure you want to delete this message from {0}?"
 msgstr "确定要删除 {0} 的这条消息吗？"
 
@@ -197,12 +197,6 @@ msgstr "复制"
 msgid "Copy code"
 msgstr "复制代码"
 
-msgid "Copy Link"
-msgstr "复制链接"
-
-msgid "Copy text"
-msgstr "复制文本"
-
 msgid "Copy the link below, or choose a group to send it to right now."
 msgstr "复制下方链接，或立即选择一个群组发送。"
 
@@ -278,6 +272,9 @@ msgstr "描述"
 
 msgid "Destination Group"
 msgstr "目标群组"
+
+msgid "Details"
+msgstr "详情"
 
 msgid "Discard"
 msgstr "放弃"
@@ -513,11 +510,11 @@ msgstr "更新角色失败"
 msgid "Failed to upload avatar"
 msgstr "上传头像失败"
 
-msgid "Favorite"
+msgid "Fav"
 msgstr "收藏"
 
-msgid "Favorite Sticker"
-msgstr "收藏贴纸"
+msgid "Favorite"
+msgstr "收藏"
 
 msgid "Favorites"
 msgstr "收藏"
@@ -560,6 +557,7 @@ msgstr "图片"
 
 msgid "In thread"
 msgstr "在话题中"
+
 msgid "indefinitely"
 msgstr "永久"
 
@@ -630,6 +628,9 @@ msgstr "正在退出..."
 
 msgid "Left group"
 msgstr "已退出群组"
+
+msgid "Link"
+msgstr "链接"
 
 msgid "Load More"
 msgstr "加载更多"
@@ -932,9 +933,6 @@ msgstr "推送通知已开启"
 msgid "Push notifications turned off"
 msgstr "推送通知已关闭"
 
-msgid "Reaction Details"
-msgstr "表情回应详情"
-
 msgid "Read"
 msgstr "标记已读"
 
@@ -1108,9 +1106,6 @@ msgstr "在所有消息旁显示头像"
 
 msgid "Small"
 msgstr "小"
-
-msgid "Start Thread"
-msgstr "创建话题"
 
 msgid "Status"
 msgstr "状态"

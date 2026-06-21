@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { IonIcon, useIonToast } from '@ionic/react';
-import { addOutline } from 'ionicons/icons';
+import { addOutline, chevronDown, chevronUp } from 'ionicons/icons';
 import EmojiPicker, { EmojiStyle, Theme, type EmojiClickData } from 'emoji-picker-react';
 import type { Attachment, MentionInfo } from '@/api/messages';
 import type { PreviewMessage } from '@/utils/messagePreview';
@@ -86,6 +86,75 @@ export function MessageOverlay(props: MessageOverlayProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [presentToast] = useIonToast();
+
+  const [actionListPage, setActionListPage] = useState(0);
+  const actionListScrollRef = useRef<HTMLDivElement>(null);
+  const actionListRowHeightRef = useRef(0);
+
+  const COLS = 5;
+  const VISIBLE_SLOTS = COLS * 2; // 10
+  const needsPagination = actions.length > VISIBLE_SLOTS;
+  const totalRows =
+    actions.length <= COLS ? 1 : actions.length <= 2 * COLS ? 2 : actions.length <= 3 * COLS - 1 ? 3 : 4;
+  const totalPages = needsPagination ? 2 : 1;
+  const scrollRows = totalRows === 4 ? 2 : 1;
+  const firstVisibleIndex = actionListPage === 0 ? 0 : totalRows === 3 ? COLS : 2 * COLS - 1;
+
+  const showDownArrow = needsPagination && actionListPage < totalPages - 1;
+  const showUpArrow = actionListPage > 0;
+
+  const buildPageItems = (): (MessageOverlayAction | { type: 'arrow'; direction: 'up' | 'down' })[] => {
+    if (!needsPagination) return actions;
+
+    const result: (MessageOverlayAction | { type: 'arrow'; direction: 'up' | 'down' })[] = [];
+    const dataStart = firstVisibleIndex;
+    const slotsForData = VISIBLE_SLOTS - (showUpArrow ? 1 : 0) - (showDownArrow ? 1 : 0);
+
+    // Up arrow at end of row 1 (replaces last slot of row 1)
+    const dataItems = actions.slice(dataStart, dataStart + slotsForData);
+    if (showUpArrow) {
+      result.push(...dataItems.slice(0, COLS - 1));
+      result.push({ type: 'arrow', direction: 'up' });
+      result.push(...dataItems.slice(COLS - 1));
+    } else {
+      result.push(...dataItems);
+    }
+    if (showDownArrow) result.push({ type: 'arrow', direction: 'down' });
+
+    return result;
+  };
+
+  const handleArrowClick = (direction: 'up' | 'down') => {
+    const newPage = direction === 'down' ? actionListPage + 1 : actionListPage - 1;
+    setActionListPage(newPage);
+    const scrollContainer = actionListScrollRef.current;
+    if (scrollContainer && actionListRowHeightRef.current > 0) {
+      const gap = 1;
+      const rowStep = actionListRowHeightRef.current + gap;
+      scrollContainer.scrollTo({ top: rowStep * scrollRows * newPage, behavior: 'smooth' });
+    }
+  };
+
+  const visibleActions = buildPageItems();
+
+  // Measure row height and set dynamic max-height after mount/resize
+  useEffect(() => {
+    const el = actionListScrollRef.current;
+    if (!el || !needsPagination) return;
+    const firstRow = el.children[COLS]; // COLS-th child = start of row 2
+    if (firstRow) {
+      const top = (firstRow as HTMLElement).offsetTop;
+      actionListRowHeightRef.current = top; // top of row 2 = row1 height + gap
+      el.style.maxHeight = `${top * 2}px`;
+    }
+  }, [needsPagination, actions.length]);
+
+  // Reset pagination when actions change
+  useEffect(() => {
+    setActionListPage(0);
+    const el = actionListScrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [messageId]);
 
   const handleEmojiClick = useCallback(
     (emojiData: EmojiClickData) => {
@@ -179,6 +248,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     // Reset any opaque-menu overrides from a previous layout pass.
     const resetMenuStyles = (el: HTMLElement) => {
       el.style.position = '';
+      el.style.width = '';
       el.style.top = '';
       el.style.left = '';
       el.style.right = '';
@@ -207,6 +277,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
 
       const applyPos = (el: HTMLElement, topY: number, leftX: number, elHeight: number) => {
         el.style.position = 'absolute';
+        // width set externally after positioning to match reactionBar
         let desiredTop = topY;
         if (desiredTop < localViewportTop) desiredTop = localViewportTop;
         if (desiredTop + elHeight > localViewportBottom) desiredTop = localViewportBottom - elHeight;
@@ -249,6 +320,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
 
         applyPos(reactionBarEl, rTop, menuLocalLeft, reactionHeight);
         applyPos(actionListEl, aTop, menuLocalLeft, actionHeight);
+        actionListEl.style.width = `${reactionBarEl.offsetWidth}px`;
       } else if (reactionBarEl) {
         applyPos(
           reactionBarEl,
@@ -348,6 +420,12 @@ export function MessageOverlay(props: MessageOverlayProps) {
       />
     );
   }
+
+  // Group actions into rows of 5 for row containers
+  const actionRows: (typeof visibleActions)[] = [];
+  for (let i = 0; i < visibleActions.length; i += 5) {
+    actionRows.push(visibleActions.slice(i, i + 5));
+  }
   const overlay = (
     <div className={styles.overlay} onClick={handleOverlayClick}>
       <div
@@ -411,22 +489,47 @@ export function MessageOverlay(props: MessageOverlayProps) {
         {bubbleClone}
 
         {/* Action list */}
-        <div className={styles.actionList} data-action-list="true">
-          {actions.map((action) => (
-            <button
-              key={action.key}
-              type="button"
-              disabled={action.disabled}
-              className={`${styles.actionItem} ${action.role === 'destructive' ? styles.actionDestructive : ''} ${action.disabled ? styles.actionDisabled : ''}`}
-              onClick={() => {
-                if (action.disabled) return;
-                action.handler();
-                onClose();
-              }}
-            >
-              {action.icon && <IonIcon icon={action.icon} />}
-              {action.label}
-            </button>
+        <div
+          className={`${styles.actionList} ${totalPages > 1 ? styles.actionListPaginated : ''}`}
+          data-action-list="true"
+          ref={actionListScrollRef}
+        >
+          {actionRows.map((row, rowIdx) => (
+            <div key={rowIdx} className={styles.actionRow}>
+              {row.map((item, index) => {
+                const globalIndex = rowIdx * 5 + index;
+                if ('type' in item && item.type === 'arrow') {
+                  return (
+                    <button
+                      key={`arrow-${item.direction}-${globalIndex}`}
+                      type="button"
+                      className={styles.actionItem}
+                      onClick={() => handleArrowClick(item.direction)}
+                    >
+                      <IonIcon icon={item.direction === 'down' ? chevronDown : chevronUp} />
+                      {'　'}
+                    </button>
+                  );
+                }
+                const action = item as MessageOverlayAction;
+                return (
+                  <button
+                    key={action.key}
+                    type="button"
+                    disabled={action.disabled}
+                    className={`${styles.actionItem} ${action.role === 'destructive' ? styles.actionDestructive : ''} ${action.disabled ? styles.actionDisabled : ''}`}
+                    onClick={() => {
+                      if (action.disabled) return;
+                      action.handler();
+                      onClose();
+                    }}
+                  >
+                    {action.icon && <IonIcon icon={action.icon} />}
+                    {action.label}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </div>
       </div>

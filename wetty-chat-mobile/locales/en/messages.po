@@ -85,7 +85,7 @@ msgstr "Archive"
 msgid "Archived"
 msgstr "Archived"
 
-#. placeholder {0}: msg.sender.name ?? 'this user'
+#. placeholder {0}: message.sender.name ?? 'this user'
 msgid "Are you sure you want to delete this message from {0}?"
 msgstr "Are you sure you want to delete this message from {0}?"
 
@@ -197,12 +197,6 @@ msgstr "Copy"
 msgid "Copy code"
 msgstr "Copy code"
 
-msgid "Copy Link"
-msgstr "Copy Link"
-
-msgid "Copy text"
-msgstr "Copy text"
-
 msgid "Copy the link below, or choose a group to send it to right now."
 msgstr "Copy the link below, or choose a group to send it to right now."
 
@@ -278,6 +272,9 @@ msgstr "Description"
 
 msgid "Destination Group"
 msgstr "Destination Group"
+
+msgid "Details"
+msgstr "Details"
 
 msgid "Discard"
 msgstr "Discard"
@@ -513,11 +510,11 @@ msgstr "Failed to update role"
 msgid "Failed to upload avatar"
 msgstr "Failed to upload avatar"
 
+msgid "Fav"
+msgstr "Fav"
+
 msgid "Favorite"
 msgstr "Favorite"
-
-msgid "Favorite Sticker"
-msgstr "Favorite Sticker"
 
 msgid "Favorites"
 msgstr "Favorites"
@@ -560,6 +557,7 @@ msgstr "Images"
 
 msgid "In thread"
 msgstr "In thread"
+
 msgid "indefinitely"
 msgstr "indefinitely"
 
@@ -630,6 +628,9 @@ msgstr "Leaving..."
 
 msgid "Left group"
 msgstr "Left group"
+
+msgid "Link"
+msgstr "Link"
 
 msgid "Load More"
 msgstr "Load More"
@@ -932,9 +933,6 @@ msgstr "Push notifications enabled"
 msgid "Push notifications turned off"
 msgstr "Push notifications turned off"
 
-msgid "Reaction Details"
-msgstr "Reaction Details"
-
 msgid "Read"
 msgstr "Read"
 
@@ -1108,9 +1106,6 @@ msgstr "Show Avatars Next to All Messages"
 
 msgid "Small"
 msgstr "Small"
-
-msgid "Start Thread"
-msgstr "Start Thread"
 
 msgid "Status"
 msgstr "Status"

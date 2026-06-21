@@ -95,7 +95,7 @@ export function useMessageOverlayActions({
         case 'copy':
           actions.push({
             key: 'copy',
-            label: policyAction.copyVariant === 'text' ? t`Copy text` : t`Copy`,
+            label: t`Copy`,
             icon: copyOutline,
             handler: () => {
               const textToCopy = message.message ?? '';
@@ -123,7 +123,7 @@ export function useMessageOverlayActions({
         case 'copy-link':
           actions.push({
             key: 'copy-link',
-            label: t`Copy Link`,
+            label: t`Link`,
             icon: linkOutline,
             handler: () => {
               navigator.clipboard.writeText(buildPermalinkUrl(chatId, message.id));
@@ -133,7 +133,7 @@ export function useMessageOverlayActions({
         case 'favorite':
           actions.push({
             key: 'favorite',
-            label: t`Favorite Sticker`,
+            label: t`Fav`,
             icon: heartOutline,
             handler: () => {
               favoriteSticker(message.sticker!.id)
@@ -175,7 +175,7 @@ export function useMessageOverlayActions({
         case 'thread':
           actions.push({
             key: 'thread',
-            label: t`Start Thread`,
+            label: t`Thread`,
             icon: chatbubbles,
             handler: () => {
               onStartThread(message.id);
@@ -256,7 +256,7 @@ export function useMessageOverlayActions({
           actions.push({
             key: 'reaction-details',
             icon: informationCircleOutline,
-            label: t`Reaction Details`,
+            label: t`Details`,
             handler: () => {
               onOpenReactionDetails(message.id);
             },
