@@ -76,7 +76,6 @@
   font-size: 20px;
   color: var(--ion-color-primary);
   padding: 8px 10px;
-  border-left: 0.55px solid var(--ion-border-color, rgba(0, 0, 0, 0.13));
 }
 
 /* Pin list button — icon + count badge */
@@ -86,7 +85,6 @@
   font-size: 18px;
   color: var(--ion-color-medium);
   padding: 8px 10px;
-  border-left: 0.55px solid var(--ion-border-color, rgba(0, 0, 0, 0.13));
 }
 
 .listCount {
@@ -101,5 +99,4 @@
   font-size: 18px;
   color: var(--ion-color-medium);
   padding: 8px 12px 8px 10px;
-  border-left: 0.55px solid var(--ion-border-color, rgba(0, 0, 0, 0.13));
 }
