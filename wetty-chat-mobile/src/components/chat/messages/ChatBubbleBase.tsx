@@ -161,6 +161,7 @@ export function ChatBubbleBase({
   const hasTopContent = showName || replyTo;
   const hasBottomContent = message && message.trim() !== '';
   const isMediaOnly = imageAttachments.length > 0 && !hasBottomContent && otherAttachments.length === 0;
+  const showDroplet = (showAvatar || layout === 'bubble-only') && !isMediaOnly;
 
   const baseFont = getChatBaseFont(chatFontSizeStyle as string);
 
@@ -365,7 +366,12 @@ export function ChatBubbleBase({
     <div
       ref={bubbleRef}
       {...bubbleRestProps}
-      className={[styles.bubble, mouseDetected ? styles.mouseSelectable : '', bubbleClassName]
+      className={[
+        styles.bubble,
+        mouseDetected ? styles.mouseSelectable : '',
+        showDroplet ? (styles as Record<string, string>).droplet : '',
+        bubbleClassName,
+      ]
         .filter(Boolean)
         .join(' ')}
       style={{ fontSize: chatFontSizeStyle, ...bubbleStyle }}
