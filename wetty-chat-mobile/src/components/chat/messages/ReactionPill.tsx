@@ -14,6 +14,7 @@ export function ReactionPill({ reaction, isSent = false, interactive = false, on
     reaction.reactedByMe ? styles.reactionPillActive : '',
     isSent ? styles.reactionPillSent : '',
     isSent && reaction.reactedByMe ? styles.reactionPillSentActive : '',
+    !interactive ? styles.reactionPillReadOnly : '',
   ]
     .filter(Boolean)
     .join(' ');

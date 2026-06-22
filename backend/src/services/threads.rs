@@ -328,7 +328,7 @@ pub fn recalculate_thread_meta(
                 .execute(conn)?;
         }
         _ => {
-            // No active replies — remove the meta row
+            // No active replies — remove the meta row and reset has_thread
             diesel::delete(
                 thread_meta::table.filter(
                     thread_meta::chat_id
@@ -337,8 +337,13 @@ pub fn recalculate_thread_meta(
                 ),
             )
             .execute(conn)?;
+
+            diesel::update(messages::table.filter(messages::id.eq(thread_root_id)))
+                .set(messages::has_thread.eq(false))
+                .execute(conn)?;
         }
     }
+
     Ok(())
 }
 
@@ -353,7 +358,6 @@ pub fn build_thread_update_payload(
                 .eq(thread_root_id)
                 .and(messages::chat_id.eq(chat_id))
                 .and(messages::reply_root_id.is_null())
-                .and(messages::has_thread.eq(true))
                 .and(messages::is_published.eq(true)),
         )
         .select(messages::created_at)
