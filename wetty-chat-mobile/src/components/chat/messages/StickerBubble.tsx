@@ -1,6 +1,6 @@
 import type { Ref } from 'react';
 import { IonIcon } from '@ionic/react';
-import { arrowUndo, chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
+import { arrowRedoOutline, arrowUndo, chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { StickerImage } from '@/components/shared/StickerImage';
 import { useSelector } from 'react-redux';
@@ -26,7 +26,11 @@ export interface StickerBubbleProps {
   replyTo?: {
     senderName: string;
     preview: PreviewMessage;
+    forwardedFromName?: string | null;
   };
+  forwardedFrom?: {
+    sender: { name: string | null };
+  } | null;
   timestamp?: string;
   edited?: boolean;
   isConfirmed?: boolean;
@@ -49,6 +53,7 @@ export function StickerBubble({
   onReplyTap,
   onAvatarClick,
   replyTo,
+  forwardedFrom,
   timestamp,
   edited,
   isConfirmed,
@@ -73,12 +78,25 @@ export function StickerBubble({
         .join(' ')}
       style={bubbleStyle}
     >
+      {forwardedFrom && (
+        <div className={styles.forwardedLabel}>
+          <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
+          <span>{t`Forwarded from ${forwardedFrom.sender.name ?? 'Unknown'}`}</span>
+        </div>
+      )}
       {replyTo && (
         <div
           className={`${styles.replyPreview} ${interactive && onReplyTap ? styles.replyPreviewTappable : ''}`}
           onClick={interactive ? onReplyTap : undefined}
         >
-          <div className={styles.replyPreviewName}>{replyTo.senderName}</div>
+          {replyTo.forwardedFromName ? (
+            <div className={styles.forwardedLabel}>
+              <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
+              {t`Forwarded from ${replyTo.forwardedFromName}`}
+            </div>
+          ) : (
+            <div className={styles.replyPreviewName}>{replyTo.senderName}</div>
+          )}
           <div className={styles.replyPreviewText}>
             {formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
           </div>

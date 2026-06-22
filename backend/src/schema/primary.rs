@@ -198,6 +198,7 @@ diesel::table! {
         sticker_id -> Nullable<Int8>,
         is_published -> Bool,
         transcode_status -> TranscodeStatus,
+        forwarded_from_message_id -> Nullable<Int8>,
     }
 }
 

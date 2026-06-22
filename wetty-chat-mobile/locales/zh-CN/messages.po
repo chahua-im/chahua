@@ -16,6 +16,10 @@ msgstr ""
 msgid "[Deleted]"
 msgstr "[已删除]"
 
+#. placeholder {0}: thread.replyCount
+msgid "{0} replies"
+msgstr "{0} 条回复"
+
 msgid "{count} attachments"
 msgstr "{count} 个附件"
 
@@ -390,6 +394,9 @@ msgstr "删除贴纸包失败"
 msgid "Failed to edit message"
 msgstr "编辑消息失败"
 
+msgid "Failed to forward message"
+msgstr "转发消息失败"
+
 msgid "Failed to jump to message"
 msgstr "跳转到消息失败"
 
@@ -524,6 +531,16 @@ msgstr "文件过大。贴纸文件大小上限为 10 MB。"
 
 msgid "Forever"
 msgstr "永久"
+
+msgid "Forward"
+msgstr "转发"
+
+msgid "Forward to"
+msgstr "转发到"
+
+#. placeholder {0}: forwardedFrom.sender.name ?? 'Unknown'
+msgid "Forwarded from {0}"
+msgstr "转发自 {0}"
 
 msgid "General"
 msgstr "通用"
@@ -689,6 +706,9 @@ msgstr "消息"
 msgid "Message cannot be empty"
 msgstr "消息不能为空"
 
+msgid "Message forwarded"
+msgstr "消息已转发"
+
 msgid "Message not found"
 msgstr "未找到消息"
 
@@ -742,6 +762,9 @@ msgstr "没有已归档会话"
 
 msgid "No archived threads"
 msgstr "没有已归档话题"
+
+msgid "No chats available"
+msgstr "暂无可用聊天"
 
 msgid "No chats yet"
 msgstr "暂无聊天"
@@ -1043,6 +1066,9 @@ msgstr "搜索"
 
 msgid "Search by username or UID"
 msgstr "按用户名或 UID 搜索"
+
+msgid "Search chats"
+msgstr "搜索聊天"
 
 msgid "Search emoji"
 msgstr "搜索表情"

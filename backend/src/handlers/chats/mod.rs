@@ -17,9 +17,9 @@ use crate::{
         attachments::AttachmentResponse,
         chats::{ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse},
         messages::{
-            MentionInfo, MessagePreview, MessagePreviewAttachment, MessagePreviewSticker,
-            MessageResponse, MessageStickerResponse, ReactionReactor, ReactionSummary,
-            StickerMediaResponse, ThreadInfo,
+            ForwardedFromInfo, MentionInfo, MessagePreview, MessagePreviewAttachment,
+            MessagePreviewSticker, MessageResponse, MessageStickerResponse, ReactionReactor,
+            ReactionSummary, StickerMediaResponse, ThreadInfo,
         },
         users::User,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
@@ -111,6 +111,7 @@ pub(crate) struct PreparedMessageSend {
     pub client_generated_id: String,
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
+    pub forwarded_from_message_id: Option<i64>,
 }
 
 pub(crate) struct SendMessageResult {
@@ -316,6 +317,7 @@ fn message_response_preview(response: MessageResponse) -> MessagePreview {
             .collect(),
         is_deleted,
         mentions: response.mentions,
+        forwarded_from_name: response.forwarded_from.and_then(|fwd| fwd.sender.name),
     }
 }
 
@@ -361,6 +363,7 @@ pub(crate) struct MessagePreviewInput {
     pub deleted_at: Option<DateTime<Utc>>,
     pub mention_source: Option<String>,
     pub mention_uids: Option<Vec<i32>>,
+    pub forwarded_from_message_id: Option<i64>,
 }
 
 pub(crate) fn build_message_preview(
@@ -368,6 +371,7 @@ pub(crate) fn build_message_preview(
     sticker_emoji_map: &std::collections::HashMap<i64, String>,
     user_avatars: &std::collections::HashMap<i32, Option<String>>,
     user_profiles: &std::collections::HashMap<i32, UserProfile>,
+    fwd_messages_map: &std::collections::HashMap<i64, crate::models::Message>,
 ) -> MessagePreview {
     let MessagePreviewInput {
         id,
@@ -381,6 +385,7 @@ pub(crate) fn build_message_preview(
         deleted_at,
         mention_source,
         mention_uids,
+        forwarded_from_message_id,
     } = input;
     let is_deleted = deleted_at.is_some();
     let sticker_emoji = sticker_id.and_then(|sid| sticker_emoji_map.get(&sid).cloned());
@@ -412,6 +417,17 @@ pub(crate) fn build_message_preview(
                 })
             })
             .unwrap_or_default(),
+        forwarded_from_name: if is_deleted {
+            None
+        } else {
+            forwarded_from_message_id.and_then(|fwd_id| {
+                fwd_messages_map.get(&fwd_id).map(|fwd_msg| {
+                    build_sender(fwd_msg.sender_uid, user_avatars, user_profiles)
+                        .name
+                        .unwrap_or_else(|| "Unknown".to_string())
+                })
+            })
+        },
     }
 }
 
@@ -672,6 +688,7 @@ pub(crate) async fn send_prepared_message(
         has_reactions: false,
         is_published: prepared.publish_immediately,
         transcode_status,
+        forwarded_from_message_id: prepared.forwarded_from_message_id,
     };
 
     let inserted_msg: Option<Message> = diesel::insert_into(messages_schema::table)
@@ -793,6 +810,7 @@ fn validate_idempotent_message_payload(
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
         && attachment_ids_match
+        && existing.forwarded_from_message_id == prepared.forwarded_from_message_id
     {
         return Ok(());
     }
@@ -820,12 +838,42 @@ pub async fn attach_metadata(
 
     let reply_messages_map = load_reply_messages(conn, &reply_ids).unwrap_or_default();
 
+    // Load forwarded-from messages' reply_to for preview building.
+    let fwd_message_ids: Vec<i64> = messages_to_process
+        .iter()
+        .filter_map(|m| m.forwarded_from_message_id)
+        .collect();
+    let fwd_messages_map: std::collections::HashMap<i64, crate::models::Message> =
+        if !fwd_message_ids.is_empty() {
+            use crate::schema::messages::dsl as m_dsl;
+            messages_schema::table
+                .filter(m_dsl::id.eq_any(&fwd_message_ids))
+                .select(crate::models::Message::as_select())
+                .load(conn)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m: crate::models::Message| (m.id, m))
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+    let fwd_reply_ids: Vec<i64> = fwd_messages_map
+        .values()
+        .filter_map(|m| m.reply_to_id)
+        .collect();
+    let fwd_reply_messages_map = load_reply_messages(conn, &fwd_reply_ids).unwrap_or_default();
+
     let mut avatar_uids = std::collections::HashSet::new();
     for m in &messages_to_process {
         avatar_uids.insert(m.sender_uid);
     }
     for reply_msg in reply_messages_map.values() {
         avatar_uids.insert(reply_msg.sender_uid);
+    }
+    // Also collect forwarded-from sender UIDs for avatar resolution.
+    for fwd_msg in fwd_messages_map.values() {
+        avatar_uids.insert(fwd_msg.sender_uid);
     }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
     let mut user_avatars = lookup_user_avatars(state, &target_uids);
@@ -1068,10 +1116,12 @@ pub async fn attach_metadata(
                         deleted_at: reply_msg.deleted_at,
                         mention_source: reply_msg.message.clone(),
                         mention_uids: None,
+                        forwarded_from_message_id: reply_msg.forwarded_from_message_id,
                     },
                     &sticker_emoji_map,
                     &user_avatars,
                     &user_profiles,
+                    &fwd_messages_map,
                 );
                 Box::new(preview)
             })
@@ -1095,10 +1145,11 @@ pub async fn attach_metadata(
         }
 
         let is_deleted = m.deleted_at.is_some();
+        let msg_type = m.message_type;
         let mut response = MessageResponse {
             id: m.id,
             message: if is_deleted { None } else { m.message },
-            message_type: m.message_type,
+            message_type: msg_type.clone(),
             sticker: m.sticker_id.and_then(|sticker_id| {
                 (!is_deleted)
                     .then(|| {
@@ -1136,6 +1187,51 @@ pub async fn attach_metadata(
                     .iter()
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
+            },
+            // Stickers forwarded look identical to self-sent: no forwarded-from info.
+            forwarded_from: if msg_type == MessageType::Sticker {
+                None
+            } else {
+                m.forwarded_from_message_id.and_then(|fwd_msg_id| {
+                    let original = fwd_messages_map.get(&fwd_msg_id)?;
+                    let original_reply_to = original.reply_to_id.and_then(|reply_id| {
+                        fwd_reply_messages_map.get(&reply_id).map(|reply_msg| {
+                            Box::new(MessagePreview {
+                                id: reply_msg.id,
+                                client_generated_id: reply_msg.client_generated_id.clone(),
+                                created_at: reply_msg.created_at,
+                                sender: build_sender(
+                                    reply_msg.sender_uid,
+                                    &user_avatars,
+                                    &user_profiles,
+                                ),
+                                message: if reply_msg.deleted_at.is_some() {
+                                    None
+                                } else {
+                                    reply_msg.message.clone()
+                                },
+                                message_type: reply_msg.message_type.clone(),
+                                sticker: reply_msg.sticker_id.and_then(|sid| {
+                                    sticker_rows.get(&sid).map(|(sticker, _)| {
+                                        MessagePreviewSticker {
+                                            emoji: sticker.emoji.clone(),
+                                        }
+                                    })
+                                }),
+                                is_deleted: reply_msg.deleted_at.is_some(),
+                                attachments: Vec::new(),
+                                mentions: Vec::new(),
+                                forwarded_from_name: None,
+                            })
+                        })
+                    });
+                    Some(ForwardedFromInfo {
+                        sender: build_sender(original.sender_uid, &user_avatars, &user_profiles),
+                        original_chat_id: original.chat_id,
+                        original_message_id: fwd_msg_id,
+                        original_reply_to,
+                    })
+                })
             },
         };
         redact_deleted_message_response(&mut response);
@@ -1811,6 +1907,7 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_from_message_id: None,
         };
         patch(&mut message);
         message
@@ -2004,6 +2101,7 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_from_message_id: None,
         }
     }
 
@@ -2019,6 +2117,7 @@ mod tests {
             client_generated_id: "client-1".to_string(),
             attachment_ids: vec![10, 11],
             publish_immediately: true,
+            forwarded_from_message_id: None,
         }
     }
 
@@ -2048,6 +2147,7 @@ mod tests {
             attachments: Vec::new(),
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_from: None,
         };
 
         let preview = build_push_preview_bundle(&response);
@@ -2090,6 +2190,7 @@ mod tests {
             }],
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_from: None,
         };
 
         let preview = build_push_preview_bundle(&response);
@@ -2127,6 +2228,7 @@ mod tests {
             }],
             is_deleted: false,
             mentions: Vec::new(),
+            forwarded_from_name: None,
         };
 
         let value = serde_json::to_value(reply).expect("serialize reply_to_message");
@@ -2195,6 +2297,7 @@ mod tests {
                 gender: 0,
                 user_group: None,
             }],
+            forwarded_from: None,
         };
 
         redact_deleted_message_response(&mut response);
@@ -2236,8 +2339,10 @@ mod tests {
                 deleted_at: Some(Utc::now()),
                 mention_source: Some("@mention".to_string()),
                 mention_uids: None,
+                forwarded_from_message_id: None,
             },
             &sticker_map,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
         );

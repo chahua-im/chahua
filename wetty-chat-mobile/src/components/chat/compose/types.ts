@@ -11,6 +11,7 @@ export interface ReplyTo {
   attachments?: Attachment[];
   isDeleted?: boolean;
   mentions?: MentionInfo[];
+  forwardedFromName?: string | null;
 }
 
 export interface EditingMessage {

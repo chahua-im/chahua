@@ -88,6 +88,7 @@ function TestComponent({
   onStartThread,
   onEdit,
   onOpenReactionDetails,
+  onForward,
 }: {
   message: MessageResponse | null;
   pins: PinResponse[];
@@ -98,6 +99,7 @@ function TestComponent({
   onStartThread: (messageId: string) => void;
   onEdit: (message: MessageResponse) => void;
   onOpenReactionDetails: (messageId: string) => void;
+  onForward: (message: MessageResponse) => void;
 }) {
   const actions = useMessageOverlayActions({
     chatId: 'chat-1',
@@ -113,6 +115,7 @@ function TestComponent({
     onStartThread,
     onEdit,
     onOpenReactionDetails,
+    onForward,
   });
   onRender({ actions });
   return null;
@@ -128,6 +131,7 @@ describe('useMessageOverlayActions', () => {
   let onStartThread: MockFn<(messageId: string) => void>;
   let onEdit: MockFn<(message: MessageResponse) => void>;
   let onOpenReactionDetails: MockFn<(messageId: string) => void>;
+  let onForward: MockFn<(message: MessageResponse) => void>;
 
   function renderHook(nextMessage: MessageResponse | null, pins: PinResponse[] = []) {
     act(() => {
@@ -141,6 +145,7 @@ describe('useMessageOverlayActions', () => {
           onStartThread={onStartThread}
           onEdit={onEdit}
           onOpenReactionDetails={onOpenReactionDetails}
+          onForward={onForward}
           onRender={(nextState) => (state = nextState)}
         />,
       );
@@ -158,6 +163,7 @@ describe('useMessageOverlayActions', () => {
     onStartThread = vi.fn() as typeof onStartThread;
     onEdit = vi.fn() as typeof onEdit;
     onOpenReactionDetails = vi.fn() as typeof onOpenReactionDetails;
+    onForward = vi.fn() as typeof onForward;
     vi.mocked(createPin).mockResolvedValue(response(pinFor(message())));
     vi.mocked(deletePin).mockResolvedValue(response(undefined));
     vi.mocked(deleteMessage).mockResolvedValue(response(undefined));
@@ -187,6 +193,7 @@ describe('useMessageOverlayActions', () => {
       'thread',
       'pin',
       'copy',
+      'forward',
       'edit',
       'save',
       'copy-link',

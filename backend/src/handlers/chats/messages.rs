@@ -552,6 +552,7 @@ async fn post_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
+                forwarded_from_message_id: None,
             },
         )
         .await?;
@@ -570,7 +571,7 @@ async fn post_message(
             send_result
         }
         Err(err) => {
-            let _ = diesel::sql_query("ROLLBACK").execute(conn);
+            diesel::sql_query("ROLLBACK").execute(conn)?;
             return Err(err);
         }
     };
@@ -684,6 +685,7 @@ pub(super) async fn post_thread_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
+                forwarded_from_message_id: None,
             },
         )
         .await?;
@@ -696,21 +698,7 @@ pub(super) async fn post_thread_message(
         let response = send_result.response.clone();
         let publish_now = publish_immediately;
 
-        // Auto-subscribe the replying user and track read position
-        crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)?;
-        crate::services::threads::mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
-
-        // Auto-subscribe the root message author
-        if root_msg.sender_uid != uid {
-            crate::services::threads::ensure_thread_subscription(
-                conn,
-                chat_id,
-                thread_id,
-                root_msg.sender_uid,
-            )?;
-        }
-
-        // Auto-subscribe mentioned users
+        // Auto-subscribe mentioned users (unique to thread replies)
         if let Some(ref text) = response.message {
             for mentioned_uid in extract_mention_uids(text) {
                 if mentioned_uid != uid {
@@ -725,6 +713,26 @@ pub(super) async fn post_thread_message(
         }
 
         if publish_now {
+            // Auto-subscribe the replying user and track read position
+            crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)?;
+            crate::services::threads::mark_thread_as_read(
+                conn,
+                chat_id,
+                thread_id,
+                uid,
+                response.id,
+            )?;
+
+            // Auto-subscribe the root message author
+            if root_msg.sender_uid != uid {
+                crate::services::threads::ensure_thread_subscription(
+                    conn,
+                    chat_id,
+                    thread_id,
+                    root_msg.sender_uid,
+                )?;
+            }
+
             crate::services::threads::increment_thread_meta(
                 conn,
                 chat_id,
@@ -748,7 +756,7 @@ pub(super) async fn post_thread_message(
             data
         }
         Err(e) => {
-            let _ = diesel::sql_query("ROLLBACK").execute(conn);
+            diesel::sql_query("ROLLBACK").execute(conn)?;
             return Err(e);
         }
     };
@@ -854,6 +862,9 @@ async fn patch_message(
 
     if message.deleted_at.is_some() {
         return Err(AppError::BadRequest("Cannot edit deleted message"));
+    }
+    if message.forwarded_from_message_id.is_some() {
+        return Err(AppError::Forbidden("Forwarded messages cannot be edited"));
     }
     if !message.is_published {
         return Err(AppError::BadRequest("Cannot edit unpublished message"));
@@ -1074,6 +1085,284 @@ async fn delete_message(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Request body for forwarding a message.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardMessageBody {
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    #[schema(value_type = String)]
+    pub source_chat_id: i64,
+    pub client_generated_id: String,
+    /// Optional: forward into a thread instead of top-level chat.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub thread_id: Option<i64>,
+}
+
+/// POST /chats/:target_chat_id/messages/:message_id/forward — Forward a message to a chat.
+#[utoipa::path(
+    post,
+    path = "/{message_id}/forward",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Target chat ID"),
+        ("message_id" = i64, Path, description = "Source message ID"),
+    ),
+    request_body = ForwardMessageBody,
+    responses(
+        (status = 201, description = "Message forwarded", body = MessageResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn forward_message(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(MessageIdPath {
+        chat_id: target_chat_id,
+        message_id,
+    }): Path<MessageIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<ForwardMessageBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let conn = &mut *conn;
+
+    let source_chat_id = body.source_chat_id;
+    // Forwarder must be a member of both source and target chats.
+    check_membership(conn, source_chat_id, uid)?;
+    check_membership(conn, target_chat_id, uid)?;
+    // Load the original message from the source chat.
+    use crate::schema::messages::dsl;
+    let original: Message = messages::table
+        .filter(
+            dsl::id
+                .eq(message_id)
+                .and(dsl::chat_id.eq(source_chat_id))
+                .and(dsl::deleted_at.is_null())
+                .and(dsl::is_published.eq(true)),
+        )
+        .select(Message::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Message not found"))?;
+    // Reject forwarding of message types that clients are not allowed to send directly
+    // (System / Invite). Otherwise a member could forward a system or invite message into
+    // another chat, bypassing the dedicated send restrictions enforced in post_message.
+    validate_client_message_type(&original.message_type)?;
+
+    // If forwarding into a thread, validate the root message exists and is a text message.
+    let thread_root: Option<Message> = if let Some(thread_id) = body.thread_id {
+        {
+            let root: Message = messages::table
+                .filter(
+                    dsl::id
+                        .eq(thread_id)
+                        .and(dsl::chat_id.eq(target_chat_id))
+                        .and(dsl::deleted_at.is_null())
+                        .and(dsl::is_published.eq(true)),
+                )
+                .select(Message::as_select())
+                .first(conn)
+                .optional()?
+                .ok_or(AppError::NotFound("Thread root message not found"))?;
+            if root.message_type != MessageType::Text {
+                return Err(AppError::BadRequest(
+                    "Threads can only be created on text messages",
+                ));
+            }
+            Some(root)
+        }
+    } else {
+        None
+    };
+
+    // Keep message creation and side effects atomic.
+    diesel::sql_query("BEGIN").execute(conn)?;
+
+    let tx_result: Result<_, AppError> = async {
+        // Re-validate inside the transaction: the original was loaded before BEGIN, so a
+        // concurrent soft-delete could race. Re-check non-deleted + published here.
+        let original_still_valid: bool = messages::table
+            .filter(
+                dsl::id
+                    .eq(message_id)
+                    .and(dsl::chat_id.eq(source_chat_id))
+                    .and(dsl::deleted_at.is_null())
+                    .and(dsl::is_published.eq(true)),
+            )
+            .count()
+            .get_result::<i64>(conn)?
+            > 0;
+        if !original_still_valid {
+            return Err(AppError::NotFound("Message not found"));
+        }
+        // forwarded_from_message_id always stores the root message ID,
+        // so no chain resolution is needed.
+        let root_message_id = original.forwarded_from_message_id.unwrap_or(original.id);
+
+        // Clone attachments from the original message BEFORE send_prepared_message
+        // so the WebSocket broadcast includes them.
+        use crate::schema::attachments::dsl as a_dsl;
+        let original_attachments: Vec<crate::models::Attachment> = attachments::table
+            .filter(a_dsl::message_id.eq(original.id))
+            .select(crate::models::Attachment::as_select())
+            .load(conn)?;
+
+        let mut cloned_attachment_ids: Vec<i64> = Vec::new();
+        for att in &original_attachments {
+            let new_id = crate::utils::ids::next_message_id(state.id_gen.as_ref())
+                .await
+                .map_err(|e| {
+                    tracing::error!("next_message_id for forwarded attachment: {:?}", e);
+                    AppError::Internal("Failed to generate attachment ID")
+                })?;
+            // Insert with message_id = None; send_prepared_message will link them.
+            diesel::insert_into(attachments::table)
+                .values(&crate::models::NewAttachment {
+                    id: new_id,
+                    message_id: None,
+                    file_name: att.file_name.clone(),
+                    kind: att.kind.clone(),
+                    external_reference: att.external_reference.clone(),
+                    size: att.size,
+                    created_at: att.created_at,
+                    deleted_at: att.deleted_at,
+                    width: att.width,
+                    height: att.height,
+                    order: att.order,
+                })
+                .execute(conn)?;
+            cloned_attachment_ids.push(new_id);
+        }
+
+        let send_result = super::send_prepared_message(
+            conn,
+            &state,
+            super::PreparedMessageSend {
+                chat_id: target_chat_id,
+                sender_uid: uid,
+                message: original.message.clone(),
+                message_type: original.message_type.clone(),
+                sticker_id: original.sticker_id,
+                reply_to_id: None,
+                reply_root_id: body.thread_id,
+                client_generated_id: body.client_generated_id,
+                attachment_ids: cloned_attachment_ids,
+                publish_immediately: true,
+                forwarded_from_message_id: Some(root_message_id),
+            },
+        )
+        .await?;
+
+        let super::SendMessageOutcome::Created(created) = &send_result else {
+            return Ok(send_result);
+        };
+        let inserted_msg = &created.inserted_message;
+
+        // If forwarding into a thread, fire thread-specific side effects.
+        if let (Some(thread_id), Some(root)) = (body.thread_id, &thread_root) {
+            crate::services::threads::ensure_thread_subscription(
+                conn,
+                target_chat_id,
+                thread_id,
+                uid,
+            )?;
+            crate::services::threads::mark_thread_as_read(
+                conn,
+                target_chat_id,
+                thread_id,
+                uid,
+                inserted_msg.id,
+            )?;
+            // Auto-subscribe the root message author if different from forwarder.
+            if root.sender_uid != uid {
+                crate::services::threads::ensure_thread_subscription(
+                    conn,
+                    target_chat_id,
+                    thread_id,
+                    root.sender_uid,
+                )?;
+            }
+            crate::services::threads::increment_thread_meta(
+                conn,
+                target_chat_id,
+                thread_id,
+                inserted_msg.created_at,
+            )?;
+            // Mark the root message as having a thread.
+            diesel::update(messages::table.filter(dsl::id.eq(thread_id)))
+                .set(dsl::has_thread.eq(true))
+                .execute(conn)?;
+            // Auto-subscribe mentioned users (mirrors post_thread_message) so they receive
+            // subsequent ThreadUpdate broadcasts, not just this forward's push notification.
+            if let Some(ref text) = original.message {
+                for mentioned_uid in extract_mention_uids(text) {
+                    if mentioned_uid != uid {
+                        crate::services::threads::ensure_thread_subscription(
+                            conn,
+                            target_chat_id,
+                            thread_id,
+                            mentioned_uid,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(send_result)
+    }
+    .await;
+
+    match tx_result {
+        Ok(send_result) => {
+            diesel::sql_query("COMMIT").execute(conn)?;
+
+            let response = match send_result {
+                super::SendMessageOutcome::Created(created) => {
+                    // If forwarding into a thread, broadcast thread update to subscribers.
+                    if let Some(thread_id) = body.thread_id {
+                        if let Err(err) =
+                            crate::services::threads::broadcast_thread_update_to_subscribers(
+                                conn,
+                                &state.ws_registry,
+                                target_chat_id,
+                                thread_id,
+                            )
+                        {
+                            tracing::warn!(
+                                target_chat_id,
+                                thread_id,
+                                ?err,
+                                "failed to broadcast thread update after forward"
+                            );
+                        }
+                    }
+                    if let Some(search_service) = state.message_search.clone() {
+                        search_service.upsert_message_best_effort(created.inserted_message.clone());
+                    }
+                    created.side_effects.fire(&state);
+
+                    super::attach_metadata(conn, vec![created.inserted_message], &state, uid)
+                        .await
+                        .into_iter()
+                        .next()
+                        .unwrap()
+                }
+                // Client retry with the same client_generated_id: return the previously created
+                // forwarded message instead of panicking. The original forward already
+                // succeeded and was committed, so this is a safe idempotent replay.
+                super::SendMessageOutcome::Duplicate(response) => *response,
+            };
+
+            Ok((StatusCode::CREATED, Json(response)).into_response())
+        }
+        Err(e) => {
+            diesel::sql_query("ROLLBACK").execute(conn)?;
+            Err(e)
+        }
+    }
+}
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_messages, post_message))
@@ -1081,7 +1370,8 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(
             get_message,
             patch_message,
-            delete_message
+            delete_message,
+            forward_message
         ))
 }
 

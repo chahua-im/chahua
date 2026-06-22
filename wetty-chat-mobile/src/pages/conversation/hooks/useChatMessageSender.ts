@@ -59,6 +59,7 @@ function buildReplyPreview(replyingTo: MessageResponse | null): MessageResponse[
         isDeleted: replyingTo.isDeleted,
         attachments: replyingTo.attachments,
         mentions: replyingTo.mentions,
+        forwardedFromName: replyingTo.forwardedFrom?.sender.name,
       }
     : undefined;
 }

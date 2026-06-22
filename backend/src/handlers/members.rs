@@ -290,6 +290,7 @@ async fn post_add_member(
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
+                forwarded_from_message_id: None,
             },
         )
         .await
@@ -420,6 +421,7 @@ async fn delete_remove_member(
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
+                forwarded_from_message_id: None,
             },
         )
         .await

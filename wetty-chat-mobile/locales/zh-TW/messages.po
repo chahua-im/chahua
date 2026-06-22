@@ -16,6 +16,10 @@ msgstr ""
 msgid "[Deleted]"
 msgstr "[已刪除]"
 
+#. placeholder {0}: thread.replyCount
+msgid "{0} replies"
+msgstr "{0} 則回覆"
+
 msgid "{count} attachments"
 msgstr "{count} 個附件"
 
@@ -390,6 +394,9 @@ msgstr "刪除貼紙包失敗"
 msgid "Failed to edit message"
 msgstr "編輯訊息失敗"
 
+msgid "Failed to forward message"
+msgstr "轉發訊息失敗"
+
 msgid "Failed to jump to message"
 msgstr "跳轉到訊息失敗"
 
@@ -524,6 +531,16 @@ msgstr "檔案過大。貼圖檔案大小上限為 10 MB。"
 
 msgid "Forever"
 msgstr "永久"
+
+msgid "Forward"
+msgstr "轉發"
+
+msgid "Forward to"
+msgstr "轉發到"
+
+#. placeholder {0}: forwardedFrom.sender.name ?? 'Unknown'
+msgid "Forwarded from {0}"
+msgstr "轉發自 {0}"
 
 msgid "General"
 msgstr "一般"
@@ -689,6 +706,9 @@ msgstr "訊息"
 msgid "Message cannot be empty"
 msgstr "訊息不能為空"
 
+msgid "Message forwarded"
+msgstr "訊息已轉發"
+
 msgid "Message not found"
 msgstr "找不到訊息"
 
@@ -742,6 +762,9 @@ msgstr "沒有已封存對話"
 
 msgid "No archived threads"
 msgstr "沒有已封存話題"
+
+msgid "No chats available"
+msgstr "暫無可用聊天"
 
 msgid "No chats yet"
 msgstr "暫無聊天"
@@ -1043,6 +1066,9 @@ msgstr "搜尋"
 
 msgid "Search by username or UID"
 msgstr "依使用者名稱或 UID 搜尋"
+
+msgid "Search chats"
+msgstr "搜尋聊天"
 
 msgid "Search emoji"
 msgstr "搜尋表情"

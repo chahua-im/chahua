@@ -67,6 +67,21 @@
   color: var(--ion-color-primary);
 }
 
+.forwardedIcon {
+  font-size: 14px;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+.forwardedLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--ion-color-medium);
+}
+
 .replySnippet {
   font-size: 12px;
   color: var(--ion-text-color-step-600, #666);

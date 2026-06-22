@@ -34,6 +34,7 @@ export interface MessagePreview {
   isDeleted: boolean;
   attachments?: Attachment[];
   mentions?: MentionInfo[] | null;
+  forwardedFromName?: string | null;
 }
 
 export type ReplyToMessage = MessagePreview;
@@ -101,6 +102,12 @@ export interface MessageResponse {
   attachments?: Attachment[];
   reactions?: ReactionSummary[];
   mentions?: MentionInfo[];
+  forwardedFrom?: {
+    sender: User;
+    originalChatId: string;
+    originalMessageId: string;
+    originalReplyTo?: ReplyToMessage;
+  } | null;
 }
 
 export function toMessagePreview(message: MessageResponse): MessagePreview {
@@ -217,6 +224,18 @@ export function updateMessage(
   body: UpdateMessageBody,
 ): Promise<AxiosResponse<MessageResponse>> {
   return apiClient.patch(`/chats/${chatId}/messages/${messageId}`, body);
+}
+
+export function forwardMessage(
+  targetChatId: string | number,
+  messageId: string,
+  body: {
+    sourceChatId: string | number;
+    clientGeneratedId: string;
+    threadId?: string | number;
+  },
+): Promise<AxiosResponse<MessageResponse>> {
+  return apiClient.post(`/chats/${targetChatId}/messages/${messageId}/forward`, body);
 }
 
 export function deleteMessage(chatId: string | number, messageId: string): Promise<AxiosResponse<void>> {
