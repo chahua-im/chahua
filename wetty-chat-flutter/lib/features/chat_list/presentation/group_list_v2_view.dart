@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:chahua/core/notifications/unread_badge_provider.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 
 import 'package:chahua/features/chat_list/presentation/widgets/chat_list_archived_folder_row.dart';
@@ -34,6 +35,9 @@ class GroupListV2View extends ConsumerWidget {
     final hasArchivedGroups = ref.watch(
       groupListV2StoreProvider.select((state) => state.hasArchivedGroups),
     );
+    final archivedUnreadCount = ref.watch(
+      unreadBadgeProvider.select((state) => state.archivedChatUnreadItemCount),
+    );
 
     return asyncState.when(
       loading: () => const SliverFillRemaining(
@@ -47,7 +51,8 @@ class GroupListV2View extends ConsumerWidget {
       data: (viewState) {
         final groups = listState.groups;
         final showArchiveFolder =
-            scope == ChatListV2Scope.active && hasArchivedGroups;
+            scope == ChatListV2Scope.active &&
+            (hasArchivedGroups || archivedUnreadCount > 0);
 
         if (viewState.errorMessage != null && groups.isEmpty) {
           return SliverFillRemaining(
@@ -68,7 +73,9 @@ class GroupListV2View extends ConsumerWidget {
               itemCount: groups.length + (showArchiveFolder ? 1 : 0),
               itemBuilder: (context, index) {
                 if (showArchiveFolder && index == 0) {
-                  return const _ArchivedGroupsFolderRow();
+                  return _ArchivedGroupsFolderRow(
+                    unreadCount: archivedUnreadCount,
+                  );
                 }
 
                 final groupIndex = showArchiveFolder ? index - 1 : index;
@@ -95,14 +102,16 @@ class GroupListV2View extends ConsumerWidget {
 }
 
 class _ArchivedGroupsFolderRow extends StatelessWidget {
-  const _ArchivedGroupsFolderRow();
+  const _ArchivedGroupsFolderRow({required this.unreadCount});
+
+  final int unreadCount;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return ChatListArchivedFolderRow(
       title: l10n.archivedGroups,
-      // TODO: pass archived group unread count.
+      unreadCount: unreadCount,
     );
   }
 }

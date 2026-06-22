@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:chahua/core/notifications/unread_badge_provider.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 
 import '../../../app/theme/style_config.dart';
@@ -24,12 +25,12 @@ class ThreadListV2View extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     final provider = threadListV2ViewModelProvider(scope);
     final asyncState = ref.watch(provider);
-    final archivedSummary = ref.watch(
-      threadListV2StoreProvider.select(
-        (state) => (
-          hasArchivedThreads: state.hasArchivedThreads,
-          unreadCount: state.unreadTotals.archivedThreadCount,
-        ),
+    final hasArchivedThreads = ref.watch(
+      threadListV2StoreProvider.select((state) => state.hasArchivedThreads),
+    );
+    final archivedUnreadCount = ref.watch(
+      unreadBadgeProvider.select(
+        (state) => state.archivedThreadUnreadItemCount,
       ),
     );
 
@@ -78,8 +79,7 @@ class ThreadListV2View extends ConsumerWidget {
 
         final showArchiveFolder =
             scope == ChatListV2Scope.active &&
-            (archivedSummary.hasArchivedThreads ||
-                archivedSummary.unreadCount > 0);
+            (hasArchivedThreads || archivedUnreadCount > 0);
 
         if (viewState.threads.isEmpty && !showArchiveFolder) {
           return SliverFillRemaining(
@@ -100,7 +100,7 @@ class ThreadListV2View extends ConsumerWidget {
               itemBuilder: (context, index) {
                 if (showArchiveFolder && index == 0) {
                   return _ArchivedThreadsFolderRow(
-                    unreadCount: archivedSummary.unreadCount,
+                    unreadCount: archivedUnreadCount,
                   );
                 }
 
@@ -127,17 +127,17 @@ class ThreadListV2View extends ConsumerWidget {
   }
 }
 
-class _ArchivedThreadsFolderRow extends ConsumerWidget {
+class _ArchivedThreadsFolderRow extends StatelessWidget {
   const _ArchivedThreadsFolderRow({required this.unreadCount});
 
   final int unreadCount;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return ChatListArchivedFolderRow(
       title: l10n.archivedThreads,
-      // TODO: pass archived thread unread count.
+      unreadCount: unreadCount,
     );
   }
 }

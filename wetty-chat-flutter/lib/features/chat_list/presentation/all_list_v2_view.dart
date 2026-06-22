@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:chahua/core/notifications/unread_badge_provider.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_models.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_projection.dart';
 import 'package:chahua/features/chat_list/application/all_list_v2_view_model.dart';
@@ -94,25 +95,27 @@ final _showAllArchivedFolderProvider = Provider<bool>((ref) {
     groupListV2StoreProvider.select((state) => state.hasArchivedGroups),
   );
   final hasArchivedThreads = ref.watch(
-    threadListV2StoreProvider.select(
-      (state) =>
-          state.hasArchivedThreads ||
-          state.unreadTotals.archivedThreadCount > 0,
-    ),
+    threadListV2StoreProvider.select((state) => state.hasArchivedThreads),
   );
-  return hasArchivedGroups || hasArchivedThreads;
+  final hasArchivedUnreadItems = ref.watch(
+    unreadBadgeProvider.select((state) => state.archivedUnreadItemCount > 0),
+  );
+  return hasArchivedGroups || hasArchivedThreads || hasArchivedUnreadItems;
 });
 
-class _AllArchivedFolderRow extends StatelessWidget {
+class _AllArchivedFolderRow extends ConsumerWidget {
   const _AllArchivedFolderRow();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
+    final unreadCount = ref.watch(
+      unreadBadgeProvider.select((state) => state.archivedUnreadItemCount),
+    );
     return ChatListArchivedFolderRow(
       title: l10n.archived,
       subtitle: l10n.archivedFolderSubtitle,
-      // TODO: pass combined archived group/thread unread count.
+      unreadCount: unreadCount,
     );
   }
 }
