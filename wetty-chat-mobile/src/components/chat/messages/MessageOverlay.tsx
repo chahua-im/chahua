@@ -507,7 +507,6 @@ export function MessageOverlay(props: MessageOverlayProps) {
                       onClick={() => handleArrowClick(item.direction)}
                     >
                       <IonIcon icon={item.direction === 'down' ? chevronDown : chevronUp} />
-                      {'　'}
                     </button>
                   );
                 }
