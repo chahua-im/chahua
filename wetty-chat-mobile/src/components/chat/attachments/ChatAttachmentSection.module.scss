@@ -34,7 +34,7 @@
   min-height: 104px;
   border-radius: 12px;
   color: var(--ion-color-medium);
-  background: #fff;
+  background: var(--ion-item-background, var(--ion-background-color));
   font-size: 0.9375rem;
 }
 

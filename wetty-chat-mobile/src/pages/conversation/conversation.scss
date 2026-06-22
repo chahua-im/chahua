@@ -62,7 +62,7 @@
   ion-fab-button {
     width: 48px;
     height: 48px;
-    --background: #fff;
+    --background: var(--ion-item-background, var(--ion-background-color));
     --background-activated: var(--ion-color-light-shade, #d7d8da);
     --background-hover: var(--ion-color-light, #f4f5f8);
     --box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);

@@ -1,8 +1,8 @@
 .button {
-  --background: #fff;
-  --background-activated: #fff;
-  --background-focused: #fff;
-  --background-hover: #fff;
+  --background: var(--ion-item-background, var(--ion-background-color));
+  --background-activated: var(--ion-item-background, var(--ion-background-color));
+  --background-focused: var(--ion-item-background, var(--ion-background-color));
+  --background-hover: var(--ion-item-background, var(--ion-background-color));
   --border-radius: 24px;
   --color: var(--ion-color-primary);
   --padding-top: 16px;
