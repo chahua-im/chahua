@@ -9,6 +9,15 @@
   justify-content: flex-end;
 }
 
+.rowSent .avatarButton,
+.rowSent .avatarSpacer {
+  order: 2;
+}
+
+.rowSent .content {
+  order: 1;
+}
+
 .avatarButton {
   display: inline-flex;
   align-items: center;
@@ -39,6 +48,11 @@
   width: 100%;
 }
 
+.sentRow {
+  flex-direction: row-reverse;
+  align-items: flex-end;
+}
+
 .senderName {
   padding: 0 8px;
   font-size: 0.8125rem;
@@ -67,10 +81,6 @@
   --background: var(--ion-background-color-step-100, #f0f0f0);
   border: 1px solid var(--ion-color-light-shade);
   box-sizing: border-box;
-}
-
-.cardSent .ionCard {
-  --background: var(--ion-color-step-50, #fcfcfc);
 }
 
 .cardDisabled .ionCard {

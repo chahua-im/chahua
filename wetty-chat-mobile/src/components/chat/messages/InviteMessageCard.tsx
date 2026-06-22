@@ -102,23 +102,21 @@ export function InviteMessageCard({
 
   return (
     <div className={`${styles.row} ${isSent ? styles.rowSent : ''}`}>
-      {!isSent ? (
-        showAvatar ? (
-          <button type="button" className={styles.avatarButton} onClick={onAvatarClick}>
-            <UserAvatar name={senderName} avatarUrl={sender.avatarUrl} size={36} />
-          </button>
-        ) : (
-          <div className={styles.avatarSpacer} />
-        )
-      ) : null}
+      {showAvatar ? (
+        <button type="button" className={styles.avatarButton} onClick={onAvatarClick}>
+          <UserAvatar name={senderName} avatarUrl={sender.avatarUrl} size={36} />
+        </button>
+      ) : (
+        <div className={styles.avatarSpacer} />
+      )}
 
       <div className={styles.content}>
         {showName && !isSent && <div className={styles.senderName}>{senderName}</div>}
 
-        <div className={styles.cardRow}>
+        <div className={`${styles.cardRow} ${isSent ? styles.sentRow : ''}`}>
           <button
             type="button"
-            className={`${styles.card} ${isSent ? styles.cardSent : ''} ${!inviteAvailable ? styles.cardDisabled : ''}`}
+            className={`${styles.card} ${!inviteAvailable ? styles.cardDisabled : ''}`}
             onClick={inviteAvailable ? onOpen : undefined}
             disabled={!inviteAvailable}
           >

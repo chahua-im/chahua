@@ -1,14 +1,27 @@
 .page {
-  --background: linear-gradient(180deg, #f4efe6 0%, #f9f7f2 48%, #ffffff 100%);
+  --background: linear-gradient(
+    180deg,
+    var(--ion-background-color-step-50, #f4f5f8) 0%,
+    var(--ion-background-color-step-100, #eceff3) 48%,
+    var(--ion-background-color, #ffffff) 100%
+  );
+
+  @media (prefers-color-scheme: dark) {
+    --background: var(--ion-background-color, #000);
+  }
 }
 
 .card {
-  --background: rgba(255, 255, 255, 0.92);
+  --background: var(--ion-card-background, #fff);
   max-width: 560px;
   margin: 24px auto;
   border-radius: 28px;
-  box-shadow: 0 18px 50px rgba(34, 32, 20, 0.1);
-  border: 1px solid rgba(102, 92, 64, 0.12);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.12);
+
+  @media (prefers-color-scheme: dark) {
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
+  }
+  border: 1px solid var(--ion-border-color, rgba(0, 0, 0, 0.12));
   overflow: hidden;
 }
 
@@ -30,22 +43,22 @@
   margin: 0;
   font-size: 1.6rem;
   line-height: 1.15;
-  color: #1f1d17;
+  color: var(--ion-text-color, #1f1d17);
 }
 
 .formDescription {
   margin: 0;
-  color: #5c5644;
+  color: var(--ion-text-color-step-600, #5c5644);
   line-height: 1.5;
 }
 
 .inputItem {
-  --background: rgba(248, 244, 235, 0.85);
+  --background: var(--ion-item-background, #f0f0f0);
   --border-radius: 18px;
   --inner-padding-top: 8px;
   --inner-padding-bottom: 8px;
   --padding-start: 14px;
   --padding-end: 14px;
 
-  border: 1px solid rgba(102, 92, 64, 0.12);
+  border: 1px solid var(--ion-border-color, rgba(102, 92, 64, 0.12));
 }
