@@ -42,9 +42,6 @@ void main() {
       await container.read(unreadBadgeProvider.notifier).refresh();
       final state = container.read(unreadBadgeProvider);
 
-      expect(state.chatUnreadTotal, 7);
-      expect(state.threadUnreadTotal, 5);
-      expect(state.combinedUnreadTotal, 12);
       expect(state.chatUnreadMessageCount, 7);
       expect(state.archivedChatUnreadMessageCount, 11);
       expect(state.threadUnreadMessageCount, 5);
@@ -81,9 +78,9 @@ void main() {
       notifier.applyChatUnreadMessageDelta(-10);
 
       final state = container.read(unreadBadgeProvider);
-      expect(state.chatUnreadTotal, 0);
-      expect(state.threadUnreadTotal, 2);
-      expect(state.combinedUnreadTotal, 2);
+      expect(state.chatUnreadMessageCount, 0);
+      expect(state.threadUnreadMessageCount, 2);
+      expect(state.activeUnreadMessageCount, 2);
       expect(state.chatUnreadItemCount, 0);
       expect(state.threadUnreadItemCount, 0);
     });

@@ -46,11 +46,6 @@ class UnreadBadgeState {
   int get archivedUnreadItemCount =>
       archivedChatUnreadItemCount + archivedThreadUnreadItemCount;
 
-  // TODO: Move existing callers to the explicit message/item count fields.
-  int get chatUnreadTotal => chatUnreadMessageCount;
-  int get threadUnreadTotal => threadUnreadMessageCount;
-  int get combinedUnreadTotal => activeUnreadMessageCount;
-
   UnreadBadgeState copyWith({
     int? chatUnreadMessageCount,
     int? archivedChatUnreadMessageCount,
@@ -84,7 +79,6 @@ class UnreadBadgeState {
   }
 }
 
-// TODO: check if this function is used
 int chatBadgeContribution({
   required int unreadCount,
   required DateTime? mutedUntil,

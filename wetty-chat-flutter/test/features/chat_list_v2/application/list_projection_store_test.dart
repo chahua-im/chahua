@@ -47,7 +47,7 @@ void main() {
         expect(group.lastMessage?.messageId, 102);
         expect(group.lastMessage?.message, 'mine');
         expect(group.unreadCount, 0);
-        expect(container.read(unreadBadgeProvider).chatUnreadTotal, 0);
+        expect(container.read(unreadBadgeProvider).chatUnreadMessageCount, 0);
       },
     );
 
@@ -74,7 +74,7 @@ void main() {
       expect(shouldRefresh, isFalse);
       expect(group.lastMessage?.messageId, 103);
       expect(group.unreadCount, 3);
-      expect(container.read(unreadBadgeProvider).chatUnreadTotal, 1);
+      expect(container.read(unreadBadgeProvider).chatUnreadMessageCount, 1);
     });
 
     test('unknown root message requests group refresh', () {
@@ -110,7 +110,7 @@ void main() {
 
   group('ThreadListV2Store realtime projection', () {
     test('known reply from current user clears unread and updates preview', () {
-      final container = _container(threadUnreadTotal: 4);
+      final container = _container(threadUnreadMessageCount: 4);
       addTearDown(container.dispose);
       container
           .read(threadListV2StoreProvider.notifier)
@@ -142,11 +142,11 @@ void main() {
       expect(thread.unreadCount, 0);
       expect(state.unreadTotals.activeThreadCount, 4);
       expect(state.unreadTotals.activeMessageCount, 0);
-      expect(container.read(unreadBadgeProvider).threadUnreadTotal, 0);
+      expect(container.read(unreadBadgeProvider).threadUnreadMessageCount, 0);
     });
 
     test('known reply from another user increments unread and reply count', () {
-      final container = _container(threadUnreadTotal: 1);
+      final container = _container(threadUnreadMessageCount: 1);
       addTearDown(container.dispose);
       container
           .read(threadListV2StoreProvider.notifier)
@@ -179,7 +179,7 @@ void main() {
       expect(thread.unreadCount, 2);
       expect(state.unreadTotals.activeThreadCount, 1);
       expect(state.unreadTotals.activeMessageCount, 2);
-      expect(container.read(unreadBadgeProvider).threadUnreadTotal, 1);
+      expect(container.read(unreadBadgeProvider).threadUnreadMessageCount, 1);
     });
 
     test('unknown reply requests thread refresh', () {
@@ -198,7 +198,7 @@ void main() {
     });
 
     test('server read state updates row and unread totals', () {
-      final container = _container(threadUnreadTotal: 4);
+      final container = _container(threadUnreadMessageCount: 4);
       addTearDown(container.dispose);
       container
           .read(threadListV2StoreProvider.notifier)
@@ -229,13 +229,13 @@ void main() {
       expect(state.active.threads.single.unreadCount, 1);
       expect(state.unreadTotals.activeThreadCount, 4);
       expect(state.unreadTotals.activeMessageCount, 1);
-      expect(container.read(unreadBadgeProvider).threadUnreadTotal, 1);
+      expect(container.read(unreadBadgeProvider).threadUnreadMessageCount, 1);
     });
 
     test(
       'server read state updates archived list without active badge delta',
       () {
-        final container = _container(threadUnreadTotal: 4);
+        final container = _container(threadUnreadMessageCount: 4);
         addTearDown(container.dispose);
         container
             .read(threadListV2StoreProvider.notifier)
@@ -271,7 +271,7 @@ void main() {
         expect(state.unreadTotals.activeThreadCount, 4);
         expect(state.unreadTotals.archivedThreadCount, 3);
         expect(state.unreadTotals.archivedMessageCount, 1);
-        expect(container.read(unreadBadgeProvider).threadUnreadTotal, 4);
+        expect(container.read(unreadBadgeProvider).threadUnreadMessageCount, 4);
       },
     );
 
@@ -293,17 +293,17 @@ void main() {
 }
 
 ProviderContainer _container({
-  int chatUnreadTotal = 0,
-  int threadUnreadTotal = 0,
+  int chatUnreadMessageCount = 0,
+  int threadUnreadMessageCount = 0,
 }) {
   return ProviderContainer(
     overrides: [
       authSessionProvider.overrideWith(_AuthenticatedSessionNotifier.new),
       chatApiServiceProvider.overrideWithValue(
-        _FakeChatApiService(unreadCount: chatUnreadTotal),
+        _FakeChatApiService(unreadCount: chatUnreadMessageCount),
       ),
       threadApiServiceProvider.overrideWithValue(
-        _FakeThreadApiService(unreadCount: threadUnreadTotal),
+        _FakeThreadApiService(unreadCount: threadUnreadMessageCount),
       ),
       apnsChannelProvider.overrideWithValue(_FakeApnsChannel()),
     ],

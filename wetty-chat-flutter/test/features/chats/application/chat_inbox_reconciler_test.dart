@@ -80,9 +80,9 @@ void main() {
       expect(groups?.groups.single.id, '10');
       expect(threads?.threads, hasLength(1));
       expect(threads?.threads.single.threadRootId, 200);
-      expect(badge.chatUnreadTotal, 4);
-      expect(badge.threadUnreadTotal, 2);
-      expect(badge.combinedUnreadTotal, 6);
+      expect(badge.chatUnreadMessageCount, 4);
+      expect(badge.threadUnreadMessageCount, 2);
+      expect(badge.activeUnreadMessageCount, 6);
       expect(chatService.fetchChatsCalls, 3);
       expect(threadService.fetchThreadsCalls, 3);
       expect(chatService.fetchUnreadCountCalls, greaterThanOrEqualTo(1));
@@ -137,7 +137,7 @@ void main() {
           container.read(threadListV2StoreProvider).active.threads,
           isEmpty,
         );
-        expect(container.read(unreadBadgeProvider).chatUnreadTotal, 4);
+        expect(container.read(unreadBadgeProvider).chatUnreadMessageCount, 4);
         expect(chatService.fetchChatsCalls, 3);
         expect(threadService.fetchThreadsCalls, 0);
         expect(chatService.fetchUnreadCountCalls, greaterThanOrEqualTo(1));
@@ -187,7 +187,7 @@ void main() {
         container.read(threadListV2StoreProvider).active.threads,
         hasLength(1),
       );
-      expect(container.read(unreadBadgeProvider).threadUnreadTotal, 2);
+      expect(container.read(unreadBadgeProvider).threadUnreadMessageCount, 2);
       expect(chatService.fetchChatsCalls, 0);
       expect(threadService.fetchThreadsCalls, 3);
       expect(threadService.fetchUnreadCountCalls, greaterThanOrEqualTo(1));
