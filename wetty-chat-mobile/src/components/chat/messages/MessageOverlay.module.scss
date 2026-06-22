@@ -33,6 +33,9 @@
   --menu-hover-bg: color-mix(in srgb, var(--ion-text-color, #000) 15%, var(--ion-background-color, #fff));
 
   --action-row-height: 63px;
+  --menu-width: 276px; /* 6 buttons × 40px + 5 gaps × 4px + 16px padding */
+  --gap: 14px;
+  --slot: calc(var(--menu-width) / 5);
 
   position: absolute;
   display: flex;
@@ -67,7 +70,7 @@
   background: var(--menu-bg);
   border-radius: 24px;
   box-shadow: var(--menu-box-shadow);
-  align-self: stretch;
+  width: var(--menu-width);
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -104,13 +107,14 @@
 
 /* Action list */
 .actionList {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
+  align-items: flex-start;
   background: var(--menu-bg);
   border-radius: 14px;
   overflow: hidden;
-  align-self: stretch;
-  width: 100%;
+  width: fit-content;
+  max-width: var(--menu-width);
   box-shadow: var(--menu-box-shadow);
   user-select: none;
   -webkit-user-select: none;
@@ -123,9 +127,13 @@
 }
 
 .actionRow {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  grid-auto-rows: var(--action-row-height);
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: var(--gap);
+  padding: 0 calc(var(--gap) / 2);
+  width: fit-content;
+  max-width: 100%;
+  min-height: var(--action-row-height);
   border-bottom: 1px solid var(--ion-background-color-step-200, rgba(0, 0, 0, 0.08));
 
   &:last-child {
@@ -141,6 +149,8 @@
   gap: 4px;
   padding: 12px 4px;
   min-width: 0;
+  flex: 0 0 calc(var(--slot) - var(--gap));
+  width: calc(var(--slot) - var(--gap));
   border: none;
   background: transparent;
   color: var(--ion-text-color, #1a1a1a);

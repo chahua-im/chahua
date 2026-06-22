@@ -249,6 +249,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     const resetMenuStyles = (el: HTMLElement) => {
       el.style.position = '';
       el.style.width = '';
+      el.style.maxWidth = '';
       el.style.top = '';
       el.style.left = '';
       el.style.right = '';
@@ -320,7 +321,6 @@ export function MessageOverlay(props: MessageOverlayProps) {
 
         applyPos(reactionBarEl, rTop, menuLocalLeft, reactionHeight);
         applyPos(actionListEl, aTop, menuLocalLeft, actionHeight);
-        actionListEl.style.width = `${reactionBarEl.offsetWidth}px`;
       } else if (reactionBarEl) {
         applyPos(
           reactionBarEl,
