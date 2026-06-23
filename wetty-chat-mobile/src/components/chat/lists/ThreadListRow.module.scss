@@ -11,6 +11,8 @@
 .active {
   color: var(--ion-color-primary-contrast);
   --background: var(--ion-color-primary);
+  --background-hover: var(--ion-color-primary);
+  --background-activated: var(--ion-color-primary-shade, var(--ion-color-primary));
   --avatar-overlay-ring-color: var(--ion-color-primary);
 
   .headerLeft,
