@@ -1,0 +1,17 @@
+when:
+  - event: pull_request
+    branch: main
+  - event: push
+    branch: main
+
+steps:
+  - name: required checks
+    image: alpine:3.20
+    commands:
+      - echo "All applicable checks passed"
+
+depends_on:
+  - name: frontend-check
+    optional: true
+  - name: backend-check
+    optional: true
