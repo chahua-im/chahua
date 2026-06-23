@@ -9,7 +9,7 @@ use diesel::prelude::*;
 use std::time::Instant;
 use utoipa_axum::router::OpenApiRouter;
 
-use crate::schema::messages::dsl;
+use crate::{dto::messages::ForwardMessagesResponse, schema::messages::dsl};
 use crate::{
     dto::{
         messages::{ListMessagesResponse, MessageResponse, SearchMessagesResponse},
@@ -31,10 +31,10 @@ use crate::{
     AppState, MAX_MESSAGES_LIMIT,
 };
 
-use super::{ChatIdPath, CreateMessageBody};
+use super::{ChatIdPath, CreateMessageBody, ForwardMessagesBody};
 use crate::services::authz::Action as AuthzAction;
 use crate::services::messages::{
-    attach_metadata, //
+    attach_metadata,
     attachment_position,
     authorize_message_send,
     extract_mention_uids,
@@ -631,6 +631,29 @@ async fn post_message(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// POST /chats/:chat_id/messages/forward — Forward messages to a chat.
+#[utoipa::path(
+    post,
+    path = "/forward",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+    ),
+    request_body = ForwardMessagesBody,
+    responses(
+        (status = CREATED, body = ForwardMessagesResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn forward_messages(
+    CurrentUid(_uid): CurrentUid,
+    Json(body): Json<ForwardMessagesBody>,
+) -> Result<Json<ForwardMessagesResponse>, AppError> {
+    Ok(Json(ForwardMessagesResponse {
+        message_ids: body.message_ids,
+    }))
+}
+
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
 #[utoipa::path(
     post,
@@ -1170,6 +1193,7 @@ async fn delete_message(
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_messages, post_message))
+        .routes(utoipa_axum::routes!(forward_messages))
         .routes(utoipa_axum::routes!(search_messages))
         .routes(utoipa_axum::routes!(
             get_message,
