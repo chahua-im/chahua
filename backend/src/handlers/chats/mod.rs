@@ -181,6 +181,12 @@ pub struct CreateMessageBody {
     pub attachment_ids: Vec<String>,
 }
 
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardMessagesBody {
+    pub message_ids: Vec<i64>,
+}
+
 // ---------------------------------------------------------------------------
 // Shared helper functions
 // ---------------------------------------------------------------------------
@@ -1465,7 +1471,7 @@ pub struct MarkAsReadBody {
     message_id: i64,
 }
 
-/// POST /chats/:chat_id/messages/read — Mark messages as read up to a specific message ID.
+/// POST /chats/:chat_id/read — Mark messages as read up to a specific message ID.
 #[utoipa::path(
     post,
     path = "/read",

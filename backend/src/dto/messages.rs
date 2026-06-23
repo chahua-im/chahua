@@ -53,6 +53,12 @@ pub struct MessageResponse {
     pub mentions: Vec<MentionInfo>,
 }
 
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardMessagesResponse {
+    pub message_ids: Vec<i64>,
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesResponse {
