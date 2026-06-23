@@ -1,0 +1,10 @@
+when:
+  - event: push
+    branch: woodpecker
+
+steps:
+  - name: build
+    image: debian
+    commands:
+      - echo "This is the build step"
+      - echo "binary-data-123" > executable
