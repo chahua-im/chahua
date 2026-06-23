@@ -4,7 +4,6 @@ import { type MessageResponse, mentionToUser, type User } from '@/api/messages';
 import { InviteMessageModal } from '@/components/invites/InviteMessageModal';
 import { ChatBubble } from './ChatBubble';
 import { type BubblePropsOverride } from './ChatBubbleBase';
-import { InviteMessageCard } from './InviteMessageCard';
 import { MessageDateSeparator } from './MessageDateSeparator';
 import { SystemMessage } from './SystemMessage';
 import type { ChatRow } from '../virtualScroll/types';
@@ -58,25 +57,6 @@ export function ChatMessageRow({
     return <SystemMessage senderName={msg.sender.name} message={msg.isDeleted ? t`[Deleted]` : (msg.message ?? '')} />;
   }
 
-  if (isInviteMessage(msg)) {
-    const code = msg.message?.trim() ?? '';
-    return (
-      <>
-        <InviteMessageCard
-          inviteCode={code}
-          sender={msg.sender}
-          isSent={msg.sender.uid === currentUserId}
-          showName={row.showName}
-          showAvatar={row.showAvatar}
-          timestamp={msg.createdAt}
-          onAvatarClick={() => onAvatarClick(msg.sender)}
-          onOpen={() => setInviteCode(code)}
-        />
-        <InviteMessageModal inviteCode={inviteCode} onDismiss={() => setInviteCode(null)} />
-      </>
-    );
-  }
-
   const sharedBubbleProps = {
     senderName: msg.sender.name ?? `User ${msg.sender.uid}`,
     isSent: msg.sender.uid === currentUserId,
@@ -99,6 +79,22 @@ export function ChatMessageRow({
         }
       : undefined,
   } as const;
+
+  if (isInviteMessage(msg)) {
+    const code = msg.message?.trim() ?? '';
+    return (
+      <>
+        <ChatBubble
+          {...sharedBubbleProps}
+          messageType="invite"
+          inviteCode={code}
+          showName={row.showName}
+          onOpen={() => setInviteCode(code)}
+        />
+        <InviteMessageModal inviteCode={inviteCode} onDismiss={() => setInviteCode(null)} />
+      </>
+    );
+  }
 
   if (isStickerMessage(msg)) {
     const stickerUrl = msg.sticker?.media.url ?? '';

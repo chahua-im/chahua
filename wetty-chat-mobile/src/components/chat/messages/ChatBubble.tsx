@@ -4,23 +4,30 @@ import { arrowUndo } from 'ionicons/icons';
 import styles from './ChatBubble.module.scss';
 import { ChatBubbleBase, type ChatBubbleBaseProps } from './ChatBubbleBase';
 import { StickerBubble, type StickerBubbleProps } from './StickerBubble';
+import { InviteBubble, type InviteBubbleProps } from './InviteBubble';
 
 const SWIPE_THRESHOLD = 60;
 const SWIPE_MAX = 80;
 const LONG_PRESS_DELAY_MS = 350;
 
-type StickerChatBubbleProps = StickerBubbleProps & {
-  messageType: 'sticker';
+type ChatBubbleInteractionProps = {
   swipeDirection?: 'left' | 'right';
   onLongPress?: (rect: DOMRect, interactionPos?: { x: number; y: number }) => void;
 };
 
-type RegularChatBubbleProps = ChatBubbleBaseProps & {
-  swipeDirection?: 'left' | 'right';
-  onLongPress?: (rect: DOMRect, interactionPos?: { x: number; y: number }) => void;
-};
+type StickerChatBubbleProps = StickerBubbleProps &
+  ChatBubbleInteractionProps & {
+    messageType: 'sticker';
+  };
 
-export type ChatBubbleProps = StickerChatBubbleProps | RegularChatBubbleProps;
+type RegularChatBubbleProps = ChatBubbleBaseProps & ChatBubbleInteractionProps;
+
+type InviteChatBubbleProps = InviteBubbleProps &
+  ChatBubbleInteractionProps & {
+    messageType: 'invite';
+  };
+
+export type ChatBubbleProps = StickerChatBubbleProps | RegularChatBubbleProps | InviteChatBubbleProps;
 
 function renderInnerBubble(props: ChatBubbleProps, bubbleRef: React.RefObject<HTMLDivElement | null>): React.ReactNode {
   if (props.messageType === 'sticker') {
@@ -39,6 +46,28 @@ function renderInnerBubble(props: ChatBubbleProps, bubbleRef: React.RefObject<HT
         timestamp={props.timestamp}
         edited={props.edited}
         isConfirmed={props.isConfirmed}
+        threadInfo={props.threadInfo}
+        onThreadClick={props.onThreadClick}
+        layout={props.layout}
+        interactionMode={props.interactionMode}
+        bubbleProps={props.bubbleProps}
+        bubbleRef={bubbleRef}
+      />
+    );
+  }
+  if (props.messageType === 'invite') {
+    return (
+      <InviteBubble
+        inviteCode={props.inviteCode}
+        senderName={props.senderName}
+        isSent={props.isSent}
+        avatarUrl={props.avatarUrl}
+        showAvatar={props.showAvatar}
+        showName={props.showName}
+        onOpen={props.onOpen}
+        onReply={props.onReply}
+        onAvatarClick={props.onAvatarClick}
+        timestamp={props.timestamp}
         threadInfo={props.threadInfo}
         onThreadClick={props.onThreadClick}
         layout={props.layout}

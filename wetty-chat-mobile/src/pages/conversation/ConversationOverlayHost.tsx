@@ -117,6 +117,12 @@ export function ConversationOverlayHost({
               );
             }
 
+            if (msg.messageType === 'invite') {
+              return (
+                <MessageOverlay messageType="invite" inviteCode={msg.message?.trim() ?? ''} {...sharedOverlayProps} />
+              );
+            }
+
             return (
               <MessageOverlay
                 messageType={msg.messageType as 'text' | 'audio'}

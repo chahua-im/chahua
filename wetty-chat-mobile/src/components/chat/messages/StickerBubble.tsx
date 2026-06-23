@@ -10,11 +10,7 @@ import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { UserAvatar } from '@/components/UserAvatar';
 import { useMouseDetected } from '@/hooks/platformHooks';
 import type { BubblePropsOverride } from './ChatBubbleBase';
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-}
+import { formatTime } from '@/utils/formatTime';
 
 export interface StickerBubbleProps {
   messageType?: 'sticker';

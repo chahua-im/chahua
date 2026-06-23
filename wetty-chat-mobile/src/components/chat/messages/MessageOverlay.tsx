@@ -7,6 +7,7 @@ import type { Attachment, MentionInfo } from '@/api/messages';
 import type { PreviewMessage } from '@/utils/messagePreview';
 import { ChatBubbleBase } from './ChatBubbleBase';
 import { StickerBubble } from './StickerBubble';
+import { InviteBubble } from './InviteBubble';
 import styles from './MessageOverlay.module.scss';
 import { MAX_DISTINCT_REACTIONS_PER_MESSAGE } from '@/constants/emojiAndStickers';
 import { getOverlayPortalTarget } from '@/utils/dom';
@@ -61,7 +62,15 @@ interface RegularOverlayProps extends MessageOverlayBaseProps {
   stickerUrl?: never;
 }
 
-export type MessageOverlayProps = StickerOverlayProps | RegularOverlayProps;
+interface InviteOverlayProps extends MessageOverlayBaseProps {
+  messageType: 'invite';
+  inviteCode: string;
+  message?: never;
+  attachments?: never;
+  stickerUrl?: never;
+}
+
+export type MessageOverlayProps = StickerOverlayProps | RegularOverlayProps | InviteOverlayProps;
 
 export function MessageOverlay(props: MessageOverlayProps) {
   const {
@@ -83,6 +92,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     onMentionClick,
   } = props;
   const isSticker = props.messageType === 'sticker';
+  const isInvite = props.messageType === 'invite';
   const contentRef = useRef<HTMLDivElement>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [presentToast] = useIonToast();
@@ -380,40 +390,40 @@ export function MessageOverlay(props: MessageOverlayProps) {
     style: { width: sourceRect.width },
   };
 
+  const commonBubbleProps = {
+    senderName,
+    isSent,
+    showAvatar: false,
+    showName,
+    timestamp,
+    layout: 'bubble-only' as const,
+    interactionMode: 'read-only' as const,
+    bubbleProps: bubbleCloneProps,
+  };
+
   let bubbleClone;
-  if (props.messageType === 'sticker') {
+  if (props.messageType === 'invite') {
+    bubbleClone = <InviteBubble {...commonBubbleProps} inviteCode={props.inviteCode} />;
+  } else if (props.messageType === 'sticker') {
     bubbleClone = (
       <StickerBubble
+        {...commonBubbleProps}
         stickerUrl={props.stickerUrl}
-        senderName={senderName}
-        isSent={isSent}
-        showAvatar={false}
         replyTo={replyTo}
-        timestamp={timestamp}
         edited={edited}
         isConfirmed={isConfirmed}
-        layout="bubble-only"
-        interactionMode="read-only"
-        bubbleProps={bubbleCloneProps}
       />
     );
   } else {
     bubbleClone = (
       <ChatBubbleBase
+        {...commonBubbleProps}
         messageType={props.messageType}
-        senderName={senderName}
         message={props.message}
-        isSent={isSent}
-        showName={showName}
-        showAvatar={false}
         replyTo={replyTo}
-        timestamp={timestamp}
         edited={edited}
         isConfirmed={isConfirmed}
         attachments={props.attachments}
-        layout="bubble-only"
-        interactionMode="read-only"
-        bubbleProps={bubbleCloneProps}
         mentions={mentions}
         currentUserUid={currentUserUid}
         onMentionClick={onMentionClick}
@@ -433,8 +443,9 @@ export function MessageOverlay(props: MessageOverlayProps) {
         className={`${styles.content} ${isSent ? styles.contentSent : ''} ${styles.contentVisible}`}
         style={{ top: sourceRect.top, left: sourceRect.left, visibility: 'hidden' }}
       >
-        {/* Reaction bar — hidden for stickers */}
+        {/* Reaction bar — hidden for stickers and invites */}
         {!isSticker &&
+          !isInvite &&
           reactions &&
           (() => {
             const currentReactionsCount = reactions.currentMessageReactions?.length ?? 0;

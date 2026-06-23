@@ -65,6 +65,7 @@
   width: 100%;
   background: transparent;
   padding: 0;
+  position: relative;
 }
 
 .cardDisabled {
@@ -81,6 +82,22 @@
   --background: var(--ion-background-color-step-100, #f0f0f0);
   border: 1px solid var(--ion-color-light-shade);
   box-sizing: border-box;
+}
+
+.inviteTimestamp {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 10px;
+  padding: 2px 6px;
+  color: #fff;
+  font-size: 11px;
+  opacity: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  z-index: 1;
 }
 
 .cardDisabled .ionCard {

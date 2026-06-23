@@ -88,5 +88,9 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
     );
   }
 
+  if (input.messageType === 'invite') {
+    return actions.filter((action) => action.key === 'reply' || action.key === 'pin' || action.key === 'delete');
+  }
+
   return actions;
 }

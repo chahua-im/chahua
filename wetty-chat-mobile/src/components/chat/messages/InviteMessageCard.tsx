@@ -7,6 +7,7 @@ import type { User } from '@/api/messages';
 import { UserAvatar } from '@/components/UserAvatar';
 import { useInvitePreview } from '@/components/invites/useInvitePreview';
 import styles from './InviteMessageCard.module.scss';
+import { formatTime } from '@/utils/formatTime';
 
 interface InviteMessageCardProps {
   inviteCode: string;
@@ -17,11 +18,6 @@ interface InviteMessageCardProps {
   timestamp: string;
   onAvatarClick?: () => void;
   onOpen: () => void;
-}
-
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 type CardBodyViewState =
@@ -110,7 +106,7 @@ export function InviteMessageCard({
         <div className={styles.avatarSpacer} />
       )}
 
-      <div className={styles.content}>
+      <div className={`${styles.content} inviteContent`}>
         {showName && !isSent && <div className={styles.senderName}>{senderName}</div>}
 
         <div className={`${styles.cardRow} ${isSent ? styles.sentRow : ''}`}>
@@ -129,9 +125,8 @@ export function InviteMessageCard({
               </IonCardHeader>
               <InviteCardBody viewState={bodyViewState} />
             </IonCard>
+            {timestamp && <span className={styles.inviteTimestamp}>{formatTime(timestamp)}</span>}
           </button>
-
-          <div className={styles.timestamp}>{formatTime(timestamp)}</div>
         </div>
       </div>
     </div>

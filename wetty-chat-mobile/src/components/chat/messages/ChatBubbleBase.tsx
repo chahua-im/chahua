@@ -13,6 +13,7 @@ import { t } from '@lingui/core/macro';
 import { useSelector } from 'react-redux';
 import styles from './ChatBubble.module.scss';
 import reactionStyles from './ReactionPill.module.scss';
+import { formatTime } from '@/utils/formatTime';
 import type { Attachment, MentionInfo, ReactionSummary, UserGroupTagInfo } from '@/api/messages';
 import { ImageViewer } from '@/components/chat/messages/media/ImageViewer';
 import { formatMessagePreview, type PreviewMessage, getNotificationPreviewLabels } from '@/utils/messagePreview';
@@ -33,11 +34,6 @@ import {
   getChatBaseFont,
   getChatBubbleMaxWidth,
 } from '@/utils/chatTextMeasure';
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-}
 
 function isImageAttachment(attachment: Attachment) {
   return (
