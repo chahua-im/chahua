@@ -593,13 +593,13 @@ async fn post_message(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-/// POST /chats/:chat_id/messages/forward — Forward messages to a chat.
+/// POST /chats/:dest_chat_id/messages/forward — Forward messages to a chat.
 #[utoipa::path(
     post,
     path = "/forward",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = i64, Path, description = "Destination Chat ID"),
     ),
     request_body = ForwardMessagesBody,
     responses(
@@ -608,11 +608,41 @@ async fn post_message(
     security(("uid_header" = []), ("bearer_jwt" = [])),
 )]
 async fn forward_messages(
-    CurrentUid(_uid): CurrentUid,
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath {
+        chat_id: dest_chat_id,
+    }): Path<ChatIdPath>,
+    mut conn: DbConn,
     Json(body): Json<ForwardMessagesBody>,
 ) -> Result<Json<ForwardMessagesResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, body.source_chat_id, uid)?;
+    check_membership(conn, dest_chat_id, uid)?;
+
+    let messages: Vec<Message> = messages::table
+        .filter(
+            dsl::chat_id
+                .eq(body.source_chat_id)
+                .and(dsl::id.eq_any(&body.message_ids))
+                .and(dsl::deleted_at.is_null())
+                .and(dsl::is_published.eq(true)),
+        )
+        .order(dsl::id.asc())
+        .select(Message::as_select())
+        .load(conn)?;
+
+    if messages.len() != body.message_ids.len() {
+        return Err(AppError::BadRequest("Invalid message IDs"));
+    }
+
+    let messages_vec = attach_metadata(conn, messages, &state, uid).await;
+
+
     Ok(Json(ForwardMessagesResponse {
-        message_ids: body.message_ids,
+        source_chat_id: body.source_chat_id,
+        messages: messages_vec,
     }))
 }
 
