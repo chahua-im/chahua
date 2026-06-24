@@ -56,7 +56,10 @@ pub struct MessageResponse {
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardMessagesResponse {
-    pub message_ids: Vec<i64>,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub source_chat_id: i64,
+    pub messages: Vec<MessageResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
