@@ -850,6 +850,9 @@ pub async fn attach_metadata(
                 .filter(m_dsl::id.eq_any(&fwd_message_ids))
                 .select(crate::models::Message::as_select())
                 .load(conn)
+                .map_err(|e| {
+                    tracing::warn!(error = ?e, "failed to load forwarded-from messages");
+                })
                 .unwrap_or_default()
                 .into_iter()
                 .map(|m: crate::models::Message| (m.id, m))
@@ -1196,33 +1199,35 @@ pub async fn attach_metadata(
                     let original = fwd_messages_map.get(&fwd_msg_id)?;
                     let original_reply_to = original.reply_to_id.and_then(|reply_id| {
                         fwd_reply_messages_map.get(&reply_id).map(|reply_msg| {
-                            Box::new(MessagePreview {
-                                id: reply_msg.id,
-                                client_generated_id: reply_msg.client_generated_id.clone(),
-                                created_at: reply_msg.created_at,
-                                sender: build_sender(
-                                    reply_msg.sender_uid,
-                                    &user_avatars,
-                                    &user_profiles,
-                                ),
-                                message: if reply_msg.deleted_at.is_some() {
-                                    None
-                                } else {
-                                    reply_msg.message.clone()
+                            let reply_sticker_emoji_map: std::collections::HashMap<i64, String> =
+                                sticker_rows
+                                    .iter()
+                                    .map(|(id, (sticker, _))| (*id, sticker.emoji.clone()))
+                                    .collect();
+                            Box::new(build_message_preview(
+                                MessagePreviewInput {
+                                    id: reply_msg.id,
+                                    client_generated_id: reply_msg.client_generated_id.clone(),
+                                    created_at: reply_msg.created_at,
+                                    sender: build_sender(
+                                        reply_msg.sender_uid,
+                                        &user_avatars,
+                                        &user_profiles,
+                                    ),
+                                    message: reply_msg.message.clone(),
+                                    message_type: reply_msg.message_type.clone(),
+                                    sticker_id: reply_msg.sticker_id,
+                                    attachments: Vec::new(),
+                                    deleted_at: reply_msg.deleted_at,
+                                    mention_source: None,
+                                    mention_uids: None,
+                                    forwarded_from_message_id: None,
                                 },
-                                message_type: reply_msg.message_type.clone(),
-                                sticker: reply_msg.sticker_id.and_then(|sid| {
-                                    sticker_rows.get(&sid).map(|(sticker, _)| {
-                                        MessagePreviewSticker {
-                                            emoji: sticker.emoji.clone(),
-                                        }
-                                    })
-                                }),
-                                is_deleted: reply_msg.deleted_at.is_some(),
-                                attachments: Vec::new(),
-                                mentions: Vec::new(),
-                                forwarded_from_name: None,
-                            })
+                                &reply_sticker_emoji_map,
+                                &user_avatars,
+                                &user_profiles,
+                                &fwd_messages_map,
+                            ))
                         })
                     });
                     Some(ForwardedFromInfo {

@@ -1,6 +1,6 @@
 import type { Ref } from 'react';
 import { IonIcon } from '@ionic/react';
-import { arrowRedoOutline, arrowUndo, chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
+import { arrowUndo, chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { StickerImage } from '@/components/shared/StickerImage';
 import { useSelector } from 'react-redux';
@@ -11,6 +11,7 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { useMouseDetected } from '@/hooks/platformHooks';
 import type { BubblePropsOverride } from './ChatBubbleBase';
 import { formatTime } from '@/utils/formatTime';
+import { ForwardedLabel } from './ForwardedLabel';
 
 export interface StickerBubbleProps {
   messageType?: 'sticker';
@@ -78,22 +79,14 @@ export function StickerBubble({
         .join(' ')}
       style={bubbleStyle}
     >
-      {forwardedFrom && (
-        <div className={styles.forwardedLabel}>
-          <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
-          <span>{t`Forwarded from ${forwardedFrom.sender.name ?? 'Unknown'}`}</span>
-        </div>
-      )}
+      {forwardedFrom && <ForwardedLabel name={forwardedFrom.sender.name} />}
       {replyTo && (
         <div
           className={`${styles.replyPreview} ${interactive && onReplyTap ? styles.replyPreviewTappable : ''}`}
           onClick={interactive ? onReplyTap : undefined}
         >
           {replyTo.forwardedFromName ? (
-            <div className={styles.forwardedLabel}>
-              <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
-              {t`Forwarded from ${replyTo.forwardedFromName}`}
-            </div>
+            <ForwardedLabel name={replyTo.forwardedFromName} />
           ) : (
             <div className={styles.replyPreviewName}>{replyTo.senderName}</div>
           )}

@@ -1,7 +1,6 @@
 import { useMemo, useState, type CSSProperties, type HTMLAttributes, type Ref } from 'react';
 import { IonIcon } from '@ionic/react';
 import {
-  arrowRedoOutline,
   arrowUndo,
   chatbubbles,
   checkmarkCircle,
@@ -36,6 +35,7 @@ import {
   getChatBubbleMaxWidth,
 } from '@/utils/chatTextMeasure';
 
+import { ForwardedLabel } from './ForwardedLabel';
 function isImageAttachment(attachment: Attachment) {
   return (
     attachment.kind.startsWith('image/') ||
@@ -397,15 +397,10 @@ export function ChatBubbleBase({
             ))}
         </div>
       )}
-      {forwardedFrom && (
-        <div className={styles.forwardedLabel}>
-          <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
-          <span>{t`Forwarded from ${forwardedFrom.sender.name ?? 'Unknown'}`}</span>
-        </div>
-      )}
+      {forwardedFrom && <ForwardedLabel name={forwardedFrom.sender.name} />}
       {forwardedFrom?.originalReplyTo && (
         <div className={styles.replyPreview}>
-          <div className={styles.replyPreviewName}>{forwardedFrom.originalReplyTo.sender.name ?? 'Unknown'}</div>
+          <div className={styles.replyPreviewName}>{forwardedFrom.originalReplyTo.sender.name ?? t`Unknown`}</div>
           <div className={styles.replyPreviewText}>
             {formatMessagePreview(forwardedFrom.originalReplyTo, getNotificationPreviewLabels(locale))}
           </div>
@@ -417,10 +412,7 @@ export function ChatBubbleBase({
           onClick={interactive ? onReplyTap : undefined}
         >
           {replyTo.forwardedFromName ? (
-            <div className={styles.forwardedLabel}>
-              <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
-              {t`Forwarded from ${replyTo.forwardedFromName}`}
-            </div>
+            <ForwardedLabel name={replyTo.forwardedFromName} />
           ) : (
             <div className={styles.replyPreviewName}>{replyTo.senderName}</div>
           )}
