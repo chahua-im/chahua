@@ -1,11 +1,12 @@
 import { IonIcon } from '@ionic/react';
 import { t } from '@lingui/core/macro';
-import { arrowRedoOutline, closeCircle } from 'ionicons/icons';
+import { closeCircle } from 'ionicons/icons';
 import { useSelector } from 'react-redux';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { useChatContext } from '@/components/chat/messages/ChatContext';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import type { EditingMessage, ReplyTo } from './types';
+import { ForwardedLabel } from '@/components/chat/messages/ForwardedLabel';
 import styles from './MessageComposeBar.module.scss';
 
 interface ComposeContextBannerProps {
@@ -46,10 +47,7 @@ export function ComposeContextBanner({ editing, replyTo, onCancelEdit, onCancelR
     <div className={styles.replyPreview}>
       <div className={`${styles.replyText} ${styles.replyPreviewTappable}`} onClick={handleJumpToReply}>
         {replyTo.forwardedFromName ? (
-          <span className={styles.forwardedLabel}>
-            <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
-            {t`Forwarded from ${replyTo.forwardedFromName}`}
-          </span>
+          <ForwardedLabel name={replyTo.forwardedFromName} as="span" />
         ) : (
           <span className={styles.replyUsername}>{t`Replying to ${replyTo.username}`}</span>
         )}

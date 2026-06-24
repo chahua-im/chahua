@@ -517,7 +517,10 @@ async fn get_message(
         .ok_or(AppError::NotFound("Message not found"))?;
 
     let messages_vec = attach_metadata(conn, vec![message], &state, uid).await;
-    let response = messages_vec.into_iter().next().unwrap();
+    let response = messages_vec
+        .into_iter()
+        .next()
+        .ok_or(AppError::Internal("Failed to build message response"))?;
 
     Ok(Json(response))
 }
@@ -619,6 +622,112 @@ async fn post_message(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
+/// Load and validate a thread root message.
+/// Returns NotFound if the message doesn't exist, BadRequest if it's not a text message.
+fn load_thread_root_message(
+    conn: &mut diesel::PgConnection,
+    thread_id: i64,
+    chat_id: i64,
+) -> Result<Message, AppError> {
+    let root: Message = messages::table
+        .filter(
+            dsl::id
+                .eq(thread_id)
+                .and(dsl::chat_id.eq(chat_id))
+                // Removed: .and(dsl::deleted_at.is_null()) — deleted roots must stay reachable.
+                .and(dsl::is_published.eq(true)),
+        )
+        .select(Message::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Thread root message not found"))?;
+    // Block creating new threads on deleted messages that have no existing thread.
+    // A deleted message with has_thread=false means the discussion is fully terminated.
+    if root.deleted_at.is_some() && !root.has_thread {
+        return Err(AppError::BadRequest(
+            "Cannot create a thread on a deleted message with no existing replies",
+        ));
+    }
+
+    // Skip message-type check for deleted roots - the thread already exists.
+    // Invariant: only Text messages can ever acquire has_thread=true (enforced in
+    // post_thread_message above), so a deleted root is guaranteed to be Text and
+    // does not need re-validation. We skip solely because message_type is not
+    // reliable for deleted rows that may have been redacted.
+    if root.deleted_at.is_none() && root.message_type != MessageType::Text {
+        return Err(AppError::BadRequest(
+            "Threads can only be created on text messages",
+        ));
+    }
+    Ok(root)
+}
+
+/// Best-effort thread-update broadcast: log a warning on failure instead of
+/// propagating the error. Thread-update delivery must never roll back an
+/// otherwise-successful message create/delete/forward.
+fn broadcast_thread_update_safely(
+    conn: &mut diesel::PgConnection,
+    state: &AppState,
+    chat_id: i64,
+    thread_id: i64,
+) {
+    if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
+        conn,
+        &state.ws_registry,
+        chat_id,
+        thread_id,
+    ) {
+        tracing::warn!(
+            chat_id,
+            thread_id,
+            ?err,
+            "failed to broadcast thread update to subscribers"
+        );
+    }
+}
+
+/// Clone all attachments belonging to `source_message_id` into new attachment rows
+/// (message_id = None; send_prepared_message links them later). Returns generated
+/// attachment IDs in original order. Used by message forwarding.
+async fn clone_attachments_for_forward(
+    conn: &mut diesel::PgConnection,
+    source_message_id: i64,
+    id_gen: &crate::utils::ids::IdGen,
+) -> Result<Vec<i64>, AppError> {
+    use crate::schema::attachments::dsl as a_dsl;
+    let original_attachments: Vec<crate::models::Attachment> = attachments::table
+        .filter(a_dsl::message_id.eq(source_message_id))
+        .select(crate::models::Attachment::as_select())
+        .load(conn)?;
+
+    let mut cloned_attachment_ids: Vec<i64> = Vec::new();
+    for att in &original_attachments {
+        let new_id = crate::utils::ids::next_message_id(id_gen)
+            .await
+            .map_err(|e| {
+                tracing::error!("next_message_id for forwarded attachment: {:?}", e);
+                AppError::Internal("Failed to generate attachment ID")
+            })?;
+        // Insert with message_id = None; send_prepared_message will link them.
+        diesel::insert_into(attachments::table)
+            .values(&crate::models::NewAttachment {
+                id: new_id,
+                message_id: None,
+                file_name: att.file_name.clone(),
+                kind: att.kind.clone(),
+                external_reference: att.external_reference.clone(),
+                size: att.size,
+                created_at: att.created_at,
+                deleted_at: att.deleted_at,
+                width: att.width,
+                height: att.height,
+                order: att.order,
+            })
+            .execute(conn)?;
+        cloned_attachment_ids.push(new_id);
+    }
+    Ok(cloned_attachment_ids)
+}
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
 #[utoipa::path(
     post,
@@ -646,29 +755,9 @@ pub(super) async fn post_thread_message(
     check_membership(conn, chat_id, uid)?;
     validate_client_message_type(&body.message_type)?;
 
-    // Load root message: validate existence. Allow deleted roots only when a
-    // thread already exists (has_thread=true) so existing discussions stay usable.
-    // A deleted message with has_thread=false means the discussion is fully
-    // terminated, so it's excluded here and surfaces as NotFound.
-
-    let root_msg: Message = messages::table
-        .filter(
-            dsl::id
-                .eq(thread_id)
-                .and(dsl::chat_id.eq(chat_id))
-                .and(dsl::is_published.eq(true))
-                .and(dsl::deleted_at.is_null().or(dsl::has_thread.eq(true))),
-        )
-        .select(Message::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Thread root message not found"))?;
-
-    if root_msg.message_type != MessageType::Text {
-        return Err(AppError::BadRequest(
-            "Threads can only be created on text messages",
-        ));
-    }
+    // Load root message: validate existence and message type. Allow deleted roots so
+    // threads remain usable (see load_thread_root_message for the deleted-root invariant).
+    let root_msg = load_thread_root_message(conn, thread_id, chat_id)?;
     let attachment_ids: Vec<i64> = body
         .attachment_ids
         .iter()
@@ -811,19 +900,7 @@ pub(super) async fn post_thread_message(
             state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
         }
 
-        if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            thread_id,
-        ) {
-            tracing::warn!(
-                chat_id,
-                thread_id,
-                ?err,
-                "failed to broadcast thread update to subscribers"
-            );
-        }
+        broadcast_thread_update_safely(conn, &state, chat_id, thread_id);
     }
 
     Ok((StatusCode::CREATED, Json(response)))
@@ -1068,19 +1145,7 @@ async fn delete_message(
     // last_reply_at) to subscribers for the thread-list view. The parent-chat bubble
     // badge is refreshed for ALL members by the MessageUpdated(root) broadcast below.
     if let Some(reply_root_id) = response.reply_root_id {
-        if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            reply_root_id,
-        ) {
-            tracing::warn!(
-                chat_id,
-                reply_root_id,
-                ?err,
-                "failed to broadcast thread update after reply deletion"
-            );
-        }
+        broadcast_thread_update_safely(conn, &state, chat_id, reply_root_id);
     }
 
     // Broadcast the updated root message to ALL members so the thread-reply
@@ -1179,26 +1244,7 @@ async fn forward_message(
 
     // If forwarding into a thread, validate the root message exists and is a text message.
     let thread_root: Option<Message> = if let Some(thread_id) = body.thread_id {
-        {
-            let root: Message = messages::table
-                .filter(
-                    dsl::id
-                        .eq(thread_id)
-                        .and(dsl::chat_id.eq(target_chat_id))
-                        .and(dsl::deleted_at.is_null())
-                        .and(dsl::is_published.eq(true)),
-                )
-                .select(Message::as_select())
-                .first(conn)
-                .optional()?
-                .ok_or(AppError::NotFound("Thread root message not found"))?;
-            if root.message_type != MessageType::Text {
-                return Err(AppError::BadRequest(
-                    "Threads can only be created on text messages",
-                ));
-            }
-            Some(root)
-        }
+        Some(load_thread_root_message(conn, thread_id, target_chat_id)?)
     } else {
         None
     };
@@ -1229,38 +1275,8 @@ async fn forward_message(
 
         // Clone attachments from the original message BEFORE send_prepared_message
         // so the WebSocket broadcast includes them.
-        use crate::schema::attachments::dsl as a_dsl;
-        let original_attachments: Vec<crate::models::Attachment> = attachments::table
-            .filter(a_dsl::message_id.eq(original.id))
-            .select(crate::models::Attachment::as_select())
-            .load(conn)?;
-
-        let mut cloned_attachment_ids: Vec<i64> = Vec::new();
-        for att in &original_attachments {
-            let new_id = crate::utils::ids::next_message_id(state.id_gen.as_ref())
-                .await
-                .map_err(|e| {
-                    tracing::error!("next_message_id for forwarded attachment: {:?}", e);
-                    AppError::Internal("Failed to generate attachment ID")
-                })?;
-            // Insert with message_id = None; send_prepared_message will link them.
-            diesel::insert_into(attachments::table)
-                .values(&crate::models::NewAttachment {
-                    id: new_id,
-                    message_id: None,
-                    file_name: att.file_name.clone(),
-                    kind: att.kind.clone(),
-                    external_reference: att.external_reference.clone(),
-                    size: att.size,
-                    created_at: att.created_at,
-                    deleted_at: att.deleted_at,
-                    width: att.width,
-                    height: att.height,
-                    order: att.order,
-                })
-                .execute(conn)?;
-            cloned_attachment_ids.push(new_id);
-        }
+        let cloned_attachment_ids =
+            clone_attachments_for_forward(conn, original.id, state.id_gen.as_ref()).await?;
 
         let send_result = super::send_prepared_message(
             conn,
@@ -1348,21 +1364,7 @@ async fn forward_message(
                 super::SendMessageOutcome::Created(created) => {
                     // If forwarding into a thread, broadcast thread update to subscribers.
                     if let Some(thread_id) = body.thread_id {
-                        if let Err(err) =
-                            crate::services::threads::broadcast_thread_update_to_subscribers(
-                                conn,
-                                &state.ws_registry,
-                                target_chat_id,
-                                thread_id,
-                            )
-                        {
-                            tracing::warn!(
-                                target_chat_id,
-                                thread_id,
-                                ?err,
-                                "failed to broadcast thread update after forward"
-                            );
-                        }
+                        broadcast_thread_update_safely(conn, &state, target_chat_id, thread_id);
                     }
                     if let Some(search_service) = state.message_search.clone() {
                         search_service.upsert_message_best_effort(created.inserted_message.clone());
@@ -1384,7 +1386,7 @@ async fn forward_message(
             Ok((StatusCode::CREATED, Json(response)).into_response())
         }
         Err(e) => {
-            diesel::sql_query("ROLLBACK").execute(conn)?;
+            let _ = diesel::sql_query("ROLLBACK").execute(conn);
             Err(e)
         }
     }

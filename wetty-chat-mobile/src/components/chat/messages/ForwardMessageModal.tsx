@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-
+import { useForwardTargetList } from './useForwardTargetList';
 import {
   IonButton,
   IonButtons,
@@ -19,14 +19,17 @@ import {
 import { chatbubbleOutline } from 'ionicons/icons';
 import { Plural, Trans } from '@lingui/react/macro';
 import { t } from '@lingui/core/macro';
-import { getChats, type ChatListEntry } from '@/api/chats';
+import type { ChatListEntry } from '@/api/chats';
 import { UserAvatar } from '@/components/UserAvatar';
 import { OverlayAvatar } from '@/components/OverlayAvatar';
 import { getChatDisplayName } from '@/utils/chatDisplay';
 import { forwardMessage, type MessageResponse } from '@/api/messages';
-import { getThreads, type ThreadListItem } from '@/api/threads';
+import type { ThreadListItem } from '@/api/threads';
+
 import { useIsDesktop } from '@/hooks/platformHooks';
 import styles from './ForwardMessageModal.module.scss';
+
+const THREAD_PREVIEW_MAX_LENGTH = 60;
 
 interface ForwardMessageModalProps {
   isOpen: boolean;
@@ -42,11 +45,9 @@ type UnifiedItem =
 export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: ForwardMessageModalProps) {
   const [presentToast] = useIonToast();
   const [forwarding, setForwarding] = useState(false);
-  const [chats, setChats] = useState<ChatListEntry[]>([]);
-  const [threads, setThreads] = useState<ThreadListItem[]>([]);
-  const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
   const isDesktop = useIsDesktop();
+  const { chats, threads, loading, error: fetchError } = useForwardTargetList(isOpen);
 
   const showToast = useCallback(
     (msg: string, duration = 3000) => {
@@ -55,37 +56,16 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
     [presentToast],
   );
 
-  // Fetch non-archived chats and subscribed threads when modal opens.
+  // Show toast when fetch fails.
   useEffect(() => {
-    if (!isOpen) {
-      setChats([]);
-      setThreads([]);
-      setSearchText('');
-      return;
+    if (fetchError) {
+      showToast(fetchError);
     }
+  }, [fetchError, showToast]);
 
-    let cancelled = false;
-    setLoading(true);
-
-    Promise.all([getChats({ archived: false }), getThreads({ limit: 50, archived: false })])
-      .then(([chatRes, threadRes]) => {
-        if (!cancelled) {
-          setChats(chatRes.data.chats);
-          setThreads(threadRes.data.threads);
-        }
-      })
-      .catch((err) => {
-        console.warn('Failed to load chats for forward modal', err);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+  // Reset search when modal closes.
+  useEffect(() => {
+    if (!isOpen) setSearchText('');
   }, [isOpen]);
 
   // Merge chats and threads into a single sorted list.
@@ -143,8 +123,8 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
         showToast(t`Message forwarded`, 2000);
         onClose();
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : t`Failed to forward message`;
-        showToast(msg);
+        const errorMsg = err instanceof Error ? err.message : t`Failed to forward message`;
+        showToast(errorMsg);
       } finally {
         setForwarding(false);
       }
@@ -227,7 +207,9 @@ export function ForwardMessageModal({ isOpen, onClose, message, sourceChatId }: 
                   <IonLabel>
                     <h3>{getChatDisplayName(thread.chatId, thread.chatName)}</h3>
                     <p>
-                      {thread.threadRootMessage.message ? thread.threadRootMessage.message.slice(0, 60) : t`Thread`}
+                      {thread.threadRootMessage.message
+                        ? thread.threadRootMessage.message.slice(0, THREAD_PREVIEW_MAX_LENGTH)
+                        : t`Thread`}
                     </p>
                     <p className={styles.threadReplyCount}>
                       <IonIcon icon={chatbubbleOutline} className={styles.threadReplyIcon} />

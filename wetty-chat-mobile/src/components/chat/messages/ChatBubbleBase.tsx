@@ -1,7 +1,6 @@
 import { useMemo, useState, type CSSProperties, type HTMLAttributes, type Ref } from 'react';
 import { IonIcon } from '@ionic/react';
 import {
-  arrowRedoOutline,
   chatbubbles,
   checkmarkCircle,
   checkmarkCircleOutline,
@@ -38,6 +37,7 @@ import {
   getChatBubbleMaxWidth,
 } from '@/utils/chatTextMeasure';
 
+import { ForwardedLabel } from './ForwardedLabel';
 function isImageAttachment(attachment: Attachment) {
   return (
     attachment.kind.startsWith('image/') ||
@@ -416,12 +416,7 @@ export function ChatBubbleBase({
             ))}
         </div>
       )}
-      {forwardedFrom && (
-        <div className={styles.forwardedLabel}>
-          <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
-          <span>{t`Forwarded from ${forwardedFrom.sender.name ?? t`Unknown`}`}</span>
-        </div>
-      )}
+      {forwardedFrom && <ForwardedLabel name={forwardedFrom.sender.name} />}
       {forwardedFrom?.originalReplyTo && (
         <ReplyPreview
           replyTo={{

@@ -1,4 +1,6 @@
 import type { MessageType } from '@/api/messages';
+import { isFeatureEnabled } from '@/features';
+
 export type OverlayActionKey =
   | 'copy'
   | 'copy-link'
@@ -58,7 +60,9 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 5. Forward
-  actions.push({ key: 'forward' });
+  if (isFeatureEnabled('messageForward') && !input.isDeleted) {
+    actions.push({ key: 'forward' });
+  }
 
   // 6. Edit
   if (input.isOwn && !input.isDeleted && !input.isForwarded && !audioMessage && !stickerMessage) {
