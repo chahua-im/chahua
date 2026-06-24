@@ -3,7 +3,6 @@ pipeline {
 
   options {
     buildDiscarder(logRotator(numToKeepStr: '30'))
-    withChecks(name: 'wetty-chat / required-checks', includeStage: true)
   }
 
   stages {
@@ -125,6 +124,32 @@ npm run test:run
       steps {
         echo 'All applicable checks passed'
       }
+    }
+  }
+
+  post {
+    success {
+      publishChecks name: 'wetty-chat / required-checks',
+        title: 'Required Checks',
+        summary: 'All applicable checks passed',
+        status: 'COMPLETED',
+        conclusion: 'SUCCESS'
+    }
+
+    failure {
+      publishChecks name: 'wetty-chat / required-checks',
+        title: 'Required Checks',
+        summary: 'One or more applicable checks failed',
+        status: 'COMPLETED',
+        conclusion: 'FAILURE'
+    }
+
+    aborted {
+      publishChecks name: 'wetty-chat / required-checks',
+        title: 'Required Checks',
+        summary: 'Build was aborted',
+        status: 'COMPLETED',
+        conclusion: 'CANCELED'
     }
   }
 }
