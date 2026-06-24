@@ -32,6 +32,8 @@ spec:
             script: '''#!/usr/bin/env bash
 set -euo pipefail
 
+git config --global --add safe.directory "$PWD"
+
 if git rev-parse HEAD^ >/dev/null 2>&1; then
   git diff --name-only HEAD^ HEAD
 else
