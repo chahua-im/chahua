@@ -377,5 +377,116 @@ exit "$test_status"
         }
       }
     }
+
+    stage('Build PWA Artifacts') {
+      when {
+        allOf {
+          anyOf {
+            branch 'main'
+            branch 'woodpecker'
+          }
+          anyOf {
+            changeset 'Jenkinsfile'
+            changeset 'wetty-chat-mobile/**'
+          }
+        }
+      }
+
+      agent {
+        kubernetes {
+          defaultContainer 'node'
+          yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: node
+      image: node:22-bookworm
+      command:
+        - cat
+      tty: true
+'''
+        }
+      }
+
+      stages {
+        stage('Install Dependencies') {
+          steps {
+            dir('wetty-chat-mobile') {
+              sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+npm ci
+
+if ! command -v zip >/dev/null; then
+  apt-get update
+  apt-get install -y --no-install-recommends zip
+fi
+              '''
+            }
+          }
+        }
+
+        stage('Typecheck') {
+          steps {
+            dir('wetty-chat-mobile') {
+              sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+npm run typecheck
+              '''
+            }
+          }
+        }
+
+        stage('Build') {
+          parallel {
+            stage('Staging') {
+              steps {
+                dir('wetty-chat-mobile') {
+                  sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+export CI_BUILD_VERSION="${BUILD_NUMBER}"
+npx vite build -c vite.config.staging.ts --mode development
+                  '''
+                }
+              }
+            }
+
+            stage('Prod') {
+              steps {
+                dir('wetty-chat-mobile') {
+                  sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+export CI_BUILD_VERSION="${BUILD_NUMBER}"
+npx vite build --base=/ --outDir prod-dist -c vite.config.prod.ts
+                  '''
+                }
+              }
+            }
+          }
+        }
+
+        stage('Archive') {
+          steps {
+            dir('wetty-chat-mobile') {
+              sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+rm -f chahua-staging.zip chahua-prod.zip
+(cd dist && zip -qr ../chahua-staging.zip .)
+(cd prod-dist && zip -qr ../chahua-prod.zip .)
+              '''
+            }
+
+            archiveArtifacts artifacts: 'wetty-chat-mobile/chahua-staging.zip, wetty-chat-mobile/chahua-prod.zip',
+              fingerprint: true,
+              onlyIfSuccessful: true
+          }
+        }
+      }
+    }
   }
 }
