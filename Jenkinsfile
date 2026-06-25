@@ -36,6 +36,12 @@ spec:
           stages {
             stage('Install Dependencies') {
               steps {
+                publishChecks name: 'checks / PWA',
+                  title: 'PWA',
+                  summary: 'Running PWA checks',
+                  status: 'IN_PROGRESS',
+                  conclusion: 'NONE'
+
                 dir('wetty-chat-mobile') {
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
@@ -109,8 +115,26 @@ npm run test:run
           }
 
           post {
+            failure {
+              publishChecks name: 'checks / PWA',
+                title: 'PWA',
+                summary: 'PWA checks failed',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE'
+            }
+
+            aborted {
+              publishChecks name: 'checks / PWA',
+                title: 'PWA',
+                summary: 'PWA checks were aborted',
+                status: 'COMPLETED',
+                conclusion: 'CANCELED'
+            }
+
             always {
-              junit allowEmptyResults: true, testResults: 'wetty-chat-mobile/test_output/report.xml'
+              junit allowEmptyResults: true,
+                checksName: 'checks / PWA',
+                testResults: 'wetty-chat-mobile/test_output/report.xml'
             }
           }
         }
@@ -143,6 +167,12 @@ spec:
           stages {
             stage('Install Tools') {
               steps {
+                publishChecks name: 'checks / Backend',
+                  title: 'Backend',
+                  summary: 'Running backend checks',
+                  status: 'IN_PROGRESS',
+                  conclusion: 'NONE'
+
                 dir('backend') {
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
@@ -193,8 +223,26 @@ cargo nextest run --profile ci
           }
 
           post {
+            failure {
+              publishChecks name: 'checks / Backend',
+                title: 'Backend',
+                summary: 'Backend checks failed',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE'
+            }
+
+            aborted {
+              publishChecks name: 'checks / Backend',
+                title: 'Backend',
+                summary: 'Backend checks were aborted',
+                status: 'COMPLETED',
+                conclusion: 'CANCELED'
+            }
+
             always {
-              junit allowEmptyResults: true, testResults: 'backend/target/**/rust-test-report.xml'
+              junit allowEmptyResults: true,
+                checksName: 'checks / Backend',
+                testResults: 'backend/target/**/rust-test-report.xml'
             }
           }
         }
