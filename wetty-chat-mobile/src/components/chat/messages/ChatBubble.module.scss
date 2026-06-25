@@ -533,6 +533,11 @@
   }
 }
 
+.threadIndicatorMediaOnly {
+  border-top: none;
+  padding-top: 0;
+}
+
 .sent .threadIndicator {
   border-top-color: rgba(var(--ion-color-primary-contrast-rgb, 255, 255, 255), 0.2);
   justify-content: flex-end;

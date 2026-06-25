@@ -177,7 +177,9 @@ export function ChatBubbleBase({
     styles.attachmentsContainer,
     (styles as any).edgeToEdgeHorizontal,
     !hasTopContent ? (styles as any).edgeToEdgeTop : (styles as any).hasTopContent,
-    !hasBottomContent ? (styles as any).edgeToEdgeBottom : (styles as any).hasBottomContent,
+    // When a thread indicator follows the media grid, keep normal bottom spacing so the
+    // indicator's divider sits at the grid bottom instead of being pulled into it.
+    !hasBottomContent && !threadInfo ? (styles as any).edgeToEdgeBottom : (styles as any).hasBottomContent,
   ]
     .filter(Boolean)
     .join(' ');
@@ -460,7 +462,10 @@ export function ChatBubbleBase({
         </div>
       )}
       {threadInfo && (
-        <div className={styles.threadIndicator} onClick={interactive ? onThreadClick : undefined}>
+        <div
+          className={`${styles.threadIndicator} ${isMediaOnly ? (styles as any).threadIndicatorMediaOnly : ''}`}
+          onClick={interactive ? onThreadClick : undefined}
+        >
           <IonIcon icon={chatbubbles} />
           <span>
             {threadInfo.replyCount} {threadInfo.replyCount === 1 ? t`reply` : t`replies`}
