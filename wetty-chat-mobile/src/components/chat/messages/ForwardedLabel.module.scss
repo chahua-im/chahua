@@ -12,3 +12,12 @@
   font-size: 0.8rem;
   color: var(--ion-color-medium);
 }
+
+div.forwardedLabel {
+  color: inherit;
+  opacity: 0.7;
+}
+
+div.forwardedLabel .forwardedIcon {
+  color: inherit;
+}

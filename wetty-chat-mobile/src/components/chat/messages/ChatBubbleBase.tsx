@@ -422,6 +422,7 @@ export function ChatBubbleBase({
           replyTo={{
             senderName: forwardedFrom.originalReplyTo.sender.name ?? t`Unknown`,
             preview: forwardedFrom.originalReplyTo,
+            forwardedFromName: forwardedFrom.originalReplyTo.forwardedFromName,
           }}
           isSent={isSent}
           interactive={false}

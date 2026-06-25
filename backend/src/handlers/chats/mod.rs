@@ -895,7 +895,7 @@ pub async fn attach_metadata(
         .iter()
         .filter_map(|m| m.forwarded_from_message_id)
         .collect();
-    let fwd_messages_map: std::collections::HashMap<i64, crate::models::Message> =
+    let mut fwd_messages_map: std::collections::HashMap<i64, crate::models::Message> =
         if !fwd_message_ids.is_empty() {
             use crate::schema::messages::dsl as m_dsl;
             messages_schema::table
@@ -918,6 +918,29 @@ pub async fn attach_metadata(
         .filter_map(|m| m.reply_to_id)
         .collect();
     let fwd_reply_messages_map = load_reply_messages(conn, &fwd_reply_ids).unwrap_or_default();
+
+    // Inner replies inside forwarded messages may themselves be forwarded.
+    // Load those forwarded-origin messages so the nested reply preview can
+    // resolve its own `forwarded_from_name`.
+    let fwd_reply_fwd_ids: Vec<i64> = fwd_reply_messages_map
+        .values()
+        .filter_map(|m| m.forwarded_from_message_id)
+        .filter(|id| !fwd_messages_map.contains_key(id))
+        .collect();
+    if !fwd_reply_fwd_ids.is_empty() {
+        use crate::schema::messages::dsl as m_dsl;
+        let extra: Vec<crate::models::Message> = messages_schema::table
+            .filter(m_dsl::id.eq_any(&fwd_reply_fwd_ids))
+            .select(crate::models::Message::as_select())
+            .load(conn)
+            .map_err(|e| {
+                tracing::warn!(error = ?e, "failed to load nested forwarded-from messages");
+            })
+            .unwrap_or_default();
+        for m in extra {
+            fwd_messages_map.entry(m.id).or_insert(m);
+        }
+    }
 
     let mut avatar_uids = std::collections::HashSet::new();
     for m in &messages_to_process {
@@ -1283,7 +1306,7 @@ pub async fn attach_metadata(
                                     deleted_at: reply_msg.deleted_at,
                                     mention_source: None,
                                     mention_uids: None,
-                                    forwarded_from_message_id: None,
+                                    forwarded_from_message_id: reply_msg.forwarded_from_message_id,
                                 },
                                 &reply_sticker_emoji_map,
                                 &user_avatars,

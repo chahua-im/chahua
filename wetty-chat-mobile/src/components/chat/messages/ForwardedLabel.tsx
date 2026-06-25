@@ -1,5 +1,5 @@
 import { IonIcon } from '@ionic/react';
-import { arrowRedoOutline } from 'ionicons/icons';
+import { arrowRedo } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import styles from './ForwardedLabel.module.scss';
 
@@ -12,7 +12,7 @@ interface ForwardedLabelProps {
 export function ForwardedLabel({ name, as: Tag = 'div' }: ForwardedLabelProps) {
   return (
     <Tag className={styles.forwardedLabel}>
-      <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
+      <IonIcon icon={arrowRedo} className={styles.forwardedIcon} />
       {t`Forwarded from ${name || t`Unknown`}`}
     </Tag>
   );
