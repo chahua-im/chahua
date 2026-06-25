@@ -13,9 +13,7 @@ pipeline {
     stage('Validate Input') {
       steps {
         script {
-          if (!params.GIT_COMMIT_SHA?.trim()) {
-            error('GIT_COMMIT_SHA is required')
-          }
+          env.PWA_BUILD_REF = params.GIT_COMMIT_SHA?.trim() ?: 'origin/main'
         }
       }
     }
@@ -43,7 +41,7 @@ spec:
           steps {
             checkout([
               $class: 'GitSCM',
-              branches: [[name: params.GIT_COMMIT_SHA]],
+              branches: [[name: env.PWA_BUILD_REF]],
               userRemoteConfigs: [[
                 credentialsId: 'github-app',
                 refspec: '+refs/heads/*:refs/remotes/origin/*',
@@ -116,7 +114,8 @@ rm -f chahua-staging.zip chahua-prod.zip
               writeFile file: 'pwa-artifact-metadata.json',
                 text: """{
   "buildNumber": "${env.BUILD_NUMBER}",
-  "commitSha": "${params.GIT_COMMIT_SHA}"
+  "commitSha": "${env.GIT_COMMIT}",
+  "sourceRef": "${env.PWA_BUILD_REF}"
 }
 """
             }
