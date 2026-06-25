@@ -386,6 +386,7 @@ exit "$test_status"
           }
           branch 'main'
           anyOf {
+            changeset 'ci/Jenkinsfile.pwa-build'
             changeset 'Jenkinsfile'
             changeset 'wetty-chat-mobile/**'
           }
