@@ -384,10 +384,7 @@ exit "$test_status"
           not {
             changeRequest()
           }
-          anyOf {
-            branch 'main'
-            branch 'woodpecker'
-          }
+          branch 'main'
           anyOf {
             changeset 'Jenkinsfile'
             changeset 'wetty-chat-mobile/**'
@@ -396,11 +393,10 @@ exit "$test_status"
       }
 
       steps {
-        build job: 'chahua-pwa-build',
+        build job: 'chahua/chahua-pwa-build',
           wait: false,
           parameters: [
-            string(name: 'GIT_COMMIT_SHA', value: env.GIT_COMMIT),
-            string(name: 'GIT_BRANCH_NAME', value: env.BRANCH_NAME)
+            string(name: 'GIT_COMMIT_SHA', value: env.GIT_COMMIT)
           ]
       }
     }
