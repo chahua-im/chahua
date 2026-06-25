@@ -169,7 +169,11 @@ describe('useConversationTimeline', () => {
     );
   });
 
-  it('loads around the initial resume target before latest load', async () => {
+  it('anchors to the resume target when the around window contains it', async () => {
+    vi.mocked(getMessages).mockResolvedValue(
+      response({ messages: [message('19'), message('20'), message('21')], nextCursor: '19', prevCursor: '21' }),
+    );
+
     await renderHook({ initialResumeMessageId: '20' });
 
     expect(getMessages).toHaveBeenCalledWith('chat-1', { around: '20', max: 50, threadId: undefined });
@@ -179,13 +183,28 @@ describe('useConversationTimeline', () => {
         payload: {
           chatId: 'chat-1',
           targetMessageId: '20',
-          messages: [message('10'), message('11')],
-          nextCursor: '10',
-          prevCursor: null,
+          messages: [message('19'), message('20'), message('21')],
+          nextCursor: '19',
+          prevCursor: '21',
         },
       }),
     );
     expect(state.timeline.initialAnchor).toEqual({ type: 'message', messageId: '20', token: 1, align: 'top' });
+  });
+
+  it('falls back to the latest message when the resume target is missing from the around window', async () => {
+    // The around fetch returns a window that does not contain the requested
+    // target (e.g. the target was soft-deleted and is no longer addressable).
+    // The anchor must degrade to the newest message instead of stranding the
+    // scroll position on a phantom row.
+    vi.mocked(getMessages).mockResolvedValue(
+      response({ messages: [message('10'), message('11')], nextCursor: '10', prevCursor: null }),
+    );
+
+    await renderHook({ initialResumeMessageId: '20' });
+
+    expect(getMessages).toHaveBeenCalledWith('chat-1', { around: '20', max: 50, threadId: undefined });
+    expect(state.timeline.initialAnchor).toEqual({ type: 'bottom', token: 1 });
   });
 
   it('loads older messages from the current older anchor', async () => {
