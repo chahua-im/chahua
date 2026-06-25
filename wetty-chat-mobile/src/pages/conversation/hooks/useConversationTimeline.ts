@@ -348,12 +348,24 @@ export function useConversationTimeline({
             responseReachedLatest: prevCursor === null,
             snapshot: collectTimelineSnapshot(store.getState(), storeChatId),
           });
-          setInitialAnchor((currentAnchor) => ({
-            type: 'message',
-            messageId: pendingResumeMessageId,
-            token: currentAnchor.token + 1,
-            align: 'top' as const,
-          }));
+          if (containsTarget) {
+            setInitialAnchor((currentAnchor) => ({
+              type: 'message',
+              messageId: pendingResumeMessageId,
+              token: currentAnchor.token + 1,
+              align: 'top' as const,
+            }));
+          } else {
+            // The resume target was not in the fetched window (e.g. the read
+            // pointer is ahead of the newest delivered message, or the target
+            // was deleted). Anchoring to the phantom id leaves VirtualScroll
+            // unable to resolve it, stranding the view at the top of the
+            // loaded window. Fall back to the newest message instead.
+            setInitialAnchor((currentAnchor) => ({
+              type: 'bottom',
+              token: currentAnchor.token + 1,
+            }));
+          }
           setPendingResumeMessageId(null);
         })
         .catch(() => {
