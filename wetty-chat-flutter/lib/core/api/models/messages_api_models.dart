@@ -377,6 +377,22 @@ class SendMessageRequestDto {
 }
 
 @JsonSerializable(explicitToJson: true)
+class ForwardMessagesRequestDto {
+  const ForwardMessagesRequestDto({
+    required this.sourceChatId,
+    required this.messageIds,
+  });
+
+  final String sourceChatId;
+  final List<String> messageIds;
+
+  factory ForwardMessagesRequestDto.fromJson(Map<String, dynamic> json) =>
+      _$ForwardMessagesRequestDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$ForwardMessagesRequestDtoToJson(this);
+}
+
+@JsonSerializable(explicitToJson: true)
 class EditMessageRequestDto {
   const EditMessageRequestDto({
     required this.message,

@@ -342,6 +342,22 @@ Map<String, dynamic> _$SendMessageRequestDtoToJson(
   'stickerId': ?instance.stickerId,
 };
 
+ForwardMessagesRequestDto _$ForwardMessagesRequestDtoFromJson(
+  Map<String, dynamic> json,
+) => ForwardMessagesRequestDto(
+  sourceChatId: json['sourceChatId'] as String,
+  messageIds: (json['messageIds'] as List<dynamic>)
+      .map((e) => e as String)
+      .toList(),
+);
+
+Map<String, dynamic> _$ForwardMessagesRequestDtoToJson(
+  ForwardMessagesRequestDto instance,
+) => <String, dynamic>{
+  'sourceChatId': instance.sourceChatId,
+  'messageIds': instance.messageIds,
+};
+
 EditMessageRequestDto _$EditMessageRequestDtoFromJson(
   Map<String, dynamic> json,
 ) => EditMessageRequestDto(

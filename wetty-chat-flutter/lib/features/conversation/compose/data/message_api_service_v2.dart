@@ -72,12 +72,17 @@ class MessageApiServiceV2 {
   }
 
   Future<Map<String, dynamic>> forwardMessages({
+    required int sourceChatId,
     required int destinationChatId,
     required List<int> messageIds,
   }) async {
+    final body = ForwardMessagesRequestDto(
+      sourceChatId: sourceChatId.toString(),
+      messageIds: messageIds.map((id) => id.toString()).toList(growable: false),
+    );
     final response = await _dio.post<Map<String, dynamic>>(
       '/chats/$destinationChatId/messages/forward',
-      data: <String, Object>{'messageIds': messageIds},
+      data: body.toJson(),
     );
     return response.data ?? <String, dynamic>{};
   }

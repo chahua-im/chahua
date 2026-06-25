@@ -223,6 +223,7 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
       final response = await ref
           .read(messageApiServiceV2Provider)
           .forwardMessages(
+            sourceChatId: widget.identity.chatId,
             destinationChatId: widget.identity.chatId,
             messageIds: messageIds,
           );
