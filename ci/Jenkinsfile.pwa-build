@@ -76,7 +76,7 @@ fi
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
 
-export CI_BUILD_VERSION="${BUILD_NUMBER}"
+export CI_BUILD_VERSION="PWA-${BUILD_NUMBER}"
 npx vite build -c vite.config.staging.ts --mode development
                   '''
                 }
@@ -89,7 +89,7 @@ npx vite build -c vite.config.staging.ts --mode development
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
 
-export CI_BUILD_VERSION="${BUILD_NUMBER}"
+export CI_BUILD_VERSION="PWA-${BUILD_NUMBER}"
 npx vite build --base=/ --outDir prod-dist -c vite.config.prod.ts
                   '''
                 }
@@ -123,6 +123,20 @@ rm -f chahua-staging.zip chahua-prod.zip
             archiveArtifacts artifacts: 'wetty-chat-mobile/chahua-staging.zip, wetty-chat-mobile/chahua-prod.zip, pwa-artifact-metadata.json',
               fingerprint: true,
               onlyIfSuccessful: true
+          }
+        }
+
+        stage('Trigger Staging Deploy') {
+          steps {
+            build job: 'chahua/deploy/pwa-staging',
+              wait: false,
+              parameters: [
+                [
+                  $class: 'RunParameterValue',
+                  name: 'PWA_BUILD',
+                  runId: "${env.JENKINS_URL}job/chahua/job/chahua-pwa-build/${env.BUILD_NUMBER}/"
+                ]
+              ]
           }
         }
       }

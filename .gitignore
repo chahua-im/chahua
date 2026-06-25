@@ -16,6 +16,7 @@ context.md
 # Where I keep my runspace for testing / docker compose
 /runspace
 /reference
+/ci-deploy/
 .geminiignore
 .playwright-mcp
 
