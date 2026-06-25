@@ -6,62 +6,14 @@ pipeline {
   }
 
   stages {
-    stage('Detect Changes') {
-      agent {
-        kubernetes {
-          defaultContainer 'git'
-          yaml '''
-apiVersion: v1
-kind: Pod
-spec:
-  containers:
-    - name: git
-      image: alpine/git:2.47.2
-      command:
-        - cat
-      tty: true
-'''
-        }
-      }
-
-      steps {
-        script {
-          def changedFiles = sh(
-            returnStdout: true,
-            script: '''#!/bin/sh
-set -eu
-
-git config --global --add safe.directory "$PWD"
-
-if git rev-parse HEAD^ >/dev/null 2>&1; then
-  git diff --name-only HEAD^ HEAD
-else
-  git show --format= --name-only HEAD
-fi
-'''
-          ).trim().split('\\n').findAll { it }
-
-          env.PWA_CHECK_REQUIRED = changedFiles.any { path ->
-            path == 'Jenkinsfile' ||
-              path.startsWith('wetty-chat-mobile/')
-          }.toString()
-
-          env.BACKEND_CHECK_REQUIRED = changedFiles.any { path ->
-            path == 'Jenkinsfile' ||
-              path.startsWith('backend/')
-          }.toString()
-
-          echo "PWA check required: ${env.PWA_CHECK_REQUIRED}"
-          echo "Backend check required: ${env.BACKEND_CHECK_REQUIRED}"
-        }
-      }
-    }
-
     stage('Run Applicable Checks') {
       parallel {
         stage('PWA Check') {
           when {
-            environment name: 'PWA_CHECK_REQUIRED', value: 'true'
+            anyOf {
+              changeset 'Jenkinsfile'
+              changeset 'wetty-chat-mobile/**'
+            }
           }
 
           agent {
@@ -165,7 +117,10 @@ npm run test:run
 
         stage('Backend Check') {
           when {
-            environment name: 'BACKEND_CHECK_REQUIRED', value: 'true'
+            anyOf {
+              changeset 'Jenkinsfile'
+              changeset 'backend/**'
+            }
           }
 
           agent {
@@ -243,14 +198,6 @@ cargo nextest run --profile ci
             }
           }
         }
-      }
-    }
-
-    stage('Required Checks') {
-      agent none
-
-      steps {
-        echo 'All applicable checks passed'
       }
     }
   }
