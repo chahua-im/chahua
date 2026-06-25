@@ -6,9 +6,9 @@ pipeline {
   }
 
   stages {
-    stage('Run Applicable Checks') {
+    stage('checks') {
       parallel {
-        stage('PWA Check') {
+        stage('PWA') {
           when {
             anyOf {
               changeset 'Jenkinsfile'
@@ -115,7 +115,7 @@ npm run test:run
           }
         }
 
-        stage('Backend Check') {
+        stage('Backend') {
           when {
             anyOf {
               changeset 'Jenkinsfile'
@@ -194,7 +194,7 @@ cargo nextest run --profile ci
 
           post {
             always {
-              junit allowEmptyResults: true, testResults: 'backend/rust-test-report.xml'
+              junit allowEmptyResults: true, testResults: 'backend/target/**/rust-test-report.xml'
             }
           }
         }
@@ -204,7 +204,7 @@ cargo nextest run --profile ci
 
   post {
     success {
-      publishChecks name: 'wetty-chat / required-checks',
+      publishChecks name: 'required-checks',
         title: 'Required Checks',
         summary: 'All applicable checks passed',
         status: 'COMPLETED',
@@ -212,7 +212,7 @@ cargo nextest run --profile ci
     }
 
     failure {
-      publishChecks name: 'wetty-chat / required-checks',
+      publishChecks name: 'required-checks',
         title: 'Required Checks',
         summary: 'One or more applicable checks failed',
         status: 'COMPLETED',
@@ -220,7 +220,7 @@ cargo nextest run --profile ci
     }
 
     aborted {
-      publishChecks name: 'wetty-chat / required-checks',
+      publishChecks name: 'required-checks',
         title: 'Required Checks',
         summary: 'Build was aborted',
         status: 'COMPLETED',
