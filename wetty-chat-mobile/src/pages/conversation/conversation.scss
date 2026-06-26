@@ -62,11 +62,11 @@
   ion-fab-button {
     width: 48px;
     height: 48px;
-    --background: var(--ion-item-background, var(--ion-background-color));
-    --background-activated: var(--ion-color-light-shade, #d7d8da);
-    --background-hover: var(--ion-color-light, #f4f5f8);
+    --background: var(--ion-background-color-step-100, #f4f5f8);
+    --background-activated: var(--ion-background-color-step-300, #d7d8da);
+    --background-hover: var(--ion-background-color-step-200, #e0e0e0);
     --box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
-    --color: var(--ion-color-medium, #92949c);
+    --color: color-mix(in srgb, var(--ion-color-medium, #636469) 60%, var(--ion-text-color, #000) 40%);
 
     &:active::part(native) {
       transform: scale(0.94);
