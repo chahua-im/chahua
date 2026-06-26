@@ -370,6 +370,7 @@ async fn post_send_invite_message(
             client_generated_id: body.client_generated_id,
             attachment_ids: vec![],
             publish_immediately: true,
+            forwarded_messages_payload: None,
         },
     )
     .await?;
@@ -727,6 +728,7 @@ async fn post_redeem_invite(
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
+                forwarded_messages_payload: None,
             },
         )
         .await

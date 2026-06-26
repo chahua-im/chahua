@@ -52,6 +52,7 @@ pub struct ChatIdPath {
     chat_id: i64,
 }
 
+
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMessageBody {
@@ -81,12 +82,13 @@ pub struct ForwardMessagesBody {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub source_chat_id: i64,
-    #[serde(with = "crate::serde_i64_string::vec")]
+    #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
     #[schema(value_type = Vec<String>)]
     pub message_ids: Vec<i64>,
 }
 
 // ---------------------------------------------------------------------------
+
 // Chat listing endpoints
 // ---------------------------------------------------------------------------
 
@@ -881,3 +883,4 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .nest("/pins", super::pins::router()),
         )
 }
+
