@@ -180,13 +180,6 @@ async fn get_thread_read_state(
 
     let last_read_message_id =
         thread_svc::get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
-    let last_read_message_id = thread_svc::clamp_dangling_thread_read_pointer(
-        conn,
-        chat_id,
-        thread_root_id,
-        uid,
-        last_read_message_id,
-    )?;
 
     Ok(Json(ThreadReadStateResponse {
         last_read_message_id,

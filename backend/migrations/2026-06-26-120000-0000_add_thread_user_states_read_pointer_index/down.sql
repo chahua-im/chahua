@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_thread_user_states_root_read_pointer;

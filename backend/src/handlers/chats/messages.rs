@@ -984,6 +984,20 @@ async fn delete_message(
             }
         }
 
+        // Shift any read pointers anchored on the deleted message so they
+        // don't dangle (PWA `around=<last_read_message_id>` would strand
+        // scroll). Only a top-level message with no thread can dangle a
+        // chat-level pointer; a reply dangles its thread-level pointer.
+        if let Some(thread_root_id) = deleted_message.reply_root_id {
+            crate::services::threads::shift_thread_read_pointers_on_delete(
+                conn,
+                thread_root_id,
+                &[message_id],
+            )?;
+        } else if !deleted_message.has_thread {
+            super::shift_chat_read_pointers_on_delete(conn, chat_id, &[message_id])?;
+        }
+
         Ok(deleted_message)
     })?;
 

@@ -1551,9 +1551,6 @@ async fn get_chat_unread_count(
         .select(gm_dsl::last_read_message_id)
         .first(conn)?;
 
-    let last_read_message_id =
-        clamp_dangling_chat_read_pointer(conn, chat_id, uid, last_read_message_id)?;
-
     let unread_count =
         state
             .unread_service
@@ -1739,69 +1736,52 @@ pub(crate) fn recalculate_group_last_message(
     Ok(())
 }
 
-/// Resolve a `last_read_message_id` that may dangle (point at a message no
-/// longer returned by the `around` window — e.g. a top-level message that was
-/// soft-deleted and has no thread replies). The PWA resume flow fetches
-/// `around=<last_read_message_id>` and strands the scroll position when that id
-/// is absent from the window. To keep the pointer addressable we clamp it to
-/// the newest surviving message that the `around` query would actually return.
+/// After a top-level message with no thread is soft-deleted, any
+/// `group_membership.last_read_message_id` anchored on it dangles — the PWA
+/// resume flow fetches `around=<last_read_message_id>` and strands scroll when
+/// that id is absent from the window (the around filter is `is_published AND
+/// reply_root_id IS NULL AND (deleted_at IS NULL OR has_thread)`). Shift every
+/// anchored pointer to the newest surviving top-level message strictly older
+/// than the deleted one (or NULL when none survives).
 ///
-/// Findability mirrors the `get_messages` around filter:
-///   reply_root_id IS NULL AND (deleted_at IS NULL OR has_thread)
-/// served by `idx_messages_unread_count` (chat_id, id DESC) WHERE
-/// deleted_at IS NULL AND reply_root_id IS NULL for the common case.
+/// Only top-level messages with `has_thread = false` can dangle: a deleted
+/// top-level message that still has a thread remains visible in the around
+/// window, so its pointer stays addressable. Replies never anchor a chat-level
+/// pointer (chat read position tracks top-level messages only), so passing
+/// reply ids here is a harmless no-op.
 ///
-/// When the stored pointer is already findable it is returned unchanged. When
-/// it dangles the clamped value (or NULL when no earlier message survives) is
-/// persisted back to `group_membership` so the lookup is paid only once.
-fn clamp_dangling_chat_read_pointer(
+/// `deleted_message_ids` must already be soft-deleted (deleted_at set) before
+/// this runs, so the clamp subquery's `deleted_at IS NULL` filter excludes them
+/// — letting one batched UPDATE handle multi-message deletes correctly.
+///
+/// Served by `idx_messages_visible_top_level_last` (chat_id, id DESC) WHERE
+/// deleted_at IS NULL AND is_published AND reply_root_id IS NULL.
+pub(crate) fn shift_chat_read_pointers_on_delete(
     conn: &mut PgConnection,
     chat_id: i64,
-    uid: i32,
-    last_read_message_id: Option<i64>,
-) -> Result<Option<i64>, AppError> {
-    use crate::schema::group_membership::dsl as gm_dsl;
-    use crate::schema::messages::dsl;
-
-    let Some(read_id) = last_read_message_id else {
-        return Ok(None);
-    };
-
-    // Is the stored pointer still addressable by the around window?
-    let findable: bool = messages_schema::table
-        .filter(dsl::chat_id.eq(chat_id))
-        .filter(dsl::id.eq(read_id))
-        .filter(dsl::reply_root_id.is_null())
-        .filter(dsl::deleted_at.is_null().or(dsl::has_thread.eq(true)))
-        .select(dsl::id)
-        .first::<i64>(conn)
-        .optional()?
-        .is_some();
-
-    if findable {
-        return Ok(last_read_message_id);
+    deleted_message_ids: &[i64],
+) -> Result<usize, diesel::result::Error> {
+    if deleted_message_ids.is_empty() {
+        return Ok(0);
     }
-
-    // Dangling pointer: clamp to the newest surviving top-level message that is
-    // strictly older than the deleted target.
-    let clamped: Option<i64> = messages_schema::table
-        .filter(dsl::chat_id.eq(chat_id))
-        .filter(dsl::id.lt(read_id))
-        .filter(dsl::reply_root_id.is_null())
-        .filter(dsl::deleted_at.is_null().or(dsl::has_thread.eq(true)))
-        .order(dsl::id.desc())
-        .select(dsl::id)
-        .first::<i64>(conn)
-        .optional()?;
-
-    // Persist the correction so future reads skip the clamp lookup.
-    diesel::update(
-        group_membership::table.filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(uid))),
+    diesel::sql_query(
+        "UPDATE group_membership
+         SET last_read_message_id = (
+             SELECT id FROM messages
+             WHERE chat_id = $1
+               AND id < group_membership.last_read_message_id
+               AND reply_root_id IS NULL
+               AND (deleted_at IS NULL OR has_thread)
+               AND is_published
+             ORDER BY id DESC
+             LIMIT 1
+         )
+         WHERE chat_id = $1
+           AND last_read_message_id = ANY($2)",
     )
-    .set(gm_dsl::last_read_message_id.eq(clamped))
-    .execute(conn)?;
-
-    Ok(clamped)
+    .bind::<diesel::sql_types::BigInt, _>(chat_id)
+    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(deleted_message_ids)
+    .execute(conn)
 }
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use futures::future::FutureExt;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -202,7 +202,8 @@ fn process_bulk_delete(
 
     // 2. Chunked delete loop
     let mut total_deleted: usize = 0;
-    let mut affected_thread_ids = HashSet::new();
+    let mut thread_clamp: HashMap<i64, Vec<i64>> = HashMap::new();
+    let mut chat_clamp_ids: Vec<i64> = Vec::new();
     loop {
         let mut query = messages::table
             .filter(dsl::chat_id.eq(chat_id))
@@ -226,12 +227,25 @@ fn process_bulk_delete(
             break;
         }
 
-        let batch_thread_ids: Vec<Option<i64>> = messages::table
+        // Partition the batch for read-pointer shifting: top-level messages
+        // with no thread dangle chat-level pointers; replies dangle
+        // thread-level pointers (grouped by thread root). Top-level messages
+        // that still have a thread stay visible in the around window, so their
+        // pointers don't dangle and are skipped.
+        let batch_meta: Vec<(Option<i64>, bool)> = messages::table
             .filter(dsl::id.eq_any(&batch_ids))
-            .select(dsl::reply_root_id)
+            .select((dsl::reply_root_id, dsl::has_thread))
             .load(conn)
             .map_err(map_db)?;
-        affected_thread_ids.extend(batch_thread_ids.into_iter().flatten());
+        for (id, (reply_root_id, has_thread)) in batch_ids.iter().zip(batch_meta) {
+            match reply_root_id {
+                None if !has_thread => chat_clamp_ids.push(*id),
+                Some(thread_root_id) => {
+                    thread_clamp.entry(thread_root_id).or_default().push(*id);
+                }
+                None => {}
+            }
+        }
 
         let now = Utc::now();
 
@@ -269,16 +283,17 @@ fn process_bulk_delete(
         }
     }
 
-    // 3. Recalculate last_message_id and thread_meta once after all batches
+    // 3. Recalculate last_message_id and thread_meta once after all batches,
+    //    then shift any read pointers anchored on deleted messages.
     if total_deleted > 0 {
         unread_service.invalidate_chat(chat_id);
 
         crate::handlers::chats::recalculate_group_last_message(conn, chat_id)
             .map_err(|e| format!("recalculate last message: {e:?}"))?;
 
-        for thread_root_id in &affected_thread_ids {
+        for &thread_root_id in thread_clamp.keys() {
             if let Err(e) =
-                crate::services::threads::recalculate_thread_meta(conn, chat_id, *thread_root_id)
+                crate::services::threads::recalculate_thread_meta(conn, chat_id, thread_root_id)
             {
                 warn!(
                     chat_id,
@@ -293,13 +308,39 @@ fn process_bulk_delete(
                 conn,
                 ws_registry,
                 chat_id,
-                *thread_root_id,
+                thread_root_id,
             ) {
                 warn!(
                     chat_id,
                     thread_root_id,
                     ?e,
                     "broadcast thread update after bulk delete"
+                );
+            }
+        }
+
+        // Shift read pointers anchored on deleted messages. Must run after all
+        // batches are soft-deleted so the clamp subqueries' `deleted_at IS NULL`
+        // filter excludes the full deleted set in one pass.
+        if !chat_clamp_ids.is_empty() {
+            crate::handlers::chats::shift_chat_read_pointers_on_delete(
+                conn,
+                chat_id,
+                &chat_clamp_ids,
+            )
+            .map_err(map_db)?;
+        }
+        for (&thread_root_id, ids) in &thread_clamp {
+            if let Err(e) = crate::services::threads::shift_thread_read_pointers_on_delete(
+                conn,
+                thread_root_id,
+                ids,
+            ) {
+                warn!(
+                    chat_id,
+                    thread_root_id,
+                    ?e,
+                    "shift thread read pointers after bulk delete"
                 );
             }
         }

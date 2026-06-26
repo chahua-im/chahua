@@ -248,76 +248,46 @@ pub fn get_thread_last_read_message_id(
         .map(|row| row.flatten())
 }
 
-/// Resolve a thread `last_read_message_id` that may dangle (point at a reply
-/// that was soft-deleted). Mirrors the chat-level clamp: the PWA thread resume
-/// flow fetches `around=<last_read_message_id>`, and a deleted reply is absent
-/// from that window (the around filter requires `deleted_at IS NULL` for
-/// replies), stranding the scroll position.
+/// After a thread reply is soft-deleted, any `thread_user_states.last_read_message_id`
+/// anchored on it dangles — the PWA thread resume flow fetches
+/// `around=<last_read_message_id>` and strands scroll when that id is absent
+/// from the window (the around filter is `reply_root_id == thread_root_id AND
+/// deleted_at IS NULL AND is_published`). Shift every anchored pointer to the
+/// newest surviving reply strictly older than the deleted one (or NULL when
+/// none survives).
 ///
-/// Thread findability mirrors the `get_messages` thread filter:
-///   (reply_root_id == thread_root_id AND deleted_at IS NULL) OR id == thread_root_id
-/// The clamp lookup is served by
-/// `idx_messages_thread_reply_stats` (reply_root_id, id DESC) WHERE deleted_at IS NULL.
+/// `deleted_message_ids` must already be soft-deleted before this runs, so the
+/// clamp subquery's `deleted_at IS NULL` filter excludes them — letting one
+/// batched UPDATE handle multi-reply deletes correctly. `thread_root_id` is a
+/// globally unique message id, so it alone scopes the update.
 ///
-/// When the pointer is already findable it is returned unchanged. When it
-/// dangles it is clamped to the newest surviving reply older than the deleted
-/// target (or NULL when none survive) and the correction is persisted to
-/// `thread_user_states`.
-pub fn clamp_dangling_thread_read_pointer(
+/// Served by `idx_messages_thread_reply_stats` (reply_root_id, id DESC) WHERE
+/// deleted_at IS NULL AND is_published.
+pub fn shift_thread_read_pointers_on_delete(
     conn: &mut PgConnection,
-    chat_id: i64,
     thread_root_id: i64,
-    uid: i32,
-    last_read_message_id: Option<i64>,
-) -> Result<Option<i64>, diesel::result::Error> {
-    use crate::schema::messages::dsl;
-
-    let Some(read_id) = last_read_message_id else {
-        return Ok(None);
-    };
-
-    // The thread root itself is always addressable; a reply is addressable only
-    // while it is not soft-deleted.
-    if read_id == thread_root_id {
-        return Ok(last_read_message_id);
+    deleted_message_ids: &[i64],
+) -> Result<usize, diesel::result::Error> {
+    if deleted_message_ids.is_empty() {
+        return Ok(0);
     }
-
-    let findable: bool = messages::table
-        .filter(dsl::id.eq(read_id))
-        .filter(dsl::reply_root_id.eq(thread_root_id))
-        .filter(dsl::deleted_at.is_null())
-        .select(dsl::id)
-        .first::<i64>(conn)
-        .optional()?
-        .is_some();
-
-    if findable {
-        return Ok(last_read_message_id);
-    }
-
-    // Dangling pointer: clamp to the newest surviving reply strictly older than
-    // the deleted target.
-    let clamped: Option<i64> = messages::table
-        .filter(dsl::reply_root_id.eq(thread_root_id))
-        .filter(dsl::deleted_at.is_null())
-        .filter(dsl::id.lt(read_id))
-        .order(dsl::id.desc())
-        .select(dsl::id)
-        .first::<i64>(conn)
-        .optional()?;
-
-    diesel::update(
-        thread_user_states::table.filter(
-            thread_user_states::chat_id
-                .eq(chat_id)
-                .and(thread_user_states::thread_root_id.eq(thread_root_id))
-                .and(thread_user_states::uid.eq(uid)),
-        ),
+    diesel::sql_query(
+        "UPDATE thread_user_states
+         SET last_read_message_id = (
+             SELECT id FROM messages
+             WHERE reply_root_id = $1
+               AND id < thread_user_states.last_read_message_id
+               AND deleted_at IS NULL
+               AND is_published
+             ORDER BY id DESC
+             LIMIT 1
+         )
+         WHERE thread_root_id = $1
+           AND last_read_message_id = ANY($2)",
     )
-    .set(thread_user_states::last_read_message_id.eq(clamped))
-    .execute(conn)?;
-
-    Ok(clamped)
+    .bind::<diesel::sql_types::BigInt, _>(thread_root_id)
+    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(deleted_message_ids)
+    .execute(conn)
 }
 /// Get all UIDs subscribed to a given thread.
 pub fn get_thread_subscriber_uids(
