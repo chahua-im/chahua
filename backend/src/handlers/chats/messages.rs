@@ -9,17 +9,19 @@ use diesel::prelude::*;
 use std::time::Instant;
 use utoipa_axum::router::OpenApiRouter;
 
-use crate::{dto::messages::ForwardMessagesResponse, schema::messages::dsl};
 use crate::{
     dto::{
-        messages::{ListMessagesResponse, MessageResponse, SearchMessagesResponse},
+        messages::{
+            ForwardMessageResponse, ForwardMessagesResponse, ListMessagesResponse, MessageResponse,
+            SearchMessagesResponse,
+        },
         ws::ServerWsMessage,
     },
     errors::AppError,
     extractors::DbConn,
     handlers::{groups::load_requester_group_role, members::check_membership},
     models::{GroupRole, Message, MessageType},
-    schema::{attachments, group_membership, groups, messages},
+    schema::{attachments, group_membership, groups, messages, messages::dsl},
     services::message_search::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
         MessageSearchSort, SearchCandidateDropCounts,
@@ -98,8 +100,11 @@ pub struct UpdateMessageBody {
 
 const SYSTEM_MESSAGE_TYPE_FORBIDDEN: &str = "System messages cannot be sent by clients";
 const INVITE_MESSAGE_TYPE_FORBIDDEN: &str = "Invite messages must be sent through invite APIs";
+const FORWARDED_MESSAGE_TYPE_FORBIDDEN: &str =
+    "Forwarded messages must be sent through forward APIs";
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
 const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
+const MAX_FORWARD_MESSAGES: usize = 50;
 
 fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppError> {
     if matches!(message_type, MessageType::System) {
@@ -110,7 +115,25 @@ fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppErr
         return Err(AppError::BadRequest(INVITE_MESSAGE_TYPE_FORBIDDEN));
     }
 
+    if matches!(message_type, MessageType::Forwarded) {
+        return Err(AppError::BadRequest(FORWARDED_MESSAGE_TYPE_FORBIDDEN));
+    }
+
     Ok(())
+}
+
+fn forward_message_snapshot(response: MessageResponse) -> ForwardMessageResponse {
+    ForwardMessageResponse {
+        original_message_id: response.id,
+        original_chat_id: response.chat_id,
+        message: response.message,
+        message_type: response.message_type,
+        sender: response.sender,
+        original_created_at: response.created_at,
+        reply_to_message: response.reply_to_message,
+        attachments: response.attachments,
+        mentions: response.mentions,
+    }
 }
 
 fn search_limit(limit: Option<i64>) -> usize {
@@ -622,6 +645,7 @@ async fn post_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
+                forwarded_messages_payload: None,
             },
         )
         .await?;
@@ -663,7 +687,7 @@ async fn post_message(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-/// POST /chats/:dest_chat_id/messages/forward — Forward messages to a chat.
+/// POST /chats/:chat_id/messages/forward — Forward messages to a chat.
 #[utoipa::path(
     post,
     path = "/forward",
@@ -685,8 +709,15 @@ async fn forward_messages(
     }): Path<ChatIdPath>,
     mut conn: DbConn,
     Json(body): Json<ForwardMessagesBody>,
-) -> Result<Json<ForwardMessagesResponse>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
+
+    if body.message_ids.is_empty() {
+        return Err(AppError::BadRequest("Message IDs cannot be empty"));
+    }
+    if body.message_ids.len() > MAX_FORWARD_MESSAGES {
+        return Err(AppError::BadRequest("Too many messages to forward"));
+    }
 
     check_membership(conn, body.source_chat_id, uid)?;
     check_membership(conn, dest_chat_id, uid)?;
@@ -707,13 +738,75 @@ async fn forward_messages(
         return Err(AppError::BadRequest("Invalid message IDs"));
     }
 
-    let messages_vec = attach_metadata(conn, messages, &state, uid).await;
+    let source_messages = attach_metadata(conn, messages, &state, uid).await;
+    let forwarded_messages: Vec<ForwardMessageResponse> = source_messages
+        .into_iter()
+        .map(forward_message_snapshot)
+        .collect();
+    let forwarded_messages_payload = serde_json::to_value(&forwarded_messages)
+        .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
 
+    diesel::sql_query("BEGIN").execute(conn)?;
+    let tx_result: Result<_, AppError> = async {
+        let send_result = send_prepared_message(
+            conn,
+            &state,
+            PreparedMessageSend {
+                chat_id: dest_chat_id,
+                sender_uid: uid,
+                message: Some(format!("Forwarded {} messages", forwarded_messages.len())),
+                message_type: MessageType::Forwarded,
+                sticker_id: None,
+                reply_to_id: None,
+                reply_root_id: None,
+                client_generated_id: uuid::Uuid::new_v4().to_string(),
+                attachment_ids: vec![],
+                publish_immediately: true,
+                forwarded_messages_payload: Some(forwarded_messages_payload),
+            },
+        )
+        .await?;
 
-    Ok(Json(ForwardMessagesResponse {
-        source_chat_id: body.source_chat_id,
-        messages: messages_vec,
-    }))
+        if let SendMessageOutcome::Created(send_result) = &send_result {
+            crate::services::chat::mark_chat_as_read(
+                conn,
+                dest_chat_id,
+                uid,
+                send_result.response.id,
+            )?;
+        }
+
+        Ok(send_result)
+    }
+    .await;
+
+    let send_result = match tx_result {
+        Ok(send_result) => {
+            diesel::sql_query("COMMIT").execute(conn)?;
+            send_result
+        }
+        Err(err) => {
+            let _ = diesel::sql_query("ROLLBACK").execute(conn);
+            return Err(err);
+        }
+    };
+
+    let message = match send_result {
+        SendMessageOutcome::Created(send_result) => {
+            let send_result = *send_result;
+            send_result.side_effects.fire(&state);
+            send_result.response
+        }
+        SendMessageOutcome::Duplicate(response) => *response,
+    };
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ForwardMessagesResponse {
+            source_chat_id: body.source_chat_id,
+            messages: vec![message],
+        }),
+    ))
 }
 
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
@@ -797,6 +890,7 @@ pub(super) async fn post_thread_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
+                forwarded_messages_payload: None,
             },
         )
         .await?;

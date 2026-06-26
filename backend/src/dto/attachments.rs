@@ -14,7 +14,7 @@ pub enum ChatAttachmentKindFilter {
     All,
 }
 
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentResponse {
     #[serde(with = "crate::serde_i64_string")]

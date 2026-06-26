@@ -115,6 +115,7 @@ pub enum MessageType {
     Sticker,
     Invite,
     System,
+    Forwarded,
 }
 
 #[derive(
@@ -519,6 +520,7 @@ pub struct Message {
     pub sticker_id: Option<i64>,
     pub is_published: bool,
     pub transcode_status: TranscodeStatus,
+    pub forwarded_messages_payload: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -541,6 +543,7 @@ pub struct NewMessage {
     pub sticker_id: Option<i64>,
     pub is_published: bool,
     pub transcode_status: TranscodeStatus,
+    pub forwarded_messages_payload: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]

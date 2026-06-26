@@ -19,9 +19,9 @@ use crate::{
         attachments::AttachmentResponse,
         chats::{ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse},
         messages::{
-            MentionInfo, MessagePreview, MessagePreviewAttachment, MessagePreviewSticker,
-            MessageResponse, MessageStickerResponse, ReactionReactor, ReactionSummary,
-            StickerMediaResponse, ThreadInfo,
+            ForwardMessageResponse, MentionInfo, MessagePreview, MessagePreviewAttachment,
+            MessagePreviewSticker, MessageResponse, MessageStickerResponse, ReactionReactor,
+            ReactionSummary, StickerMediaResponse, ThreadInfo,
         },
         users::User,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
@@ -112,6 +112,7 @@ pub(crate) struct PreparedMessageSend {
     pub client_generated_id: String,
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
+    pub forwarded_messages_payload: Option<serde_json::Value>,
 }
 
 pub(crate) struct SendMessageResult {
@@ -187,7 +188,7 @@ pub struct ForwardMessagesBody {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub source_chat_id: i64,
-    #[serde(with = "crate::serde_i64_string::vec")]
+    #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
     #[schema(value_type = Vec<String>)]
     pub message_ids: Vec<i64>,
 }
@@ -482,6 +483,7 @@ pub(crate) fn redact_deleted_message_response(response: &mut MessageResponse) {
     response.attachments.clear();
     response.reactions.clear();
     response.mentions.clear();
+    response.forwarded_messages = None;
 }
 
 fn sticker_preview_text(emoji: Option<&str>) -> String {
@@ -567,6 +569,7 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
     } else {
         match response.message_type {
             MessageType::Invite => Some("sent an invite".to_string()),
+            MessageType::Forwarded => Some("forwarded messages".to_string()),
             MessageType::Sticker => Some(sticker_preview_text(
                 response.sticker.as_ref().map(|s| s.emoji.as_str()),
             )),
@@ -583,6 +586,7 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
     } else {
         match response.message_type {
             MessageType::Invite => None,
+            MessageType::Forwarded => None,
             _ => rendered_message,
         }
     };
@@ -712,6 +716,7 @@ pub(crate) async fn send_prepared_message(
         has_reactions: false,
         is_published: prepared.publish_immediately,
         transcode_status,
+        forwarded_messages_payload: prepared.forwarded_messages_payload.clone(),
     };
 
     let inserted_msg: Option<Message> = diesel::insert_into(messages_schema::table)
@@ -843,6 +848,7 @@ fn validate_idempotent_message_payload(
         && existing.sticker_id == prepared.sticker_id
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
+        && existing.forwarded_messages_payload == prepared.forwarded_messages_payload
         && attachment_ids_match
     {
         return Ok(());
@@ -1221,6 +1227,21 @@ pub async fn attach_metadata(
                     .iter()
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
+            },
+            forwarded_messages: if is_deleted {
+                None
+            } else {
+                m.forwarded_messages_payload.as_ref().and_then(|payload| {
+                    serde_json::from_value::<Vec<ForwardMessageResponse>>(payload.clone())
+                        .map_err(|err| {
+                            tracing::warn!(
+                                message_id = m.id,
+                                ?err,
+                                "failed to deserialize forwarded message payload"
+                            );
+                        })
+                        .ok()
+                })
             },
         };
         redact_deleted_message_response(&mut response);
@@ -1945,6 +1966,7 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_messages_payload: None,
         };
         patch(&mut message);
         message
@@ -2138,6 +2160,7 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_messages_payload: None,
         }
     }
 
@@ -2153,6 +2176,7 @@ mod tests {
             client_generated_id: "client-1".to_string(),
             attachment_ids: vec![10, 11],
             publish_immediately: true,
+            forwarded_messages_payload: None,
         }
     }
 
@@ -2182,6 +2206,7 @@ mod tests {
             attachments: Vec::new(),
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_messages: None,
         };
 
         let preview = build_push_preview_bundle(&response);
@@ -2224,6 +2249,7 @@ mod tests {
             }],
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_messages: None,
         };
 
         let preview = build_push_preview_bundle(&response);
@@ -2329,6 +2355,7 @@ mod tests {
                 gender: 0,
                 user_group: None,
             }],
+            forwarded_messages: Some(Vec::new()),
         };
 
         redact_deleted_message_response(&mut response);

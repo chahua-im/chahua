@@ -225,6 +225,7 @@ async fn create_pin(
                 client_generated_id: Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
+                forwarded_messages_payload: None,
             },
         )
         .await
@@ -302,6 +303,7 @@ async fn delete_pin(
                 client_generated_id: Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
+                forwarded_messages_payload: None,
             },
         )
         .await
