@@ -1,4 +1,4 @@
-import type { Ref } from 'react';
+import { useState, type Ref } from 'react';
 import { IonIcon } from '@ionic/react';
 import { chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
@@ -64,6 +64,7 @@ export function StickerBubble({
   const locale = useSelector(selectEffectiveLocale);
   const interactive = interactionMode === 'interactive';
   const { className: bubbleClassName, style: bubbleStyle, ...bubbleRestProps } = bubblePropOverrides ?? {};
+  const [loaded, setLoaded] = useState(false);
 
   const bubble = (
     <div
@@ -91,9 +92,11 @@ export function StickerBubble({
           alt={t`Sticker`}
           className={styles.stickerImage}
           onClick={interactive && onStickerTap ? onStickerTap : undefined}
+          onLoad={() => setLoaded(true)}
+          onLoadedData={() => setLoaded(true)}
           style={interactive && onStickerTap ? { cursor: 'pointer' } : undefined}
         />
-        {timestamp && (
+        {loaded && timestamp && (
           <span className={styles.stickerTimestamp}>
             {formatTime(timestamp)}
             {edited && ` (${t`Edited`})`}
