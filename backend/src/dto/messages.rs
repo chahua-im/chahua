@@ -52,21 +52,12 @@ pub struct MessageResponse {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub forwarded_messages: Option<Vec<ForwardMessageResponse>>,
-}
-
-#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ForwardMessagesResponse {
-    #[serde(with = "crate::serde_i64_string")]
-    #[schema(value_type = String)]
-    pub source_chat_id: i64,
-    pub messages: Vec<MessageResponse>,
+    pub forwarded_messages: Option<Vec<ForwardedMessageSnapshot>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ForwardMessageResponse {
+pub struct ForwardedMessageSnapshot {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
