@@ -19,7 +19,7 @@ use crate::{
         attachments::AttachmentResponse,
         chats::{ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse},
         messages::{
-            ForwardMessageResponse, MentionInfo, MessagePreview, MessagePreviewAttachment,
+            ForwardedMessageSnapshot, MentionInfo, MessagePreview, MessagePreviewAttachment,
             MessagePreviewSticker, MessageResponse, MessageStickerResponse, ReactionReactor,
             ReactionSummary, StickerMediaResponse, ThreadInfo,
         },
@@ -1232,7 +1232,7 @@ pub async fn attach_metadata(
                 None
             } else {
                 m.forwarded_messages_payload.as_ref().and_then(|payload| {
-                    serde_json::from_value::<Vec<ForwardMessageResponse>>(payload.clone())
+                    serde_json::from_value::<Vec<ForwardedMessageSnapshot>>(payload.clone())
                         .map_err(|err| {
                             tracing::warn!(
                                 message_id = m.id,
