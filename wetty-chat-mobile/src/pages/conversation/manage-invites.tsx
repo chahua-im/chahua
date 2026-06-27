@@ -28,6 +28,7 @@ import { selectEffectiveLocale } from '@/store/settingsSlice';
 import type { RootState } from '@/store';
 import { createClientGeneratedId } from '@/utils/clientGeneratedId';
 import type { BackAction } from '@/types/back-action';
+import { useIsDesktop } from '@/hooks/platformHooks';
 import styles from './manage-invites.module.scss';
 
 interface ChatInvitesCoreProps {
@@ -253,6 +254,7 @@ function ChatInvitesContent({
 }
 
 export default function ChatInvitesCore({ chatId: propChatId, backAction }: ChatInvitesCoreProps) {
+  const isDesktop = useIsDesktop();
   const { id } = useParams<{ id: string }>();
   const chatId = propChatId ?? (id ? String(id) : '');
   const locale = useSelector(selectEffectiveLocale);
@@ -470,7 +472,7 @@ export default function ChatInvitesCore({ chatId: propChatId, backAction }: Chat
         />
         <ShareInviteGroupSelectorModal
           isOpen={selectorOpen}
-          isDesktop={false}
+          isDesktop={isDesktop}
           scope="joined"
           onDismiss={closeSelector}
           onSelect={(group) => void handleShareSelect(group)}

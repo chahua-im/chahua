@@ -15,6 +15,7 @@ import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { EmojiInput } from '@/components/shared/EmojiInput';
 import styles from './AddStickerModal.module.scss';
+import { useIsDesktop } from '@/hooks/platformHooks';
 
 interface AddStickerModalProps {
   file: File | null;
@@ -23,10 +24,15 @@ interface AddStickerModalProps {
 }
 
 export function AddStickerModal({ file, onDismiss, onAdd }: AddStickerModalProps) {
+  const isDesktop = useIsDesktop();
   const fileKey = file ? `${file.name}:${file.size}:${file.lastModified}` : 'empty';
 
   return (
-    <IonModal isOpen={file != null} onDidDismiss={onDismiss} initialBreakpoint={0.8} breakpoints={[0, 0.8]}>
+    <IonModal
+      isOpen={file != null}
+      onDidDismiss={onDismiss}
+      {...(!isDesktop ? { initialBreakpoint: 0.8, breakpoints: [0, 0.8] } : {})}
+    >
       {file ? <AddStickerModalForm key={fileKey} file={file} onDismiss={onDismiss} onAdd={onAdd} /> : null}
     </IonModal>
   );

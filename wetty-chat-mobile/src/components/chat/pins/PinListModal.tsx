@@ -11,6 +11,7 @@ import type { PinResponse } from '@/api/pins';
 import { deletePin } from '@/api/pins';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import styles from './PinListModal.module.scss';
+import { useIsDesktop } from '@/hooks/platformHooks';
 
 interface PinListModalProps {
   chatId: string;
@@ -22,6 +23,7 @@ interface PinListModalProps {
 
 export function PinListModal({ chatId, isOpen, onDismiss, onSelectPin, onSelectThread }: PinListModalProps) {
   const [presentAlert] = useIonAlert();
+  const isDesktop = useIsDesktop();
   const { role } = useChatRole(chatId);
   const isAdmin = role === 'admin';
   const pins = useSelector((state: RootState) => selectPinsForChat(state, chatId));
@@ -67,7 +69,11 @@ export function PinListModal({ chatId, isOpen, onDismiss, onSelectPin, onSelectT
   );
 
   return (
-    <IonModal isOpen={isOpen} onDidDismiss={onDismiss} initialBreakpoint={0.5} breakpoints={[0, 0.5, 0.75]}>
+    <IonModal
+      isOpen={isOpen}
+      onDidDismiss={onDismiss}
+      {...(!isDesktop ? { initialBreakpoint: 0.5, breakpoints: [0, 0.5, 0.75] } : {})}
+    >
       <IonContent>
         <div className={styles.header}>
           <span className={styles.title}>{t`Pinned Messages`}</span>
