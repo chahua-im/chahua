@@ -47,8 +47,8 @@ This is a direct replacement behind the existing `ChatVirtualScroll` API.
 Key rules:
 
 - date rows keep stable `date:` / `datefirst:` keys
-- message rows keep stable `msg:${client_generated_id || id}` keys
-- mutation classification uses `msg:` keys only
+- group rows keep stable `grp:${clientGeneratedId || id}` keys
+- mutation classification uses `grp:` keys only
 
 The row model in `useChatRows()` stays as-is.
 

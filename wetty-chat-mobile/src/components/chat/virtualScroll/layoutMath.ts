@@ -25,8 +25,8 @@ function isSubsequence(sub: string[], full: string[]): boolean {
 }
 
 export function classifyKeyMutation(prev: string[], next: string[]): MutationType {
-  const prevMsgs = prev.filter((key) => key.startsWith('msg:'));
-  const nextMsgs = next.filter((key) => key.startsWith('msg:'));
+  const prevMsgs = prev.filter((key) => key.startsWith('grp:'));
+  const nextMsgs = next.filter((key) => key.startsWith('grp:'));
 
   if (arraysEqual(prevMsgs, nextMsgs)) return 'none';
   if (prevMsgs.length === 0 || nextMsgs.length === 0) return 'reset';
