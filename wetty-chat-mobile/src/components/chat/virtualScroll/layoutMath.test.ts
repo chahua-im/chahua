@@ -10,10 +10,10 @@ import {
 
 describe('virtual scroll layout math', () => {
   it('classifies message-key mutations while ignoring date rows', () => {
-    expect(classifyKeyMutation(['date:a', 'msg:1', 'msg:2'], ['date:a', 'msg:1', 'msg:2'])).toBe('none');
-    expect(classifyKeyMutation(['msg:3', 'msg:4'], ['msg:1', 'msg:2', 'msg:3', 'msg:4'])).toBe('prepend');
-    expect(classifyKeyMutation(['msg:1', 'msg:2'], ['msg:1', 'msg:2', 'date:b', 'msg:3'])).toBe('append');
-    expect(classifyKeyMutation(['msg:1', 'msg:3'], ['msg:1', 'msg:2', 'msg:3'])).toBe('reset');
+    expect(classifyKeyMutation(['date:a', 'grp:1', 'grp:2'], ['date:a', 'grp:1', 'grp:2'])).toBe('none');
+    expect(classifyKeyMutation(['grp:3', 'grp:4'], ['grp:1', 'grp:2', 'grp:3', 'grp:4'])).toBe('prepend');
+    expect(classifyKeyMutation(['grp:1', 'grp:2'], ['grp:1', 'grp:2', 'date:b', 'grp:3'])).toBe('append');
+    expect(classifyKeyMutation(['grp:1', 'grp:3'], ['grp:1', 'grp:2', 'grp:3'])).toBe('reset');
   });
 
   it('normalizes, unions, and caps mounted ranges', () => {

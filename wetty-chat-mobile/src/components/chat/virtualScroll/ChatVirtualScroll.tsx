@@ -659,7 +659,7 @@ export function ChatVirtualScroll({
       const row = rowRefsMap.current.get(key);
       if (!key || !row) continue;
 
-      if (key.startsWith('msg:') && !firstMountedMessage) {
+      if (key.startsWith('grp:') && !firstMountedMessage) {
         firstMountedMessage = { key, offsetTop: roundScrollValue(row.offsetTop) };
       }
 
@@ -667,7 +667,7 @@ export function ChatVirtualScroll({
       if (rect.bottom <= containerRect.top || rect.top >= containerRect.bottom) continue;
 
       const anchor = { key, offsetTop: roundScrollValue(rect.top - containerRect.top) };
-      if (key.startsWith('msg:')) {
+      if (key.startsWith('grp:')) {
         firstVisibleMessage = anchor;
         break;
       }

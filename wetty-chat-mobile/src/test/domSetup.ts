@@ -30,7 +30,7 @@ afterEach(() => {
     }
   });
   cacheStores.clear();
-  localStorage.clear();
-  sessionStorage.clear();
+  if (typeof localStorage !== 'undefined' && localStorage) localStorage.clear();
+  if (typeof sessionStorage !== 'undefined' && sessionStorage) sessionStorage.clear();
   vi.clearAllMocks();
 });
