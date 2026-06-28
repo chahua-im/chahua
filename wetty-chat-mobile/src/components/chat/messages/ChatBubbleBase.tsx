@@ -364,6 +364,17 @@ export function ChatBubbleBase({
     );
   }
 
+  const senderGroupBadgeStyle = (() => {
+    if (isSent || !senderGroup?.chatGroupColor) return undefined;
+    const groupColor = isDarkMode
+      ? (senderGroup.chatGroupColorDark ?? senderGroup.chatGroupColor)
+      : senderGroup.chatGroupColor;
+    return {
+      backgroundColor: `${groupColor}`,
+      color: '#fff',
+    } as CSSProperties;
+  })();
+
   const bubble = (
     <div
       ref={bubbleRef}
@@ -380,25 +391,11 @@ export function ChatBubbleBase({
     >
       {showName && (
         <div className={styles.sender}>
-          <span className={styles.senderName} style={{ color: colorForUser(senderName) }}>
+          <span className={styles.senderName} style={isSent ? undefined : { color: colorForUser(senderName) }}>
             {senderName}
           </span>
           {senderGroup && (
-            <span
-              className={styles.senderGroup}
-              style={
-                senderGroup.chatGroupColor
-                  ? {
-                      backgroundColor: `${
-                        isDarkMode
-                          ? senderGroup.chatGroupColorDark || senderGroup.chatGroupColor
-                          : senderGroup.chatGroupColor
-                      }70`,
-                      color: '#fff',
-                    }
-                  : undefined
-              }
-            >
+            <span className={styles.senderGroup} style={senderGroupBadgeStyle}>
               {senderGroup.name}
             </span>
           )}
@@ -410,7 +407,7 @@ export function ChatBubbleBase({
             ))}
         </div>
       )}
-      {replyTo && <ReplyPreview replyTo={replyTo} interactive={interactive} onReplyTap={onReplyTap} />}
+      {replyTo && <ReplyPreview replyTo={replyTo} isSent={isSent} interactive={interactive} onReplyTap={onReplyTap} />}
       {imageAttachments.length > 0 && (
         <div className={mediaContainerClasses}>
           {imageAttachments.length === 1 ? (

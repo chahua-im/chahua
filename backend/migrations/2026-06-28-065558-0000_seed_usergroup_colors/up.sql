@@ -1,6 +1,6 @@
 -- Seed chat_group_color / chat_group_color_dark for existing usergroups.
 -- Data-only migration: colors should persist even if this migration is rolled back.
-INSERT INTO public.usergroup_extra (groupid, chat_group_color, chat_group_color_dark) VALUES
+INSERT INTO usergroup_extra (groupid, chat_group_color, chat_group_color_dark) VALUES
     (57, '#6fb1d5', '#6fb1d5'),
     (56, '#F4A460', '#F4A460'),
     (53, '#F4A460', '#F4A460'),

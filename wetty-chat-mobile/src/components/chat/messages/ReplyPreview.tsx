@@ -11,24 +11,29 @@ export interface ReplyPreviewInfo {
 
 interface ReplyPreviewProps {
   replyTo: ReplyPreviewInfo;
+  isSent?: boolean;
   interactive?: boolean;
   onReplyTap?: () => void;
 }
 
-export function ReplyPreview({ replyTo, interactive, onReplyTap }: ReplyPreviewProps) {
+export function ReplyPreview({ replyTo, isSent, interactive, onReplyTap }: ReplyPreviewProps) {
   const locale = useSelector(selectEffectiveLocale);
-  const color = colorForUser(replyTo.senderName);
+  const color = isSent ? undefined : colorForUser(replyTo.senderName);
 
   return (
     <div
       className={`${styles.replyPreview} ${interactive && onReplyTap ? styles.replyPreviewTappable : ''}`}
       onClick={interactive ? onReplyTap : undefined}
-      style={{
-        borderLeftColor: color,
-        backgroundColor: `${color}1a`,
-      }}
+      style={
+        color
+          ? {
+              borderLeftColor: color,
+              backgroundColor: `${color}1a`,
+            }
+          : undefined
+      }
     >
-      <div className={styles.replyPreviewName} style={{ color }}>
+      <div className={styles.replyPreviewName} style={color ? { color } : undefined}>
         {replyTo.senderName}
       </div>
       <div className={styles.replyPreviewText}>

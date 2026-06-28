@@ -457,6 +457,10 @@
     display: inline-flex;
     align-items: center;
     opacity: 0.85;
+
+    .received & {
+      filter: contrast(0.85);
+    }
   }
 
   .gender {

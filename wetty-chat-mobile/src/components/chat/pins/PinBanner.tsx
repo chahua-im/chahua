@@ -9,7 +9,6 @@ import { selectPinsForChat } from '@/store/pinsSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { deletePin } from '@/api/pins';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
-import { colorForUser } from '@/utils/userColor';
 import styles from './PinBanner.module.scss';
 
 interface PinBannerProps {
@@ -106,10 +105,7 @@ export function PinBanner({
       >
         <IonIcon icon={pin} className={styles.pinIcon} />
         <div className={styles.text}>
-          <span
-            className={styles.senderName}
-            style={{ color: colorForUser(msg.sender.name ?? `User ${msg.sender.uid}`), opacity: 0.85 }}
-          >
+          <span className={styles.senderName} style={{ opacity: 0.85 }}>
             {msg.sender.name ?? `User ${msg.sender.uid}`}
           </span>
           <span className={styles.messageText}>{previewText}</span>
