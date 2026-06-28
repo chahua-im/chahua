@@ -41,15 +41,15 @@
   width: 100%;
 }
 
-// Received groups render the message column above the sticky avatar
-// (.avatarContainer z-index:2) so a left-swiping bubble paints OVER the floating
-// avatar instead of under it. The avatar stays tappable: the per-row avatarSpacer
-// (ChatBubble.module.scss) is pointer-events:none, so taps fall through to the
-// avatar behind. Sent groups omit this class, keeping the avatar on top — sent
-// swipes move the bubble away from the right-side avatar, so no overlap either way.
+// Received: the message column sits BELOW the sticky avatar (z-index 1 < 2)
+// so the avatar is directly tappable — no pointer-events passthrough needed.
+// reportSwipe raises the column to z-index 3 while the last message is swiped,
+// so the left-sliding bubble paints OVER the avatar (original swipe visual).
+// Sent groups omit this class: sent swipes move the bubble away from the
+// right-side avatar, so the two never overlap regardless of z-index.
 .messageColumnAbove {
   position: relative;
-  z-index: 3;
+  z-index: 1;
 }
 
 // Zero-height sentinel placed at the bottom of .messageColumn. An

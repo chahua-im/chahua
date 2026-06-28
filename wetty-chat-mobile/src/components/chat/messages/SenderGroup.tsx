@@ -40,6 +40,7 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
   // every touchmove frame. `avatarAtRestRef` is the gate; the sentinel's
   // IntersectionObserver flips it (in-view = group bottom visible = at rest).
   const avatarRef = useRef<HTMLDivElement>(null);
+  const messageColumnRef = useRef<HTMLDivElement>(null);
   const avatarAtRestRef = useRef(true);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -102,9 +103,22 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
     return () => io.disconnect();
   }, []);
 
-  // Only the last message reports; its updates drive the avatar transform. Mutates
-  // the DOM directly (no state) so swiping stays 60fps regardless of group size.
-  const reportSwipe = useCallback((transformPx: number, animating: boolean) => {
+  // Every bubble reports its live swipe; SenderGroup mutates the DOM directly
+  // (no state) so swiping stays 60fps regardless of group size. Two effects:
+  //  - any bubble: raise the message column z-index so it paints over the avatar
+  //    while swiping, then restore it so the avatar is tappable at rest;
+  //  - only the last bubble (isLast): also drive the floating avatar transform.
+  const reportSwipe = useCallback((transformPx: number, animating: boolean, isLast: boolean) => {
+    // Raise the message column above the avatar while any bubble is swiping
+    // (z 3 > 2) so it paints OVER the avatar. Drop back to CSS default (1) on
+    // release so the avatar stays directly tappable at rest. Not gated by
+    // avatarAtRestRef: even mid-scroll (avatar stuck elsewhere) the swipe
+    // visual should win, and there is no overlap to protect in that state anyway.
+    const mc = messageColumnRef.current;
+    if (mc) mc.style.zIndex = transformPx !== 0 ? '3' : '';
+    // Only the last message's swipe drives the floating avatar transform;
+    // non-last bubbles slide over the (stationary) avatar instead of dragging it.
+    if (!isLast) return;
     const el = avatarRef.current;
     if (!el || !avatarAtRestRef.current) return;
     el.style.transform = transformPx !== 0 ? `translateX(${transformPx}px)` : '';
@@ -120,9 +134,10 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
 
   const senderName = sender.name ?? `User ${sender.uid}`;
   const containerClass = `${styles.avatarContainer}${isSent ? ` ${styles.sent}` : ''}`;
-  // Received: raise the message column above the sticky avatar so a left-swiping
-  // bubble slides OVER the floating avatar. Sent keeps the avatar on top (sent
-  // swipes move the bubble away from the right-side avatar, so no overlap).
+  // Received: the message column defaults below the sticky avatar (z 1 < 2) so
+  // the avatar is tappable; reportSwipe raises it to z 3 while swiping so the
+  // bubble paints OVER the avatar. Sent keeps the avatar on top (sent swipes
+  // move the bubble away from the right-side avatar, so no overlap).
 
   return (
     <div ref={rootRef} className={styles.root}>
@@ -135,7 +150,10 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
           onClick={() => onAvatarClick(sender)}
         />
       </div>
-      <div className={`${styles.messageColumn}${!isSent ? ` ${styles.messageColumnAbove}` : ''}`}>
+      <div
+        ref={messageColumnRef}
+        className={`${styles.messageColumn}${!isSent ? ` ${styles.messageColumnAbove}` : ''}`}
+      >
         <SenderSwipeContext.Provider value={{ reportSwipe }}>{children}</SenderSwipeContext.Provider>
         <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
       </div>

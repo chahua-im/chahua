@@ -96,20 +96,25 @@ export function ChatBubble(props: ChatBubbleProps) {
   const [offset, setOffset] = useState(0);
   const [animating, setAnimating] = useState(false);
 
-  // Report this bubble's live swipe offset to the SenderGroup so the floating
-  // avatar can mirror it — but only for the last message in the group. The group
-  // applies the transform directly to the avatar DOM node (no React state), so
-  // this stays 60fps even for large groups. When the context is null (search /
-  // read-only / showAllAvatars inline mode) this is a no-op.
+  // Report this bubble's live swipe offset to the SenderGroup. Every bubble
+  // reports so the group can raise its message column z-index while swiping
+  // (bubble paints OVER the avatar); the last message additionally drives the
+  // floating avatar's horizontal transform (isLastInGroup gate lives inside
+  // SenderGroup.reportSwipe). Mutates the DOM directly (no state) so swiping
+  // stays 60fps. When the context is null (search / read-only / showAllAvatars
+  // inline mode) this is a no-op.
   useEffect(() => {
-    if (!isLastInGroup || !swipeCtx) return;
-    swipeCtx.reportSwipe(offset * swipeSign, animating);
+    if (!swipeCtx) return;
+    swipeCtx.reportSwipe(offset * swipeSign, animating, !!isLastInGroup);
   }, [offset, animating, isLastInGroup, swipeCtx, swipeSign]);
 
-  // On unmount, release the avatar so it doesn't keep a stale transform.
+  // On unmount, release the avatar so it doesn't keep a stale transform. Only
+  // the last message owns the avatar transform, so only it needs this cleanup;
+  // non-last bubbles reset the column z-index via the offset effect above when
+  // their swipe ends (offset → 0).
   useEffect(() => {
     return () => {
-      if (isLastInGroup && swipeCtx) swipeCtx.reportSwipe(0, false);
+      if (isLastInGroup && swipeCtx) swipeCtx.reportSwipe(0, false, isLastInGroup);
     };
   }, [isLastInGroup, swipeCtx]);
   const startX = useRef(0);
