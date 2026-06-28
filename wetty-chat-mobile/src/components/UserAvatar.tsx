@@ -2,6 +2,7 @@ import { forwardRef } from 'react';
 import { IonIcon } from '@ionic/react';
 import { personCircle } from 'ionicons/icons';
 import styles from './UserAvatar.module.scss';
+import { colorForUser } from '@/utils/userColor';
 
 interface UserAvatarProps {
   name: string;
@@ -15,16 +16,6 @@ interface UserAvatarProps {
 
 function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
-}
-
-function colorForUser(name: string): string {
-  let hash = 0;
-  for (const char of name) {
-    hash = (hash << 5) - hash + char.charCodeAt(0);
-    hash |= 0;
-  }
-  const hue = (((hash * 137) % 360) + 360) % 360;
-  return `hsl(${hue}, 55%, 50%)`;
 }
 
 /**

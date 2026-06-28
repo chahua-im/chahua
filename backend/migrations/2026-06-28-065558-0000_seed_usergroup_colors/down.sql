@@ -1,0 +1,1 @@
+-- No-op: this migration seeds color data that should persist across rollbacks.

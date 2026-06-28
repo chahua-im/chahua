@@ -273,9 +273,6 @@ msgstr "描述"
 msgid "Destination Group"
 msgstr "目標群組"
 
-msgid "Reactions"
-msgstr "回應"
-
 msgid "Discard"
 msgstr "放棄"
 
@@ -932,6 +929,9 @@ msgstr "推播通知已開啟"
 
 msgid "Push notifications turned off"
 msgstr "推播通知已關閉"
+
+msgid "Reactions"
+msgstr "回應"
 
 msgid "Read"
 msgstr "標記已讀"

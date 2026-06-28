@@ -16,10 +16,12 @@ import reactionStyles from './ReactionPill.module.scss';
 import { formatTime } from '@/utils/formatTime';
 import type { Attachment, MentionInfo, ReactionSummary, UserGroupTagInfo } from '@/api/messages';
 import { ImageViewer } from '@/components/chat/messages/media/ImageViewer';
-import { formatMessagePreview, type PreviewMessage, getNotificationPreviewLabels } from '@/utils/messagePreview';
-import { selectChatFontSizeStyle, selectEffectiveLocale } from '@/store/settingsSlice';
+import { type PreviewMessage } from '@/utils/messagePreview';
+import { selectChatFontSizeStyle } from '@/store/settingsSlice';
 import { UserAvatar } from '@/components/UserAvatar';
-import { useMouseDetected } from '@/hooks/platformHooks';
+import { ReplyPreview } from './ReplyPreview';
+import { useIsDarkMode, useMouseDetected } from '@/hooks/platformHooks';
+import { colorForUser } from '@/utils/userColor';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
 import { renderMessageContent } from './messageContent';
 import { ReactionPill } from './ReactionPill';
@@ -112,6 +114,7 @@ export interface ChatBubbleBaseProps {
   mentions?: MentionInfo[];
   currentUserUid?: number | null;
   onMentionClick?: (uid: number) => void;
+  showDroplet?: boolean;
 }
 
 export function ChatBubbleBase({
@@ -144,11 +147,12 @@ export function ChatBubbleBase({
   mentions,
   currentUserUid,
   onMentionClick,
+  showDroplet: showDropletProp,
 }: ChatBubbleBaseProps) {
   const [viewingAttachmentIndex, setViewingAttachmentIndex] = useState<number | null>(null);
   const mouseDetected = useMouseDetected();
+  const isDarkMode = useIsDarkMode();
   const chatFontSizeStyle = useSelector(selectChatFontSizeStyle);
-  const locale = useSelector(selectEffectiveLocale);
   const interactive = interactionMode === 'interactive';
   const imageAttachments = attachments?.filter((att) => isImageAttachment(att) || isVideoAttachment(att)) ?? [];
   const otherAttachments = attachments?.filter((att) => !(isImageAttachment(att) || isVideoAttachment(att))) ?? [];
@@ -157,7 +161,7 @@ export function ChatBubbleBase({
   const hasTopContent = showName || replyTo;
   const hasBottomContent = message && message.trim() !== '';
   const isMediaOnly = imageAttachments.length > 0 && !hasBottomContent && otherAttachments.length === 0;
-  const showDroplet = (showAvatar || layout === 'bubble-only') && !isMediaOnly;
+  const showDroplet = (showDropletProp ?? (showAvatar || layout === 'bubble-only')) && !isMediaOnly;
 
   const baseFont = getChatBaseFont(chatFontSizeStyle as string);
 
@@ -376,9 +380,25 @@ export function ChatBubbleBase({
     >
       {showName && (
         <div className={styles.sender}>
-          <span className={styles.senderName}>{senderName}</span>
+          <span className={styles.senderName} style={{ color: colorForUser(senderName) }}>
+            {senderName}
+          </span>
           {senderGroup && (
-            <span className={styles.senderGroup} color={senderGroup.chatGroupColor!}>
+            <span
+              className={styles.senderGroup}
+              style={
+                senderGroup.chatGroupColor
+                  ? {
+                      backgroundColor: `${
+                        isDarkMode
+                          ? senderGroup.chatGroupColorDark || senderGroup.chatGroupColor
+                          : senderGroup.chatGroupColor
+                      }70`,
+                      color: '#fff',
+                    }
+                  : undefined
+              }
+            >
               {senderGroup.name}
             </span>
           )}
@@ -390,17 +410,7 @@ export function ChatBubbleBase({
             ))}
         </div>
       )}
-      {replyTo && (
-        <div
-          className={`${styles.replyPreview} ${interactive && onReplyTap ? styles.replyPreviewTappable : ''}`}
-          onClick={interactive ? onReplyTap : undefined}
-        >
-          <div className={styles.replyPreviewName}>{replyTo.senderName}</div>
-          <div className={styles.replyPreviewText}>
-            {formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
-          </div>
-        </div>
-      )}
+      {replyTo && <ReplyPreview replyTo={replyTo} interactive={interactive} onReplyTap={onReplyTap} />}
       {imageAttachments.length > 0 && (
         <div className={mediaContainerClasses}>
           {imageAttachments.length === 1 ? (

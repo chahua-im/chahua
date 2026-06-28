@@ -273,9 +273,6 @@ msgstr "Description"
 msgid "Destination Group"
 msgstr "Destination Group"
 
-msgid "Reactions"
-msgstr "Reactions"
-
 msgid "Discard"
 msgstr "Discard"
 
@@ -932,6 +929,9 @@ msgstr "Push notifications enabled"
 
 msgid "Push notifications turned off"
 msgstr "Push notifications turned off"
+
+msgid "Reactions"
+msgstr "Reactions"
 
 msgid "Read"
 msgstr "Read"

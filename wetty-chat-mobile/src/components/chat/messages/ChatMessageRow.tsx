@@ -124,6 +124,11 @@ function MessageBubble({
   // polarities; derive the local render flag from the single upstream value.
   const showInlineAvatar = !useStickyAvatar;
 
+  // Droplet tail points at the adjacent avatar. Inline mode gives every
+  // bubble its own avatar; sticky mode rests one group avatar at the last
+  // bubble, so only the last bubble carries the tail.
+  const showDroplet = showInlineAvatar || (useStickyAvatar && isLastInGroup);
+
   // Only the group's first bubble shows the sender name.
   const showNameOnBubble = showName && index === 0;
 
@@ -182,6 +187,7 @@ function MessageBubble({
   return (
     <ChatBubble
       {...sharedBubbleProps}
+      showDroplet={showDroplet}
       messageType={msg.messageType as 'text' | 'audio'}
       senderGender={msg.sender.gender}
       senderGroup={msg.sender.userGroup}

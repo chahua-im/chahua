@@ -3,15 +3,14 @@ import { IonIcon } from '@ionic/react';
 import { chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { StickerImage } from '@/components/shared/StickerImage';
-import { useSelector } from 'react-redux';
 import styles from './ChatBubble.module.scss';
 import { HoverReplyButton } from './HoverReplyButton';
-import { formatMessagePreview, type PreviewMessage, getNotificationPreviewLabels } from '@/utils/messagePreview';
-import { selectEffectiveLocale } from '@/store/settingsSlice';
+import { type PreviewMessage } from '@/utils/messagePreview';
 import { UserAvatar } from '@/components/UserAvatar';
 import { useMouseDetected } from '@/hooks/platformHooks';
 import type { BubblePropsOverride } from './ChatBubbleBase';
 import { formatTime } from '@/utils/formatTime';
+import { ReplyPreview } from './ReplyPreview';
 
 export interface StickerBubbleProps {
   messageType?: 'sticker';
@@ -61,7 +60,6 @@ export function StickerBubble({
   bubbleRef,
 }: StickerBubbleProps) {
   const mouseDetected = useMouseDetected();
-  const locale = useSelector(selectEffectiveLocale);
   const interactive = interactionMode === 'interactive';
   const { className: bubbleClassName, style: bubbleStyle, ...bubbleRestProps } = bubblePropOverrides ?? {};
   const [loaded, setLoaded] = useState(false);
@@ -75,17 +73,7 @@ export function StickerBubble({
         .join(' ')}
       style={bubbleStyle}
     >
-      {replyTo && (
-        <div
-          className={`${styles.replyPreview} ${interactive && onReplyTap ? styles.replyPreviewTappable : ''}`}
-          onClick={interactive ? onReplyTap : undefined}
-        >
-          <div className={styles.replyPreviewName}>{replyTo.senderName}</div>
-          <div className={styles.replyPreviewText}>
-            {formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
-          </div>
-        </div>
-      )}
+      {replyTo && <ReplyPreview replyTo={replyTo} interactive={interactive} onReplyTap={onReplyTap} />}
       <div className={styles.stickerContainer}>
         <StickerImage
           src={stickerUrl}
