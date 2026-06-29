@@ -1200,7 +1200,6 @@ export function ChatVirtualScroll({
           nextHeight: height,
           delta: height - previousHeight,
           scrollTop: container.scrollTop,
-          rowOffsetTop: rowNode.offsetTop,
           strategy: 'bottom-lock',
         });
         scrollToBottomInternal();

@@ -10,10 +10,13 @@ function isPrefix(prefix: string[], full: string[]): boolean {
   return prefix.every((value, index) => full[index] === value);
 }
 
-function isSuffix(suffix: string[], full: string[]): boolean {
-  if (suffix.length > full.length) return false;
-  const offset = full.length - suffix.length;
-  return suffix.every((value, index) => full[offset + index] === value);
+function commonSuffixLength(a: string[], b: string[]): number {
+  const max = Math.min(a.length, b.length);
+  let len = 0;
+  while (len < max && a[a.length - 1 - len] === b[b.length - 1 - len]) {
+    len += 1;
+  }
+  return len;
 }
 
 function isSubsequence(sub: string[], full: string[]): boolean {
@@ -32,7 +35,22 @@ export function classifyKeyMutation(prev: string[], next: string[]): MutationTyp
   if (prevMsgs.length === 0 || nextMsgs.length === 0) return 'reset';
   if (nextMsgs.length < prevMsgs.length && isSubsequence(nextMsgs, prevMsgs)) return 'delete';
   if (nextMsgs.length < prevMsgs.length) return 'reset';
-  if (isSuffix(prevMsgs, nextMsgs)) return 'prepend';
+  // Prepend: older messages added at the front. Normally prev is an exact suffix
+  // of next. But when prepended messages merge into the old first group (same
+  // sender + same date), that group's key changes (it derives from the first
+  // message id), so prev is no longer an exact suffix. Detect this by allowing
+  // only the leading group to differ — and only when its old key truly
+  // disappeared from next (merged away, not merely repositioned by a middle
+  // insert). Otherwise a middle insert would be misread as a prepend.
+  const commonSuffix = commonSuffixLength(prevMsgs, nextMsgs);
+  if (nextMsgs.length > prevMsgs.length) {
+    if (commonSuffix >= prevMsgs.length) {
+      return 'prepend';
+    }
+    if (prevMsgs.length >= 2 && commonSuffix === prevMsgs.length - 1 && !nextMsgs.includes(prevMsgs[0])) {
+      return 'prepend';
+    }
+  }
   if (isPrefix(prevMsgs, nextMsgs)) return 'append';
   return 'reset';
 }

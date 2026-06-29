@@ -14,6 +14,11 @@ describe('virtual scroll layout math', () => {
     expect(classifyKeyMutation(['grp:3', 'grp:4'], ['grp:1', 'grp:2', 'grp:3', 'grp:4'])).toBe('prepend');
     expect(classifyKeyMutation(['grp:1', 'grp:2'], ['grp:1', 'grp:2', 'date:b', 'grp:3'])).toBe('append');
     expect(classifyKeyMutation(['grp:1', 'grp:3'], ['grp:1', 'grp:2', 'grp:3'])).toBe('reset');
+    // Prepend-merge: older same-sender messages merge into the old first
+    // group, changing its key (derived from the first message id). Must still
+    // classify as prepend, not reset, so the prepend compensation keeps the
+    // scroll position instead of re-bootstrapping to the latest message.
+    expect(classifyKeyMutation(['grp:1', 'grp:2', 'grp:3'], ['grp:0', 'grp:1m', 'grp:2', 'grp:3'])).toBe('prepend');
   });
 
   it('normalizes, unions, and caps mounted ranges', () => {
