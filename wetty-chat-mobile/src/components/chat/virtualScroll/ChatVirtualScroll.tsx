@@ -226,6 +226,7 @@ export function ChatVirtualScroll({
   const [containerHeight, setContainerHeight] = useState(0);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [highlightedRowKey, setHighlightedRowKey] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [hiddenDateRowKey, setHiddenDateRowKey] = useState<string | null>(null);
   const [renderTick, setRenderTick] = useState(0);
   const triggerRender = useCallback(() => setRenderTick((value) => value + 1), []);
@@ -598,17 +599,50 @@ export function ChatVirtualScroll({
     [],
   );
 
-  const triggerJumpTargetHighlight = useCallback((key: string) => {
+  const triggerJumpTargetHighlight = useCallback((key?: string, messageId?: string) => {
     if (highlightTimerRef.current) {
       clearTimeout(highlightTimerRef.current);
     }
 
-    setHighlightedRowKey(key);
+    if (messageId) {
+      setHighlightedRowKey(null);
+      setHighlightedMessageId(messageId);
+    } else {
+      setHighlightedRowKey(key ?? null);
+      setHighlightedMessageId(null);
+    }
+
     highlightTimerRef.current = setTimeout(() => {
       setHighlightedRowKey((current) => (current === key ? null : current));
+      setHighlightedMessageId((current) => (current === messageId ? null : current));
       highlightTimerRef.current = null;
     }, JUMP_TARGET_HIGHLIGHT_MS);
   }, []);
+
+  // Highlight the specific message bubble via DOM — avoids prop threading through
+  // SenderGroup / ChatMessageRow / ChatBubble. Re-runs on every renderTick so the
+  // highlight survives virtual-scroll remounts.
+  useLayoutEffect(() => {
+    if (!highlightedMessageId) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const target = container.querySelector(`[data-message-id="${highlightedMessageId}"]`);
+    if (!target) return;
+
+    const chatRow = target.closest('[class*="chatRow"]') ?? target.closest('[class*="bubbleOnly"]');
+    if (!chatRow) return;
+
+    const el = chatRow as HTMLElement;
+    el.style.transition = 'background-color 100ms ease-out';
+    el.style.backgroundColor = 'rgba(var(--ion-color-warning-rgb), 0.18)';
+
+    return () => {
+      el.style.backgroundColor = '';
+      el.style.transition = '';
+    };
+  }, [highlightedMessageId, renderTick]);
 
   const resolveMessageTarget = useCallback(
     (messageId: string) => {
@@ -1434,9 +1468,15 @@ export function ChatVirtualScroll({
           }
         }
         if (scrolled) {
-          // Skip highlight when resuming the latest message — no jump is happening.
-          if (target.index < rowKeys.length - 1) {
-            triggerJumpTargetHighlight(target.key);
+          // Skip highlight only when resuming to the very latest message (all read →
+          // no jump). Compare by messageId, not row index: with sticky-avatar grouping
+          // the last group row holds multiple messages, so a row-index check would
+          // wrongly suppress the unread-divider flash whenever the last-read message
+          // shares the final group with later unread messages.
+          const lastRow = rows[rows.length - 1];
+          const latestMessageId = lastRow?.type === 'group' ? lastRow.lastMessageId : null;
+          if (intent.scrollToMessageId.messageId !== latestMessageId) {
+            triggerJumpTargetHighlight(target.key, intent.scrollToMessageId.messageId);
           }
         }
       } else {
@@ -2257,7 +2297,7 @@ export function ChatVirtualScroll({
           if (scrolled) {
             // Skip highlight when resuming the latest message — no jump is happening.
             if (target.index < rowKeys.length - 1) {
-              triggerJumpTargetHighlight(target.key);
+              triggerJumpTargetHighlight(target.key, messageId);
             }
             pendingScrollMessageIdRef.current = null;
           }
