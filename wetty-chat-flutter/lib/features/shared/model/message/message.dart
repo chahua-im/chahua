@@ -1,4 +1,5 @@
 import 'package:chahua/core/api/models/messages_api_models.dart';
+import 'package:flutter/rendering.dart';
 
 import 'attachment.dart';
 import 'mention.dart';
@@ -54,6 +55,9 @@ class ConversationMessageV2 {
     final sticker = dto.sticker == null
         ? null
         : StickerSummary.fromDto(dto.sticker!);
+    final forwardedMessages = dto.forwardedMessages
+        ?.map(ForwardedMessageSnapshot.fromDto)
+        .toList(growable: false);
 
     return ConversationMessageV2(
       serverMessageId: dto.id,
@@ -78,6 +82,7 @@ class ConversationMessageV2 {
         sticker: sticker,
         attachments: attachments,
         mentions: mentions,
+        forwardedMessages: forwardedMessages,
       ),
     );
   }
@@ -142,6 +147,7 @@ MessageContent _contentFromMessageItemDto({
   required StickerSummary? sticker,
   required List<AttachmentItem> attachments,
   required List<MentionInfo> mentions,
+  required List<ForwardedMessageSnapshot>? forwardedMessages,
 }) {
   if (messageType == 'system') {
     return SystemMessageContent(text: message ?? '');
@@ -154,6 +160,9 @@ MessageContent _contentFromMessageItemDto({
   }
   if (messageType == 'invite') {
     return InviteMessageContent(text: message, mentions: mentions);
+  }
+  if (messageType == 'forwarded') {
+    return ForwardedMessageContent(messages: forwardedMessages ?? const []);
   }
   if (messageType == 'audio') {
     if (attachments.isEmpty) {
@@ -214,6 +223,72 @@ class InviteMessageContent extends MessageContent {
 
   final String? text;
   final List<MentionInfo> mentions;
+}
+
+class ForwardedMessageContent extends MessageContent {
+  const ForwardedMessageContent({required this.messages});
+
+  final List<ForwardedMessageSnapshot> messages;
+}
+
+class ForwardedMessageSnapshot {
+  const ForwardedMessageSnapshot({
+    required this.originalMessageId,
+    required this.originalChatId,
+    required this.sender,
+    required this.content,
+    this.originalCreatedAt,
+    this.replyToMessage,
+  });
+
+  factory ForwardedMessageSnapshot.fromDto(ForwardedMessageSnapshotDto dto) {
+    final attachments = dto.attachments
+        .map(AttachmentItem.fromDto)
+        .toList(growable: false);
+    final mentions = dto.mentions
+        .map(MentionInfo.fromDto)
+        .toList(growable: false);
+
+    return ForwardedMessageSnapshot(
+      originalMessageId: dto.originalMessageId,
+      originalChatId: dto.originalChatId,
+      sender: User.fromDto(dto.sender),
+      originalCreatedAt: dto.originalCreatedAt,
+      replyToMessage: dto.replyToMessage == null
+          ? null
+          : ReplyToMessage.fromDto(dto.replyToMessage!),
+      content: _contentFromForwardedSnapshotDto(
+        dto,
+        attachments: attachments,
+        mentions: mentions,
+      ),
+    );
+  }
+
+  final int originalMessageId;
+  final int originalChatId;
+  final User sender;
+  final DateTime? originalCreatedAt;
+  final ReplyToMessage? replyToMessage;
+  final MessageContent content;
+}
+
+MessageContent _contentFromForwardedSnapshotDto(
+  ForwardedMessageSnapshotDto dto, {
+  required List<AttachmentItem> attachments,
+  required List<MentionInfo> mentions,
+}) {
+  if (dto.messageType == 'sticker') {
+    return TextMessageContent(text: '[Sticker]', mentions: mentions);
+  }
+  return _contentFromMessageItemDto(
+    messageType: dto.messageType,
+    message: dto.message,
+    sticker: null,
+    attachments: attachments,
+    mentions: mentions,
+    forwardedMessages: null,
+  );
 }
 
 class SystemMessageContent extends MessageContent {

@@ -270,6 +270,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get forwardMessagesAction => '转发';
 
   @override
+  String get forwardedMessagesTitle => '转发消息';
+
+  @override
+  String forwardedMessagesCount(int count) {
+    return '包含 $count 条消息';
+  }
+
+  @override
   String get forwardCurrentChatLabel => '当前聊天';
 
   @override
@@ -420,6 +428,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get previewAttachment => '[附件]';
+
+  @override
+  String get previewForwarded => '[转发]';
 
   @override
   String get mediaImageSaved => '图片已保存到照片。';
@@ -799,6 +810,14 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get forwardMessagesAction => '轉發';
 
   @override
+  String get forwardedMessagesTitle => '轉發訊息';
+
+  @override
+  String forwardedMessagesCount(int count) {
+    return '包含 $count 則訊息';
+  }
+
+  @override
   String get forwardCurrentChatLabel => '目前聊天';
 
   @override
@@ -949,6 +968,9 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get previewAttachment => '[附件]';
+
+  @override
+  String get previewForwarded => '[轉發]';
 
   @override
   String get mediaImageSaved => '圖片已儲存到照片。';

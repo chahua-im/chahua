@@ -168,6 +168,7 @@ class ConversationTimelineV2Repository {
       StickerMessageContent() => 'sticker',
       InviteMessageContent() => 'invite',
       SystemMessageContent() => 'system',
+      ForwardedMessageContent() => 'forwarded',
     };
   }
 
@@ -178,6 +179,7 @@ class ConversationTimelineV2Repository {
       InviteMessageContent(:final text) => text ?? '',
       SystemMessageContent(:final text) => text,
       StickerMessageContent() => '',
+      ForwardedMessageContent() => '',
     };
   }
 

@@ -512,7 +512,9 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
             }
           },
         ),
-      if (isOwn && message.content is! AudioMessageContent)
+      if (isOwn &&
+          message.content is! AudioMessageContent &&
+          message.content is! ForwardedMessageContent)
         MessageOverlayActionV2(
           label: l10n.edit,
           icon: CupertinoIcons.pencil,

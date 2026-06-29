@@ -1173,6 +1173,7 @@ MessageContent _editedContent(MessageContent content, String newText) {
     ),
     StickerMessageContent() => content,
     SystemMessageContent() => content,
+    ForwardedMessageContent() => content,
   };
 }
 
@@ -1183,6 +1184,7 @@ String? _messageTextFor(MessageContent content) {
     InviteMessageContent(:final text) => text,
     SystemMessageContent(:final text) => text,
     StickerMessageContent() => null,
+    ForwardedMessageContent() => null,
   };
 }
 
@@ -1193,6 +1195,7 @@ String _messageTypeFor(MessageContent content) {
     InviteMessageContent() => 'invite',
     StickerMessageContent() => 'sticker',
     SystemMessageContent() => 'system',
+    ForwardedMessageContent() => 'forwarded',
   };
 }
 

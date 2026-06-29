@@ -621,6 +621,18 @@ abstract class AppLocalizations {
   /// **'Forward'**
   String get forwardMessagesAction;
 
+  /// Title for forwarded message cards and the forwarded messages viewer
+  ///
+  /// In en, this message translates to:
+  /// **'Forwarded'**
+  String get forwardedMessagesTitle;
+
+  /// Label showing how many messages are inside a forwarded message card
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No messages} =1{1 message} other{{count} messages}}'**
+  String forwardedMessagesCount(int count);
+
   /// Label for the disabled current chat row in the forward destination picker
   ///
   /// In en, this message translates to:
@@ -908,6 +920,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'[Attachment]'**
   String get previewAttachment;
+
+  /// Message preview label for a forwarded message
+  ///
+  /// In en, this message translates to:
+  /// **'[Forwarded]'**
+  String get previewForwarded;
 
   /// Status shown after saving an image attachment
   ///

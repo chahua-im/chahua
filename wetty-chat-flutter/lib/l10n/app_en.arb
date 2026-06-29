@@ -262,6 +262,20 @@
   "forwardMessagesAction": "Forward",
   "@forwardMessagesAction": { "description": "Action label for forwarding selected messages" },
 
+  "forwardedMessagesTitle": "Forwarded",
+  "@forwardedMessagesTitle": { "description": "Title for forwarded message cards and the forwarded messages viewer" },
+
+  "forwardedMessagesCount": "{count, plural, =0{No messages} =1{1 message} other{{count} messages}}",
+  "@forwardedMessagesCount": {
+    "description": "Label showing how many messages are inside a forwarded message card",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "2"
+      }
+    }
+  },
+
   "forwardCurrentChatLabel": "Current chat",
   "@forwardCurrentChatLabel": { "description": "Label for the disabled current chat row in the forward destination picker" },
 
@@ -420,6 +434,9 @@
 
   "previewAttachment": "[Attachment]",
   "@previewAttachment": { "description": "Message preview label for a generic attachment" },
+
+  "previewForwarded": "[Forwarded]",
+  "@previewForwarded": { "description": "Message preview label for a forwarded message" },
 
   "mediaImageSaved": "Image saved to Photos.",
   "@mediaImageSaved": { "description": "Status shown after saving an image attachment" },

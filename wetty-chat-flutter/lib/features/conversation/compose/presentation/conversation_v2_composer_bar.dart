@@ -292,6 +292,7 @@ class _ConversationV2ComposerBarState
         InviteMessageContent(:final text) => text ?? '',
         SystemMessageContent(:final text) => text,
         StickerMessageContent() => '',
+        ForwardedMessageContent() => '',
       },
       switch (mode.message.content) {
         TextMessageContent(:final mentions) => mentions,

@@ -13,6 +13,7 @@ const String voiceMessagePreviewLabel = '[Voice message]';
 const String imagePreviewLabel = '[Image]';
 const String videoPreviewLabel = '[Video]';
 const String attachmentPreviewLabel = '[Attachment]';
+const String forwardedPreviewLabel = '[Forwarded]';
 
 String formatReplyPreview(ReplyToMessage preview, {AppLocalizations? l10n}) {
   return formatMessagePreviewSummary(
@@ -84,6 +85,10 @@ String formatMessagePreview({
     return labels.voiceMessage;
   }
 
+  if (messageType == 'forwarded') {
+    return labels.forwarded;
+  }
+
   final text = message?.trim();
   if (text != null && text.isNotEmpty) {
     return renderMentionsAsText(text, mentions);
@@ -124,6 +129,7 @@ class _PreviewLabels {
   String get image => l10n?.previewImage ?? imagePreviewLabel;
   String get video => l10n?.previewVideo ?? videoPreviewLabel;
   String get attachment => l10n?.previewAttachment ?? attachmentPreviewLabel;
+  String get forwarded => l10n?.previewForwarded ?? forwardedPreviewLabel;
 }
 
 bool _containsAttachmentKind(List<AttachmentItem> attachments, String prefix) {

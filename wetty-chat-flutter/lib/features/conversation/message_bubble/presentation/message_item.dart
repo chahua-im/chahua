@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/bubble_theme_v2.dart';
+import 'forwarded/forwarded_message_card.dart';
 import 'sticker_bubble_v2.dart';
 import 'system_bubble_v2.dart';
 import 'text/text_bubble_v2.dart';
@@ -65,6 +66,7 @@ class MessageItem extends ConsumerWidget {
           onOpenThread: onOpenThread,
           onToggleReaction: onToggleReaction,
         ),
+        ForwardedMessageContent() => ForwardedMessageCard(message: message),
         TextMessageContent() || InviteMessageContent() => TextBubbleV2(
           message: message,
           showSenderName: showSenderName,

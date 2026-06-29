@@ -273,6 +273,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get forwardMessagesAction => 'Forward';
 
   @override
+  String get forwardedMessagesTitle => 'Forwarded';
+
+  @override
+  String forwardedMessagesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count messages',
+      one: '1 message',
+      zero: 'No messages',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get forwardCurrentChatLabel => 'Current chat';
 
   @override
@@ -432,6 +447,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get previewAttachment => '[Attachment]';
+
+  @override
+  String get previewForwarded => '[Forwarded]';
 
   @override
   String get mediaImageSaved => 'Image saved to Photos.';
