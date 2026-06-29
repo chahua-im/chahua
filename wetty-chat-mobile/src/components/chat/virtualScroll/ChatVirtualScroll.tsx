@@ -167,6 +167,12 @@ export function ChatVirtualScroll({
   const pendingPrependRestoreRef = useRef<{ key: string; offsetTop: number } | null>(null);
   const pendingDeleteRestoreRef = useRef<{ key: string; offsetTop: number } | null>(null);
   const pendingPrependCompensationRef = useRef<number | null>(null);
+  // Tracks the last message id seen on the previous layout pass. With sticky-avatar
+  // grouping, a new message from the same sender is merged into the existing last
+  // group row, so the row key array is unchanged and classifyKeyMutation returns
+  // 'none'. Comparing the actual last message id detects this "group grew" case so
+  // the append-bottom-lock auto-scroll still fires.
+  const lastKnownLastMessageIdRef = useRef<string | null>(null);
   const pendingLayoutAnchorRestoreRef = useRef<{
     source: string;
     key: string;
@@ -1413,6 +1419,25 @@ export function ChatVirtualScroll({
     const mutation = classifyKeyMutation(prevKeysRef.current, rowKeys);
     const intent = layoutIntentRef.current;
 
+    // Sticky-avatar grouping merges same-sender messages into one group row, so a
+    // new message that joins the last group leaves rowKeys unchanged and
+    // classifyKeyMutation reports 'none'. Detect that case by comparing the last
+    // message id so the append-bottom-lock auto-scroll still fires.
+    let treatAsAppend = mutation === 'append';
+    if (mutation === 'none') {
+      let currentLastMessageId: string | null = null;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        if (row.type === 'group') {
+          currentLastMessageId = row.lastMessageId;
+          break;
+        }
+      }
+      if (currentLastMessageId != null && currentLastMessageId !== lastKnownLastMessageIdRef.current) {
+        treatAsAppend = true;
+      }
+    }
+
     if (intent?.preserveHeightDelta && intent.preserveHeightDelta !== 0) {
       const nextScrollTop = roundScrollValue(container.scrollTop + intent.preserveHeightDelta);
       if (hasMeaningfulScrollDelta(container.scrollTop, nextScrollTop)) {
@@ -1642,7 +1667,7 @@ export function ChatVirtualScroll({
       setPhaseState(containerHeight > 0 ? 'BOOTSTRAP' : 'WAITING_VIEWPORT');
       triggerRender();
     } else if (
-      mutation === 'append' &&
+      treatAsAppend &&
       (isAtBottomRef.current || pendingScrollToBottomRef.current) &&
       !isPageHidden() && // skip auto-scroll while backgrounded
       !intent?.scrollToKey
@@ -1660,7 +1685,7 @@ export function ChatVirtualScroll({
         pendingScrollToBottomSourceRef.current = 'append-detected';
       }
       ensureBottomMeasured();
-    } else if (mutation === 'append') {
+    } else if (treatAsAppend) {
       logVirtualScroll('append-preserve-natural-position', {
         logicalAtBottom: isAtBottomRef.current,
         visualBottomDistance: container.scrollHeight - (container.scrollTop + container.clientHeight),
@@ -1671,6 +1696,19 @@ export function ChatVirtualScroll({
     updateLastFullyVisibleMessage();
     layoutIntentRef.current = null;
     prevKeysRef.current = rowKeys;
+    // Track the last message id so the next render can detect a same-sender
+    // message merging into the final group (mutation 'none' but content grew).
+    {
+      let lastId: string | null = null;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        if (row.type === 'group') {
+          lastId = row.lastMessageId;
+          break;
+        }
+      }
+      lastKnownLastMessageIdRef.current = lastId;
+    }
   }, [
     rowKeys,
     rowKeys.length,
