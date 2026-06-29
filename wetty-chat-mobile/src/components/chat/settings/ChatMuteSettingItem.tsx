@@ -70,18 +70,29 @@ export function ChatMuteSettingItem({ chatId, mutedUntil, archived = false }: Ch
   const muted = isChatMuted(mutedUntil);
 
   const handleMute = (durationSeconds: number | null) => {
+    const previousMutedUntil = mutedUntil ?? null;
+    const optimisticMutedUntil =
+      durationSeconds === null
+        ? new Date(9999, 11, 31).toISOString()
+        : new Date(Date.now() + durationSeconds * 1000).toISOString();
+    dispatch(setChatMutedUntil({ chatId, mutedUntil: optimisticMutedUntil }));
+
     muteChat(chatId, { durationSeconds })
       .then((response) => {
         dispatch(setChatMutedUntil({ chatId, mutedUntil: response.data.mutedUntil }));
         presentToast({ message: t`Notifications muted`, duration: 2000 });
       })
       .catch((error: Error) => {
+        dispatch(setChatMutedUntil({ chatId, mutedUntil: previousMutedUntil }));
         presentToast({ message: error.message || t`Failed to mute`, duration: 3000 });
       });
   };
 
   const handleUnmute = () => {
+    const previousMutedUntil = mutedUntil ?? null;
+
     if (archived) {
+      const previousArchived = archived;
       presentAlert({
         header: t`Unarchive chat?`,
         message: t`Unmuting will unarchive this chat. Continue?`,
@@ -90,13 +101,15 @@ export function ChatMuteSettingItem({ chatId, mutedUntil, archived = false }: Ch
           {
             text: t`Continue`,
             handler: () => {
+              dispatch(setChatMutedUntil({ chatId, mutedUntil: null }));
+              dispatch(setChatArchived({ chatId, archived: false }));
               void unmuteChat(chatId)
                 .then(() => {
-                  dispatch(setChatMutedUntil({ chatId, mutedUntil: null }));
-                  dispatch(setChatArchived({ chatId, archived: false }));
                   presentToast({ message: t`Notifications unmuted`, duration: 2000 });
                 })
                 .catch((error: Error) => {
+                  dispatch(setChatMutedUntil({ chatId, mutedUntil: previousMutedUntil }));
+                  dispatch(setChatArchived({ chatId, archived: previousArchived }));
                   presentToast({ message: error.message || t`Failed to unmute`, duration: 3000 });
                 });
             },
@@ -106,12 +119,13 @@ export function ChatMuteSettingItem({ chatId, mutedUntil, archived = false }: Ch
       return;
     }
 
+    dispatch(setChatMutedUntil({ chatId, mutedUntil: null }));
     unmuteChat(chatId)
       .then(() => {
-        dispatch(setChatMutedUntil({ chatId, mutedUntil: null }));
         presentToast({ message: t`Notifications unmuted`, duration: 2000 });
       })
       .catch((error: Error) => {
+        dispatch(setChatMutedUntil({ chatId, mutedUntil: previousMutedUntil }));
         presentToast({ message: error.message || t`Failed to unmute`, duration: 3000 });
       });
   };
@@ -132,7 +146,7 @@ export function ChatMuteSettingItem({ chatId, mutedUntil, archived = false }: Ch
 
   if (muted && mutedUntil) {
     return (
-      <GroupSettingsActionButton icon={notificationsOff} onClick={handleUnmute}>
+      <GroupSettingsActionButton tone="danger" icon={notificationsOff} onClick={handleUnmute}>
         {getMutedUntilLabel(locale, mutedUntil)}
       </GroupSettingsActionButton>
     );
