@@ -1,8 +1,8 @@
 .button {
-  --background: var(--ion-item-background, var(--ion-background-color));
-  --background-activated: var(--ion-item-background, var(--ion-background-color));
-  --background-focused: var(--ion-item-background, var(--ion-background-color));
-  --background-hover: var(--ion-item-background, var(--ion-background-color));
+  --background: rgba(var(--ion-color-primary-rgb), 0.08);
+  --background-activated: rgba(var(--ion-color-primary-rgb), 0.16);
+  --background-focused: rgba(var(--ion-color-primary-rgb), 0.12);
+  --background-hover: rgba(var(--ion-color-primary-rgb), 0.12);
   --border-radius: 24px;
   --color: var(--ion-color-primary);
   --padding-top: 16px;
@@ -45,6 +45,10 @@
 }
 
 .danger {
+  --background: rgba(var(--ion-color-danger-rgb), 0.1);
+  --background-activated: rgba(var(--ion-color-danger-rgb), 0.18);
+  --background-focused: rgba(var(--ion-color-danger-rgb), 0.14);
+  --background-hover: rgba(var(--ion-color-danger-rgb), 0.14);
   --color: var(--ion-color-danger);
 }
 
