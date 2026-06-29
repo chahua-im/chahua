@@ -70,7 +70,7 @@ pub struct ForwardedMessageSnapshot {
     pub original_created_at: DateTime<Utc>,
     pub reply_to_message: Option<Box<MessagePreview>>,
     pub attachments: Vec<AttachmentResponse>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
 }
 
