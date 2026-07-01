@@ -196,6 +196,7 @@ function MessageBubble({
       attachments={msg.attachments}
       reactions={msg.reactions}
       onReactionToggle={(emoji, currentlyReacted) => onReactionToggle(msg, emoji, currentlyReacted)}
+      reactionsInteractive={!msg.isDeleted}
       mentions={msg.mentions}
       currentUserUid={typeof currentUserId === 'number' ? currentUserId : null}
       onMentionClick={(uid) => onAvatarClick(mentionToUser(msg.mentions, uid))}

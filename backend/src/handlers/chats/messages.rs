@@ -640,22 +640,30 @@ pub(super) async fn post_thread_message(
     check_membership(conn, chat_id, uid)?;
     validate_client_message_type(&body.message_type)?;
 
-    // Load root message: validate existence and message type
+    // Load root message: validate existence. Allow deleted roots only when a
+    // thread already exists (has_thread=true) so existing discussions stay usable.
+    // A deleted message with has_thread=false means the discussion is fully
+    // terminated, so it's excluded here and surfaces as NotFound.
 
     let root_msg: Message = messages::table
         .filter(
             dsl::id
                 .eq(thread_id)
                 .and(dsl::chat_id.eq(chat_id))
-                .and(dsl::deleted_at.is_null())
-                .and(dsl::is_published.eq(true)),
+                .and(dsl::is_published.eq(true))
+                .and(dsl::deleted_at.is_null().or(dsl::has_thread.eq(true))),
         )
         .select(Message::as_select())
         .first(conn)
         .optional()?
         .ok_or(AppError::NotFound("Thread root message not found"))?;
 
-    if root_msg.message_type != MessageType::Text {
+    // Skip message-type check for deleted roots - the thread already exists.
+    // Invariant: only Text messages can ever acquire has_thread=true (enforced in
+    // post_thread_message above), so a deleted root is guaranteed to be Text and
+    // does not need re-validation. We skip solely because message_type is not
+    // reliable for deleted rows that may have been redacted.
+    if root_msg.deleted_at.is_none() && root_msg.message_type != MessageType::Text {
         return Err(AppError::BadRequest(
             "Threads can only be created on text messages",
         ));
@@ -1051,6 +1059,9 @@ async fn delete_message(
     let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageDeleted(response.clone()));
     state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
 
+    // Thread reply deletion: broadcast the lighter ThreadUpdate (carries reply_count /
+    // last_reply_at) to subscribers for the thread-list view. The parent-chat bubble
+    // badge is refreshed for ALL members by the MessageUpdated(root) broadcast below.
     if let Some(reply_root_id) = response.reply_root_id {
         if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
             conn,
@@ -1064,6 +1075,30 @@ async fn delete_message(
                 ?err,
                 "failed to broadcast thread update after reply deletion"
             );
+        }
+    }
+
+    // Broadcast the updated root message to ALL members so the thread-reply
+    // count badge (threadInfo.replyCount) decreases in real-time — mirrors the
+    // reply-create path which broadcasts MessageUpdated(root) to all members.
+    // The ThreadUpdate above only reaches subscribed users; the bubble audience
+    // is all members viewing the parent timeline, many of whom are not
+    // subscribed (thread view does not set subscribed=true).
+    if let Some(reply_root_id) = response.reply_root_id {
+        let root_msg_updated: Option<Message> = messages::table
+            .filter(dsl::id.eq(reply_root_id).and(dsl::chat_id.eq(chat_id)))
+            .select(Message::as_select())
+            .first(conn)
+            .ok();
+        if let Some(root_msg) = root_msg_updated {
+            let root_response = attach_metadata(conn, vec![root_msg], &state, uid)
+                .await
+                .into_iter()
+                .next();
+            if let Some(root_response) = root_response {
+                let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response));
+                state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
+            }
         }
     }
 

@@ -141,11 +141,15 @@ async fn get_reaction_details(
     let conn = &mut *conn;
     check_membership(conn, chat_id, uid)?;
 
-    // Verify message exists in this chat
+    // Verify message exists in this chat (allow deleted messages with threads to show existing reactions)
     let _message: Message = messages::table
         .filter(messages::id.eq(message_id))
         .filter(messages::chat_id.eq(chat_id))
-        .filter(messages::deleted_at.is_null())
+        .filter(
+            messages::deleted_at
+                .is_null()
+                .or(messages::has_thread.eq(true)),
+        )
         .filter(messages::is_published.eq(true))
         .first(conn)
         .optional()?
@@ -281,6 +285,16 @@ async fn delete_reaction(
     let conn = &mut *conn;
     let emoji = validate_emoji(&emoji)?;
     check_membership(conn, chat_id, uid)?;
+
+    // Verify message exists and is not deleted (no reaction removal on deleted messages)
+    let _message: Message = messages::table
+        .filter(messages::id.eq(message_id))
+        .filter(messages::chat_id.eq(chat_id))
+        .filter(messages::deleted_at.is_null())
+        .filter(messages::is_published.eq(true))
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Message not found"))?;
 
     let deleted = diesel::delete(
         message_reactions::table

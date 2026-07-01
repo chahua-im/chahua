@@ -216,6 +216,28 @@ const messagesSlice = createSlice({
       failed.isDeleted = true;
       chat.generation++;
     },
+    updateThreadReplyCount(state, action: { payload: { chatId: string; threadRootId: string; replyCount: number } }) {
+      const { chatId, threadRootId, replyCount } = action.payload;
+      const chat = state.chats[chatId];
+      if (!chat) return;
+      for (const segment of chat.segments) {
+        for (let i = 0; i < segment.messages.length; i++) {
+          if (segment.messages[i].id === threadRootId && segment.messages[i].threadInfo) {
+            if (replyCount === 0) {
+              // Remove threadInfo so bubble renders as normal message
+              delete segment.messages[i].threadInfo;
+            } else {
+              segment.messages[i] = {
+                ...segment.messages[i],
+                threadInfo: { ...segment.messages[i].threadInfo, replyCount },
+              };
+            }
+            chat.generation++;
+            return;
+          }
+        }
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -257,18 +279,37 @@ const messagesSlice = createSlice({
           }
           for (const segment of chat.segments) {
             if (message.isDeleted) {
-              segment.messages = segment.messages.filter((m) => m.id !== messageId);
+              // Thread root messages stay in timeline with isDeleted flag so the
+              // thread remains reachable; plain messages are removed.
+              const idx = segment.messages.findIndex((m) => m.id === messageId);
+              const existing = idx !== -1 ? segment.messages[idx] : undefined;
+              // Use explicit `!== undefined` so `null` from the server (thread_info: None)
+              // is respected instead of falling back to the stale local value via `??`.
+              const newThreadInfo =
+                existing && message.threadInfo !== undefined ? message.threadInfo : existing?.threadInfo;
+              if (existing && newThreadInfo) {
+                segment.messages[idx] = {
+                  ...existing,
+                  ...message,
+                  threadInfo: newThreadInfo,
+                };
+              } else {
+                segment.messages = segment.messages.filter((m) => m.id !== messageId);
+              }
             }
             for (let i = 0; i < segment.messages.length; i++) {
               const current = segment.messages[i];
               if (!message.isDeleted && current.id === messageId) {
-                segment.messages[i] = {
-                  ...current,
-                  ...message,
-                  replyToMessage: message.replyToMessage ?? current.replyToMessage,
-                  reactions: message.reactions ?? current.reactions,
-                  threadInfo: message.threadInfo ?? current.threadInfo,
-                };
+                // Capture originals before Object.assign; otherwise the `??` fallbacks
+                // below would read the already-overwritten value (`message.X ?? message.X`).
+                // threadInfo uses `!== undefined` (not `??`) so an explicit server `null`
+                // clears the field instead of falling back to the stale local value.
+                const prevReplyTo = current.replyToMessage;
+                const prevReactions = current.reactions;
+                Object.assign(current, message);
+                current.replyToMessage = message.replyToMessage ?? prevReplyTo;
+                current.reactions = message.reactions ?? prevReactions;
+                if (message.threadInfo !== undefined) current.threadInfo = message.threadInfo;
               } else if (current.replyToMessage?.id === messageId) {
                 current.replyToMessage.message = message.message;
                 current.replyToMessage.messageType = message.messageType;
@@ -335,6 +376,7 @@ export const {
   applyRealtimeMessage,
   confirmOptimistic,
   markOptimisticFailed,
+  updateThreadReplyCount,
 } = messagesSlice.actions;
 
 export default messagesSlice.reducer;

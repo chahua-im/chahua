@@ -94,13 +94,15 @@ export function ConversationOverlayHost({
               sourceRect: overlayMessage.sourceRect,
               interactionPos: overlayMessage.interactionPos,
               actions: overlayActions,
-              reactions: {
-                emojis: quickReactionEmojis,
-                currentMessageReactions: msg.reactions?.map((r) => r.emoji) ?? [],
-                onReact: (emoji: string) => {
-                  onReactionToggle(msg, emoji, !!msg.reactions?.some((r) => r.emoji === emoji && r.reactedByMe));
-                },
-              },
+              reactions: msg.isDeleted
+                ? undefined
+                : {
+                    emojis: quickReactionEmojis,
+                    currentMessageReactions: msg.reactions?.map((r) => r.emoji) ?? [],
+                    onReact: (emoji: string) => {
+                      onReactionToggle(msg, emoji, !!msg.reactions?.some((r) => r.emoji === emoji && r.reactedByMe));
+                    },
+                  },
               onClose: onCloseOverlay,
               mentions: msg.mentions ?? undefined,
               currentUserUid: currentUserId,

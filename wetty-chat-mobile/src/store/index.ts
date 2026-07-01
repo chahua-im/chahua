@@ -1,6 +1,7 @@
 import { combineReducers, configureStore, createListenerMiddleware } from '@reduxjs/toolkit';
 import connectionReducer from './connectionSlice';
-import messagesReducer from './messages/slice';
+import { getMessages } from '@/api/messages';
+import messagesReducer, { updateThreadReplyCount, refreshLatest } from './messages/slice';
 import settingsReducer, { type SettingsState } from './settingsSlice';
 import stickerPreferencesReducer, {
   hydrateStickerPreferencesFromKv,
@@ -18,6 +19,7 @@ import threadsReducer, {
   updateThreadCachedLastReply,
   patchThreadCachedLastReply,
   patchThreadRootMessage,
+  updateThreadFromWs,
 } from './threadsSlice';
 import chatsReducer, {
   projectChatMessageAdded,
@@ -209,6 +211,33 @@ listenerMiddleware.startListening({
             }),
           );
         }
+      }
+    }
+  },
+});
+
+listenerMiddleware.startListening({
+  actionCreator: updateThreadFromWs,
+  effect: async (action, api) => {
+    const { threadRootId, chatId, replyCount } = action.payload;
+    api.dispatch(updateThreadReplyCount({ chatId, threadRootId, replyCount }));
+
+    // When all replies are deleted and the thread is removed from the list,
+    // refresh the parent chat timeline so the root message's threadInfo is cleared.
+    if (replyCount === 0) {
+      try {
+        const res = await getMessages(chatId);
+        const list = res.data.messages ?? [];
+        api.dispatch(
+          refreshLatest({
+            chatId,
+            messages: list,
+            nextCursor: res.data.nextCursor ?? null,
+            prevCursor: null,
+          }),
+        );
+      } catch {
+        // silent — timeline will refresh on next visit
       }
     }
   },

@@ -87,6 +87,13 @@ const threadsSlice = createSlice({
       const { threadRootId, lastReplyAt, replyCount } = action.payload;
       const idx = state.items.findIndex((t) => t.threadRootMessage.id === threadRootId);
       if (idx >= 0) {
+        // When all replies are deleted, remove the thread from the list entirely
+        if (replyCount === 0) {
+          state.items.splice(idx, 1);
+          state.subscriptionByThreadId[threadRootId] = false;
+          delete state.archivedByThreadId[threadRootId];
+          return;
+        }
         const thread = state.items[idx];
         thread.replyCount = replyCount;
         thread.lastReplyAt = lastReplyAt;

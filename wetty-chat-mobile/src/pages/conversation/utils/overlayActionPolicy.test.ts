@@ -36,7 +36,7 @@ describe('overlay action policy', () => {
     expect(keys({ text: '', hasAttachments: true })).toEqual(['reply', 'thread', 'save', 'copy-link']);
   });
 
-  it('adds edit and delete for own regular messages even when optimistic or deleted', () => {
+  it('adds edit and delete for own regular messages, but not when deleted', () => {
     expect(keys({ isOwn: true, isOptimistic: true })).toEqual([
       'reply',
       'thread',
@@ -45,13 +45,7 @@ describe('overlay action policy', () => {
       'copy-link',
       'delete',
     ]);
-    expect(keys({ isOwn: true, isDeleted: true, text: null })).toEqual([
-      'reply',
-      'thread',
-      'edit',
-      'copy-link',
-      'delete',
-    ]);
+    expect(keys({ isOwn: true, isDeleted: true, text: null })).toEqual(['reply', 'copy-link']);
   });
 
   it('adds delete and pin state for admins in main chat', () => {
@@ -72,7 +66,7 @@ describe('overlay action policy', () => {
 
   it('preserves current optimistic and deleted save/pin restrictions', () => {
     expect(keys({ isOptimistic: true })).toEqual(['reply', 'thread', 'copy', 'copy-link']);
-    expect(keys({ isDeleted: true, text: null, isAdmin: true })).toEqual(['reply', 'thread', 'copy-link', 'delete']);
+    expect(keys({ isDeleted: true, text: null, isAdmin: true })).toEqual(['reply', 'copy-link']);
   });
 
   it('keeps sticker actions filtered to reply delete copy link and favorite', () => {

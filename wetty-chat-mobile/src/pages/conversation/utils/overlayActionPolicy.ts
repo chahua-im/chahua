@@ -42,7 +42,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   actions.push({ key: 'reply' });
 
   // 2. Thread
-  if (!input.isThreadView && !input.hasThreadInfo) {
+  if (!input.isThreadView && !input.hasThreadInfo && !input.isDeleted) {
     actions.push({ key: 'thread' });
   }
 
@@ -57,7 +57,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 5. Edit
-  if (input.isOwn && !audioMessage && !stickerMessage) {
+  if (input.isOwn && !input.isDeleted && !audioMessage && !stickerMessage) {
     actions.push({ key: 'edit' });
   }
 
@@ -72,7 +72,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   actions.push({ key: 'copy-link' });
 
   // 8. Delete
-  if (input.isOwn || input.isAdmin) {
+  if ((input.isOwn || input.isAdmin) && !input.isDeleted) {
     actions.push({ key: 'delete' });
   }
 

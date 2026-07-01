@@ -195,6 +195,22 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     setOverlayMessage({ message, sourceRect, interactionPos });
   }, [keyboardFullyClosed]);
 
+  // Auto-redirect from thread view when the root message and all replies are deleted.
+  // When a deleted root loses its last reply, threadInfo is cleared → the message is
+  // removed from the timeline entirely. Track whether we've seen the root at least once
+  // to avoid redirecting during initial load before the API response arrives.
+  const hasSeenRootRef = useRef(false);
+  useEffect(() => {
+    if (!threadId) return;
+    const rootMessage = messageLookup.get(threadId);
+    if (rootMessage) {
+      hasSeenRootRef.current = true;
+    } else if (hasSeenRootRef.current) {
+      // Root was present before but is now gone — discussion terminated.
+      history.replace(`/chats/chat/${chatId}`);
+    }
+  }, [threadId, messageLookup, chatId, history]);
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     console.log('[Conversation] rows-changed', {

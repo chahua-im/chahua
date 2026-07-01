@@ -304,9 +304,10 @@ fn process_bulk_delete(
                 continue;
             }
 
-            if let Err(e) = crate::services::threads::broadcast_thread_update_to_subscribers(
+            if let Err(e) = crate::services::threads::broadcast_thread_update_to_uids(
                 conn,
                 ws_registry,
+                &member_uids,
                 chat_id,
                 thread_root_id,
             ) {
