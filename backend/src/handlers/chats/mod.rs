@@ -468,8 +468,14 @@ pub(crate) fn redact_deleted_message_response(response: &mut MessageResponse) {
     response.sticker = None;
     response.has_attachments = false;
     response.attachments.clear();
-    response.reactions.clear();
     response.mentions.clear();
+
+    // Keep reactions only on deleted thread roots — those threads remain visible and
+    // reactions belong to other users. For ordinary deleted messages, clear reactions
+    // (they are no longer reachable and should not leak).
+    if response.thread_info.is_none() {
+        response.reactions.clear();
+    }
 }
 
 fn sticker_preview_text(emoji: Option<&str>) -> String {
@@ -1192,11 +1198,7 @@ pub async fn attach_metadata(
             },
             reply_to_message,
             attachments,
-            reactions: if is_deleted {
-                Vec::new()
-            } else {
-                reaction_summaries_map.remove(&m.id).unwrap_or_default()
-            },
+            reactions: reaction_summaries_map.remove(&m.id).unwrap_or_default(),
             mentions: {
                 per_message_mentions[idx]
                     .iter()
@@ -2326,7 +2328,9 @@ mod tests {
         assert!(response.sticker.is_none());
         assert!(!response.has_attachments);
         assert!(response.attachments.is_empty());
-        assert!(response.reactions.is_empty());
+        // This deleted message is a thread root (thread_info present), so reactions are
+        // intentionally preserved per the targeted redaction policy.
+        assert_eq!(response.reactions.len(), 1);
         assert!(response.mentions.is_empty());
     }
 

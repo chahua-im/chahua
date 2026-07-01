@@ -107,6 +107,7 @@ export interface ChatBubbleBaseProps {
   maxImageHeight?: number;
   reactions?: ReactionSummary[];
   onReactionToggle?: (emoji: string, currentlyReacted: boolean) => void;
+  reactionsInteractive?: boolean;
   layout?: 'thread' | 'bubble-only';
   interactionMode?: 'interactive' | 'read-only';
   bubbleProps?: BubblePropsOverride;
@@ -140,6 +141,7 @@ export function ChatBubbleBase({
   maxImageHeight = 300,
   reactions,
   onReactionToggle,
+  reactionsInteractive,
   layout = 'thread',
   interactionMode = 'interactive',
   bubbleProps,
@@ -500,7 +502,7 @@ export function ChatBubbleBase({
           key={reaction.emoji}
           reaction={reaction}
           isSent={isSent}
-          interactive={interactive}
+          interactive={reactionsInteractive ?? interactive}
           onToggle={onReactionToggle}
         />
       ))}
