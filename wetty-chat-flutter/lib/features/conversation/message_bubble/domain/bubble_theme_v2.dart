@@ -16,6 +16,7 @@ class BubbleThemeV2 extends InheritedWidget {
     required this.isMe,
     required this.isInteractive,
     this.isTextSelectable = false,
+    this.showDeliveryStatus = true,
     required this.maxBubbleWidth,
     required this.timeSpacerWidth,
     required this.chatMessageFontSize,
@@ -33,6 +34,7 @@ class BubbleThemeV2 extends InheritedWidget {
     required bool isMe,
     required bool isInteractive,
     bool isTextSelectable = false,
+    bool showDeliveryStatus = true,
     required double chatMessageFontSize,
     double? timelineViewportWidth,
     required Widget child,
@@ -46,6 +48,7 @@ class BubbleThemeV2 extends InheritedWidget {
       isMe: isMe,
       isInteractive: isInteractive,
       isTextSelectable: isTextSelectable,
+      showDeliveryStatus: showDeliveryStatus,
       maxBubbleWidth: math.max(
         0,
         (viewportWidth * _maxRowWidthFactor) -
@@ -54,7 +57,14 @@ class BubbleThemeV2 extends InheritedWidget {
             _avatarGap,
       ),
       timeSpacerWidth:
-          measureMetaWidth(context, message, timeText, isMe: isMe) + 8,
+          measureMetaWidth(
+            context,
+            message,
+            timeText,
+            isMe: isMe,
+            showDeliveryStatus: showDeliveryStatus,
+          ) +
+          8,
       chatMessageFontSize: chatMessageFontSize,
       bubbleColor: isMe ? colors.chatSentBubble : colors.chatReceivedBubble,
       textColor: isMe ? colors.textOnAccent : colors.textPrimary,
@@ -67,6 +77,7 @@ class BubbleThemeV2 extends InheritedWidget {
   final bool isMe;
   final bool isInteractive;
   final bool isTextSelectable;
+  final bool showDeliveryStatus;
   final double maxBubbleWidth;
   final double timeSpacerWidth;
   final double chatMessageFontSize;
@@ -88,6 +99,7 @@ class BubbleThemeV2 extends InheritedWidget {
     return isMe != old.isMe ||
         isInteractive != old.isInteractive ||
         isTextSelectable != old.isTextSelectable ||
+        showDeliveryStatus != old.showDeliveryStatus ||
         maxBubbleWidth != old.maxBubbleWidth ||
         timeSpacerWidth != old.timeSpacerWidth ||
         chatMessageFontSize != old.chatMessageFontSize ||
@@ -106,6 +118,7 @@ double measureMetaWidth(
   ConversationMessageV2 message,
   String timeStr, {
   required bool isMe,
+  required bool showDeliveryStatus,
 }) {
   final metaText = message.isEdited ? 'edited $timeStr' : timeStr;
   final metaPainter = TextPainter(
@@ -122,7 +135,9 @@ double measureMetaWidth(
   )..layout(maxWidth: double.infinity);
 
   final showsDelivery =
-      isMe && message.deliveryState != ConversationDeliveryState.failed;
+      showDeliveryStatus &&
+      isMe &&
+      message.deliveryState != ConversationDeliveryState.failed;
   if (showsDelivery) {
     return metaPainter.width + _statusIconGap + _statusIconSize;
   }

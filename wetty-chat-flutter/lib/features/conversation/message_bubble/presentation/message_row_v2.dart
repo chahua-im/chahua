@@ -45,6 +45,7 @@ class MessageRowV2 extends StatefulWidget {
     this.onToggleForwardSelected,
     this.showSenderName = true,
     this.showAvatar = true,
+    this.showDeliveryStatus = true,
   });
 
   final ConversationMessageV2 message;
@@ -62,6 +63,7 @@ class MessageRowV2 extends StatefulWidget {
   final VoidCallback? onToggleForwardSelected;
   final bool showSenderName;
   final bool showAvatar;
+  final bool showDeliveryStatus;
 
   @override
   State<MessageRowV2> createState() => _MessageRowV2State();
@@ -196,6 +198,7 @@ class _MessageRowV2State extends State<MessageRowV2>
           isMe: _isMe,
           isInteractive: true,
           showSenderName: widget.showSenderName,
+          showDeliveryStatus: widget.showDeliveryStatus,
           timelineViewportWidth: timelineViewportWidth,
           onToggleReaction: widget.onToggleReaction,
           onTapReply: widget.onTapReply,

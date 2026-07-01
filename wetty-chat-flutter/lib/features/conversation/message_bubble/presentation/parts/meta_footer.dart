@@ -26,7 +26,9 @@ class MetaFooter extends StatelessWidget {
     final metaColor = color ?? theme.metaColor;
     final timeText = formatChatMessageTime(context, message.createdAt);
     final showDeliveryStatus =
-        theme.isMe && message.deliveryState != ConversationDeliveryState.failed;
+        theme.showDeliveryStatus &&
+        theme.isMe &&
+        message.deliveryState != ConversationDeliveryState.failed;
     final deliveryIndicator = switch (message.deliveryState) {
       ConversationDeliveryState.sending ||
       ConversationDeliveryState.sent => Icon(

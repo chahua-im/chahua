@@ -58,9 +58,16 @@ class ForwardedMessageCard extends StatelessWidget {
     BuildContext context,
     List<ForwardedMessageSnapshot> messages,
   ) {
+    final navigationBarBackgroundColor = CupertinoTheme.of(
+      context,
+    ).barBackgroundColor;
+    debugPrint('navigationBarBackgroundColor: $navigationBarBackgroundColor');
     Navigator.of(context).push(
       CupertinoPageRoute<void>(
-        builder: (context) => ForwardedMessagesViewer(messages: messages),
+        builder: (context) => ForwardedMessagesViewer(
+          messages: messages,
+          navigationBarBackgroundColor: navigationBarBackgroundColor,
+        ),
       ),
     );
   }
@@ -208,9 +215,14 @@ String _messagePreview(MessageContent content, AppLocalizations l10n) {
 }
 
 class ForwardedMessagesViewer extends StatefulWidget {
-  const ForwardedMessagesViewer({super.key, required this.messages});
+  const ForwardedMessagesViewer({
+    super.key,
+    required this.messages,
+    required this.navigationBarBackgroundColor,
+  });
 
   final List<ForwardedMessageSnapshot> messages;
+  final Color navigationBarBackgroundColor;
 
   @override
   State<ForwardedMessagesViewer> createState() =>
@@ -238,9 +250,13 @@ class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     final l10n = AppLocalizations.of(context)!;
     return CupertinoPageScaffold(
+      backgroundColor: colors.chatBackground,
       navigationBar: CupertinoNavigationBar(
+        backgroundColor: widget.navigationBarBackgroundColor,
+        automaticBackgroundVisibility: false,
         middle: Text(l10n.forwardedMessagesTitle),
       ),
       child: SafeArea(
@@ -255,8 +271,9 @@ class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
               key: _messageKeys[snapshot.originalMessageId],
               child: MessageRowV2(
                 message: message,
-                showSenderName: true,
-                showAvatar: true,
+                showSenderName: _shouldShowSenderName(index),
+                showAvatar: _shouldShowAvatar(index),
+                showDeliveryStatus: false,
                 onTapReply:
                     replyToMessageId != null &&
                         _messageKeys.containsKey(replyToMessageId)
@@ -268,6 +285,32 @@ class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
         ),
       ),
     );
+  }
+
+  bool _shouldShowSenderName(int index) {
+    final snapshot = widget.messages[index];
+    if (snapshot.content is SystemMessageContent) {
+      return false;
+    }
+
+    final previousSnapshot = index > 0 ? widget.messages[index - 1] : null;
+    return previousSnapshot == null ||
+        previousSnapshot.content is SystemMessageContent ||
+        previousSnapshot.sender.uid != snapshot.sender.uid;
+  }
+
+  bool _shouldShowAvatar(int index) {
+    final snapshot = widget.messages[index];
+    if (snapshot.content is SystemMessageContent) {
+      return false;
+    }
+
+    final nextSnapshot = index < widget.messages.length - 1
+        ? widget.messages[index + 1]
+        : null;
+    return nextSnapshot == null ||
+        nextSnapshot.content is SystemMessageContent ||
+        nextSnapshot.sender.uid != snapshot.sender.uid;
   }
 
   ConversationMessageV2 _messageFromSnapshot(
