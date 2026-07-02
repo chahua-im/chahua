@@ -17,6 +17,68 @@ import 'package:chahua/core/preferences/app_preferences.dart';
 const _overlayBoundaryKey = ValueKey('message-overlay-v2-boundary');
 
 void main() {
+  testWidgets('action panel lays actions out in one horizontal row', (
+    tester,
+  ) async {
+    await _pumpWithSettings(
+      tester,
+      MessageOverlayActionPanelV2(actions: _numberedActions(5)),
+    );
+
+    final firstTop = tester.getTopLeft(find.text('Action 1')).dy;
+    for (var index = 2; index <= 5; index++) {
+      expect(tester.getTopLeft(find.text('Action $index')).dy, firstTop);
+    }
+  });
+
+  testWidgets('action panel wraps actions into a second row', (tester) async {
+    await _pumpWithSettings(
+      tester,
+      MessageOverlayActionPanelV2(actions: _numberedActions(6)),
+    );
+
+    final firstRowTop = tester.getTopLeft(find.text('Action 1')).dy;
+    final secondRowTop = tester.getTopLeft(find.text('Action 6')).dy;
+
+    expect(secondRowTop, greaterThan(firstRowTop));
+  });
+
+  testWidgets('action panel paginates after ten visible slots', (tester) async {
+    await _pumpWithSettings(
+      tester,
+      MessageOverlayActionPanelV2(actions: _numberedActions(11)),
+    );
+
+    expect(find.text('Action 1'), findsOneWidget);
+    expect(find.text('Action 9'), findsOneWidget);
+    expect(find.text('Action 10'), findsNothing);
+    expect(find.byIcon(CupertinoIcons.chevron_down), findsOneWidget);
+
+    await tester.tap(find.byIcon(CupertinoIcons.chevron_down));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(CupertinoIcons.chevron_up), findsOneWidget);
+    expect(find.text('Action 1'), findsNothing);
+    expect(find.text('Action 10'), findsOneWidget);
+    expect(find.text('Action 11'), findsOneWidget);
+  });
+
+  testWidgets('action panel keeps later pages reachable', (tester) async {
+    await _pumpWithSettings(
+      tester,
+      MessageOverlayActionPanelV2(actions: _numberedActions(19)),
+    );
+
+    await tester.tap(find.byIcon(CupertinoIcons.chevron_down));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(CupertinoIcons.chevron_down));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(CupertinoIcons.chevron_up), findsOneWidget);
+    expect(find.text('Action 18'), findsOneWidget);
+    expect(find.text('Action 19'), findsOneWidget);
+  });
+
   testWidgets('expanded reaction picker paints above the action menu', (
     tester,
   ) async {
@@ -177,6 +239,17 @@ List<MessageOverlayActionV2> _actions() {
     MessageOverlayActionV2(label: 'Copy', onPressed: () {}),
     MessageOverlayActionV2(label: 'Edit', onPressed: () {}),
     MessageOverlayActionV2(label: 'Delete', onPressed: () {}),
+  ];
+}
+
+List<MessageOverlayActionV2> _numberedActions(int count) {
+  return [
+    for (var index = 1; index <= count; index++)
+      MessageOverlayActionV2(
+        label: 'Action $index',
+        icon: CupertinoIcons.circle,
+        onPressed: () {},
+      ),
   ];
 }
 

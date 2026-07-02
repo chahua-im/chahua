@@ -3,8 +3,10 @@ class MessageOverlayMetricsV2 {
 
   static const double screenPadding = 16;
   static const double panelMinWidth = 176;
-  static const double panelMaxWidth = 260;
-  static const double rowHeight = 48;
+  static const double panelMaxWidth = 276;
+  static const int actionColumns = 5;
+  static const int actionVisibleSlots = actionColumns * 2;
+  static const double actionRowHeight = 63;
   static const double separatorHeight = 1;
   static const double gap = 10;
   static const double reactionBarHeight = 44;
@@ -15,6 +17,17 @@ class MessageOverlayMetricsV2 {
     if (actionCount <= 0) {
       return 0;
     }
-    return (actionCount * rowHeight) + ((actionCount - 1) * separatorHeight);
+    final rowCount = actionRowCount(actionCount);
+    return (rowCount * actionRowHeight) + ((rowCount - 1) * separatorHeight);
+  }
+
+  static int actionRowCount(int actionCount) {
+    if (actionCount <= 0) {
+      return 0;
+    }
+    final visibleActionCount = actionCount > actionVisibleSlots
+        ? actionVisibleSlots
+        : actionCount;
+    return ((visibleActionCount - 1) ~/ actionColumns) + 1;
   }
 }

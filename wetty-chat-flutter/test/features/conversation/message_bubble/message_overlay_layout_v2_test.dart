@@ -4,6 +4,23 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('action panel height follows visible grid rows', () {
+    expect(
+      MessageOverlayMetricsV2.actionPanelHeight(5),
+      MessageOverlayMetricsV2.actionRowHeight,
+    );
+    expect(
+      MessageOverlayMetricsV2.actionPanelHeight(6),
+      (MessageOverlayMetricsV2.actionRowHeight * 2) +
+          MessageOverlayMetricsV2.separatorHeight,
+    );
+    expect(
+      MessageOverlayMetricsV2.actionPanelHeight(11),
+      (MessageOverlayMetricsV2.actionRowHeight * 2) +
+          MessageOverlayMetricsV2.separatorHeight,
+    );
+  });
+
   test('expanded reaction picker receives a large safe overlay rect', () {
     final layout = MessageOverlayLayoutV2.calculate(
       viewportSize: const Size(390, 780),

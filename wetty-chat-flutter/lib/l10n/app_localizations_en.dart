@@ -350,7 +350,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get newThread => 'New Thread';
 
   @override
-  String get startThread => 'Start Thread';
+  String get startThread => 'Thread';
 
   @override
   String get pinMessage => 'Pin';

@@ -112,7 +112,7 @@
   "threads": "话题",
   "thread": "话题",
   "newThread": "新话题",
-  "startThread": "创建话题",
+  "startThread": "话题",
   "pinMessage": "置顶",
   "pinMessageTitle": "置顶这条消息？",
   "pinMessageBody": "这会为所有人在聊天中置顶它。",

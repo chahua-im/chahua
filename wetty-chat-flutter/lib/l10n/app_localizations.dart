@@ -738,7 +738,7 @@ abstract class AppLocalizations {
   /// Message action label for starting a thread
   ///
   /// In en, this message translates to:
-  /// **'Start Thread'**
+  /// **'Thread'**
   String get startThread;
 
   /// Message action label for pinning a message

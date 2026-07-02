@@ -539,9 +539,7 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
             }
           },
         ),
-      if (isOwn &&
-          message.content is! AudioMessageContent &&
-          message.content is! ForwardedMessageContent)
+      if (_canEditMessage(message, isOwn))
         MessageOverlayActionV2(
           label: l10n.edit,
           icon: CupertinoIcons.pencil,
@@ -568,6 +566,20 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
         widget.onStartThread != null &&
         message.serverMessageId != null &&
         message.threadInfo == null;
+  }
+
+  bool _canEditMessage(ConversationMessageV2 message, bool isOwn) {
+    if (!isOwn || message.isDeleted || message.serverMessageId == null) {
+      return false;
+    }
+    return switch (message.content) {
+      TextMessageContent() ||
+      AudioMessageContent() ||
+      InviteMessageContent() => true,
+      StickerMessageContent() ||
+      SystemMessageContent() ||
+      ForwardedMessageContent() => false,
+    };
   }
 
   bool _canPinMessage(ConversationMessageV2 message) {

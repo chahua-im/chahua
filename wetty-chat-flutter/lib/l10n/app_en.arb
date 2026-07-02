@@ -341,7 +341,7 @@
   "newThread": "New Thread",
   "@newThread": { "description": "New thread detail page title" },
 
-  "startThread": "Start Thread",
+  "startThread": "Thread",
   "@startThread": { "description": "Message action label for starting a thread" },
 
   "pinMessage": "Pin",

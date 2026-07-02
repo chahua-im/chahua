@@ -333,7 +333,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get newThread => '新话题';
 
   @override
-  String get startThread => '创建话题';
+  String get startThread => '话题';
 
   @override
   String get pinMessage => '置顶';
@@ -884,7 +884,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get newThread => '新話題';
 
   @override
-  String get startThread => '開始話題';
+  String get startThread => '話題';
 
   @override
   String get pinMessage => '置頂';
