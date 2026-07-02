@@ -508,6 +508,15 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
           composerNotifier.beginReply(message);
         },
       ),
+      if (_canStartThreadFrom(message))
+        MessageOverlayActionV2(
+          label: l10n.startThread,
+          icon: CupertinoIcons.chat_bubble_2,
+          onPressed: () {
+            _dismissMessageOverlay();
+            widget.onStartThread!(message);
+          },
+        ),
       if (copyText != null)
         MessageOverlayActionV2(
           label: l10n.copyMessageAction,
@@ -517,13 +526,14 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
             unawaited(Clipboard.setData(ClipboardData(text: copyText)));
           },
         ),
-      if (_canStartThreadFrom(message))
+      if (_canEditMessage(message, isOwn))
         MessageOverlayActionV2(
-          label: l10n.startThread,
-          icon: CupertinoIcons.chat_bubble_2,
+          label: l10n.edit,
+          icon: CupertinoIcons.pencil,
           onPressed: () {
             _dismissMessageOverlay();
-            widget.onStartThread!(message);
+            composerNotifier.clearAttachments();
+            composerNotifier.beginEdit(message);
           },
         ),
       if (canManagePins && _canPinMessage(message))
@@ -539,20 +549,11 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
             }
           },
         ),
-      if (_canEditMessage(message, isOwn))
-        MessageOverlayActionV2(
-          label: l10n.edit,
-          icon: CupertinoIcons.pencil,
-          onPressed: () {
-            _dismissMessageOverlay();
-            composerNotifier.clearAttachments();
-            composerNotifier.beginEdit(message);
-          },
-        ),
       if (isOwn)
         MessageOverlayActionV2(
           label: l10n.deleteMessageAction,
           icon: CupertinoIcons.delete,
+          color: CupertinoColors.destructiveRed,
           onPressed: () {
             _dismissMessageOverlay();
             _confirmDelete(message);

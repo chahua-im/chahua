@@ -184,6 +184,9 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color =
+        CupertinoDynamicColor.maybeResolve(action.color, context) ??
+        context.appColors.textPrimary;
     return CupertinoButton(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       minimumSize: Size.zero,
@@ -193,7 +196,7 @@ class _ActionButton extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (action.icon case final icon?) ...[
-            Icon(icon, size: 22, color: context.appColors.textPrimary),
+            Icon(icon, size: 22, color: color),
             const SizedBox(height: 4),
           ],
           Text(
@@ -203,6 +206,7 @@ class _ActionButton extends StatelessWidget {
             textAlign: TextAlign.center,
             style: appCaptionTextStyle(
               context,
+              color: color,
               fontWeight: AppFontWeights.medium,
             ),
           ),
