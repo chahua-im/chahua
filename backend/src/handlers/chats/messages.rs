@@ -658,12 +658,7 @@ pub(super) async fn post_thread_message(
         .optional()?
         .ok_or(AppError::NotFound("Thread root message not found"))?;
 
-    // Skip message-type check for deleted roots - the thread already exists.
-    // Invariant: only Text messages can ever acquire has_thread=true (enforced in
-    // post_thread_message above), so a deleted root is guaranteed to be Text and
-    // does not need re-validation. We skip solely because message_type is not
-    // reliable for deleted rows that may have been redacted.
-    if root_msg.deleted_at.is_none() && root_msg.message_type != MessageType::Text {
+    if root_msg.message_type != MessageType::Text {
         return Err(AppError::BadRequest(
             "Threads can only be created on text messages",
         ));

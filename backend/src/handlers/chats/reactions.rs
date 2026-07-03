@@ -141,15 +141,11 @@ async fn get_reaction_details(
     let conn = &mut *conn;
     check_membership(conn, chat_id, uid)?;
 
-    // Verify message exists in this chat (allow deleted messages with threads to show existing reactions)
+    // Reactions are not exposed for deleted messages (even thread-root placeholders).
     let _message: Message = messages::table
         .filter(messages::id.eq(message_id))
         .filter(messages::chat_id.eq(chat_id))
-        .filter(
-            messages::deleted_at
-                .is_null()
-                .or(messages::has_thread.eq(true)),
-        )
+        .filter(messages::deleted_at.is_null())
         .filter(messages::is_published.eq(true))
         .first(conn)
         .optional()?
