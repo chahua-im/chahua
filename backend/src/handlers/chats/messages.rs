@@ -101,6 +101,8 @@ const SYSTEM_MESSAGE_TYPE_FORBIDDEN: &str = "System messages cannot be sent by c
 const INVITE_MESSAGE_TYPE_FORBIDDEN: &str = "Invite messages must be sent through invite APIs";
 const FORWARDED_MESSAGE_TYPE_FORBIDDEN: &str =
     "Forwarded messages must be sent through forward APIs";
+const SYSTEM_MESSAGE_FORWARD_FORBIDDEN: &str = "System messages cannot be forwarded";
+const INVITE_MESSAGE_FORWARD_FORBIDDEN: &str = "Invite messages cannot be forwarded";
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
 const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
 const MAX_FORWARD_MESSAGES: usize = 50;
@@ -116,6 +118,18 @@ fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppErr
 
     if matches!(message_type, MessageType::Forwarded) {
         return Err(AppError::BadRequest(FORWARDED_MESSAGE_TYPE_FORBIDDEN));
+    }
+
+    Ok(())
+}
+
+fn validate_forwardable_source_message_type(message_type: &MessageType) -> Result<(), AppError> {
+    if matches!(message_type, MessageType::System) {
+        return Err(AppError::BadRequest(SYSTEM_MESSAGE_FORWARD_FORBIDDEN));
+    }
+
+    if matches!(message_type, MessageType::Invite) {
+        return Err(AppError::BadRequest(INVITE_MESSAGE_FORWARD_FORBIDDEN));
     }
 
     Ok(())
@@ -736,6 +750,9 @@ async fn forward_messages(
     if messages.len() != body.message_ids.len() {
         return Err(AppError::BadRequest("Invalid message IDs"));
     }
+    for message in &messages {
+        validate_forwardable_source_message_type(&message.message_type)?;
+    }
 
     let source_messages = attach_metadata(conn, messages, &state, uid).await;
     let forwarded_messages: Vec<ForwardedMessageSnapshot> = source_messages
@@ -1320,7 +1337,9 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 mod tests {
     use super::{
         search_limit, search_next_offset, search_offset, validate_client_message_type,
-        INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
+        validate_forwardable_source_message_type, FORWARDED_MESSAGE_TYPE_FORBIDDEN,
+        INVITE_MESSAGE_FORWARD_FORBIDDEN, INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW,
+        SYSTEM_MESSAGE_FORWARD_FORBIDDEN, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
     use crate::errors::AppError;
     use crate::models::MessageType;
@@ -1346,6 +1365,39 @@ mod tests {
         let err = validate_client_message_type(&MessageType::Invite)
             .expect_err("invite should be rejected");
         assert!(matches!(err, AppError::BadRequest(msg) if msg == INVITE_MESSAGE_TYPE_FORBIDDEN));
+    }
+
+    #[test]
+    fn rejects_forwarded_message_type_from_generic_message_api() {
+        let err = validate_client_message_type(&MessageType::Forwarded)
+            .expect_err("forwarded should be rejected");
+        assert!(
+            matches!(err, AppError::BadRequest(msg) if msg == FORWARDED_MESSAGE_TYPE_FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn rejects_non_forwardable_source_message_types() {
+        let err = validate_forwardable_source_message_type(&MessageType::System)
+            .expect_err("system should not be forwardable");
+        assert!(
+            matches!(err, AppError::BadRequest(msg) if msg == SYSTEM_MESSAGE_FORWARD_FORBIDDEN)
+        );
+
+        let err = validate_forwardable_source_message_type(&MessageType::Invite)
+            .expect_err("invite should not be forwardable");
+        assert!(
+            matches!(err, AppError::BadRequest(msg) if msg == INVITE_MESSAGE_FORWARD_FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn allows_forwardable_source_message_types() {
+        assert!(validate_forwardable_source_message_type(&MessageType::Text).is_ok());
+        assert!(validate_forwardable_source_message_type(&MessageType::Audio).is_ok());
+        assert!(validate_forwardable_source_message_type(&MessageType::File).is_ok());
+        assert!(validate_forwardable_source_message_type(&MessageType::Sticker).is_ok());
+        assert!(validate_forwardable_source_message_type(&MessageType::Forwarded).is_ok());
     }
 
     #[test]
