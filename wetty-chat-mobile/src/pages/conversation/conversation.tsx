@@ -21,6 +21,7 @@ import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { ConversationFooter } from './ConversationFooter';
 import { ConversationHeader } from './ConversationHeader';
 import { ConversationOverlayHost } from './ConversationOverlayHost';
+import { ForwardMessageModal } from '@/components/chat/messages/ForwardMessageModal';
 import { useChatMetadata } from './hooks/useChatMetadata';
 import { useChatPins } from './hooks/useChatPins';
 import { type ChatMessageEditSession, useChatMessageSender } from './hooks/useChatMessageSender';
@@ -49,6 +50,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
 
   // Feature Gates
   const savedMessagesEnabled = useFeatureGate('savedMessages');
+  const messageForwardEnabled = useFeatureGate('messageForward');
 
   // Global states
   const locale = useSelector(selectEffectiveLocale);
@@ -160,6 +162,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     sourceRect: DOMRect;
     interactionPos?: { x: number; y: number };
   } | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<MessageResponse | null>(null);
 
   // When a long-press happens while the keyboard is open we defer showing the
   // overlay until the keyboard has fully closed, while preserving the press-time
@@ -365,6 +368,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     onReply: setReplyingTo,
     onStartThread: handleSelectThread,
     onEdit: startEditingMessage,
+    onForward: setForwardingMessage,
     onOpenReactionDetails: handleOpenReactionDetails,
   });
 
@@ -518,6 +522,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
                   attachments: replyingTo.attachments,
                   isDeleted: replyingTo.isDeleted,
                   mentions: replyingTo.mentions,
+                  forwardedFromName: replyingTo.forwardedFrom?.sender.name,
                 }
               : undefined
           }
@@ -547,6 +552,14 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
           onReactionToggle={handleReactionToggle}
           onCloseOverlay={handleCloseOverlay}
         />
+        {forwardingMessage && chatId && messageForwardEnabled && (
+          <ForwardMessageModal
+            isOpen={true}
+            onClose={() => setForwardingMessage(null)}
+            message={forwardingMessage}
+            sourceChatId={chatId}
+          />
+        )}
       </div>
     </ChatContext.Provider>
   );

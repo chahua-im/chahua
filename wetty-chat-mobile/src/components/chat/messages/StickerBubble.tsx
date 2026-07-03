@@ -1,6 +1,6 @@
 import { useState, type Ref } from 'react';
 import { IonIcon } from '@ionic/react';
-import { chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
+import { arrowRedoOutline, chatbubbles, checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { StickerImage } from '@/components/shared/StickerImage';
 import styles from './ChatBubble.module.scss';
@@ -26,7 +26,11 @@ export interface StickerBubbleProps {
   replyTo?: {
     senderName: string;
     preview: PreviewMessage;
+    forwardedFromName?: string | null;
   };
+  forwardedFrom?: {
+    sender: { name: string | null };
+  } | null;
   timestamp?: string;
   edited?: boolean;
   isConfirmed?: boolean;
@@ -49,6 +53,7 @@ export function StickerBubble({
   onReplyTap,
   onAvatarClick,
   replyTo,
+  forwardedFrom,
   timestamp,
   edited,
   isConfirmed,
@@ -73,7 +78,13 @@ export function StickerBubble({
         .join(' ')}
       style={bubbleStyle}
     >
-      {replyTo && <ReplyPreview replyTo={replyTo} interactive={interactive} onReplyTap={onReplyTap} />}
+      {forwardedFrom && (
+        <div className={styles.forwardedLabel}>
+          <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
+          <span>{t`Forwarded from ${forwardedFrom.sender.name ?? t`Unknown`}`}</span>
+        </div>
+      )}
+      {replyTo && <ReplyPreview replyTo={replyTo} isSent={isSent} interactive={interactive} onReplyTap={onReplyTap} />}
       <div className={styles.stickerContainer}>
         <StickerImage
           src={stickerUrl}

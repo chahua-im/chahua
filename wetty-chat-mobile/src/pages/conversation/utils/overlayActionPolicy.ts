@@ -1,11 +1,11 @@
 import type { MessageType } from '@/api/messages';
-
 export type OverlayActionKey =
   | 'copy'
   | 'copy-link'
   | 'favorite'
   | 'save'
   | 'reply'
+  | 'forward'
   | 'thread'
   | 'edit'
   | 'delete'
@@ -25,6 +25,7 @@ export interface OverlayActionPolicyInput {
   savedMessagesEnabled: boolean;
   isPinned: boolean;
   hasReactions: boolean;
+  isForwarded: boolean;
 }
 
 export type OverlayActionPolicyItem =
@@ -56,27 +57,30 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
     actions.push({ key: 'copy', copyVariant: input.hasAttachments ? 'text' : 'message' });
   }
 
-  // 5. Edit
-  if (input.isOwn && !input.isDeleted && !audioMessage && !stickerMessage) {
+  // 5. Forward
+  actions.push({ key: 'forward' });
+
+  // 6. Edit
+  if (input.isOwn && !input.isDeleted && !input.isForwarded && !audioMessage && !stickerMessage) {
     actions.push({ key: 'edit' });
   }
 
-  // 6. Save / Favorite
+  // 7. Save / Favorite
   if (stickerMessage && isDeletableAction) {
     actions.push({ key: 'favorite' });
   } else if (input.savedMessagesEnabled && isDeletableAction && input.messageType !== 'system') {
     actions.push({ key: 'save' });
   }
 
-  // 7. Copy-link
+  // 8. Copy-link
   actions.push({ key: 'copy-link' });
 
-  // 8. Delete
+  // 9. Delete
   if ((input.isOwn || input.isAdmin) && !input.isDeleted) {
     actions.push({ key: 'delete' });
   }
 
-  // 9. Details
+  // 10. Details
   if (input.hasReactions) {
     actions.push({ key: 'reaction-details' });
   }
@@ -84,7 +88,11 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   if (stickerMessage) {
     return actions.filter(
       (action) =>
-        action.key === 'reply' || action.key === 'delete' || action.key === 'copy-link' || action.key === 'favorite',
+        action.key === 'reply' ||
+        action.key === 'forward' ||
+        action.key === 'delete' ||
+        action.key === 'copy-link' ||
+        action.key === 'favorite',
     );
   }
 

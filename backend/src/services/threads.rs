@@ -907,10 +907,12 @@ pub fn enrich_thread_list(
                     deleted_at: None,
                     mention_source: None,
                     mention_uids: mention_uids_per_reply.get(&lr.reply_root_id).cloned(),
+                    forwarded_from_message_id: None,
                 },
                 &sticker_emoji_map,
                 &user_avatars,
                 &user_profiles,
+                &HashMap::new(),
             ),
         );
     }
@@ -946,10 +948,12 @@ pub fn enrich_thread_list(
                     deleted_at: root_msg.deleted_at,
                     mention_source: None,
                     mention_uids: mention_uids_per_root.get(&root_msg.id).cloned(),
+                    forwarded_from_message_id: None,
                 },
                 &sticker_emoji_map,
                 &user_avatars,
                 &user_profiles,
+                &HashMap::new(),
             );
             Some(ThreadListItem {
                 chat_id: row.chat_id,

@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties, type HTMLAttributes, type Ref } from 'react';
 import { IonIcon } from '@ionic/react';
 import {
+  arrowRedoOutline,
   chatbubbles,
   checkmarkCircle,
   checkmarkCircleOutline,
@@ -14,7 +15,7 @@ import styles from './ChatBubble.module.scss';
 import { HoverReplyButton } from './HoverReplyButton';
 import reactionStyles from './ReactionPill.module.scss';
 import { formatTime } from '@/utils/formatTime';
-import type { Attachment, MentionInfo, ReactionSummary, UserGroupTagInfo } from '@/api/messages';
+import type { Attachment, MentionInfo, ReplyToMessage, ReactionSummary, UserGroupTagInfo } from '@/api/messages';
 import { ImageViewer } from '@/components/chat/messages/media/ImageViewer';
 import { type PreviewMessage } from '@/utils/messagePreview';
 import { selectChatFontSizeStyle } from '@/store/settingsSlice';
@@ -97,6 +98,7 @@ export interface ChatBubbleBaseProps {
   replyTo?: {
     senderName: string;
     preview: PreviewMessage;
+    forwardedFromName?: string | null;
   };
   timestamp?: string;
   edited?: boolean;
@@ -113,6 +115,10 @@ export interface ChatBubbleBaseProps {
   bubbleProps?: BubblePropsOverride;
   bubbleRef?: Ref<HTMLDivElement>;
   mentions?: MentionInfo[];
+  forwardedFrom?: {
+    sender: { name: string | null };
+    originalReplyTo?: ReplyToMessage;
+  } | null;
   currentUserUid?: number | null;
   onMentionClick?: (uid: number) => void;
   showDroplet?: boolean;
@@ -147,6 +153,7 @@ export function ChatBubbleBase({
   bubbleProps,
   bubbleRef,
   mentions,
+  forwardedFrom,
   currentUserUid,
   onMentionClick,
   showDroplet: showDropletProp,
@@ -160,7 +167,7 @@ export function ChatBubbleBase({
   const otherAttachments = attachments?.filter((att) => !(isImageAttachment(att) || isVideoAttachment(att))) ?? [];
   const { className: bubbleClassName, style: bubbleStyle, ...bubbleRestProps } = bubbleProps ?? {};
 
-  const hasTopContent = showName || replyTo;
+  const hasTopContent = showName || replyTo || !!forwardedFrom;
   const hasBottomContent = message && message.trim() !== '';
   const isMediaOnly = imageAttachments.length > 0 && !hasBottomContent && otherAttachments.length === 0;
   const showDroplet = (showDropletProp ?? (showAvatar || layout === 'bubble-only')) && !isMediaOnly;
@@ -408,6 +415,22 @@ export function ChatBubbleBase({
               <IonIcon icon={maleOutline} className={`${styles.gender} ${styles.gender1}`} />
             ))}
         </div>
+      )}
+      {forwardedFrom && (
+        <div className={styles.forwardedLabel}>
+          <IonIcon icon={arrowRedoOutline} className={styles.forwardedIcon} />
+          <span>{t`Forwarded from ${forwardedFrom.sender.name ?? t`Unknown`}`}</span>
+        </div>
+      )}
+      {forwardedFrom?.originalReplyTo && (
+        <ReplyPreview
+          replyTo={{
+            senderName: forwardedFrom.originalReplyTo.sender.name ?? t`Unknown`,
+            preview: forwardedFrom.originalReplyTo,
+          }}
+          isSent={isSent}
+          interactive={false}
+        />
       )}
       {replyTo && <ReplyPreview replyTo={replyTo} isSent={isSent} interactive={interactive} onReplyTap={onReplyTap} />}
       {imageAttachments.length > 0 && (

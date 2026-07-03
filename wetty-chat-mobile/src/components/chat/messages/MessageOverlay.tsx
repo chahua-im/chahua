@@ -29,6 +29,7 @@ interface MessageOverlayBaseProps {
   replyTo?: {
     senderName: string;
     preview: PreviewMessage;
+    forwardedFromName?: string | null;
   };
   timestamp?: string;
   edited?: boolean;
@@ -44,6 +45,10 @@ interface MessageOverlayBaseProps {
   };
   onClose: () => void;
   mentions?: MentionInfo[];
+  forwardedFrom?: {
+    sender: { name: string | null };
+    originalReplyTo?: import('@/api/messages').ReplyToMessage;
+  } | null;
   currentUserUid?: number | null;
   onMentionClick?: (uid: number) => void;
 }
@@ -88,6 +93,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
     reactions,
     onClose,
     mentions,
+    forwardedFrom,
     currentUserUid,
     onMentionClick,
   } = props;
@@ -412,6 +418,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
         replyTo={replyTo}
         edited={edited}
         isConfirmed={isConfirmed}
+        forwardedFrom={forwardedFrom}
       />
     );
   } else {
@@ -425,6 +432,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
         isConfirmed={isConfirmed}
         attachments={props.attachments}
         mentions={mentions}
+        forwardedFrom={forwardedFrom}
         currentUserUid={currentUserUid}
         onMentionClick={onMentionClick}
       />
