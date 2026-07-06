@@ -13,6 +13,7 @@ import 'package:chahua/features/conversation/shared/domain/conversation_identity
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
 import 'package:chahua/features/conversation/shared/presentation/conversation_surface_v2.dart';
+import 'package:chahua/features/conversation/timeline/presentation/conversation_date_separator.dart';
 import 'package:chahua/features/conversation/timeline/presentation/conversation_timeline_view.dart';
 import 'package:chahua/features/conversation/timeline/presentation/conversation_timeline_view_model.dart';
 import 'package:chahua/features/conversation/timeline/presentation/jump_to_latest_fab.dart';
@@ -27,6 +28,52 @@ import 'package:chahua/core/preferences/app_preferences.dart';
 
 void main() {
   group('ConversationTimelineView live edge behavior', () {
+    testWidgets('renders date separators for first message and date boundary', (
+      tester,
+    ) async {
+      final api = _FakeMessageApiService([
+        _message(1, createdAt: DateTime(2026, 1, 1, 9)),
+        _message(2, createdAt: DateTime(2026, 1, 1, 10)),
+        _message(3, createdAt: DateTime(2026, 1, 2, 9)),
+      ]);
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 600);
+      await _settleTimeline(tester);
+
+      final separatorLabels = tester
+          .widgetList<Text>(find.byKey(conversationDateSeparatorLabelKey))
+          .map((text) => text.data)
+          .toList();
+      expect(separatorLabels, containsAll(<String>['Jan 1', 'Jan 2']));
+      expect(separatorLabels, hasLength(2));
+    });
+
+    testWidgets('shows floating date while the timeline scrolls', (
+      tester,
+    ) async {
+      final api = _FakeMessageApiService(
+        _messages(1, 30, createdAt: DateTime.now()),
+      );
+      final container = await _container(api);
+      addTearDown(container.dispose);
+
+      await _pumpTimeline(tester, container: container, viewportHeight: 360);
+      await _settleTimeline(tester);
+
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 120));
+      await tester.pump();
+
+      final opacity = tester.widget<AnimatedOpacity>(
+        find.ancestor(
+          of: find.byKey(conversationFloatingDateLabelKey),
+          matching: find.byType(AnimatedOpacity),
+        ),
+      );
+      expect(opacity.opacity, 1);
+    });
+
     // Use case:
     // A brand-new group has no messages yet. Opening the latest timeline should
     // complete bootstrap and show a blank timeline instead of a permanent
@@ -2069,8 +2116,10 @@ Finder _clientRowFinder(String clientGeneratedId) {
   );
 }
 
-List<MessageItemDto> _messages(int start, int end) {
-  return [for (var id = start; id <= end; id++) _message(id)];
+List<MessageItemDto> _messages(int start, int end, {DateTime? createdAt}) {
+  return [
+    for (var id = start; id <= end; id++) _message(id, createdAt: createdAt),
+  ];
 }
 
 String _multiLineText(String prefix, int lineCount) {
@@ -2085,12 +2134,14 @@ MessageItemDto _message(
   int senderUid = 7,
   String? text,
   String? clientGeneratedId,
+  DateTime? createdAt,
 }) {
   return MessageItemDto(
     id: id,
     message: text ?? 'message $id',
     sender: UserDto(uid: senderUid, name: 'Sender $senderUid'),
     chatId: _identity.chatId,
+    createdAt: createdAt,
     clientGeneratedId: clientGeneratedId ?? 'client-$id',
     reactions: [
       for (var i = 0; i < reactionCount; i++)

@@ -10,10 +10,12 @@ import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:chahua/features/conversation/shared/domain/conversation_identity.dart';
 import 'package:chahua/features/conversation/shared/domain/launch_request.dart';
 import 'package:chahua/features/conversation/timeline/model/conversation_message_highlight.dart';
+import 'package:chahua/features/conversation/timeline/model/conversation_timeline_row.dart';
 import 'package:chahua/features/conversation/timeline/model/message_long_press_details_v2.dart';
 import 'package:chahua/features/conversation/timeline/model/message_visibility_window.dart';
 import 'package:chahua/features/conversation/timeline/model/timeline_viewport_geometry.dart';
 import 'package:chahua/features/conversation/message_bubble/presentation/message_row_v2.dart';
+import 'package:chahua/features/conversation/timeline/presentation/conversation_date_separator.dart';
 import 'package:chahua/features/conversation/timeline/presentation/jump_to_latest_fab.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 import 'package:chahua/features/stickers/presentation/sticker_preview_modal.dart';
@@ -98,6 +100,8 @@ class _ConversationTimelineViewState
   bool _isViewportMeasurementScheduled = false;
   bool _hasReportedViewportFacts = false;
   MessageVisibilityWindow? _lastVisibilityWindow;
+  Timer? _floatingDateHideTimer;
+  bool _floatingDateVisible = false;
 
   @override
   void initState() {
@@ -109,6 +113,7 @@ class _ConversationTimelineViewState
 
   @override
   void dispose() {
+    _floatingDateHideTimer?.cancel();
     _scrollController.removeListener(_handleScrollChanged);
     _scrollController.dispose();
     super.dispose();
@@ -203,7 +208,28 @@ class _ConversationTimelineViewState
   }
 
   void _handleScrollChanged() {
+    _showFloatingDateForScrollActivity();
     _updateViewportSnapshotAndVisibilityWindow();
+  }
+
+  void _showFloatingDateForScrollActivity() {
+    if (_firstVisibleMessageDay() == null) {
+      return;
+    }
+    _floatingDateHideTimer?.cancel();
+    if (!_floatingDateVisible) {
+      setState(() {
+        _floatingDateVisible = true;
+      });
+    }
+    _floatingDateHideTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _floatingDateVisible = false;
+      });
+    });
   }
 
   void _scheduleViewportMeasurement() {
@@ -630,10 +656,12 @@ class _ConversationTimelineViewState
       final showSenderName =
           previousMessage == null ||
           previousMessage.content is SystemMessageContent ||
+          _hasDateBoundary(previousMessage, message) ||
           previousMessage.sender.uid != message.sender.uid;
       final showAvatar =
           nextMessage == null ||
           nextMessage.content is SystemMessageContent ||
+          _hasDateBoundary(message, nextMessage) ||
           nextMessage.sender.uid != message.sender.uid;
 
       presentationByStableKey[message.stableKey] = (
@@ -643,6 +671,29 @@ class _ConversationTimelineViewState
     }
 
     return presentationByStableKey;
+  }
+
+  bool _hasDateBoundary(
+    ConversationMessageV2 previousMessage,
+    ConversationMessageV2 nextMessage,
+  ) {
+    final previousDay = conversationTimelineLocalDay(previousMessage.createdAt);
+    final nextDay = conversationTimelineLocalDay(nextMessage.createdAt);
+    return previousDay != null && nextDay != null && previousDay != nextDay;
+  }
+
+  DateTime? _firstVisibleMessageDay() {
+    final firstVisibleMessageId = _lastVisibilityWindow?.firstVisibleMessageId;
+    if (firstVisibleMessageId == null) {
+      return null;
+    }
+
+    for (final message in _renderedMessagesByStableKey.values) {
+      if (message.serverMessageId == firstVisibleMessageId) {
+        return conversationTimelineLocalDay(message.createdAt);
+      }
+    }
+    return null;
   }
 
   GlobalKey _keyForMessage(ConversationMessageV2 message) {
@@ -667,6 +718,94 @@ class _ConversationTimelineViewState
       itemCount: messages.length,
       itemBuilder: (context, index) {
         final message = messages[index];
+        final messageId = message.serverMessageId;
+        final rowPresentation =
+            rowPresentationByStableKey[message.stableKey] ??
+            const (showSenderName: true, showAvatar: true);
+        return KeyedSubtree(
+          key: _keyForMessage(message),
+          child: MessageRowV2(
+            message: message,
+            highlight: message.stableKey == highlight?.stableKey
+                ? highlight
+                : null,
+            showSenderName: rowPresentation.showSenderName,
+            showAvatar: rowPresentation.showAvatar,
+            isForwardSelectionMode: widget.isForwardSelectionMode,
+            isForwardSelected:
+                messageId != null &&
+                widget.selectedForwardMessageIds.contains(messageId),
+            onToggleForwardSelected:
+                widget.isForwardSelectionMode && messageId != null
+                ? () => widget.onToggleForwardMessageSelection?.call(message)
+                : null,
+            onLongPress: _openMessageOverlay,
+            onReply: () => ref
+                .read(
+                  conversationComposerViewModelProvider(
+                    widget._identity,
+                  ).notifier,
+                )
+                .beginReply(message),
+            onToggleReaction:
+                message.content is StickerMessageContent || message.isDeleted
+                ? null
+                : (emoji) => unawaited(_toggleReaction(message, emoji)),
+            onTapReply: message.replyToMessage != null
+                ? () => vmNotifier.jumpToMessageServerId(
+                    message.replyToMessage!.id,
+                    highlight: true,
+                  )
+                : null,
+            onOpenThread:
+                widget.onOpenThread != null &&
+                    message.threadInfo != null &&
+                    message.threadInfo!.replyCount > 0
+                ? () => widget.onOpenThread!(message)
+                : null,
+            onOpenAttachment: _openAttachment,
+            onOpenSticker: _openSticker,
+            onFailedMessageAction: _openFailedMessageActions,
+          ),
+        );
+      },
+    );
+  }
+
+  SliverList _buildTimelineRowSliver(
+    List<ConversationTimelineRow> rows, {
+    Key? key,
+    ConversationMessageHighlight? highlight,
+    required Map<String, ({bool showSenderName, bool showAvatar})>
+    rowPresentationByStableKey,
+  }) {
+    if (rows.every((row) => row is ConversationTimelineMessageRow)) {
+      return _buildMessageSliver(
+        [
+          for (final row in rows)
+            (row as ConversationTimelineMessageRow).message,
+        ],
+        key: key,
+        highlight: highlight,
+        rowPresentationByStableKey: rowPresentationByStableKey,
+      );
+    }
+
+    final vmNotifier = ref.read(
+      conversationTimelineViewModelProvider(widget._identity).notifier,
+    );
+    return SliverList.builder(
+      key: key,
+      itemCount: rows.length,
+      itemBuilder: (context, index) {
+        final row = rows[index];
+        if (row is ConversationTimelineDateSeparatorRow) {
+          return KeyedSubtree(
+            key: ValueKey(row.stableKey),
+            child: ConversationDateSeparator(day: row.day),
+          );
+        }
+        final message = (row as ConversationTimelineMessageRow).message;
         final messageId = message.serverMessageId;
         final rowPresentation =
             rowPresentationByStableKey[message.stableKey] ??
@@ -762,10 +901,17 @@ class _ConversationTimelineViewState
         ? null
         : orderedMessages.last.stableKey;
     final rowPresentationByStableKey = _buildRowPresentation(orderedMessages);
-    final beforeMessages = state.beforeMessages.reversed.toList(
-      growable: false,
-    );
     final afterMessages = state.afterMessages;
+    final beforeRows = buildConversationTimelineRows(
+      state.beforeMessages,
+    ).reversed.toList(growable: false);
+    final afterRows = buildConversationTimelineRows(
+      afterMessages,
+      previousMessage: state.beforeMessages.isEmpty
+          ? null
+          : state.beforeMessages.last,
+    );
+    final floatingDateDay = _firstVisibleMessageDay();
 
     _scheduleViewportMeasurement();
 
@@ -790,9 +936,9 @@ class _ConversationTimelineViewState
                   const SliverPadding(padding: EdgeInsets.only(top: 8)),
 
                   // Before slice (if not empty)
-                  if (beforeMessages.isNotEmpty)
-                    _buildMessageSliver(
-                      beforeMessages,
+                  if (beforeRows.isNotEmpty)
+                    _buildTimelineRowSliver(
+                      beforeRows,
                       highlight: state.highlight,
                       rowPresentationByStableKey: rowPresentationByStableKey,
                     ),
@@ -804,9 +950,9 @@ class _ConversationTimelineViewState
                   ),
 
                   // After slice (if not empty)
-                  if (afterMessages.isNotEmpty)
-                    _buildMessageSliver(
-                      afterMessages,
+                  if (afterRows.isNotEmpty)
+                    _buildTimelineRowSliver(
+                      afterRows,
                       key: _afterContentSliverKey,
                       highlight: state.highlight,
                       rowPresentationByStableKey: rowPresentationByStableKey,
@@ -814,29 +960,34 @@ class _ConversationTimelineViewState
                 ],
               ),
             ),
-            if (kDebugMode)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: IgnorePointer(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'Seam @ ${centerViewportFraction.toStringAsFixed(2)}'
-                      ' (${placement.name})'
-                      ' cmd: ${state.viewportCommand.kind.name} (${state.viewportCommand.placement.name})'
-                      ' gen: ${state.viewportCommandGeneration}'
-                      ' | before=${state.beforeMessages.length}'
-                      ' after=${state.afterMessages.length}'
-                      ' | visible=${_lastVisibilityWindow?.firstVisibleMessageId.toString() ?? 'null'}'
-                      '..${_lastVisibilityWindow?.lastVisibleMessageId.toString() ?? 'null'}'
-                      ' canLoadNewer=${state.canLoadNewer} isNearBottom=${_latestViewportSnapshot.isNearBottom}'
-                      ' atLiveEdge=${_latestViewportSnapshot.viewportAtLiveEdge}',
-                    ),
-                  ),
-                ),
+            if (floatingDateDay != null)
+              ConversationFloatingDate(
+                day: floatingDateDay,
+                visible: _floatingDateVisible,
               ),
+            if (kDebugMode)
+              // Positioned(
+              //   top: 0,
+              //   left: 0,
+              //   right: 0,
+              //   child: IgnorePointer(
+              //     child: Padding(
+              //       padding: const EdgeInsets.symmetric(horizontal: 16),
+              //       child: Text(
+              //         'Seam @ ${centerViewportFraction.toStringAsFixed(2)}'
+              //         ' (${placement.name})'
+              //         ' cmd: ${state.viewportCommand.kind.name} (${state.viewportCommand.placement.name})'
+              //         ' gen: ${state.viewportCommandGeneration}'
+              //         ' | before=${state.beforeMessages.length}'
+              //         ' after=${state.afterMessages.length}'
+              //         ' | visible=${_lastVisibilityWindow?.firstVisibleMessageId.toString() ?? 'null'}'
+              //         '..${_lastVisibilityWindow?.lastVisibleMessageId.toString() ?? 'null'}'
+              //         ' canLoadNewer=${state.canLoadNewer} isNearBottom=${_latestViewportSnapshot.isNearBottom}'
+              //         ' atLiveEdge=${_latestViewportSnapshot.viewportAtLiveEdge}',
+              //       ),
+              //     ),
+              //   ),
+              // ),
             if (state.canLoadNewer || !_latestViewportSnapshot.isNearBottom)
               Positioned(
                 right: _jumpToLatestInset,
