@@ -82,9 +82,9 @@ class _ConversationTimelineViewState
     extends ConsumerState<ConversationTimelineView> {
   static const double _edgeThreshold = 80;
   static const double _jumpToLatestInset = 16;
-  static const double _floatingDateCollisionEnterTopInset = 8;
+  static const double _floatingDateCollisionEnterTopInset = 12;
   static const double _floatingDateCollisionEnterBottomInset = 48;
-  static const double _floatingDateCollisionExitTopInset = 0;
+  static const double _floatingDateCollisionExitTopInset = 8;
   static const double _floatingDateCollisionExitBottomInset = 60;
   late ScrollController _scrollController;
   int _lastHandledViewportCommandGeneration = 0;
@@ -396,7 +396,6 @@ class _ConversationTimelineViewState
     var nextColliding = false;
 
     for (final entry in _dateSeparatorKeys.entries) {
-      final stableKey = entry.key;
       final key = entry.value;
       final renderObject = key.currentContext?.findRenderObject();
       if (renderObject is! RenderBox || !renderObject.attached) {
@@ -406,9 +405,6 @@ class _ConversationTimelineViewState
       final top = topLeft.dy;
       final bottom = top + renderObject.size.height;
       if (bottom > collisionTop && top < collisionBottom) {
-        if (floatingDateActive && stableKey == activeDateSeparatorKey) {
-          continue;
-        }
         nextColliding = true;
         break;
       }
@@ -1007,8 +1003,6 @@ class _ConversationTimelineViewState
                 controller: _scrollController,
                 slivers: [
                   // Fixed top padding?
-                  const SliverPadding(padding: EdgeInsets.only(top: 8)),
-
                   // Before slice (if not empty)
                   if (beforeRows.isNotEmpty)
                     _buildTimelineRowSliver(

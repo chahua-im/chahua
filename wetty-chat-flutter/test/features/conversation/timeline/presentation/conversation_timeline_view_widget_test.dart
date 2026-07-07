@@ -102,7 +102,7 @@ void main() {
     });
 
     testWidgets(
-      'hides same-date inline separator while floating date is visible',
+      'keeps same-date inline separator visible in floating date band',
       (tester) async {
         final api = _FakeMessageApiService(
           _messages(1, 30, createdAt: DateTime.now()),
@@ -123,12 +123,12 @@ void main() {
             matching: find.byType(AnimatedOpacity),
           ),
         );
-        expect(opacity.opacity, 1);
+        expect(opacity.opacity, 0);
 
         final separator = tester.widget<ConversationDateSeparator>(
           find.byType(ConversationDateSeparator),
         );
-        expect(separator.hidden, isTrue);
+        expect(separator.hidden, isFalse);
       },
     );
 
@@ -234,22 +234,22 @@ void main() {
     testWidgets('allows the user to scroll away from live edge', (
       tester,
     ) async {
-      final api = _FakeMessageApiService(_messages(1, 20));
+      final api = _FakeMessageApiService(_messages(1, 30));
       final container = await _container(api);
       addTearDown(container.dispose);
 
       await _pumpTimeline(tester, container: container, viewportHeight: 600);
       await _settleTimeline(tester);
-      _expectRowBottomPinnedToViewport(tester, 20);
+      _expectRowBottomPinnedToViewport(tester, 30);
 
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, 16));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 48));
       await tester.pump();
       await tester.pump();
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, 16));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 48));
       await tester.pump();
       await tester.pump();
 
-      _expectRowBottomBelowViewport(tester, 20);
+      _expectRowBelowViewport(tester, 30);
     });
 
     // Use case:
@@ -2049,13 +2049,6 @@ void _expectJumpToLatestHidden() {
 
 void _expectJumpToLatestVisible() {
   expect(find.byType(JumpToLatestFab), findsOneWidget);
-}
-
-void _expectRowBottomBelowViewport(WidgetTester tester, int messageId) {
-  final viewport = tester.getRect(find.byKey(_viewportKey));
-  final row = tester.getRect(_rowFinder(messageId));
-  expect(row.bottom, greaterThan(viewport.bottom + 1));
-  expect(row.top < viewport.bottom, isTrue);
 }
 
 void _expectRowBelowViewport(WidgetTester tester, int messageId) {
