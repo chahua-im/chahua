@@ -12,18 +12,29 @@ const conversationFloatingDateLabelKey = ValueKey<String>(
 );
 
 class ConversationDateSeparator extends StatelessWidget {
-  const ConversationDateSeparator({super.key, required this.day});
+  const ConversationDateSeparator({
+    super.key,
+    required this.day,
+    this.hidden = false,
+  });
 
   final DateTime day;
+  final bool hidden;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 8),
       child: Center(
-        child: ConversationDateLabel(
-          day: day,
-          labelKey: conversationDateSeparatorLabelKey,
+        child: Visibility(
+          visible: !hidden,
+          maintainAnimation: true,
+          maintainSize: true,
+          maintainState: true,
+          child: ConversationDateLabel(
+            day: day,
+            labelKey: conversationDateSeparatorLabelKey,
+          ),
         ),
       ),
     );
@@ -35,13 +46,18 @@ class ConversationFloatingDate extends StatelessWidget {
     super.key,
     required this.day,
     required this.visible,
+    this.immediate = false,
   });
 
   final DateTime day;
   final bool visible;
+  final bool immediate;
 
   @override
   Widget build(BuildContext context) {
+    final transitionDuration = immediate
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
     return Positioned(
       top: 12,
       left: 0,
@@ -49,11 +65,11 @@ class ConversationFloatingDate extends StatelessWidget {
       child: IgnorePointer(
         child: AnimatedOpacity(
           opacity: visible ? 1 : 0,
-          duration: const Duration(milliseconds: 180),
+          duration: transitionDuration,
           curve: Curves.easeOut,
           child: AnimatedSlide(
             offset: visible ? Offset.zero : const Offset(0, -0.2),
-            duration: const Duration(milliseconds: 180),
+            duration: transitionDuration,
             curve: Curves.easeOut,
             child: Center(
               child: ConversationDateLabel(

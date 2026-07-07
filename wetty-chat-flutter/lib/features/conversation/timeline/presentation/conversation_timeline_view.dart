@@ -82,8 +82,10 @@ class _ConversationTimelineViewState
     extends ConsumerState<ConversationTimelineView> {
   static const double _edgeThreshold = 80;
   static const double _jumpToLatestInset = 16;
-  static const double _floatingDateCollisionTopInset = 8;
-  static const double _floatingDateCollisionBottomInset = 48;
+  static const double _floatingDateCollisionEnterTopInset = 8;
+  static const double _floatingDateCollisionEnterBottomInset = 48;
+  static const double _floatingDateCollisionExitTopInset = 0;
+  static const double _floatingDateCollisionExitBottomInset = 60;
   late ScrollController _scrollController;
   int _lastHandledViewportCommandGeneration = 0;
   final GlobalKey _centerSliverKey = GlobalKey();
@@ -106,6 +108,7 @@ class _ConversationTimelineViewState
   Timer? _floatingDateHideTimer;
   bool _floatingDateVisible = false;
   bool _floatingDateColliding = false;
+  String? _hiddenDateSeparatorKey;
 
   @override
   void initState() {
@@ -375,11 +378,26 @@ class _ConversationTimelineViewState
   }
 
   void _updateFloatingDateCollision(double viewportTop) {
-    final collisionTop = viewportTop + _floatingDateCollisionTopInset;
-    final collisionBottom = viewportTop + _floatingDateCollisionBottomInset;
+    // Use hysteresis so tiny scroll/measurement changes at the handoff point
+    // do not rapidly swap between the floating label and inline separator.
+    final collisionTop =
+        viewportTop +
+        (_floatingDateColliding
+            ? _floatingDateCollisionExitTopInset
+            : _floatingDateCollisionEnterTopInset);
+    final collisionBottom =
+        viewportTop +
+        (_floatingDateColliding
+            ? _floatingDateCollisionExitBottomInset
+            : _floatingDateCollisionEnterBottomInset);
+    final activeDateSeparatorKey = _activeFloatingDateSeparatorKey();
+    final floatingDateActive =
+        _floatingDateVisible && activeDateSeparatorKey != null;
     var nextColliding = false;
 
-    for (final key in _dateSeparatorKeys.values) {
+    for (final entry in _dateSeparatorKeys.entries) {
+      final stableKey = entry.key;
+      final key = entry.value;
       final renderObject = key.currentContext?.findRenderObject();
       if (renderObject is! RenderBox || !renderObject.attached) {
         continue;
@@ -388,16 +406,25 @@ class _ConversationTimelineViewState
       final top = topLeft.dy;
       final bottom = top + renderObject.size.height;
       if (bottom > collisionTop && top < collisionBottom) {
+        if (floatingDateActive && stableKey == activeDateSeparatorKey) {
+          continue;
+        }
         nextColliding = true;
         break;
       }
     }
 
-    if (nextColliding == _floatingDateColliding) {
+    final nextHiddenDateSeparatorKey = floatingDateActive && !nextColliding
+        ? activeDateSeparatorKey
+        : null;
+
+    if (nextColliding == _floatingDateColliding &&
+        nextHiddenDateSeparatorKey == _hiddenDateSeparatorKey) {
       return;
     }
     setState(() {
       _floatingDateColliding = nextColliding;
+      _hiddenDateSeparatorKey = nextHiddenDateSeparatorKey;
     });
   }
 
@@ -728,6 +755,14 @@ class _ConversationTimelineViewState
     return null;
   }
 
+  String? _activeFloatingDateSeparatorKey() {
+    final day = _firstVisibleMessageDay();
+    if (day == null) {
+      return null;
+    }
+    return 'date:${conversationTimelineDateKey(day)}';
+  }
+
   GlobalKey _keyForMessage(ConversationMessageV2 message) {
     return _messageKeys.putIfAbsent(message.stableKey, GlobalKey.new);
   }
@@ -838,7 +873,10 @@ class _ConversationTimelineViewState
         if (row is ConversationTimelineDateSeparatorRow) {
           return KeyedSubtree(
             key: _keyForDateSeparator(row.stableKey),
-            child: ConversationDateSeparator(day: row.day),
+            child: ConversationDateSeparator(
+              day: row.day,
+              hidden: row.stableKey == _hiddenDateSeparatorKey,
+            ),
           );
         }
         final message = (row as ConversationTimelineMessageRow).message;
@@ -1000,6 +1038,7 @@ class _ConversationTimelineViewState
               ConversationFloatingDate(
                 day: floatingDateDay,
                 visible: _floatingDateVisible && !_floatingDateColliding,
+                immediate: _floatingDateColliding,
               ),
             if (kDebugMode)
               // Positioned(

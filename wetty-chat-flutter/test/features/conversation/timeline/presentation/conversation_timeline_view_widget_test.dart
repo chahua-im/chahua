@@ -74,19 +74,47 @@ void main() {
       expect(opacity.opacity, 1);
     });
 
+    testWidgets('hides colliding floating date immediately', (tester) async {
+      await tester.pumpWidget(
+        CupertinoApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Stack(
+            children: [
+              ConversationFloatingDate(
+                day: DateTime(2026, 1, 1),
+                visible: false,
+                immediate: true,
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final opacity = tester.widget<AnimatedOpacity>(
+        find.ancestor(
+          of: find.byKey(conversationFloatingDateLabelKey),
+          matching: find.byType(AnimatedOpacity),
+        ),
+      );
+      expect(opacity.opacity, 0);
+      expect(opacity.duration, Duration.zero);
+    });
+
     testWidgets(
-      'hides floating date when an inline separator reaches the top',
+      'hides same-date inline separator while floating date is visible',
       (tester) async {
         final api = _FakeMessageApiService(
-          _messages(1, 3, createdAt: DateTime.now()),
+          _messages(1, 30, createdAt: DateTime.now()),
         );
         final container = await _container(api);
         addTearDown(container.dispose);
 
-        await _pumpTimeline(tester, container: container, viewportHeight: 140);
+        await _pumpTimeline(tester, container: container, viewportHeight: 360);
         await _settleTimeline(tester);
 
-        await tester.drag(find.byType(CustomScrollView), const Offset(0, -8));
+        _jumpToCurrentTop(tester);
+        await tester.pump();
         await tester.pump();
 
         final opacity = tester.widget<AnimatedOpacity>(
@@ -95,7 +123,12 @@ void main() {
             matching: find.byType(AnimatedOpacity),
           ),
         );
-        expect(opacity.opacity, 0);
+        expect(opacity.opacity, 1);
+
+        final separator = tester.widget<ConversationDateSeparator>(
+          find.byType(ConversationDateSeparator),
+        );
+        expect(separator.hidden, isTrue);
       },
     );
 
@@ -1984,6 +2017,13 @@ void _jumpToCurrentBottom(WidgetTester tester) {
       .state<ScrollableState>(find.byType(Scrollable))
       .position;
   position.jumpTo(position.maxScrollExtent);
+}
+
+void _jumpToCurrentTop(WidgetTester tester) {
+  final position = tester
+      .state<ScrollableState>(find.byType(Scrollable))
+      .position;
+  position.jumpTo(position.minScrollExtent);
 }
 
 void _expectRowBottomPinnedToViewport(WidgetTester tester, int messageId) {
