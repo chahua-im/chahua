@@ -82,11 +82,14 @@ class _ConversationTimelineViewState
     extends ConsumerState<ConversationTimelineView> {
   static const double _edgeThreshold = 80;
   static const double _jumpToLatestInset = 16;
+  static const double _floatingDateCollisionTopInset = 8;
+  static const double _floatingDateCollisionBottomInset = 48;
   late ScrollController _scrollController;
   int _lastHandledViewportCommandGeneration = 0;
   final GlobalKey _centerSliverKey = GlobalKey();
   final GlobalKey _afterContentSliverKey = GlobalKey();
   final Map<String, GlobalKey> _messageKeys = <String, GlobalKey>{};
+  final Map<String, GlobalKey> _dateSeparatorKeys = <String, GlobalKey>{};
   bool _isMeasureScheduled = false;
   double _topPreferredAnchorAlignment = 0;
   double? _lastMeasuredTopPreferredAfterExtent;
@@ -102,6 +105,7 @@ class _ConversationTimelineViewState
   MessageVisibilityWindow? _lastVisibilityWindow;
   Timer? _floatingDateHideTimer;
   bool _floatingDateVisible = false;
+  bool _floatingDateColliding = false;
 
   @override
   void initState() {
@@ -305,6 +309,7 @@ class _ConversationTimelineViewState
     }
 
     _updateMessageVisibilityWindow(measurements, viewportTop, viewportBottom);
+    _updateFloatingDateCollision(viewportTop);
     final timelineState = ref.read(
       conversationTimelineViewModelProvider(widget._identity),
     );
@@ -367,6 +372,33 @@ class _ConversationTimelineViewState
           )
           .reportMessageVisibilityWindow(nextVisibilityWindow);
     }
+  }
+
+  void _updateFloatingDateCollision(double viewportTop) {
+    final collisionTop = viewportTop + _floatingDateCollisionTopInset;
+    final collisionBottom = viewportTop + _floatingDateCollisionBottomInset;
+    var nextColliding = false;
+
+    for (final key in _dateSeparatorKeys.values) {
+      final renderObject = key.currentContext?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.attached) {
+        continue;
+      }
+      final topLeft = renderObject.localToGlobal(Offset.zero);
+      final top = topLeft.dy;
+      final bottom = top + renderObject.size.height;
+      if (bottom > collisionTop && top < collisionBottom) {
+        nextColliding = true;
+        break;
+      }
+    }
+
+    if (nextColliding == _floatingDateColliding) {
+      return;
+    }
+    setState(() {
+      _floatingDateColliding = nextColliding;
+    });
   }
 
   /// This method is meant to be called by the build method synchronously,
@@ -700,6 +732,10 @@ class _ConversationTimelineViewState
     return _messageKeys.putIfAbsent(message.stableKey, GlobalKey.new);
   }
 
+  GlobalKey _keyForDateSeparator(String stableKey) {
+    return _dateSeparatorKeys.putIfAbsent(stableKey, GlobalKey.new);
+  }
+
   // ============ Build & Build Helpers ============
 
   /// Build the actual message list (sliver)
@@ -801,7 +837,7 @@ class _ConversationTimelineViewState
         final row = rows[index];
         if (row is ConversationTimelineDateSeparatorRow) {
           return KeyedSubtree(
-            key: ValueKey(row.stableKey),
+            key: _keyForDateSeparator(row.stableKey),
             child: ConversationDateSeparator(day: row.day),
           );
         }
@@ -963,7 +999,7 @@ class _ConversationTimelineViewState
             if (floatingDateDay != null)
               ConversationFloatingDate(
                 day: floatingDateDay,
-                visible: _floatingDateVisible,
+                visible: _floatingDateVisible && !_floatingDateColliding,
               ),
             if (kDebugMode)
               // Positioned(
@@ -988,21 +1024,21 @@ class _ConversationTimelineViewState
               //     ),
               //   ),
               // ),
-            if (state.canLoadNewer || !_latestViewportSnapshot.isNearBottom)
-              Positioned(
-                right: _jumpToLatestInset,
-                bottom: _jumpToLatestInset,
-                child: JumpToLatestFab(
-                  pendingLiveCount: 0,
-                  onPressed: () => ref
-                      .read(
-                        conversationTimelineViewModelProvider(
-                          widget._identity,
-                        ).notifier,
-                      )
-                      .jumpToLatest(),
+              if (state.canLoadNewer || !_latestViewportSnapshot.isNearBottom)
+                Positioned(
+                  right: _jumpToLatestInset,
+                  bottom: _jumpToLatestInset,
+                  child: JumpToLatestFab(
+                    pendingLiveCount: 0,
+                    onPressed: () => ref
+                        .read(
+                          conversationTimelineViewModelProvider(
+                            widget._identity,
+                          ).notifier,
+                        )
+                        .jumpToLatest(),
+                  ),
                 ),
-              ),
           ],
         );
       },

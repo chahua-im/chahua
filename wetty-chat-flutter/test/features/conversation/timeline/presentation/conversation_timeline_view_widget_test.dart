@@ -74,6 +74,31 @@ void main() {
       expect(opacity.opacity, 1);
     });
 
+    testWidgets(
+      'hides floating date when an inline separator reaches the top',
+      (tester) async {
+        final api = _FakeMessageApiService(
+          _messages(1, 3, createdAt: DateTime.now()),
+        );
+        final container = await _container(api);
+        addTearDown(container.dispose);
+
+        await _pumpTimeline(tester, container: container, viewportHeight: 140);
+        await _settleTimeline(tester);
+
+        await tester.drag(find.byType(CustomScrollView), const Offset(0, -8));
+        await tester.pump();
+
+        final opacity = tester.widget<AnimatedOpacity>(
+          find.ancestor(
+            of: find.byKey(conversationFloatingDateLabelKey),
+            matching: find.byType(AnimatedOpacity),
+          ),
+        );
+        expect(opacity.opacity, 0);
+      },
+    );
+
     // Use case:
     // A brand-new group has no messages yet. Opening the latest timeline should
     // complete bootstrap and show a blank timeline instead of a permanent
