@@ -1,3 +1,5 @@
+import 'package:chahua/core/session/dev_session_defaults.dart';
+
 const String apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'https://chahui.app/_api',
@@ -26,7 +28,7 @@ Map<String, String> apiJsonHeaders([
 class ApiSession {
   const ApiSession._();
 
-  static int _currentUserId = 1;
+  static int _currentUserId = defaultDeveloperUserId;
   static Map<String, String> _authHeaders = const <String, String>{};
 
   static int get currentUserId => _currentUserId;

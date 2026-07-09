@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:chahua/core/session/dev_session_defaults.dart';
 
 import '../network/dio_client.dart';
 import '../network/api_config.dart';
@@ -62,7 +63,7 @@ class AuthSessionState {
 }
 
 class AuthSessionNotifier extends Notifier<AuthSessionState> {
-  static const int defaultUserId = 1;
+  static const int defaultUserId = defaultDeveloperUserId;
   static const String _userIdStorageKey = 'dev_session_user_id';
   static const String _jwtTokenStorageKey = 'auth_session_jwt_token';
 

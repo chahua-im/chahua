@@ -25,7 +25,7 @@ void main() {
   tearDown(() => container.dispose());
 
   test(
-    'defaults to uid 1 while bootstrapping when no preference is stored',
+    'defaults to the configured UID while bootstrapping when no preference is stored',
     () {
       final session = container.read(authSessionProvider);
       expect(session.developerUserId, AuthSessionNotifier.defaultUserId);
@@ -91,8 +91,14 @@ void main() {
           authBootstrapApiProvider.overrideWithValue(
             _FakeAuthBootstrapApi(
               onFetchAuthToken: (headers) {
-                expect(headers['X-User-Id'], '1');
-                expect(headers['X-Client-Id'], '1');
+                expect(
+                  headers['X-User-Id'],
+                  AuthSessionNotifier.defaultUserId.toString(),
+                );
+                expect(
+                  headers['X-Client-Id'],
+                  AuthSessionNotifier.defaultUserId.toString(),
+                );
                 jwtValidationAttempted = headers.containsKey('Authorization');
                 return 'dev-token';
               },
@@ -152,7 +158,7 @@ void main() {
       expect(session.currentUserId, 9);
       expect(session.jwtToken, 'server-token');
       expect(requests, <String>[
-        'dev:1',
+        'dev:${AuthSessionNotifier.defaultUserId}',
         'Bearer persisted-token',
         'me:Bearer server-token',
       ]);
@@ -168,8 +174,14 @@ void main() {
         authBootstrapApiProvider.overrideWithValue(
           _FakeAuthBootstrapApi(
             onFetchAuthToken: (headers) {
-              expect(headers['X-User-Id'], '1');
-              expect(headers['X-Client-Id'], '1');
+              expect(
+                headers['X-User-Id'],
+                AuthSessionNotifier.defaultUserId.toString(),
+              );
+              expect(
+                headers['X-Client-Id'],
+                AuthSessionNotifier.defaultUserId.toString(),
+              );
               return 'dev-token';
             },
           ),
