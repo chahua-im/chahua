@@ -46,35 +46,50 @@ class _MessageOverlayActionPanelV2State
   Widget build(BuildContext context) {
     final colors = context.appColors;
     final rows = _actionRows();
-    return Container(
-      width: MessageOverlayMetricsV2.panelMaxWidth,
-      decoration: BoxDecoration(
-        color: colors.backgroundSecondary,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(
-            blurRadius: 22,
-            offset: Offset(0, 8),
-            color: Color(0x22000000),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final (index, row) in rows.indexed) ...[
-              _ActionRow(items: row, onPageChanged: _setPage),
-              if (index < rows.length - 1)
-                Container(
-                  height: 1,
-                  color: CupertinoColors.separator.resolveFrom(context),
-                ),
+    final columnCount = widget.actions.length < _columns
+        ? widget.actions.length
+        : _columns;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = MessageOverlayMetricsV2.actionPanelWidth(
+          widget.actions.length,
+          constraints.maxWidth,
+        );
+        return Container(
+          width: width,
+          decoration: BoxDecoration(
+            color: colors.backgroundSecondary,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: const [
+              BoxShadow(
+                blurRadius: 22,
+                offset: Offset(0, 8),
+                color: Color(0x22000000),
+              ),
             ],
-          ],
-        ),
-      ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (index, row) in rows.indexed) ...[
+                  _ActionRow(
+                    items: row,
+                    columnCount: columnCount,
+                    onPageChanged: _setPage,
+                  ),
+                  if (index < rows.length - 1)
+                    Container(
+                      height: 1,
+                      color: CupertinoColors.separator.resolveFrom(context),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -138,9 +153,14 @@ class _MessageOverlayActionPanelV2State
 }
 
 class _ActionRow extends StatelessWidget {
-  const _ActionRow({required this.items, required this.onPageChanged});
+  const _ActionRow({
+    required this.items,
+    required this.columnCount,
+    required this.onPageChanged,
+  });
 
   final List<_ActionPanelItem> items;
+  final int columnCount;
   final ValueChanged<int> onPageChanged;
 
   @override
@@ -165,11 +185,7 @@ class _ActionRow extends StatelessWidget {
                 ),
               },
             ),
-          for (
-            var index = items.length;
-            index < MessageOverlayMetricsV2.actionColumns;
-            index++
-          )
+          for (var index = items.length; index < columnCount; index++)
             const Spacer(),
         ],
       ),

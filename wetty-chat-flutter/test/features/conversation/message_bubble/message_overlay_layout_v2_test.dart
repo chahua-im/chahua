@@ -21,6 +21,58 @@ void main() {
     );
   });
 
+  test('action panel width follows visible columns', () {
+    final fourActionLayout = MessageOverlayLayoutV2.calculate(
+      viewportSize: const Size(390, 780),
+      mediaPadding: EdgeInsets.zero,
+      sourceBubbleRect: const Rect.fromLTWH(40, 360, 220, 80),
+      isMe: false,
+      actionCount: 4,
+      showReactionBar: true,
+    );
+    final fiveActionLayout = MessageOverlayLayoutV2.calculate(
+      viewportSize: const Size(390, 780),
+      mediaPadding: EdgeInsets.zero,
+      sourceBubbleRect: const Rect.fromLTWH(40, 360, 220, 80),
+      isMe: false,
+      actionCount: 5,
+      showReactionBar: true,
+    );
+
+    expect(
+      fourActionLayout.actionPanelRect.width,
+      lessThan(MessageOverlayMetricsV2.panelMaxWidth),
+    );
+    expect(
+      fourActionLayout.actionPanelRect.width,
+      greaterThanOrEqualTo(MessageOverlayMetricsV2.panelMinWidth),
+    );
+    expect(
+      fiveActionLayout.actionPanelRect.width,
+      MessageOverlayMetricsV2.panelMaxWidth,
+    );
+  });
+
+  test('collapsed reaction bar width is independent from action count', () {
+    final layout = MessageOverlayLayoutV2.calculate(
+      viewportSize: const Size(390, 780),
+      mediaPadding: EdgeInsets.zero,
+      sourceBubbleRect: const Rect.fromLTWH(40, 360, 220, 80),
+      isMe: false,
+      actionCount: 2,
+      showReactionBar: true,
+    );
+
+    expect(
+      layout.actionPanelRect.width,
+      lessThan(layout.reactionBarRect!.width),
+    );
+    expect(
+      layout.reactionBarRect!.width,
+      MessageOverlayMetricsV2.panelMaxWidth,
+    );
+  });
+
   test('expanded reaction picker receives a large safe overlay rect', () {
     final layout = MessageOverlayLayoutV2.calculate(
       viewportSize: const Size(390, 780),

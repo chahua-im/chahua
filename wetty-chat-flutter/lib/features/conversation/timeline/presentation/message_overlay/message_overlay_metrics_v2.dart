@@ -13,6 +13,25 @@ class MessageOverlayMetricsV2 {
   static const double reactionPickerExpandedHeight = 250;
   static const double reactionPickerExpandedWidth = 340;
 
+  static double reactionBarWidth(double safeWidth) {
+    return panelMaxWidth.clamp(0.0, safeWidth);
+  }
+
+  static double actionPanelWidth(int actionCount, double safeWidth) {
+    if (actionCount <= 0 || safeWidth <= 0) {
+      return 0;
+    }
+    final visibleColumns = actionCount >= actionColumns
+        ? actionColumns
+        : actionCount;
+    final columnWidth = panelMaxWidth / actionColumns;
+    final preferredWidth = visibleColumns * columnWidth;
+    final boundedWidth = preferredWidth < panelMinWidth
+        ? panelMinWidth
+        : preferredWidth;
+    return boundedWidth.clamp(0.0, panelMaxWidth).clamp(0.0, safeWidth);
+  }
+
   static double actionPanelHeight(int actionCount) {
     if (actionCount <= 0) {
       return 0;

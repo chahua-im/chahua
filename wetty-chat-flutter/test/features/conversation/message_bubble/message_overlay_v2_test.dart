@@ -4,6 +4,7 @@ import 'package:chahua/core/providers/shared_preferences_provider.dart';
 import 'package:chahua/features/conversation/timeline/model/message_long_press_details_v2.dart';
 import 'package:chahua/features/conversation/timeline/presentation/message_overlay/message_overlay_action_v2.dart';
 import 'package:chahua/features/conversation/timeline/presentation/message_overlay/message_overlay_controls_v2.dart';
+import 'package:chahua/features/conversation/timeline/presentation/message_overlay/message_overlay_metrics_v2.dart';
 import 'package:chahua/features/conversation/timeline/presentation/message_overlay/message_overlay_reaction_picker_v2.dart';
 import 'package:chahua/features/conversation/timeline/presentation/message_overlay/message_overlay_v2.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
@@ -29,6 +30,41 @@ void main() {
     for (var index = 2; index <= 5; index++) {
       expect(tester.getTopLeft(find.text('Action $index')).dy, firstTop);
     }
+  });
+
+  testWidgets('action panel distributes fewer than five actions evenly', (
+    tester,
+  ) async {
+    final panelWidth = MessageOverlayMetricsV2.actionPanelWidth(4, 390);
+    await _pumpWithSettings(
+      tester,
+      Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(
+          width: panelWidth,
+          child: MessageOverlayActionPanelV2(actions: _numberedActions(4)),
+        ),
+      ),
+    );
+
+    final expectedActionWidth = panelWidth / 4;
+    final firstActionButton = find.ancestor(
+      of: find.text('Action 1'),
+      matching: find.byType(CupertinoButton),
+    );
+    final lastActionButton = find.ancestor(
+      of: find.text('Action 4'),
+      matching: find.byType(CupertinoButton),
+    );
+    final firstActionRect = tester.getRect(firstActionButton);
+    final lastActionRect = tester.getRect(lastActionButton);
+
+    expect(firstActionRect.width, closeTo(expectedActionWidth, 0.1));
+    expect(lastActionRect.width, closeTo(expectedActionWidth, 0.1));
+    expect(
+      lastActionRect.right,
+      closeTo(firstActionRect.left + (expectedActionWidth * 4), 0.1),
+    );
   });
 
   testWidgets('action panel wraps actions into a second row', (tester) async {
