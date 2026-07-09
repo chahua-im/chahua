@@ -273,6 +273,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get forwardMessagesFailed => '发送失败';
 
   @override
+  String forwardMessagesSelectionLimit(int count) {
+    return '一次最多可转发 $count 条消息。';
+  }
+
+  @override
   String get forwardedMessagesTitle => '转发消息';
 
   @override
@@ -822,6 +827,11 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get forwardMessagesFailed => '傳送失敗';
+
+  @override
+  String forwardMessagesSelectionLimit(int count) {
+    return '一次最多可轉發 $count 則訊息。';
+  }
 
   @override
   String get forwardedMessagesTitle => '轉發訊息';

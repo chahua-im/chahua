@@ -627,6 +627,12 @@ abstract class AppLocalizations {
   /// **'Failed to send'**
   String get forwardMessagesFailed;
 
+  /// Dialog message shown when the user tries to select too many messages to forward
+  ///
+  /// In en, this message translates to:
+  /// **'You can forward up to {count} messages at a time.'**
+  String forwardMessagesSelectionLimit(int count);
+
   /// Title for forwarded message cards and the forwarded messages viewer
   ///
   /// In en, this message translates to:

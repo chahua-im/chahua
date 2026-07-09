@@ -65,6 +65,7 @@ class ForwardSelectionNavigationState {
 }
 
 class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
+  static const int _maxForwardMessageSelectionCount = 100;
   static const List<String> _quickReactionEmojis = <String>[
     '👍',
     '❤️',
@@ -220,6 +221,11 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
         message.content is! SystemMessageContent;
   }
 
+  bool _canSelectAdditionalForwardMessage(int messageId) {
+    return _selectedForwardMessageIds.contains(messageId) ||
+        _selectedForwardMessageIds.length < _maxForwardMessageSelectionCount;
+  }
+
   void _beginForwardSelection(ConversationMessageV2 message) {
     final messageId = message.serverMessageId;
     if (messageId == null || !_canSelectForwardMessage(message)) {
@@ -237,6 +243,10 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
   void _toggleForwardMessageSelection(ConversationMessageV2 message) {
     final messageId = message.serverMessageId;
     if (messageId == null || !_canSelectForwardMessage(message)) {
+      return;
+    }
+    if (!_canSelectAdditionalForwardMessage(messageId)) {
+      _showForwardSelectionLimitReached();
       return;
     }
     setState(() {
@@ -264,6 +274,10 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
     if (messageIds.isEmpty) {
       return;
     }
+    if (messageIds.length > _maxForwardMessageSelectionCount) {
+      _showForwardSelectionLimitReached();
+      return;
+    }
     final response = await ref
         .read(messageApiServiceV2Provider)
         .forwardMessages(
@@ -289,6 +303,13 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
         onForward: (destinationChatId) =>
             _forwardSelectedMessages(destinationChatId: destinationChatId),
       ),
+    );
+  }
+
+  void _showForwardSelectionLimitReached() {
+    final l10n = AppLocalizations.of(context)!;
+    _showErrorDialog(
+      l10n.forwardMessagesSelectionLimit(_maxForwardMessageSelectionCount),
     );
   }
 

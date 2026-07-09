@@ -265,6 +265,17 @@
   "forwardMessagesFailed": "Failed to send",
   "@forwardMessagesFailed": { "description": "Inline error shown when forwarding selected messages fails" },
 
+  "forwardMessagesSelectionLimit": "You can forward up to {count} messages at a time.",
+  "@forwardMessagesSelectionLimit": {
+    "description": "Dialog message shown when the user tries to select too many messages to forward",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "100"
+      }
+    }
+  },
+
   "forwardedMessagesTitle": "Forwarded",
   "@forwardedMessagesTitle": { "description": "Title for forwarded message cards and the forwarded messages viewer" },
 

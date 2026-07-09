@@ -94,6 +94,7 @@
   "selectMessageAction": "选择",
   "forwardMessagesAction": "转发",
   "forwardMessagesFailed": "发送失败",
+  "forwardMessagesSelectionLimit": "一次最多可转发 {count} 条消息。",
   "forwardedMessagesTitle": "转发消息",
   "forwardedChatHistoryTitle": "聊天记录",
   "forwardedMessagesCount": "包含 {count} 条消息",

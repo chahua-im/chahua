@@ -276,6 +276,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get forwardMessagesFailed => 'Failed to send';
 
   @override
+  String forwardMessagesSelectionLimit(int count) {
+    return 'You can forward up to $count messages at a time.';
+  }
+
+  @override
   String get forwardedMessagesTitle => 'Forwarded';
 
   @override
