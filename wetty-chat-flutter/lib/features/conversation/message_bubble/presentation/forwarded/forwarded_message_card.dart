@@ -15,7 +15,6 @@ class ForwardedMessageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final content = message.content;
     if (content is! ForwardedMessageContent) {
-      debugPrint('not a forwarded message');
       return const SizedBox.shrink();
     }
 
@@ -61,7 +60,6 @@ class ForwardedMessageCard extends StatelessWidget {
     final navigationBarBackgroundColor = CupertinoTheme.of(
       context,
     ).barBackgroundColor;
-    debugPrint('navigationBarBackgroundColor: $navigationBarBackgroundColor');
     Navigator.of(context).push(
       CupertinoPageRoute<void>(
         builder: (context) => ForwardedMessagesViewer(

@@ -91,6 +91,43 @@ void main() {
 
     expect(find.byKey(messageRowFailedActionKey), findsOneWidget);
   });
+
+  testWidgets('forward selection mode shows empty indicator for message rows', (
+    tester,
+  ) async {
+    await _pumpRow(
+      tester,
+      MessageRowV2(
+        message: _message(senderUid: 7),
+        isForwardSelectionMode: true,
+      ),
+    );
+
+    expect(find.byKey(messageRowForwardSelectionIndicatorKey), findsOneWidget);
+    expect(find.byKey(messageRowForwardSelectionCheckmarkKey), findsNothing);
+  });
+
+  testWidgets('forward selected row fills indicator without row highlight', (
+    tester,
+  ) async {
+    await _pumpRow(
+      tester,
+      MessageRowV2(
+        message: _message(senderUid: 7),
+        isForwardSelectionMode: true,
+        isForwardSelected: true,
+      ),
+    );
+
+    expect(find.byKey(messageRowForwardSelectionIndicatorKey), findsOneWidget);
+    expect(find.byKey(messageRowForwardSelectionCheckmarkKey), findsOneWidget);
+
+    final highlightBox = tester.widget<DecoratedBox>(
+      find.byKey(messageRowHighlightKey),
+    );
+    final decoration = highlightBox.decoration as BoxDecoration;
+    expect(decoration.color, CupertinoColors.transparent);
+  });
 }
 
 Future<void> _pumpRow(WidgetTester tester, Widget child) async {

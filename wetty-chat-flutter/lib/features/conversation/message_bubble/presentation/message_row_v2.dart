@@ -18,11 +18,23 @@ const messageRowHighlightKey = ValueKey<String>('message-row-highlight');
 @visibleForTesting
 const messageRowFailedActionKey = ValueKey<String>('message-row-failed-action');
 
+@visibleForTesting
+const messageRowForwardSelectionIndicatorKey = ValueKey<String>(
+  'message-row-forward-selection-indicator',
+);
+
+@visibleForTesting
+const messageRowForwardSelectionCheckmarkKey = ValueKey<String>(
+  'message-row-forward-selection-checkmark',
+);
+
 const double _bottomSpacing = 12;
 const double _avatarSlotWidth = 36;
 const double _avatarGap = 8;
 const double _failedActionGap = 6;
 const double _failedActionSize = 28;
+const double _forwardSelectionSlotWidth = 36;
+const double _forwardSelectionIndicatorSize = 22;
 
 /// Private bubble layout alignment
 enum _BubbleLayout { centered, aligned }
@@ -144,10 +156,6 @@ class _MessageRowV2State extends State<MessageRowV2>
   }
 
   Color _resolveHighlightColor(BuildContext context, double progress) {
-    if (widget.isForwardSelected) {
-      final color = context.appColors.accentPrimary;
-      return color.withValues(alpha: color.a * 0.16);
-    }
     final highlight = _activeHighlight;
     if (highlight == null) {
       return CupertinoColors.transparent;
@@ -262,14 +270,36 @@ class _MessageRowV2State extends State<MessageRowV2>
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment
                       .end, // Important for tall message to align avatar at bottom
-                  textDirection: _isMe ? TextDirection.rtl : TextDirection.ltr,
                   children: [
-                    avatar,
-                    Flexible(child: item),
-                    if (failedAction != null) ...[
-                      const SizedBox(width: _failedActionGap),
-                      failedAction,
-                    ],
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      width: widget.isForwardSelectionMode
+                          ? _forwardSelectionSlotWidth
+                          : 0,
+                      alignment: Alignment.center,
+                      child: widget.isForwardSelectionMode
+                          ? _ForwardSelectionIndicator(
+                              isSelected: widget.isForwardSelected,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        textDirection: _isMe
+                            ? TextDirection.rtl
+                            : TextDirection.ltr,
+                        children: [
+                          avatar,
+                          Flexible(child: item),
+                          if (failedAction != null) ...[
+                            const SizedBox(width: _failedActionGap),
+                            failedAction,
+                          ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -277,6 +307,45 @@ class _MessageRowV2State extends State<MessageRowV2>
           ),
         );
       },
+    );
+  }
+}
+
+class _ForwardSelectionIndicator extends StatelessWidget {
+  const _ForwardSelectionIndicator({required this.isSelected});
+
+  final bool isSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = context.appColors.accentPrimary;
+    final borderColor = CupertinoColors.systemGrey3.resolveFrom(context);
+    return AnimatedContainer(
+      key: messageRowForwardSelectionIndicatorKey,
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOutCubic,
+      width: _forwardSelectionIndicatorSize,
+      height: _forwardSelectionIndicatorSize,
+      decoration: BoxDecoration(
+        color: isSelected ? accentColor : CupertinoColors.transparent,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: isSelected ? accentColor : borderColor,
+          width: 1.5,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 120),
+        child: isSelected
+            ? const Icon(
+                CupertinoIcons.checkmark,
+                key: messageRowForwardSelectionCheckmarkKey,
+                size: 15,
+                color: CupertinoColors.white,
+              )
+            : const SizedBox.shrink(),
+      ),
     );
   }
 }
