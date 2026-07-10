@@ -74,6 +74,22 @@ pub struct ForwardedMessageSnapshot {
     pub mentions: Vec<MentionInfo>,
 }
 
+impl From<MessageResponse> for ForwardedMessageSnapshot {
+    fn from(response: MessageResponse) -> Self {
+        Self {
+            original_message_id: response.id,
+            original_chat_id: response.chat_id,
+            message: response.message,
+            message_type: response.message_type,
+            sender: response.sender,
+            original_created_at: response.created_at,
+            reply_to_message: response.reply_to_message,
+            attachments: response.attachments,
+            mentions: response.mentions,
+        }
+    }
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesResponse {

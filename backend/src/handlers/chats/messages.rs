@@ -105,7 +105,7 @@ const SYSTEM_MESSAGE_FORWARD_FORBIDDEN: &str = "System messages cannot be forwar
 const INVITE_MESSAGE_FORWARD_FORBIDDEN: &str = "Invite messages cannot be forwarded";
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
 const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
-const MAX_FORWARD_MESSAGES: usize = 50;
+const MAX_FORWARD_MESSAGES: usize = 100;
 
 fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppError> {
     if matches!(message_type, MessageType::System) {
@@ -133,20 +133,6 @@ fn validate_forwardable_source_message_type(message_type: &MessageType) -> Resul
     }
 
     Ok(())
-}
-
-fn forward_message_snapshot(response: MessageResponse) -> ForwardedMessageSnapshot {
-    ForwardedMessageSnapshot {
-        original_message_id: response.id,
-        original_chat_id: response.chat_id,
-        message: response.message,
-        message_type: response.message_type,
-        sender: response.sender,
-        original_created_at: response.created_at,
-        reply_to_message: response.reply_to_message,
-        attachments: response.attachments,
-        mentions: response.mentions,
-    }
 }
 
 fn search_limit(limit: Option<i64>) -> usize {
@@ -757,7 +743,7 @@ async fn forward_messages(
     let source_messages = attach_metadata(conn, messages, &state, uid).await;
     let forwarded_messages: Vec<ForwardedMessageSnapshot> = source_messages
         .into_iter()
-        .map(forward_message_snapshot)
+        .map(ForwardedMessageSnapshot::from)
         .collect();
     let forwarded_messages_payload = serde_json::to_value(&forwarded_messages)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
