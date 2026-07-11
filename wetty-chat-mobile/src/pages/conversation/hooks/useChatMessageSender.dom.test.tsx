@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { AxiosResponse } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageResponse } from '@/api/messages';
-import { markMessagesAsRead, sendMessage } from '@/api/messages';
+import { markMessagesAsRead, sendMessage, sendThreadMessage } from '@/api/messages';
 import { useChatMessageSender } from './useChatMessageSender';
 
 function response<T>(data: T): AxiosResponse<T> {
@@ -181,5 +181,129 @@ describe('useChatMessageSender', () => {
         }),
       }),
     );
+  });
+
+  it('dispatches optimistic and confirmed actions for a thread text send', async () => {
+    vi.mocked(sendThreadMessage).mockResolvedValue(response(message({ id: 'server-1', replyRootId: 'thread-1' })));
+
+    // Create a test component with threadId
+    function ThreadTestComponent({ onRender }: { onRender: (state: HookState) => void }) {
+      const sender = useChatMessageSender({
+        chatId: 'chat-1',
+        storeChatId: 'chat-1_thread_thread-1',
+        threadId: 'thread-1',
+        currentUserId: 7,
+        currentUserName: 'Me',
+        currentUserAvatarUrl: null,
+        threadSubscribed: true,
+        replyingTo: null,
+        editingSession: null,
+        messageLookup: new Map(),
+        setReplyingTo,
+        setEditingSession,
+        revealLatestAfterSend,
+        markThreadSubscribedOptimistically,
+        showToast,
+      });
+      onRender({ sender });
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <ThreadTestComponent
+          onRender={(nextState) => {
+            state = nextState;
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      state.sender.handleSend({
+        kind: 'text',
+        text: 'thread reply',
+        attachmentIds: [],
+        existingAttachments: [],
+        uploadedAttachments: [],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Should use sendThreadMessage, not sendMessage
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendThreadMessage).toHaveBeenCalledWith(
+      'chat-1',
+      'thread-1',
+      expect.objectContaining({
+        message: 'thread reply',
+        messageType: 'text',
+      }),
+    );
+
+    // Should dispatch with scope: 'thread'
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'messages/messageAdded',
+        payload: expect.objectContaining({
+          scope: 'thread',
+        }),
+      }),
+    );
+  });
+
+  it('auto-subscribes to thread when sending in an unsubscribed thread', async () => {
+    vi.mocked(sendThreadMessage).mockResolvedValue(response(message({ id: 'server-1', replyRootId: 'thread-1' })));
+
+    function UnsubscribedThreadTestComponent({ onRender }: { onRender: (state: HookState) => void }) {
+      const sender = useChatMessageSender({
+        chatId: 'chat-1',
+        storeChatId: 'chat-1_thread_thread-1',
+        threadId: 'thread-1',
+        currentUserId: 7,
+        currentUserName: 'Me',
+        currentUserAvatarUrl: null,
+        threadSubscribed: false, // Not subscribed
+        replyingTo: null,
+        editingSession: null,
+        messageLookup: new Map(),
+        setReplyingTo,
+        setEditingSession,
+        revealLatestAfterSend,
+        markThreadSubscribedOptimistically,
+        showToast,
+      });
+      onRender({ sender });
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <UnsubscribedThreadTestComponent
+          onRender={(nextState) => {
+            state = nextState;
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      state.sender.handleSend({
+        kind: 'text',
+        text: 'auto subscribe',
+        attachmentIds: [],
+        existingAttachments: [],
+        uploadedAttachments: [],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Should call markThreadSubscribedOptimistically before sending
+    expect(markThreadSubscribedOptimistically).toHaveBeenCalled();
+    expect(sendThreadMessage).toHaveBeenCalled();
   });
 });

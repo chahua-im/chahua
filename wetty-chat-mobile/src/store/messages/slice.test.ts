@@ -356,4 +356,249 @@ describe('messages slice canonical reducers', () => {
     expect(selectActiveTimelineMessages(testRootState(next), '1')[0].reactions?.[0]?.emoji).toBe('thumbs-up');
     expect(selectActiveTimelineMessages(testRootState(next), '1_thread_10')[0].replyToMessage?.isDeleted).toBe(true);
   });
+
+  it('updates replyToMessage.isDeleted when the referenced message is deleted via messagePatched', () => {
+    const replyToMessage: MessageResponse['replyToMessage'] = {
+      id: '10',
+      clientGeneratedId: 'client-10',
+      createdAt: testMessage('10').createdAt,
+      message: 'message 10',
+      messageType: 'text',
+      sender: { uid: 2, name: 'User', gender: 0 },
+      isDeleted: false,
+    };
+    let next = reducer(
+      undefined,
+      refreshLatest({
+        chatId: '1',
+        messages: [testMessage('10'), testMessage('11', 'client-11', { replyToMessage })],
+        olderCursor: null,
+        newerCursor: null,
+      }),
+    );
+
+    // Delete msg10 via messagePatched (single delete path)
+    next = reducer(
+      next,
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null }),
+      }),
+    );
+
+    // msg10 removed from timeline
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['11']);
+    // msg11's replyToMessage.isDeleted updated to true
+    expect(selectActiveTimelineMessages(testRootState(next), '1')[0].replyToMessage?.isDeleted).toBe(true);
+    expect(selectActiveTimelineMessages(testRootState(next), '1')[0].replyToMessage?.message).toBeNull();
+  });
+
+  it('keeps thread root as placeholder when deleted but threadInfo exists', () => {
+    let next = reducer(
+      undefined,
+      refreshLatest({
+        chatId: '1',
+        messages: [testMessage('10', 'client-10', { threadInfo: { replyCount: 3 } }), testMessage('11')],
+        olderCursor: null,
+        newerCursor: null,
+      }),
+    );
+
+    // Delete thread root via messagePatched
+    next = reducer(
+      next,
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null, threadInfo: { replyCount: 3 } }),
+      }),
+    );
+
+    // Thread root stays as placeholder (has threadInfo)
+    const messages = selectActiveTimelineMessages(testRootState(next), '1');
+    expect(ids(messages)).toEqual(['10', '11']);
+    expect(messages[0].isDeleted).toBe(true);
+    expect(messages[0].message).toBeNull();
+    expect(messages[0].threadInfo).toEqual({ replyCount: 3 });
+  });
+
+  it('removes thread root when deleted and threadInfo is null', () => {
+    let next = reducer(
+      undefined,
+      refreshLatest({
+        chatId: '1',
+        messages: [testMessage('10', 'client-10', { threadInfo: { replyCount: 3 } }), testMessage('11')],
+        olderCursor: null,
+        newerCursor: null,
+      }),
+    );
+
+    // Delete thread root with threadInfo explicitly set to null (server says no thread)
+    next = reducer(
+      next,
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null, threadInfo: null as any }),
+      }),
+    );
+
+    // Thread root removed (threadInfo is null/falsy)
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['11']);
+  });
+
+  it('removes thread root when deleted and no threadInfo on existing message', () => {
+    let next = reducer(
+      undefined,
+      refreshLatest({
+        chatId: '1',
+        messages: [testMessage('10'), testMessage('11')],
+        olderCursor: null,
+        newerCursor: null,
+      }),
+    );
+
+    // Delete a regular message (no threadInfo)
+    next = reducer(
+      next,
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null }),
+      }),
+    );
+
+    // Message removed from timeline
+    expect(ids(selectActiveTimelineMessages(testRootState(next), '1'))).toEqual(['11']);
+  });
+
+  it('cleans up empty segments after deletion', () => {
+    let next = reducer(
+      undefined,
+      insertAround({
+        chatId: '1',
+        targetMessageId: '10',
+        messages: [testMessage('10')],
+        olderCursor: '10',
+        newerCursor: '10',
+      }),
+    );
+
+    // Delete the only message in the segment
+    next = reducer(
+      next,
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null }),
+      }),
+    );
+
+    // Segment should be cleaned up
+    expect(next.chats['1'].segments).toHaveLength(0);
+  });
+
+  it('preserves forwardedFrom when message is added via messageAdded', () => {
+    const forwardedMessage = testMessage('20', 'client-20', {
+      forwardedFrom: {
+        sender: { uid: 99, name: 'OriginalSender', gender: 0 },
+        originalChatId: 'other-chat',
+        originalMessageId: 'orig-1',
+      },
+    });
+
+    let next = reducer(
+      undefined,
+      refreshLatest({ chatId: '1', messages: [testMessage('10')], olderCursor: '10', newerCursor: null }),
+    );
+    next = reducer(
+      next,
+      messageAdded({ chatId: '1', storeChatId: '1', message: forwardedMessage, origin: 'ws', scope: 'main' }),
+    );
+
+    const messages = selectActiveTimelineMessages(testRootState(next), '1');
+    const fwd = messages.find((m) => m.id === '20');
+    expect(fwd?.forwardedFrom).toBeDefined();
+    expect(fwd?.forwardedFrom?.sender.name).toBe('OriginalSender');
+    expect(fwd?.forwardedFrom?.originalChatId).toBe('other-chat');
+  });
+
+  it('preserves forwardedFrom when message is loaded via refreshLatest', () => {
+    const forwardedMessage = testMessage('20', 'client-20', {
+      forwardedFrom: {
+        sender: { uid: 99, name: 'OriginalSender', gender: 0 },
+        originalChatId: 'other-chat',
+        originalMessageId: 'orig-1',
+      },
+    });
+
+    const next = reducer(
+      undefined,
+      refreshLatest({ chatId: '1', messages: [forwardedMessage], olderCursor: null, newerCursor: null }),
+    );
+
+    const messages = selectActiveTimelineMessages(testRootState(next), '1');
+    expect(messages[0].forwardedFrom).toBeDefined();
+    expect(messages[0].forwardedFrom?.sender.name).toBe('OriginalSender');
+    expect(messages[0].forwardedFrom?.originalChatId).toBe('other-chat');
+  });
+
+  it('preserves reactions and replyTo when a non-delete patch omits them', () => {
+    const base = testMessage('30', 'client-30', {
+      reactions: [{ emoji: '👍', count: 1, users: [{ uid: 1 }] }] as any,
+      replyToMessage: {
+        id: '10',
+        senderName: 'A',
+        message: 'hi',
+        messageType: 'text',
+        isDeleted: false,
+      } as any,
+    });
+    let next = reducer(
+      undefined,
+      refreshLatest({ chatId: '1', messages: [base], olderCursor: null, newerCursor: null }),
+    );
+    // Patch carries only id + body; reactions/replyToMessage are absent (undefined),
+    // so the `??` fallbacks must restore the originals (regression guard for M7).
+    next = reducer(
+      next,
+      messagePatched({
+        chatId: '1',
+        messageId: '30',
+        message: { id: '30', message: 'edited', messageType: 'text' } as any,
+      }),
+    );
+    const msg = selectActiveTimelineMessages(testRootState(next), '1').find((m) => m.id === '30')!;
+    expect(msg.message).toBe('edited');
+    expect(msg.reactions).toHaveLength(1);
+    expect(msg.replyToMessage?.id).toBe('10');
+  });
+
+  it('preserves forwardedFrom when a forwarded message is patched (edit)', () => {
+    const forwarded = testMessage('40', 'client-40', {
+      forwardedFrom: {
+        sender: { uid: 99, name: 'OriginalSender', gender: 0 },
+        originalChatId: 'other-chat',
+        originalMessageId: 'orig-1',
+      },
+    });
+    let next = reducer(
+      undefined,
+      refreshLatest({ chatId: '1', messages: [forwarded], olderCursor: null, newerCursor: null }),
+    );
+    // Edit the forwarded message body; forwardedFrom must survive because the patch omits it.
+    next = reducer(
+      next,
+      messagePatched({
+        chatId: '1',
+        messageId: '40',
+        message: { id: '40', message: 'edited forward', messageType: 'text' } as any,
+      }),
+    );
+    const msg = selectActiveTimelineMessages(testRootState(next), '1').find((m) => m.id === '40')!;
+    expect(msg.message).toBe('edited forward');
+    expect(msg.forwardedFrom).toBeDefined();
+    expect(msg.forwardedFrom?.sender.name).toBe('OriginalSender');
+  });
 });

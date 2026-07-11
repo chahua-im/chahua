@@ -17,8 +17,8 @@ msgid "[Deleted]"
 msgstr "[已删除]"
 
 #. placeholder {0}: thread.replyCount
-msgid "{0} replies"
-msgstr "{0} 条回复"
+msgid "{0, plural, one {# reply} other {# replies}}"
+msgstr "{0, plural, one {# 条回复} other {# 条回复}}"
 
 msgid "{count} attachments"
 msgstr "{count} 个附件"
@@ -535,7 +535,7 @@ msgstr "转发"
 msgid "Forward to"
 msgstr "转发到"
 
-#. placeholder {0}: forwardedFrom.sender.name ?? 'Unknown'
+#. placeholder {0}: name || t`Unknown`
 msgid "Forwarded from {0}"
 msgstr "转发自 {0}"
 

@@ -17,8 +17,8 @@ msgid "[Deleted]"
 msgstr "[Deleted]"
 
 #. placeholder {0}: thread.replyCount
-msgid "{0} replies"
-msgstr "{0} replies"
+msgid "{0, plural, one {# reply} other {# replies}}"
+msgstr "{0, plural, one {# reply} other {# replies}}"
 
 msgid "{count} attachments"
 msgstr "{count} attachments"
@@ -535,7 +535,7 @@ msgstr "Forward"
 msgid "Forward to"
 msgstr "Forward to"
 
-#. placeholder {0}: forwardedFrom.sender.name ?? 'Unknown'
+#. placeholder {0}: name || t`Unknown`
 msgid "Forwarded from {0}"
 msgstr "Forwarded from {0}"
 
