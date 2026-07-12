@@ -2,11 +2,17 @@
 
 ## Project Structure & Module Organization
 
-This repository contains three apps plus shared docs and API collections. `backend/` is the Rust API server; core modules live in `src/handlers`, `src/services`, `src/utils`, and `src/schema`, with Diesel migrations in `migrations/`.
+This repository contains three apps plus shared docs and API collections. `backend/` is the Rust API server; core modules live in `src/handlers`, `src/services`, `src/utils`, `src/schema`, `src/dto` (API data transfer objects), `src/models.rs` (Diesel models), and `src/metrics.rs` (Prometheus metrics), with Diesel migrations in `migrations/`. Routing and app wiring live in `src/main.rs`.
+
+Real-time messaging uses WebSockets: ticket-based WS auth, handlers in `src/handlers/ws/`, payloads in `src/dto/ws.rs`, connection registry in `src/services/ws_registry.rs`. Background work (e.g. push notifications via web-push/APNs) lives in `src/services/background.rs` and `src/services/push/`. Message full-text search is backed by Meilisearch (`src/services/message_search/`); media is stored in S3.
+
+## Auth
+
+Auth uses JWTs (`src/utils/auth.rs`), with authorization policy in `src/services/authz.rs`. User identity is currently sourced from Discuz tables (`src/schema/discuz*.rs`, `src/services/user.rs`). A design plan for extracting a proper auth/user-provider boundary lives in `docs/auth-provider/` at the repo root — read it before making auth-related changes.
 
 ## Design background
 
-- The application is designed to handle 20K users, and 200k messages a year (combined across all users).
+- The application is designed to handle 20K users, and ~2k messages a day (combined across all users).
 - Expect around 5K users in a large chat group.
 
 ## API Serialization
@@ -26,8 +32,9 @@ This repository contains three apps plus shared docs and API collections. `backe
 
 Run backend work from `backend/`:
 
-- `cargo run` starts the API on `http://localhost:3000`.
+- `cargo run` starts the API on port 3000 (binds `0.0.0.0:3000`, overridable via `APP_ADDR`). A separate Prometheus metrics server binds port 3001 (`METRICS_ADDR`).
 - `cargo build` verifies the Rust backend compiles.
+- `cargo test` runs the test suite (inline `#[test]`/`#[tokio::test]` modules).
 - `cargo clippy` checks lint issues before review.
 - `diesel migration run` applies local PostgreSQL migrations.
 
@@ -38,6 +45,6 @@ Keep Axum handlers grouped by feature, and move database logic into services or 
 
 ## Database Related
 
-- Use diesel DSL when ever possible, only fall back to raw SQL query when absolutely required
+- Use diesel DSL when ever possible. Raw SQL (`sql_query`) is an accepted fallback in performance-critical hot paths (e.g. `src/services/threads.rs`, unread counting) where the DSL can't express the query efficiently — but justify new raw SQL and keep it in services, not handlers
 - Never manually create migration, new migration should always be generated via `diesel migration generate`
 - When writing queries make sure to verify that we do not trigger a table scan of too many rows

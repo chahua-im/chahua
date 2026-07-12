@@ -63,7 +63,7 @@ You are an expert Flutter and Dart developer. Your goal is to build beautiful, p
 * **Widgets:** Use `ConsumerWidget` or `ConsumerStatefulWidget` (when local controllers needed). Access state via `ref.watch()` for reactive rebuilds, `ref.read()` for one-off reads/mutations.
 * **Architecture:** Providers → API Services → Repositories (Notifiers) → ViewModels (AsyncNotifiers) → ConsumerWidgets
 * **AppPreferences:** Async-backed preferences are migrated/preloaded in `main()` and passed via `ProviderScope(overrides:)`.
-* **ApiSession bridge:** `ApiSession.updateUserId()` is kept in sync via the app widget for deep presentation-layer code (image loading headers) that cannot access `ref`.
+* **ApiSession bridge:** `ApiSession.updateSession(userId:, authHeaders:)` (`lib/core/network/api_config.dart`) is kept in sync via the app widget for deep presentation-layer code (image loading headers) that cannot access `ref`.
 
 ## Routing (GoRouter)
 Use `go_router` for all navigation needs (deep linking, web). Ensure users are redirected to login when unauthorized.
@@ -90,7 +90,9 @@ MaterialApp.router(routerConfig: _router);
 ```
 
 ## Data Handling & Serialization
+* **HTTP client:** This project uses `dio` for all HTTP calls (see `lib/core/api/`). Do not introduce `package:http`.
 * **JSON:** Use `json_serializable` and `json_annotation`.
+* **Immutable models:** Domain/state models use `freezed` (with `freezed_annotation`). Prefer freezed for new immutable data classes; run build_runner to regenerate `.freezed.dart`/`.g.dart` parts.
 * **Naming:** Backend uses camelCase JSON keys. Use default field naming (no `fieldRename`) so Dart camelCase fields map 1:1 to camelCase JSON keys.
 * **Null handling:** Use `includeIfNull: false` on request DTOs to omit null fields.
 
