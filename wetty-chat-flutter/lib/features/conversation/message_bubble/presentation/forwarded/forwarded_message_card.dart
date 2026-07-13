@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:chahua/app/theme/style_config.dart';
 import 'package:chahua/features/conversation/message_bubble/presentation/message_row_v2.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
@@ -57,6 +59,10 @@ class ForwardedMessageCard extends StatelessWidget {
     BuildContext context,
     List<ForwardedMessageSnapshot> messages,
   ) {
+    log(
+      'open forwarded viewer chatId=${message.chatId} messageId=${message.serverMessageId}',
+      name: 'ForwardedMessageCard',
+    );
     final navigationBarBackgroundColor = CupertinoTheme.of(
       context,
     ).barBackgroundColor;

@@ -34,6 +34,7 @@ class ConversationMessageV2 {
     required this.sender,
     required this.content,
     this.serverMessageId,
+    this.chatId,
     this.createdAt,
     this.isEdited = false,
     this.isDeleted = false,
@@ -60,6 +61,7 @@ class ConversationMessageV2 {
 
     return ConversationMessageV2(
       serverMessageId: dto.id,
+      chatId: dto.chatId,
       clientGeneratedId: dto.clientGeneratedId,
       sender: User.fromDto(dto.sender),
       createdAt: dto.createdAt,
@@ -87,6 +89,7 @@ class ConversationMessageV2 {
   }
 
   final int? serverMessageId;
+  final int? chatId;
   final String clientGeneratedId;
   final User sender;
   final DateTime? createdAt;
@@ -101,6 +104,7 @@ class ConversationMessageV2 {
 
   ConversationMessageV2 copyWith({
     int? serverMessageId,
+    int? chatId,
     String? clientGeneratedId,
     User? sender,
     DateTime? createdAt,
@@ -115,6 +119,7 @@ class ConversationMessageV2 {
   }) {
     return ConversationMessageV2(
       serverMessageId: serverMessageId ?? this.serverMessageId,
+      chatId: chatId ?? this.chatId,
       clientGeneratedId: clientGeneratedId ?? this.clientGeneratedId,
       sender: sender ?? this.sender,
       createdAt: createdAt ?? this.createdAt,

@@ -27,6 +27,7 @@ void main() {
     );
 
     final content = message.content;
+    expect(message.chatId, 10);
     expect(content, isA<ForwardedMessageContent>());
     final forwarded = content as ForwardedMessageContent;
     expect(forwarded.messages, hasLength(1));

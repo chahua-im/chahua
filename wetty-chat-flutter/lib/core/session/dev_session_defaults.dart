@@ -1,1 +1,1 @@
-const int defaultDeveloperUserId = 2;
+const int defaultDeveloperUserId = 1;
