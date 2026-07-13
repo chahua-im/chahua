@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    dto::{attachments::AttachmentResponse, users::User},
+    dto::{
+        attachments::{AttachmentResponse, AttachmentSnapshot},
+        users::User,
+    },
     models::MessageType,
 };
 
@@ -52,12 +55,75 @@ pub struct MessageResponse {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub forwarded_messages: Option<Vec<ForwardedMessageSnapshot>>,
+    pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagePreviewSnapshot {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub id: i64,
+    pub client_generated_id: String,
+    pub created_at: DateTime<Utc>,
+    pub sender_uid: i32,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sticker: Option<MessagePreviewSticker>,
+    pub attachments: Vec<MessagePreviewAttachment>,
+    pub is_deleted: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mention_uids: Vec<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessageSnapshot {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    pub sender_uid: i32,
+    pub original_created_at: DateTime<Utc>,
+    pub reply_to_message: Option<Box<ForwardedMessagePreviewSnapshot>>,
+    pub attachments: Vec<AttachmentSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mention_uids: Vec<i32>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagePreviewResponse {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    pub sender: User,
+    pub original_created_at: DateTime<Utc>,
+    pub first_attachment_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mention_uids: Vec<i32>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagesPreviewResponse {
+    pub total: usize,
+    pub messages: Vec<ForwardedMessagePreviewResponse>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessageResponse {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub original_message_id: i64,
@@ -74,20 +140,11 @@ pub struct ForwardedMessageSnapshot {
     pub mentions: Vec<MentionInfo>,
 }
 
-impl From<MessageResponse> for ForwardedMessageSnapshot {
-    fn from(response: MessageResponse) -> Self {
-        Self {
-            original_message_id: response.id,
-            original_chat_id: response.chat_id,
-            message: response.message,
-            message_type: response.message_type,
-            sender: response.sender,
-            original_created_at: response.created_at,
-            reply_to_message: response.reply_to_message,
-            attachments: response.attachments,
-            mentions: response.mentions,
-        }
-    }
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagesResponse {
+    pub total: usize,
+    pub messages: Vec<ForwardedMessageResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

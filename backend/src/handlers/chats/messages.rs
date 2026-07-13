@@ -12,7 +12,8 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         messages::{
-            ForwardedMessageSnapshot, ListMessagesResponse, MessageResponse, SearchMessagesResponse,
+            ForwardedMessageSnapshot, ForwardedMessagesResponse, ListMessagesResponse,
+            MessageResponse, SearchMessagesResponse,
         },
         ws::{NotificationPayload, NotificationType, ServerWsMessage},
     },
@@ -25,6 +26,7 @@ use crate::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
         MessageSearchSort, SearchCandidateDropCounts,
     },
+    services::user::lookup_user_profiles,
     utils::{
         auth::{CurrentUid, Principal},
         pagination::validate_limit,
@@ -38,7 +40,10 @@ use crate::services::messages::{
     attach_metadata,
     attachment_position,
     authorize_message_send,
+    build_forwarded_message_snapshots,
+    collect_forwarded_snapshot_uids,
     extract_mention_uids,
+    forwarded_message_response,
     load_username_by_uid,
     parse_attachment_ids,
     send_prepared_message,
@@ -168,6 +173,7 @@ fn search_offset(offset: Option<usize>, limit: usize) -> Result<usize, AppError>
 fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize> {
     next_offset.filter(|offset| offset.saturating_add(limit) <= MAX_SEARCH_RESULT_WINDOW)
 }
+
 
 /// GET /chats/:chat_id/messages — List messages in a chat (cursor-based).
 #[utoipa::path(
@@ -708,12 +714,11 @@ async fn forward_messages(
         validate_forwardable_source_message_type(&message.message_type)?;
     }
 
-    let source_messages = attach_metadata(conn, messages, &state, uid).await;
-    let forwarded_messages: Vec<ForwardedMessageSnapshot> = source_messages
-        .into_iter()
-        .map(ForwardedMessageSnapshot::from)
-        .collect();
-    let forwarded_messages_payload = serde_json::to_value(&forwarded_messages)
+    let source_messages =
+        attach_metadata(conn, messages, &state.media, &state.avatars, uid).await;
+    let forwarded_message_snapshots =
+        build_forwarded_message_snapshots(conn, source_messages)?;
+    let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_message_snapshots)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
 
     diesel::sql_query("BEGIN").execute(conn)?;
@@ -724,7 +729,10 @@ async fn forward_messages(
             PreparedMessageSend {
                 chat_id: dest_chat_id,
                 sender_uid: uid,
-                message: Some(format!("Forwarded {} messages", forwarded_messages.len())),
+                message: Some(format!(
+                    "Forwarded {} messages",
+                    forwarded_message_snapshots.len()
+                )),
                 message_type: MessageType::Forwarded,
                 sticker_id: None,
                 reply_to_id: None,
@@ -732,7 +740,7 @@ async fn forward_messages(
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
-                forwarded_messages_payload: Some(forwarded_messages_payload),
+                forwarded_messages_payload: Some(forwarded_message_snapshots_payload),
             },
         )
         .await?;
@@ -771,6 +779,69 @@ async fn forward_messages(
     };
 
     Ok((StatusCode::CREATED, Json(message)))
+}
+
+/// GET /chats/:chat_id/messages/:message_id/forwarded-messages — List forwarded message details.
+#[utoipa::path(
+    get,
+    path = "/{message_id}/forwarded-messages",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Forwarded message ID"),
+    ),
+    responses(
+        (status = 200, description = "Forwarded message details", body = ForwardedMessagesResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn get_forwarded_messages(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(MessageIdPath {
+        chat_id,
+        message_id,
+    }): Path<MessageIdPath>,
+    mut conn: DbConn,
+) -> Result<Json<ForwardedMessagesResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    let message: Message = messages::table
+        .filter(
+            dsl::id
+                .eq(message_id)
+                .and(dsl::chat_id.eq(chat_id))
+                .and(dsl::deleted_at.is_null())
+                .and(dsl::is_published.eq(true)),
+        )
+        .select(Message::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Message not found"))?;
+
+    if !matches!(message.message_type, MessageType::Forwarded) {
+        return Err(AppError::BadRequest("Message is not a forwarded message"));
+    }
+
+    let payload = message
+        .forwarded_messages_payload
+        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
+    let snapshots: Vec<ForwardedMessageSnapshot> = serde_json::from_value(payload)
+        .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
+    let mut forwarded_uids = std::collections::HashSet::new();
+    collect_forwarded_snapshot_uids(&snapshots, &mut forwarded_uids);
+    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
+    let user_avatars = state.avatars.lookup(&forwarded_uids);
+    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
+    let total = snapshots.len();
+    let messages = snapshots
+        .into_iter()
+        .map(|snapshot| forwarded_message_response(&state, snapshot, &user_avatars, &user_profiles))
+        .collect();
+
+    Ok(Json(ForwardedMessagesResponse { total, messages }))
 }
 
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
@@ -1314,6 +1385,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_messages, post_message))
         .routes(utoipa_axum::routes!(forward_messages))
+        .routes(utoipa_axum::routes!(get_forwarded_messages))
         .routes(utoipa_axum::routes!(search_messages))
         .routes(utoipa_axum::routes!(
             get_message,
