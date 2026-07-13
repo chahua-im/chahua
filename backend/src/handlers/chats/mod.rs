@@ -19,9 +19,11 @@ use crate::{
         attachments::AttachmentResponse,
         chats::{ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse},
         messages::{
-            ForwardedMessageSnapshot, MentionInfo, MessagePreview, MessagePreviewAttachment,
-            MessagePreviewSticker, MessageResponse, MessageStickerResponse, ReactionReactor,
-            ReactionSummary, StickerMediaResponse, ThreadInfo,
+            ForwardedMessagePreviewResponse, ForwardedMessageResponse, ForwardedMessageSnapshot,
+            ForwardedMessagesPreviewResponse, MentionInfo, MessagePreview,
+            MessagePreviewAttachment, MessagePreviewSticker, MessageResponse,
+            MessageStickerResponse, ReactionReactor, ReactionSummary, StickerMediaResponse,
+            ThreadInfo,
         },
         users::User,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
@@ -483,7 +485,124 @@ pub(crate) fn redact_deleted_message_response(response: &mut MessageResponse) {
     response.attachments.clear();
     response.reactions.clear();
     response.mentions.clear();
-    response.forwarded_messages = None;
+    response.forwarded_preview = None;
+}
+
+pub(crate) const FORWARDED_PREVIEW_LIMIT: usize = 3;
+
+pub(crate) fn collect_forwarded_snapshot_uids(
+    snapshots: &[ForwardedMessageSnapshot],
+    uids: &mut std::collections::HashSet<i32>,
+) {
+    for snapshot in snapshots {
+        uids.insert(snapshot.sender_uid);
+        uids.extend(snapshot.mention_uids.iter().copied());
+        if let Some(reply_to_message) = &snapshot.reply_to_message {
+            uids.insert(reply_to_message.sender_uid);
+            uids.extend(reply_to_message.mention_uids.iter().copied());
+        }
+    }
+}
+
+pub(crate) fn forwarded_message_preview_response(
+    snapshot: &ForwardedMessageSnapshot,
+    user_avatars: &std::collections::HashMap<i32, Option<String>>,
+    user_profiles: &std::collections::HashMap<i32, UserProfile>,
+) -> ForwardedMessagePreviewResponse {
+    ForwardedMessagePreviewResponse {
+        original_message_id: snapshot.original_message_id,
+        original_chat_id: snapshot.original_chat_id,
+        message: snapshot.message.clone(),
+        message_type: snapshot.message_type.clone(),
+        sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
+        original_created_at: snapshot.original_created_at,
+        first_attachment_kind: snapshot
+            .attachments
+            .first()
+            .map(|attachment| attachment.kind.clone()),
+        mention_uids: snapshot.mention_uids.clone(),
+    }
+}
+
+pub(crate) fn forwarded_messages_preview_response(
+    snapshots: &[ForwardedMessageSnapshot],
+    user_avatars: &std::collections::HashMap<i32, Option<String>>,
+    user_profiles: &std::collections::HashMap<i32, UserProfile>,
+) -> ForwardedMessagesPreviewResponse {
+    ForwardedMessagesPreviewResponse {
+        total: snapshots.len(),
+        messages: snapshots
+            .iter()
+            .take(FORWARDED_PREVIEW_LIMIT)
+            .map(|snapshot| {
+                forwarded_message_preview_response(snapshot, user_avatars, user_profiles)
+            })
+            .collect(),
+    }
+}
+
+fn forwarded_message_preview_snapshot_response(
+    snapshot: crate::dto::messages::ForwardedMessagePreviewSnapshot,
+    user_avatars: &std::collections::HashMap<i32, Option<String>>,
+    user_profiles: &std::collections::HashMap<i32, UserProfile>,
+) -> MessagePreview {
+    MessagePreview {
+        id: snapshot.id,
+        client_generated_id: snapshot.client_generated_id,
+        created_at: snapshot.created_at,
+        sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
+        message: snapshot.message,
+        message_type: snapshot.message_type,
+        sticker: snapshot.sticker,
+        attachments: snapshot.attachments,
+        is_deleted: snapshot.is_deleted,
+        mentions: snapshot
+            .mention_uids
+            .into_iter()
+            .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+            .collect(),
+    }
+}
+
+pub(crate) fn forwarded_message_response(
+    state: &AppState,
+    snapshot: ForwardedMessageSnapshot,
+    user_avatars: &std::collections::HashMap<i32, Option<String>>,
+    user_profiles: &std::collections::HashMap<i32, UserProfile>,
+) -> ForwardedMessageResponse {
+    ForwardedMessageResponse {
+        original_message_id: snapshot.original_message_id,
+        original_chat_id: snapshot.original_chat_id,
+        message: snapshot.message,
+        message_type: snapshot.message_type,
+        sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
+        original_created_at: snapshot.original_created_at,
+        reply_to_message: snapshot.reply_to_message.map(|preview| {
+            Box::new(forwarded_message_preview_snapshot_response(
+                *preview,
+                user_avatars,
+                user_profiles,
+            ))
+        }),
+        attachments: snapshot
+            .attachments
+            .into_iter()
+            .map(|attachment| AttachmentResponse {
+                id: attachment.id,
+                url: state.media.public_url(&attachment.external_reference),
+                kind: attachment.kind,
+                size: attachment.size,
+                file_name: attachment.file_name,
+                width: attachment.width,
+                height: attachment.height,
+            })
+            .collect(),
+        mentions: snapshot
+            .mention_uids
+            .into_iter()
+            .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+            .collect(),
+    }
 }
 
 fn sticker_preview_text(emoji: Option<&str>) -> String {
@@ -908,6 +1027,20 @@ pub async fn attach_metadata(
     for reply_msg in reply_messages_map.values() {
         avatar_uids.insert(reply_msg.sender_uid);
     }
+    for message in &messages_to_process {
+        if let Some(payload) = &message.forwarded_messages_payload {
+            match serde_json::from_value::<Vec<ForwardedMessageSnapshot>>(payload.clone()) {
+                Ok(snapshots) => collect_forwarded_snapshot_uids(&snapshots, &mut avatar_uids),
+                Err(err) => {
+                    tracing::warn!(
+                        message_id = message.id,
+                        ?err,
+                        "failed to deserialize forwarded message payload for user hydration"
+                    );
+                }
+            }
+        }
+    }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
     let mut user_avatars = avatars.lookup(&target_uids);
     let mut user_profiles = lookup_user_profiles(conn, &target_uids).unwrap_or_default();
@@ -1228,11 +1361,18 @@ pub async fn attach_metadata(
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
             },
-            forwarded_messages: if is_deleted {
+            forwarded_preview: if is_deleted {
                 None
             } else {
                 m.forwarded_messages_payload.as_ref().and_then(|payload| {
                     serde_json::from_value::<Vec<ForwardedMessageSnapshot>>(payload.clone())
+                        .map(|snapshots| {
+                            forwarded_messages_preview_response(
+                                &snapshots,
+                                &user_avatars,
+                                &user_profiles,
+                            )
+                        })
                         .map_err(|err| {
                             tracing::warn!(
                                 message_id = m.id,
@@ -2206,7 +2346,7 @@ mod tests {
             attachments: Vec::new(),
             reactions: Vec::new(),
             mentions: Vec::new(),
-            forwarded_messages: None,
+            forwarded_preview: None,
         };
 
         let preview = build_push_preview_bundle(&response);
@@ -2249,7 +2389,7 @@ mod tests {
             }],
             reactions: Vec::new(),
             mentions: Vec::new(),
-            forwarded_messages: None,
+            forwarded_preview: None,
         };
 
         let preview = build_push_preview_bundle(&response);
@@ -2355,7 +2495,10 @@ mod tests {
                 gender: 0,
                 user_group: None,
             }],
-            forwarded_messages: Some(Vec::new()),
+            forwarded_preview: Some(super::ForwardedMessagesPreviewResponse {
+                total: 0,
+                messages: Vec::new(),
+            }),
         };
 
         redact_deleted_message_response(&mut response);

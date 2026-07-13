@@ -11,26 +11,30 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::{
+        attachments::AttachmentSnapshot,
         messages::{
-            ForwardedMessageSnapshot, ListMessagesResponse, MessageResponse, SearchMessagesResponse,
+            ForwardedMessagePreviewSnapshot, ForwardedMessageSnapshot, ForwardedMessagesResponse,
+            ListMessagesResponse, MessagePreview, MessageResponse, SearchMessagesResponse,
         },
         ws::ServerWsMessage,
     },
     errors::AppError,
     extractors::DbConn,
     handlers::{groups::load_requester_group_role, members::check_membership},
-    models::{GroupRole, Message, MessageType},
+    models::{Attachment, GroupRole, Message, MessageType},
     schema::{attachments, group_membership, groups, messages, messages::dsl},
     services::message_search::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
         MessageSearchSort, SearchCandidateDropCounts,
     },
+    services::user::lookup_user_profiles,
     utils::{auth::CurrentUid, pagination::validate_limit},
     AppState, MAX_MESSAGES_LIMIT,
 };
 
 use super::{
-    attach_metadata, extract_mention_uids, send_prepared_message, ChatIdPath, CreateMessageBody,
+    attach_metadata, collect_forwarded_snapshot_uids, extract_mention_uids,
+    forwarded_message_response, send_prepared_message, ChatIdPath, CreateMessageBody,
     ForwardMessagesBody, PreparedMessageSend, SendMessageOutcome,
 };
 
@@ -189,6 +193,97 @@ fn validate_message_payload(
     }
 
     Ok(())
+}
+
+fn build_forwarded_message_snapshot(
+    response: MessageResponse,
+    attachment_storage_keys: &std::collections::HashMap<i64, String>,
+) -> Result<ForwardedMessageSnapshot, AppError> {
+    let attachments =
+        response
+            .attachments
+            .into_iter()
+            .map(|attachment| {
+                let external_reference =
+                    attachment_storage_keys.get(&attachment.id).cloned().ok_or(
+                        AppError::Internal("Forwarded attachment storage key missing"),
+                    )?;
+                Ok(AttachmentSnapshot {
+                    id: attachment.id,
+                    external_reference,
+                    kind: attachment.kind,
+                    size: attachment.size,
+                    file_name: attachment.file_name,
+                    width: attachment.width,
+                    height: attachment.height,
+                })
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+
+    Ok(ForwardedMessageSnapshot {
+        original_message_id: response.id,
+        original_chat_id: response.chat_id,
+        message: response.message,
+        message_type: response.message_type,
+        sender_uid: response.sender.uid,
+        original_created_at: response.created_at,
+        reply_to_message: response
+            .reply_to_message
+            .map(|preview| Box::new(build_forwarded_message_preview_snapshot(*preview))),
+        attachments,
+        mention_uids: response
+            .mentions
+            .into_iter()
+            .map(|mention| mention.uid)
+            .collect(),
+    })
+}
+
+fn build_forwarded_message_preview_snapshot(
+    preview: MessagePreview,
+) -> ForwardedMessagePreviewSnapshot {
+    ForwardedMessagePreviewSnapshot {
+        id: preview.id,
+        client_generated_id: preview.client_generated_id,
+        created_at: preview.created_at,
+        sender_uid: preview.sender.uid,
+        message: preview.message,
+        message_type: preview.message_type,
+        sticker: preview.sticker,
+        attachments: preview.attachments,
+        is_deleted: preview.is_deleted,
+        mention_uids: preview
+            .mentions
+            .into_iter()
+            .map(|mention| mention.uid)
+            .collect(),
+    }
+}
+
+fn load_attachment_storage_keys(
+    conn: &mut PgConnection,
+    source_messages: &[MessageResponse],
+) -> Result<std::collections::HashMap<i64, String>, AppError> {
+    let attachment_ids: Vec<i64> = source_messages
+        .iter()
+        .flat_map(|message| message.attachments.iter().map(|attachment| attachment.id))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if attachment_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let attachment_rows: Vec<Attachment> = attachments::table
+        .filter(attachments::id.eq_any(&attachment_ids))
+        .select(Attachment::as_select())
+        .load(conn)?;
+
+    Ok(attachment_rows
+        .into_iter()
+        .map(|attachment| (attachment.id, attachment.external_reference))
+        .collect())
 }
 
 /// GET /chats/:chat_id/messages — List messages in a chat (cursor-based).
@@ -741,11 +836,12 @@ async fn forward_messages(
     }
 
     let source_messages = attach_metadata(conn, messages, &state, uid).await;
-    let forwarded_messages: Vec<ForwardedMessageSnapshot> = source_messages
+    let attachment_storage_keys = load_attachment_storage_keys(conn, &source_messages)?;
+    let forwarded_message_snapshots: Vec<ForwardedMessageSnapshot> = source_messages
         .into_iter()
-        .map(ForwardedMessageSnapshot::from)
-        .collect();
-    let forwarded_messages_payload = serde_json::to_value(&forwarded_messages)
+        .map(|response| build_forwarded_message_snapshot(response, &attachment_storage_keys))
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_message_snapshots)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
 
     diesel::sql_query("BEGIN").execute(conn)?;
@@ -756,7 +852,10 @@ async fn forward_messages(
             PreparedMessageSend {
                 chat_id: dest_chat_id,
                 sender_uid: uid,
-                message: Some(format!("Forwarded {} messages", forwarded_messages.len())),
+                message: Some(format!(
+                    "Forwarded {} messages",
+                    forwarded_message_snapshots.len()
+                )),
                 message_type: MessageType::Forwarded,
                 sticker_id: None,
                 reply_to_id: None,
@@ -764,7 +863,7 @@ async fn forward_messages(
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
-                forwarded_messages_payload: Some(forwarded_messages_payload),
+                forwarded_messages_payload: Some(forwarded_message_snapshots_payload),
             },
         )
         .await?;
@@ -803,6 +902,69 @@ async fn forward_messages(
     };
 
     Ok((StatusCode::CREATED, Json(message)))
+}
+
+/// GET /chats/:chat_id/messages/:message_id/forwarded-messages — List forwarded message details.
+#[utoipa::path(
+    get,
+    path = "/{message_id}/forwarded-messages",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Forwarded message ID"),
+    ),
+    responses(
+        (status = 200, description = "Forwarded message details", body = ForwardedMessagesResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn get_forwarded_messages(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(MessageIdPath {
+        chat_id,
+        message_id,
+    }): Path<MessageIdPath>,
+    mut conn: DbConn,
+) -> Result<Json<ForwardedMessagesResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    let message: Message = messages::table
+        .filter(
+            dsl::id
+                .eq(message_id)
+                .and(dsl::chat_id.eq(chat_id))
+                .and(dsl::deleted_at.is_null())
+                .and(dsl::is_published.eq(true)),
+        )
+        .select(Message::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Message not found"))?;
+
+    if !matches!(message.message_type, MessageType::Forwarded) {
+        return Err(AppError::BadRequest("Message is not a forwarded message"));
+    }
+
+    let payload = message
+        .forwarded_messages_payload
+        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
+    let snapshots: Vec<ForwardedMessageSnapshot> = serde_json::from_value(payload)
+        .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
+    let mut forwarded_uids = std::collections::HashSet::new();
+    collect_forwarded_snapshot_uids(&snapshots, &mut forwarded_uids);
+    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
+    let user_avatars = state.avatars.lookup(&forwarded_uids);
+    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
+    let total = snapshots.len();
+    let messages = snapshots
+        .into_iter()
+        .map(|snapshot| forwarded_message_response(&state, snapshot, &user_avatars, &user_profiles))
+        .collect();
+
+    Ok(Json(ForwardedMessagesResponse { total, messages }))
 }
 
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
@@ -1311,6 +1473,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_messages, post_message))
         .routes(utoipa_axum::routes!(forward_messages))
+        .routes(utoipa_axum::routes!(get_forwarded_messages))
         .routes(utoipa_axum::routes!(search_messages))
         .routes(utoipa_axum::routes!(
             get_message,
