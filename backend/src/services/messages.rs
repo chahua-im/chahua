@@ -615,7 +615,12 @@ fn forwarded_messages_preview_response(
                     .attachments
                     .first()
                     .map(|attachment| attachment.kind.clone()),
-                mention_uids: snapshot.mention_uids.clone(),
+                mentions: snapshot
+                    .mention_uids
+                    .iter()
+                    .copied()
+                    .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+                    .collect(),
             })
             .collect(),
     }
