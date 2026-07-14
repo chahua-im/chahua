@@ -111,7 +111,7 @@ pub struct ForwardedMessagePreviewResponse {
     pub original_created_at: DateTime<Utc>,
     pub first_attachment_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mention_uids: Vec<i32>,
+    pub mentions: Vec<MentionInfo>,
 }
 
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
