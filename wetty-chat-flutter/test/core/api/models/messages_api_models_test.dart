@@ -2,10 +2,10 @@ import 'package:chahua/core/api/models/messages_api_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('MessageItemDto parses forwarded message snapshots', () {
+  test('MessageItemDto parses forwarded preview', () {
     final dto = MessageItemDto.fromJson(<String, dynamic>{
       'id': '9007199254740993',
-      'message': 'Forwarded 1 messages',
+      'message': 'Forwarded 4 messages',
       'messageType': 'forwarded',
       'sender': <String, dynamic>{'uid': 7, 'name': 'Alice', 'gender': 0},
       'chatId': '42',
@@ -17,7 +17,42 @@ void main() {
       'attachments': <dynamic>[],
       'reactions': <dynamic>[],
       'mentions': <dynamic>[],
-      'forwardedMessages': <dynamic>[
+      'forwardedPreview': <String, dynamic>{
+        'total': 4,
+        'messages': <dynamic>[
+          <String, dynamic>{
+            'originalMessageId': '123',
+            'originalChatId': '24',
+            'message': 'hello @[uid:8]',
+            'messageType': 'text',
+            'sender': <String, dynamic>{'uid': '8', 'name': 'Bob', 'gender': 0},
+            'originalCreatedAt': '2026-06-25T12:00:00Z',
+            'firstAttachmentKind': 'image/png',
+            'mentions': <dynamic>[
+              <String, dynamic>{'uid': 8, 'username': 'Bob', 'gender': 0},
+              <String, dynamic>{'uid': 9, 'username': 'Carol', 'gender': 0},
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(dto.messageType, 'forwarded');
+    expect(dto.forwardedPreview?.total, 4);
+
+    final forwarded = dto.forwardedPreview!.messages.single;
+    expect(forwarded.originalMessageId, 123);
+    expect(forwarded.originalChatId, 24);
+    expect(forwarded.sender.uid, 8);
+    expect(forwarded.firstAttachmentKind, 'image/png');
+    expect(forwarded.mentions.map((mention) => mention.uid), <int>[8, 9]);
+    expect(forwarded.mentions.first.username, 'Bob');
+  });
+
+  test('ForwardedMessagesResponseDto parses full forwarded messages', () {
+    final dto = ForwardedMessagesResponseDto.fromJson(<String, dynamic>{
+      'total': 1,
+      'messages': <dynamic>[
         <String, dynamic>{
           'originalMessageId': '123',
           'originalChatId': '24',
@@ -52,10 +87,9 @@ void main() {
       ],
     });
 
-    expect(dto.messageType, 'forwarded');
-    expect(dto.forwardedMessages, hasLength(1));
+    expect(dto.total, 1);
 
-    final forwarded = dto.forwardedMessages!.single;
+    final forwarded = dto.messages.single;
     expect(forwarded.originalMessageId, 123);
     expect(forwarded.originalChatId, 24);
     expect(forwarded.sender.uid, 8);

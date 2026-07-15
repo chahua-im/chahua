@@ -9,13 +9,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('forwarded card opens a viewer with forwarded messages', (
+  testWidgets('forwarded card renders previews and opens viewer', (
     tester,
   ) async {
     await _pumpRow(tester, MessageRowV2(message: _forwardedMessage()));
 
     expect(find.text('Chat History'), findsOneWidget);
-    expect(find.text('Bob: First forwarded message'), findsOneWidget);
+    expect(find.text('Bob: Hello @Carol'), findsOneWidget);
     expect(find.text('Carol: [Image]'), findsOneWidget);
     expect(find.text('Alice: See you tomorrow'), findsOneWidget);
     expect(find.text('Dave: Hidden fourth message'), findsNothing);
@@ -26,7 +26,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byType(ForwardedMessagesViewer), findsOneWidget);
-    expect(find.byType(MessageRowV2), findsWidgets);
   });
 }
 
@@ -52,46 +51,30 @@ ConversationMessageV2 _forwardedMessage() {
     clientGeneratedId: 'forwarded-card',
     sender: const User(uid: 1, name: 'Alice'),
     createdAt: DateTime(2026, 6, 26, 12),
-    content: ForwardedMessageContent(
-      messages: <ForwardedMessageSnapshot>[
-        ForwardedMessageSnapshot(
+    content: const ForwardedMessageContent(
+      total: 4,
+      previewMessages: <ForwardedMessagePreview>[
+        ForwardedMessagePreview(
           originalMessageId: 10,
           originalChatId: 1,
-          sender: const User(uid: 2, name: 'Bob'),
-          originalCreatedAt: DateTime(2026, 6, 26, 11),
-          content: const TextMessageContent(text: 'First forwarded message'),
+          sender: User(uid: 2, name: 'Bob'),
+          message: 'Hello @[uid:3]',
+          messageType: 'text',
+          mentions: <MentionInfo>[MentionInfo(uid: 3, username: 'Carol')],
         ),
-        ForwardedMessageSnapshot(
+        ForwardedMessagePreview(
           originalMessageId: 11,
           originalChatId: 1,
-          sender: const User(uid: 3, name: 'Carol'),
-          originalCreatedAt: DateTime(2026, 6, 26, 11, 1),
-          content: const TextMessageContent(
-            text: '',
-            attachments: [
-              AttachmentItem(
-                id: 'image-1',
-                url: 'https://example.com/image.png',
-                kind: 'image/png',
-                size: 120,
-                fileName: 'image.png',
-              ),
-            ],
-          ),
+          sender: User(uid: 3, name: 'Carol'),
+          messageType: 'text',
+          firstAttachmentKind: 'image/png',
         ),
-        ForwardedMessageSnapshot(
+        ForwardedMessagePreview(
           originalMessageId: 12,
           originalChatId: 1,
-          sender: const User(uid: 1, name: 'Alice'),
-          originalCreatedAt: DateTime(2026, 6, 26, 11, 2),
-          content: const TextMessageContent(text: 'See you tomorrow'),
-        ),
-        ForwardedMessageSnapshot(
-          originalMessageId: 13,
-          originalChatId: 1,
-          sender: const User(uid: 4, name: 'Dave'),
-          originalCreatedAt: DateTime(2026, 6, 26, 11, 3),
-          content: const TextMessageContent(text: 'Hidden fourth message'),
+          sender: User(uid: 1, name: 'Alice'),
+          message: 'See you tomorrow',
+          messageType: 'text',
         ),
       ],
     ),

@@ -55,9 +55,9 @@ class ConversationMessageV2 {
     final sticker = dto.sticker == null
         ? null
         : StickerSummary.fromDto(dto.sticker!);
-    final forwardedMessages = dto.forwardedMessages
-        ?.map(ForwardedMessageSnapshot.fromDto)
-        .toList(growable: false);
+    final forwardedPreview = dto.forwardedPreview == null
+        ? null
+        : ForwardedMessagesPreview.fromDto(dto.forwardedPreview!);
 
     return ConversationMessageV2(
       serverMessageId: dto.id,
@@ -83,7 +83,7 @@ class ConversationMessageV2 {
         sticker: sticker,
         attachments: attachments,
         mentions: mentions,
-        forwardedMessages: forwardedMessages,
+        forwardedPreview: forwardedPreview,
       ),
     );
   }
@@ -151,7 +151,7 @@ MessageContent _contentFromMessageItemDto({
   required StickerSummary? sticker,
   required List<AttachmentItem> attachments,
   required List<MentionInfo> mentions,
-  required List<ForwardedMessageSnapshot>? forwardedMessages,
+  required ForwardedMessagesPreview? forwardedPreview,
 }) {
   if (messageType == 'system') {
     return SystemMessageContent(text: message ?? '');
@@ -166,7 +166,10 @@ MessageContent _contentFromMessageItemDto({
     return InviteMessageContent(text: message, mentions: mentions);
   }
   if (messageType == 'forwarded') {
-    return ForwardedMessageContent(messages: forwardedMessages ?? const []);
+    return ForwardedMessageContent(
+      total: forwardedPreview?.total ?? 0,
+      previewMessages: forwardedPreview?.messages ?? const [],
+    );
   }
   if (messageType == 'audio') {
     if (attachments.isEmpty) {
@@ -230,9 +233,64 @@ class InviteMessageContent extends MessageContent {
 }
 
 class ForwardedMessageContent extends MessageContent {
-  const ForwardedMessageContent({required this.messages});
+  const ForwardedMessageContent({
+    required this.total,
+    required this.previewMessages,
+  });
 
-  final List<ForwardedMessageSnapshot> messages;
+  final int total;
+  final List<ForwardedMessagePreview> previewMessages;
+}
+
+class ForwardedMessagesPreview {
+  const ForwardedMessagesPreview({required this.total, required this.messages});
+
+  factory ForwardedMessagesPreview.fromDto(ForwardedMessagesPreviewDto dto) {
+    return ForwardedMessagesPreview(
+      total: dto.total,
+      messages: dto.messages
+          .map(ForwardedMessagePreview.fromDto)
+          .toList(growable: false),
+    );
+  }
+
+  final int total;
+  final List<ForwardedMessagePreview> messages;
+}
+
+class ForwardedMessagePreview {
+  const ForwardedMessagePreview({
+    required this.originalMessageId,
+    required this.originalChatId,
+    required this.sender,
+    required this.messageType,
+    this.message,
+    this.originalCreatedAt,
+    this.firstAttachmentKind,
+    this.mentions = const <MentionInfo>[],
+  });
+
+  factory ForwardedMessagePreview.fromDto(ForwardedMessagePreviewDto dto) {
+    return ForwardedMessagePreview(
+      originalMessageId: dto.originalMessageId,
+      originalChatId: dto.originalChatId,
+      sender: User.fromDto(dto.sender),
+      message: dto.message,
+      messageType: dto.messageType,
+      originalCreatedAt: dto.originalCreatedAt,
+      firstAttachmentKind: dto.firstAttachmentKind,
+      mentions: dto.mentions.map(MentionInfo.fromDto).toList(growable: false),
+    );
+  }
+
+  final int originalMessageId;
+  final int originalChatId;
+  final User sender;
+  final String? message;
+  final String messageType;
+  final DateTime? originalCreatedAt;
+  final String? firstAttachmentKind;
+  final List<MentionInfo> mentions;
 }
 
 class ForwardedMessageSnapshot {
@@ -245,7 +303,7 @@ class ForwardedMessageSnapshot {
     this.replyToMessage,
   });
 
-  factory ForwardedMessageSnapshot.fromDto(ForwardedMessageSnapshotDto dto) {
+  factory ForwardedMessageSnapshot.fromDto(ForwardedMessageResponseDto dto) {
     final attachments = dto.attachments
         .map(AttachmentItem.fromDto)
         .toList(growable: false);
@@ -278,7 +336,7 @@ class ForwardedMessageSnapshot {
 }
 
 MessageContent _contentFromForwardedSnapshotDto(
-  ForwardedMessageSnapshotDto dto, {
+  ForwardedMessageResponseDto dto, {
   required List<AttachmentItem> attachments,
   required List<MentionInfo> mentions,
 }) {
@@ -291,7 +349,7 @@ MessageContent _contentFromForwardedSnapshotDto(
     sticker: null,
     attachments: attachments,
     mentions: mentions,
-    forwardedMessages: null,
+    forwardedPreview: null,
   );
 }
 

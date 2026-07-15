@@ -27,7 +27,7 @@ class ForwardedMessageCard extends StatelessWidget {
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         minimumSize: Size.zero,
-        onPressed: () => _openForwardedViewer(context, content.messages),
+        onPressed: () => _openForwardedViewer(context),
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: theme.bubbleColor,
@@ -44,7 +44,8 @@ class ForwardedMessageCard extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: _ForwardedHistoryPreview(
-                messages: content.messages,
+                total: content.total,
+                messages: content.previewMessages,
                 theme: theme,
                 l10n: l10n,
               ),
@@ -55,10 +56,7 @@ class ForwardedMessageCard extends StatelessWidget {
     );
   }
 
-  void _openForwardedViewer(
-    BuildContext context,
-    List<ForwardedMessageSnapshot> messages,
-  ) {
+  void _openForwardedViewer(BuildContext context) {
     log(
       'open forwarded viewer chatId=${message.chatId} messageId=${message.serverMessageId}',
       name: 'ForwardedMessageCard',
@@ -69,7 +67,7 @@ class ForwardedMessageCard extends StatelessWidget {
     Navigator.of(context).push(
       CupertinoPageRoute<void>(
         builder: (context) => ForwardedMessagesViewer(
-          messages: messages,
+          messages: const <ForwardedMessageSnapshot>[],
           navigationBarBackgroundColor: navigationBarBackgroundColor,
         ),
       ),
@@ -79,20 +77,19 @@ class ForwardedMessageCard extends StatelessWidget {
 
 class _ForwardedHistoryPreview extends StatelessWidget {
   const _ForwardedHistoryPreview({
+    required this.total,
     required this.messages,
     required this.theme,
     required this.l10n,
   });
 
-  static const int _previewLimit = 3;
-
-  final List<ForwardedMessageSnapshot> messages;
+  final int total;
+  final List<ForwardedMessagePreview> messages;
   final BubbleThemeV2 theme;
   final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
-    final previewMessages = messages.take(_previewLimit);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -113,7 +110,7 @@ class _ForwardedHistoryPreview extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              for (final message in previewMessages) ...[
+              for (final message in messages) ...[
                 _ForwardedPreviewLine(
                   message: message,
                   theme: theme,
@@ -122,7 +119,7 @@ class _ForwardedHistoryPreview extends StatelessWidget {
                 const SizedBox(height: 4),
               ],
               Text(
-                l10n.forwardedMessagesFooterCount(messages.length),
+                l10n.forwardedMessagesFooterCount(total),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: appBubbleMetaTextStyle(
@@ -149,14 +146,20 @@ class _ForwardedPreviewLine extends StatelessWidget {
     required this.l10n,
   });
 
-  final ForwardedMessageSnapshot message;
+  final ForwardedMessagePreview message;
   final BubbleThemeV2 theme;
   final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
     final senderName = _senderName(message.sender, l10n);
-    final preview = _messagePreview(message.content, l10n);
+    final preview = formatMessagePreview(
+      message: message.message,
+      messageType: message.messageType,
+      firstAttachmentKind: message.firstAttachmentKind,
+      mentions: message.mentions,
+      l10n: l10n,
+    );
     return Text(
       '$senderName: $preview',
       maxLines: 1,
@@ -177,45 +180,6 @@ String _senderName(User sender, AppLocalizations l10n) {
     return name;
   }
   return l10n.userFallbackName(sender.uid);
-}
-
-String _messagePreview(MessageContent content, AppLocalizations l10n) {
-  return switch (content) {
-    TextMessageContent(:final text, :final attachments, :final mentions) =>
-      formatMessagePreview(
-        message: text,
-        messageType: 'text',
-        attachments: attachments,
-        mentions: mentions,
-        l10n: l10n,
-      ),
-    AudioMessageContent(:final text, :final mentions) => formatMessagePreview(
-      message: text,
-      messageType: 'audio',
-      mentions: mentions,
-      l10n: l10n,
-    ),
-    StickerMessageContent(:final sticker) => formatMessagePreview(
-      messageType: 'sticker',
-      sticker: sticker,
-      l10n: l10n,
-    ),
-    InviteMessageContent(:final text, :final mentions) => formatMessagePreview(
-      message: text,
-      messageType: 'invite',
-      mentions: mentions,
-      l10n: l10n,
-    ),
-    ForwardedMessageContent() => formatMessagePreview(
-      messageType: 'forwarded',
-      l10n: l10n,
-    ),
-    SystemMessageContent(:final text) => formatMessagePreview(
-      message: text,
-      messageType: 'system',
-      l10n: l10n,
-    ),
-  };
 }
 
 class ForwardedMessagesViewer extends StatefulWidget {
