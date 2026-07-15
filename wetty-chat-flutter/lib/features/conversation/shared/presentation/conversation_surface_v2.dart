@@ -600,7 +600,7 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
       InviteMessageContent() => true,
       StickerMessageContent() ||
       SystemMessageContent() ||
-      ForwardedMessageContent() => false,
+      ForwardedPreviewContent() => false,
     };
   }
 

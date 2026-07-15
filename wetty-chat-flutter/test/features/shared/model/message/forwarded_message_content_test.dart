@@ -31,8 +31,8 @@ void main() {
 
     final content = message.content;
     expect(message.chatId, 10);
-    expect(content, isA<ForwardedMessageContent>());
-    final forwarded = content as ForwardedMessageContent;
+    expect(content, isA<ForwardedPreviewContent>());
+    final forwarded = content as ForwardedPreviewContent;
     expect(forwarded.total, 2);
     expect(forwarded.previewMessages, hasLength(1));
     expect(forwarded.previewMessages.single.originalMessageId, 20);

@@ -166,7 +166,7 @@ MessageContent _contentFromMessageItemDto({
     return InviteMessageContent(text: message, mentions: mentions);
   }
   if (messageType == 'forwarded') {
-    return ForwardedMessageContent(
+    return ForwardedPreviewContent(
       total: forwardedPreview?.total ?? 0,
       previewMessages: forwardedPreview?.messages ?? const [],
     );
@@ -232,8 +232,8 @@ class InviteMessageContent extends MessageContent {
   final List<MentionInfo> mentions;
 }
 
-class ForwardedMessageContent extends MessageContent {
-  const ForwardedMessageContent({
+class ForwardedPreviewContent extends MessageContent {
+  const ForwardedPreviewContent({
     required this.total,
     required this.previewMessages,
   });
@@ -293,8 +293,8 @@ class ForwardedMessagePreview {
   final List<MentionInfo> mentions;
 }
 
-class ForwardedMessageSnapshot {
-  const ForwardedMessageSnapshot({
+class ForwardedMessage {
+  const ForwardedMessage({
     required this.originalMessageId,
     required this.originalChatId,
     required this.sender,
@@ -303,7 +303,7 @@ class ForwardedMessageSnapshot {
     this.replyToMessage,
   });
 
-  factory ForwardedMessageSnapshot.fromDto(ForwardedMessageResponseDto dto) {
+  factory ForwardedMessage.fromDto(ForwardedMessageResponseDto dto) {
     final attachments = dto.attachments
         .map(AttachmentItem.fromDto)
         .toList(growable: false);
@@ -311,7 +311,7 @@ class ForwardedMessageSnapshot {
         .map(MentionInfo.fromDto)
         .toList(growable: false);
 
-    return ForwardedMessageSnapshot(
+    return ForwardedMessage(
       originalMessageId: dto.originalMessageId,
       originalChatId: dto.originalChatId,
       sender: User.fromDto(dto.sender),
@@ -319,7 +319,7 @@ class ForwardedMessageSnapshot {
       replyToMessage: dto.replyToMessage == null
           ? null
           : ReplyToMessage.fromDto(dto.replyToMessage!),
-      content: _contentFromForwardedSnapshotDto(
+      content: _contentFromForwardedMessageResponseDto(
         dto,
         attachments: attachments,
         mentions: mentions,
@@ -335,7 +335,7 @@ class ForwardedMessageSnapshot {
   final MessageContent content;
 }
 
-MessageContent _contentFromForwardedSnapshotDto(
+MessageContent _contentFromForwardedMessageResponseDto(
   ForwardedMessageResponseDto dto, {
   required List<AttachmentItem> attachments,
   required List<MentionInfo> mentions,

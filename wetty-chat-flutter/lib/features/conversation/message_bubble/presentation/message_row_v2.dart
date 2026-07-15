@@ -104,7 +104,7 @@ class _MessageRowV2State extends State<MessageRowV2>
         AudioMessageContent() ||
         StickerMessageContent() ||
         InviteMessageContent() ||
-        ForwardedMessageContent() => true,
+        ForwardedPreviewContent() => true,
         SystemMessageContent() => false,
       };
   bool get _isDesktopPlatform {

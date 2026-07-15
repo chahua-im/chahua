@@ -131,7 +131,7 @@ String? _previewTextFor(MessageContent content) {
     InviteMessageContent(:final text) => text,
     SystemMessageContent(:final text) => text,
     StickerMessageContent() => null,
-    ForwardedMessageContent() => null,
+    ForwardedPreviewContent() => null,
   };
 }
 
@@ -142,7 +142,7 @@ String _previewMessageTypeFor(MessageContent content) {
     InviteMessageContent() => 'invite',
     StickerMessageContent() => 'sticker',
     SystemMessageContent() => 'system',
-    ForwardedMessageContent() => 'forwarded',
+    ForwardedPreviewContent() => 'forwarded',
   };
 }
 

@@ -12,7 +12,7 @@ String messageTextForBubble(MessageContent content) => switch (content) {
   TextMessageContent(:final text) => text,
   AudioMessageContent(:final text) => text ?? '',
   InviteMessageContent(:final text) => text ?? '',
-  ForwardedMessageContent() => '',
+  ForwardedPreviewContent() => '',
   SystemMessageContent(:final text) => text,
   StickerMessageContent() => '',
 };

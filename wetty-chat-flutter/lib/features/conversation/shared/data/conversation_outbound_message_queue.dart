@@ -168,7 +168,7 @@ class ConversationOutboundMessageQueue {
       StickerMessageContent() => 'sticker',
       InviteMessageContent() => 'invite',
       SystemMessageContent() => 'system',
-      ForwardedMessageContent() => 'forwarded',
+      ForwardedPreviewContent() => 'forwarded',
     };
   }
 
@@ -179,7 +179,7 @@ class ConversationOutboundMessageQueue {
       InviteMessageContent(:final text) => text ?? '',
       SystemMessageContent(:final text) => text,
       StickerMessageContent() => '',
-      ForwardedMessageContent() => '',
+      ForwardedPreviewContent() => '',
     };
   }
 

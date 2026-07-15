@@ -69,7 +69,7 @@ class MessageItem extends ConsumerWidget {
           onOpenThread: onOpenThread,
           onToggleReaction: onToggleReaction,
         ),
-        ForwardedMessageContent() => ForwardedMessageCard(message: message),
+        ForwardedPreviewContent() => ForwardedMessageCard(message: message),
         TextMessageContent() || InviteMessageContent() => TextBubbleV2(
           message: message,
           showSenderName: showSenderName,

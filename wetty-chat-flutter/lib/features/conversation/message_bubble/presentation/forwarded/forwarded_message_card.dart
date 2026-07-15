@@ -16,7 +16,7 @@ class ForwardedMessageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final content = message.content;
-    if (content is! ForwardedMessageContent) {
+    if (content is! ForwardedPreviewContent) {
       return const SizedBox.shrink();
     }
 
@@ -67,7 +67,7 @@ class ForwardedMessageCard extends StatelessWidget {
     Navigator.of(context).push(
       CupertinoPageRoute<void>(
         builder: (context) => ForwardedMessagesViewer(
-          messages: const <ForwardedMessageSnapshot>[],
+          messages: const <ForwardedMessage>[],
           navigationBarBackgroundColor: navigationBarBackgroundColor,
         ),
       ),
@@ -189,7 +189,7 @@ class ForwardedMessagesViewer extends StatefulWidget {
     required this.navigationBarBackgroundColor,
   });
 
-  final List<ForwardedMessageSnapshot> messages;
+  final List<ForwardedMessage> messages;
   final Color navigationBarBackgroundColor;
 
   @override
@@ -232,11 +232,11 @@ class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
           padding: const EdgeInsets.fromLTRB(8, 12, 8, 24),
           itemCount: widget.messages.length,
           itemBuilder: (context, index) {
-            final snapshot = widget.messages[index];
-            final message = _messageFromSnapshot(snapshot);
+            final forwardedMessage = widget.messages[index];
+            final message = _messageFromForwardedMessage(forwardedMessage);
             final replyToMessageId = message.replyToMessage?.id;
             return KeyedSubtree(
-              key: _messageKeys[snapshot.originalMessageId],
+              key: _messageKeys[forwardedMessage.originalMessageId],
               child: MessageRowV2(
                 message: message,
                 showSenderName: _shouldShowSenderName(index),
@@ -256,42 +256,42 @@ class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
   }
 
   bool _shouldShowSenderName(int index) {
-    final snapshot = widget.messages[index];
-    if (snapshot.content is SystemMessageContent) {
+    final forwardedMessage = widget.messages[index];
+    if (forwardedMessage.content is SystemMessageContent) {
       return false;
     }
 
-    final previousSnapshot = index > 0 ? widget.messages[index - 1] : null;
-    return previousSnapshot == null ||
-        previousSnapshot.content is SystemMessageContent ||
-        previousSnapshot.sender.uid != snapshot.sender.uid;
+    final previousMessage = index > 0 ? widget.messages[index - 1] : null;
+    return previousMessage == null ||
+        previousMessage.content is SystemMessageContent ||
+        previousMessage.sender.uid != forwardedMessage.sender.uid;
   }
 
   bool _shouldShowAvatar(int index) {
-    final snapshot = widget.messages[index];
-    if (snapshot.content is SystemMessageContent) {
+    final forwardedMessage = widget.messages[index];
+    if (forwardedMessage.content is SystemMessageContent) {
       return false;
     }
 
-    final nextSnapshot = index < widget.messages.length - 1
+    final nextMessage = index < widget.messages.length - 1
         ? widget.messages[index + 1]
         : null;
-    return nextSnapshot == null ||
-        nextSnapshot.content is SystemMessageContent ||
-        nextSnapshot.sender.uid != snapshot.sender.uid;
+    return nextMessage == null ||
+        nextMessage.content is SystemMessageContent ||
+        nextMessage.sender.uid != forwardedMessage.sender.uid;
   }
 
-  ConversationMessageV2 _messageFromSnapshot(
-    ForwardedMessageSnapshot snapshot,
+  ConversationMessageV2 _messageFromForwardedMessage(
+    ForwardedMessage forwardedMessage,
   ) {
     return ConversationMessageV2(
-      serverMessageId: snapshot.originalMessageId,
+      serverMessageId: forwardedMessage.originalMessageId,
       clientGeneratedId:
-          'forwarded:${snapshot.originalChatId}:${snapshot.originalMessageId}',
-      sender: snapshot.sender,
-      createdAt: snapshot.originalCreatedAt,
-      replyToMessage: snapshot.replyToMessage,
-      content: snapshot.content,
+          'forwarded:${forwardedMessage.originalChatId}:${forwardedMessage.originalMessageId}',
+      sender: forwardedMessage.sender,
+      createdAt: forwardedMessage.originalCreatedAt,
+      replyToMessage: forwardedMessage.replyToMessage,
+      content: forwardedMessage.content,
     );
   }
 }

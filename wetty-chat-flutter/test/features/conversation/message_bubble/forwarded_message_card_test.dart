@@ -51,7 +51,7 @@ ConversationMessageV2 _forwardedMessage() {
     clientGeneratedId: 'forwarded-card',
     sender: const User(uid: 1, name: 'Alice'),
     createdAt: DateTime(2026, 6, 26, 12),
-    content: const ForwardedMessageContent(
+    content: const ForwardedPreviewContent(
       total: 4,
       previewMessages: <ForwardedMessagePreview>[
         ForwardedMessagePreview(

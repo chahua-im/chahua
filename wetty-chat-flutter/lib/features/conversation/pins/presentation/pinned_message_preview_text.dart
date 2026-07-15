@@ -47,7 +47,7 @@ String formatPinnedMessagePreview(
       messageType: 'system',
       l10n: l10n,
     ),
-    ForwardedMessageContent() => formatMessagePreview(
+    ForwardedPreviewContent() => formatMessagePreview(
       messageType: 'forwarded',
       l10n: l10n,
     ),
