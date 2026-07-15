@@ -9,7 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('forwarded card renders previews and opens viewer', (
+  testWidgets('renders forwarded preview messages and total count', (
     tester,
   ) async {
     await _pumpRow(tester, MessageRowV2(message: _forwardedMessage()));
