@@ -87,6 +87,16 @@ class MessageApiServiceV2 {
     return MessageItemDto.fromJson(response.data!);
   }
 
+  Future<ForwardedMessagesResponseDto> fetchForwardedMessages({
+    required int chatId,
+    required int messageId,
+  }) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/chats/$chatId/messages/$messageId/forwarded-messages',
+    );
+    return ForwardedMessagesResponseDto.fromJson(response.data!);
+  }
+
   Future<MessageItemDto> editMessage(
     int chatId,
     int messageId,
@@ -143,3 +153,18 @@ final messageApiServiceV2Provider = Provider<MessageApiServiceV2>((ref) {
   final session = ref.watch(authSessionProvider);
   return MessageApiServiceV2(ref.watch(dioProvider), session.currentUserId);
 });
+
+typedef ForwardedMessagesRequest = ({int chatId, int messageId});
+
+final forwardedMessagesProvider =
+    FutureProvider.family<
+      ForwardedMessagesResponseDto,
+      ForwardedMessagesRequest
+    >((ref, request) {
+      return ref
+          .watch(messageApiServiceV2Provider)
+          .fetchForwardedMessages(
+            chatId: request.chatId,
+            messageId: request.messageId,
+          );
+    });

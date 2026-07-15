@@ -1,10 +1,12 @@
 import 'dart:developer';
 
 import 'package:chahua/app/theme/style_config.dart';
+import 'package:chahua/features/conversation/compose/data/message_api_service_v2.dart';
 import 'package:chahua/features/conversation/message_bubble/presentation/message_row_v2.dart';
 import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:chahua/l10n/app_localizations.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/bubble_theme_v2.dart';
 
@@ -57,17 +59,23 @@ class ForwardedMessageCard extends StatelessWidget {
   }
 
   void _openForwardedViewer(BuildContext context) {
-    log(
-      'open forwarded viewer chatId=${message.chatId} messageId=${message.serverMessageId}',
-      name: 'ForwardedMessageCard',
-    );
+    final chatId = message.chatId;
+    final messageId = message.serverMessageId;
+    if (chatId == null || messageId == null) {
+      log(
+        'missing forwarded viewer identity chatId=$chatId messageId=$messageId',
+        name: 'ForwardedMessageCard',
+      );
+      return;
+    }
     final navigationBarBackgroundColor = CupertinoTheme.of(
       context,
     ).barBackgroundColor;
     Navigator.of(context).push(
       CupertinoPageRoute<void>(
         builder: (context) => ForwardedMessagesViewer(
-          messages: const <ForwardedMessage>[],
+          chatId: chatId,
+          messageId: messageId,
           navigationBarBackgroundColor: navigationBarBackgroundColor,
         ),
       ),
@@ -182,26 +190,30 @@ String _senderName(User sender, AppLocalizations l10n) {
   return l10n.userFallbackName(sender.uid);
 }
 
-class ForwardedMessagesViewer extends StatefulWidget {
+class ForwardedMessagesViewer extends ConsumerStatefulWidget {
   const ForwardedMessagesViewer({
     super.key,
-    required this.messages,
+    required this.chatId,
+    required this.messageId,
     required this.navigationBarBackgroundColor,
   });
 
-  final List<ForwardedMessage> messages;
+  final int chatId;
+  final int messageId;
   final Color navigationBarBackgroundColor;
 
   @override
-  State<ForwardedMessagesViewer> createState() =>
+  ConsumerState<ForwardedMessagesViewer> createState() =>
       _ForwardedMessagesViewerState();
 }
 
-class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
-  late final Map<int, GlobalKey> _messageKeys = {
-    for (final message in widget.messages)
-      message.originalMessageId: GlobalKey(),
-  };
+class _ForwardedMessagesViewerState
+    extends ConsumerState<ForwardedMessagesViewer> {
+  final Map<int, GlobalKey> _messageKeys = {};
+
+  GlobalKey _keyForMessage(int messageId) {
+    return _messageKeys.putIfAbsent(messageId, GlobalKey.new);
+  }
 
   void _jumpToMessage(int messageId) {
     final keyContext = _messageKeys[messageId]?.currentContext;
@@ -220,6 +232,12 @@ class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
   Widget build(BuildContext context) {
     final colors = context.appColors;
     final l10n = AppLocalizations.of(context)!;
+    final forwardedMessages = ref.watch(
+      forwardedMessagesProvider((
+        chatId: widget.chatId,
+        messageId: widget.messageId,
+      )),
+    );
     return CupertinoPageScaffold(
       backgroundColor: colors.chatBackground,
       navigationBar: CupertinoNavigationBar(
@@ -228,53 +246,91 @@ class _ForwardedMessagesViewerState extends State<ForwardedMessagesViewer> {
         middle: Text(l10n.forwardedMessagesTitle),
       ),
       child: SafeArea(
-        child: ListView.builder(
-          padding: const EdgeInsets.fromLTRB(8, 12, 8, 24),
-          itemCount: widget.messages.length,
-          itemBuilder: (context, index) {
-            final forwardedMessage = widget.messages[index];
-            final message = _messageFromForwardedMessage(forwardedMessage);
-            final replyToMessageId = message.replyToMessage?.id;
-            return KeyedSubtree(
-              key: _messageKeys[forwardedMessage.originalMessageId],
-              child: MessageRowV2(
-                message: message,
-                showSenderName: _shouldShowSenderName(index),
-                showAvatar: _shouldShowAvatar(index),
-                showDeliveryStatus: false,
-                onTapReply:
-                    replyToMessageId != null &&
-                        _messageKeys.containsKey(replyToMessageId)
-                    ? () => _jumpToMessage(replyToMessageId)
-                    : null,
-              ),
+        child: forwardedMessages.when(
+          loading: () => const Center(child: CupertinoActivityIndicator()),
+          error: (_, _) => const Center(
+            child: Icon(CupertinoIcons.exclamationmark_triangle),
+          ),
+          data: (response) {
+            final messages = response.messages
+                .map(ForwardedMessage.fromDto)
+                .toList(growable: false);
+            return _ForwardedMessagesList(
+              messages: messages,
+              keyForMessage: _keyForMessage,
+              jumpToMessage: _jumpToMessage,
             );
           },
         ),
       ),
     );
   }
+}
+
+class _ForwardedMessagesList extends StatelessWidget {
+  const _ForwardedMessagesList({
+    required this.messages,
+    required this.keyForMessage,
+    required this.jumpToMessage,
+  });
+
+  final List<ForwardedMessage> messages;
+  final GlobalKey Function(int messageId) keyForMessage;
+  final void Function(int messageId) jumpToMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 24),
+      itemCount: messages.length,
+      itemBuilder: (context, index) {
+        final forwardedMessage = messages[index];
+        final message = _messageFromForwardedMessage(forwardedMessage);
+        final replyToMessageId = message.replyToMessage?.id;
+        return KeyedSubtree(
+          key: keyForMessage(forwardedMessage.originalMessageId),
+          child: MessageRowV2(
+            key: ValueKey(
+              'forwarded-message-${forwardedMessage.originalChatId}-${forwardedMessage.originalMessageId}',
+            ),
+            message: message,
+            showSenderName: _shouldShowSenderName(index),
+            showAvatar: _shouldShowAvatar(index),
+            showDeliveryStatus: false,
+            onTapReply:
+                replyToMessageId != null &&
+                    messages.any(
+                      (message) =>
+                          message.originalMessageId == replyToMessageId,
+                    )
+                ? () => jumpToMessage(replyToMessageId)
+                : null,
+          ),
+        );
+      },
+    );
+  }
 
   bool _shouldShowSenderName(int index) {
-    final forwardedMessage = widget.messages[index];
+    final forwardedMessage = messages[index];
     if (forwardedMessage.content is SystemMessageContent) {
       return false;
     }
 
-    final previousMessage = index > 0 ? widget.messages[index - 1] : null;
+    final previousMessage = index > 0 ? messages[index - 1] : null;
     return previousMessage == null ||
         previousMessage.content is SystemMessageContent ||
         previousMessage.sender.uid != forwardedMessage.sender.uid;
   }
 
   bool _shouldShowAvatar(int index) {
-    final forwardedMessage = widget.messages[index];
+    final forwardedMessage = messages[index];
     if (forwardedMessage.content is SystemMessageContent) {
       return false;
     }
 
-    final nextMessage = index < widget.messages.length - 1
-        ? widget.messages[index + 1]
+    final nextMessage = index < messages.length - 1
+        ? messages[index + 1]
         : null;
     return nextMessage == null ||
         nextMessage.content is SystemMessageContent ||
