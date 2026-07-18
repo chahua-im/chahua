@@ -138,6 +138,33 @@
   }
 }
 
+// Jump-target highlight (reply preview / pinned banner / last-read resume).
+// The `.focused` class sits on the row container (.chatRow / .bubbleOnly).
+// We tint the WHOLE ROW background — the row is the bottom-most layer, so a
+// background pulse is never occluded by opaque bubble content (sticker images,
+// invite cards) and spans the full row width behind the bubble + avatar.
+// Mirrors telegram-tt's focused-row affordance.
+.chatRow,
+.bubbleOnly {
+  position: relative;
+}
+
+.focused {
+  animation: message-focus-pulse 2s ease-out forwards;
+}
+
+@keyframes message-focus-pulse {
+  0% {
+    background-color: rgba(var(--ion-color-warning-rgb, 255, 206, 0), 0);
+  }
+  15% {
+    background-color: rgba(var(--ion-color-warning-rgb, 255, 206, 0), 0.18);
+  }
+  100% {
+    background-color: rgba(var(--ion-color-warning-rgb, 255, 206, 0), 0);
+  }
+}
+
 .avatar {
   width: var(--avatar-size);
   height: var(--avatar-size);

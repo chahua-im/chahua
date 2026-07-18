@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import { type MessageResponse, mentionToUser, type User } from '@/api/messages';
 import { InviteMessageModal } from '@/components/invites/InviteMessageModal';
@@ -8,6 +9,7 @@ import { MessageDateSeparator } from './MessageDateSeparator';
 import { SenderGroup } from './SenderGroup';
 import { SystemMessage } from './SystemMessage';
 import { isInviteMessage, isStickerMessage } from './messageTypePredicates';
+import { selectHighlightedMessageId } from '@/store/highlightSlice';
 import type { ChatRow } from '../virtualScroll/types';
 
 /**
@@ -117,6 +119,9 @@ function MessageBubble({
 }: MessageBubbleProps) {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
 
+  const highlightedMessageId = useSelector(selectHighlightedMessageId);
+  const focused = highlightedMessageId === msg.id;
+
   const replyToMessage = msg.replyToMessage;
 
   // Sticky avatar (group-level, handled by SenderGroup) vs inline avatar
@@ -148,6 +153,7 @@ function MessageBubble({
     isLastInGroup,
     isConfirmed: !msg.id.startsWith('cg_'),
     bubbleProps: { 'data-message-id': msg.id, 'data-bubble-row': '' } as BubblePropsOverride,
+    focused,
     replyTo: replyToMessage
       ? {
           senderName: replyToMessage.sender.name ?? `User ${replyToMessage.sender.uid}`,

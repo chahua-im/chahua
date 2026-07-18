@@ -58,6 +58,7 @@ function renderInnerBubble(props: ChatBubbleProps, bubbleRef: React.RefObject<HT
         interactionMode={props.interactionMode}
         bubbleProps={props.bubbleProps}
         bubbleRef={bubbleRef}
+        focused={props.focused}
       />
     );
   }
@@ -80,6 +81,7 @@ function renderInnerBubble(props: ChatBubbleProps, bubbleRef: React.RefObject<HT
         interactionMode={props.interactionMode}
         bubbleProps={props.bubbleProps}
         bubbleRef={bubbleRef}
+        focused={props.focused}
       />
     );
   }

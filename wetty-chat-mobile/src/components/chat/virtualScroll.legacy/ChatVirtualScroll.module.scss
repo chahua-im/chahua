@@ -1,0 +1,103 @@
+.container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overflow-anchor: none;
+  background: inherit;
+}
+
+.flowContent {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+  overflow-anchor: none;
+  background: inherit;
+}
+
+.flowItem {
+  width: 100%;
+}
+
+.rowContent {
+  width: 100%;
+  background: transparent;
+  transition: background-color 100ms ease-out;
+  // Contain layout & style so off-viewport mounted rows don't force the
+  // browser to re-lay-out their siblings during scroll/fling. Safe per audit:
+  // every `position:absolute` descendant is captured by an inner positioned
+  // ancestor (.swipeRoot / .bubble / .stickerContainer / .attachmentsContainer),
+  // so this never steals a containing block. No `content-visibility:auto` here
+  // — it would skip subtree layout and break height measurement.
+  contain: layout style;
+}
+
+.rowContentHighlighted {
+  background: rgba(var(--ion-color-warning-rgb, 255, 196, 9), 0.18);
+  transition: background-color 100ms ease-out;
+}
+
+.dateRowContentHidden {
+  visibility: hidden;
+}
+
+.spacer {
+  width: 100%;
+}
+
+.boundaryRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  color: var(--ion-color-medium, #888);
+}
+
+.edgeHintRow {
+  position: absolute;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-size: 0.85em;
+  color: var(--ion-color-medium, #888);
+  background: inherit;
+  pointer-events: none;
+}
+
+.edgeHintTop {
+  top: 0;
+}
+
+.edgeHintBottom {
+  bottom: 0;
+}
+
+.stagingArea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: -1;
+}
+
+.stagingItem {
+  width: 100%;
+}
+
+.overlayScrim {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  background: var(--background, var(--ion-background-color-step-50, #ece5dd));
+  color: var(--ion-color-medium, #666);
+  font-size: 0.9rem;
+}

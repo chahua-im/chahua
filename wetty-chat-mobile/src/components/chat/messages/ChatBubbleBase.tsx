@@ -12,6 +12,7 @@ import { t } from '@lingui/core/macro';
 import { useSelector } from 'react-redux';
 import styles from './ChatBubble.module.scss';
 import { HoverReplyButton } from './HoverReplyButton';
+import { rowClassName } from './messageRowClass';
 import reactionStyles from './ReactionPill.module.scss';
 import { formatTime } from '@/utils/formatTime';
 import type { Attachment, MentionInfo, ReactionSummary, UserGroupTagInfo } from '@/api/messages';
@@ -116,6 +117,7 @@ export interface ChatBubbleBaseProps {
   currentUserUid?: number | null;
   onMentionClick?: (uid: number) => void;
   showDroplet?: boolean;
+  focused?: boolean;
 }
 
 export function ChatBubbleBase({
@@ -138,6 +140,7 @@ export function ChatBubbleBase({
   threadInfo,
   onThreadClick,
   attachments,
+  focused,
   maxImageHeight = 300,
   reactions,
   onReactionToggle,
@@ -511,7 +514,7 @@ export function ChatBubbleBase({
 
   if (layout === 'bubble-only') {
     return (
-      <div className={`${styles.bubbleOnly} ${isSent ? styles.sent : styles.received}`} data-message-row>
+      <div className={rowClassName(styles.bubbleOnly, isSent, focused)} data-message-row>
         <div className={styles.bubbleWrapper}>
           {bubble}
           {reactionsContent}
@@ -522,7 +525,7 @@ export function ChatBubbleBase({
 
   return (
     <>
-      <div className={`${styles.chatRow} ${isSent ? styles.sent : styles.received}`} data-message-row>
+      <div className={rowClassName(styles.chatRow, isSent, focused)} data-message-row>
         <div className={styles.messageColumn}>
           <div className={styles.avatarBubbleRow}>
             {showAvatar ? (

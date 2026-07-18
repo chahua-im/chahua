@@ -7,6 +7,7 @@ import { InviteMessageCard } from './InviteMessageCard';
 import { UserAvatar } from '@/components/UserAvatar';
 import styles from './ChatBubble.module.scss';
 import { HoverReplyButton } from './HoverReplyButton';
+import { rowClassName } from './messageRowClass';
 import type { BubblePropsOverride } from './ChatBubbleBase';
 
 export interface InviteBubbleProps {
@@ -26,6 +27,7 @@ export interface InviteBubbleProps {
   interactionMode?: 'interactive' | 'read-only';
   bubbleProps?: BubblePropsOverride;
   bubbleRef?: Ref<HTMLDivElement>;
+  focused?: boolean;
 }
 
 export function InviteBubble({
@@ -44,6 +46,7 @@ export function InviteBubble({
   interactionMode = 'interactive',
   bubbleProps: bubblePropOverrides,
   bubbleRef,
+  focused,
 }: InviteBubbleProps) {
   const mouseDetected = useMouseDetected();
   const interactive = interactionMode === 'interactive';
@@ -77,14 +80,14 @@ export function InviteBubble({
 
   if (layout === 'bubble-only') {
     return (
-      <div className={`${styles.bubbleOnly} ${isSent ? styles.sent : styles.received}`} data-message-row>
+      <div className={rowClassName(styles.bubbleOnly, isSent, focused)} data-message-row>
         {bubble}
       </div>
     );
   }
 
   return (
-    <div className={`${styles.chatRow} ${isSent ? styles.sent : styles.received}`}>
+    <div className={rowClassName(styles.chatRow, isSent, focused)}>
       <div className={styles.messageColumn}>
         <div className={styles.avatarBubbleRow}>
           {showAvatar ? (

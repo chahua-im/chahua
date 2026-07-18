@@ -11,6 +11,7 @@ import { useMouseDetected } from '@/hooks/platformHooks';
 import type { BubblePropsOverride } from './ChatBubbleBase';
 import { formatTime } from '@/utils/formatTime';
 import { ReplyPreview } from './ReplyPreview';
+import { rowClassName } from './messageRowClass';
 
 export interface StickerBubbleProps {
   messageType?: 'sticker';
@@ -22,6 +23,7 @@ export interface StickerBubbleProps {
   onReply?: () => void;
   onReplyTap?: () => void;
   onStickerTap?: () => void;
+  focused?: boolean;
   onAvatarClick?: () => void;
   replyTo?: {
     senderName: string;
@@ -58,6 +60,7 @@ export function StickerBubble({
   interactionMode = 'interactive',
   bubbleProps: bubblePropOverrides,
   bubbleRef,
+  focused,
 }: StickerBubbleProps) {
   const mouseDetected = useMouseDetected();
   const interactive = interactionMode === 'interactive';
@@ -107,14 +110,14 @@ export function StickerBubble({
 
   if (layout === 'bubble-only') {
     return (
-      <div className={`${styles.bubbleOnly} ${isSent ? styles.sent : styles.received}`} data-message-row>
+      <div className={rowClassName(styles.bubbleOnly, isSent, focused)} data-message-row>
         {bubble}
       </div>
     );
   }
 
   return (
-    <div className={`${styles.chatRow} ${isSent ? styles.sent : styles.received}`}>
+    <div className={rowClassName(styles.chatRow, isSent, focused)}>
       {showAvatar ? (
         <UserAvatar
           name={senderName}

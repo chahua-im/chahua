@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { t } from '@lingui/core/macro';
 import { useDispatch, useSelector } from 'react-redux';
 import { selectShowAllAvatars } from '@/store/settingsSlice';
+import { setMessageHighlight, clearMessageHighlight } from '@/store/highlightSlice';
 import { getMessages } from '@/api/messages';
 import { getThreadReadState } from '@/api/threads';
 import type { VirtualScrollAnchor, VirtualScrollHandle } from '@/components/chat/virtualScroll/types';
@@ -9,6 +10,7 @@ import { DEFAULT_OFFSET_RATIO } from '@/components/chat/virtualScroll/types';
 import { useChatRows } from '@/components/chat/virtualScroll/useChatRows';
 import { useFloatingDateVisibility } from '@/hooks/useFloatingDate';
 import store from '@/store';
+
 import {
   clearPendingLiveMessages,
   insertAfterAnchor,
@@ -30,6 +32,9 @@ import {
 import { collectTimelineSnapshot, logTimelineDiagnostic } from '@/store/messages/timelineDiagnostics';
 import type { RootState } from '@/store';
 import { areMessageListsEquivalent, isMessageAtOrAfter, parseComparableMessageId } from '../utils/conversationUtils';
+
+/** How long the jump-target highlight stays visible before fading out. */
+const HIGHLIGHT_DURATION_MS = 2000;
 
 interface UseConversationTimelineArgs {
   chatId: string;
@@ -60,6 +65,7 @@ export function useConversationTimeline({
   const [loadingNewer, setLoadingNewer] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadingNewerRef = useRef(false);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [initialAnchor, setInitialAnchor] = useState<VirtualScrollAnchor>(() => {
     if (initialResumeMessageId) {
       return { type: 'message', messageId: initialResumeMessageId, token: 0, align: 'top' };
@@ -113,6 +119,7 @@ export function useConversationTimeline({
   const pendingLiveCount = useSelector((state: RootState) => selectPendingLiveCount(state, storeChatId));
 
   const messageLookup = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
+  const latestMessageId = useMemo(() => (messages.length ? messages[messages.length - 1].id : null), [messages]);
   const showAllAvatars = useSelector(selectShowAllAvatars);
   const chatRows = useChatRows(messages, formatDateSeparator, showAllAvatars);
 
@@ -461,6 +468,22 @@ export function useConversationTimeline({
       });
   }, [chatId, storeChatId, threadId, dispatch, showToast]);
 
+  // Trigger a brief highlight on the jump target, unless it is the latest
+  // message (= resuming to the bottom after opening the chat, not a real jump).
+  // Mirrors telegram-tt's focusedMessage behavior.
+  const triggerJumpHighlight = useCallback(
+    (targetId: string) => {
+      if (targetId === latestMessageId) return;
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      dispatch(setMessageHighlight(targetId));
+      highlightTimerRef.current = setTimeout(() => {
+        dispatch(clearMessageHighlight());
+        highlightTimerRef.current = null;
+      }, HIGHLIGHT_DURATION_MS);
+    },
+    [dispatch, latestMessageId],
+  );
+
   const jumpToMessage = useCallback(
     (
       messageId: string,
@@ -472,7 +495,19 @@ export function useConversationTimeline({
       const currentMessages = selectActiveTimelineMessages(state, storeChatId);
       const idx = currentMessages.findIndex((message) => message.id === messageId);
       if (idx !== -1) {
-        scrollApiRef.current?.scrollToMessageId(messageId, 'smooth', align, offsetRatio);
+        const scrolled = scrollApiRef.current?.scrollToMessageId(messageId, 'smooth', align, offsetRatio);
+        if (!scrolled) {
+          // DOM not ready (rows mid-update) — fall back to the token mechanism
+          // so the layout effect retries the scroll once rows commit.
+          setInitialAnchor((currentAnchor) => ({
+            type: 'message',
+            messageId,
+            token: currentAnchor.token + 1,
+            align,
+            offsetRatio,
+          }));
+        }
+        triggerJumpHighlight(messageId);
         return Promise.resolve(true);
       }
 
@@ -516,6 +551,7 @@ export function useConversationTimeline({
             align,
             offsetRatio,
           }));
+          triggerJumpHighlight(messageId);
           return true;
         })
         .catch((err: Error) => {
@@ -525,7 +561,7 @@ export function useConversationTimeline({
           return false;
         });
     },
-    [chatId, dispatch, showToast, storeChatId, threadId],
+    [chatId, dispatch, showToast, storeChatId, threadId, triggerJumpHighlight],
   );
 
   const scrollToAbsoluteBottom = useCallback(() => {

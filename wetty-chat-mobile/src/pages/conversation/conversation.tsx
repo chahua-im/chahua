@@ -5,7 +5,7 @@ import { chevronDown } from 'ionicons/icons';
 import { useSelector } from 'react-redux';
 import { getMessage, type MessageResponse, type User } from '@/api/messages';
 import { selectCurrentUser } from '@/store/userSlice';
-import { ChatVirtualScroll } from '@/components/chat/virtualScroll/ChatVirtualScroll';
+import { ChatVirtualScroll } from '@/components/chat/virtualScroll';
 import type { ChatRow } from '@/components/chat/virtualScroll/types';
 import { type MessageComposeBarHandle } from '@/components/chat/compose/MessageComposeBar';
 import './conversation.scss';

@@ -1,17 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export function useNativeScrollActivity(
-  containerRef: React.RefObject<HTMLElement | null>,
-  graceMs = 1200,
-  idleMs = 200,
-) {
+export function useNativeScrollActivity(graceMs = 1200, idleMs = 200) {
   const [active, setActive] = useState(false);
   const userUntilRef = useRef(0);
   const idleTimerRef = useRef<number | null>(null);
 
-  const markIntent = useCallback(() => {
-    userUntilRef.current = performance.now() + graceMs;
-    setActive(true);
+  const resetIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
       window.clearTimeout(idleTimerRef.current);
     }
@@ -19,34 +13,28 @@ export function useNativeScrollActivity(
       setActive(false);
       idleTimerRef.current = null;
     }, idleMs);
-  }, [graceMs, idleMs]);
+  }, [idleMs]);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+  // Bound to wheel/touch/pointer input — marks the start of a user-driven
+  // interaction and (re)starts the idle countdown.
+  const markIntent = useCallback(() => {
+    userUntilRef.current = performance.now() + graceMs;
+    setActive(true);
+    resetIdleTimer();
+  }, [graceMs, resetIdleTimer]);
 
-    const onScroll = (e: Event) => {
-      const now = performance.now();
-      const isUser = (e as any).isTrusted || now <= userUntilRef.current;
+  // Called from the component's own scroll handler so we keep a SINGLE scroll
+  // listener instead of registering a second native addEventListener('scroll').
+  // `isTrusted` mirrors the previous native path: real user scrolls are trusted,
+  // programmatic scrollTop changes are not. See plan P0-3.
+  const notifyScroll = useCallback(
+    (isTrusted: boolean) => {
+      const isUser = isTrusted || performance.now() <= userUntilRef.current;
       setActive(isUser);
-      if (idleTimerRef.current) {
-        window.clearTimeout(idleTimerRef.current);
-      }
-      idleTimerRef.current = window.setTimeout(() => {
-        setActive(false);
-        idleTimerRef.current = null;
-      }, idleMs);
-    };
-
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      el.removeEventListener('scroll', onScroll);
-      if (idleTimerRef.current) {
-        window.clearTimeout(idleTimerRef.current);
-        idleTimerRef.current = null;
-      }
-    };
-  }, [containerRef, idleMs]);
+      resetIdleTimer();
+    },
+    [resetIdleTimer],
+  );
 
   useEffect(() => {
     return () => {
@@ -57,5 +45,5 @@ export function useNativeScrollActivity(
     };
   }, []);
 
-  return { active, markIntent };
+  return { active, markIntent, notifyScroll };
 }
