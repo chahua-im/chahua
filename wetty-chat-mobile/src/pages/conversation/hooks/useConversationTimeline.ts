@@ -83,6 +83,13 @@ export function useConversationTimeline({
     if (threadId) return;
     if (!lastReadMessageId) return;
 
+    // No unread -> stay at the bottom; only jump to last-read when there are
+    // unread messages (mirrors telegram-tt, which only uses the unread divider
+    // when unreadCount > 0). Without this, a fully-read chat re-anchors from
+    // bottom to message-top on the async lastReadMessageId arrival, causing an
+    // extra scroll adjustment and landing short of the bottom.
+    if (!scrollToBottomUnreadCount) return;
+
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setInitialAnchor((current) => {
       if (current.type !== 'bottom') return current;
@@ -93,7 +100,7 @@ export function useConversationTimeline({
         align: 'top' as const,
       };
     });
-  }, [initialResumeMessageId, lastReadMessageId, threadId]);
+  }, [initialResumeMessageId, lastReadMessageId, scrollToBottomUnreadCount, threadId]);
 
   const [pendingResumeMessageId, setPendingResumeMessageId] = useState<string | null>(initialResumeMessageId);
   const [lastFullyVisibleMessageId, setLastFullyVisibleMessageId] = useState<string | null>(null);

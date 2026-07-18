@@ -1,4 +1,14 @@
-import { type ReactNode, type UIEvent, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  type ReactNode,
+  type UIEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { IonSpinner } from '@ionic/react';
 import { useNativeScrollActivity } from '@/hooks/useNativeScrollActivity';
 import { AT_BOTTOM_THRESHOLD_PX, DEFAULT_OFFSET_RATIO, type ChatRow, type ChatVirtualScrollProps } from './types';
@@ -118,6 +128,21 @@ export function ChatVirtualScroll({
   const rowHeightsRef = useRef<Map<string, number>>(new Map());
   const pendingHeightDeltaRef = useRef(0);
   const heightRafRef = useRef<number | null>(null);
+  // PRE-resize "at bottom" flag, refreshed in updateViewportState and after a
+  // programmatic scroll-to-bottom. The ResizeObserver reads this to decide
+  // between re-pinning to the bottom (telegram-tt `isAtBottom && isResized`)
+  // and compensating the top anchor.
+  const atBottomRef = useRef(false);
+  const pendingBottomPinRef = useRef(false);
+
+  // Render-visible mirror of atBottomRef. The top edge hint is an in-flow
+  // 36px box at the top of the list; when pinned to the bottom it is off-screen
+  // but its box still shifts the newest message out of view (the confirmed
+  // "half-visible last bubble" cause). Suppressing the hint while at the bottom
+  // removes that shift - the hint is invisible there anyway. A ref tracks the
+  // previous value so we only setState on actual changes (no render churn).
+  const [atBottomState, setAtBottomState] = useState(false);
+  const prevAtBottomStateRef = useRef(false);
 
   // Latest-callbacks ref so the layout effect doesn't re-run on identity churn
   // (which would pollute isScrollTopJustUpdatedRef). Updated in a layout effect
@@ -202,6 +227,11 @@ export function ChatVirtualScroll({
     const cbs = callbacksRef.current;
 
     const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < AT_BOTTOM_THRESHOLD_PX;
+    atBottomRef.current = atBottom;
+    if (atBottom !== prevAtBottomStateRef.current) {
+      prevAtBottomStateRef.current = atBottom;
+      setAtBottomState(atBottom);
+    }
 
     let firstVisibleMessageId: string | null = null;
     let lastFullyVisibleMessageId: string | null = null;
@@ -291,11 +321,25 @@ export function ChatVirtualScroll({
 
     const flushHeightDelta = () => {
       heightRafRef.current = null;
+      const el = containerRef.current;
+      if (!el) return;
+      // Bottom-pin takes precedence: when the viewport was at the bottom and a
+      // row resized (image load, link unfurl), re-glue to the newest message
+      // instead of compensating the top anchor. Re-check atBottomRef here in
+      // case the user scrolled away between the RO callback and this frame -
+      // if so, fall through to the delta compensation. Mirrors telegram-tt's
+      // `isAtBottom && isResized` branch.
+      if (pendingBottomPinRef.current && atBottomRef.current) {
+        pendingBottomPinRef.current = false;
+        pendingHeightDeltaRef.current = 0;
+        setScrollTop(el, el.scrollHeight);
+        captureAnchor(el);
+        return;
+      }
+      pendingBottomPinRef.current = false;
       const delta = pendingHeightDeltaRef.current;
       pendingHeightDeltaRef.current = 0;
       if (delta === 0) return;
-      const el = containerRef.current;
-      if (!el) return;
       setScrollTop(el, el.scrollTop + delta);
       // Keep the anchor consistent after the programmatic correction.
       captureAnchor(el);
@@ -327,27 +371,59 @@ export function ChatVirtualScroll({
       if (!el) return;
       const containerTop = el.getBoundingClientRect().top;
       const delta = trackHeights(entries, containerTop);
-      // Skip compensation during a programmatic jump — the viewport move is
+      // Skip compensation during a programmatic jump - the viewport move is
       // intentional and instant scroll has already positioned the target.
       // (Heights are still tracked above so the anchor stays accurate.)
-      if (isReplacingHistoryRef.current || delta === 0) return;
+      if (isReplacingHistoryRef.current) return;
       pendingHeightDeltaRef.current += delta;
-      if (heightRafRef.current == null) {
-        heightRafRef.current = requestAnimationFrame(flushHeightDelta);
+      // Telegram-aligned: when pinned to the bottom, a height change re-pins
+      // to the bottom (queued, coalesced in one rAF) instead of compensating
+      // the top anchor - otherwise image load drifts the viewport off the
+      // newest message. We read the PRE-resize atBottom (refreshed on scroll /
+      // commit) because RO fires after the resize, when the post-resize math
+      // would already look "not at bottom".
+      if (atBottomRef.current) {
+        pendingBottomPinRef.current = true;
+      }
+      if (pendingBottomPinRef.current || pendingHeightDeltaRef.current !== 0) {
+        if (heightRafRef.current == null) {
+          heightRafRef.current = requestAnimationFrame(flushHeightDelta);
+        }
       }
     });
     resizeObserverRef.current = observer;
     // Observe any rows already registered before this effect ran.
     for (const node of rowRefs.current.values()) observer.observe(node);
 
+    // Container ResizeObserver: when the viewport was pinned to the bottom and
+    // the CONTAINER itself resizes (composer/input bar mounting after the list,
+    // Ionic page transition settling, safe-area inset, keyboard), clientHeight
+    // changes and the last message would be left half-visible. Row RO does not
+    // fire (rows did not resize), so without this the viewport stays cut off
+    // until some unrelated row RO (font/emoji load) happens to correct it - the
+    // "half visible, then jumps a second later" symptom. Re-pin to the bottom
+    // via the same coalesced path. Mirrors telegram-tt's layout-effect
+    // `isAtBottom && isResized -> scrollHeight - offsetHeight` branch.
+    const containerObserver = new ResizeObserver(() => {
+      if (isReplacingHistoryRef.current) return;
+      if (!atBottomRef.current) return;
+      pendingBottomPinRef.current = true;
+      if (heightRafRef.current == null) {
+        heightRafRef.current = requestAnimationFrame(flushHeightDelta);
+      }
+    });
+    containerObserver.observe(container);
+
     return () => {
       observer.disconnect();
+      containerObserver.disconnect();
       resizeObserverRef.current = null;
       if (heightRafRef.current != null) {
         cancelAnimationFrame(heightRafRef.current);
         heightRafRef.current = null;
       }
       pendingHeightDeltaRef.current = 0;
+      pendingBottomPinRef.current = false;
     };
   }, [captureAnchor, setScrollTop]);
 
@@ -385,6 +461,7 @@ export function ChatVirtualScroll({
       prevTokenRef.current = initialAnchor.token;
       if (initialAnchor.type === 'bottom') {
         setScrollTop(container, container.scrollHeight);
+        atBottomRef.current = true;
       } else if (initialAnchor.type === 'top') {
         setScrollTop(container, 0);
       } else if (initialAnchor.type === 'message') {
@@ -400,26 +477,36 @@ export function ChatVirtualScroll({
         isReplacingHistoryRef.current = false;
       });
     } else if (rowsChanged) {
-      // Prepend / append / delete — restore the captured anchor exactly.
-      // anchorRef holds the pre-commit viewport-relative top (refreshed on the
-      // last scroll/commit), so delta = newTop - oldTop is the real shift.
-      const anchor = anchorRef.current;
-      if (anchor) {
-        // Fast path: anchor key unchanged (common case).
-        let node: HTMLDivElement | undefined = rowRefs.current.get(anchor.key);
-        // Fallback: group merged on prepend → `grp:firstId` key changed. Look
-        // up the row containing the anchor's firstMessageId instead (the row's
-        // firstMessageId survives merges even when the row key does not).
-        if (!node && anchor.messageId) {
-          const fallbackRowKey = messageIdToRowKey.get(anchor.messageId);
-          node = fallbackRowKey ? rowRefs.current.get(fallbackRowKey) : undefined;
-        }
-        if (node) {
-          const containerRect = container.getBoundingClientRect();
-          const newTop = node.getBoundingClientRect().top - containerRect.top;
-          const delta = newTop - anchor.offsetTop;
-          if (delta !== 0) {
-            setScrollTop(container, container.scrollTop + delta);
+      // Bottom-pin: if the viewport was anchored to the bottom before the rows
+      // changed (loadOlder prepend, new-message append, delete), re-pin to the
+      // newest message instead of restoring the top anchor. Otherwise the last
+      // bubble lands half-visible: the prepend delta sits below the restored
+      // anchor and no RO fires to correct it (the shift is from a non-row
+      // element or from content added above the viewport).
+      if (atBottomRef.current) {
+        setScrollTop(container, container.scrollHeight);
+      } else {
+        // Prepend / append / delete - restore the captured anchor exactly.
+        // anchorRef holds the pre-commit viewport-relative top (refreshed on the
+        // last scroll/commit), so delta = newTop - oldTop is the real shift.
+        const anchor = anchorRef.current;
+        if (anchor) {
+          // Fast path: anchor key unchanged (common case).
+          let node: HTMLDivElement | undefined = rowRefs.current.get(anchor.key);
+          // Fallback: group merged on prepend -> `grp:firstId` key changed. Look
+          // up the row containing the anchor's firstMessageId instead (the row's
+          // firstMessageId survives merges even when the row key does not).
+          if (!node && anchor.messageId) {
+            const fallbackRowKey = messageIdToRowKey.get(anchor.messageId);
+            node = fallbackRowKey ? rowRefs.current.get(fallbackRowKey) : undefined;
+          }
+          if (node) {
+            const containerRect = container.getBoundingClientRect();
+            const newTop = node.getBoundingClientRect().top - containerRect.top;
+            const delta = newTop - anchor.offsetTop;
+            if (delta !== 0) {
+              setScrollTop(container, container.scrollTop + delta);
+            }
           }
         }
       }
@@ -441,6 +528,7 @@ export function ChatVirtualScroll({
         const container = containerRef.current;
         if (!container) return;
         setScrollTop(container, container.scrollHeight, options?.behavior);
+        atBottomRef.current = true;
         requestAnimationFrame(() => {
           if (containerRef.current) captureAnchor(containerRef.current);
         });
@@ -540,7 +628,7 @@ export function ChatVirtualScroll({
   // Partition rows into per-day segments once per `rows` change; the render
   // below maps over this memoized array so we don't re-partition every render.
   const dateSegments = useMemo(() => segmentRowsByDate(rows), [rows]);
-  const showTopHint = loadOlder.loading;
+  const showTopHint = loadOlder.loading && !atBottomState;
   const showBottomHint = !!loadNewer?.loading;
 
   return (

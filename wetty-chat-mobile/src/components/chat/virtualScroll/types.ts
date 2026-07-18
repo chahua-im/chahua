@@ -66,5 +66,5 @@ export interface ChatVirtualScrollProps {
 
 // ── Constants ──
 
-export const AT_BOTTOM_THRESHOLD_PX = 30;
+export const AT_BOTTOM_THRESHOLD_PX = 48;
 export const DEFAULT_OFFSET_RATIO = 0.5;
