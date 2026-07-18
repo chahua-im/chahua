@@ -1229,6 +1229,9 @@ msgstr "取消釘選訊息"
 msgid "Unread"
 msgstr "標記未讀"
 
+msgid "Unread messages"
+msgstr "未讀訊息"
+
 msgid "Unsave"
 msgstr "取消收藏"
 

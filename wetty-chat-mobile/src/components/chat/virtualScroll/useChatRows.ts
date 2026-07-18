@@ -23,6 +23,15 @@ export function useChatRows(
   messages: MessageResponse[],
   formatDateSeparator: (iso: string) => string,
   showAllAvatars: boolean,
+  /**
+   * Id of the first unread message (the first message after lastReadMessageId),
+   * captured once per chat session by the caller. When this message is present
+   * in the loaded window, the group containing it is tagged with
+   * `unreadDividerBeforeMessageId` so an "Unread messages" divider renders at
+   * the read/unread boundary. Mirrors telegram-tt's memoUnreadDividerBeforeId.
+   * Null/undefined disables the divider (no unread messages or not yet loaded).
+   */
+  firstUnreadMessageId?: string | null,
 ): ChatRow[] {
   return useMemo(() => {
     const rows: ChatRow[] = [];
@@ -88,6 +97,15 @@ export function useChatRows(
       // (current behavior), so the group-level sticky avatar is not used.
       const useStickyAvatar = !showAllAvatars;
 
+      // Tag the group that contains the first unread message so the divider
+      // renders at the read/unread boundary. System messages are skipped (the
+      // SystemMessage row does not render the divider) - a rare edge case where
+      // the first unread happens to be a join/leave notice.
+      const unreadDividerBeforeMessageId =
+        firstUnreadMessageId && groupMessages.some((m) => m.id === firstUnreadMessageId)
+          ? firstUnreadMessageId
+          : undefined;
+
       rows.push({
         type: 'group',
         key: `grp:${msg.clientGeneratedId || msg.id}`,
@@ -97,6 +115,7 @@ export function useChatRows(
         isSystem: false,
         showName,
         useStickyAvatar,
+        unreadDividerBeforeMessageId,
       });
 
       prevSenderUid = msg.sender.uid;
@@ -104,5 +123,5 @@ export function useChatRows(
     }
 
     return rows;
-  }, [messages, formatDateSeparator, showAllAvatars]);
+  }, [messages, formatDateSeparator, showAllAvatars, firstUnreadMessageId]);
 }

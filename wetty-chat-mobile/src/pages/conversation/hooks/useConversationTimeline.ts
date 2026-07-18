@@ -77,20 +77,26 @@ export function useConversationTimeline({
   });
 
   // Update initial anchor when lastReadMessageId loads asynchronously.
-  // This effect runs at most once (null → value), so cascading renders are not a concern.
-  useEffect(() => {
-    if (initialResumeMessageId) return;
-    if (threadId) return;
-    if (!lastReadMessageId) return;
-
-    // No unread -> stay at the bottom; only jump to last-read when there are
-    // unread messages (mirrors telegram-tt, which only uses the unread divider
-    // when unreadCount > 0). Without this, a fully-read chat re-anchors from
-    // bottom to message-top on the async lastReadMessageId arrival, causing an
-    // extra scroll adjustment and landing short of the bottom.
-    if (!scrollToBottomUnreadCount) return;
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Render-time state adjustment (not an effect) to avoid cascading renders.
+  // The `initialAnchor.type === 'bottom'` guard makes it fire at most once
+  // (bottom -> message), so there is no render loop.
+  //
+  // No unread -> stay at the bottom; only jump to last-read when there are
+  // unread messages (mirrors telegram-tt, which only uses the unread divider
+  // when unreadCount > 0). Without this, a fully-read chat re-anchors from
+  // bottom to message-top on the async lastReadMessageId arrival, causing an
+  // extra scroll adjustment and landing short of the bottom.
+  //
+  // The `lastReadMessageId &&` guard narrows it to `string` inline so the
+  // 'message' anchor below type-checks (extracting to a named boolean would
+  // lose that narrowing and re-introduce a string|null error).
+  if (
+    !initialResumeMessageId &&
+    !threadId &&
+    lastReadMessageId &&
+    scrollToBottomUnreadCount &&
+    initialAnchor.type === 'bottom'
+  ) {
     setInitialAnchor((current) => {
       if (current.type !== 'bottom') return current;
       return {
@@ -100,7 +106,7 @@ export function useConversationTimeline({
         align: 'top' as const,
       };
     });
-  }, [initialResumeMessageId, lastReadMessageId, scrollToBottomUnreadCount, threadId]);
+  }
 
   const [pendingResumeMessageId, setPendingResumeMessageId] = useState<string | null>(initialResumeMessageId);
   const [lastFullyVisibleMessageId, setLastFullyVisibleMessageId] = useState<string | null>(null);
@@ -128,7 +134,49 @@ export function useConversationTimeline({
   const messageLookup = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const latestMessageId = useMemo(() => (messages.length ? messages[messages.length - 1].id : null), [messages]);
   const showAllAvatars = useSelector(selectShowAllAvatars);
-  const chatRows = useChatRows(messages, formatDateSeparator, showAllAvatars);
+
+  // ── Unread divider position (memoized once per chat session) ──
+  // Mirrors telegram-tt's memoUnreadDividerBeforeIdRef: the first unread
+  // message id is captured once when the unread boundary is first seen in the
+  // loaded window, then kept stable for the session. The divider therefore
+  // marks "where new messages started" and doesn't jump as the user reads past
+  // it; it only clears on chat reopen (when there are no unread messages, no
+  // divider is captured).
+  //
+  // Implemented with the "adjusting state during render" pattern (React docs,
+  // "You Might Not Need an Effect"): setState is called during render - not in
+  // an effect - so it neither trips react-hooks/set-state-in-effect nor
+  // react-hooks/refs. The `unreadDividerBeforeId === null` guard makes the
+  // capture fire at most once per storeChatId (reset below), so there is no
+  // render loop.
+  const [unreadDividerBeforeId, setUnreadDividerBeforeId] = useState<string | null>(null);
+  const [unreadDividerStoreChatId, setUnreadDividerStoreChatId] = useState(storeChatId);
+  if (unreadDividerStoreChatId !== storeChatId) {
+    // Chat switched: reset so the new chat captures its own boundary.
+    setUnreadDividerStoreChatId(storeChatId);
+    setUnreadDividerBeforeId(null);
+  }
+
+  if (
+    unreadDividerBeforeId === null &&
+    !threadId &&
+    scrollToBottomUnreadCount &&
+    lastReadMessageId &&
+    messages.length > 0
+  ) {
+    const lastReadComparable = parseComparableMessageId(lastReadMessageId);
+    if (lastReadComparable != null) {
+      const firstUnread = messages.find((message) => {
+        const comparableId = parseComparableMessageId(message.id);
+        return comparableId != null && comparableId > lastReadComparable;
+      });
+      if (firstUnread) {
+        setUnreadDividerBeforeId(firstUnread.id);
+      }
+    }
+  }
+
+  const chatRows = useChatRows(messages, formatDateSeparator, showAllAvatars, unreadDividerBeforeId);
 
   useEffect(() => {
     if (messages.length > 0 || pendingLiveCount === 0) {

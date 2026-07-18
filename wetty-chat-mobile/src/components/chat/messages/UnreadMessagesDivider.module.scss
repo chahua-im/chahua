@@ -1,0 +1,22 @@
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 16px;
+}
+
+.line {
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--ion-color-medium, #6b6b6b) 40%, transparent);
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ion-color-medium, #6b6b6b);
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}

@@ -14,6 +14,13 @@ export type ChatRow =
       isSystem: boolean;
       showName: boolean;
       useStickyAvatar: boolean;
+      /**
+       * When set, an "unread messages" divider is rendered inside this group,
+       * immediately before the bubble whose id matches this value. Marks the
+       * read/unread boundary (mirrors telegram-tt's memoUnreadDividerBeforeId).
+       * Only set on the group that contains the first unread message.
+       */
+      unreadDividerBeforeMessageId?: string;
     };
 
 // Range primitive shared by useCoreManager / useMountedWindow for mounted-window math.

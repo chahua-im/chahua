@@ -1229,6 +1229,9 @@ msgstr "取消置顶消息"
 msgid "Unread"
 msgstr "标记未读"
 
+msgid "Unread messages"
+msgstr "未读消息"
+
 msgid "Unsave"
 msgstr "取消收藏"
 

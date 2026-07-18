@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import { type MessageResponse, mentionToUser, type User } from '@/api/messages';
@@ -8,6 +8,7 @@ import { type BubblePropsOverride } from './ChatBubbleBase';
 import { MessageDateSeparator } from './MessageDateSeparator';
 import { SenderGroup } from './SenderGroup';
 import { SystemMessage } from './SystemMessage';
+import { UnreadMessagesDivider } from './UnreadMessagesDivider';
 import { isInviteMessage, isStickerMessage } from './messageTypePredicates';
 import { selectHighlightedMessageId } from '@/store/highlightSlice';
 import type { ChatRow } from '../virtualScroll/types';
@@ -66,24 +67,26 @@ export function ChatMessageRow({
       onAvatarClick={onAvatarClick}
     >
       {messages.map((msg, index) => (
-        <MessageBubble
-          key={msg.clientGeneratedId || msg.id}
-          msg={msg}
-          index={index}
-          isSent={isSent}
-          useStickyAvatar={useStickyAvatar}
-          showName={showName}
-          threadId={threadId}
-          currentUserId={currentUserId}
-          onReply={onReply}
-          onJumpToReply={onJumpToReply}
-          onLongPress={onLongPress}
-          onAvatarClick={onAvatarClick}
-          onThreadClick={onThreadClick}
-          onReactionToggle={onReactionToggle}
-          onStickerTap={onStickerTap}
-          isLastInGroup={index === messages.length - 1}
-        />
+        <Fragment key={msg.clientGeneratedId || msg.id}>
+          {row.unreadDividerBeforeMessageId === msg.id ? <UnreadMessagesDivider /> : null}
+          <MessageBubble
+            msg={msg}
+            index={index}
+            isSent={isSent}
+            useStickyAvatar={useStickyAvatar}
+            showName={showName}
+            threadId={threadId}
+            currentUserId={currentUserId}
+            onReply={onReply}
+            onJumpToReply={onJumpToReply}
+            onLongPress={onLongPress}
+            onAvatarClick={onAvatarClick}
+            onThreadClick={onThreadClick}
+            onReactionToggle={onReactionToggle}
+            onStickerTap={onStickerTap}
+            isLastInGroup={index === messages.length - 1}
+          />
+        </Fragment>
       ))}
     </SenderGroup>
   );

@@ -1229,6 +1229,9 @@ msgstr "Unpin Message"
 msgid "Unread"
 msgstr "Unread"
 
+msgid "Unread messages"
+msgstr "Unread messages"
+
 msgid "Unsave"
 msgstr "Unsave"
 
