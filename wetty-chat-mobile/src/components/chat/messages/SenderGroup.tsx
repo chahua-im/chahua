@@ -42,6 +42,14 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
   // safe to apply.
   const avatarRef = useRef<HTMLDivElement>(null);
   const messageColumnRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the avatar offset has been measured against a laid-out
+  // container. Until true, the avatar container is hidden (visibility:hidden)
+  // so the user never sees the avatar at a wrong resting position when the
+  // scroll container briefly has clientHeight=0 (e.g. ChatVirtualScroll's first
+  // mount inside IonContent before the web component lays out). Once a real
+  // measurement is taken, the avatar becomes visible. This mirrors
+  // telegram-tt's approach of rendering the avatar only after layout is stable.
+  const [avatarMeasured, setAvatarMeasured] = useState(false);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -57,6 +65,10 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
         return;
       }
       const rootRect = root.getBoundingClientRect();
+      // Skip measurement while the container has no layout (clientHeight === 0).
+      // The avatar stays hidden (avatarMeasured === false) until a real
+      // measurement is possible, avoiding a visible 0 -> correct-value jump.
+      if (rootRect.height === 0) return;
       const lastBubbleRect = lastBubbleRow.getBoundingClientRect();
       const tailBelowLastBubble = Math.max(0, rootRect.bottom - lastBubbleRect.bottom);
       // Offset the avatar container so its bottom edge sits exactly at the last
@@ -67,6 +79,7 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
       // is "stuck" (long groups mid-scroll), leaving short groups misaligned, so
       // the gap must be 0 for consistent resting alignment.
       setAvatarContainerBottom(Math.max(0, tailBelowLastBubble));
+      if (!avatarMeasured) setAvatarMeasured(true);
     };
 
     compute();
@@ -75,7 +88,7 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
     const ro = new ResizeObserver(compute);
     ro.observe(root);
     return () => ro.disconnect();
-  }, [useStickyAvatar]);
+  }, [useStickyAvatar, avatarMeasured]);
 
   // Every bubble reports its live swipe; SenderGroup mutates the DOM directly
   // (no state) so swiping stays 60fps regardless of group size. Two effects:
@@ -113,7 +126,10 @@ export function SenderGroup({ useStickyAvatar, isSent, sender, onAvatarClick, ch
 
   return (
     <div ref={rootRef} className={styles.root}>
-      <div className={containerClass} style={{ bottom: avatarContainerBottom }}>
+      <div
+        className={containerClass}
+        style={{ bottom: avatarContainerBottom, visibility: avatarMeasured ? undefined : 'hidden' }}
+      >
         <UserAvatar
           ref={avatarRef}
           name={senderName}

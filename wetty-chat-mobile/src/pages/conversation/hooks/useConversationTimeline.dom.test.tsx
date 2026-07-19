@@ -249,4 +249,25 @@ describe('useConversationTimeline', () => {
     expect(scrollToMessageId).toHaveBeenCalledWith('10', 'smooth', 'top', DEFAULT_OFFSET_RATIO);
     expect(getMessages).not.toHaveBeenCalled();
   });
+
+  it('uses a bottom anchor for a fully-read chat even when lastReadMessageId is set', async () => {
+    // unreadCount=0 (default), lastReadMessageId='5' (default), no deep-link
+    // resume id. The initial anchor must be 'bottom' (not 'message'/lastRead)
+    // so the viewport pins to the newest message instead of a stale last-read
+    // position. Regression for the initial-anchor unread-gating fix.
+    const anchorTypes: string[] = [];
+    await act(async () => {
+      root.render(
+        <TestComponent
+          showToast={showToast}
+          onRender={(nextState) => {
+            state = nextState;
+            anchorTypes.push(nextState.timeline.initialAnchor.type);
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+    expect(anchorTypes[0]).toBe('bottom');
+  });
 });

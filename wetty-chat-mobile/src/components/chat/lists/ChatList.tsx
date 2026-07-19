@@ -481,7 +481,7 @@ export function ChatList({
           onChatSelect(
             chat.id,
             buildResumeHash({
-              lastReadMessageId: chat.lastReadMessageId,
+              lastReadMessageId: chat.unreadCount > 0 ? chat.lastReadMessageId : null,
             }) || undefined,
           )
         }

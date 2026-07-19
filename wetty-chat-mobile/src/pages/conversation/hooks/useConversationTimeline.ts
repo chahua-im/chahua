@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { t } from '@lingui/core/macro';
 import { useDispatch, useSelector } from 'react-redux';
 import { selectShowAllAvatars } from '@/store/settingsSlice';
@@ -63,6 +63,7 @@ export function useConversationTimeline({
   const scrollApiRef = useRef<VirtualScrollHandle | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingNewer, setLoadingNewer] = useState(false);
+  const [hasInitialFetchResolved, setHasInitialFetchResolved] = useState(false);
   const loadingMoreRef = useRef(false);
   const loadingNewerRef = useRef(false);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,7 +71,7 @@ export function useConversationTimeline({
     if (initialResumeMessageId) {
       return { type: 'message', messageId: initialResumeMessageId, token: 0, align: 'top' };
     }
-    if (!threadId && lastReadMessageId) {
+    if (!threadId && lastReadMessageId && scrollToBottomUnreadCount) {
       return { type: 'message', messageId: lastReadMessageId, token: 0, align: 'top' };
     }
     return { type: threadId ? 'top' : 'bottom', token: 0 } as VirtualScrollAnchor;
@@ -178,6 +179,19 @@ export function useConversationTimeline({
 
   const chatRows = useChatRows(messages, formatDateSeparator, showAllAvatars, unreadDividerBeforeId);
 
+  // Defer the heavy chatRows render. When fetchLatestWindow resolves for a
+  // cached chat, a single urgent render fires both "data arrived" (rows change)
+  // and "spinner should hide" (hasInitialFetchResolved=true). Without
+  // deferral, that urgent render must commit ~50 ChatMessageRow mounts +
+  // getBoundingClientRect calls synchronously, which freezes the SVG-based
+  // IonSpinner animation for the duration of the heavy commit — the user sees
+  // "spinner stopped, content not yet visible". By deferring chatRows, the
+  // urgent render stays light (old/empty rows + scrim still up), and the
+  // expensive row render happens in an interruptible transition so the spinner
+  // keeps animating until the deferred rows catch up.
+  const deferredChatRows = useDeferredValue(chatRows);
+  const chatRowsStale = deferredChatRows !== chatRows;
+
   useEffect(() => {
     if (messages.length > 0 || pendingLiveCount === 0) {
       emptyTimelinePendingLiveLogKeyRef.current = null;
@@ -251,20 +265,14 @@ export function useConversationTimeline({
   useEffect(() => {
     previousFirstVisibleComparableIdRef.current = null;
     initialLoadCompletedRef.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHasInitialFetchResolved(false);
   }, [storeChatId]);
 
   const fetchLatestWindow = useCallback(
     (options?: { forceReopen?: boolean }) => {
       const forceReopen = options?.forceReopen ?? false;
       if (!chatId) return;
-      if (import.meta.env.DEV) {
-        console.log('[Conversation] fetchLatestWindow:start', {
-          chatId,
-          storeChatId,
-          threadId: threadId ?? null,
-          forceReopen,
-        });
-      }
 
       const resetAnchor = (resumeMessageId: string | null | undefined) => {
         const effectiveAnchorType: VirtualScrollAnchor['type'] = threadId
@@ -305,33 +313,6 @@ export function useConversationTimeline({
             olderCursor !== currentOlderCursor ||
             newerCursor !== currentNewerCursor;
 
-          if (import.meta.env.DEV) {
-            console.log('[Conversation] fetchLatestWindow:resolved', {
-              chatId,
-              storeChatId,
-              threadId: threadId ?? null,
-              forceReopen,
-              fetchedCount: list.length,
-              firstMessageId: list[0]?.id ?? null,
-              lastMessageId: list[list.length - 1]?.id ?? null,
-              olderCursor,
-              newerCursor,
-              currentMessageCount: currentMessages.length,
-              currentFirstMessageId: currentMessages[0]?.id ?? null,
-              currentLastMessageId: currentMessages[currentMessages.length - 1]?.id ?? null,
-              shouldResetAnchor,
-            });
-          }
-
-          console.debug('[msg-trace] fetchLatestWindow:resolved', {
-            storeChatId,
-            forceReopen,
-            fetchedCount: list.length,
-            shouldResetAnchor,
-            firstFetchedId: list[0]?.id ?? null,
-            lastFetchedId: list[list.length - 1]?.id ?? null,
-          });
-
           dispatch(refreshLatest({ chatId: storeChatId, messages: list, olderCursor, newerCursor }));
           dispatch(setTimelineMode({ chatId: storeChatId, mode: { type: 'latest' } }));
 
@@ -339,22 +320,14 @@ export function useConversationTimeline({
             const resumeId: string | null | undefined =
               initialResumeMessageId ?? (threadId ? threadLastReadMessageIdRef.current : lastReadMessageId);
             resetAnchor(resumeId);
-          } else if (import.meta.env.DEV) {
-            console.log('[Conversation] initialAnchor-preserved', {
-              reason: 'fetchLatestWindow-equivalentWindow',
-              chatId,
-              storeChatId,
-            });
           }
+          setHasInitialFetchResolved(true);
         })
         .catch((err: Error) => {
-          console.debug('[msg-trace] fetchLatestWindow:error', {
-            storeChatId,
-            error: err.message,
-          });
           dispatch(resetChat({ chatId: storeChatId, messages: [], olderCursor: null, newerCursor: null }));
           resetAnchor(initialResumeMessageId);
           showToast(err.message || t`Failed to load messages`);
+          setHasInitialFetchResolved(true);
         });
     },
     [
@@ -429,6 +402,7 @@ export function useConversationTimeline({
             }));
           }
           setPendingResumeMessageId(null);
+          setHasInitialFetchResolved(true);
         })
         .catch(() => {
           setPendingResumeMessageId(null);
@@ -468,14 +442,6 @@ export function useConversationTimeline({
           return;
         }
         const list = res.data.messages ?? [];
-        if (import.meta.env.DEV) {
-          console.log('[Conversation] loadMore resolved', {
-            fetchedCount: list.length,
-            oldestId: list[0]?.id ?? null,
-            newestId: list[list.length - 1]?.id ?? null,
-            olderCursor: res.data.olderCursor ?? null,
-          });
-        }
         dispatch(
           insertBeforeAnchor({
             chatId: storeChatId,
@@ -571,18 +537,6 @@ export function useConversationTimeline({
           const list = res.data.messages ?? [];
           const targetMessage = list.find((message) => message.id === messageId) ?? null;
 
-          if (import.meta.env.DEV) {
-            console.log('[Conversation] jumpToMessage fetched-window', {
-              chatId,
-              storeChatId,
-              threadId: threadId ?? null,
-              messageId,
-              fetchedCount: list.length,
-              targetFound: targetMessage != null,
-              targetClientGeneratedId: targetMessage?.clientGeneratedId ?? null,
-            });
-          }
-
           if (!targetMessage) {
             if (!options?.silent) {
               showToast(t`Message not found`);
@@ -659,23 +613,7 @@ export function useConversationTimeline({
   ]);
 
   const revealLatestAfterSend = useCallback(() => {
-    const state = store.getState();
-    const chatState = state.messages.chats[storeChatId];
-    const winInfo = chatState
-      ? {
-          segmentCount: chatState.segments.length,
-          segmentMsgCounts: chatState.segments.map((segment: { messages: unknown[] }) => segment.messages.length),
-          optimisticCount: chatState.optimisticMessages.length,
-        }
-      : null;
-
     if (canLoadNewer || pendingLiveCount > 0) {
-      console.debug('[msg-trace] revealLatestAfterSend:activateLatest', {
-        storeChatId,
-        canLoadNewer,
-        pendingLiveCount,
-        ...winInfo,
-      });
       dispatch(setTimelineMode({ chatId: storeChatId, mode: { type: 'latest' } }));
       dispatch(clearPendingLiveMessages({ chatId: storeChatId }));
       setInitialAnchor((current) => ({ type: 'bottom', token: current.token + 1 }));
@@ -683,25 +621,30 @@ export function useConversationTimeline({
       return;
     }
 
-    console.debug('[msg-trace] revealLatestAfterSend:scrollToBottom', {
-      storeChatId,
-      ...winInfo,
-    });
     scrollApiRef.current?.scrollToBottom();
   }, [canLoadNewer, dispatch, fetchLatestWindow, pendingLiveCount, storeChatId]);
 
   const pendingJumpCount = scrollToBottomUnreadCount + pendingLiveCount;
   const isScrollingTowardNewerMessages = scrollDirection.storeChatId === storeChatId && scrollDirection.towardNewer;
   const showScrollToBottomButton = pendingJumpCount > 0 || (!atBottom && isScrollingTowardNewerMessages);
+  // Loading ends only when the data fetch has resolved AND the deferred rows
+  // have caught up with the latest rows. The `chatRowsStale` term covers the
+  // window where fetchLatestWindow resolved (hasInitialFetchResolved=true)
+  // but the heavy ChatMessageRow render is still pending in a transition —
+  // during that window the spinner must keep animating, otherwise the user
+  // sees "spinner stopped, content not yet visible". This makes "loading done"
+  // mean "the first stable visible frame is ready", not just "data arrived".
+  const isInitialLoading = !hasInitialFetchResolved || chatRowsStale;
 
   return {
     messages,
     messageLookup,
-    chatRows,
+    chatRows: deferredChatRows,
     bottomVisibleMessageDate,
     lastFullyVisibleMessageId,
     atBottom,
     initialAnchor,
+    isInitialLoading,
     scrollApiRef,
     floatingDateLabel,
     floatingDateFading,

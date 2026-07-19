@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { matchPath, useHistory, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { Trans } from '@lingui/react/macro';
@@ -235,6 +235,17 @@ export function DesktopSplitLayout() {
     isJoinChat,
   } = baseRoute;
   useDocumentTitle(activeChatId, threadMatch?.threadId);
+  // Defer the activeChatId that drives ConversationPane (the detail panel), but
+  // NOT the one passed to ChatList. The sidebar's highlight must update in the
+  // same urgent commit as the URL change so chat A loses its highlight and
+  // chat B gains it in the same frame — never both highlighted at once. The
+  // ConversationPane's heavy mount (cached chat: ~50 ChatMessageRow renders +
+  // getBoundingClientRect in layout effects) is deferred into an interruptible
+  // transition, so it cannot block the sidebar's commit. Without this, the
+  // urgent render for a cached chat B is so heavy that the browser delays
+  // committing the sidebar's highlight change, leaving A highlighted while B
+  // is already pressed/activated — the observed "double highlight" window.
+  const deferredActiveChatId = useDeferredValue(activeChatId);
   const groupInfoSavedMessagesMatch = savedMessagesEnabled ? routeGroupInfoSavedMessagesMatch : null;
   const disabledGroupSavedMessagesChatId = savedMessagesEnabled ? null : routeGroupInfoSavedMessagesMatch?.id;
   const disabledSavedMessagesSettings = !savedMessagesEnabled && currentRoute.savedMessagesSettings;
@@ -418,9 +429,9 @@ export function DesktopSplitLayout() {
       </div>
       <div className={styles.desktopSplitRight}>
         {/* Base layer: always render ConversationPane when a chat is selected */}
-        {activeChatId && !isNewChat && !joinPreviewMatch && (
+        {deferredActiveChatId && !isNewChat && !joinPreviewMatch && (
           <div style={{ display: subPageOverlay ? 'none' : undefined }} className={styles.desktopSplitPane}>
-            <ConversationPane key={activeChatId} chatId={activeChatId} />
+            <ConversationPane key={deferredActiveChatId} chatId={deferredActiveChatId} />
           </div>
         )}
 
@@ -567,7 +578,7 @@ export function DesktopSplitLayout() {
         )}
 
         {/* Placeholder when no chat selected */}
-        {!activeChatId && !isNewChat && !isJoinChat && !joinPreviewMatch && (
+        {!deferredActiveChatId && !isNewChat && !isJoinChat && !joinPreviewMatch && (
           <div className={styles.desktopSplitPlaceholder}>
             <Trans>Select a chat</Trans>
           </div>

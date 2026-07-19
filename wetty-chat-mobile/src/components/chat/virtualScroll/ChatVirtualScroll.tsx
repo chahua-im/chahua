@@ -11,7 +11,13 @@ import {
 } from 'react';
 import { IonSpinner } from '@ionic/react';
 import { useNativeScrollActivity } from '@/hooks/useNativeScrollActivity';
-import { AT_BOTTOM_THRESHOLD_PX, DEFAULT_OFFSET_RATIO, type ChatRow, type ChatVirtualScrollProps } from './types';
+import {
+  AT_BOTTOM_THRESHOLD_PX,
+  DEFAULT_OFFSET_RATIO,
+  type ChatRow,
+  type ChatVirtualScrollProps,
+  type VirtualScrollAnchor,
+} from './types';
 import styles from './ChatVirtualScroll.module.scss';
 
 const SCROLL_IDLE_MS = 200;
@@ -92,6 +98,7 @@ export function ChatVirtualScroll({
   loadNewer,
   header,
   bottomPadding = 0,
+  isInitialLoading = false,
   onAtBottomChange,
   onLastFullyVisibleMessageChange,
   onFirstVisibleMessageChange,
@@ -108,6 +115,30 @@ export function ChatVirtualScroll({
   const anchorRef = useRef<Anchor | null>(null);
   const prevTokenRef = useRef(initialAnchor.token);
   const prevRowsRef = useRef<ChatRow[]>(rows);
+  // First-mount flag: forces the token-changed branch on the initial layout
+  // effect so the initial anchor (bottom / top / message) is applied before
+  // first paint. Without this, prevTokenRef.current === initialAnchor.token on
+  // mount and the effect skips all scroll positioning — the viewport stays at
+  // scrollTop=0 until a later anchor update (e.g. fetchLatestWindow resolves
+  // and bumps the token) triggers the token-changed branch, producing the
+  // visible "middle -> snap to bottom" flicker on cached chats.
+  const isFirstLayoutRef = useRef(true);
+  // Pending initial anchor: when the very first layout effect runs but
+  // container.clientHeight === 0 (the Ionic IonContent web component has not
+  // finished its layout yet — the inner scroll container has height:100% but
+  // the parent is still 0px tall at commit time), we cannot compute a correct
+  // scrollTop (scrollHeight is meaningless, scrollToBottom would set scrollTop=0
+  // which becomes the visible "stuck at top" position once the container
+  // gains height on the next frame). We stash the anchor here and apply it the
+  // moment the container reports a non-zero clientHeight — either in a later
+  // layout effect (next render) or via the container ResizeObserver. This
+  // guarantees the FIRST visible frame is already at the correct position,
+  // with no "middle -> snap to bottom" flicker. Mirrors telegram-tt's
+  // `wasContainerReady` guard.
+  const pendingInitialAnchorRef = useRef<VirtualScrollAnchor | null>(null);
+  // rAF handle for the "poll until container is ready" loop. Cancelled on
+  // unmount and when the pending anchor is applied.
+  const pendingReadyRafRef = useRef<number | null>(null);
   const isScrollTopJustUpdatedRef = useRef(false);
   const scrollRafRef = useRef<number | null>(null);
   const idleTimerRef = useRef<number | null>(null);
@@ -312,6 +343,53 @@ export function ChatVirtualScroll({
     }
   }, []);
 
+  const applyMessageIntent = useCallback(
+    (
+      container: HTMLDivElement,
+      messageId: string,
+      align?: 'top' | 'bottom' | 'custom',
+      offsetRatio?: number,
+    ): boolean => {
+      const rowKey = messageIdToRowKey.get(messageId);
+      const node = rowKey ? rowRefs.current.get(rowKey) : null;
+      if (!node) return false;
+      const ratio = offsetRatio ?? DEFAULT_OFFSET_RATIO;
+      let target: number;
+      if (align === 'top') target = node.offsetTop;
+      else if (align === 'bottom') target = node.offsetTop + node.offsetHeight - container.clientHeight;
+      else target = node.offsetTop - ratio * (container.clientHeight - node.offsetHeight);
+      setScrollTop(container, target);
+      return true;
+    },
+    [messageIdToRowKey, setScrollTop],
+  );
+
+  // Apply a previously-deferred anchor (saved when container.clientHeight was
+  // 0 at first mount). Mirrors the tokenChanged branch but reads from the
+  // passed anchor so it is independent of the current `initialAnchor` prop
+  // identity. Runs synchronously inside a layout effect or a ResizeObserver
+  // callback (which fires before paint for the size transition), so the first
+  // visible frame after the container gains height is already at the correct
+  // position.
+  const applyPendingAnchor = useCallback(
+    (container: HTMLDivElement, anchor: VirtualScrollAnchor) => {
+      if (anchor.type === 'bottom') {
+        setScrollTop(container, container.scrollHeight);
+        atBottomRef.current = true;
+      } else if (anchor.type === 'top') {
+        setScrollTop(container, 0);
+      } else if (anchor.type === 'message') {
+        isReplacingHistoryRef.current = true;
+        applyMessageIntent(container, anchor.messageId, anchor.align, anchor.offsetRatio);
+      }
+      requestAnimationFrame(() => {
+        if (containerRef.current) captureAnchor(containerRef.current);
+        isReplacingHistoryRef.current = false;
+      });
+    },
+    [applyMessageIntent, captureAnchor, setScrollTop],
+  );
+
   // ResizeObserver: compensate scrollTop when a row above the viewport changes
   // height (image/video load, link unfurl). Without this, an image finishing
   // load above the viewport pushes visible content down → jump.
@@ -395,16 +473,33 @@ export function ChatVirtualScroll({
     // Observe any rows already registered before this effect ran.
     for (const node of rowRefs.current.values()) observer.observe(node);
 
-    // Container ResizeObserver: when the viewport was pinned to the bottom and
-    // the CONTAINER itself resizes (composer/input bar mounting after the list,
-    // Ionic page transition settling, safe-area inset, keyboard), clientHeight
-    // changes and the last message would be left half-visible. Row RO does not
-    // fire (rows did not resize), so without this the viewport stays cut off
-    // until some unrelated row RO (font/emoji load) happens to correct it - the
-    // "half visible, then jumps a second later" symptom. Re-pin to the bottom
-    // via the same coalesced path. Mirrors telegram-tt's layout-effect
-    // `isAtBottom && isResized -> scrollHeight - offsetHeight` branch.
+    // Container ResizeObserver serves two purposes:
+    // 1) When the viewport was pinned to the bottom and the CONTAINER itself
+    //    resizes (composer/input bar mounting after the list, Ionic page
+    //    transition settling, safe-area inset, keyboard), clientHeight changes
+    //    and the last message would be left half-visible. Row RO does not fire
+    //    (rows did not resize), so without this the viewport stays cut off
+    //    until some unrelated row RO (font/emoji load) happens to correct it -
+    //    the "half visible, then jumps a second later" symptom. Re-pin to the
+    //    bottom via the same coalesced path. Mirrors telegram-tt's layout-effect
+    //    `isAtBottom && isResized -> scrollHeight - offsetHeight` branch.
+    // 2) Apply a deferred initial anchor when the container transitions from
+    //    clientHeight=0 (IonContent not yet laid out) to a real size. The RO
+    //    callback fires before the browser paints the new size, so the anchor
+    //    is applied synchronously and the FIRST visible frame is at the correct
+    //    position — no "middle -> snap to bottom" flicker.
     const containerObserver = new ResizeObserver(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      // Case 2: deferred initial anchor pending application (fallback if the
+      // rAF poll did not catch it — e.g. if the layout effect was skipped).
+      const pending = pendingInitialAnchorRef.current;
+      if (pending && el.clientHeight > 0) {
+        pendingInitialAnchorRef.current = null;
+        applyPendingAnchor(el, pending);
+        return;
+      }
+      // Case 1: container resize while pinned to bottom — re-pin.
       if (isReplacingHistoryRef.current) return;
       if (!atBottomRef.current) return;
       pendingBottomPinRef.current = true;
@@ -425,28 +520,7 @@ export function ChatVirtualScroll({
       pendingHeightDeltaRef.current = 0;
       pendingBottomPinRef.current = false;
     };
-  }, [captureAnchor, setScrollTop]);
-
-  const applyMessageIntent = useCallback(
-    (
-      container: HTMLDivElement,
-      messageId: string,
-      align?: 'top' | 'bottom' | 'custom',
-      offsetRatio?: number,
-    ): boolean => {
-      const rowKey = messageIdToRowKey.get(messageId);
-      const node = rowKey ? rowRefs.current.get(rowKey) : null;
-      if (!node) return false;
-      const ratio = offsetRatio ?? DEFAULT_OFFSET_RATIO;
-      let target: number;
-      if (align === 'top') target = node.offsetTop;
-      else if (align === 'bottom') target = node.offsetTop + node.offsetHeight - container.clientHeight;
-      else target = node.offsetTop - ratio * (container.clientHeight - node.offsetHeight);
-      setScrollTop(container, target);
-      return true;
-    },
-    [messageIdToRowKey, setScrollTop],
-  );
+  }, [captureAnchor, setScrollTop, applyPendingAnchor]);
 
   // ── Core layout effect: anchor restore on mutation, intent on token change ──
 
@@ -454,7 +528,76 @@ export function ChatVirtualScroll({
     const container = containerRef.current;
     if (!container) return;
 
-    const tokenChanged = prevTokenRef.current !== initialAnchor.token;
+    // Container-not-ready guard: on first mount inside Ionic's IonContent (a
+    // web component), the inner scroll container has height:100% but the parent
+    // IonContent has not yet laid out, so container.clientHeight === 0 at the
+    // moment the layout effect runs. scrollHeight is also unreliable in this
+    // state. If we call setScrollTop(scrollHeight) now it clamps to 0, and once
+    // IonContent gains height on the next frame the viewport is left stuck at
+    // scrollTop=0 — i.e. the visible "list starts ~80-100 messages above the
+    // bottom, then snaps to bottom" flicker. Stash the anchor and apply it when
+    // the container reports a real size.
+    //
+    // The container ResizeObserver fires only AFTER paint (RO callbacks are
+    // delivered in a separate task post-paint), so it is too late to prevent
+    // the first visible frame from showing scrollTop=0. Instead we poll with
+    // requestAnimationFrame, which runs BEFORE the next paint. As soon as the
+    // container reports a non-zero clientHeight, we synchronously apply the
+    // pending anchor — before the browser paints, so the first visible frame
+    // is already at the correct position. This mirrors telegram-tt's pattern
+    // of deferring scroll positioning until `wasContainerReady` becomes true.
+    if (container.clientHeight === 0) {
+      pendingInitialAnchorRef.current = initialAnchor;
+      // Schedule a rAF loop to apply the pending anchor as soon as the
+      // container gains a real size, BEFORE the browser paints the new size.
+      // Without this, the first visible frame after IonContent lays out would
+      // show scrollTop=0 (stuck at the top of the cached window, ~80-100
+      // messages above the bottom), and only afterwards would the RO callback
+      // re-pin to the bottom — the visible "middle -> snap to bottom" flicker.
+      const pollForReady = () => {
+        const el = containerRef.current;
+        if (!el || pendingInitialAnchorRef.current == null) return;
+        if (el.clientHeight > 0) {
+          const pending = pendingInitialAnchorRef.current;
+          pendingInitialAnchorRef.current = null;
+          applyPendingAnchor(el, pending);
+          return;
+        }
+        // Container still not laid out — try again before the next paint.
+        pendingReadyRafRef.current = requestAnimationFrame(pollForReady);
+      };
+      pendingReadyRafRef.current = requestAnimationFrame(pollForReady);
+      return;
+    }
+
+    // If we previously deferred an anchor because the container was not ready,
+    // apply it now (container has a real size). This runs before any other
+    // scroll logic so the first visible frame lands at the correct position.
+    const pendingAnchor = pendingInitialAnchorRef.current;
+    if (pendingAnchor) {
+      pendingInitialAnchorRef.current = null;
+      applyPendingAnchor(container, pendingAnchor);
+      // After applying the deferred anchor, capture state and bail out — the
+      // token/rows diff logic below is for subsequent updates, not the initial
+      // positioning which we just handled.
+      prevTokenRef.current = initialAnchor.token;
+      prevRowsRef.current = rows;
+      isFirstLayoutRef.current = false;
+      captureAnchor(container);
+      updateViewportState();
+      return;
+    }
+
+    // On first mount, force the token-changed branch so the initial anchor
+    // (bottom / top / message) is applied synchronously before first paint.
+    // Without this, prevTokenRef.current === initialAnchor.token on mount and
+    // the effect skips all scroll positioning — the viewport stays at
+    // scrollTop=0 until a later anchor update (e.g. fetchLatestWindow resolves
+    // and bumps the token) triggers the token-changed branch, producing the
+    // visible "middle -> snap to bottom" flicker on cached chats.
+    const isFirstLayout = isFirstLayoutRef.current;
+    isFirstLayoutRef.current = false;
+    const tokenChanged = isFirstLayout || prevTokenRef.current !== initialAnchor.token;
     const rowsChanged = prevRowsRef.current !== rows;
 
     if (tokenChanged) {
@@ -517,7 +660,16 @@ export function ChatVirtualScroll({
 
     captureAnchor(container);
     updateViewportState();
-  }, [rows, initialAnchor, applyMessageIntent, captureAnchor, setScrollTop, updateViewportState, messageIdToRowKey]);
+  }, [
+    rows,
+    initialAnchor,
+    applyMessageIntent,
+    applyPendingAnchor,
+    captureAnchor,
+    setScrollTop,
+    updateViewportState,
+    messageIdToRowKey,
+  ]);
 
   // ── scrollApi ──
 
@@ -611,6 +763,13 @@ export function ChatVirtualScroll({
     return () => {
       if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
       if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+      // Cancel any pending "wait for container ready" rAF poll so a stale
+      // instance cannot apply its anchor after the component unmounted (e.g.
+      // on quick A -> B -> C switches).
+      if (pendingReadyRafRef.current != null) {
+        cancelAnimationFrame(pendingReadyRafRef.current);
+        pendingReadyRafRef.current = null;
+      }
     };
   }, []);
 
@@ -619,8 +778,15 @@ export function ChatVirtualScroll({
     if (initialAnchor.type === 'message' && !messageIdToRowKey.has(initialAnchor.messageId)) {
       return true;
     }
+    // Show the scrim while the initial window is fetching for a chat with no
+    // cached rows (e.g. first open). Previously this was covered by the
+    // 'message' anchor path; with the no-unread -> 'bottom' anchor fix, the
+    // 'bottom' anchor needs its own loading signal.
+    if (isInitialLoading && rows.length === 0) {
+      return true;
+    }
     return false;
-  }, [initialAnchor, messageIdToRowKey]);
+  }, [initialAnchor, messageIdToRowKey, isInitialLoading, rows]);
 
   // Edge hints: show a loading spinner while fetching, or a subtle
   // "more messages" affordance when more history exists but isn't loading yet.

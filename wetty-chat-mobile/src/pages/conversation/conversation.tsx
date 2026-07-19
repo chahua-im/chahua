@@ -100,6 +100,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     lastFullyVisibleMessageId,
     atBottom,
     initialAnchor,
+    isInitialLoading,
     scrollApiRef,
     floatingDateLabel,
     floatingDateFading,
@@ -171,24 +172,6 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   } | null>(null);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    console.log('[Conversation] view-mounted', {
-      chatId,
-      storeChatId,
-      threadId: threadId ?? null,
-      locationState: location.state ?? null,
-    });
-    return () => {
-      console.log('[Conversation] view-unmounted', {
-        chatId,
-        storeChatId,
-        threadId: threadId ?? null,
-      });
-    };
-  }, [chatId, storeChatId, threadId, location.state]);
-
-  // When the keyboard finishes closing after a deferred long-press, show the overlay.
-  useEffect(() => {
     if (!keyboardFullyClosed || !deferredOverlayRef.current) return;
     const { message, sourceRect, interactionPos } = deferredOverlayRef.current;
     deferredOverlayRef.current = null;
@@ -210,19 +193,6 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
       history.replace(`/chats/chat/${chatId}`);
     }
   }, [threadId, messageLookup, chatId, history]);
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    console.log('[Conversation] rows-changed', {
-      chatId,
-      storeChatId,
-      messageCount: messages.length,
-      firstMessageId: messages[0]?.id ?? null,
-      lastMessageId: messages[messages.length - 1]?.id ?? null,
-      rowCount: chatRows.length,
-      initialAnchor,
-    });
-  }, [chatId, storeChatId, messages, chatRows.length, initialAnchor]);
 
   const startEditingMessage = useCallback((message: MessageResponse) => {
     setReplyingTo(null);
@@ -465,6 +435,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
             rows={chatRows}
             renderRow={renderRow}
             initialAnchor={initialAnchor}
+            isInitialLoading={isInitialLoading}
             topOverlay={
               floatingDateLabel ? (
                 <div

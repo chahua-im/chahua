@@ -63,6 +63,7 @@ export interface ChatVirtualScrollProps {
   loadNewer?: LoadController;
   header?: ReactNode;
   topOverlay?: ReactNode;
+  isInitialLoading?: boolean;
   bottomPadding?: number;
   onAtBottomChange?: (atBottom: boolean) => void;
   onLastFullyVisibleMessageChange?: (messageId: string | null) => void;
