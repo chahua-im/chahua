@@ -209,6 +209,18 @@ class MentionInfoDto {
   Map<String, dynamic> toJson() => _$MentionInfoDtoToJson(this);
 }
 
+@JsonSerializable()
+class MessagePreviewAttachmentDto {
+  const MessagePreviewAttachmentDto({required this.kind});
+
+  final String kind;
+
+  factory MessagePreviewAttachmentDto.fromJson(Map<String, dynamic> json) =>
+      _$MessagePreviewAttachmentDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$MessagePreviewAttachmentDtoToJson(this);
+}
+
 @JsonSerializable(explicitToJson: true)
 class MessagePreviewDto {
   const MessagePreviewDto({
@@ -220,7 +232,7 @@ class MessagePreviewDto {
     this.sticker,
     this.createdAt,
     this.isDeleted = false,
-    this.firstAttachmentKind,
+    this.attachments = const <MessagePreviewAttachmentDto>[],
     this.mentions = const <MentionInfoDto>[],
   });
 
@@ -237,7 +249,8 @@ class MessagePreviewDto {
   final DateTime? createdAt;
   @JsonKey(defaultValue: false)
   final bool isDeleted;
-  final String? firstAttachmentKind;
+  @JsonKey(defaultValue: <MessagePreviewAttachmentDto>[])
+  final List<MessagePreviewAttachmentDto> attachments;
   @JsonKey(defaultValue: <MentionInfoDto>[])
   final List<MentionInfoDto> mentions;
 
@@ -269,7 +282,7 @@ class ForwardedMessagePreviewDto {
     this.messageType = 'text',
     required this.sender,
     this.originalCreatedAt,
-    this.firstAttachmentKind,
+    this.attachments = const <MessagePreviewAttachmentDto>[],
     this.mentions = const <MentionInfoDto>[],
   });
 
@@ -283,7 +296,8 @@ class ForwardedMessagePreviewDto {
   final UserDto sender;
   @NullableDateTimeConverter()
   final DateTime? originalCreatedAt;
-  final String? firstAttachmentKind;
+  @JsonKey(defaultValue: <MessagePreviewAttachmentDto>[])
+  final List<MessagePreviewAttachmentDto> attachments;
   @JsonKey(defaultValue: <MentionInfoDto>[])
   final List<MentionInfoDto> mentions;
 

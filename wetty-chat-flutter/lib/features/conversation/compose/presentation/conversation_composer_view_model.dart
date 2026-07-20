@@ -1049,11 +1049,10 @@ class ConversationComposerViewModel
         sticker: _stickerFor(message.content),
         sender: message.sender,
         isDeleted: message.isDeleted,
-        attachments: _attachmentsFor(message.content),
         reactions: message.reactions,
-        firstAttachmentKind: _attachmentsFor(message.content).isEmpty
-            ? null
-            : _attachmentsFor(message.content).first.kind,
+        attachmentKinds: _attachmentsFor(
+          message.content,
+        ).map((attachment) => attachment.kind).toList(growable: false),
         mentions: _mentionsFor(message.content),
       );
     }

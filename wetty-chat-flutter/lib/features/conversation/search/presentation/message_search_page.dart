@@ -292,11 +292,10 @@ class _MessageSearchResultRow extends StatelessWidget {
           ? null
           : StickerSummary.fromDto(message.sticker!),
       createdAt: message.createdAt,
-      attachments: message.attachments.map(AttachmentItem.fromDto).toList(),
       reactions: message.reactions.map(ReactionSummary.fromDto).toList(),
-      firstAttachmentKind: message.attachments.isNotEmpty
-          ? message.attachments.first.kind
-          : null,
+      attachmentKinds: message.attachments
+          .map((attachment) => attachment.kind)
+          .toList(growable: false),
       isDeleted: message.isDeleted,
       mentions: message.mentions.map(MentionInfo.fromDto).toList(),
     );

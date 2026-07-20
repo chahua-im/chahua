@@ -169,6 +169,14 @@ Map<String, dynamic> _$MentionInfoDtoToJson(MentionInfoDto instance) =>
       'userGroup': instance.userGroup?.toJson(),
     };
 
+MessagePreviewAttachmentDto _$MessagePreviewAttachmentDtoFromJson(
+  Map<String, dynamic> json,
+) => MessagePreviewAttachmentDto(kind: json['kind'] as String);
+
+Map<String, dynamic> _$MessagePreviewAttachmentDtoToJson(
+  MessagePreviewAttachmentDto instance,
+) => <String, dynamic>{'kind': instance.kind};
+
 MessagePreviewDto _$MessagePreviewDtoFromJson(Map<String, dynamic> json) =>
     MessagePreviewDto(
       id: const FlexibleIntConverter().fromJson(json['id']),
@@ -183,7 +191,15 @@ MessagePreviewDto _$MessagePreviewDtoFromJson(Map<String, dynamic> json) =>
             ),
       createdAt: const NullableDateTimeConverter().fromJson(json['createdAt']),
       isDeleted: json['isDeleted'] as bool? ?? false,
-      firstAttachmentKind: json['firstAttachmentKind'] as String?,
+      attachments:
+          (json['attachments'] as List<dynamic>?)
+              ?.map(
+                (e) => MessagePreviewAttachmentDto.fromJson(
+                  e as Map<String, dynamic>,
+                ),
+              )
+              .toList() ??
+          [],
       mentions:
           (json['mentions'] as List<dynamic>?)
               ?.map((e) => MentionInfoDto.fromJson(e as Map<String, dynamic>))
@@ -201,7 +217,7 @@ Map<String, dynamic> _$MessagePreviewDtoToJson(MessagePreviewDto instance) =>
       'sticker': instance.sticker?.toJson(),
       'createdAt': const NullableDateTimeConverter().toJson(instance.createdAt),
       'isDeleted': instance.isDeleted,
-      'firstAttachmentKind': instance.firstAttachmentKind,
+      'attachments': instance.attachments.map((e) => e.toJson()).toList(),
       'mentions': instance.mentions.map((e) => e.toJson()).toList(),
     };
 
@@ -224,7 +240,14 @@ ForwardedMessagePreviewDto _$ForwardedMessagePreviewDtoFromJson(
   originalCreatedAt: const NullableDateTimeConverter().fromJson(
     json['originalCreatedAt'],
   ),
-  firstAttachmentKind: json['firstAttachmentKind'] as String?,
+  attachments:
+      (json['attachments'] as List<dynamic>?)
+          ?.map(
+            (e) =>
+                MessagePreviewAttachmentDto.fromJson(e as Map<String, dynamic>),
+          )
+          .toList() ??
+      [],
   mentions:
       (json['mentions'] as List<dynamic>?)
           ?.map((e) => MentionInfoDto.fromJson(e as Map<String, dynamic>))
@@ -247,7 +270,7 @@ Map<String, dynamic> _$ForwardedMessagePreviewDtoToJson(
   'originalCreatedAt': const NullableDateTimeConverter().toJson(
     instance.originalCreatedAt,
   ),
-  'firstAttachmentKind': instance.firstAttachmentKind,
+  'attachments': instance.attachments.map((e) => e.toJson()).toList(),
   'mentions': instance.mentions.map((e) => e.toJson()).toList(),
 };
 

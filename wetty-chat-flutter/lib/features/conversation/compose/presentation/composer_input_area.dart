@@ -114,9 +114,6 @@ class ComposerPreviewBar extends StatelessWidget {
       messageType: _previewMessageTypeFor(message.content),
       sticker: _previewStickerFor(message.content),
       attachments: attachments,
-      firstAttachmentKind: attachments.isNotEmpty
-          ? attachments.first.kind
-          : null,
       isDeleted: message.isDeleted,
       mentions: _previewMentionsFor(message.content),
       l10n: l10n,

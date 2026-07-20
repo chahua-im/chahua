@@ -164,7 +164,7 @@ class _ForwardedPreviewLine extends StatelessWidget {
     final preview = formatMessagePreview(
       message: message.message,
       messageType: message.messageType,
-      firstAttachmentKind: message.firstAttachmentKind,
+      attachmentKinds: message.attachmentKinds,
       mentions: message.mentions,
       l10n: l10n,
     );

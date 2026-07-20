@@ -2,6 +2,25 @@ import 'package:chahua/core/api/models/messages_api_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('MessagePreviewDto parses all attachment kinds', () {
+    final dto = MessagePreviewDto.fromJson(<String, dynamic>{
+      'id': '42',
+      'sender': <String, dynamic>{'uid': 7, 'name': 'Alice', 'gender': 0},
+      'message': 'photos',
+      'messageType': 'text',
+      'attachments': <dynamic>[
+        <String, dynamic>{'kind': 'image/png'},
+        <String, dynamic>{'kind': 'application/pdf'},
+      ],
+      'mentions': <dynamic>[],
+    });
+
+    expect(
+      dto.attachments.map((attachment) => attachment.kind),
+      <String>['image/png', 'application/pdf'],
+    );
+  });
+
   test('MessageItemDto parses forwarded preview', () {
     final dto = MessageItemDto.fromJson(<String, dynamic>{
       'id': '9007199254740993',
@@ -27,7 +46,9 @@ void main() {
             'messageType': 'text',
             'sender': <String, dynamic>{'uid': '8', 'name': 'Bob', 'gender': 0},
             'originalCreatedAt': '2026-06-25T12:00:00Z',
-            'firstAttachmentKind': 'image/png',
+            'attachments': [
+              {'kind': 'image/png'},
+            ],
             'mentions': <dynamic>[
               <String, dynamic>{'uid': 8, 'username': 'Bob', 'gender': 0},
               <String, dynamic>{'uid': 9, 'username': 'Carol', 'gender': 0},
@@ -44,7 +65,7 @@ void main() {
     expect(forwarded.originalMessageId, 123);
     expect(forwarded.originalChatId, 24);
     expect(forwarded.sender.uid, 8);
-    expect(forwarded.firstAttachmentKind, 'image/png');
+    expect(forwarded.attachments.single.kind, 'image/png');
     expect(forwarded.mentions.map((mention) => mention.uid), <int>[8, 9]);
     expect(forwarded.mentions.first.username, 'Bob');
   });

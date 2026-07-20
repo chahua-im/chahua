@@ -14,7 +14,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$MessagePreview {
 
- int get messageId; String? get clientGeneratedId; User get sender; String? get message; String get messageType; StickerSummary? get sticker; DateTime? get createdAt; List<AttachmentItem> get attachments; List<ReactionSummary> get reactions; String? get firstAttachmentKind; bool get isDeleted; List<MentionInfo> get mentions;
+ int get messageId; String? get clientGeneratedId; User get sender; String? get message; String get messageType; StickerSummary? get sticker; DateTime? get createdAt; List<String> get attachmentKinds; List<ReactionSummary> get reactions; bool get isDeleted; List<MentionInfo> get mentions;
 /// Create a copy of MessagePreview
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -25,16 +25,16 @@ $MessagePreviewCopyWith<MessagePreview> get copyWith => _$MessagePreviewCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is MessagePreview&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.clientGeneratedId, clientGeneratedId) || other.clientGeneratedId == clientGeneratedId)&&(identical(other.sender, sender) || other.sender == sender)&&(identical(other.message, message) || other.message == message)&&(identical(other.messageType, messageType) || other.messageType == messageType)&&(identical(other.sticker, sticker) || other.sticker == sticker)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other.attachments, attachments)&&const DeepCollectionEquality().equals(other.reactions, reactions)&&(identical(other.firstAttachmentKind, firstAttachmentKind) || other.firstAttachmentKind == firstAttachmentKind)&&(identical(other.isDeleted, isDeleted) || other.isDeleted == isDeleted)&&const DeepCollectionEquality().equals(other.mentions, mentions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is MessagePreview&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.clientGeneratedId, clientGeneratedId) || other.clientGeneratedId == clientGeneratedId)&&(identical(other.sender, sender) || other.sender == sender)&&(identical(other.message, message) || other.message == message)&&(identical(other.messageType, messageType) || other.messageType == messageType)&&(identical(other.sticker, sticker) || other.sticker == sticker)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other.attachmentKinds, attachmentKinds)&&const DeepCollectionEquality().equals(other.reactions, reactions)&&(identical(other.isDeleted, isDeleted) || other.isDeleted == isDeleted)&&const DeepCollectionEquality().equals(other.mentions, mentions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,messageId,clientGeneratedId,sender,message,messageType,sticker,createdAt,const DeepCollectionEquality().hash(attachments),const DeepCollectionEquality().hash(reactions),firstAttachmentKind,isDeleted,const DeepCollectionEquality().hash(mentions));
+int get hashCode => Object.hash(runtimeType,messageId,clientGeneratedId,sender,message,messageType,sticker,createdAt,const DeepCollectionEquality().hash(attachmentKinds),const DeepCollectionEquality().hash(reactions),isDeleted,const DeepCollectionEquality().hash(mentions));
 
 @override
 String toString() {
-  return 'MessagePreview(messageId: $messageId, clientGeneratedId: $clientGeneratedId, sender: $sender, message: $message, messageType: $messageType, sticker: $sticker, createdAt: $createdAt, attachments: $attachments, reactions: $reactions, firstAttachmentKind: $firstAttachmentKind, isDeleted: $isDeleted, mentions: $mentions)';
+  return 'MessagePreview(messageId: $messageId, clientGeneratedId: $clientGeneratedId, sender: $sender, message: $message, messageType: $messageType, sticker: $sticker, createdAt: $createdAt, attachmentKinds: $attachmentKinds, reactions: $reactions, isDeleted: $isDeleted, mentions: $mentions)';
 }
 
 
@@ -45,7 +45,7 @@ abstract mixin class $MessagePreviewCopyWith<$Res>  {
   factory $MessagePreviewCopyWith(MessagePreview value, $Res Function(MessagePreview) _then) = _$MessagePreviewCopyWithImpl;
 @useResult
 $Res call({
- int messageId, String? clientGeneratedId, User sender, String? message, String messageType, StickerSummary? sticker, DateTime? createdAt, List<AttachmentItem> attachments, List<ReactionSummary> reactions, String? firstAttachmentKind, bool isDeleted, List<MentionInfo> mentions
+ int messageId, String? clientGeneratedId, User sender, String? message, String messageType, StickerSummary? sticker, DateTime? createdAt, List<String> attachmentKinds, List<ReactionSummary> reactions, bool isDeleted, List<MentionInfo> mentions
 });
 
 
@@ -62,7 +62,7 @@ class _$MessagePreviewCopyWithImpl<$Res>
 
 /// Create a copy of MessagePreview
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? messageId = null,Object? clientGeneratedId = freezed,Object? sender = null,Object? message = freezed,Object? messageType = null,Object? sticker = freezed,Object? createdAt = freezed,Object? attachments = null,Object? reactions = null,Object? firstAttachmentKind = freezed,Object? isDeleted = null,Object? mentions = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? messageId = null,Object? clientGeneratedId = freezed,Object? sender = null,Object? message = freezed,Object? messageType = null,Object? sticker = freezed,Object? createdAt = freezed,Object? attachmentKinds = null,Object? reactions = null,Object? isDeleted = null,Object? mentions = null,}) {
   return _then(_self.copyWith(
 messageId: null == messageId ? _self.messageId : messageId // ignore: cast_nullable_to_non_nullable
 as int,clientGeneratedId: freezed == clientGeneratedId ? _self.clientGeneratedId : clientGeneratedId // ignore: cast_nullable_to_non_nullable
@@ -71,10 +71,9 @@ as User,message: freezed == message ? _self.message : message // ignore: cast_nu
 as String?,messageType: null == messageType ? _self.messageType : messageType // ignore: cast_nullable_to_non_nullable
 as String,sticker: freezed == sticker ? _self.sticker : sticker // ignore: cast_nullable_to_non_nullable
 as StickerSummary?,createdAt: freezed == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,attachments: null == attachments ? _self.attachments : attachments // ignore: cast_nullable_to_non_nullable
-as List<AttachmentItem>,reactions: null == reactions ? _self.reactions : reactions // ignore: cast_nullable_to_non_nullable
-as List<ReactionSummary>,firstAttachmentKind: freezed == firstAttachmentKind ? _self.firstAttachmentKind : firstAttachmentKind // ignore: cast_nullable_to_non_nullable
-as String?,isDeleted: null == isDeleted ? _self.isDeleted : isDeleted // ignore: cast_nullable_to_non_nullable
+as DateTime?,attachmentKinds: null == attachmentKinds ? _self.attachmentKinds : attachmentKinds // ignore: cast_nullable_to_non_nullable
+as List<String>,reactions: null == reactions ? _self.reactions : reactions // ignore: cast_nullable_to_non_nullable
+as List<ReactionSummary>,isDeleted: null == isDeleted ? _self.isDeleted : isDeleted // ignore: cast_nullable_to_non_nullable
 as bool,mentions: null == mentions ? _self.mentions : mentions // ignore: cast_nullable_to_non_nullable
 as List<MentionInfo>,
   ));
@@ -182,10 +181,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int messageId,  String? clientGeneratedId,  User sender,  String? message,  String messageType,  StickerSummary? sticker,  DateTime? createdAt,  List<AttachmentItem> attachments,  List<ReactionSummary> reactions,  String? firstAttachmentKind,  bool isDeleted,  List<MentionInfo> mentions)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( int messageId,  String? clientGeneratedId,  User sender,  String? message,  String messageType,  StickerSummary? sticker,  DateTime? createdAt,  List<String> attachmentKinds,  List<ReactionSummary> reactions,  bool isDeleted,  List<MentionInfo> mentions)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _MessagePreview() when $default != null:
-return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.message,_that.messageType,_that.sticker,_that.createdAt,_that.attachments,_that.reactions,_that.firstAttachmentKind,_that.isDeleted,_that.mentions);case _:
+return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.message,_that.messageType,_that.sticker,_that.createdAt,_that.attachmentKinds,_that.reactions,_that.isDeleted,_that.mentions);case _:
   return orElse();
 
 }
@@ -203,10 +202,10 @@ return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.messa
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int messageId,  String? clientGeneratedId,  User sender,  String? message,  String messageType,  StickerSummary? sticker,  DateTime? createdAt,  List<AttachmentItem> attachments,  List<ReactionSummary> reactions,  String? firstAttachmentKind,  bool isDeleted,  List<MentionInfo> mentions)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( int messageId,  String? clientGeneratedId,  User sender,  String? message,  String messageType,  StickerSummary? sticker,  DateTime? createdAt,  List<String> attachmentKinds,  List<ReactionSummary> reactions,  bool isDeleted,  List<MentionInfo> mentions)  $default,) {final _that = this;
 switch (_that) {
 case _MessagePreview():
-return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.message,_that.messageType,_that.sticker,_that.createdAt,_that.attachments,_that.reactions,_that.firstAttachmentKind,_that.isDeleted,_that.mentions);case _:
+return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.message,_that.messageType,_that.sticker,_that.createdAt,_that.attachmentKinds,_that.reactions,_that.isDeleted,_that.mentions);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -223,10 +222,10 @@ return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.messa
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int messageId,  String? clientGeneratedId,  User sender,  String? message,  String messageType,  StickerSummary? sticker,  DateTime? createdAt,  List<AttachmentItem> attachments,  List<ReactionSummary> reactions,  String? firstAttachmentKind,  bool isDeleted,  List<MentionInfo> mentions)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( int messageId,  String? clientGeneratedId,  User sender,  String? message,  String messageType,  StickerSummary? sticker,  DateTime? createdAt,  List<String> attachmentKinds,  List<ReactionSummary> reactions,  bool isDeleted,  List<MentionInfo> mentions)?  $default,) {final _that = this;
 switch (_that) {
 case _MessagePreview() when $default != null:
-return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.message,_that.messageType,_that.sticker,_that.createdAt,_that.attachments,_that.reactions,_that.firstAttachmentKind,_that.isDeleted,_that.mentions);case _:
+return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.message,_that.messageType,_that.sticker,_that.createdAt,_that.attachmentKinds,_that.reactions,_that.isDeleted,_that.mentions);case _:
   return null;
 
 }
@@ -238,7 +237,7 @@ return $default(_that.messageId,_that.clientGeneratedId,_that.sender,_that.messa
 
 
 class _MessagePreview extends MessagePreview {
-  const _MessagePreview({required this.messageId, this.clientGeneratedId, required this.sender, this.message, this.messageType = 'text', this.sticker, this.createdAt, final  List<AttachmentItem> attachments = const [], final  List<ReactionSummary> reactions = const [], this.firstAttachmentKind, this.isDeleted = false, final  List<MentionInfo> mentions = const []}): _attachments = attachments,_reactions = reactions,_mentions = mentions,super._();
+  const _MessagePreview({required this.messageId, this.clientGeneratedId, required this.sender, this.message, this.messageType = 'text', this.sticker, this.createdAt, final  List<String> attachmentKinds = const [], final  List<ReactionSummary> reactions = const [], this.isDeleted = false, final  List<MentionInfo> mentions = const []}): _attachmentKinds = attachmentKinds,_reactions = reactions,_mentions = mentions,super._();
   
 
 @override final  int messageId;
@@ -248,11 +247,11 @@ class _MessagePreview extends MessagePreview {
 @override@JsonKey() final  String messageType;
 @override final  StickerSummary? sticker;
 @override final  DateTime? createdAt;
- final  List<AttachmentItem> _attachments;
-@override@JsonKey() List<AttachmentItem> get attachments {
-  if (_attachments is EqualUnmodifiableListView) return _attachments;
+ final  List<String> _attachmentKinds;
+@override@JsonKey() List<String> get attachmentKinds {
+  if (_attachmentKinds is EqualUnmodifiableListView) return _attachmentKinds;
   // ignore: implicit_dynamic_type
-  return EqualUnmodifiableListView(_attachments);
+  return EqualUnmodifiableListView(_attachmentKinds);
 }
 
  final  List<ReactionSummary> _reactions;
@@ -262,7 +261,6 @@ class _MessagePreview extends MessagePreview {
   return EqualUnmodifiableListView(_reactions);
 }
 
-@override final  String? firstAttachmentKind;
 @override@JsonKey() final  bool isDeleted;
  final  List<MentionInfo> _mentions;
 @override@JsonKey() List<MentionInfo> get mentions {
@@ -282,16 +280,16 @@ _$MessagePreviewCopyWith<_MessagePreview> get copyWith => __$MessagePreviewCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MessagePreview&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.clientGeneratedId, clientGeneratedId) || other.clientGeneratedId == clientGeneratedId)&&(identical(other.sender, sender) || other.sender == sender)&&(identical(other.message, message) || other.message == message)&&(identical(other.messageType, messageType) || other.messageType == messageType)&&(identical(other.sticker, sticker) || other.sticker == sticker)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other._attachments, _attachments)&&const DeepCollectionEquality().equals(other._reactions, _reactions)&&(identical(other.firstAttachmentKind, firstAttachmentKind) || other.firstAttachmentKind == firstAttachmentKind)&&(identical(other.isDeleted, isDeleted) || other.isDeleted == isDeleted)&&const DeepCollectionEquality().equals(other._mentions, _mentions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MessagePreview&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.clientGeneratedId, clientGeneratedId) || other.clientGeneratedId == clientGeneratedId)&&(identical(other.sender, sender) || other.sender == sender)&&(identical(other.message, message) || other.message == message)&&(identical(other.messageType, messageType) || other.messageType == messageType)&&(identical(other.sticker, sticker) || other.sticker == sticker)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&const DeepCollectionEquality().equals(other._attachmentKinds, _attachmentKinds)&&const DeepCollectionEquality().equals(other._reactions, _reactions)&&(identical(other.isDeleted, isDeleted) || other.isDeleted == isDeleted)&&const DeepCollectionEquality().equals(other._mentions, _mentions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,messageId,clientGeneratedId,sender,message,messageType,sticker,createdAt,const DeepCollectionEquality().hash(_attachments),const DeepCollectionEquality().hash(_reactions),firstAttachmentKind,isDeleted,const DeepCollectionEquality().hash(_mentions));
+int get hashCode => Object.hash(runtimeType,messageId,clientGeneratedId,sender,message,messageType,sticker,createdAt,const DeepCollectionEquality().hash(_attachmentKinds),const DeepCollectionEquality().hash(_reactions),isDeleted,const DeepCollectionEquality().hash(_mentions));
 
 @override
 String toString() {
-  return 'MessagePreview(messageId: $messageId, clientGeneratedId: $clientGeneratedId, sender: $sender, message: $message, messageType: $messageType, sticker: $sticker, createdAt: $createdAt, attachments: $attachments, reactions: $reactions, firstAttachmentKind: $firstAttachmentKind, isDeleted: $isDeleted, mentions: $mentions)';
+  return 'MessagePreview(messageId: $messageId, clientGeneratedId: $clientGeneratedId, sender: $sender, message: $message, messageType: $messageType, sticker: $sticker, createdAt: $createdAt, attachmentKinds: $attachmentKinds, reactions: $reactions, isDeleted: $isDeleted, mentions: $mentions)';
 }
 
 
@@ -302,7 +300,7 @@ abstract mixin class _$MessagePreviewCopyWith<$Res> implements $MessagePreviewCo
   factory _$MessagePreviewCopyWith(_MessagePreview value, $Res Function(_MessagePreview) _then) = __$MessagePreviewCopyWithImpl;
 @override @useResult
 $Res call({
- int messageId, String? clientGeneratedId, User sender, String? message, String messageType, StickerSummary? sticker, DateTime? createdAt, List<AttachmentItem> attachments, List<ReactionSummary> reactions, String? firstAttachmentKind, bool isDeleted, List<MentionInfo> mentions
+ int messageId, String? clientGeneratedId, User sender, String? message, String messageType, StickerSummary? sticker, DateTime? createdAt, List<String> attachmentKinds, List<ReactionSummary> reactions, bool isDeleted, List<MentionInfo> mentions
 });
 
 
@@ -319,7 +317,7 @@ class __$MessagePreviewCopyWithImpl<$Res>
 
 /// Create a copy of MessagePreview
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? messageId = null,Object? clientGeneratedId = freezed,Object? sender = null,Object? message = freezed,Object? messageType = null,Object? sticker = freezed,Object? createdAt = freezed,Object? attachments = null,Object? reactions = null,Object? firstAttachmentKind = freezed,Object? isDeleted = null,Object? mentions = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? messageId = null,Object? clientGeneratedId = freezed,Object? sender = null,Object? message = freezed,Object? messageType = null,Object? sticker = freezed,Object? createdAt = freezed,Object? attachmentKinds = null,Object? reactions = null,Object? isDeleted = null,Object? mentions = null,}) {
   return _then(_MessagePreview(
 messageId: null == messageId ? _self.messageId : messageId // ignore: cast_nullable_to_non_nullable
 as int,clientGeneratedId: freezed == clientGeneratedId ? _self.clientGeneratedId : clientGeneratedId // ignore: cast_nullable_to_non_nullable
@@ -328,10 +326,9 @@ as User,message: freezed == message ? _self.message : message // ignore: cast_nu
 as String?,messageType: null == messageType ? _self.messageType : messageType // ignore: cast_nullable_to_non_nullable
 as String,sticker: freezed == sticker ? _self.sticker : sticker // ignore: cast_nullable_to_non_nullable
 as StickerSummary?,createdAt: freezed == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,attachments: null == attachments ? _self._attachments : attachments // ignore: cast_nullable_to_non_nullable
-as List<AttachmentItem>,reactions: null == reactions ? _self._reactions : reactions // ignore: cast_nullable_to_non_nullable
-as List<ReactionSummary>,firstAttachmentKind: freezed == firstAttachmentKind ? _self.firstAttachmentKind : firstAttachmentKind // ignore: cast_nullable_to_non_nullable
-as String?,isDeleted: null == isDeleted ? _self.isDeleted : isDeleted // ignore: cast_nullable_to_non_nullable
+as DateTime?,attachmentKinds: null == attachmentKinds ? _self._attachmentKinds : attachmentKinds // ignore: cast_nullable_to_non_nullable
+as List<String>,reactions: null == reactions ? _self._reactions : reactions // ignore: cast_nullable_to_non_nullable
+as List<ReactionSummary>,isDeleted: null == isDeleted ? _self.isDeleted : isDeleted // ignore: cast_nullable_to_non_nullable
 as bool,mentions: null == mentions ? _self._mentions : mentions // ignore: cast_nullable_to_non_nullable
 as List<MentionInfo>,
   ));

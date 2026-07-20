@@ -90,7 +90,7 @@ ConversationMessageV2 _forwardedMessage() {
           originalChatId: 1,
           sender: User(uid: 3, name: 'Carol'),
           messageType: 'text',
-          firstAttachmentKind: 'image/png',
+          attachmentKinds: ['image/png'],
         ),
         ForwardedMessagePreview(
           originalMessageId: 12,

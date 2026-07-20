@@ -2,7 +2,6 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'package:chahua/core/api/models/messages_api_models.dart';
 
-import 'attachment.dart';
 import 'mention.dart';
 import 'reaction.dart';
 import 'user.dart';
@@ -19,9 +18,8 @@ abstract class ReplyToMessage with _$ReplyToMessage {
     StickerSummary? sticker,
     required User sender,
     @Default(false) bool isDeleted,
-    @Default([]) List<AttachmentItem> attachments,
+    @Default([]) List<String> attachmentKinds,
     @Default([]) List<ReactionSummary> reactions,
-    String? firstAttachmentKind,
     @Default([]) List<MentionInfo> mentions,
   }) = _ReplyToMessage;
 
@@ -37,7 +35,9 @@ abstract class ReplyToMessage with _$ReplyToMessage {
           ),
     sender: User.fromDto(dto.sender),
     isDeleted: dto.isDeleted,
-    firstAttachmentKind: dto.firstAttachmentKind,
+    attachmentKinds: dto.attachments
+        .map((attachment) => attachment.kind)
+        .toList(growable: false),
     mentions: dto.mentions
         .map((mention) => MentionInfo.fromDto(mention))
         .toList(),

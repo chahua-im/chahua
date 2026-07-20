@@ -266,7 +266,7 @@ class ForwardedMessagePreview {
     required this.messageType,
     this.message,
     this.originalCreatedAt,
-    this.firstAttachmentKind,
+    this.attachmentKinds = const <String>[],
     this.mentions = const <MentionInfo>[],
   });
 
@@ -278,7 +278,9 @@ class ForwardedMessagePreview {
       message: dto.message,
       messageType: dto.messageType,
       originalCreatedAt: dto.originalCreatedAt,
-      firstAttachmentKind: dto.firstAttachmentKind,
+      attachmentKinds: dto.attachments
+          .map((attachment) => attachment.kind)
+          .toList(growable: false),
       mentions: dto.mentions.map(MentionInfo.fromDto).toList(growable: false),
     );
   }
@@ -289,7 +291,7 @@ class ForwardedMessagePreview {
   final String? message;
   final String messageType;
   final DateTime? originalCreatedAt;
-  final String? firstAttachmentKind;
+  final List<String> attachmentKinds;
   final List<MentionInfo> mentions;
 }
 

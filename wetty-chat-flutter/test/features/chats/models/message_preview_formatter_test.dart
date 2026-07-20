@@ -50,15 +50,7 @@ void main() {
         id: 1,
         sender: sender,
         isDeleted: false,
-        attachments: [
-          AttachmentItem(
-            id: 'a1',
-            url: '',
-            kind: 'image/png',
-            size: 0,
-            fileName: 'photo.png',
-          ),
-        ],
+        attachmentKinds: ['image/png'],
       );
 
       expect(formatReplyPreview(preview), imagePreviewLabel);
@@ -69,7 +61,7 @@ void main() {
         id: 1,
         sender: sender,
         isDeleted: false,
-        firstAttachmentKind: 'video/mp4',
+        attachmentKinds: ['video/mp4'],
       );
 
       expect(formatReplyPreview(preview), videoPreviewLabel);
@@ -80,18 +72,25 @@ void main() {
         id: 1,
         sender: sender,
         isDeleted: false,
-        attachments: [
-          AttachmentItem(
-            id: 'a1',
-            url: '',
-            kind: 'application/pdf',
-            size: 0,
-            fileName: 'doc.pdf',
-          ),
-        ],
+        attachmentKinds: ['application/pdf'],
       );
 
       expect(formatReplyPreview(preview), attachmentPreviewLabel);
+    });
+
+    test('formats every attachment kind before message text', () {
+      const preview = ReplyToMessage(
+        id: 1,
+        message: 'See these files',
+        sender: sender,
+        isDeleted: false,
+        attachmentKinds: ['image/png', 'application/pdf', 'video/mp4'],
+      );
+
+      expect(
+        formatReplyPreview(preview),
+        '[Image][Attachment][Video] See these files',
+      );
     });
 
     test('renders mentions as usernames', () {

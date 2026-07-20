@@ -1,7 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'package:chahua/core/api/models/messages_api_models.dart';
-import 'attachment.dart';
 import 'mention.dart';
 import 'reaction.dart';
 import 'user.dart';
@@ -21,9 +20,8 @@ abstract class MessagePreview with _$MessagePreview {
     @Default('text') String messageType,
     StickerSummary? sticker,
     DateTime? createdAt,
-    @Default([]) List<AttachmentItem> attachments,
+    @Default([]) List<String> attachmentKinds,
     @Default([]) List<ReactionSummary> reactions,
-    String? firstAttachmentKind,
     @Default(false) bool isDeleted,
     @Default([]) List<MentionInfo> mentions,
   }) = _MessagePreview;
@@ -45,7 +43,9 @@ abstract class MessagePreview with _$MessagePreview {
             emoji: dto.sticker!.emoji,
           ),
     createdAt: dto.createdAt,
-    firstAttachmentKind: dto.firstAttachmentKind,
+    attachmentKinds: dto.attachments
+        .map((attachment) => attachment.kind)
+        .toList(growable: false),
     isDeleted: dto.isDeleted,
     mentions: dto.mentions.map(MentionInfo.fromDto).toList(),
   );

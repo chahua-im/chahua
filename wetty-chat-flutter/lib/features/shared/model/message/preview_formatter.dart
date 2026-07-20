@@ -24,9 +24,8 @@ String formatReplyPreview(ReplyToMessage preview, {AppLocalizations? l10n}) {
       message: preview.message,
       messageType: preview.messageType,
       sticker: preview.sticker,
-      attachments: preview.attachments,
+      attachmentKinds: preview.attachmentKinds,
       reactions: preview.reactions,
-      firstAttachmentKind: preview.firstAttachmentKind,
       isDeleted: preview.isDeleted,
       mentions: preview.mentions,
     ),
@@ -47,8 +46,7 @@ String formatMessagePreviewSummary(
         (stickerEmoji == null
             ? null
             : StickerSummary(id: 'message-preview', emoji: stickerEmoji)),
-    attachments: preview.attachments,
-    firstAttachmentKind: preview.firstAttachmentKind,
+    attachmentKinds: preview.attachmentKinds,
     isDeleted: preview.isDeleted,
     mentions: preview.mentions,
     l10n: l10n,
@@ -60,7 +58,7 @@ String formatMessagePreview({
   String? messageType,
   StickerSummary? sticker,
   List<AttachmentItem> attachments = const <AttachmentItem>[],
-  String? firstAttachmentKind,
+  List<String> attachmentKinds = const <String>[],
   bool isDeleted = false,
   List<MentionInfo> mentions = const <MentionInfo>[],
   AppLocalizations? l10n,
@@ -89,31 +87,28 @@ String formatMessagePreview({
     return labels.forwarded;
   }
 
+  final kinds = <String>[
+    ...attachmentKinds,
+    ...attachments.map((attachment) => attachment.kind),
+  ];
+  final attachmentLabels = kinds
+      .map((kind) {
+        if (kind.startsWith('audio/')) return labels.voiceMessage;
+        if (kind.startsWith('image/')) return labels.image;
+        if (kind.startsWith('video/')) return labels.video;
+        return labels.attachment;
+      })
+      .toList(growable: false);
+  final attachmentText = attachmentLabels.join();
   final text = message?.trim();
-  if (text != null && text.isNotEmpty) {
-    return renderMentionsAsText(text, mentions);
-  }
+  final messageText = text == null || text.isEmpty
+      ? ''
+      : renderMentionsAsText(text, mentions);
 
-  if (_containsAttachmentKind(attachments, 'audio/') ||
-      (firstAttachmentKind?.startsWith('audio/') ?? false)) {
-    return labels.voiceMessage;
+  if (attachmentText.isNotEmpty && messageText.isNotEmpty) {
+    return '$attachmentText $messageText';
   }
-
-  if (_containsAttachmentKind(attachments, 'image/') ||
-      (firstAttachmentKind?.startsWith('image/') ?? false)) {
-    return labels.image;
-  }
-
-  if (_containsAttachmentKind(attachments, 'video/') ||
-      (firstAttachmentKind?.startsWith('video/') ?? false)) {
-    return labels.video;
-  }
-
-  if (attachments.isNotEmpty || firstAttachmentKind != null) {
-    return labels.attachment;
-  }
-
-  return '';
+  return attachmentText.isNotEmpty ? attachmentText : messageText;
 }
 
 class _PreviewLabels {
@@ -130,10 +125,6 @@ class _PreviewLabels {
   String get video => l10n?.previewVideo ?? videoPreviewLabel;
   String get attachment => l10n?.previewAttachment ?? attachmentPreviewLabel;
   String get forwarded => l10n?.previewForwarded ?? forwardedPreviewLabel;
-}
-
-bool _containsAttachmentKind(List<AttachmentItem> attachments, String prefix) {
-  return attachments.any((attachment) => attachment.kind.startsWith(prefix));
 }
 
 String renderMentionsAsText(String text, List<MentionInfo> mentions) {

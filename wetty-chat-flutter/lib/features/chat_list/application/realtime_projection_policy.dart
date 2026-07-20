@@ -46,9 +46,9 @@ MessagePreview messagePreviewFromMessageItemDto(MessageItemDto payload) {
         ? null
         : StickerSummary.fromDto(payload.sticker!),
     createdAt: payload.createdAt,
-    firstAttachmentKind: payload.attachments.isNotEmpty
-        ? payload.attachments.first.kind
-        : null,
+    attachmentKinds: payload.attachments
+        .map((attachment) => attachment.kind)
+        .toList(growable: false),
     isDeleted: payload.isDeleted,
     mentions: payload.mentions.map(MentionInfo.fromDto).toList(),
   );
