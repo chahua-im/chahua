@@ -516,10 +516,13 @@ pub(crate) fn forwarded_message_preview_response(
         message_type: snapshot.message_type.clone(),
         sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
         original_created_at: snapshot.original_created_at,
-        first_attachment_kind: snapshot
+        attachments: snapshot
             .attachments
-            .first()
-            .map(|attachment| attachment.kind.clone()),
+            .iter()
+            .map(|attachment| MessagePreviewAttachment {
+                kind: attachment.kind.clone(),
+            })
+            .collect(),
         mentions: snapshot
             .mention_uids
             .iter()

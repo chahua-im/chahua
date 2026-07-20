@@ -109,7 +109,7 @@ pub struct ForwardedMessagePreviewResponse {
     pub message_type: MessageType,
     pub sender: User,
     pub original_created_at: DateTime<Utc>,
-    pub first_attachment_kind: Option<String>,
+    pub attachments: Vec<MessagePreviewAttachment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
 }
