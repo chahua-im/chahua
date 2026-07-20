@@ -2,11 +2,10 @@ use axum::{
     extract::FromRequestParts,
     http::{header::AUTHORIZATION, request::Parts, HeaderMap, StatusCode},
 };
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use serde::{Deserialize, Serialize};
-use std::{fmt, sync::Once};
+use std::fmt;
 
 use crate::errors::AppError;
+use crate::services::auth_token::{AuthTokenError, VerifiedSession};
 use crate::services::service_tokens::{self, AuthenticatedServiceToken};
 
 pub const X_USER_ID: &str = "x-user-id";
@@ -31,6 +30,8 @@ pub struct AuthContext {
     pub client_id: Option<String>,
     pub source: AuthSource,
 }
+#[derive(Clone, Debug)]
+pub struct BearerSession(pub VerifiedSession);
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -45,32 +46,10 @@ pub enum Principal {
     ServiceToken(ServiceTokenPrincipal),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AuthClaims {
-    pub uid: i32,
-    pub cid: String,
-    pub gen: i32,
-}
-
 impl fmt::Display for CurrentUid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
-}
-
-static JWT_CRYPTO_PROVIDER: Once = Once::new();
-
-fn jwt_validation() -> Validation {
-    let mut validation = Validation::default();
-    validation.validate_exp = false;
-    validation.required_spec_claims.clear();
-    validation
-}
-
-fn ensure_jwt_crypto_provider() {
-    JWT_CRYPTO_PROVIDER.call_once(|| {
-        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
-    });
 }
 
 pub fn extract_current_uid(
@@ -85,10 +64,13 @@ pub fn extract_auth_context(
     state: &crate::AppState,
 ) -> Result<AuthContext, (StatusCode, &'static str)> {
     if let Some(token) = bearer_token(headers)? {
-        let claims = decode_auth_token(token, &state.jwt_signing_key)?;
+        let session = state
+            .auth_token_service
+            .verify(token)
+            .map_err(AuthTokenError::into_rejection)?;
         return Ok(AuthContext {
-            uid: claims.uid,
-            client_id: Some(claims.cid),
+            uid: session.uid,
+            client_id: Some(session.client_id),
             source: AuthSource::Jwt,
         });
     }
@@ -164,38 +146,6 @@ fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, (StatusCode, &'stat
     Ok(Some(token))
 }
 
-pub fn decode_auth_token(
-    token: &str,
-    jwt_signing_key: &[u8],
-) -> Result<AuthClaims, (StatusCode, &'static str)> {
-    ensure_jwt_crypto_provider();
-    decode::<AuthClaims>(
-        token,
-        &DecodingKey::from_secret(jwt_signing_key),
-        &jwt_validation(),
-    )
-    .map(|data| data.claims)
-    .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid auth token"))
-}
-
-pub fn encode_auth_token(
-    claims: &AuthClaims,
-    jwt_signing_key: &[u8],
-) -> Result<String, (StatusCode, &'static str)> {
-    ensure_jwt_crypto_provider();
-    encode(
-        &Header::default(),
-        claims,
-        &EncodingKey::from_secret(jwt_signing_key),
-    )
-    .map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to create auth token",
-        )
-    })
-}
-
 fn validate_client_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -238,6 +188,23 @@ pub fn resolve_client_id(
 
 pub fn required_client_id(headers: &HeaderMap) -> Result<String, (StatusCode, &'static str)> {
     optional_client_id(headers)?.ok_or((StatusCode::BAD_REQUEST, "Missing X-Client-Id header"))
+}
+
+impl FromRequestParts<crate::AppState> for BearerSession {
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &crate::AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let token = bearer_token(&parts.headers)?
+            .ok_or((StatusCode::UNAUTHORIZED, "Missing auth token"))?;
+        state
+            .auth_token_service
+            .verify(token)
+            .map(BearerSession)
+            .map_err(AuthTokenError::into_rejection)
+    }
 }
 
 impl FromRequestParts<crate::AppState> for CurrentUid {
@@ -296,37 +263,6 @@ mod tests {
         assert_eq!(
             result,
             Err((StatusCode::UNAUTHORIZED, "Invalid Authorization header"))
-        );
-    }
-
-    #[test]
-    fn auth_token_round_trip_preserves_claims() {
-        let claims = AuthClaims {
-            uid: 42,
-            cid: "client_123".to_string(),
-            gen: 0,
-        };
-
-        let token = encode_auth_token(&claims, b"01234567890123456789012345678901").unwrap();
-        let decoded = decode_auth_token(&token, b"01234567890123456789012345678901").unwrap();
-
-        assert_eq!(decoded, claims);
-    }
-
-    #[test]
-    fn auth_token_rejects_wrong_key() {
-        let claims = AuthClaims {
-            uid: 42,
-            cid: "client_123".to_string(),
-            gen: 0,
-        };
-
-        let token = encode_auth_token(&claims, b"01234567890123456789012345678901").unwrap();
-        let result = decode_auth_token(&token, b"abcdefabcdefabcdefabcdefabcdefab");
-
-        assert_eq!(
-            result,
-            Err((StatusCode::UNAUTHORIZED, "Invalid auth token"))
         );
     }
 

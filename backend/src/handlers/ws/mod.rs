@@ -14,7 +14,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::dto::ws::{ServerWsMessage, TicketResponse};
 use crate::services::ws_registry;
-use crate::utils::auth::{decode_auth_token, encode_auth_token, AuthClaims, ClientId, CurrentUid};
+use crate::utils::auth::{ClientId, CurrentUid};
 use crate::AppState;
 use ws_registry::AppPresenceState;
 
@@ -32,12 +32,10 @@ async fn get_ws_ticket(
     ClientId(client_id): ClientId,
     State(state): State<AppState>,
 ) -> Result<Json<TicketResponse>, (axum::http::StatusCode, &'static str)> {
-    let claims = AuthClaims {
-        uid,
-        cid: client_id,
-        gen: 0,
-    };
-    let ticket = encode_auth_token(&claims, &state.jwt_signing_key)?;
+    let ticket = state
+        .auth_token_service
+        .issue_legacy_session(uid, &client_id, 0)
+        .map_err(crate::services::auth_token::AuthTokenError::into_rejection)?;
 
     Ok(Json(TicketResponse { ticket }))
 }
@@ -98,8 +96,8 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
         Ok(Some(Ok(Message::Text(text)))) => {
             if let Ok(parsed) = serde_json::from_str::<WsAuthMessage>(&text) {
                 if parsed.type_ == "auth" {
-                    match decode_auth_token(&parsed.ticket, &state.jwt_signing_key) {
-                        Ok(claims) => claims.uid,
+                    match state.auth_token_service.verify(&parsed.ticket) {
+                        Ok(session) => session.uid,
                         Err(e) => {
                             debug!("ws auth rejected (invalid ticket): {:?}", e);
                             return;

@@ -99,7 +99,7 @@ pub(crate) struct AppState {
     pub auth_method: AuthMethod,
     pub discuz_avatar_public_url: Option<String>,
     pub discuz_avatar_path: Option<String>,
-    pub jwt_signing_key: Vec<u8>,
+    pub auth_token_service: Arc<services::auth_token::AuthTokenService>,
     pub service_token_hash_key: Vec<u8>,
 }
 
@@ -200,6 +200,9 @@ async fn main() {
             jwt_signing_key.clone()
         }
     };
+    let auth_token_service = Arc::new(services::auth_token::AuthTokenService::new(
+        &jwt_signing_key,
+    ));
 
     let state = AppState {
         db: pool.clone(),
@@ -233,7 +236,7 @@ async fn main() {
         auth_method,
         discuz_avatar_public_url,
         discuz_avatar_path,
-        jwt_signing_key,
+        auth_token_service,
         service_token_hash_key,
     };
 

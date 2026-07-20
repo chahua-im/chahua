@@ -38,11 +38,6 @@ pub struct MeResponse {
     pub permissions: Vec<String>,
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct AuthTokenResponse {
-    pub token: String,
-}
-
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberSummary {

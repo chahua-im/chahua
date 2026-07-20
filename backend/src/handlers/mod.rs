@@ -1,4 +1,5 @@
 pub mod attachments;
+pub mod auth;
 pub mod chats;
 pub mod external;
 pub mod groups;
@@ -18,6 +19,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 pub fn api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .nest("/auth", auth::router())
         .nest("/ws", ws::router())
         .nest("/chats", chats::router())
         .nest("/threads", threads::router())

@@ -8,9 +8,8 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::dto::users::{
-    AuthTokenResponse, MeResponse, MemberSummary, SearchUsersResponse, StickerPackOrderItem,
-};
+use crate::dto::auth::AuthTokenResponse;
+use crate::dto::users::{MeResponse, MemberSummary, SearchUsersResponse, StickerPackOrderItem};
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
@@ -20,9 +19,7 @@ use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
 use crate::services::user::{
     lookup_user_avatars, lookup_user_profiles, search_user_uids_by_prefix,
 };
-use crate::utils::auth::{
-    encode_auth_token, extract_auth_context, required_client_id, AuthClaims, AuthSource, CurrentUid,
-};
+use crate::utils::auth::{extract_auth_context, required_client_id, AuthSource, CurrentUid};
 use crate::AppState;
 use diesel::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -395,6 +392,8 @@ async fn get_user_search(
     Ok(Json(SearchUsersResponse { members, excluded }))
 }
 
+/// Planned for deprecation: we are moving towards a model with we always
+/// authenticate with a JWT token.
 #[utoipa::path(
     get,
     path = "/auth-token",
@@ -414,14 +413,9 @@ async fn get_auth_token(
         None => return Err(AppError::BadRequest("Missing X-Client-Id header")),
     };
 
-    let token = encode_auth_token(
-        &AuthClaims {
-            uid: auth.uid,
-            cid: client_id,
-            gen: 0,
-        },
-        &state.jwt_signing_key,
-    )?;
+    let token = state
+        .auth_token_service
+        .issue_legacy_session(auth.uid, &client_id, 0)?;
 
     Ok(Json(AuthTokenResponse { token }))
 }
