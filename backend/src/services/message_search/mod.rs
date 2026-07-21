@@ -846,6 +846,7 @@ mod tests {
             is_published: true,
             transcode_status: TranscodeStatus::None,
             forwarded_messages_payload: None,
+            forwarded_bundle_id: None,
         }
     }
 

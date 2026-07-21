@@ -140,6 +140,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    forwarded_bundles (id) {
+        id -> Int8,
+        created_by_uid -> Int4,
+        created_at -> Timestamptz,
+        item_count -> Int4,
+        payload -> Jsonb,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::GroupRole;
     use super::sql_types::GroupJoinReason;
@@ -270,6 +280,7 @@ diesel::table! {
         is_published -> Bool,
         transcode_status -> TranscodeStatus,
         forwarded_messages_payload -> Nullable<Jsonb>,
+        forwarded_bundle_id -> Nullable<Int8>,
     }
 }
 
@@ -481,6 +492,7 @@ diesel::table! {
 }
 
 diesel::joinable!(attachments -> messages (message_id));
+diesel::joinable!(messages -> forwarded_bundles (forwarded_bundle_id));
 diesel::joinable!(group_membership -> groups (chat_id));
 diesel::joinable!(groups -> media (avatar_image_id));
 diesel::joinable!(message_mentions -> groups (chat_id));
@@ -508,6 +520,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     clients,
     friend_requests,
     friendships,
+    forwarded_bundles,
     group_membership,
     groups,
     invites,

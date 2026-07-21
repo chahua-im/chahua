@@ -1332,6 +1332,7 @@ pub async fn send_prepared_message(
         is_published: prepared.publish_immediately,
         transcode_status,
         forwarded_messages_payload: prepared.forwarded_messages_payload.clone(),
+        forwarded_bundle_id: None,
     };
 
     let inserted_msg: Option<Message> = diesel::insert_into(messages_schema::table)
@@ -2285,6 +2286,8 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_messages_payload: None,
+            forwarded_bundle_id: None,
         }
     }
 
