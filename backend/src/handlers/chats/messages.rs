@@ -20,8 +20,10 @@ use crate::{
     errors::AppError,
     extractors::DbConn,
     handlers::{groups::load_requester_group_role, members::check_membership},
-    models::{GroupRole, Message, MessageType},
-    schema::{attachments, group_membership, groups, messages, messages::dsl},
+    models::{GroupRole, Message, MessageType, NewForwardedBundle},
+    schema::{
+        attachments, forwarded_bundles, group_membership, groups, messages, messages::dsl,
+    },
     services::message_search::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
         MessageSearchSort, SearchCandidateDropCounts,
@@ -29,6 +31,7 @@ use crate::{
     services::user::lookup_user_profiles,
     utils::{
         auth::{CurrentUid, Principal},
+        ids,
         pagination::validate_limit,
     },
     AppState, MAX_MESSAGES_LIMIT,
@@ -619,6 +622,8 @@ async fn post_message(
                 attachment_ids,
                 publish_immediately,
                 forwarded_messages_payload: None,
+                forwarded_bundle_id: None,
+                forwarded_preview_snapshots: None,
             },
         )
         .await?;
@@ -720,19 +725,33 @@ async fn forward_messages(
         build_forwarded_message_snapshots(conn, source_messages)?;
     let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_message_snapshots)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
+    let forwarded_message_count = forwarded_message_snapshots.len();
 
     diesel::sql_query("BEGIN").execute(conn)?;
     let tx_result: Result<_, AppError> = async {
+        let bundle_id = ids::next_id(state.id_gen.as_ref()).await.map_err(|e| {
+            tracing::error!("next_id for forwarded bundle: {:?}", e);
+            AppError::Internal("ID generation failed")
+        })?;
+        let now = Utc::now();
+        let new_bundle = NewForwardedBundle {
+            id: bundle_id,
+            created_by_uid: uid,
+            created_at: now,
+            item_count: forwarded_message_count as i32,
+            payload: forwarded_message_snapshots_payload,
+        };
+        diesel::insert_into(forwarded_bundles::table)
+            .values(&new_bundle)
+            .execute(conn)?;
+
         let send_result = send_prepared_message(
             conn,
             &state,
             PreparedMessageSend {
                 chat_id: dest_chat_id,
                 sender_uid: uid,
-                message: Some(format!(
-                    "Forwarded {} messages",
-                    forwarded_message_snapshots.len()
-                )),
+                message: Some(format!("Forwarded {} messages", forwarded_message_count)),
                 message_type: MessageType::Forwarded,
                 sticker_id: None,
                 reply_to_id: None,
@@ -740,7 +759,9 @@ async fn forward_messages(
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
-                forwarded_messages_payload: Some(forwarded_message_snapshots_payload),
+                forwarded_messages_payload: None,
+                forwarded_bundle_id: Some(bundle_id),
+                forwarded_preview_snapshots: Some(forwarded_message_snapshots),
             },
         )
         .await?;
@@ -825,8 +846,14 @@ async fn get_forwarded_messages(
         return Err(AppError::BadRequest("Message is not a forwarded message"));
     }
 
-    let payload = message
-        .forwarded_messages_payload
+    let bundle_id = message
+        .forwarded_bundle_id
+        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
+    let payload = forwarded_bundles::table
+        .filter(forwarded_bundles::id.eq(bundle_id))
+        .select(forwarded_bundles::payload)
+        .first(conn)
+        .optional()?
         .ok_or(AppError::NotFound("Forwarded messages not found"))?;
     let snapshots: Vec<ForwardedMessageSnapshot> = serde_json::from_value(payload)
         .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
@@ -897,6 +924,8 @@ pub(super) async fn post_thread_message(
                 attachment_ids,
                 publish_immediately,
                 forwarded_messages_payload: None,
+                forwarded_bundle_id: None,
+                forwarded_preview_snapshots: None,
             },
         )
         .await?;
@@ -1397,14 +1426,18 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        search_limit, search_next_offset, search_offset, validate_client_message_type,
-        validate_forwardable_source_message_type, FORWARDED_MESSAGE_TYPE_FORBIDDEN,
-        INVITE_MESSAGE_FORWARD_FORBIDDEN, INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW,
-        SYSTEM_MESSAGE_FORWARD_FORBIDDEN, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
+        build_forwarded_message_snapshot, search_limit, search_next_offset, search_offset,
+        validate_client_message_type, validate_forwardable_source_message_type,
+        FORWARDED_MESSAGE_TYPE_FORBIDDEN, INVITE_MESSAGE_FORWARD_FORBIDDEN,
+        INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW, SYSTEM_MESSAGE_FORWARD_FORBIDDEN,
+        SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
+    use crate::dto::{attachments::AttachmentResponse, messages::MessageResponse, users::User};
     use crate::errors::AppError;
     use crate::models::MessageType;
     use crate::services::message_search::MessageSearchSort;
+    use chrono::Utc;
+    use std::collections::HashMap;
 
     #[test]
     fn rejects_system_message_type_from_clients() {
@@ -1459,6 +1492,53 @@ mod tests {
         assert!(validate_forwardable_source_message_type(&MessageType::File).is_ok());
         assert!(validate_forwardable_source_message_type(&MessageType::Sticker).is_ok());
         assert!(validate_forwardable_source_message_type(&MessageType::Forwarded).is_ok());
+    }
+
+    #[test]
+    fn forwarded_snapshot_uses_attachment_storage_key_not_public_url() {
+        let response = MessageResponse {
+            id: 10,
+            message: Some("photo".to_string()),
+            message_type: MessageType::File,
+            sticker: None,
+            reply_root_id: None,
+            client_generated_id: "client-10".to_string(),
+            sender: User {
+                uid: 7,
+                avatar_url: None,
+                name: Some("Alice".to_string()),
+                gender: 0,
+                user_group: None,
+            },
+            chat_id: 20,
+            created_at: Utc::now(),
+            is_edited: false,
+            is_deleted: false,
+            has_attachments: true,
+            thread_info: None,
+            reply_to_message: None,
+            attachments: vec![AttachmentResponse {
+                id: 30,
+                url: "https://cdn.example.test/public-image.png".to_string(),
+                kind: "image/png".to_string(),
+                size: 123,
+                file_name: "image.png".to_string(),
+                width: Some(640),
+                height: Some(480),
+            }],
+            reactions: vec![],
+            mentions: vec![],
+            forwarded_preview: None,
+        };
+        let attachment_storage_keys = HashMap::from([(30, "media/private-image-key".to_string())]);
+
+        let snapshot = build_forwarded_message_snapshot(response, &attachment_storage_keys)
+            .expect("snapshot should build");
+
+        assert_eq!(
+            snapshot.attachments[0].external_reference,
+            "media/private-image-key"
+        );
     }
 
     #[test]

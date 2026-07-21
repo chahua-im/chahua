@@ -492,12 +492,12 @@ diesel::table! {
 }
 
 diesel::joinable!(attachments -> messages (message_id));
-diesel::joinable!(messages -> forwarded_bundles (forwarded_bundle_id));
 diesel::joinable!(group_membership -> groups (chat_id));
 diesel::joinable!(groups -> media (avatar_image_id));
 diesel::joinable!(message_mentions -> groups (chat_id));
 diesel::joinable!(message_mentions -> messages (message_id));
 diesel::joinable!(message_reactions -> messages (message_id));
+diesel::joinable!(messages -> forwarded_bundles (forwarded_bundle_id));
 diesel::joinable!(messages -> stickers (sticker_id));
 diesel::joinable!(pinned_messages -> groups (chat_id));
 diesel::joinable!(policy_assignments -> policies (policy_id));

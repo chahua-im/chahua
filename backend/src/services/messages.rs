@@ -95,6 +95,8 @@ pub struct PreparedMessageSend {
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
     pub forwarded_messages_payload: Option<serde_json::Value>,
+    pub forwarded_bundle_id: Option<i64>,
+    pub forwarded_preview_snapshots: Option<Vec<ForwardedMessageSnapshot>>,
 }
 
 /// Authorization failures for a user-originated message send.
@@ -1332,7 +1334,7 @@ pub async fn send_prepared_message(
         is_published: prepared.publish_immediately,
         transcode_status,
         forwarded_messages_payload: prepared.forwarded_messages_payload.clone(),
-        forwarded_bundle_id: None,
+        forwarded_bundle_id: prepared.forwarded_bundle_id,
     };
 
     let inserted_msg: Option<Message> = diesel::insert_into(messages_schema::table)
@@ -1357,7 +1359,7 @@ pub async fn send_prepared_message(
             stored_message.as_deref(),
             &existing_attachment_ids,
         )?;
-        let response = attach_metadata(
+        let mut response = attach_metadata(
             conn,
             vec![existing],
             &state.media,
@@ -1368,6 +1370,12 @@ pub async fn send_prepared_message(
         .into_iter()
         .next()
         .ok_or(AppError::Internal("Failed to build message response"))?;
+        apply_forwarded_preview_override(
+            conn,
+            state,
+            &mut response,
+            prepared.forwarded_preview_snapshots.as_deref(),
+        );
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
     };
 
@@ -1425,7 +1433,7 @@ pub async fn send_prepared_message(
         }
     }
 
-    let response = attach_metadata(
+    let mut response = attach_metadata(
         conn,
         vec![inserted_msg.clone()],
         &state.media,
@@ -1436,6 +1444,12 @@ pub async fn send_prepared_message(
     .into_iter()
     .next()
     .ok_or(AppError::Internal("Failed to build message response"))?;
+    apply_forwarded_preview_override(
+        conn,
+        state,
+        &mut response,
+        prepared.forwarded_preview_snapshots.as_deref(),
+    );
 
     let (member_uids, side_effects) = if prepared.publish_immediately {
         let side_effects = build_message_side_effects(
@@ -1479,6 +1493,27 @@ pub async fn send_prepared_message(
     })))
 }
 
+fn apply_forwarded_preview_override(
+    conn: &mut PgConnection,
+    state: &AppState,
+    response: &mut MessageResponse,
+    snapshots: Option<&[ForwardedMessageSnapshot]>,
+) {
+    let Some(snapshots) = snapshots.filter(|_| !response.is_deleted) else {
+        return;
+    };
+    let mut forwarded_uids = std::collections::HashSet::new();
+    collect_forwarded_snapshot_uids(snapshots, &mut forwarded_uids);
+    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
+    let user_avatars = state.avatars.lookup(&forwarded_uids);
+    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
+    response.forwarded_preview = Some(forwarded_messages_preview_response(
+        snapshots,
+        &user_avatars,
+        &user_profiles,
+    ));
+}
+
 fn load_message_attachment_ids(conn: &mut PgConnection, message_id: i64) -> QueryResult<Vec<i64>> {
     use crate::schema::attachments::dsl as a_dsl;
     attachments::table
@@ -1505,6 +1540,7 @@ fn validate_idempotent_message_payload(
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
         && existing.forwarded_messages_payload == prepared.forwarded_messages_payload
+        && existing.forwarded_bundle_id == prepared.forwarded_bundle_id
         && attachment_ids_match
     {
         return Ok(());
@@ -2294,6 +2330,8 @@ mod tests {
     fn test_prepared_message() -> PreparedMessageSend {
         PreparedMessageSend {
             chat_id: 42,
+            forwarded_bundle_id: None,
+            forwarded_preview_snapshots: None,
             sender_uid: 7,
             message: Some("hello".to_string()),
             message_type: MessageType::Text,
