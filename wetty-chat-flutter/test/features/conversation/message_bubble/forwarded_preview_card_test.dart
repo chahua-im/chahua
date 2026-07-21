@@ -38,9 +38,18 @@ void main() {
       (chatId: 42, messageId: 100),
     ]);
     expect(
-      find.byKey(const ValueKey('forwarded-message-1-20')),
+      find.byKey(const ValueKey('forwarded-message-77-200')),
       findsOneWidget,
     );
+
+    await tester.tap(find.text('Chat History').last);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(api.forwardedMessageRequests, <({int chatId, int messageId})>[
+      (chatId: 42, messageId: 100),
+      (chatId: 77, messageId: 200),
+    ]);
   });
 }
 
@@ -115,14 +124,28 @@ class _FakeMessageApiService extends MessageApiServiceV2 {
     required int messageId,
   }) async {
     forwardedMessageRequests.add((chatId: chatId, messageId: messageId));
+    if (messageId == 200) {
+      return const ForwardedMessagesResponseDto(
+        total: 1,
+        messages: <ForwardedMessageResponseDto>[
+          ForwardedMessageResponseDto(
+            originalMessageId: 201,
+            originalChatId: 77,
+            message: 'Nested message',
+            messageType: 'text',
+            sender: UserDto(uid: 3, name: 'Carol'),
+          ),
+        ],
+      );
+    }
     return const ForwardedMessagesResponseDto(
       total: 1,
       messages: <ForwardedMessageResponseDto>[
         ForwardedMessageResponseDto(
-          originalMessageId: 20,
-          originalChatId: 1,
-          message: 'Loaded full forwarded message',
-          messageType: 'text',
+          originalMessageId: 200,
+          originalChatId: 77,
+          message: 'Nested forwarded message',
+          messageType: 'forwarded',
           sender: UserDto(uid: 2, name: 'Bob'),
         ),
       ],

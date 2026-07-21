@@ -342,6 +342,7 @@ class _ForwardedMessagesList extends StatelessWidget {
   ) {
     return ConversationMessageV2(
       serverMessageId: forwardedMessage.originalMessageId,
+      chatId: forwardedMessage.originalChatId,
       clientGeneratedId:
           'forwarded:${forwardedMessage.originalChatId}:${forwardedMessage.originalMessageId}',
       sender: forwardedMessage.sender,
