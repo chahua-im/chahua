@@ -94,7 +94,6 @@ pub struct PreparedMessageSend {
     pub client_generated_id: String,
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
-    pub forwarded_messages_payload: Option<serde_json::Value>,
     pub forwarded_bundle_id: Option<i64>,
     pub forwarded_preview_snapshots: Option<Vec<ForwardedMessageSnapshot>>,
 }
@@ -1333,7 +1332,6 @@ pub async fn send_prepared_message(
         has_reactions: false,
         is_published: prepared.publish_immediately,
         transcode_status,
-        forwarded_messages_payload: prepared.forwarded_messages_payload.clone(),
         forwarded_bundle_id: prepared.forwarded_bundle_id,
     };
 
@@ -1539,7 +1537,6 @@ fn validate_idempotent_message_payload(
         && existing.sticker_id == prepared.sticker_id
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
-        && existing.forwarded_messages_payload == prepared.forwarded_messages_payload
         && existing.forwarded_bundle_id == prepared.forwarded_bundle_id
         && attachment_ids_match
     {
@@ -1599,18 +1596,6 @@ pub async fn attach_metadata(
     }
     for reply_msg in reply_messages_map.values() {
         avatar_uids.insert(reply_msg.sender_uid);
-    }
-    for message in &messages_to_process {
-        if let Some(payload) = &message.forwarded_messages_payload {
-            match serde_json::from_value::<Vec<ForwardedMessageSnapshot>>(payload.clone()) {
-                Ok(snapshots) => collect_forwarded_snapshot_uids(&snapshots, &mut avatar_uids),
-                Err(err) => tracing::warn!(
-                    message_id = message.id,
-                    ?err,
-                    "failed to deserialize forwarded message payload for user hydration"
-                ),
-            }
-        }
     }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
     let mut user_avatars = avatars.lookup(&target_uids);
@@ -1932,28 +1917,7 @@ pub async fn attach_metadata(
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
             },
-            forwarded_preview: if is_deleted {
-                None
-            } else {
-                m.forwarded_messages_payload.as_ref().and_then(|payload| {
-                    serde_json::from_value::<Vec<ForwardedMessageSnapshot>>(payload.clone())
-                        .map(|snapshots| {
-                            forwarded_messages_preview_response(
-                                &snapshots,
-                                &user_avatars,
-                                &user_profiles,
-                            )
-                        })
-                        .map_err(|err| {
-                            tracing::warn!(
-                                message_id = m.id,
-                                ?err,
-                                "failed to deserialize forwarded message payload"
-                            );
-                        })
-                        .ok()
-                })
-            },
+            forwarded_preview: None,
         };
         redact_deleted_message_response(&mut response);
         responses.push(response);

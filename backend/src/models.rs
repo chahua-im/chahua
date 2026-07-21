@@ -537,7 +537,6 @@ pub struct NewInvite {
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]
 #[diesel(table_name = schema::forwarded_bundles)]
-#[allow(dead_code)]
 pub struct ForwardedBundle {
     pub id: i64,
     pub created_by_uid: i32,
@@ -576,7 +575,6 @@ pub struct Message {
     pub sticker_id: Option<i64>,
     pub is_published: bool,
     pub transcode_status: TranscodeStatus,
-    pub forwarded_messages_payload: Option<serde_json::Value>,
     pub forwarded_bundle_id: Option<i64>,
 }
 
@@ -600,7 +598,6 @@ pub struct NewMessage {
     pub sticker_id: Option<i64>,
     pub is_published: bool,
     pub transcode_status: TranscodeStatus,
-    pub forwarded_messages_payload: Option<serde_json::Value>,
     pub forwarded_bundle_id: Option<i64>,
 }
 
