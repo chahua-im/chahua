@@ -290,6 +290,8 @@ async fn post_add_member(
                 attachment_ids: vec![],
                 publish_immediately: true,
                 forwarded_messages_payload: None,
+                forwarded_bundle_id: None,
+                forwarded_preview_snapshots: None,
             },
         )
         .await
@@ -423,6 +425,8 @@ async fn delete_remove_member(
                 attachment_ids: vec![],
                 publish_immediately: true,
                 forwarded_messages_payload: None,
+                forwarded_bundle_id: None,
+                forwarded_preview_snapshots: None,
             },
         )
         .await

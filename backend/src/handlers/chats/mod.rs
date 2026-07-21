@@ -115,6 +115,8 @@ pub(crate) struct PreparedMessageSend {
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
     pub forwarded_messages_payload: Option<serde_json::Value>,
+    pub forwarded_bundle_id: Option<i64>,
+    pub forwarded_preview_snapshots: Option<Vec<ForwardedMessageSnapshot>>,
 }
 
 pub(crate) struct SendMessageResult {
@@ -844,7 +846,7 @@ pub(crate) async fn send_prepared_message(
         is_published: prepared.publish_immediately,
         transcode_status,
         forwarded_messages_payload: prepared.forwarded_messages_payload.clone(),
-        forwarded_bundle_id: None,
+        forwarded_bundle_id: prepared.forwarded_bundle_id,
     };
 
     let inserted_msg: Option<Message> = diesel::insert_into(messages_schema::table)
@@ -863,7 +865,7 @@ pub(crate) async fn send_prepared_message(
             .ok_or(AppError::Conflict("Duplicate client generated id"))?;
         let existing_attachment_ids = load_message_attachment_ids(conn, existing.id)?;
         validate_idempotent_message_payload(&existing, &prepared, &existing_attachment_ids)?;
-        let response = attach_metadata(
+        let mut response = attach_metadata(
             conn,
             vec![existing],
             &state.media,
@@ -874,6 +876,12 @@ pub(crate) async fn send_prepared_message(
         .into_iter()
         .next()
         .ok_or(AppError::Internal("Failed to build message response"))?;
+        apply_forwarded_preview_override(
+            conn,
+            state,
+            &mut response,
+            prepared.forwarded_preview_snapshots.as_deref(),
+        );
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
     };
     state.metrics.chat.record_message(prepared.chat_id);
@@ -895,7 +903,7 @@ pub(crate) async fn send_prepared_message(
             .execute(conn)?;
     }
 
-    let response = attach_metadata(
+    let mut response = attach_metadata(
         conn,
         vec![inserted_msg.clone()],
         &state.media,
@@ -906,6 +914,12 @@ pub(crate) async fn send_prepared_message(
     .into_iter()
     .next()
     .ok_or(AppError::Internal("Failed to build message response"))?;
+    apply_forwarded_preview_override(
+        conn,
+        state,
+        &mut response,
+        prepared.forwarded_preview_snapshots.as_deref(),
+    );
 
     let (member_uids, side_effects) = if prepared.publish_immediately {
         let side_effects = build_message_side_effects(
@@ -977,6 +991,7 @@ fn validate_idempotent_message_payload(
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
         && existing.forwarded_messages_payload == prepared.forwarded_messages_payload
+        && existing.forwarded_bundle_id == prepared.forwarded_bundle_id
         && attachment_ids_match
     {
         return Ok(());
@@ -985,6 +1000,31 @@ fn validate_idempotent_message_payload(
     Err(AppError::Conflict(
         "clientGeneratedId already exists with different payload",
     ))
+}
+
+fn apply_forwarded_preview_override(
+    conn: &mut PgConnection,
+    state: &AppState,
+    response: &mut MessageResponse,
+    snapshots: Option<&[ForwardedMessageSnapshot]>,
+) {
+    let Some(snapshots) = snapshots else {
+        return;
+    };
+    if response.is_deleted {
+        return;
+    }
+
+    let mut forwarded_uids = std::collections::HashSet::new();
+    collect_forwarded_snapshot_uids(snapshots, &mut forwarded_uids);
+    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
+    let user_avatars = state.avatars.lookup(&forwarded_uids);
+    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
+    response.forwarded_preview = Some(forwarded_messages_preview_response(
+        snapshots,
+        &user_avatars,
+        &user_profiles,
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -2261,6 +2301,25 @@ mod tests {
     }
 
     #[test]
+    fn idempotent_message_payload_rejects_different_forwarded_bundle() {
+        let existing = Message {
+            message_type: MessageType::Forwarded,
+            forwarded_bundle_id: Some(10),
+            ..test_message()
+        };
+        let prepared = PreparedMessageSend {
+            message_type: MessageType::Forwarded,
+            forwarded_bundle_id: Some(11),
+            ..test_prepared_message()
+        };
+
+        assert!(matches!(
+            super::validate_idempotent_message_payload(&existing, &prepared, &[10, 11]),
+            Err(super::AppError::Conflict(_))
+        ));
+    }
+
+    #[test]
     fn idempotent_message_payload_rejects_different_attachment_set() {
         let existing = test_message();
         let prepared = test_prepared_message();
@@ -2328,6 +2387,8 @@ mod tests {
             attachment_ids: vec![10, 11],
             publish_immediately: true,
             forwarded_messages_payload: None,
+            forwarded_bundle_id: None,
+            forwarded_preview_snapshots: None,
         }
     }
 

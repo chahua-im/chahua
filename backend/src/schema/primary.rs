@@ -370,9 +370,9 @@ diesel::table! {
         chat_id -> Int8,
         thread_root_id -> Int8,
         uid -> Int4,
+        last_read_message_id -> Nullable<Int8>,
         subscribed_at -> Timestamptz,
         archived -> Bool,
-        last_read_message_id -> Nullable<Int8>,
         subscribed -> Bool,
     }
 }
@@ -413,10 +413,10 @@ diesel::table! {
 }
 
 diesel::joinable!(attachments -> messages (message_id));
-diesel::joinable!(messages -> forwarded_bundles (forwarded_bundle_id));
 diesel::joinable!(group_membership -> groups (chat_id));
 diesel::joinable!(groups -> media (avatar_image_id));
 diesel::joinable!(message_reactions -> messages (message_id));
+diesel::joinable!(messages -> forwarded_bundles (forwarded_bundle_id));
 diesel::joinable!(messages -> stickers (sticker_id));
 diesel::joinable!(pinned_messages -> groups (chat_id));
 diesel::joinable!(pinned_messages -> messages (message_id));
