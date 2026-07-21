@@ -21,7 +21,7 @@ use crate::{
     errors::AppError,
     extractors::DbConn,
     handlers::{groups::load_requester_group_role, members::check_membership},
-    models::{Attachment, GroupRole, Message, MessageType, NewForwardedBundle},
+    models::{Attachment, ForwardedBundle, GroupRole, Message, MessageType, NewForwardedBundle},
     schema::{attachments, forwarded_bundles, group_membership, groups, messages, messages::dsl},
     services::message_search::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
@@ -739,7 +739,6 @@ async fn post_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
-                forwarded_messages_payload: None,
                 forwarded_bundle_id: None,
                 forwarded_preview_snapshots: None,
             },
@@ -879,7 +878,6 @@ async fn forward_messages(
                 client_generated_id: uuid::Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
-                forwarded_messages_payload: None,
                 forwarded_bundle_id: Some(bundle_id),
                 forwarded_preview_snapshots: Some(forwarded_message_snapshots),
             },
@@ -966,17 +964,23 @@ async fn get_forwarded_messages(
         return Err(AppError::BadRequest("Message is not a forwarded message"));
     }
 
-    let payload = message
-        .forwarded_messages_payload
+    let bundle_id = message
+        .forwarded_bundle_id
         .ok_or(AppError::NotFound("Forwarded messages not found"))?;
-    let snapshots: Vec<ForwardedMessageSnapshot> = serde_json::from_value(payload)
+    let bundle: ForwardedBundle = forwarded_bundles::table
+        .filter(forwarded_bundles::id.eq(bundle_id))
+        .select(ForwardedBundle::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
+    let total = bundle.item_count as usize;
+    let snapshots: Vec<ForwardedMessageSnapshot> = serde_json::from_value(bundle.payload)
         .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
     let mut forwarded_uids = std::collections::HashSet::new();
     collect_forwarded_snapshot_uids(&snapshots, &mut forwarded_uids);
     let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
     let user_avatars = state.avatars.lookup(&forwarded_uids);
     let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
-    let total = snapshots.len();
     let messages = snapshots
         .into_iter()
         .map(|snapshot| forwarded_message_response(&state, snapshot, &user_avatars, &user_profiles))
@@ -1066,7 +1070,6 @@ pub(super) async fn post_thread_message(
                 client_generated_id: body.client_generated_id,
                 attachment_ids,
                 publish_immediately,
-                forwarded_messages_payload: None,
                 forwarded_bundle_id: None,
                 forwarded_preview_snapshots: None,
             },

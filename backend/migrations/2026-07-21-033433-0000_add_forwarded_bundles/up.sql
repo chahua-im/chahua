@@ -2,7 +2,7 @@ CREATE TABLE forwarded_bundles (
     id BIGINT PRIMARY KEY,
     created_by_uid INTEGER NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
-    item_count INTEGER NOT NULL,
+    item_count INTEGER NOT NULL CHECK (item_count >= 0),
     payload JSONB NOT NULL
 );
 
