@@ -372,7 +372,7 @@ async fn post_send_invite_message(
             publish_immediately: true,
             forwarded_bundle_id: None,
             forwarded_preview_total: None,
-            forwarded_preview_snapshots: None,
+            forwarded_preview_items: None,
         },
     )
     .await?;
@@ -732,7 +732,7 @@ async fn post_redeem_invite(
                 publish_immediately: true,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
-                forwarded_preview_snapshots: None,
+                forwarded_preview_items: None,
             },
         )
         .await

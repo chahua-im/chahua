@@ -397,7 +397,7 @@ async fn send_pin_system_message(
                 publish_immediately: true,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
-                forwarded_preview_snapshots: None,
+                forwarded_preview_items: None,
             },
         )
         .await
