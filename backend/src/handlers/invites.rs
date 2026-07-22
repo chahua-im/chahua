@@ -371,6 +371,7 @@ async fn post_send_invite_message(
             attachment_ids: vec![],
             publish_immediately: true,
             forwarded_bundle_id: None,
+            forwarded_preview_total: None,
             forwarded_preview_snapshots: None,
         },
     )
@@ -730,6 +731,7 @@ async fn post_redeem_invite(
                 attachment_ids: vec![],
                 publish_immediately: true,
                 forwarded_bundle_id: None,
+                forwarded_preview_total: None,
                 forwarded_preview_snapshots: None,
             },
         )

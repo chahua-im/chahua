@@ -431,6 +431,7 @@ async fn send_friendship_accepted_message(
                 attachment_ids: vec![],
                 publish_immediately: true,
                 forwarded_bundle_id: None,
+                forwarded_preview_total: None,
                 forwarded_preview_snapshots: None,
             },
         )

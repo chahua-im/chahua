@@ -95,6 +95,7 @@ pub struct PreparedMessageSend {
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
     pub forwarded_bundle_id: Option<i64>,
+    pub forwarded_preview_total: Option<usize>,
     pub forwarded_preview_snapshots: Option<Vec<ForwardedMessageSnapshot>>,
 }
 
@@ -504,7 +505,7 @@ pub fn redact_deleted_message_response(response: &mut MessageResponse) {
     response.forwarded_preview = None;
 }
 
-const FORWARDED_PREVIEW_LIMIT: usize = 3;
+pub const FORWARDED_PREVIEW_LIMIT: usize = 3;
 
 pub fn build_forwarded_message_snapshots(
     conn: &mut PgConnection,
