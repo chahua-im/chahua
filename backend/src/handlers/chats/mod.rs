@@ -520,9 +520,6 @@ pub(crate) fn collect_forwarded_bundle_item_uids(
             }
             ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => {
                 uids.insert(bundle_ref.sender_uid);
-                for preview_item in &bundle_ref.preview.messages {
-                    collect_forwarded_bundle_item_uids(std::slice::from_ref(preview_item), uids);
-                }
             }
         }
     }

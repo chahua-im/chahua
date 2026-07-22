@@ -13,9 +13,9 @@ use crate::{
     dto::{
         attachments::AttachmentSnapshot,
         messages::{
-            ForwardedBundlePayloadItem, MessagePreviewSnapshot, ForwardedMessageSnapshot,
-            ForwardedMessagesResponse, ListMessagesResponse, MessagePreview, MessageResponse,
-            SearchMessagesResponse,
+            ForwardedBundlePayloadItem, ForwardedBundleRefSnapshot, ForwardedMessageSnapshot,
+            ForwardedMessagesPreviewSnapshot, ForwardedMessagesResponse, ListMessagesResponse,
+            MessagePreview, MessagePreviewSnapshot, MessageResponse, SearchMessagesResponse,
         },
         ws::ServerWsMessage,
     },
@@ -240,9 +240,87 @@ fn build_forwarded_message_snapshot(
     })
 }
 
-fn build_forwarded_message_preview_snapshot(
-    preview: MessagePreview,
-) -> MessagePreviewSnapshot {
+fn build_forwarded_bundle_ref_snapshot(
+    source_message: &Message,
+    referenced_bundle_previews: &std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>,
+) -> Result<ForwardedBundleRefSnapshot, AppError> {
+    let forwarded_bundle_id = source_message
+        .forwarded_bundle_id
+        .ok_or(AppError::BadRequest(
+            "Forwarded source message has no bundle",
+        ))?;
+    let preview = referenced_bundle_previews
+        .get(&forwarded_bundle_id)
+        .cloned()
+        .ok_or(AppError::BadRequest("Forwarded source bundle not found"))?;
+
+    Ok(ForwardedBundleRefSnapshot {
+        original_message_id: source_message.id,
+        original_chat_id: source_message.chat_id,
+        forwarded_bundle_id,
+        message: source_message.message.clone(),
+        message_type: source_message.message_type.clone(),
+        sender_uid: source_message.sender_uid,
+        original_created_at: source_message.created_at,
+        preview,
+    })
+}
+
+fn build_forwarded_bundle_payload_item(
+    source_message: &Message,
+    response: MessageResponse,
+    attachment_storage_keys: &std::collections::HashMap<i64, String>,
+    referenced_bundle_previews: &std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>,
+) -> Result<ForwardedBundlePayloadItem, AppError> {
+    if matches!(source_message.message_type, MessageType::Forwarded) {
+        return Ok(ForwardedBundlePayloadItem::ForwardedBundleRef {
+            bundle_ref: build_forwarded_bundle_ref_snapshot(
+                source_message,
+                referenced_bundle_previews,
+            )?,
+        });
+    }
+
+    Ok(ForwardedBundlePayloadItem::MessageSnapshot {
+        snapshot: build_forwarded_message_snapshot(response, attachment_storage_keys)?,
+    })
+}
+
+fn load_forwarded_bundle_preview_items(
+    conn: &mut PgConnection,
+    bundle_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>, AppError> {
+    if bundle_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let bundles: Vec<ForwardedBundle> = forwarded_bundles::table
+        .filter(forwarded_bundles::id.eq_any(bundle_ids))
+        .select(ForwardedBundle::as_select())
+        .load(conn)?;
+
+    if bundles.len() != bundle_ids.len() {
+        return Err(AppError::BadRequest("Forwarded source bundle not found"));
+    }
+
+    bundles
+        .into_iter()
+        .map(|bundle| {
+            let total = bundle.item_count as usize;
+            let messages: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
+                .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
+            Ok((
+                bundle.id,
+                ForwardedMessagesPreviewSnapshot {
+                    total,
+                    messages: messages.into_iter().take(FORWARDED_PREVIEW_LIMIT).collect(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn build_forwarded_message_preview_snapshot(preview: MessagePreview) -> MessagePreviewSnapshot {
     MessagePreviewSnapshot {
         id: preview.id,
         client_generated_id: preview.client_generated_id,
@@ -838,16 +916,35 @@ async fn forward_messages(
         validate_forwardable_source_message_type(&message.message_type)?;
     }
 
-    let source_messages = attach_metadata(conn, messages, &state, uid).await;
-    let attachment_storage_keys = load_attachment_storage_keys(conn, &source_messages)?;
-    let forwarded_message_snapshots: Vec<ForwardedMessageSnapshot> = source_messages
+    let forwarded_source_bundle_ids: Vec<i64> = messages
+        .iter()
+        .filter(|message| matches!(message.message_type, MessageType::Forwarded))
+        .map(|message| {
+            message.forwarded_bundle_id.ok_or(AppError::BadRequest(
+                "Forwarded source message has no bundle",
+            ))
+        })
+        .collect::<Result<std::collections::HashSet<_>, AppError>>()?
         .into_iter()
-        .map(|response| build_forwarded_message_snapshot(response, &attachment_storage_keys))
-        .collect::<Result<Vec<_>, AppError>>()?;
-    let forwarded_payload_items: Vec<ForwardedBundlePayloadItem> = forwarded_message_snapshots
-        .into_iter()
-        .map(|snapshot| ForwardedBundlePayloadItem::MessageSnapshot { snapshot })
         .collect();
+    let referenced_bundle_previews =
+        load_forwarded_bundle_preview_items(conn, &forwarded_source_bundle_ids)?;
+
+    let source_messages =
+        attach_metadata(conn, messages.clone(), &state.media, &state.avatars, uid).await;
+    let attachment_storage_keys = load_attachment_storage_keys(conn, &source_messages)?;
+    let forwarded_payload_items: Vec<ForwardedBundlePayloadItem> = messages
+        .iter()
+        .zip(source_messages)
+        .map(|(message, response)| {
+            build_forwarded_bundle_payload_item(
+                message,
+                response,
+                &attachment_storage_keys,
+                &referenced_bundle_previews,
+            )
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
     let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_payload_items)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
     let forwarded_message_count = forwarded_payload_items.len();
@@ -1520,22 +1617,48 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_forwarded_message_snapshot, search_limit, search_next_offset, search_offset,
-        validate_client_message_type, validate_forwardable_source_message_type,
-        FORWARDED_MESSAGE_TYPE_FORBIDDEN, INVITE_MESSAGE_FORWARD_FORBIDDEN,
-        INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW, SYSTEM_MESSAGE_FORWARD_FORBIDDEN,
-        SYSTEM_MESSAGE_TYPE_FORBIDDEN,
+        build_forwarded_bundle_ref_snapshot, build_forwarded_message_snapshot, search_limit,
+        search_next_offset, search_offset, validate_client_message_type,
+        validate_forwardable_source_message_type, FORWARDED_MESSAGE_TYPE_FORBIDDEN,
+        INVITE_MESSAGE_FORWARD_FORBIDDEN, INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW,
+        SYSTEM_MESSAGE_FORWARD_FORBIDDEN, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
     use crate::dto::{
         attachments::AttachmentResponse,
-        messages::{ForwardedBundlePayloadItem, ForwardedMessageSnapshot, MessageResponse},
+        messages::{
+            ForwardedBundlePayloadItem, ForwardedMessageSnapshot, ForwardedMessagesPreviewSnapshot,
+            MessageResponse,
+        },
         users::User,
     };
     use crate::errors::AppError;
-    use crate::models::MessageType;
+    use crate::models::{Message, MessageType, TranscodeStatus};
     use crate::services::message_search::MessageSearchSort;
     use chrono::Utc;
     use std::collections::HashMap;
+
+    fn message(id: i64, message_type: MessageType, forwarded_bundle_id: Option<i64>) -> Message {
+        Message {
+            id,
+            message: Some(format!("message {id}")),
+            message_type,
+            reply_to_id: None,
+            reply_root_id: None,
+            client_generated_id: format!("client-{id}"),
+            sender_uid: 7,
+            chat_id: 20,
+            created_at: Utc::now(),
+            updated_at: None,
+            deleted_at: None,
+            has_attachments: false,
+            has_thread: false,
+            has_reactions: false,
+            sticker_id: None,
+            is_published: true,
+            transcode_status: TranscodeStatus::None,
+            forwarded_bundle_id,
+        }
+    }
 
     #[test]
     fn rejects_system_message_type_from_clients() {
@@ -1659,6 +1782,56 @@ mod tests {
         assert_eq!(value["kind"], "messageSnapshot");
         assert_eq!(value["originalMessageId"], "10");
         assert_eq!(value["originalChatId"], "20");
+    }
+
+    #[test]
+    fn forwarded_bundle_ref_snapshot_uses_source_bundle_preview() {
+        let source_message = message(10, MessageType::Forwarded, Some(100));
+        let preview_items: Vec<ForwardedBundlePayloadItem> = (1..=3)
+            .map(|id| ForwardedBundlePayloadItem::MessageSnapshot {
+                snapshot: ForwardedMessageSnapshot {
+                    original_message_id: id,
+                    original_chat_id: 20,
+                    message: Some(format!("inner {id}")),
+                    message_type: MessageType::Text,
+                    sender_uid: 8,
+                    original_created_at: Utc::now(),
+                    reply_to_message: None,
+                    attachments: vec![],
+                    mention_uids: vec![],
+                },
+            })
+            .collect();
+        let referenced_bundle_previews = HashMap::from([(
+            100,
+            ForwardedMessagesPreviewSnapshot {
+                total: 5,
+                messages: preview_items.clone(),
+            },
+        )]);
+
+        let bundle_ref =
+            build_forwarded_bundle_ref_snapshot(&source_message, &referenced_bundle_previews)
+                .expect("bundle ref should build");
+
+        assert_eq!(bundle_ref.original_message_id, 10);
+        assert_eq!(bundle_ref.original_chat_id, 20);
+        assert_eq!(bundle_ref.forwarded_bundle_id, 100);
+        assert_eq!(bundle_ref.preview.total, 5);
+        assert_eq!(bundle_ref.preview.messages.len(), 3);
+    }
+
+    #[test]
+    fn forwarded_bundle_ref_snapshot_rejects_missing_source_bundle() {
+        let source_message = message(10, MessageType::Forwarded, None);
+        let referenced_bundle_previews = HashMap::new();
+
+        let err = build_forwarded_bundle_ref_snapshot(&source_message, &referenced_bundle_previews)
+            .expect_err("forwarded source without bundle should fail");
+
+        assert!(
+            matches!(err, AppError::BadRequest(msg) if msg == "Forwarded source message has no bundle")
+        );
     }
 
     #[test]
