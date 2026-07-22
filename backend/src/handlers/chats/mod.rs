@@ -118,6 +118,7 @@ pub(crate) struct PreparedMessageSend {
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
     pub forwarded_bundle_id: Option<i64>,
+    pub forwarded_preview_total: Option<usize>,
     pub forwarded_preview_snapshots: Option<Vec<ForwardedMessageSnapshot>>,
 }
 
@@ -546,7 +547,6 @@ pub(crate) fn forwarded_messages_preview_response(
         total,
         messages: snapshots
             .iter()
-            .take(FORWARDED_PREVIEW_LIMIT)
             .map(|snapshot| {
                 forwarded_message_preview_response(snapshot, user_avatars, user_profiles)
             })
@@ -878,10 +878,11 @@ pub(crate) async fn send_prepared_message(
         .into_iter()
         .next()
         .ok_or(AppError::Internal("Failed to build message response"))?;
-        apply_forwarded_preview_override(
+        attach_prepared_forwarded_preview(
             conn,
             state,
             &mut response,
+            prepared.forwarded_preview_total,
             prepared.forwarded_preview_snapshots.as_deref(),
         );
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
@@ -916,10 +917,11 @@ pub(crate) async fn send_prepared_message(
     .into_iter()
     .next()
     .ok_or(AppError::Internal("Failed to build message response"))?;
-    apply_forwarded_preview_override(
+    attach_prepared_forwarded_preview(
         conn,
         state,
         &mut response,
+        prepared.forwarded_preview_total,
         prepared.forwarded_preview_snapshots.as_deref(),
     );
 
@@ -1003,13 +1005,14 @@ fn validate_idempotent_message_payload(
     ))
 }
 
-fn apply_forwarded_preview_override(
+fn attach_prepared_forwarded_preview(
     conn: &mut PgConnection,
     state: &AppState,
     response: &mut MessageResponse,
+    total: Option<usize>,
     snapshots: Option<&[ForwardedMessageSnapshot]>,
 ) {
-    let Some(snapshots) = snapshots else {
+    let (Some(total), Some(snapshots)) = (total, snapshots) else {
         return;
     };
     if response.is_deleted {
@@ -1022,7 +1025,7 @@ fn apply_forwarded_preview_override(
     let user_avatars = state.avatars.lookup(&forwarded_uids);
     let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
     response.forwarded_preview = Some(forwarded_messages_preview_response(
-        snapshots.len(),
+        total,
         snapshots,
         &user_avatars,
         &user_profiles,
@@ -1108,6 +1111,10 @@ pub async fn attach_metadata(
             let total = bundle.item_count as usize;
             match serde_json::from_value::<Vec<ForwardedMessageSnapshot>>(bundle.payload) {
                 Ok(snapshots) => {
+                    let snapshots = snapshots
+                        .into_iter()
+                        .take(FORWARDED_PREVIEW_LIMIT)
+                        .collect();
                     forwarded_bundle_previews
                         .insert(bundle_id, ForwardedBundlePreviewData { total, snapshots });
                 }
@@ -2283,8 +2290,8 @@ mod tests {
     }
 
     #[test]
-    fn forwarded_preview_uses_supplied_total_and_caps_messages() {
-        let snapshots: Vec<ForwardedMessageSnapshot> = (1..=4)
+    fn forwarded_preview_uses_supplied_total_and_messages() {
+        let snapshots: Vec<ForwardedMessageSnapshot> = (1..=3)
             .map(|id| ForwardedMessageSnapshot {
                 original_message_id: id,
                 original_chat_id: 10,
@@ -2446,6 +2453,7 @@ mod tests {
             attachment_ids: vec![10, 11],
             publish_immediately: true,
             forwarded_bundle_id: None,
+            forwarded_preview_total: None,
             forwarded_preview_snapshots: None,
         }
     }

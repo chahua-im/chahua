@@ -35,7 +35,7 @@ use crate::{
 use super::{
     attach_metadata, collect_forwarded_snapshot_uids, extract_mention_uids,
     forwarded_message_response, send_prepared_message, ChatIdPath, CreateMessageBody,
-    ForwardMessagesBody, PreparedMessageSend, SendMessageOutcome,
+    ForwardMessagesBody, PreparedMessageSend, SendMessageOutcome, FORWARDED_PREVIEW_LIMIT,
 };
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
@@ -740,6 +740,7 @@ async fn post_message(
                 attachment_ids,
                 publish_immediately,
                 forwarded_bundle_id: None,
+                forwarded_preview_total: None,
                 forwarded_preview_snapshots: None,
             },
         )
@@ -845,6 +846,11 @@ async fn forward_messages(
     let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_message_snapshots)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
     let forwarded_message_count = forwarded_message_snapshots.len();
+    let forwarded_preview_snapshots = forwarded_message_snapshots
+        .iter()
+        .take(FORWARDED_PREVIEW_LIMIT)
+        .cloned()
+        .collect();
 
     diesel::sql_query("BEGIN").execute(conn)?;
     let tx_result: Result<_, AppError> = async {
@@ -879,7 +885,8 @@ async fn forward_messages(
                 attachment_ids: vec![],
                 publish_immediately: true,
                 forwarded_bundle_id: Some(bundle_id),
-                forwarded_preview_snapshots: Some(forwarded_message_snapshots),
+                forwarded_preview_total: Some(forwarded_message_count),
+                forwarded_preview_snapshots: Some(forwarded_preview_snapshots),
             },
         )
         .await?;
@@ -1071,6 +1078,7 @@ pub(super) async fn post_thread_message(
                 attachment_ids,
                 publish_immediately,
                 forwarded_bundle_id: None,
+                forwarded_preview_total: None,
                 forwarded_preview_snapshots: None,
             },
         )
