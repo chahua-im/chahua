@@ -13,8 +13,9 @@ use crate::{
     dto::{
         attachments::AttachmentSnapshot,
         messages::{
-            ForwardedMessagePreviewSnapshot, ForwardedMessageSnapshot, ForwardedMessagesResponse,
-            ListMessagesResponse, MessagePreview, MessageResponse, SearchMessagesResponse,
+            ForwardedBundlePayloadItem, MessagePreviewSnapshot, ForwardedMessageSnapshot,
+            ForwardedMessagesResponse, ListMessagesResponse, MessagePreview, MessageResponse,
+            SearchMessagesResponse,
         },
         ws::ServerWsMessage,
     },
@@ -33,8 +34,8 @@ use crate::{
 };
 
 use super::{
-    attach_metadata, collect_forwarded_snapshot_uids, extract_mention_uids,
-    forwarded_message_response, send_prepared_message, ChatIdPath, CreateMessageBody,
+    attach_metadata, collect_forwarded_bundle_item_uids, extract_mention_uids,
+    forwarded_bundle_item_response, send_prepared_message, ChatIdPath, CreateMessageBody,
     ForwardMessagesBody, PreparedMessageSend, SendMessageOutcome, FORWARDED_PREVIEW_LIMIT,
 };
 
@@ -241,8 +242,8 @@ fn build_forwarded_message_snapshot(
 
 fn build_forwarded_message_preview_snapshot(
     preview: MessagePreview,
-) -> ForwardedMessagePreviewSnapshot {
-    ForwardedMessagePreviewSnapshot {
+) -> MessagePreviewSnapshot {
+    MessagePreviewSnapshot {
         id: preview.id,
         client_generated_id: preview.client_generated_id,
         created_at: preview.created_at,
@@ -741,7 +742,7 @@ async fn post_message(
                 publish_immediately,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
-                forwarded_preview_snapshots: None,
+                forwarded_preview_items: None,
             },
         )
         .await?;
@@ -843,13 +844,16 @@ async fn forward_messages(
         .into_iter()
         .map(|response| build_forwarded_message_snapshot(response, &attachment_storage_keys))
         .collect::<Result<Vec<_>, AppError>>()?;
-    let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_message_snapshots)
+    let forwarded_payload_items: Vec<ForwardedBundlePayloadItem> = forwarded_message_snapshots
+        .into_iter()
+        .map(|snapshot| ForwardedBundlePayloadItem::MessageSnapshot { snapshot })
+        .collect();
+    let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_payload_items)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
-    let forwarded_message_count = forwarded_message_snapshots.len();
-    let forwarded_preview_snapshots = forwarded_message_snapshots
-        .iter()
+    let forwarded_message_count = forwarded_payload_items.len();
+    let forwarded_preview_items = forwarded_payload_items
+        .into_iter()
         .take(FORWARDED_PREVIEW_LIMIT)
-        .cloned()
         .collect();
 
     diesel::sql_query("BEGIN").execute(conn)?;
@@ -886,7 +890,7 @@ async fn forward_messages(
                 publish_immediately: true,
                 forwarded_bundle_id: Some(bundle_id),
                 forwarded_preview_total: Some(forwarded_message_count),
-                forwarded_preview_snapshots: Some(forwarded_preview_snapshots),
+                forwarded_preview_items: Some(forwarded_preview_items),
             },
         )
         .await?;
@@ -981,16 +985,16 @@ async fn get_forwarded_messages(
         .optional()?
         .ok_or(AppError::NotFound("Forwarded messages not found"))?;
     let total = bundle.item_count as usize;
-    let snapshots: Vec<ForwardedMessageSnapshot> = serde_json::from_value(bundle.payload)
+    let items: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
         .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
     let mut forwarded_uids = std::collections::HashSet::new();
-    collect_forwarded_snapshot_uids(&snapshots, &mut forwarded_uids);
+    collect_forwarded_bundle_item_uids(&items, &mut forwarded_uids);
     let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
     let user_avatars = state.avatars.lookup(&forwarded_uids);
     let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
-    let messages = snapshots
+    let messages = items
         .into_iter()
-        .map(|snapshot| forwarded_message_response(&state, snapshot, &user_avatars, &user_profiles))
+        .map(|item| forwarded_bundle_item_response(&state, item, &user_avatars, &user_profiles))
         .collect();
 
     Ok(Json(ForwardedMessagesResponse { total, messages }))
@@ -1079,7 +1083,7 @@ pub(super) async fn post_thread_message(
                 publish_immediately,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
-                forwarded_preview_snapshots: None,
+                forwarded_preview_items: None,
             },
         )
         .await?;
@@ -1522,7 +1526,11 @@ mod tests {
         INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW, SYSTEM_MESSAGE_FORWARD_FORBIDDEN,
         SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
-    use crate::dto::{attachments::AttachmentResponse, messages::MessageResponse, users::User};
+    use crate::dto::{
+        attachments::AttachmentResponse,
+        messages::{ForwardedBundlePayloadItem, ForwardedMessageSnapshot, MessageResponse},
+        users::User,
+    };
     use crate::errors::AppError;
     use crate::models::MessageType;
     use crate::services::message_search::MessageSearchSort;
@@ -1629,6 +1637,28 @@ mod tests {
             snapshot.attachments[0].external_reference,
             "media/private-image-key"
         );
+    }
+
+    #[test]
+    fn forwarded_bundle_payload_item_serializes_message_snapshot_kind() {
+        let snapshot = ForwardedMessageSnapshot {
+            original_message_id: 10,
+            original_chat_id: 20,
+            message: Some("hello".to_string()),
+            message_type: MessageType::Text,
+            sender_uid: 7,
+            original_created_at: Utc::now(),
+            reply_to_message: None,
+            attachments: vec![],
+            mention_uids: vec![],
+        };
+        let item = ForwardedBundlePayloadItem::MessageSnapshot { snapshot };
+
+        let value = serde_json::to_value(&item).expect("payload item should serialize");
+
+        assert_eq!(value["kind"], "messageSnapshot");
+        assert_eq!(value["originalMessageId"], "10");
+        assert_eq!(value["originalChatId"], "20");
     }
 
     #[test]

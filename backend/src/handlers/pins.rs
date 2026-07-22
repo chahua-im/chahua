@@ -227,7 +227,7 @@ async fn create_pin(
                 publish_immediately: true,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
-                forwarded_preview_snapshots: None,
+                forwarded_preview_items: None,
             },
         )
         .await
@@ -307,7 +307,7 @@ async fn delete_pin(
                 publish_immediately: true,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
-                forwarded_preview_snapshots: None,
+                forwarded_preview_items: None,
             },
         )
         .await
