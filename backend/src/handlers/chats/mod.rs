@@ -653,6 +653,7 @@ pub(crate) fn forwarded_message_response(
             .into_iter()
             .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
             .collect(),
+        forwarded_preview: None,
     }
 }
 
@@ -666,17 +667,33 @@ pub(crate) fn forwarded_bundle_item_response(
         ForwardedBundlePayloadItem::MessageSnapshot { snapshot } => {
             forwarded_message_response(state, snapshot, user_avatars, user_profiles)
         }
-        ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => ForwardedMessageResponse {
-            original_message_id: bundle_ref.original_message_id,
-            original_chat_id: bundle_ref.original_chat_id,
-            message: bundle_ref.message,
-            message_type: bundle_ref.message_type,
-            sender: build_sender(bundle_ref.sender_uid, user_avatars, user_profiles),
-            original_created_at: bundle_ref.original_created_at,
-            reply_to_message: None,
-            attachments: Vec::new(),
-            mentions: Vec::new(),
-        },
+        ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => {
+            forwarded_bundle_ref_response(bundle_ref, user_avatars, user_profiles)
+        }
+    }
+}
+
+fn forwarded_bundle_ref_response(
+    bundle_ref: crate::dto::messages::ForwardedBundleRefSnapshot,
+    user_avatars: &std::collections::HashMap<i32, Option<String>>,
+    user_profiles: &std::collections::HashMap<i32, UserProfile>,
+) -> ForwardedMessageResponse {
+    ForwardedMessageResponse {
+        original_message_id: bundle_ref.original_message_id,
+        original_chat_id: bundle_ref.original_chat_id,
+        message: bundle_ref.message,
+        message_type: bundle_ref.message_type,
+        sender: build_sender(bundle_ref.sender_uid, user_avatars, user_profiles),
+        original_created_at: bundle_ref.original_created_at,
+        reply_to_message: None,
+        attachments: Vec::new(),
+        mentions: Vec::new(),
+        forwarded_preview: Some(forwarded_messages_preview_response(
+            bundle_ref.preview.total,
+            &bundle_ref.preview.messages,
+            user_avatars,
+            user_profiles,
+        )),
     }
 }
 
@@ -2229,7 +2246,11 @@ mod tests {
         ReactionSummary, StickerMediaResponse,
     };
     use crate::{
-        dto::{attachments::AttachmentResponse, users::User},
+        dto::{
+            attachments::AttachmentResponse,
+            messages::{ForwardedBundleRefSnapshot, ForwardedMessagesPreviewSnapshot},
+            users::User,
+        },
         models::{Message, MessageType, TranscodeStatus},
     };
     use chrono::{TimeZone, Utc};
@@ -2373,6 +2394,50 @@ mod tests {
 
         assert_eq!(preview.total, 12);
         assert_eq!(preview.messages.len(), 3);
+    }
+
+    #[test]
+    fn forwarded_bundle_ref_detail_response_includes_nested_preview() {
+        let nested_item = ForwardedBundlePayloadItem::MessageSnapshot {
+            snapshot: ForwardedMessageSnapshot {
+                original_message_id: 1,
+                original_chat_id: 10,
+                message: Some("nested".to_string()),
+                message_type: MessageType::Text,
+                sender_uid: 8,
+                original_created_at: Utc::now(),
+                reply_to_message: None,
+                attachments: vec![],
+                mention_uids: vec![],
+            },
+        };
+        let bundle_ref = ForwardedBundleRefSnapshot {
+            original_message_id: 2,
+            original_chat_id: 20,
+            forwarded_bundle_id: 100,
+            message: Some("Forwarded 1 message".to_string()),
+            message_type: MessageType::Forwarded,
+            sender_uid: 7,
+            original_created_at: Utc::now(),
+            preview: ForwardedMessagesPreviewSnapshot {
+                total: 1,
+                messages: vec![nested_item],
+            },
+        };
+        let user_avatars = HashMap::new();
+        let user_profiles = HashMap::new();
+
+        let response =
+            super::forwarded_bundle_ref_response(bundle_ref, &user_avatars, &user_profiles);
+
+        let forwarded_preview = response
+            .forwarded_preview
+            .expect("bundle refs should include nested preview");
+        assert_eq!(forwarded_preview.total, 1);
+        assert_eq!(
+            forwarded_preview.messages[0].message.as_deref(),
+            Some("nested")
+        );
     }
 
     #[test]
