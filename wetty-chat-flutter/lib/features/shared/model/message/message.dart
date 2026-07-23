@@ -342,6 +342,10 @@ MessageContent _contentFromForwardedMessageResponseDto(
   required List<AttachmentItem> attachments,
   required List<MentionInfo> mentions,
 }) {
+  final forwardedPreview = dto.forwardedPreview == null
+      ? null
+      : ForwardedMessagesPreview.fromDto(dto.forwardedPreview!);
+
   if (dto.messageType == 'sticker') {
     return TextMessageContent(text: '[Sticker]', mentions: mentions);
   }
@@ -351,7 +355,7 @@ MessageContent _contentFromForwardedMessageResponseDto(
     sticker: null,
     attachments: attachments,
     mentions: mentions,
-    forwardedPreview: null,
+    forwardedPreview: forwardedPreview,
   );
 }
 

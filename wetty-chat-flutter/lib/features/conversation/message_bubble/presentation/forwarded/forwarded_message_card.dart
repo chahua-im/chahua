@@ -21,7 +21,7 @@ class ForwardedMessageCard extends StatelessWidget {
     if (content is! ForwardedPreviewContent) {
       return const SizedBox.shrink();
     }
-
+    
     final theme = BubbleThemeV2.of(context);
     final l10n = AppLocalizations.of(context)!;
     return ConstrainedBox(

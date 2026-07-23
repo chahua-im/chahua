@@ -3,6 +3,34 @@ import 'package:chahua/features/shared/model/message/message.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('forwarded response maps nested preview to forwarded content', () {
+    final message = ForwardedMessage.fromDto(
+      const ForwardedMessageResponseDto(
+        originalMessageId: 100,
+        originalChatId: 10,
+        message: 'Forwarded message',
+        messageType: 'forwarded',
+        sender: UserDto(uid: 1, name: 'Alice'),
+        forwardedPreview: ForwardedMessagesPreviewDto(
+          total: 2,
+          messages: <ForwardedMessagePreviewDto>[
+            ForwardedMessagePreviewDto(
+              originalMessageId: 20,
+              originalChatId: 10,
+              message: 'Nested message',
+              sender: UserDto(uid: 2, name: 'Bob'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(message.content, isA<ForwardedPreviewContent>());
+    final content = message.content as ForwardedPreviewContent;
+    expect(content.total, 2);
+    expect(content.previewMessages.single.message, 'Nested message');
+  });
+
   test('forwarded preview DTO maps to forwarded content', () {
     final message = ConversationMessageV2.fromMessageItemDto(
       MessageItemDto(

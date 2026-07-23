@@ -323,6 +323,11 @@ ForwardedMessageResponseDto _$ForwardedMessageResponseDtoFromJson(
           ?.map((e) => MentionInfoDto.fromJson(e as Map<String, dynamic>))
           .toList() ??
       [],
+  forwardedPreview: json['forwardedPreview'] == null
+      ? null
+      : ForwardedMessagesPreviewDto.fromJson(
+          json['forwardedPreview'] as Map<String, dynamic>,
+        ),
 );
 
 Map<String, dynamic> _$ForwardedMessageResponseDtoToJson(
@@ -343,6 +348,7 @@ Map<String, dynamic> _$ForwardedMessageResponseDtoToJson(
   'replyToMessage': instance.replyToMessage?.toJson(),
   'attachments': instance.attachments.map((e) => e.toJson()).toList(),
   'mentions': instance.mentions.map((e) => e.toJson()).toList(),
+  'forwardedPreview': instance.forwardedPreview?.toJson(),
 };
 
 ForwardedMessagesResponseDto _$ForwardedMessagesResponseDtoFromJson(

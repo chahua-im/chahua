@@ -337,6 +337,7 @@ class ForwardedMessageResponseDto {
     this.replyToMessage,
     this.attachments = const <AttachmentItemDto>[],
     this.mentions = const <MentionInfoDto>[],
+    this.forwardedPreview,
   });
 
   @FlexibleIntConverter()
@@ -354,6 +355,7 @@ class ForwardedMessageResponseDto {
   final List<AttachmentItemDto> attachments;
   @JsonKey(defaultValue: <MentionInfoDto>[])
   final List<MentionInfoDto> mentions;
+  final ForwardedMessagesPreviewDto? forwardedPreview;
 
   factory ForwardedMessageResponseDto.fromJson(Map<String, dynamic> json) =>
       _$ForwardedMessageResponseDtoFromJson(json);
