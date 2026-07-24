@@ -1324,6 +1324,9 @@ msgstr "You can only upload up to {maxAttachments} media files at once."
 msgid "You have unsaved group detail changes. Leave without saving?"
 msgstr "You have unsaved group detail changes. Leave without saving?"
 
+msgid "You haven't joined this group"
+msgstr "You haven't joined this group"
+
 msgid "You’ve been invited"
 msgstr "You’ve been invited"
 

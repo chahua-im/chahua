@@ -45,13 +45,16 @@ export default function PermalinkPage({ encoded }: PermalinkPageProps) {
           status: err?.response?.status,
           err,
         });
+        const status = err?.response?.status;
         // 401 is handled by the axios interceptor (auth redirect)
-        if (err?.response?.status !== 401) {
-          presentToast({
-            message: err?.response?.status === 404 ? t`Message not found` : t`Failed to open link`,
-            duration: 2000,
-            color: 'danger',
-          });
+        if (status !== 401) {
+          const message =
+            status === 404
+              ? t`Message not found`
+              : status === 403
+                ? t`You haven't joined this group`
+                : t`Failed to open link`;
+          presentToast({ message, duration: 2000, color: 'danger' });
           navigateToNotificationTarget('/chats');
         }
       });

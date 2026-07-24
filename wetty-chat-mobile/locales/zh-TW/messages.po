@@ -1324,6 +1324,9 @@ msgstr "你一次最多只能上傳 {maxAttachments} 個媒體檔案。"
 msgid "You have unsaved group detail changes. Leave without saving?"
 msgstr "你有尚未儲存的群組資料變更。要不儲存就離開嗎？"
 
+msgid "You haven't joined this group"
+msgstr ""
+
 msgid "You’ve been invited"
 msgstr "你已收到邀請"
 
