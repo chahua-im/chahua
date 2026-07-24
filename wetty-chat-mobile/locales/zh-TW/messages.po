@@ -1325,7 +1325,7 @@ msgid "You have unsaved group detail changes. Leave without saving?"
 msgstr "你有尚未儲存的群組資料變更。要不儲存就離開嗎？"
 
 msgid "You haven't joined this group"
-msgstr ""
+msgstr "你還沒有加入這個群組"
 
 msgid "You’ve been invited"
 msgstr "你已收到邀請"
