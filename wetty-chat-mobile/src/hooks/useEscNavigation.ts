@@ -24,6 +24,8 @@ export function useEscNavigation(): void {
       // Defer to Ionic overlays (alerts, action sheets, modals, toasts) — they handle ESC internally.
       if (active?.closest('ion-alert, ion-action-sheet, ion-modal, ion-toast')) return;
       if (document.querySelector('ion-alert, ion-action-sheet')) return;
+      // Defer to custom fullscreen overlays (e.g. image viewer) - they handle ESC internally.
+      if (document.querySelector('[data-image-viewer]')) return;
 
       // Thread → parent chat with #msg= scroll target
       const threadMatch = matchPath<{ id: string; threadId: string }>(location.pathname, {

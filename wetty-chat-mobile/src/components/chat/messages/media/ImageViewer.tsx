@@ -563,6 +563,7 @@ export function ImageViewer({ images, initialIndex = 0, onClose }: ImageViewerPr
   return createPortal(
     <div
       className={styles.overlay}
+      data-image-viewer
       onClick={(e) => {
         e.stopPropagation();
         handleDismissClick(e);
