@@ -17,7 +17,7 @@ import {
 } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import { setCurrentUserId } from '@/utils/current-user';
+import { getCurrentUserId, normalizeCurrentUserId, setCurrentUserId } from '@/utils/current-user';
 import type { RootState } from '@/store/index';
 import { Trans } from '@lingui/react/macro';
 import { FeatureGate } from '@/components/FeatureGate';
@@ -74,20 +74,21 @@ export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, o
     avatarUrl,
     loading: currentUserLoading,
   } = useSelector((state: RootState) => state.user);
-  const [uidInput, setUidInput] = useState(() => String(currentUid || '1'));
+  // The developer field edits the stored development UID, which is available synchronously
+  // and is what the auth bootstrap used to mint this session — not the fetched profile UID.
+  const [uidInput, setUidInput] = useState(() => String(getCurrentUserId()));
   const [presentToast] = useIonToast();
   const history = useHistory();
   const { permission, isSubscribed, loading, isCheckingSubscription, subscribeToPush, unsubscribeFromPush } =
     usePushNotifications();
 
   const handleSave = () => {
-    const trimmed = uidInput.trim();
-    const n = parseInt(trimmed, 10);
-    if (!Number.isFinite(n) || n < 1) {
-      presentToast({ message: 'Enter a valid User ID (integer ≥ 1)', duration: 3000 });
+    const uid = normalizeCurrentUserId(uidInput);
+    if (uid === null) {
+      presentToast({ message: t`Enter a valid User ID (integer from 1 to 2,147,483,647)`, duration: 3000 });
       return;
     }
-    setCurrentUserId(n);
+    setCurrentUserId(uid);
     window.location.reload();
   };
 
@@ -180,22 +181,24 @@ export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, o
             <IonLabel>Developer</IonLabel>
           </IonListHeader>
           <IonList inset={true}>
-            <IonItem>
-              <IonIcon aria-hidden="true" icon={codeWorking} slot="start" color="medium" />
-              <IonInput
-                label="User ID"
-                type="number"
-                placeholder="e.g. 1"
-                value={uidInput}
-                onIonInput={(e) => setUidInput(e.detail.value ?? '')}
-                className="ion-text-right"
-              />
-            </IonItem>
-            <IonItem button onClick={handleSave} detail={false}>
-              <IonLabel color="primary">
-                <Trans>Save</Trans>
-              </IonLabel>
-            </IonItem>
+            <FeatureGate feature="developerSettings" devOnly>
+              <IonItem>
+                <IonIcon aria-hidden="true" icon={codeWorking} slot="start" color="medium" />
+                <IonInput
+                  label="User ID"
+                  type="number"
+                  placeholder="e.g. 1"
+                  value={uidInput}
+                  onIonInput={(e) => setUidInput(e.detail.value ?? '')}
+                  className="ion-text-right"
+                />
+              </IonItem>
+              <IonItem button onClick={handleSave} detail={false}>
+                <IonLabel color="primary">
+                  <Trans>Save</Trans>
+                </IonLabel>
+              </IonItem>
+            </FeatureGate>
           </IonList>
         </FeatureGate>
 

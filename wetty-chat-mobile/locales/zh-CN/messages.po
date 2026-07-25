@@ -164,6 +164,10 @@ msgstr "消息"
 msgid "Check for Update"
 msgstr "检查更新"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.transient.description"
+msgstr "请检查网络连接后重试。"
+
 msgid "Checking..."
 msgstr "检查中..."
 
@@ -320,6 +324,9 @@ msgstr "表情和贴纸"
 
 msgid "Enter a user UID"
 msgstr "输入用户 UID"
+
+msgid "Enter a valid User ID (integer from 1 to 2,147,483,647)"
+msgstr "请输入有效的用户 ID（1 到 2,147,483,647 之间的整数）"
 
 msgid "Enter an exact UID to find a specific user."
 msgstr "输入精确 UID 以查找特定用户。"
@@ -887,6 +894,10 @@ msgstr "请至少选择一个表情"
 msgid "Please try again in a moment."
 msgstr "请稍后再试。"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.redirecting.description"
+msgstr "请稍候，应用正在跳转到登录页面。"
+
 #. placeholder {0}: item.name
 msgid "Preview {0}"
 msgstr "预览 {0}"
@@ -1004,8 +1015,16 @@ msgstr "正在回复 {0}"
 msgid "Restricted To"
 msgstr "限制为"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.retry"
+msgstr "重试"
+
 msgid "Retry"
 msgstr "重试"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.retrying"
+msgstr "正在重试…"
 
 msgid "Review to confirm if you want to join. Nothing changes until you click join."
 msgstr "你可以先查看并确认是否要加入。在你点击“加入聊天”之前不会有任何变更。"
@@ -1104,6 +1123,10 @@ msgstr "在聊天中显示\"全部\"标签"
 msgid "Show Avatars Next to All Messages"
 msgstr "在所有消息旁显示头像"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.description"
+msgstr "此应用版本未配置登录功能。"
+
 msgid "Small"
 msgstr "小"
 
@@ -1145,6 +1168,10 @@ msgstr "目标用户"
 
 msgid "Targeted"
 msgstr "定向"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.transient.title"
+msgstr "应用无法刷新你的会话。"
 
 msgid "The invite code entered is not valid."
 msgstr "输入的邀请码无效。"
@@ -1332,3 +1359,7 @@ msgstr "你已收到邀请"
 
 msgid "Your account"
 msgstr "你的账户"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.title"
+msgstr "你的会话已不可用。"

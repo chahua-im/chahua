@@ -4,10 +4,9 @@ import { Redirect, useHistory, useLocation, useRouteMatch } from 'react-router-d
 import { useDispatch } from 'react-redux';
 import { useEffect, useRef } from 'react';
 import type { AppDispatch } from '@/store/index';
-import { fetchCurrentUser, setUser } from '@/store/userSlice';
+import { fetchCurrentUser } from '@/store/userSlice';
 
 import './app.scss';
-import { getCurrentUserId } from './utils/current-user';
 import { t } from '@lingui/core/macro';
 import MobileLayout from './layouts/MobileLayout';
 import { AppUpdateProvider } from './hooks/AppUpdateProvider';
@@ -21,8 +20,6 @@ import LandingPage from './pages/landing';
 import PushOpenPage from '@/pages/push-open';
 import PermalinkPage from '@/pages/permalink';
 import { initWebSocket } from '@/api/ws';
-import { syncJwtTokenToIdb } from '@/utils/jwtToken';
-import { useDeviceToken } from './hooks/useDeviceToken';
 import { appHistory } from '@/utils/navigationHistory';
 import { useNotificationOpenHandler } from '@/hooks/useNotificationOpenHandler';
 import { PendingInviteModalHost } from '@/components/invites/PendingInviteModalHost';
@@ -91,25 +88,15 @@ function AppRouter({ isDesktop }: { isDesktop: boolean }) {
 function AppShell() {
   const dispatch = useDispatch<AppDispatch>();
   const isDesktop = useIsDesktop();
-  const token = useDeviceToken(true);
   useAppLifecycle();
   usePushNotificationBootstrap();
   useNotificationOpenHandler();
   const { needRefresh, setNeedRefresh, updateServiceWorker } = useAppUpdate();
-  const missingProdToken = import.meta.env.PROD && (!token || token.length === 0);
 
   useEffect(() => {
-    void syncJwtTokenToIdb();
     initWebSocket();
-    if (import.meta.env.DEV) {
-      dispatch(setUser({ uid: getCurrentUserId(), username: 'Development User', avatarUrl: null }));
-    }
     dispatch(fetchCurrentUser());
   }, [dispatch]);
-
-  if (missingProdToken) {
-    return <h1>I'm a tea pot</h1>;
-  }
 
   return (
     <IonApp>

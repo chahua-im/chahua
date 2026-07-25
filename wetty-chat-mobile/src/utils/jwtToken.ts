@@ -1,10 +1,12 @@
 import Cookies from 'js-cookie';
-import { kvGet, kvSet } from './db';
+import { kvDelete, kvGet, kvSet } from './db';
 import { syncClientIdFromJwt } from './clientId';
 
 const JWT_TOKEN_COOKIE_KEY = 'jwt_token';
 const JWT_TOKEN_QUERY_PARAM = 'token';
 const JWT_TOKEN_COOKIE_OPTIONS = { path: '/', expires: 365 };
+const JWT_TOKEN_CACHE_NAME = 'jwt_token';
+const JWT_TOKEN_CACHE_KEY = 'jwt_token';
 
 let cachedJwtToken: string | null = null;
 
@@ -26,86 +28,80 @@ export function setJwtTokenCookie(token: string): void {
   Cookies.set(JWT_TOKEN_COOKIE_KEY, token, JWT_TOKEN_COOKIE_OPTIONS);
 }
 
-/** Sync accessor — only valid after `syncJwtTokenToIdb()` has resolved. */
 export function getStoredJwtToken(): string {
   return cachedJwtToken ?? getJwtTokenFromCookie() ?? '';
 }
 
-/** Write token to both cookie (transport) and IDB (source of truth). */
-export async function persistJwtToken(token: string): Promise<void> {
-  cachedJwtToken = token;
-  setJwtTokenCookie(token);
-  syncClientIdFromJwt(token);
-  await kvSet('jwt_token', token);
+async function refreshTokenCache(token: string): Promise<void> {
+  try {
+    const cache = await caches.open(JWT_TOKEN_CACHE_NAME);
+    await cache.put(JWT_TOKEN_CACHE_KEY, new Response(token));
+  } catch {
+    // Cache Storage is only an iOS 16 compatibility fallback.
+  }
 }
 
-/**
- * Bootstrap sync: IDB is source of truth.
- * If IDB is empty, pick up from cookie (web→PWA transport) and persist to IDB.
- */
-export async function syncJwtTokenToIdb(): Promise<string> {
-  const idbToken = await kvGet<string>('jwt_token');
-  if (idbToken) {
-    cachedJwtToken = idbToken;
-    syncClientIdFromJwt(idbToken);
-    // Also ensure cookie stays in sync (transport for future installs)
-    if (!getJwtTokenFromCookie()) {
-      setJwtTokenCookie(idbToken);
-    }
-    return idbToken;
+async function clearTokenCache(): Promise<void> {
+  if (typeof caches === 'undefined') return;
+  const cache = await caches.open(JWT_TOKEN_CACHE_NAME);
+  await cache.delete(JWT_TOKEN_CACHE_KEY);
+}
+
+async function readTokenCache(): Promise<string | null> {
+  try {
+    const cache = await caches.open(JWT_TOKEN_CACHE_NAME);
+    const response = await cache.match(JWT_TOKEN_CACHE_KEY);
+    return normalizeToken(response ? await response.text() : null);
+  } catch {
+    return null;
   }
+}
+
+async function adoptToken(token: string, persistIdb: boolean): Promise<string> {
+  if (persistIdb) await kvSet('jwt_token', token);
+  await syncClientIdFromJwt(token);
+  cachedJwtToken = token;
+  setJwtTokenCookie(token);
+  await refreshTokenCache(token);
+  return token;
+}
+
+export async function loadStoredJwtToken(): Promise<string> {
+  const idbToken = normalizeToken(await kvGet<string>('jwt_token'));
+  if (idbToken) return adoptToken(idbToken, false);
 
   const cookieToken = getJwtTokenFromCookie();
-  if (cookieToken) {
-    cachedJwtToken = cookieToken;
-    syncClientIdFromJwt(cookieToken);
-    await kvSet('jwt_token', cookieToken);
-    return cookieToken;
-  }
+  if (cookieToken) return adoptToken(cookieToken, true);
 
-  const cacheToken = await GetTokenCacheStorage();
-  if (cacheToken) {
-    cachedJwtToken = cacheToken;
-    syncClientIdFromJwt(cacheToken);
-    setJwtTokenCookie(cacheToken);
-    await kvSet('jwt_token', cacheToken);
-    return cacheToken;
-  }
+  const cacheToken = await readTokenCache();
+  if (cacheToken) return adoptToken(cacheToken, true);
 
   return '';
 }
 
-export function syncJwtTokenFromLanding(search: string): string {
-  const queryToken = getJwtTokenFromQuery(search);
-  if (queryToken) {
-    cachedJwtToken = queryToken;
-    setJwtTokenCookie(queryToken);
-    syncClientIdFromJwt(queryToken);
-    void kvSet('jwt_token', queryToken);
-    void SetTokenCacheStorage(queryToken);
-    return queryToken;
-  }
-
-  // No query token — just return what we have
-  return getStoredJwtToken();
+export async function commitJwtToken(token: string): Promise<void> {
+  const normalized = normalizeToken(token);
+  if (!normalized) throw new Error('Cannot commit an empty JWT token');
+  await adoptToken(normalized, true);
 }
 
-// for iOS16 compat
-async function SetTokenCacheStorage(token: string): Promise<void> {
+export async function clearJwtToken(): Promise<void> {
+  cachedJwtToken = null;
+  Cookies.remove(JWT_TOKEN_COOKIE_KEY, { path: '/' });
+  let cacheError: unknown;
   try {
-    const cache = await caches.open('jwt_token');
-    await cache.put('jwt_token', new Response(token));
-  } catch (e) {
-    console.error('Error inserting into cache', e);
+    await clearTokenCache();
+  } catch (error) {
+    cacheError = error;
   }
+  await kvDelete('jwt_token');
+  if (cacheError) throw cacheError;
 }
-async function GetTokenCacheStorage(): Promise<string | undefined> {
-  try {
-    const cache = await caches.open('jwt_token');
-    const response = await cache.match('jwt_token');
-    return response?.text();
-  } catch {
-    console.warn('Failed fetching JWT from cache');
-    return undefined;
-  }
+
+export function captureJwtTokenFromUrl(url: URL): string | null {
+  const token = normalizeToken(url.searchParams.get(JWT_TOKEN_QUERY_PARAM));
+  if (!token) return null;
+  url.searchParams.delete(JWT_TOKEN_QUERY_PARAM);
+  window.history.replaceState(window.history.state, '', url);
+  return token;
 }

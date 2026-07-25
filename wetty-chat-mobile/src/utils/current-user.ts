@@ -1,29 +1,36 @@
 /**
- * Current user id for API auth (X-User-Id).
- * Stored in localStorage; defaults to 1 when not set.
- * A settings page will allow changing this later.
+ * Development user ID used by the gated PWA development-session flow.
  */
 
 const STORAGE_KEY = 'uid';
 const DEFAULT_USER_ID = 1;
+const MAX_USER_ID = 2_147_483_647;
+
+export function normalizeCurrentUserId(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const uid = Number(raw);
+  return Number.isInteger(uid) && uid >= DEFAULT_USER_ID && uid <= MAX_USER_ID ? uid : null;
+}
 
 export function getCurrentUserId(): number {
   if (typeof window === 'undefined') return DEFAULT_USER_ID;
   try {
-    const stored = sessionStorage.getItem(STORAGE_KEY);
-    if (stored == null || stored === '') return DEFAULT_USER_ID;
-    const n = parseInt(stored, 10);
-    return Number.isFinite(n) ? n : DEFAULT_USER_ID;
+    const uid = normalizeCurrentUserId(sessionStorage.getItem(STORAGE_KEY));
+    if (uid !== null) return uid;
+    sessionStorage.setItem(STORAGE_KEY, String(DEFAULT_USER_ID));
   } catch {
-    return DEFAULT_USER_ID;
+    // Storage may be unavailable; the established default remains safe.
   }
+  return DEFAULT_USER_ID;
 }
 
 export function setCurrentUserId(uid: number): void {
-  if (typeof window === 'undefined') return;
-  try {
-    sessionStorage.setItem(STORAGE_KEY, String(uid));
-  } catch {
-    // ignore
+  const normalized = normalizeCurrentUserId(uid);
+  if (normalized === null) {
+    throw new RangeError('User ID must be a positive i32');
   }
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem(STORAGE_KEY, String(normalized));
 }

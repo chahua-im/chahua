@@ -164,6 +164,10 @@ msgstr "Chats"
 msgid "Check for Update"
 msgstr "Check for Update"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.transient.description"
+msgstr "Check your connection and try again."
+
 msgid "Checking..."
 msgstr "Checking..."
 
@@ -320,6 +324,9 @@ msgstr "Emojis & Stickers"
 
 msgid "Enter a user UID"
 msgstr "Enter a user UID"
+
+msgid "Enter a valid User ID (integer from 1 to 2,147,483,647)"
+msgstr "Enter a valid User ID (integer from 1 to 2,147,483,647)"
 
 msgid "Enter an exact UID to find a specific user."
 msgstr "Enter an exact UID to find a specific user."
@@ -887,6 +894,10 @@ msgstr "Please choose at least one emoji"
 msgid "Please try again in a moment."
 msgstr "Please try again in a moment."
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.redirecting.description"
+msgstr "Please wait while this app redirects you to sign in."
+
 #. placeholder {0}: item.name
 msgid "Preview {0}"
 msgstr "Preview {0}"
@@ -1004,8 +1015,16 @@ msgstr "Replying to {0}"
 msgid "Restricted To"
 msgstr "Restricted To"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.retry"
+msgstr "Retry"
+
 msgid "Retry"
 msgstr "Retry"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.retrying"
+msgstr "Retrying…"
 
 msgid "Review to confirm if you want to join. Nothing changes until you click join."
 msgstr "Review to confirm if you want to join. Nothing changes until you click join."
@@ -1104,6 +1123,10 @@ msgstr "Show \"All\" Tab in Chats"
 msgid "Show Avatars Next to All Messages"
 msgstr "Show Avatars Next to All Messages"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.description"
+msgstr "Sign-in is not configured for this app build."
+
 msgid "Small"
 msgstr "Small"
 
@@ -1145,6 +1168,10 @@ msgstr "Target User"
 
 msgid "Targeted"
 msgstr "Targeted"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.transient.title"
+msgstr "The app couldn’t refresh your session."
 
 msgid "The invite code entered is not valid."
 msgstr "The invite code entered is not valid."
@@ -1332,3 +1359,7 @@ msgstr "You’ve been invited"
 
 msgid "Your account"
 msgstr "Your account"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.title"
+msgstr "Your session is no longer available."

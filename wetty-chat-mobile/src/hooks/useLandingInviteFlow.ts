@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { isFeatureEnabled } from '@/features';
-import { syncJwtTokenFromLanding } from '@/utils/jwtToken';
 import { parsePendingInviteFromLanding, syncPendingInviteFromLanding } from '@/utils/pendingInvite';
 
 const LANDING_INVITE_MODAL_ENABLED = isFeatureEnabled('landingInviteModal');
@@ -17,7 +16,7 @@ export function useLandingInviteFlow({ search, isPwa, appEntryUrl }: UseLandingI
 
   useEffect(() => {
     let cancelled = false;
-    syncJwtTokenFromLanding(search);
+
     const pendingInviteCode = PENDING_INVITE_PWA_MODAL_ENABLED
       ? syncPendingInviteFromLanding(search)
       : parsePendingInviteFromLanding(search);
@@ -28,12 +27,9 @@ export function useLandingInviteFlow({ search, isPwa, appEntryUrl }: UseLandingI
           setLandingInviteCode(LANDING_INVITE_MODAL_ENABLED ? pendingInviteCode : null);
         }
       });
-      return () => {
-        cancelled = true;
-      };
+    } else {
+      window.location.replace(appEntryUrl);
     }
-
-    window.location.replace(appEntryUrl);
 
     return () => {
       cancelled = true;

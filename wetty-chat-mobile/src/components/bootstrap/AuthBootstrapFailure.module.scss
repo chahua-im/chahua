@@ -1,0 +1,34 @@
+.content {
+  --background: var(--ion-background-color);
+}
+
+.panel {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.panel h1 {
+  max-width: 28rem;
+  margin: 0;
+  color: var(--ion-text-color);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.panel p {
+  max-width: 28rem;
+  margin: 12px 0 24px;
+  color: var(--ion-color-medium-shade);
+  line-height: 1.5;
+}
+
+.status {
+  min-height: 1.5rem;
+  color: var(--ion-color-medium-shade);
+  font-size: 0.875rem;
+}

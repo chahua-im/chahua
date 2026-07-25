@@ -40,11 +40,11 @@ export function getOrCreateClientId(): string {
 /**
  * Sync update — called after JWT is available to align clientId with JWT's `cid` claim.
  */
-export function syncClientIdFromJwt(jwtToken: string): void {
+export async function syncClientIdFromJwt(jwtToken: string): Promise<void> {
   const cid = extractCidFromJwt(jwtToken);
   if (cid) {
     cachedClientId = cid;
-    void kvSet('client_id', cid);
+    await kvSet('client_id', cid);
   }
 }
 

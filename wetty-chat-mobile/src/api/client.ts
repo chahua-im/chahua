@@ -1,5 +1,4 @@
 import axios, { HttpStatusCode } from 'axios';
-import { getCurrentUserId } from '@/utils/current-user';
 import { getOrCreateClientId } from '@/utils/clientId';
 import { getStoredJwtToken } from '@/utils/jwtToken';
 
@@ -19,9 +18,6 @@ apiClient.interceptors.request.use((config) => {
   } else {
     // Only send X-Client-Id when there's no JWT (JWT already carries cid)
     config.headers['X-Client-Id'] = getOrCreateClientId();
-  }
-  if (import.meta.env.DEV) {
-    config.headers['X-User-Id'] = String(getCurrentUserId());
   }
   return config;
 });

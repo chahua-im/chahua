@@ -180,6 +180,14 @@ to legacy parsing. Issuance and verification live in one backend
 select token versions.
 
 This deliberately small slice makes no frontend or WebSocket behavior change.
+
+**Backend slice 1a (implemented):** in development builds, and in any build with
+the exact environment override `ENABLE_DEBUG_AUTH=true`, unauthenticated
+`POST /auth/dev-session` accepts a positive `uid` and required `X-Client-Id`
+and issues the same v2 session shape. The route remains registered and documented,
+but returns `404 Not Found` unless the gate stored in `AppState` is enabled. Setting
+the override in a release deployment intentionally enables arbitrary-UID
+impersonation and must therefore be treated as a privileged development configuration.
 Existing `GET /users/auth-token` and `GET /ws/ticket` continue issuing
 legacy-shaped tokens for client compatibility. Both old and new endpoints
 currently reuse the existing shared signing key, as explicitly chosen for this

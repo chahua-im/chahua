@@ -20,13 +20,13 @@ import { Provider } from 'react-redux';
 import { I18nProvider } from '@lingui/react';
 import { activateDetectedLocale, i18n } from '@/i18n';
 import { createStore, setStoreInstance } from '@/store/index';
-import { initializeClientId } from '@/utils/clientId';
-import { syncJwtTokenToIdb } from '@/utils/jwtToken';
 import { kvDelete, kvGet, kvSet } from '@/utils/db';
 import { hydrateSettings, type SettingsState } from '@/store/settingsSlice';
 import { hydrateStickerPreferences } from '@/store/stickerPreferencesSlice';
 import { installBootstrapRecoveryHandlers } from '@/bootstrapRecovery';
+import { bootstrapAuth } from '@/authBootstrap';
 import App from './App';
+import AuthBootstrapGate from '@/components/bootstrap/AuthBootstrapGate';
 import { setupIonicReact } from '@ionic/react';
 
 setupIonicReact({
@@ -46,8 +46,6 @@ async function bootstrap() {
       kvGet<unknown>('autoSortStickerPacks'),
       kvGet<unknown>('favoriteStickerOrder'),
       kvGet<unknown>('autoSortFavoriteStickers'),
-      initializeClientId(),
-      syncJwtTokenToIdb(),
     ]);
 
   const settings = hydrateSettings(savedSettings);
@@ -82,17 +80,29 @@ async function bootstrap() {
     await kvSet('autoSortFavoriteStickers', hydratedStickerPreferences.state.autoSortFavoritesEnabled);
   }
   await activateDetectedLocale(settings.locale);
+  const root = createRoot(document.getElementById('root')!);
+  const renderReady = () => {
+    const store = createStore(settings, hydratedStickerPreferences.state);
+    setStoreInstance(store);
+    root.render(
+      <Provider store={store}>
+        <I18nProvider i18n={i18n}>
+          <App />
+        </I18nProvider>
+      </Provider>,
+    );
+  };
 
-  const store = createStore(settings, hydratedStickerPreferences.state);
-  setStoreInstance(store);
-
-  createRoot(document.getElementById('root')!).render(
-    <Provider store={store}>
+  const authResult = await bootstrapAuth();
+  if (authResult.status === 'ready') {
+    renderReady();
+  } else if (authResult.status !== 'redirecting') {
+    root.render(
       <I18nProvider i18n={i18n}>
-        <App />
-      </I18nProvider>
-    </Provider>,
-  );
+        <AuthBootstrapGate initialResult={authResult} onReady={renderReady} onRedirecting={() => root.render(null)} />
+      </I18nProvider>,
+    );
+  }
 }
 
 void bootstrap();
