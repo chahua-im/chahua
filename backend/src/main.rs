@@ -80,6 +80,10 @@ impl AuthMethod {
     }
 }
 
+fn debug_auth_enabled(debug_build: bool, raw_env: Option<&str>) -> bool {
+    debug_build || raw_env == Some("true")
+}
+
 #[derive(Clone)]
 pub(crate) struct AppState {
     db: Pool<ConnectionManager<PgConnection>>,
@@ -98,8 +102,10 @@ pub(crate) struct AppState {
     s3_base_url: Option<String>,
     pub auth_method: AuthMethod,
     pub discuz_avatar_public_url: Option<String>,
+
     pub discuz_avatar_path: Option<String>,
     pub auth_token_service: Arc<services::auth_token::AuthTokenService>,
+    pub debug_auth_enabled: bool,
     pub service_token_hash_key: Vec<u8>,
 }
 
@@ -166,6 +172,15 @@ async fn main() {
     let s3_base_url = std::env::var("S3_BASE_URL").ok();
 
     let auth_method = AuthMethod::from_env(std::env::var("AUTH_METHOD").ok());
+    let debug_auth_enabled = debug_auth_enabled(
+        cfg!(debug_assertions),
+        std::env::var("ENABLE_DEBUG_AUTH").ok().as_deref(),
+    );
+    if debug_auth_enabled {
+        tracing::warn!(
+            "Development authentication is enabled; arbitrary UID impersonation is available"
+        );
+    }
     let app_addr = read_socket_addr("APP_ADDR", SocketAddr::from(([0, 0, 0, 0], 3000)));
     let metrics_addr = read_socket_addr("METRICS_ADDR", SocketAddr::from(([0, 0, 0, 0], 3001)));
     let cors_allowed_origins = read_cors_allowed_origins("CORS_ALLOWED_ORIGINS");
@@ -231,6 +246,7 @@ async fn main() {
         message_search,
         s3_client,
         s3_bucket_name,
+        debug_auth_enabled,
         s3_attachment_prefix,
         s3_base_url,
         auth_method,
@@ -482,7 +498,7 @@ fn read_cors_allowed_origins(var_name: &str) -> Option<Vec<HeaderValue>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_log_format, LogFormat};
+    use super::{debug_auth_enabled, parse_log_format, LogFormat};
 
     #[test]
     fn log_format_defaults_to_pretty_when_unset() {
@@ -501,5 +517,15 @@ mod tests {
     #[should_panic(expected = "BACKEND_LOG_FORMAT must be one of: pretty, json")]
     fn log_format_rejects_unknown_values() {
         parse_log_format(Some("xml"));
+    }
+    #[test]
+    fn debug_auth_gate_requires_exact_release_override() {
+        assert!(debug_auth_enabled(true, None));
+        assert!(debug_auth_enabled(true, Some("TRUE")));
+        assert!(debug_auth_enabled(false, Some("true")));
+        assert!(!debug_auth_enabled(false, None));
+        assert!(!debug_auth_enabled(false, Some("TRUE")));
+        assert!(!debug_auth_enabled(false, Some("1")));
+        assert!(!debug_auth_enabled(false, Some(" true ")));
     }
 }
