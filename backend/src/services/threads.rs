@@ -16,10 +16,10 @@ use crate::handlers::chats::{
 };
 use crate::models::{Attachment, Message, MessageType};
 use crate::schema::{attachments, messages, stickers, thread_meta, thread_user_states};
-use crate::services::media::build_public_object_url;
-use crate::services::user::{lookup_user_avatars, lookup_user_profiles};
+use crate::services::avatars::AvatarService;
+use crate::services::media::MediaStore;
+use crate::services::user::lookup_user_profiles;
 use crate::services::ws_registry::ConnectionRegistry;
-use crate::AppState;
 use std::sync::Arc;
 
 /// Ensure a thread-user state row exists. This is an insert-only helper:
@@ -667,14 +667,15 @@ struct ParticipantRow {
 /// `rows` — the thread subscription rows (already trimmed to the page size).
 /// `has_more` — whether there are more results beyond this page.
 /// `root_messages` — raw root `Message` rows (no heavy enrichment needed).
-/// `state` — application state (for avatar URLs, S3 URLs, etc.).
+/// `media` / `avatars` — URL construction for attachments and user avatars.
 pub fn enrich_thread_list(
     conn: &mut PgConnection,
     rows: Vec<ThreadListRow>,
     has_more: bool,
     root_messages: Vec<Message>,
     uid: i32,
-    state: &AppState,
+    media: &MediaStore,
+    avatars: &AvatarService,
 ) -> Result<ListThreadsResponse, diesel::result::Error> {
     let root_ids: Vec<i64> = rows.iter().map(|r| r.thread_root_id).collect();
 
@@ -814,7 +815,7 @@ pub fn enrich_thread_list(
 
     // Single batched profile + avatar lookup
     let user_profiles = lookup_user_profiles(conn, &all_uids)?;
-    let user_avatars = lookup_user_avatars(state, &all_uids);
+    let user_avatars = avatars.lookup(&all_uids);
 
     let make_sender = |uid: i32| -> User { build_sender(uid, &user_avatars, &user_profiles) };
 
@@ -957,7 +958,7 @@ pub fn enrich_thread_list(
                 chat_avatar: row
                     .chat_avatar_key
                     .as_deref()
-                    .map(|key| build_public_object_url(state, key)),
+                    .map(|key| media.public_url(key)),
                 thread_root_message: root_preview,
                 participants: participants_map
                     .remove(&row.thread_root_id)

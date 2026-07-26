@@ -46,7 +46,7 @@ async fn post_dev_session(
     headers: HeaderMap,
     Json(request): Json<DevSessionRequest>,
 ) -> Result<Json<AuthTokenResponse>, AppError> {
-    if !state.debug_auth_enabled {
+    if !state.config.auth.debug_auth_enabled {
         return Err(AppError::NotFound("Not found"));
     }
     if request.uid <= 0 {

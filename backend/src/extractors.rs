@@ -1,12 +1,12 @@
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRef, FromRequestParts};
 use diesel::r2d2::{ConnectionManager, PooledConnection};
 use diesel::PgConnection;
 use std::ops::{Deref, DerefMut};
 
 use crate::errors::AppError;
-use crate::AppState;
+use crate::state::DbPool;
 
-/// Axum extractor that acquires a pooled database connection from `AppState.db`.
+/// Axum extractor that acquires a pooled database connection from the router state.
 ///
 /// Usage in handler functions:
 /// ```ignore
@@ -36,14 +36,20 @@ impl DerefMut for DbConn {
     }
 }
 
-impl FromRequestParts<AppState> for DbConn {
+/// Generic over the router state, following axum's guidance for state-dependent
+/// extractors: any state that can produce a [`DbPool`] can produce a `DbConn`.
+impl<S> FromRequestParts<S> for DbConn
+where
+    DbPool: FromRef<S>,
+    S: Send + Sync,
+{
     type Rejection = AppError;
 
     async fn from_request_parts(
         _parts: &mut axum::http::request::Parts,
-        state: &AppState,
+        state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let conn = state.db.get()?;
+        let conn = DbPool::from_ref(state).get()?;
         Ok(DbConn(conn))
     }
 }

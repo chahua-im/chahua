@@ -8,7 +8,7 @@ use crate::errors::AppError;
 use crate::models::{Invite, InviteType, NewInvite};
 use crate::schema::invites;
 use crate::utils::ids;
-use crate::AppState;
+use crate::utils::ids::IdGen;
 
 const INVITE_CODE_LEN: usize = 10;
 const INVITE_CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -66,14 +66,14 @@ pub fn find_active_targeted_invite(
 
 pub async fn create_generic_invite(
     conn: &mut PgConnection,
-    state: &AppState,
+    id_gen: &IdGen,
     chat_id: i64,
     creator_uid: i32,
     expires_at: Option<DateTime<Utc>>,
 ) -> Result<Invite, AppError> {
     create_invite(
         conn,
-        state,
+        id_gen,
         NewInviteInput {
             chat_id,
             invite_type: InviteType::Generic,
@@ -88,7 +88,7 @@ pub async fn create_generic_invite(
 
 pub async fn create_targeted_invite(
     conn: &mut PgConnection,
-    state: &AppState,
+    id_gen: &IdGen,
     chat_id: i64,
     target_uid: i32,
     creator_uid: Option<i32>,
@@ -96,7 +96,7 @@ pub async fn create_targeted_invite(
 ) -> Result<Invite, AppError> {
     create_invite(
         conn,
-        state,
+        id_gen,
         NewInviteInput {
             chat_id,
             invite_type: InviteType::Targeted,
@@ -120,10 +120,10 @@ pub struct NewInviteInput {
 
 pub async fn create_invite(
     conn: &mut PgConnection,
-    state: &AppState,
+    id_gen: &IdGen,
     input: NewInviteInput,
 ) -> Result<Invite, AppError> {
-    let id = ids::next_id(state.id_gen.as_ref()).await.map_err(|e| {
+    let id = ids::next_id(id_gen).await.map_err(|e| {
         tracing::error!("next_id for invite: {:?}", e);
         AppError::Internal("ID generation failed")
     })?;

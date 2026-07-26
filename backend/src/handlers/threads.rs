@@ -81,8 +81,15 @@ async fn get_threads(
         .select(Message::as_select())
         .load(conn)?;
 
-    let response =
-        thread_svc::enrich_thread_list(conn, rows, has_more, root_messages, uid, &state)?;
+    let response = thread_svc::enrich_thread_list(
+        conn,
+        rows,
+        has_more,
+        root_messages,
+        uid,
+        &state.media,
+        &state.avatars,
+    )?;
 
     Ok(Json(response))
 }

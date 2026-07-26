@@ -15,10 +15,7 @@ use crate::{
     handlers::{chats::ChatIdPath, members::check_membership},
     models::Attachment,
     schema::{attachments, messages},
-    services::{
-        media::build_public_object_url,
-        user::{lookup_user_avatars, lookup_user_profiles},
-    },
+    services::user::lookup_user_profiles,
     utils::{auth::CurrentUid, pagination::validate_limit},
     AppState, MAX_CHAT_ATTACHMENTS_LIMIT,
 };
@@ -254,7 +251,7 @@ async fn get_chat_attachments(
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let user_avatars = lookup_user_avatars(&state, &sender_uids);
+    let user_avatars = state.avatars.lookup(&sender_uids);
     let user_profiles = lookup_user_profiles(conn, &sender_uids).unwrap_or_default();
     let message_map: std::collections::HashMap<i64, AttachmentMessageRow> = message_rows
         .into_iter()
@@ -275,7 +272,7 @@ async fn get_chat_attachments(
             message_id,
             message_created_at: message.message_created_at,
             sender: build_sender(message.sender_uid, &user_avatars, &user_profiles),
-            url: build_public_object_url(&state, &attachment.external_reference),
+            url: state.media.public_url(&attachment.external_reference),
             kind: attachment.kind,
             size: attachment.size,
             file_name: attachment.file_name,

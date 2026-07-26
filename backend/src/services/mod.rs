@@ -1,6 +1,7 @@
 pub mod audio_transcode;
 pub mod auth_token;
 pub mod authz;
+pub mod avatars;
 pub mod background;
 pub mod chat;
 pub mod client_tracking;

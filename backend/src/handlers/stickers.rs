@@ -31,9 +31,7 @@ use crate::{
         user_sticker_pack_subscriptions,
     },
     services::{
-        image_processing::process_sticker,
-        media::{build_public_object_url, build_storage_key, upload_public_object},
-        user::lookup_user_profiles,
+        image_processing::process_sticker, media::build_storage_key, user::lookup_user_profiles,
     },
     utils::{auth::CurrentUid, ids},
     AppState,
@@ -92,7 +90,7 @@ fn is_allowed_sticker_content_type(content_type: &str) -> bool {
 fn media_response(state: &AppState, media_row: &Media) -> StickerMediaResponse {
     StickerMediaResponse {
         id: media_row.id,
-        url: build_public_object_url(state, &media_row.storage_key),
+        url: state.media.public_url(&media_row.storage_key),
         content_type: media_row.content_type.clone(),
         size: media_row.size,
         width: media_row.width,
@@ -721,14 +719,14 @@ async fn post_pack_sticker(
     let storage_object_id = uuid::Uuid::new_v4().to_string();
     let storage_key = build_storage_key(STICKER_STORAGE_PREFIX, &file_name, &storage_object_id);
 
-    upload_public_object(
-        &state.s3_client,
-        &state.s3_bucket_name,
-        &storage_key,
-        &processed.content_type,
-        ByteStream::from(processed.data.clone()),
-    )
-    .await?;
+    state
+        .media
+        .put_object(
+            &storage_key,
+            &processed.content_type,
+            ByteStream::from(processed.data.clone()),
+        )
+        .await?;
 
     let now = Utc::now();
 
@@ -783,13 +781,7 @@ async fn post_pack_sticker(
         Ok(value) => value,
         Err(e) => {
             tracing::error!("create sticker: {:?}", e);
-            let _ = state
-                .s3_client
-                .delete_object()
-                .bucket(&state.s3_bucket_name)
-                .key(&storage_key)
-                .send()
-                .await;
+            state.media.delete_object(&storage_key).await;
             return Err(AppError::Internal("Failed to create sticker"));
         }
     };

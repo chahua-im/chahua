@@ -74,7 +74,7 @@ async fn post_external_invite(
 
     let invite = invite_service::create_targeted_invite(
         conn,
-        &state,
+        state.id_gen.as_ref(),
         body.chat_id,
         body.target_uid,
         None,

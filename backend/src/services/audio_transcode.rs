@@ -19,7 +19,7 @@ use crate::handlers::chats::{
 };
 use crate::models::{Attachment, Message, MessageType, NewAttachment, TranscodeStatus};
 use crate::schema::{attachments, messages};
-use crate::services::media::{build_storage_key, upload_public_object};
+use crate::services::media::MediaStore;
 use crate::AppState;
 
 const CHANNEL_BUFFER: usize = 64;
@@ -308,26 +308,28 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
     }
 
     let was_published = message.is_published;
-    if let Some(ref attachment) = current_attachment {
+    if let Some(attachment) = &current_attachment {
         state
             .metrics
             .record_audio_transcode_source(&attachment.kind);
     }
     let mut metric_guard = AudioTranscodeMetricGuard::new(state.clone(), started_at);
 
-    let outcome = match current_attachment {
-        Some(ref attachment) if is_canonical_attachment(attachment) => AudioPublishOutcome::Done {
+    let outcome = match &current_attachment {
+        Some(attachment) if is_canonical_attachment(attachment) => AudioPublishOutcome::Done {
             swap_attachment: None,
         },
-        Some(ref attachment) => match transcode_attachment(&state, attachment).await {
-            Ok(new_attachment) => AudioPublishOutcome::Done {
-                swap_attachment: Some(new_attachment),
-            },
-            Err(err) => {
-                tracing::warn!(message_id, attachment_id = attachment.id, error = %err, "audio transcode failed, publishing original attachment");
-                AudioPublishOutcome::Failed
+        Some(attachment) => {
+            match transcode_attachment(&state.media, state.id_gen.as_ref(), attachment).await {
+                Ok(new_attachment) => AudioPublishOutcome::Done {
+                    swap_attachment: Some(new_attachment),
+                },
+                Err(err) => {
+                    tracing::warn!(message_id, attachment_id = attachment.id, error = %err, "audio transcode failed, publishing original attachment");
+                    AudioPublishOutcome::Failed
+                }
             }
-        },
+        }
         None => {
             tracing::warn!(
                 message_id,
@@ -394,11 +396,17 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
     };
 
     let conn = &mut state.db.get()?;
-    let response = attach_metadata(conn, vec![updated_message], &state, message.sender_uid)
-        .await
-        .into_iter()
-        .next()
-        .ok_or(AppError::Internal("Failed to build message response"))?;
+    let response = attach_metadata(
+        conn,
+        vec![updated_message],
+        &state.media,
+        &state.avatars,
+        message.sender_uid,
+    )
+    .await
+    .into_iter()
+    .next()
+    .ok_or(AppError::Internal("Failed to build message response"))?;
 
     if was_published {
         if matches!(
@@ -420,14 +428,8 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
     }
 
     let conn = &mut state.db.get()?;
-    let side_effects = build_message_side_effects(
-        conn,
-        &response,
-        &state,
-        message.sender_uid,
-        message.chat_id,
-        true,
-    )?;
+    let side_effects =
+        build_message_side_effects(conn, &response, message.sender_uid, message.chat_id, true)?;
     let member_uids = side_effects.broadcast_uids.clone();
     side_effects.fire(&state);
 
@@ -440,11 +442,17 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
             .first(conn)
             .optional()?
         {
-            let root_response = attach_metadata(conn, vec![root_msg], &state, message.sender_uid)
-                .await
-                .into_iter()
-                .next()
-                .ok_or(AppError::Internal("Failed to build thread root response"))?;
+            let root_response = attach_metadata(
+                conn,
+                vec![root_msg],
+                &state.media,
+                &state.avatars,
+                message.sender_uid,
+            )
+            .await
+            .into_iter()
+            .next()
+            .ok_or(AppError::Internal("Failed to build thread root response"))?;
             let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response));
             state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
         }
@@ -532,45 +540,30 @@ fn is_canonical_attachment(attachment: &Attachment) -> bool {
 }
 
 async fn transcode_attachment(
-    state: &AppState,
+    media: &MediaStore,
+    id_gen: &crate::utils::ids::IdGen,
     attachment: &Attachment,
 ) -> Result<NewAttachment, String> {
-    let object = state
-        .s3_client
-        .get_object()
-        .bucket(&state.s3_bucket_name)
-        .key(&attachment.external_reference)
-        .send()
+    let source_bytes = media
+        .get_object(&attachment.external_reference)
         .await
         .map_err(|err| format!("download source object: {err:?}"))?;
 
-    let source_bytes = object
-        .body
-        .collect()
-        .await
-        .map_err(|err| format!("read source object: {err:?}"))?
-        .into_bytes();
-
-    let output_bytes = transcode_with_ffmpeg(&attachment.file_name, source_bytes.to_vec()).await?;
+    let output_bytes = transcode_with_ffmpeg(&attachment.file_name, source_bytes).await?;
 
     let object_id = Uuid::new_v4().to_string();
     let canonical_file_name = canonical_file_name(&attachment.file_name);
-    let storage_key = build_storage_key(
-        &state.s3_attachment_prefix,
-        &canonical_file_name,
-        &object_id,
-    );
-    upload_public_object(
-        &state.s3_client,
-        &state.s3_bucket_name,
-        &storage_key,
-        "audio/ogg",
-        ByteStream::from(output_bytes.clone()),
-    )
-    .await
-    .map_err(|err| format!("upload canonical object: {err:?}"))?;
+    let storage_key = media.attachment_key(&canonical_file_name, &object_id);
+    media
+        .put_object(
+            &storage_key,
+            "audio/ogg",
+            ByteStream::from(output_bytes.clone()),
+        )
+        .await
+        .map_err(|err| format!("upload canonical object: {err:?}"))?;
 
-    let new_attachment_id = crate::utils::ids::next_message_id(state.id_gen.as_ref())
+    let new_attachment_id = crate::utils::ids::next_message_id(id_gen)
         .await
         .map_err(|err| format!("generate canonical attachment id: {err:?}"))?;
 

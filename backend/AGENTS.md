@@ -4,6 +4,8 @@
 
 This repository contains three apps plus shared docs and API collections. `backend/` is the Rust API server; core modules live in `src/handlers`, `src/services`, `src/utils`, `src/schema`, `src/dto` (API data transfer objects), `src/models.rs` (Diesel models), and `src/metrics.rs` (Prometheus metrics), with Diesel migrations in `migrations/`. Routing and app wiring live in `src/main.rs`.
 
+Server-wide configuration is parsed in one place, `src/config.rs` (`AppConfig::from_env`) — add new env vars there rather than calling `std::env::var` from a handler or `main`. Three subsystems still own their own `from_env` because they are independently optional: `services/message_search`, `services/push` (VAPID/APNs) and `utils/ids` (`NODE_ID`). Shared state lives in `src/state.rs`: `AppState` is a newtype over `Arc<AppInner>` that `Deref`s to the inner struct, so `state.db`, `state.media` etc. read normally while the per-request clone stays a single refcount bump. Services take the narrowest dependency they actually use — `&MediaStore` for object-storage URLs, `&AvatarService` for user avatars, `&IdGen` for id generation — and never `&AppState`; handlers may take `State<AppState>` and pass the pieces down.
+
 Real-time messaging uses WebSockets: ticket-based WS auth, handlers in `src/handlers/ws/`, payloads in `src/dto/ws.rs`, connection registry in `src/services/ws_registry.rs`. Background work (e.g. push notifications via web-push/APNs) lives in `src/services/background.rs` and `src/services/push/`. Message full-text search is backed by Meilisearch (`src/services/message_search/`); media is stored in S3.
 
 ## Auth

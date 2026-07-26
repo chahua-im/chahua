@@ -86,8 +86,11 @@ pub fn extract_principal(
     if let Some(token) = bearer_token(headers).map_err(AppError::from)? {
         if token.starts_with(service_tokens::TOKEN_PREFIX) {
             let mut conn = state.db.get()?;
-            let service_token =
-                service_tokens::authenticate(&mut conn, &state.service_token_hash_key, token)?;
+            let service_token = service_tokens::authenticate(
+                &mut conn,
+                &state.config.auth.service_token_hash_key,
+                token,
+            )?;
             return Ok(Principal::ServiceToken(ServiceTokenPrincipal::from(
                 service_token,
             )));
@@ -103,8 +106,8 @@ fn extract_legacy_auth_context(
     headers: &HeaderMap,
     state: &crate::AppState,
 ) -> Result<AuthContext, (StatusCode, &'static str)> {
-    match state.auth_method {
-        crate::AuthMethod::UIDHeader => {
+    match state.config.auth.method {
+        crate::config::AuthMethod::UIDHeader => {
             let value = headers
                 .get(X_USER_ID)
                 .and_then(|v| v.to_str().ok())
@@ -122,7 +125,7 @@ fn extract_legacy_auth_context(
                 source: AuthSource::Legacy,
             })
         }
-        crate::AuthMethod::JwtOnly => Err((StatusCode::UNAUTHORIZED, "Missing auth token")),
+        crate::config::AuthMethod::JwtOnly => Err((StatusCode::UNAUTHORIZED, "Missing auth token")),
     }
 }
 

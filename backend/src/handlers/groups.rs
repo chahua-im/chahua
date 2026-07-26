@@ -22,7 +22,6 @@ use crate::models::{
 };
 use crate::schema::{group_membership, groups, media};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
-use crate::services::media::{build_public_object_url, build_storage_key, presign_public_upload};
 use crate::utils::ids;
 use crate::utils::{auth::CurrentUid, pagination::validate_limit};
 use crate::AppState;
@@ -203,7 +202,7 @@ pub(super) fn load_group_info(
         avatar: avatar_image
             .as_ref()
             .filter(|image| image.deleted_at.is_none())
-            .map(|image| build_public_object_url(state, &image.storage_key)),
+            .map(|image| state.media.public_url(&image.storage_key)),
         visibility: group.visibility,
         created_at: group.created_at,
         muted_until,
@@ -379,7 +378,7 @@ async fn get_groups(
                 id,
                 name,
                 description,
-                avatar: avatar_key.map(|key| build_public_object_url(&state, &key)),
+                avatar: avatar_key.map(|key| state.media.public_url(&key)),
                 visibility,
                 role,
             },
@@ -457,16 +456,15 @@ async fn post_avatar_upload_url(
         })?;
 
     let s3_item_id = uuid::Uuid::new_v4().to_string();
-    let storage_key =
-        build_storage_key(&state.s3_attachment_prefix, &payload.filename, &s3_item_id);
-    let presigned_upload = presign_public_upload(
-        &state.s3_client,
-        &state.s3_bucket_name,
-        &storage_key,
-        &payload.content_type,
-        chrono::Duration::minutes(15),
-    )
-    .await?;
+    let storage_key = state.media.attachment_key(&payload.filename, &s3_item_id);
+    let presigned_upload = state
+        .media
+        .presign_upload(
+            &storage_key,
+            &payload.content_type,
+            chrono::Duration::minutes(15),
+        )
+        .await?;
 
     diesel::insert_into(media::table)
         .values(&NewMedia {

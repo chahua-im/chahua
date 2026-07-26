@@ -16,9 +16,7 @@ use crate::extractors::DbConn;
 use crate::models::{NewUserExtra, UserExtra};
 use crate::schema::{group_membership, sticker_packs, user_extra, user_sticker_pack_subscriptions};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
-use crate::services::user::{
-    lookup_user_avatars, lookup_user_profiles, search_user_uids_by_prefix,
-};
+use crate::services::user::{lookup_user_profiles, search_user_uids_by_prefix};
 use crate::utils::auth::{extract_auth_context, required_client_id, AuthSource, CurrentUid};
 use crate::AppState;
 use diesel::prelude::*;
@@ -179,7 +177,7 @@ fn lookup_member_summary(
         return Ok(None);
     };
 
-    let mut avatars = lookup_user_avatars(state, &[uid]);
+    let mut avatars = state.avatars.lookup(&[uid]);
     Ok(Some(MemberSummary {
         uid,
         username: profile.username,
@@ -195,7 +193,7 @@ fn build_member_summary_map(
     uids: &[i32],
 ) -> Result<HashMap<i32, MemberSummary>, AppError> {
     let profiles = lookup_user_profiles(conn, uids)?;
-    let mut avatars = lookup_user_avatars(state, uids);
+    let mut avatars = state.avatars.lookup(uids);
 
     Ok(uids
         .iter()
@@ -294,7 +292,7 @@ async fn get_me(
         .and_then(|profile| profile.username.clone())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let mut avatars = lookup_user_avatars(&state, &[uid]);
+    let mut avatars = state.avatars.lookup(&[uid]);
     let avatar_url = avatars.remove(&uid).flatten();
 
     let extra = user_extra::table

@@ -43,7 +43,7 @@ impl From<diesel::result::Error> for AppError {
 }
 
 /// Allow converting from the legacy `(StatusCode, &'static str)` tuple so that existing
-/// helpers (e.g. `presign_public_upload`, auth extractors) can interop without rewriting
+/// helpers (e.g. `MediaStore` methods, auth extractors) can interop without rewriting
 /// everything at once.
 impl From<(StatusCode, &'static str)> for AppError {
     fn from((status, msg): (StatusCode, &'static str)) -> Self {

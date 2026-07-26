@@ -19,7 +19,6 @@ use crate::{
     handlers::members::check_membership,
     models::{Message, MessageReaction},
     schema::{group_membership, message_reactions, messages},
-    services::user::lookup_user_avatars,
     utils::auth::CurrentUid,
     AppState,
 };
@@ -81,7 +80,7 @@ fn broadcast_reaction_update(
         .into_iter()
         .collect();
     let names = load_usernames_by_uids(conn, &all_uids);
-    let avatars = lookup_user_avatars(state, &all_uids);
+    let avatars = state.avatars.lookup(&all_uids);
 
     let reactions: Vec<ReactionSummary> = counts
         .into_iter()
@@ -191,7 +190,7 @@ async fn get_reaction_details(
     // Resolve names + avatars
     let uids_vec: Vec<i32> = all_uids.into_iter().collect();
     let names = load_usernames_by_uids(conn, &uids_vec);
-    let avatars = lookup_user_avatars(&state, &uids_vec);
+    let avatars = state.avatars.lookup(&uids_vec);
 
     for group in &mut groups {
         for reactor in &mut group.reactors {

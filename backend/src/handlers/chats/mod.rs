@@ -29,9 +29,8 @@ use crate::{
     handlers::members::check_membership,
     services::{
         chat,
-        media::build_public_object_url,
         push::{PushJob, PushMessagePreview, PushMessagePreviewSticker},
-        user::{lookup_user_avatars, lookup_user_profiles, UserProfile},
+        user::{lookup_user_profiles, UserProfile},
     },
     utils::{auth::CurrentUid, ids, pagination::validate_limit},
 };
@@ -285,7 +284,7 @@ fn load_favorited_sticker_ids(
 }
 
 fn build_message_sticker_response(
-    state: &AppState,
+    media: &crate::services::media::MediaStore,
     sticker: &Sticker,
     media_row: &Media,
     is_favorited: bool,
@@ -299,7 +298,7 @@ fn build_message_sticker_response(
         is_favorited,
         media: StickerMediaResponse {
             id: media_row.id,
-            url: build_public_object_url(state, &media_row.storage_key),
+            url: media.public_url(&media_row.storage_key),
             content_type: media_row.content_type.clone(),
             size: media_row.size,
             width: media_row.width,
@@ -591,7 +590,6 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
 pub(crate) fn build_message_side_effects(
     conn: &mut PgConnection,
     response: &MessageResponse,
-    _state: &AppState,
     sender_uid: i32,
     chat_id: i64,
     enqueue_push: bool,
@@ -719,11 +717,17 @@ pub(crate) async fn send_prepared_message(
             .ok_or(AppError::Conflict("Duplicate client generated id"))?;
         let existing_attachment_ids = load_message_attachment_ids(conn, existing.id)?;
         validate_idempotent_message_payload(&existing, &prepared, &existing_attachment_ids)?;
-        let response = attach_metadata(conn, vec![existing], state, prepared.sender_uid)
-            .await
-            .into_iter()
-            .next()
-            .ok_or(AppError::Internal("Failed to build message response"))?;
+        let response = attach_metadata(
+            conn,
+            vec![existing],
+            &state.media,
+            &state.avatars,
+            prepared.sender_uid,
+        )
+        .await
+        .into_iter()
+        .next()
+        .ok_or(AppError::Internal("Failed to build message response"))?;
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
     };
     state.metrics.record_message(prepared.chat_id);
@@ -745,17 +749,22 @@ pub(crate) async fn send_prepared_message(
             .execute(conn)?;
     }
 
-    let response = attach_metadata(conn, vec![inserted_msg.clone()], state, prepared.sender_uid)
-        .await
-        .into_iter()
-        .next()
-        .ok_or(AppError::Internal("Failed to build message response"))?;
+    let response = attach_metadata(
+        conn,
+        vec![inserted_msg.clone()],
+        &state.media,
+        &state.avatars,
+        prepared.sender_uid,
+    )
+    .await
+    .into_iter()
+    .next()
+    .ok_or(AppError::Internal("Failed to build message response"))?;
 
     let (member_uids, side_effects) = if prepared.publish_immediately {
         let side_effects = build_message_side_effects(
             conn,
             &response,
-            state,
             prepared.sender_uid,
             prepared.chat_id,
             !is_system_message,
@@ -839,7 +848,8 @@ fn validate_idempotent_message_payload(
 pub async fn attach_metadata(
     conn: &mut PgConnection,
     messages_to_process: Vec<Message>,
-    state: &AppState,
+    media: &crate::services::media::MediaStore,
+    avatars: &crate::services::avatars::AvatarService,
     current_user_uid: i32,
 ) -> Vec<MessageResponse> {
     let mut reply_target_contexts: std::collections::HashMap<
@@ -880,7 +890,7 @@ pub async fn attach_metadata(
         avatar_uids.insert(reply_msg.sender_uid);
     }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
-    let mut user_avatars = lookup_user_avatars(state, &target_uids);
+    let mut user_avatars = avatars.lookup(&target_uids);
     let mut user_profiles = lookup_user_profiles(conn, &target_uids).unwrap_or_default();
 
     let mut message_attachments_map: std::collections::HashMap<i64, Vec<Attachment>> =
@@ -1020,7 +1030,7 @@ pub async fn attach_metadata(
             .into_iter()
             .collect();
         let reactor_names = load_usernames_by_uids(conn, &all_reactor_uids);
-        let reactor_avatars = lookup_user_avatars(state, &all_reactor_uids);
+        let reactor_avatars = avatars.lookup(&all_reactor_uids);
 
         for (msg_id, emoji, count) in counts {
             let reacted_by_me = Some(my_reactions.contains(&(msg_id, emoji.clone())));
@@ -1082,7 +1092,7 @@ pub async fn attach_metadata(
         .collect();
     if !extra_mention_uids.is_empty() {
         user_profiles.extend(lookup_user_profiles(conn, &extra_mention_uids).unwrap_or_default());
-        user_avatars.extend(lookup_user_avatars(state, &extra_mention_uids));
+        user_avatars.extend(avatars.lookup(&extra_mention_uids));
     }
 
     let mut responses = Vec::with_capacity(messages_to_process.len());
@@ -1145,7 +1155,7 @@ pub async fn attach_metadata(
                 for att in atts {
                     attachments.push(AttachmentResponse {
                         id: att.id,
-                        url: build_public_object_url(state, &att.external_reference),
+                        url: media.public_url(&att.external_reference),
                         kind: att.kind.clone(),
                         size: att.size,
                         file_name: att.file_name.clone(),
@@ -1166,7 +1176,7 @@ pub async fn attach_metadata(
                     .then(|| {
                         sticker_rows.get(&sticker_id).map(|(sticker, media_row)| {
                             build_message_sticker_response(
-                                state,
+                                media,
                                 sticker,
                                 media_row,
                                 favorited_sticker_ids.contains(&sticker_id),
@@ -1397,7 +1407,8 @@ async fn get_chats(
         .unread_service
         .count_membership_unreads(conn, &memberships)?;
 
-    let message_responses = attach_metadata(conn, messages_to_process, &state, uid).await;
+    let message_responses =
+        attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
 
     let mut message_response_map: std::collections::HashMap<i64, MessageResponse> =
         message_responses
@@ -1427,7 +1438,7 @@ async fn get_chats(
                     name: Some(name),
                     avatar: avatar_key
                         .as_deref()
-                        .map(|storage_key| build_public_object_url(&state, storage_key)),
+                        .map(|storage_key| state.media.public_url(storage_key)),
                     last_message_at,
                     unread_count,
                     last_read_message_id,

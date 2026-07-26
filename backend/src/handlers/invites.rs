@@ -212,13 +212,13 @@ fn validate_invite_is_active(invite: &Invite, now: DateTime<Utc>) -> bool {
 
 async fn create_invite_from_body(
     conn: &mut PgConnection,
-    state: &AppState,
+    id_gen: &crate::utils::ids::IdGen,
     uid: i32,
     body: &CreateInviteBody,
 ) -> Result<Invite, AppError> {
     invite_service::create_invite(
         conn,
-        state,
+        id_gen,
         invite_service::NewInviteInput {
             chat_id: body.chat_id,
             invite_type: body.invite_type.clone(),
@@ -301,7 +301,7 @@ async fn post_invite(
     validate_create_body(&body)?;
 
     require_admin_role(conn, body.chat_id, uid)?;
-    let invite = create_invite_from_body(conn, &state, uid, &body).await?;
+    let invite = create_invite_from_body(conn, state.id_gen.as_ref(), uid, &body).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -346,7 +346,7 @@ async fn post_send_invite_message(
     } else {
         invite_service::create_generic_invite(
             conn,
-            &state,
+            state.id_gen.as_ref(),
             body.source_chat_id,
             uid,
             body.expires_at,

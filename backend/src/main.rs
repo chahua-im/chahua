@@ -1,12 +1,10 @@
 use axum::body::Body;
 use axum::http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
-use axum::http::{HeaderValue, Method, Request};
+use axum::http::{Method, Request};
 use axum::{middleware, routing::get, Router};
-use base64::Engine;
-use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
@@ -20,6 +18,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 use utils::auth::{X_APP_VERSION, X_CLIENT_ID, X_USER_ID};
 use utoipa::OpenApi;
 
+mod config;
 mod constants;
 mod db_tracing;
 mod dto;
@@ -32,7 +31,13 @@ mod openapi;
 mod schema;
 mod serde_i64_string;
 mod services;
+mod state;
 mod utils;
+
+use config::{AppConfig, LogFormat};
+use state::{AppInner, DbPool};
+
+pub(crate) use state::AppState;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
@@ -55,59 +60,7 @@ pub(crate) const MAX_CHAT_ATTACHMENTS_LIMIT: i64 = 100;
 pub(crate) const MAX_MESSAGES_LIMIT: i64 = 100;
 pub(crate) const MAX_MEMBERS_LIMIT: i64 = 100;
 const MAX_REQUEST_BODY_BYTES: usize = 50 * 1024 * 1024;
-const LOG_FORMAT_ENV: &str = "BACKEND_LOG_FORMAT";
 const MESSAGE_SEARCH_REINDEX_COMMAND: &str = "message-search-reindex";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LogFormat {
-    Pretty,
-    Json,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
-pub(crate) enum AuthMethod {
-    UIDHeader,
-    #[default]
-    JwtOnly,
-}
-
-impl AuthMethod {
-    fn from_env(raw: Option<String>) -> Self {
-        match raw.as_deref() {
-            Some("UIDHeader") => Self::UIDHeader,
-            _ => Self::JwtOnly,
-        }
-    }
-}
-
-fn debug_auth_enabled(debug_build: bool, raw_env: Option<&str>) -> bool {
-    debug_build || raw_env == Some("true")
-}
-
-#[derive(Clone)]
-pub(crate) struct AppState {
-    db: Pool<ConnectionManager<PgConnection>>,
-    id_gen: Arc<utils::ids::IdGen>,
-    metrics: Arc<metrics::Metrics>,
-    authz_service: Arc<services::authz::AuthorizationService>,
-    ws_registry: Arc<services::ws_registry::ConnectionRegistry>,
-    push_service: Arc<services::push::PushService>,
-    unread_service: Arc<services::unread::UnreadService>,
-    client_tracking: Arc<services::client_tracking::ClientTrackingService>,
-    background_service: Arc<services::background::BackgroundService>,
-    message_search: Option<Arc<services::message_search::MessageSearchService>>,
-    s3_client: aws_sdk_s3::Client,
-    s3_bucket_name: String,
-    s3_attachment_prefix: String,
-    s3_base_url: Option<String>,
-    pub auth_method: AuthMethod,
-    pub discuz_avatar_public_url: Option<String>,
-
-    pub discuz_avatar_path: Option<String>,
-    pub auth_token_service: Arc<services::auth_token::AuthTokenService>,
-    pub debug_auth_enabled: bool,
-    pub service_token_hash_key: Vec<u8>,
-}
 
 #[tokio::main]
 async fn main() {
@@ -123,11 +76,12 @@ async fn main() {
     db_tracing::install();
     let command = read_command();
 
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let manager = ConnectionManager::<PgConnection>::new(&database_url);
+    let config = Arc::new(AppConfig::from_env());
+
+    let manager = ConnectionManager::<PgConnection>::new(&config.database_url);
 
     // TODO: consider deadpool for pool
-    let pool = Pool::builder()
+    let pool = DbPool::builder()
         .build(manager)
         .expect("Failed to create pool");
 
@@ -150,80 +104,21 @@ async fn main() {
         .await
         .expect("Failed to initialize message search service");
 
-    let authz_service = services::authz::AuthorizationService::start();
     let ws_registry = Arc::new(services::ws_registry::ConnectionRegistry::new(
         metrics.clone(),
     ));
     let unread_service = Arc::new(services::unread::UnreadService::new());
 
-    let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-    let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&aws_config);
-
-    if let Ok(endpoint) = std::env::var("S3_ENDPOINT_URL") {
-        s3_config_builder = s3_config_builder
-            .endpoint_url(endpoint)
-            .force_path_style(true);
-    }
-
-    let s3_client = aws_sdk_s3::Client::from_conf(s3_config_builder.build());
-    let s3_bucket_name = std::env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set");
-    let s3_attachment_prefix =
-        std::env::var("ATTACHMENTS_PREFIX").unwrap_or_else(|_| "attachments".to_string());
-    let s3_base_url = std::env::var("S3_BASE_URL").ok();
-
-    let auth_method = AuthMethod::from_env(std::env::var("AUTH_METHOD").ok());
-    let debug_auth_enabled = debug_auth_enabled(
-        cfg!(debug_assertions),
-        std::env::var("ENABLE_DEBUG_AUTH").ok().as_deref(),
-    );
-    if debug_auth_enabled {
-        tracing::warn!(
-            "Development authentication is enabled; arbitrary UID impersonation is available"
-        );
-    }
-    let app_addr = read_socket_addr("APP_ADDR", SocketAddr::from(([0, 0, 0, 0], 3000)));
-    let metrics_addr = read_socket_addr("METRICS_ADDR", SocketAddr::from(([0, 0, 0, 0], 3001)));
-    let cors_allowed_origins = read_cors_allowed_origins("CORS_ALLOWED_ORIGINS");
-    let discuz_avatar_public_url = std::env::var("DISCUZ_AVATAR_PUBLIC_URL").ok();
-    let discuz_avatar_path = std::env::var("DISCUZ_AVATAR_PATH").ok();
-
-    let jwt_signing_key = base64::engine::general_purpose::STANDARD
-        .decode(
-            std::env::var("JWT_SIGNING_KEY_BASE64").expect("JWT_SIGNING_KEY_BASE64 must be set"),
-        )
-        .expect("JWT_SIGNING_KEY_BASE64 must be valid base64");
-    assert!(
-        jwt_signing_key.len() >= 32,
-        "JWT_SIGNING_KEY_BASE64 must decode to at least 32 bytes"
-    );
-
-    let service_token_hash_key = match std::env::var("SERVICE_TOKEN_HASH_KEY_BASE64").ok() {
-        Some(raw) => {
-            let key = base64::engine::general_purpose::STANDARD
-                .decode(raw)
-                .expect("SERVICE_TOKEN_HASH_KEY_BASE64 must be valid base64");
-            assert!(
-                key.len() >= 32,
-                "SERVICE_TOKEN_HASH_KEY_BASE64 must decode to at least 32 bytes"
-            );
-            key
-        }
-        None => {
-            tracing::warn!(
-                "SERVICE_TOKEN_HASH_KEY_BASE64 not set; falling back to JWT signing key"
-            );
-            jwt_signing_key.clone()
-        }
-    };
-    let auth_token_service = Arc::new(services::auth_token::AuthTokenService::new(
-        &jwt_signing_key,
-    ));
-
-    let state = AppState {
+    let state = AppState::new(AppInner {
         db: pool.clone(),
         id_gen: Arc::new(utils::ids::new_generator()),
         metrics: metrics.clone(),
-        authz_service,
+        media: build_media_store(&config).await,
+        avatars: Arc::new(services::avatars::AvatarService::new(
+            config.avatars.clone(),
+            metrics.clone(),
+        )),
+        authz_service: services::authz::AuthorizationService::start(),
         ws_registry: ws_registry.clone(),
         push_service: services::push::PushService::start(
             pool.clone(),
@@ -244,17 +139,11 @@ async fn main() {
             unread_service.clone(),
         ),
         message_search,
-        s3_client,
-        s3_bucket_name,
-        debug_auth_enabled,
-        s3_attachment_prefix,
-        s3_base_url,
-        auth_method,
-        discuz_avatar_public_url,
-        discuz_avatar_path,
-        auth_token_service,
-        service_token_hash_key,
-    };
+        auth_token_service: Arc::new(services::auth_token::AuthTokenService::new(
+            &config.auth.jwt_signing_key,
+        )),
+        config: config.clone(),
+    });
 
     services::audio_transcode::start(state.clone());
 
@@ -322,7 +211,7 @@ async fn main() {
     let app = app.merge(
         utoipa_swagger_ui::SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi_doc),
     );
-    let app = if let Some(allowed_origins) = cors_allowed_origins {
+    let app = if let Some(allowed_origins) = config.server.cors_allowed_origins.clone() {
         info!(
             allowed_origins = ?allowed_origins,
             "Enabling CORS for configured origins"
@@ -357,11 +246,21 @@ async fn main() {
         .route("/metrics", get(metrics::metrics_handler))
         .with_state(metrics_registry);
 
-    info!("Starting API server listening on {:?}", app_addr);
-    let app_listener = tokio::net::TcpListener::bind(app_addr).await.unwrap();
+    info!(
+        "Starting API server listening on {:?}",
+        config.server.app_addr
+    );
+    let app_listener = tokio::net::TcpListener::bind(config.server.app_addr)
+        .await
+        .unwrap();
 
-    info!("Starting metrics server listening on {:?}", metrics_addr);
-    let metrics_listener = tokio::net::TcpListener::bind(metrics_addr).await.unwrap();
+    info!(
+        "Starting metrics server listening on {:?}",
+        config.server.metrics_addr
+    );
+    let metrics_listener = tokio::net::TcpListener::bind(config.server.metrics_addr)
+        .await
+        .unwrap();
 
     let api_server = axum::serve(app_listener, app);
     let metrics_server = axum::serve(metrics_listener, metrics_app);
@@ -374,6 +273,22 @@ async fn main() {
             result.unwrap();
         }
     }
+}
+
+async fn build_media_store(config: &AppConfig) -> services::media::MediaStore {
+    let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&aws_config);
+
+    if let Some(endpoint) = config.media.endpoint_url.as_deref() {
+        s3_config_builder = s3_config_builder
+            .endpoint_url(endpoint)
+            .force_path_style(true);
+    }
+
+    services::media::MediaStore::new(
+        aws_sdk_s3::Client::from_conf(s3_config_builder.build()),
+        config.media.clone(),
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -419,7 +334,7 @@ async fn build_message_search_service(
 }
 
 async fn run_message_search_reindex(
-    pool: Pool<ConnectionManager<PgConnection>>,
+    pool: DbPool,
     metrics: Arc<metrics::Metrics>,
 ) -> Result<(), services::message_search::MessageSearchError> {
     let config = services::message_search::MessageSearchConfig::from_required_env()?;
@@ -433,20 +348,9 @@ async fn run_message_search_reindex(
     Ok(())
 }
 
-fn read_socket_addr(var_name: &str, default: SocketAddr) -> SocketAddr {
-    std::env::var(var_name)
-        .ok()
-        .map(|value| {
-            value
-                .parse()
-                .unwrap_or_else(|_| panic!("{var_name} must be a valid socket address"))
-        })
-        .unwrap_or(default)
-}
-
 fn init_tracing() {
     let env_filter = EnvFilter::from_default_env();
-    match parse_log_format(std::env::var(LOG_FORMAT_ENV).ok().as_deref()) {
+    match config::log_format_from_env() {
         LogFormat::Pretty => tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt::layer().pretty().with_target(true))
@@ -455,77 +359,5 @@ fn init_tracing() {
             .with(env_filter)
             .with(fmt::layer().json().with_target(true))
             .init(),
-    }
-}
-
-fn parse_log_format(value: Option<&str>) -> LogFormat {
-    match value.map(str::trim).filter(|value| !value.is_empty()) {
-        None => LogFormat::Pretty,
-        Some(value) if value.eq_ignore_ascii_case("pretty") => LogFormat::Pretty,
-        Some(value) if value.eq_ignore_ascii_case("json") => LogFormat::Json,
-        Some(_) => panic!("{LOG_FORMAT_ENV} must be one of: pretty, json"),
-    }
-}
-
-fn read_cors_allowed_origins(var_name: &str) -> Option<Vec<HeaderValue>> {
-    let raw_value = std::env::var(var_name).ok()?;
-    let raw_value = raw_value.trim();
-    if raw_value.is_empty() {
-        return None;
-    }
-
-    let origins = raw_value
-        .split(',')
-        .map(str::trim)
-        .filter(|origin| !origin.is_empty())
-        .map(|origin| {
-            assert!(
-                origin != "*",
-                "{var_name} must list explicit origins when credentials are enabled"
-            );
-            HeaderValue::from_str(origin)
-                .unwrap_or_else(|_| panic!("{var_name} contains an invalid origin: {origin}"))
-        })
-        .collect::<Vec<_>>();
-
-    assert!(
-        !origins.is_empty(),
-        "{var_name} must contain at least one non-empty origin when set"
-    );
-
-    Some(origins)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{debug_auth_enabled, parse_log_format, LogFormat};
-
-    #[test]
-    fn log_format_defaults_to_pretty_when_unset() {
-        assert_eq!(parse_log_format(None), LogFormat::Pretty);
-    }
-
-    #[test]
-    fn log_format_accepts_json_and_pretty_case_insensitively() {
-        assert_eq!(parse_log_format(Some("json")), LogFormat::Json);
-        assert_eq!(parse_log_format(Some("JSON")), LogFormat::Json);
-        assert_eq!(parse_log_format(Some("pretty")), LogFormat::Pretty);
-        assert_eq!(parse_log_format(Some("Pretty")), LogFormat::Pretty);
-    }
-
-    #[test]
-    #[should_panic(expected = "BACKEND_LOG_FORMAT must be one of: pretty, json")]
-    fn log_format_rejects_unknown_values() {
-        parse_log_format(Some("xml"));
-    }
-    #[test]
-    fn debug_auth_gate_requires_exact_release_override() {
-        assert!(debug_auth_enabled(true, None));
-        assert!(debug_auth_enabled(true, Some("TRUE")));
-        assert!(debug_auth_enabled(false, Some("true")));
-        assert!(!debug_auth_enabled(false, None));
-        assert!(!debug_auth_enabled(false, Some("TRUE")));
-        assert!(!debug_auth_enabled(false, Some("1")));
-        assert!(!debug_auth_enabled(false, Some(" true ")));
     }
 }

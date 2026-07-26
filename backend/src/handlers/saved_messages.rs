@@ -83,7 +83,15 @@ async fn put_saved_message(
 ) -> Result<Json<SavedMessageResponse>, AppError> {
     let conn = &mut *conn;
 
-    let response = saved_messages_svc::save_message_snapshot(conn, &state, uid, message_id).await?;
+    let response = saved_messages_svc::save_message_snapshot(
+        conn,
+        &state.media,
+        &state.avatars,
+        state.id_gen.as_ref(),
+        uid,
+        message_id,
+    )
+    .await?;
 
     Ok(Json(response))
 }

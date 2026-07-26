@@ -62,7 +62,8 @@ async fn post_service_token(
     })?;
     let assignment_ids =
         next_ids(&state, policy_ids.len(), "service token policy assignment").await?;
-    let credential = service_token_service::generate_credential(&state.service_token_hash_key)?;
+    let credential =
+        service_token_service::generate_credential(&state.config.auth.service_token_hash_key)?;
 
     let now = Utc::now();
     let new_token = NewServiceToken {
@@ -213,8 +214,11 @@ async fn post_rotate_service_token(
     }
 
     let secret = service_token_service::generate_secret();
-    let secret_hash =
-        service_token_service::hash_secret(&state.service_token_hash_key, &row.token, &secret)?;
+    let secret_hash = service_token_service::hash_secret(
+        &state.config.auth.service_token_hash_key,
+        &row.token,
+        &secret,
+    )?;
     let credential = format!(
         "{}{}_{}",
         service_token_service::TOKEN_PREFIX,

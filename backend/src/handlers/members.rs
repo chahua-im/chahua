@@ -19,8 +19,7 @@ use crate::models::{GroupJoinReason, GroupMembership, GroupRole, NewGroupMembers
 use crate::schema::{self, group_membership};
 
 use crate::services::user::{
-    lookup_user_avatars, lookup_user_profiles, parse_user_search_query, search_group_member_uids,
-    UserSearchMode,
+    lookup_user_profiles, parse_user_search_query, search_group_member_uids, UserSearchMode,
 };
 use crate::utils::{auth::CurrentUid, pagination::validate_limit};
 use crate::{AppState, MAX_MEMBERS_LIMIT};
@@ -66,7 +65,7 @@ fn build_member_responses(
 ) -> Result<Vec<MemberResponse>, AppError> {
     let uids: Vec<i32> = page_rows.iter().map(|(uid, _, _)| *uid).collect();
     let profiles = lookup_user_profiles(conn, &uids)?;
-    let mut avatars = lookup_user_avatars(state, &uids);
+    let mut avatars = state.avatars.lookup(&uids);
 
     Ok(page_rows
         .into_iter()
@@ -298,7 +297,9 @@ async fn post_add_member(
         send_result.side_effects.fire(&state);
     }
 
-    let avatar_url = lookup_user_avatars(&state, &[body.uid])
+    let avatar_url = state
+        .avatars
+        .lookup(&[body.uid])
         .remove(&body.uid)
         .flatten();
 
@@ -514,7 +515,9 @@ async fn patch_member(
     let profiles = lookup_user_profiles(conn, &[target_uid])?;
     let profile = profiles.get(&target_uid);
 
-    let avatar_url = lookup_user_avatars(&state, &[target_uid])
+    let avatar_url = state
+        .avatars
+        .lookup(&[target_uid])
         .remove(&target_uid)
         .flatten();
 

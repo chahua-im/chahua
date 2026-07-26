@@ -18,12 +18,8 @@ use crate::{
         Attachment, Group, Media, Message, MessageType, NewSavedMessage, SavedMessage, Sticker,
     },
     schema::{attachments, group_membership, groups, media, messages, saved_messages, stickers},
-    services::{
-        media::build_public_object_url,
-        user::{lookup_user_avatars, lookup_user_profiles},
-    },
-    utils::{ids, pagination::validate_limit},
-    AppState,
+    services::{avatars::AvatarService, media::MediaStore, user::lookup_user_profiles},
+    utils::{ids, ids::IdGen, pagination::validate_limit},
 };
 
 pub const DEFAULT_SAVED_MESSAGES_LIMIT: i64 = 30;
@@ -198,7 +194,7 @@ fn load_existing_saved_message(
 
 fn load_attachment_snapshots(
     conn: &mut PgConnection,
-    state: &AppState,
+    media: &MediaStore,
     message: &Message,
 ) -> Result<Vec<SavedAttachmentSnapshot>, AppError> {
     if !message.has_attachments {
@@ -220,7 +216,7 @@ fn load_attachment_snapshots(
         .map(|attachment| SavedAttachmentSnapshot {
             id: attachment.id,
             external_reference: attachment.external_reference.clone(),
-            url: build_public_object_url(state, &attachment.external_reference),
+            url: media.public_url(&attachment.external_reference),
             kind: attachment.kind,
             size: attachment.size,
             file_name: attachment.file_name,
@@ -233,7 +229,7 @@ fn load_attachment_snapshots(
 
 fn load_sender_and_mentions_snapshots(
     conn: &mut PgConnection,
-    state: &AppState,
+    avatars: &AvatarService,
     message: &Message,
 ) -> Result<(SavedSenderSnapshot, Vec<MentionInfo>), AppError> {
     let mention_uids = message
@@ -251,7 +247,7 @@ fn load_sender_and_mentions_snapshots(
     }
 
     let user_profiles = lookup_user_profiles(conn, &lookup_uids)?;
-    let user_avatars = lookup_user_avatars(state, &lookup_uids);
+    let user_avatars = avatars.lookup(&lookup_uids);
     let sender_profile = user_profiles.get(&message.sender_uid);
     let sender = SavedSenderSnapshot {
         uid: message.sender_uid,
@@ -270,7 +266,7 @@ fn load_sender_and_mentions_snapshots(
 
 fn load_chat_snapshot(
     conn: &mut PgConnection,
-    state: &AppState,
+    media: &MediaStore,
     chat_id: i64,
 ) -> Result<SavedChatSnapshot, AppError> {
     let group = groups::table
@@ -288,7 +284,7 @@ fn load_chat_snapshot(
             .select(media::storage_key)
             .first::<String>(conn)
             .optional()?
-            .map(|storage_key| build_public_object_url(state, &storage_key)),
+            .map(|storage_key| media.public_url(&storage_key)),
         None => None,
     };
 
@@ -301,7 +297,7 @@ fn load_chat_snapshot(
 
 fn load_sticker_snapshot(
     conn: &mut PgConnection,
-    state: &AppState,
+    media: &MediaStore,
     sticker_id: Option<i64>,
 ) -> Result<Option<SavedStickerSnapshot>, AppError> {
     let Some(sticker_id) = sticker_id else {
@@ -319,7 +315,7 @@ fn load_sticker_snapshot(
         id: sticker.id,
         emoji: sticker.emoji,
         name: sticker.name,
-        media_url: build_public_object_url(state, &media_row.storage_key),
+        media_url: media.public_url(&media_row.storage_key),
         media_content_type: media_row.content_type,
     }))
 }
@@ -391,7 +387,9 @@ fn load_locatable_chat_ids(
 
 pub async fn save_message_snapshot(
     conn: &mut PgConnection,
-    state: &AppState,
+    media: &MediaStore,
+    avatars: &AvatarService,
+    id_gen: &IdGen,
     uid: i32,
     message_id: i64,
 ) -> Result<SavedMessageResponse, AppError> {
@@ -409,16 +407,16 @@ pub async fn save_message_snapshot(
         return saved_message_row_to_response(existing, true);
     }
 
-    let attachments = load_attachment_snapshots(conn, state, &message)?;
-    let sticker = load_sticker_snapshot(conn, state, message.sticker_id)?;
-    let (sender, mentions) = load_sender_and_mentions_snapshots(conn, state, &message)?;
-    let chat = load_chat_snapshot(conn, state, message.chat_id)?;
+    let attachments = load_attachment_snapshots(conn, media, &message)?;
+    let sticker = load_sticker_snapshot(conn, media, message.sticker_id)?;
+    let (sender, mentions) = load_sender_and_mentions_snapshots(conn, avatars, &message)?;
+    let chat = load_chat_snapshot(conn, media, message.chat_id)?;
 
     if let Some(existing) = load_existing_saved_message(conn, uid, message_id)? {
         return saved_message_row_to_response(existing, true);
     }
 
-    let id = match ids::next_message_id(state.id_gen.as_ref()).await {
+    let id = match ids::next_message_id(id_gen).await {
         Ok(id) => id,
         Err(err) => {
             tracing::error!(error = ?err, "failed to generate saved message id");

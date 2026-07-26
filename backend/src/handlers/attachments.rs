@@ -14,7 +14,6 @@ use utoipa_axum::routes;
 use crate::dto::attachments::UploadUrlResponse;
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::services::media::{build_storage_key, presign_public_upload};
 use crate::utils::auth::CurrentUid;
 use crate::utils::ids;
 use crate::{models::NewAttachment, schema::attachments, AppState};
@@ -76,10 +75,6 @@ async fn post_upload_url(
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
 
-    let s3_client = &state.s3_client;
-    let bucket = &state.s3_bucket_name;
-    let prefix = &state.s3_attachment_prefix;
-
     let id = ids::next_message_id(state.id_gen.as_ref())
         .await
         .map_err(|e| {
@@ -89,10 +84,12 @@ async fn post_upload_url(
 
     let s3_item_id = uuid::Uuid::new_v4().to_string();
 
-    let key = build_storage_key(prefix, &payload.filename, &s3_item_id);
+    let key = state.media.attachment_key(&payload.filename, &s3_item_id);
     let expires_in = Duration::minutes(15);
-    let presigned_upload =
-        presign_public_upload(s3_client, bucket, &key, &payload.content_type, expires_in).await?;
+    let presigned_upload = state
+        .media
+        .presign_upload(&key, &payload.content_type, expires_in)
+        .await?;
 
     let new_attachment = NewAttachment {
         id,
