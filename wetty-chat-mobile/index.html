@@ -11,10 +11,54 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>茶话</title>
+  <style>
+    #bootstrap-splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f7f7f7;
+    }
+
+    #bootstrap-splash::after {
+      content: '';
+      width: 28px;
+      height: 28px;
+      border: 3px solid rgba(0, 0, 0, 0.18);
+      border-top-color: rgba(0, 0, 0, 0.5);
+      border-radius: 50%;
+      animation: bootstrap-splash-spin 0.8s linear infinite;
+    }
+
+    @keyframes bootstrap-splash-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #bootstrap-splash::after {
+        animation-duration: 2.4s;
+      }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      #bootstrap-splash {
+        background: #0d0d0d;
+      }
+
+      #bootstrap-splash::after {
+        border-color: rgba(255, 255, 255, 0.22);
+        border-top-color: rgba(255, 255, 255, 0.6);
+      }
+    }
+  </style>
 </head>
 
 <body>
   <div id="root"></div>
+  <div id="bootstrap-splash" role="status" aria-label="Loading"></div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

@@ -1015,11 +1015,11 @@ msgstr "正在回复 {0}"
 msgid "Restricted To"
 msgstr "限制为"
 
-#. js-lingui-explicit-id
-msgid "auth.bootstrap.retry"
+msgid "Retry"
 msgstr "重试"
 
-msgid "Retry"
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.retry"
 msgstr "重试"
 
 #. js-lingui-explicit-id
@@ -1122,10 +1122,6 @@ msgstr "在聊天中显示\"全部\"标签"
 
 msgid "Show Avatars Next to All Messages"
 msgstr "在所有消息旁显示头像"
-
-#. js-lingui-explicit-id
-msgid "auth.bootstrap.signed-out.description"
-msgstr "此应用版本未配置登录功能。"
 
 msgid "Small"
 msgstr "小"
@@ -1330,6 +1326,10 @@ msgstr "正在等待麦克风…"
 msgid "We could not join this chat right now."
 msgstr "我们现在无法让你加入此聊天。"
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.title"
+msgstr "无法完成登录。"
+
 msgid "Would you like to unpin this message?"
 msgstr "确定要取消置顶此消息吗？"
 
@@ -1361,5 +1361,5 @@ msgid "Your account"
 msgstr "你的账户"
 
 #. js-lingui-explicit-id
-msgid "auth.bootstrap.signed-out.title"
-msgstr "你的会话已不可用。"
+msgid "auth.bootstrap.signed-out.description"
+msgstr "你的会话已失效，请重新登录后继续。"

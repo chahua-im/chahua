@@ -81,6 +81,8 @@ async function bootstrap() {
   }
   await activateDetectedLocale(settings.locale);
   const root = createRoot(document.getElementById('root')!);
+  // The splash stays up until something is actually rendered, including while a
+  // configured sign-in redirect is navigating away.
   const renderReady = () => {
     const store = createStore(settings, hydratedStickerPreferences.state);
     setStoreInstance(store);
@@ -91,6 +93,7 @@ async function bootstrap() {
         </I18nProvider>
       </Provider>,
     );
+    document.getElementById('bootstrap-splash')?.remove();
   };
 
   const authResult = await bootstrapAuth();
@@ -102,6 +105,7 @@ async function bootstrap() {
         <AuthBootstrapGate initialResult={authResult} onReady={renderReady} onRedirecting={() => root.render(null)} />
       </I18nProvider>,
     );
+    document.getElementById('bootstrap-splash')?.remove();
   }
 }
 

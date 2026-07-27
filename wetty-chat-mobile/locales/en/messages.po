@@ -1015,11 +1015,11 @@ msgstr "Replying to {0}"
 msgid "Restricted To"
 msgstr "Restricted To"
 
-#. js-lingui-explicit-id
-msgid "auth.bootstrap.retry"
+msgid "Retry"
 msgstr "Retry"
 
-msgid "Retry"
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.retry"
 msgstr "Retry"
 
 #. js-lingui-explicit-id
@@ -1122,10 +1122,6 @@ msgstr "Show \"All\" Tab in Chats"
 
 msgid "Show Avatars Next to All Messages"
 msgstr "Show Avatars Next to All Messages"
-
-#. js-lingui-explicit-id
-msgid "auth.bootstrap.signed-out.description"
-msgstr "Sign-in is not configured for this app build."
 
 msgid "Small"
 msgstr "Small"
@@ -1330,6 +1326,10 @@ msgstr "Waiting for microphone…"
 msgid "We could not join this chat right now."
 msgstr "We could not join this chat right now."
 
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.title"
+msgstr "We couldn’t sign you in."
+
 msgid "Would you like to unpin this message?"
 msgstr "Would you like to unpin this message?"
 
@@ -1361,5 +1361,5 @@ msgid "Your account"
 msgstr "Your account"
 
 #. js-lingui-explicit-id
-msgid "auth.bootstrap.signed-out.title"
-msgstr "Your session is no longer available."
+msgid "auth.bootstrap.signed-out.description"
+msgstr "Your session is no longer valid. Please sign in again to continue."

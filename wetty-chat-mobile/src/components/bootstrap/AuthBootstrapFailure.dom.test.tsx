@@ -46,8 +46,8 @@ describe('AuthBootstrapFailure', () => {
       root.render(<AuthBootstrapFailure mode="signed-out" retrying onRetry={vi.fn()} />);
     });
 
-    expect(container.textContent).toContain('Your session is no longer available.');
-    expect(container.textContent).toContain('Sign-in is not configured for this app build.');
+    expect(container.textContent).toContain('We couldn’t sign you in.');
+    expect(container.textContent).toContain('Your session is no longer valid. Please sign in again to continue.');
     expect(container.textContent).toContain('Retrying…');
     expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
   });

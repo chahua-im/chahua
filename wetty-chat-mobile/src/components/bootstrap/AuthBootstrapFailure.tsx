@@ -15,7 +15,7 @@ export default function AuthBootstrapFailure({ mode, retrying, onRetry }: AuthBo
   const title =
     mode === 'transient'
       ? i18n._({ id: 'auth.bootstrap.transient.title', message: 'The app couldn’t refresh your session.' })
-      : i18n._({ id: 'auth.bootstrap.signed-out.title', message: 'Your session is no longer available.' });
+      : i18n._({ id: 'auth.bootstrap.signed-out.title', message: 'We couldn’t sign you in.' });
   const description =
     mode === 'signed-out'
       ? hasRedirect
@@ -25,7 +25,7 @@ export default function AuthBootstrapFailure({ mode, retrying, onRetry }: AuthBo
           })
         : i18n._({
             id: 'auth.bootstrap.signed-out.description',
-            message: 'Sign-in is not configured for this app build.',
+            message: 'Your session is no longer valid. Please sign in again to continue.',
           })
       : i18n._({ id: 'auth.bootstrap.transient.description', message: 'Check your connection and try again.' });
 
