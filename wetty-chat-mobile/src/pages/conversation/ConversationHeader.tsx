@@ -13,8 +13,10 @@ interface ConversationHeaderProps {
   threadSubscribed: boolean | null;
   threadArchived: boolean;
   threadSubLoading: boolean;
+  isDm: boolean;
   onOpenMembers: () => void;
   onOpenGroupInfo: () => void;
+  onOpenPeerProfile?: () => void;
   onToggleThreadSubscription: () => void;
 }
 
@@ -26,8 +28,10 @@ export function ConversationHeader({
   threadSubscribed,
   threadArchived,
   threadSubLoading,
+  isDm,
   onOpenMembers,
   onOpenGroupInfo,
+  onOpenPeerProfile,
   onToggleThreadSubscription,
 }: ConversationHeaderProps) {
   const wsConnected = useSelector((state: RootState) => state.connection.wsConnected);
@@ -58,6 +62,10 @@ export function ConversationHeader({
                 />
               </IonButton>
             )
+          ) : isDm ? (
+            <IonButton onClick={onOpenPeerProfile}>
+              <IonIcon slot="icon-only" icon={informationCircleOutline} />
+            </IonButton>
           ) : (
             <>
               <IonButton onClick={onOpenMembers}>

@@ -43,6 +43,18 @@ export const FEATURES = {
     enabled: false,
     description: 'Stores landing auth/invite state for PWA handoff and shows pending invites inside the installed app.',
   },
+  friends: {
+    enabled: false,
+    description: 'Friends list, friend requests, and unfriend actions.',
+  },
+  directMessages: {
+    enabled: false,
+    description: '1:1 direct messages with mutual friends.',
+  },
+  userBlock: {
+    enabled: false,
+    description: 'Blocklist (Chahua-side 「拉黑」) affecting DM and friend relationships only.',
+  },
 } as const;
 
 export type Feature = keyof typeof FEATURES;

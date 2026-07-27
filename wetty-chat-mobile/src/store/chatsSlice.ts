@@ -3,6 +3,8 @@ import { createSelector, createSlice } from '@reduxjs/toolkit';
 import type { RootState } from './index';
 import { toMessagePreview, type MessagePreview, type MessageResponse } from '@/api/messages';
 import type { ChatListEntry } from '@/api/chats';
+import type { GroupKind } from '@/api/dms';
+import type { MemberSummary } from '@/api/users';
 import type { GroupRole } from '@/api/group';
 import { UNREAD_BADGE_COUNT_CAP } from '@/utils/unreadBadge';
 import { compareMessageOrder, isSameMessage } from './messageProjection';
@@ -15,6 +17,10 @@ export interface ChatMeta {
   visibility?: string;
   createdAt?: string;
   myRole?: GroupRole | null;
+  /** 'dm' for 1:1 conversations; absent/'group' for normal group chats. */
+  kind?: GroupKind;
+  /** For DM chats, the other participant. */
+  peer?: MemberSummary | null;
 }
 
 interface ChatListMeta {
