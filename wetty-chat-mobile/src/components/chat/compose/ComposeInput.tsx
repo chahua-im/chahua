@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { IonIcon } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { happyOutline } from 'ionicons/icons';
-import type { EditingMessage } from './types';
+import type { EditingMessage, ReplyTo } from './types';
 import styles from './MessageComposeBar.module.scss';
 
 const SIMULATED_MOUSE_DELAY_MS = 500;
@@ -48,6 +48,8 @@ interface ComposeInputProps {
   editing?: EditingMessage;
   isUnchangedEdit: boolean;
   onCancelEdit?: () => void;
+  replyTo?: ReplyTo;
+  onCancelReply?: () => void;
   onStickerPress?: () => void;
   isStickerActive?: boolean;
   onMentionKeyDown?: (event: KeyboardEvent) => boolean;
@@ -64,6 +66,8 @@ export function ComposeInput({
   editing,
   isUnchangedEdit,
   onCancelEdit,
+  replyTo,
+  onCancelReply,
   onStickerPress,
   isStickerActive,
   onMentionKeyDown,
@@ -75,7 +79,10 @@ export function ComposeInput({
     textarea.setAttribute('enterkeyhint', 'enter');
     const onKeyDown = (event: KeyboardEvent) => {
       // Let mention autocomplete consume the event first
-      if (onMentionKeyDown?.(event)) return;
+      const consumedByMention = onMentionKeyDown?.(event);
+      if (consumedByMention) {
+        return;
+      }
 
       const isImeConfirm = event.isComposing || event.keyCode === 229 || event.which === 229;
       const isVirtualKbd = checkIsVirtualKeyboard();
@@ -93,9 +100,39 @@ export function ComposeInput({
         return;
       }
 
-      if (event.key === 'Escape' && editing && isUnchangedEdit) {
-        event.preventDefault();
-        onCancelEdit?.();
+      if (event.key === 'Escape') {
+        // Never interfere with IME composition (e.g. CJK candidate cancel).
+        if (event.isComposing) {
+          return;
+        }
+
+        // 1. Cancel an unchanged edit session (existing behaviour).
+        if (editing && isUnchangedEdit) {
+          event.preventDefault();
+          event.stopPropagation();
+          onCancelEdit?.();
+          return;
+        }
+
+        // 2. Cancel reply state: clear the reply target/preview but keep focus,
+        //    text, attachments and drafts. Do NOT blur or navigate.
+        if (replyTo) {
+          event.preventDefault();
+          event.stopPropagation();
+          onCancelReply?.();
+          return;
+        }
+
+        // 3. Blur the input so the next Esc performs page-level back navigation.
+        //    Only applies to normal (non-editing) compose, preserving existing
+        //    edit behaviour. stopPropagation prevents this same Esc from also
+        //    triggering the global back-navigation handler.
+        if (!editing) {
+          event.preventDefault();
+          event.stopPropagation();
+          textareaRef.current?.blur();
+        }
+        return;
       }
     };
 
@@ -106,6 +143,8 @@ export function ComposeInput({
     editing,
     isUnchangedEdit,
     onCancelEdit,
+    replyTo,
+    onCancelReply,
     onMentionKeyDown,
     onRequestEditLastMessage,
     onSubmit,

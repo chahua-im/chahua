@@ -20,14 +20,22 @@ export function useEscNavigation(): void {
       if (e.key !== 'Escape') return;
 
       const active = document.activeElement;
-      if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) return;
-      // Defer to Ionic overlays (alerts, action sheets, modals, toasts) — they handle ESC internally.
-      if (active?.closest('ion-alert, ion-action-sheet, ion-modal, ion-toast')) return;
-      if (document.querySelector('ion-alert, ion-action-sheet')) return;
+      if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
+        return;
+      }
+      // Defer to Ionic overlays (alerts, action sheets, modals, toasts) - they handle ESC internally.
+      if (active?.closest('ion-alert, ion-action-sheet, ion-modal, ion-toast')) {
+        return;
+      }
+      if (document.querySelector('ion-alert, ion-action-sheet')) {
+        return;
+      }
       // Defer to custom fullscreen overlays (e.g. image viewer) - they handle ESC internally.
-      if (document.querySelector('[data-image-viewer]')) return;
+      if (document.querySelector('[data-image-viewer]')) {
+        return;
+      }
 
-      // Thread → parent chat with #msg= scroll target
+      // Thread -> parent chat with #msg= scroll target
       const threadMatch = matchPath<{ id: string; threadId: string }>(location.pathname, {
         path: '/chats/chat/:id/thread/:threadId',
         exact: true,
@@ -38,7 +46,7 @@ export function useEscNavigation(): void {
         return;
       }
 
-      // Chat → chat list
+      // Chat -> chat list
       const chatMatch = matchPath(location.pathname, { path: '/chats/chat/:id', exact: true });
       if (chatMatch) {
         history.replace('/chats');
