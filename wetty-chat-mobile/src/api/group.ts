@@ -1,6 +1,8 @@
 import type { AxiosResponse } from 'axios';
 import apiClient from './client';
 import type { UserGroupTagInfo } from './messages';
+import type { MemberSummary } from './users';
+import type { GroupKind } from './dms';
 
 export interface GroupInfoResponse {
   id: string;
@@ -12,6 +14,10 @@ export interface GroupInfoResponse {
   createdAt: string;
   mutedUntil?: string | null;
   myRole: GroupRole | null;
+  /** Discriminator added when DMs are enabled; absent on older payloads means a group chat. */
+  kind?: GroupKind;
+  /** For DM chats, the other participant. Null/absent for group chats. */
+  peer?: MemberSummary | null;
 }
 
 export interface UpdateGroupInfoBody {

@@ -13,6 +13,7 @@ import {
 } from '@/store/threadsSlice';
 import { addPin, removePin } from '@/store/pinsSlice';
 import { replaceStickerPackOrderFromWs } from '@/store/stickerPreferencesSlice';
+import { fetchFriends, fetchIncomingRequests, fetchOutgoingRequests } from '@/store/socialSlice';
 import type { PinResponse } from '@/api/pins';
 import { getThreadSubscriptionStatus, getThreads } from '@/api/threads';
 import store from '@/store/index';
@@ -512,6 +513,35 @@ async function connectWebSocket(): Promise<void> {
           if (payload.order) {
             store.dispatch(replaceStickerPackOrderFromWs(payload.order));
           }
+          return;
+        }
+
+        if (message.type === 'friendRequestReceived' && message.payload != null) {
+          // A new incoming friend request arrived for us; refresh the incoming list.
+          store.dispatch(fetchIncomingRequests());
+          return;
+        }
+
+        if (message.type === 'friendRequestResolved' && message.payload != null) {
+          const payload = message.payload as {
+            requestId: string;
+            status: 'accepted' | 'rejected' | 'cancelled';
+            byUid: number;
+          };
+          // An accepted request changes the friends list for both sides; any resolution
+          // removes the request from the relevant pending list(s).
+          store.dispatch(fetchIncomingRequests());
+          store.dispatch(fetchOutgoingRequests());
+          if (payload.status === 'accepted') {
+            store.dispatch(fetchFriends());
+          }
+          return;
+        }
+
+        if (message.type === 'friendshipRemoved' && message.payload != null) {
+          // Either side tore down the friendship; refresh the friends list.
+          store.dispatch(fetchFriends());
+          return;
         }
       } catch {
         // ignore malformed websocket messages

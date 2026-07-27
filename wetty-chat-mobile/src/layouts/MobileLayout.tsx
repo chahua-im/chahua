@@ -1,11 +1,12 @@
 import { IonBadge, IonIcon, IonLabel, IonRouterOutlet, IonTabBar, IonTabButton, IonTabs } from '@ionic/react';
 import { Trans } from '@lingui/react/macro';
-import { chatbubbles, flask, settings } from 'ionicons/icons';
+import { chatbubbles, flask, personOutline, settings } from 'ionicons/icons';
 import { useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { Redirect, Route, useLocation, matchPath } from 'react-router-dom';
 
 import ChatsPage from '@/pages/chats';
+import ContactsPage from '@/pages/contacts';
 import ArchivedPage from '@/pages/archived';
 import ThreadsPage from '@/pages/threads';
 import { CreateChatPage } from '@/pages/create-chat';
@@ -28,18 +29,20 @@ import { safariSafeRouteAnimation } from '@/utils/navigationHistory';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { featureGatedList, whenFeature } from '@/features';
 import { selectChatsWithUnreadCount } from '@/store/chatsSlice';
+import { selectIncomingRequests } from '@/store/socialSlice';
 import { selectThreadsWithUnreadCount } from '@/store/threadsSlice';
 import styles from './MobileLayout.module.scss';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
 
-const TAB_ROOT_PATHS = ['/', '/chats', '/settings', '/demo'];
+const TAB_ROOT_PATHS = ['/', '/chats', '/contacts', '/settings', '/demo'];
 
 const MobileLayout: React.FC = () => {
   const location = useLocation();
   const unreadChatCount = useSelector(selectChatsWithUnreadCount);
   const unreadThreadCount = useSelector(selectThreadsWithUnreadCount);
   const totalUnreadCount = unreadChatCount + unreadThreadCount;
+  const incomingRequestCount = useSelector(selectIncomingRequests).length;
   const isTabRoot = TAB_ROOT_PATHS.includes(location.pathname);
   const chatMatch = matchPath<{ id: string }>(location.pathname, { path: '/chats/chat/:id', exact: true });
   const threadMatch = matchPath<{ id: string; threadId: string }>(location.pathname, {
@@ -58,6 +61,18 @@ const MobileLayout: React.FC = () => {
         </IonLabel>
         {totalUnreadCount > 0 && <IonBadge color="primary">{formatUnreadBadge(totalUnreadCount)}</IonBadge>}
       </IonTabButton>,
+      whenFeature(
+        'friends',
+        <IonTabButton tab="contacts" href="/contacts" key="contacts">
+          <IonIcon icon={personOutline} />
+          <IonLabel>
+            <Trans>Contacts</Trans>
+          </IonLabel>
+          {incomingRequestCount > 0 && (
+            <IonBadge color="primary">{formatUnreadBadge(incomingRequestCount)}</IonBadge>
+          )}
+        </IonTabButton>,
+      ),
       <IonTabButton tab="settings" href="/settings" key="settings">
         <IonIcon icon={settings} />
         <IonLabel>
@@ -72,12 +87,13 @@ const MobileLayout: React.FC = () => {
         </IonTabButton>,
       ),
     ]);
-  }, [totalUnreadCount]);
+  }, [totalUnreadCount, incomingRequestCount]);
 
   return (
     <IonTabs className={`${isTabRoot ? '' : styles.tabBarHidden}`}>
       <IonRouterOutlet animation={safariSafeRouteAnimation}>
         <Route path="/chats" exact component={ChatsPage} />
+        {whenFeature('friends', <Route path="/contacts" exact component={ContactsPage} />)}
         <Route path="/chats/archived/:tab?" exact component={ArchivedPage} />
         <Route path="/chats/threads" exact component={ThreadsPage} />
         <Route path="/chats/new" exact component={CreateChatPage} />

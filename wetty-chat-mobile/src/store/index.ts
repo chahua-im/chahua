@@ -28,6 +28,7 @@ import chatsReducer, {
   projectChatMessagePatched,
 } from './chatsSlice';
 import pinsReducer from './pinsSlice';
+import socialReducer from './socialSlice';
 import userReducer, { fetchCurrentUser } from './userSlice';
 import { toMessagePreview, type MessagePreview, type MessageResponse } from '@/api/messages';
 import { messageAdded, messageConfirmed, messagePatched, messagesBulkDeleted } from './messageEvents';
@@ -316,6 +317,7 @@ const rootReducer = combineReducers({
   chats: chatsReducer,
   threads: threadsReducer,
   pins: pinsReducer,
+  social: socialReducer,
   user: userReducer,
   uploadProgress: uploadProgressReducer,
 });

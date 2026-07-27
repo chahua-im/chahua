@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
 import { shallowEqual, useDispatch, useSelector } from 'react-redux';
+import { t } from '@lingui/core/macro';
 import { getChatUnreadCount } from '@/api/chats';
 import { getGroupInfo, type GroupRole } from '@/api/group';
+import type { GroupKind } from '@/api/dms';
+import type { MemberSummary } from '@/api/users';
 import type { ChatMeta } from '@/store/chatsSlice';
 import {
   selectChatLastReadMessageId,
@@ -46,6 +49,9 @@ export interface UseChatMetadataResult {
   lastReadMessageId: string | null;
   unreadCount: number;
   metaLoading: boolean;
+  kind: GroupKind | undefined;
+  isDm: boolean;
+  peer: MemberSummary | null;
 }
 
 export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseChatMetadataResult {
@@ -56,7 +62,11 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
   );
 
   const role = meta?.myRole ?? null;
-  const name = meta?.name ?? null;
+  const kind = meta?.kind;
+  const peer = meta?.peer ?? null;
+  const isDm = kind === 'dm';
+  // DMs are named after the peer; normal chats use the group name.
+  const name = isDm ? (peer?.username ?? (peer ? t`User ${peer.uid}` : null)) : (meta?.name ?? null);
   const metaLoaded = hasLoadedThreadChatMeta(meta);
   const metaLoading = !metaLoaded;
 
@@ -99,5 +109,8 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
     lastReadMessageId,
     unreadCount: threadId ? 0 : unreadCount,
     metaLoading,
+    kind,
+    isDm,
+    peer,
   };
 }

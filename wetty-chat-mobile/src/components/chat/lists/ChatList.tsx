@@ -488,15 +488,15 @@ export function ChatList({
       >
         <span slot="start">
           <UserAvatar
-            name={getChatDisplayName(chat.id, chat.name)}
-            avatarUrl={chat.avatar}
+            name={getChatDisplayName(chat.id, chat.name, chat.peer)}
+            avatarUrl={chat.kind === 'dm' ? (chat.peer?.avatarUrl ?? null) : chat.avatar}
             size={48}
             className={styles.chatsListAvatar}
           />
         </span>
         <IonLabel className={styles.chatsListLabel}>
           <h3 className={styles.chatsListTitle}>
-            <span className={styles.chatsListTitleText}>{getChatDisplayName(chat.id, chat.name)}</span>
+            <span className={styles.chatsListTitleText}>{getChatDisplayName(chat.id, chat.name, chat.peer)}</span>
             {isChatMuted(chat) ? (
               <IonIcon aria-hidden="true" icon={notificationsOffOutline} className={styles.chatsListMutedIcon} />
             ) : null}

@@ -18,6 +18,7 @@ import { parseResumeHash } from '@/types/conversationNavigation';
 import { PinBanner } from '@/components/chat/pins/PinBanner';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
+import { memberSummaryToUser } from '@/utils/userConvert';
 import { ConversationFooter } from './ConversationFooter';
 import { ConversationHeader } from './ConversationHeader';
 import { ConversationOverlayHost } from './ConversationOverlayHost';
@@ -61,7 +62,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     initialResumeMessageId ? `${storeChatId}:${initialResumeMessageId}` : null,
   );
 
-  const { name, isAdmin, isMuted, lastReadMessageId, unreadCount } = useChatMetadata({ chatId, threadId });
+  const { name, isAdmin, isMuted, lastReadMessageId, unreadCount, isDm, peer } = useChatMetadata({ chatId, threadId });
   const chatName = threadId ? t`Thread` : (name ?? t`Loading...`);
   const formatDateSeparatorForLocale = useCallback(
     (iso: string) => formatDateSeparator(iso, locale, { today: t`Today`, yesterday: t`Yesterday` }),
@@ -377,6 +378,10 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     history.push(`/chats/chat/${chatId}/group-info`);
   }, [chatId, history]);
 
+  const handleOpenPeerProfile = useCallback(() => {
+    if (peer) setProfileSender(memberSummaryToUser(peer));
+  }, [peer]);
+
   const handleRestoreReply = useCallback(
     async (replyToMessageId: string, replyToUsername?: string) => {
       const message = messageLookup.get(replyToMessageId);
@@ -446,8 +451,10 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
           threadSubscribed={threadSubscribed}
           threadArchived={threadArchived}
           threadSubLoading={threadSubLoading}
+          isDm={isDm}
           onOpenMembers={handleOpenMembers}
           onOpenGroupInfo={handleOpenGroupInfo}
+          onOpenPeerProfile={handleOpenPeerProfile}
           onToggleThreadSubscription={handleToggleThreadSubscription}
         />
 

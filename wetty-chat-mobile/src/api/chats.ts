@@ -1,6 +1,8 @@
 import type { AxiosResponse } from 'axios';
 import apiClient from './client';
 import type { MessagePreview } from './messages';
+import type { MemberSummary } from './users';
+import type { GroupKind } from './dms';
 
 export interface ChatListEntry {
   id: string;
@@ -12,6 +14,10 @@ export interface ChatListEntry {
   lastMessage: MessagePreview | null;
   mutedUntil: string | null;
   archived: boolean;
+  /** Discriminator added when DMs are enabled; absent on older payloads means a group chat. */
+  kind?: GroupKind;
+  /** For DM chats, the other participant. Null/absent for group chats. */
+  peer?: MemberSummary | null;
 }
 
 interface ListChatsResponse {
