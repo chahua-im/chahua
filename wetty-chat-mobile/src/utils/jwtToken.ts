@@ -88,14 +88,16 @@ export async function commitJwtToken(token: string): Promise<void> {
 export async function clearJwtToken(): Promise<void> {
   cachedJwtToken = null;
   Cookies.remove(JWT_TOKEN_COOKIE_KEY, { path: '/' });
-  let cacheError: unknown;
+  // Cache Storage is only an iOS 16 compatibility replica, and it is read only when
+  // IndexedDB and the cookie are both empty. Failing to clear it must not abort
+  // sign-out, or an unreliable `caches` implementation would trap the user on the
+  // failure screen with no way to reach a signed-out state.
   try {
     await clearTokenCache();
-  } catch (error) {
-    cacheError = error;
+  } catch {
+    // best-effort
   }
   await kvDelete('jwt_token');
-  if (cacheError) throw cacheError;
 }
 
 export function captureJwtTokenFromUrl(url: URL): string | null {

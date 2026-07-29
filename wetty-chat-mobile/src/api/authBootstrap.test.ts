@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { post } = vi.hoisted(() => ({ post: vi.fn() }));
+const { post, create } = vi.hoisted(() => ({
+  post: vi.fn(),
+  create: vi.fn<(config: { timeout?: number }) => void>(),
+}));
 vi.mock('axios', () => ({
   default: {
-    create: () => ({ post }),
+    create: (config: { timeout?: number }) => {
+      create(config);
+      return { post };
+    },
     isAxiosError: (value: unknown) => Boolean((value as { isAxiosError?: boolean })?.isAxiosError),
   },
 }));
@@ -56,5 +62,14 @@ describe('isolated bootstrap auth HTTP', () => {
     });
     const error = await refreshSessionToken('token').catch((value) => value as AuthBootstrapError);
     expect(error).toBeInstanceOf(AuthBootstrapError);
+  });
+
+  it('bounds bootstrap requests so a hung backend cannot block first render', async () => {
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ timeout: expect.any(Number) }));
+    const timeout = create.mock.calls[0][0].timeout ?? 0;
+    expect(timeout).toBeGreaterThan(0);
+
+    post.mockRejectedValueOnce({ isAxiosError: true, code: 'ECONNABORTED' });
+    await expect(refreshSessionToken('token')).rejects.toMatchObject({ category: 'transient' });
   });
 });

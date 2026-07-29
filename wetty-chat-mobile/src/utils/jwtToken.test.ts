@@ -105,11 +105,11 @@ describe('JWT storage ownership', () => {
     expect(cookies.jwt_token).toBeUndefined();
   });
 
-  it('deletes IDB even when Cache Storage clearing fails', async () => {
+  it('completes sign-out even when Cache Storage clearing fails', async () => {
     vi.stubGlobal('caches', {
       open: vi.fn().mockRejectedValue(new Error('cache unavailable')),
     });
-    await expect(clearJwtToken()).rejects.toThrow('cache unavailable');
+    await expect(clearJwtToken()).resolves.toBeUndefined();
     expect(kvDelete).toHaveBeenCalledWith('jwt_token');
   });
 

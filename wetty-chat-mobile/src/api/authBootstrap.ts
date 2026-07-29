@@ -1,6 +1,10 @@
 import axios from 'axios';
 
-const authBootstrapClient = axios.create({ baseURL: __API_BASE__ });
+// Bootstrap blocks first render, so an unbounded request would hold the splash
+// forever. Failing over to the Retry screen beats an indefinite spinner.
+const BOOTSTRAP_TIMEOUT_MS = 10_000;
+
+const authBootstrapClient = axios.create({ baseURL: __API_BASE__, timeout: BOOTSTRAP_TIMEOUT_MS });
 
 type AuthBootstrapErrorCategory = 'unauthorized' | 'transient' | 'invalid-response';
 

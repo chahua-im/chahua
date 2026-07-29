@@ -196,6 +196,25 @@ property**; key separation remains required before the external PHP minting
 role can be considered retired. Generation storage/enforcement and
 legacy-decay metrics are also deferred.
 
+**PWA slice 1b (implemented):** the React PWA resolves exactly one session before
+React, Redux, or the WebSocket starts. It captures a `?token=` handoff, refreshes it
+through `POST /auth/refresh`, and commits the returned v2 token; in Vite development
+builds it instead mints a session through `POST /auth/dev-session`. The development
+`X-User-Id` header is gone. A static splash covers the pre-render wait, bootstrap
+requests time out after 10s, and unrecoverable outcomes render a localized
+authentication-error page with Retry.
+
+**Rollout order is backend first.** The PWA cannot start without `/auth/refresh`;
+against an older backend that route returns `404`, which the client maps to a
+bootstrap error and shows the failure page. Credentials are preserved, so clients
+recover once the backend is deployed, but shipping the frontend first makes the app
+unusable for every updated client in the meantime.
+
+`__AUTH_REDIRECT_URL__` is currently `null` in every build. Production therefore
+clears rejected credentials and renders the signed-out page instead of redirecting;
+users re-enter through the external handoff link. Configure the redirect URL to
+change that.
+
 ### Review observations to resolve with affected slices
 
 These are recorded risks, not requirements to design every remaining phase now:
