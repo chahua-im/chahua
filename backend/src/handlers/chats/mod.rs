@@ -490,6 +490,7 @@ pub(crate) fn redact_deleted_message_response(response: &mut MessageResponse) {
     response.attachments.clear();
     response.reactions.clear();
     response.mentions.clear();
+    response.forwarded_bundle_id = None;
     response.forwarded_preview = None;
 }
 
@@ -653,6 +654,7 @@ pub(crate) fn forwarded_message_response(
             .into_iter()
             .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
             .collect(),
+        forwarded_bundle_id: None,
         forwarded_preview: None,
     }
 }
@@ -688,6 +690,7 @@ fn forwarded_bundle_ref_response(
         reply_to_message: None,
         attachments: Vec::new(),
         mentions: Vec::new(),
+        forwarded_bundle_id: Some(bundle_ref.forwarded_bundle_id),
         forwarded_preview: Some(forwarded_messages_preview_response(
             bundle_ref.preview.total,
             &bundle_ref.preview.messages,
@@ -1548,6 +1551,11 @@ pub async fn attach_metadata(
                     .iter()
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
+            },
+            forwarded_bundle_id: if is_deleted {
+                None
+            } else {
+                m.forwarded_bundle_id
             },
             forwarded_preview,
         };
@@ -2430,6 +2438,7 @@ mod tests {
         let response =
             super::forwarded_bundle_ref_response(bundle_ref, &user_avatars, &user_profiles);
 
+        assert_eq!(response.forwarded_bundle_id, Some(100));
         let forwarded_preview = response
             .forwarded_preview
             .expect("bundle refs should include nested preview");
@@ -2610,6 +2619,7 @@ mod tests {
             attachments: Vec::new(),
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_bundle_id: None,
             forwarded_preview: None,
         };
 
@@ -2653,6 +2663,7 @@ mod tests {
             }],
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_bundle_id: None,
             forwarded_preview: None,
         };
 
@@ -2759,6 +2770,7 @@ mod tests {
                 gender: 0,
                 user_group: None,
             }],
+            forwarded_bundle_id: Some(99),
             forwarded_preview: Some(super::ForwardedMessagesPreviewResponse {
                 total: 0,
                 messages: Vec::new(),
@@ -2782,6 +2794,7 @@ mod tests {
         assert!(response.attachments.is_empty());
         assert!(response.reactions.is_empty());
         assert!(response.mentions.is_empty());
+        assert!(response.forwarded_bundle_id.is_none());
     }
 
     #[test]

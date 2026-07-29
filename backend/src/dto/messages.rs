@@ -54,6 +54,12 @@ pub struct MessageResponse {
     pub reactions: Vec<ReactionSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
+    #[serde(
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub forwarded_bundle_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
 }
@@ -184,6 +190,12 @@ pub struct ForwardedMessageResponse {
     pub attachments: Vec<AttachmentResponse>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
+    #[serde(
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub forwarded_bundle_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
 }

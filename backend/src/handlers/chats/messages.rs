@@ -23,12 +23,17 @@ use crate::{
     extractors::DbConn,
     handlers::{groups::load_requester_group_role, members::check_membership},
     models::{Attachment, ForwardedBundle, GroupRole, Message, MessageType, NewForwardedBundle},
-    schema::{attachments, forwarded_bundles, group_membership, groups, messages, messages::dsl},
-    services::message_search::{
-        filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
-        MessageSearchSort, SearchCandidateDropCounts,
+    schema::{
+        attachments, forwarded_bundles, group_membership, groups,
+        messages::{self, dsl},
     },
-    services::user::lookup_user_profiles,
+    services::{
+        message_search::{
+            filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
+            MessageSearchSort, SearchCandidateDropCounts,
+        },
+        user::lookup_user_profiles,
+    },
     utils::{auth::CurrentUid, ids, pagination::validate_limit},
     AppState, MAX_MESSAGES_LIMIT,
 };
@@ -92,6 +97,15 @@ pub struct MessageIdPath {
     chat_id: i64,
     #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
     message_id: i64,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ForwardedBundleMessagesPath {
+    chat_id: i64,
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    message_id: i64,
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    bundle_id: i64,
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
@@ -318,6 +332,74 @@ fn load_forwarded_bundle_preview_items(
             ))
         })
         .collect()
+}
+
+fn load_forwarded_bundle(
+    conn: &mut PgConnection,
+    bundle_id: i64,
+) -> Result<ForwardedBundle, AppError> {
+    forwarded_bundles::table
+        .filter(forwarded_bundles::id.eq(bundle_id))
+        .select(ForwardedBundle::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Forwarded messages not found"))
+}
+
+fn deserialize_forwarded_bundle_payload(
+    bundle: ForwardedBundle,
+) -> Result<(usize, Vec<ForwardedBundlePayloadItem>), AppError> {
+    let total = bundle.item_count as usize;
+    let items: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
+        .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
+    Ok((total, items))
+}
+
+fn forwarded_bundle_reaches(
+    conn: &mut PgConnection,
+    root_bundle_id: i64,
+    target_bundle_id: i64,
+) -> Result<bool, AppError> {
+    let mut stack = vec![root_bundle_id];
+    let mut visited = std::collections::HashSet::new();
+
+    while let Some(bundle_id) = stack.pop() {
+        if !visited.insert(bundle_id) {
+            continue;
+        }
+        if bundle_id == target_bundle_id {
+            return Ok(true);
+        }
+
+        let bundle = load_forwarded_bundle(conn, bundle_id)?;
+        let (_, items) = deserialize_forwarded_bundle_payload(bundle)?;
+        for item in items {
+            if let ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } = item {
+                stack.push(bundle_ref.forwarded_bundle_id);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+fn forwarded_messages_response_from_items(
+    conn: &mut PgConnection,
+    state: &AppState,
+    total: usize,
+    items: Vec<ForwardedBundlePayloadItem>,
+) -> ForwardedMessagesResponse {
+    let mut forwarded_uids = std::collections::HashSet::new();
+    collect_forwarded_bundle_item_uids(&items, &mut forwarded_uids);
+    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
+    let user_avatars = state.avatars.lookup(&forwarded_uids);
+    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
+    let messages = items
+        .into_iter()
+        .map(|item| forwarded_bundle_item_response(state, item, &user_avatars, &user_profiles))
+        .collect();
+
+    ForwardedMessagesResponse { total, messages }
 }
 
 fn build_forwarded_message_preview_snapshot(preview: MessagePreview) -> MessagePreviewSnapshot {
@@ -1075,26 +1157,88 @@ async fn get_forwarded_messages(
     let bundle_id = message
         .forwarded_bundle_id
         .ok_or(AppError::NotFound("Forwarded messages not found"))?;
-    let bundle: ForwardedBundle = forwarded_bundles::table
-        .filter(forwarded_bundles::id.eq(bundle_id))
-        .select(ForwardedBundle::as_select())
+    // tracing::debug!(
+    //     chat_id,
+    //     message_id,
+    //     bundle_id,
+    //     "get_forwarded_messages bundle lookup"
+    // );
+    let bundle = load_forwarded_bundle(conn, bundle_id)?;
+    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
+
+    Ok(Json(forwarded_messages_response_from_items(
+        conn, &state, total, items,
+    )))
+}
+
+/// GET /chats/:chat_id/messages/:message_id/forwarded-bundles/:bundle_id/messages — List forwarded message details by reachable bundle.
+#[utoipa::path(
+    get,
+    path = "/{message_id}/forwarded-bundles/{bundle_id}/messages",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Root forwarded message ID"),
+        ("bundle_id" = String, Path, description = "Reachable forwarded bundle ID"),
+    ),
+    responses(
+        (status = 200, description = "Forwarded message details", body = ForwardedMessagesResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn get_forwarded_bundle_messages(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ForwardedBundleMessagesPath {
+        chat_id,
+        message_id,
+        bundle_id,
+    }): Path<ForwardedBundleMessagesPath>,
+    mut conn: DbConn,
+) -> Result<Json<ForwardedMessagesResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    let message: Message = messages::table
+        .filter(
+            dsl::id
+                .eq(message_id)
+                .and(dsl::chat_id.eq(chat_id))
+                .and(dsl::deleted_at.is_null())
+                .and(dsl::is_published.eq(true)),
+        )
+        .select(Message::as_select())
         .first(conn)
         .optional()?
-        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
-    let total = bundle.item_count as usize;
-    let items: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
-        .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
-    let mut forwarded_uids = std::collections::HashSet::new();
-    collect_forwarded_bundle_item_uids(&items, &mut forwarded_uids);
-    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
-    let user_avatars = state.avatars.lookup(&forwarded_uids);
-    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
-    let messages = items
-        .into_iter()
-        .map(|item| forwarded_bundle_item_response(&state, item, &user_avatars, &user_profiles))
-        .collect();
+        .ok_or(AppError::NotFound("Message not found"))?;
 
-    Ok(Json(ForwardedMessagesResponse { total, messages }))
+    if !matches!(message.message_type, MessageType::Forwarded) {
+        return Err(AppError::BadRequest("Message is not a forwarded message"));
+    }
+
+    let root_bundle_id = message
+        .forwarded_bundle_id
+        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
+
+    if !forwarded_bundle_reaches(conn, root_bundle_id, bundle_id)? {
+        return Err(AppError::NotFound("Forwarded messages not found"));
+    }
+
+    tracing::debug!(
+        chat_id,
+        message_id,
+        root_bundle_id,
+        bundle_id,
+        "get_forwarded_bundle_messages bundle lookup"
+    );
+
+    let bundle = load_forwarded_bundle(conn, bundle_id)?;
+    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
+
+    Ok(Json(forwarded_messages_response_from_items(
+        conn, &state, total, items,
+    )))
 }
 
 /// POST /chats/:chat_id/threads/:thread_id/messages — Send a message in a thread.
@@ -1606,6 +1750,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(get_messages, post_message))
         .routes(utoipa_axum::routes!(forward_messages))
         .routes(utoipa_axum::routes!(get_forwarded_messages))
+        .routes(utoipa_axum::routes!(get_forwarded_bundle_messages))
         .routes(utoipa_axum::routes!(search_messages))
         .routes(utoipa_axum::routes!(
             get_message,
@@ -1749,6 +1894,7 @@ mod tests {
             }],
             reactions: vec![],
             mentions: vec![],
+            forwarded_bundle_id: None,
             forwarded_preview: None,
         };
         let attachment_storage_keys = HashMap::from([(30, "media/private-image-key".to_string())]);
