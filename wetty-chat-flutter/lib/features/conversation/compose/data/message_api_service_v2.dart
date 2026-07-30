@@ -87,12 +87,14 @@ class MessageApiServiceV2 {
     return MessageItemDto.fromJson(response.data!);
   }
 
-  Future<ForwardedMessagesResponseDto> fetchForwardedMessages({
-    required int chatId,
-    required int messageId,
+  Future<ForwardedMessagesResponseDto> fetchForwardedBundleMessages({
+    required int rootChatId,
+    required int rootMessageId,
+    required String forwardedBundleId,
   }) async {
     final response = await _dio.get<Map<String, dynamic>>(
-      '/chats/$chatId/messages/$messageId/forwarded-messages',
+      '/chats/$rootChatId/messages/$rootMessageId/forwarded-bundles/'
+      '${Uri.encodeComponent(forwardedBundleId)}/messages',
     );
     return ForwardedMessagesResponseDto.fromJson(response.data!);
   }
@@ -154,7 +156,11 @@ final messageApiServiceV2Provider = Provider<MessageApiServiceV2>((ref) {
   return MessageApiServiceV2(ref.watch(dioProvider), session.currentUserId);
 });
 
-typedef ForwardedMessagesRequest = ({int chatId, int messageId});
+typedef ForwardedMessagesRequest = ({
+  int rootChatId,
+  int rootMessageId,
+  String forwardedBundleId,
+});
 
 final forwardedMessagesProvider =
     FutureProvider.family<
@@ -163,8 +169,9 @@ final forwardedMessagesProvider =
     >((ref, request) {
       return ref
           .watch(messageApiServiceV2Provider)
-          .fetchForwardedMessages(
-            chatId: request.chatId,
-            messageId: request.messageId,
+          .fetchForwardedBundleMessages(
+            rootChatId: request.rootChatId,
+            rootMessageId: request.rootMessageId,
+            forwardedBundleId: request.forwardedBundleId,
           );
     });

@@ -84,6 +84,7 @@ class ConversationMessageV2 {
         attachments: attachments,
         mentions: mentions,
         forwardedPreview: forwardedPreview,
+        forwardedBundleId: dto.forwardedBundleId,
       ),
     );
   }
@@ -152,6 +153,7 @@ MessageContent _contentFromMessageItemDto({
   required List<AttachmentItem> attachments,
   required List<MentionInfo> mentions,
   required ForwardedMessagesPreview? forwardedPreview,
+  required String? forwardedBundleId,
 }) {
   if (messageType == 'system') {
     return SystemMessageContent(text: message ?? '');
@@ -169,6 +171,7 @@ MessageContent _contentFromMessageItemDto({
     return ForwardedPreviewContent(
       total: forwardedPreview?.total ?? 0,
       previewMessages: forwardedPreview?.messages ?? const [],
+      forwardedBundleId: forwardedBundleId,
     );
   }
   if (messageType == 'audio') {
@@ -236,10 +239,12 @@ class ForwardedPreviewContent extends MessageContent {
   const ForwardedPreviewContent({
     required this.total,
     required this.previewMessages,
+    this.forwardedBundleId,
   });
 
   final int total;
   final List<ForwardedMessagePreview> previewMessages;
+  final String? forwardedBundleId;
 }
 
 class ForwardedMessagesPreview {
@@ -301,6 +306,7 @@ class ForwardedMessage {
     required this.originalChatId,
     required this.sender,
     required this.content,
+    this.forwardedBundleId,
     this.originalCreatedAt,
     this.replyToMessage,
   });
@@ -317,6 +323,7 @@ class ForwardedMessage {
       originalMessageId: dto.originalMessageId,
       originalChatId: dto.originalChatId,
       sender: User.fromDto(dto.sender),
+      forwardedBundleId: dto.forwardedBundleId,
       originalCreatedAt: dto.originalCreatedAt,
       replyToMessage: dto.replyToMessage == null
           ? null
@@ -332,6 +339,7 @@ class ForwardedMessage {
   final int originalMessageId;
   final int originalChatId;
   final User sender;
+  final String? forwardedBundleId;
   final DateTime? originalCreatedAt;
   final ReplyToMessage? replyToMessage;
   final MessageContent content;
@@ -356,6 +364,7 @@ MessageContent _contentFromForwardedMessageResponseDto(
     attachments: attachments,
     mentions: mentions,
     forwardedPreview: forwardedPreview,
+    forwardedBundleId: dto.forwardedBundleId,
   );
 }
 

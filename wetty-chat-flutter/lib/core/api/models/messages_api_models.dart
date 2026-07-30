@@ -330,6 +330,7 @@ class ForwardedMessageResponseDto {
   const ForwardedMessageResponseDto({
     required this.originalMessageId,
     required this.originalChatId,
+    this.forwardedBundleId,
     this.message,
     this.messageType = 'text',
     required this.sender,
@@ -344,6 +345,7 @@ class ForwardedMessageResponseDto {
   final int originalMessageId;
   @FlexibleIntConverter()
   final int originalChatId;
+  final String? forwardedBundleId;
   final String? message;
   @JsonKey(defaultValue: 'text')
   final String messageType;
@@ -387,6 +389,7 @@ class MessageItemDto {
     required this.id,
     this.message,
     this.messageType = 'text',
+    this.forwardedBundleId,
     this.sticker,
     required this.sender,
     required this.chatId,
@@ -409,6 +412,7 @@ class MessageItemDto {
   final String? message;
   @JsonKey(defaultValue: 'text')
   final String messageType;
+  final String? forwardedBundleId;
   final StickerSummaryDto? sticker;
   final UserDto sender;
   @FlexibleIntConverter()

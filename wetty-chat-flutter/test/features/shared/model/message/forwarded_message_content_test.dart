@@ -8,6 +8,7 @@ void main() {
       const ForwardedMessageResponseDto(
         originalMessageId: 100,
         originalChatId: 10,
+        forwardedBundleId: 'bundle-nested-100',
         message: 'Forwarded message',
         messageType: 'forwarded',
         sender: UserDto(uid: 1, name: 'Alice'),
@@ -27,6 +28,7 @@ void main() {
 
     expect(message.content, isA<ForwardedPreviewContent>());
     final content = message.content as ForwardedPreviewContent;
+    expect(message.forwardedBundleId, 'bundle-nested-100');
     expect(content.total, 2);
     expect(content.previewMessages.single.message, 'Nested message');
   });
@@ -37,6 +39,7 @@ void main() {
         id: 100,
         message: 'Forwarded 2 messages',
         messageType: 'forwarded',
+        forwardedBundleId: 'bundle-root-100',
         sender: const UserDto(uid: 1, name: 'Alice'),
         chatId: 10,
         clientGeneratedId: 'forwarded-client',
@@ -61,6 +64,7 @@ void main() {
     expect(message.chatId, 10);
     expect(content, isA<ForwardedPreviewContent>());
     final forwarded = content as ForwardedPreviewContent;
+    expect(forwarded.forwardedBundleId, 'bundle-root-100');
     expect(forwarded.total, 2);
     expect(forwarded.previewMessages, hasLength(1));
     expect(forwarded.previewMessages.single.originalMessageId, 20);

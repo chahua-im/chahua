@@ -15,10 +15,10 @@ void main() {
       'mentions': <dynamic>[],
     });
 
-    expect(
-      dto.attachments.map((attachment) => attachment.kind),
-      <String>['image/png', 'application/pdf'],
-    );
+    expect(dto.attachments.map((attachment) => attachment.kind), <String>[
+      'image/png',
+      'application/pdf',
+    ]);
   });
 
   test('MessageItemDto parses forwarded preview', () {
@@ -26,6 +26,7 @@ void main() {
       'id': '9007199254740993',
       'message': 'Forwarded 4 messages',
       'messageType': 'forwarded',
+      'forwardedBundleId': 'bundle-root-900',
       'sender': <String, dynamic>{'uid': 7, 'name': 'Alice', 'gender': 0},
       'chatId': '42',
       'createdAt': '2026-06-26T12:00:00Z',
@@ -59,6 +60,7 @@ void main() {
     });
 
     expect(dto.messageType, 'forwarded');
+    expect(dto.forwardedBundleId, 'bundle-root-900');
     expect(dto.forwardedPreview?.total, 4);
 
     final forwarded = dto.forwardedPreview!.messages.single;
@@ -77,6 +79,7 @@ void main() {
         <String, dynamic>{
           'originalMessageId': '123',
           'originalChatId': '24',
+          'forwardedBundleId': 'bundle-nested-123',
           'message': 'hello @[uid:8]',
           'messageType': 'text',
           'sender': <String, dynamic>{'uid': '8', 'name': 'Bob', 'gender': 0},
@@ -113,6 +116,7 @@ void main() {
     final forwarded = dto.messages.single;
     expect(forwarded.originalMessageId, 123);
     expect(forwarded.originalChatId, 24);
+    expect(forwarded.forwardedBundleId, 'bundle-nested-123');
     expect(forwarded.sender.uid, 8);
     expect(forwarded.replyToMessage?.id, 99);
     expect(forwarded.attachments.single.kind, 'image/png');

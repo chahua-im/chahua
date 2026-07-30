@@ -302,6 +302,7 @@ ForwardedMessageResponseDto _$ForwardedMessageResponseDtoFromJson(
     json['originalMessageId'],
   ),
   originalChatId: const FlexibleIntConverter().fromJson(json['originalChatId']),
+  forwardedBundleId: json['forwardedBundleId'] as String?,
   message: json['message'] as String?,
   messageType: json['messageType'] as String? ?? 'text',
   sender: UserDto.fromJson(json['sender'] as Map<String, dynamic>),
@@ -339,6 +340,7 @@ Map<String, dynamic> _$ForwardedMessageResponseDtoToJson(
   'originalChatId': const FlexibleIntConverter().toJson(
     instance.originalChatId,
   ),
+  'forwardedBundleId': instance.forwardedBundleId,
   'message': instance.message,
   'messageType': instance.messageType,
   'sender': instance.sender.toJson(),
@@ -378,6 +380,7 @@ MessageItemDto _$MessageItemDtoFromJson(
   id: const FlexibleIntConverter().fromJson(json['id']),
   message: json['message'] as String?,
   messageType: json['messageType'] as String? ?? 'text',
+  forwardedBundleId: json['forwardedBundleId'] as String?,
   sticker: json['sticker'] == null
       ? null
       : StickerSummaryDto.fromJson(json['sticker'] as Map<String, dynamic>),
@@ -426,6 +429,7 @@ Map<String, dynamic> _$MessageItemDtoToJson(MessageItemDto instance) =>
       'id': const FlexibleIntConverter().toJson(instance.id),
       'message': instance.message,
       'messageType': instance.messageType,
+      'forwardedBundleId': instance.forwardedBundleId,
       'sticker': instance.sticker?.toJson(),
       'sender': instance.sender.toJson(),
       'chatId': const FlexibleIntConverter().toJson(instance.chatId),

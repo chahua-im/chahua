@@ -34,9 +34,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(ForwardedMessagesViewer), findsOneWidget);
-    expect(api.forwardedMessageRequests, <({int chatId, int messageId})>[
-      (chatId: 42, messageId: 100),
-    ]);
+    expect(
+      api.forwardedMessageRequests,
+      <({int rootChatId, int rootMessageId, String forwardedBundleId})>[
+        (rootChatId: 42, rootMessageId: 100, forwardedBundleId: 'root-bundle'),
+      ],
+    );
     expect(
       find.byKey(const ValueKey('forwarded-message-77-200')),
       findsOneWidget,
@@ -46,9 +49,11 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(api.forwardedMessageRequests, <({int chatId, int messageId})>[
-      (chatId: 42, messageId: 100),
-      (chatId: 77, messageId: 200),
+    expect(api.forwardedMessageRequests, <
+      ({int rootChatId, int rootMessageId, String forwardedBundleId})
+    >[
+      (rootChatId: 42, rootMessageId: 100, forwardedBundleId: 'root-bundle'),
+      (rootChatId: 42, rootMessageId: 100, forwardedBundleId: 'nested-bundle'),
     ]);
   });
 }
@@ -85,6 +90,7 @@ ConversationMessageV2 _forwardedMessage() {
     createdAt: DateTime(2026, 6, 26, 12),
     content: const ForwardedPreviewContent(
       total: 4,
+      forwardedBundleId: 'root-bundle',
       previewMessages: <ForwardedMessagePreview>[
         ForwardedMessagePreview(
           originalMessageId: 10,
@@ -116,15 +122,21 @@ ConversationMessageV2 _forwardedMessage() {
 class _FakeMessageApiService extends MessageApiServiceV2 {
   _FakeMessageApiService() : super(Dio(), 1);
 
-  final forwardedMessageRequests = <({int chatId, int messageId})>[];
+  final forwardedMessageRequests =
+      <({int rootChatId, int rootMessageId, String forwardedBundleId})>[];
 
   @override
-  Future<ForwardedMessagesResponseDto> fetchForwardedMessages({
-    required int chatId,
-    required int messageId,
+  Future<ForwardedMessagesResponseDto> fetchForwardedBundleMessages({
+    required int rootChatId,
+    required int rootMessageId,
+    required String forwardedBundleId,
   }) async {
-    forwardedMessageRequests.add((chatId: chatId, messageId: messageId));
-    if (messageId == 200) {
+    forwardedMessageRequests.add((
+      rootChatId: rootChatId,
+      rootMessageId: rootMessageId,
+      forwardedBundleId: forwardedBundleId,
+    ));
+    if (forwardedBundleId == 'nested-bundle') {
       return const ForwardedMessagesResponseDto(
         total: 1,
         messages: <ForwardedMessageResponseDto>[
@@ -144,6 +156,7 @@ class _FakeMessageApiService extends MessageApiServiceV2 {
         ForwardedMessageResponseDto(
           originalMessageId: 200,
           originalChatId: 77,
+          forwardedBundleId: 'nested-bundle',
           message: 'Nested forwarded message',
           messageType: 'forwarded',
           sender: UserDto(uid: 2, name: 'Bob'),

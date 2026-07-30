@@ -21,7 +21,7 @@ class ForwardedMessageCard extends StatelessWidget {
     if (content is! ForwardedPreviewContent) {
       return const SizedBox.shrink();
     }
-    
+
     final theme = BubbleThemeV2.of(context);
     final l10n = AppLocalizations.of(context)!;
     return ConstrainedBox(
@@ -29,7 +29,7 @@ class ForwardedMessageCard extends StatelessWidget {
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         minimumSize: Size.zero,
-        onPressed: () => _openForwardedViewer(context),
+        onPressed: () => _openForwardedViewer(context, content),
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: theme.bubbleColor,
@@ -58,12 +58,17 @@ class ForwardedMessageCard extends StatelessWidget {
     );
   }
 
-  void _openForwardedViewer(BuildContext context) {
+  void _openForwardedViewer(
+    BuildContext context,
+    ForwardedPreviewContent content,
+  ) {
     final chatId = message.chatId;
     final messageId = message.serverMessageId;
-    if (chatId == null || messageId == null) {
+    final forwardedBundleId = content.forwardedBundleId;
+    if (chatId == null || messageId == null || forwardedBundleId == null) {
       log(
-        'missing forwarded viewer identity chatId=$chatId messageId=$messageId',
+        'missing forwarded viewer identity chatId=$chatId '
+        'messageId=$messageId forwardedBundleId=$forwardedBundleId',
         name: 'ForwardedMessageCard',
       );
       return;
@@ -74,8 +79,9 @@ class ForwardedMessageCard extends StatelessWidget {
     Navigator.of(context).push(
       CupertinoPageRoute<void>(
         builder: (context) => ForwardedMessagesViewer(
-          chatId: chatId,
-          messageId: messageId,
+          rootChatId: chatId,
+          rootMessageId: messageId,
+          forwardedBundleId: forwardedBundleId,
           navigationBarBackgroundColor: navigationBarBackgroundColor,
         ),
       ),
@@ -193,13 +199,15 @@ String _senderName(User sender, AppLocalizations l10n) {
 class ForwardedMessagesViewer extends ConsumerStatefulWidget {
   const ForwardedMessagesViewer({
     super.key,
-    required this.chatId,
-    required this.messageId,
+    required this.rootChatId,
+    required this.rootMessageId,
+    required this.forwardedBundleId,
     required this.navigationBarBackgroundColor,
   });
 
-  final int chatId;
-  final int messageId;
+  final int rootChatId;
+  final int rootMessageId;
+  final String forwardedBundleId;
   final Color navigationBarBackgroundColor;
 
   @override
@@ -234,8 +242,9 @@ class _ForwardedMessagesViewerState
     final l10n = AppLocalizations.of(context)!;
     final forwardedMessages = ref.watch(
       forwardedMessagesProvider((
-        chatId: widget.chatId,
-        messageId: widget.messageId,
+        rootChatId: widget.rootChatId,
+        rootMessageId: widget.rootMessageId,
+        forwardedBundleId: widget.forwardedBundleId,
       )),
     );
     return CupertinoPageScaffold(
@@ -257,6 +266,8 @@ class _ForwardedMessagesViewerState
                 .toList(growable: false);
             return _ForwardedMessagesList(
               messages: messages,
+              rootChatId: widget.rootChatId,
+              rootMessageId: widget.rootMessageId,
               keyForMessage: _keyForMessage,
               jumpToMessage: _jumpToMessage,
             );
@@ -270,11 +281,15 @@ class _ForwardedMessagesViewerState
 class _ForwardedMessagesList extends StatelessWidget {
   const _ForwardedMessagesList({
     required this.messages,
+    required this.rootChatId,
+    required this.rootMessageId,
     required this.keyForMessage,
     required this.jumpToMessage,
   });
 
   final List<ForwardedMessage> messages;
+  final int rootChatId;
+  final int rootMessageId;
   final GlobalKey Function(int messageId) keyForMessage;
   final void Function(int messageId) jumpToMessage;
 
@@ -285,7 +300,11 @@ class _ForwardedMessagesList extends StatelessWidget {
       itemCount: messages.length,
       itemBuilder: (context, index) {
         final forwardedMessage = messages[index];
-        final message = _messageFromForwardedMessage(forwardedMessage);
+        final message = _messageFromForwardedMessage(
+          forwardedMessage,
+          rootChatId: rootChatId,
+          rootMessageId: rootMessageId,
+        );
         final replyToMessageId = message.replyToMessage?.id;
         return KeyedSubtree(
           key: keyForMessage(forwardedMessage.originalMessageId),
@@ -338,11 +357,13 @@ class _ForwardedMessagesList extends StatelessWidget {
   }
 
   ConversationMessageV2 _messageFromForwardedMessage(
-    ForwardedMessage forwardedMessage,
-  ) {
+    ForwardedMessage forwardedMessage, {
+    required int rootChatId,
+    required int rootMessageId,
+  }) {
     return ConversationMessageV2(
-      serverMessageId: forwardedMessage.originalMessageId,
-      chatId: forwardedMessage.originalChatId,
+      serverMessageId: rootMessageId,
+      chatId: rootChatId,
       clientGeneratedId:
           'forwarded:${forwardedMessage.originalChatId}:${forwardedMessage.originalMessageId}',
       sender: forwardedMessage.sender,
