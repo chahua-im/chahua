@@ -9,8 +9,10 @@ use diesel::PgConnection;
 
 use crate::{
     dto::{
-        attachments::AttachmentResponse,
+        attachments::{AttachmentResponse, AttachmentSnapshot},
         messages::{
+            ForwardedMessagePreviewResponse, ForwardedMessagePreviewSnapshot,
+            ForwardedMessageResponse, ForwardedMessageSnapshot, ForwardedMessagesPreviewResponse,
             MentionInfo, MessagePreview, MessagePreviewAttachment, MessagePreviewSticker,
             MessageResponse, MessageStickerResponse, ReactionReactor, ReactionSummary,
             StickerMediaResponse, ThreadInfo,
@@ -92,6 +94,9 @@ pub struct PreparedMessageSend {
     pub client_generated_id: String,
     pub attachment_ids: Vec<i64>,
     pub publish_immediately: bool,
+    pub forwarded_bundle_id: Option<i64>,
+    pub forwarded_preview_total: Option<usize>,
+    pub forwarded_preview_snapshots: Option<Vec<ForwardedMessageSnapshot>>,
 }
 
 /// Authorization failures for a user-originated message send.
@@ -497,12 +502,200 @@ pub fn redact_deleted_message_response(response: &mut MessageResponse) {
     response.attachments.clear();
     response.reactions.clear();
     response.mentions.clear();
+    response.forwarded_preview = None;
+}
+
+pub const FORWARDED_PREVIEW_LIMIT: usize = 3;
+
+pub fn build_forwarded_message_snapshots(
+    conn: &mut PgConnection,
+    source_messages: Vec<MessageResponse>,
+) -> Result<Vec<ForwardedMessageSnapshot>, AppError> {
+    let attachment_ids: Vec<i64> = source_messages
+        .iter()
+        .flat_map(|message| message.attachments.iter().map(|attachment| attachment.id))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let attachment_storage_keys = if attachment_ids.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        attachments::table
+            .filter(attachments::id.eq_any(&attachment_ids))
+            .select(Attachment::as_select())
+            .load::<Attachment>(conn)?
+            .into_iter()
+            .map(|attachment| (attachment.id, attachment.external_reference))
+            .collect()
+    };
+
+    source_messages
+        .into_iter()
+        .map(|response| {
+            let attachments = response
+                .attachments
+                .into_iter()
+                .map(|attachment| {
+                    let external_reference = attachment_storage_keys
+                        .get(&attachment.id)
+                        .cloned()
+                        .ok_or(AppError::Internal(
+                            "Forwarded attachment storage key missing",
+                        ))?;
+                    Ok(AttachmentSnapshot {
+                        id: attachment.id,
+                        external_reference,
+                        kind: attachment.kind,
+                        size: attachment.size,
+                        file_name: attachment.file_name,
+                        width: attachment.width,
+                        height: attachment.height,
+                    })
+                })
+                .collect::<Result<Vec<_>, AppError>>()?;
+
+            Ok(ForwardedMessageSnapshot {
+                original_message_id: response.id,
+                original_chat_id: response.chat_id,
+                message: response.message,
+                message_type: response.message_type,
+                sender_uid: response.sender.uid,
+                original_created_at: response.created_at,
+                reply_to_message: response.reply_to_message.map(|preview| {
+                    Box::new(ForwardedMessagePreviewSnapshot {
+                        id: preview.id,
+                        client_generated_id: preview.client_generated_id,
+                        created_at: preview.created_at,
+                        sender_uid: preview.sender.uid,
+                        message: preview.message,
+                        message_type: preview.message_type,
+                        sticker: preview.sticker,
+                        attachments: preview.attachments,
+                        is_deleted: preview.is_deleted,
+                        mention_uids: preview.mentions.into_iter().map(|mention| mention.uid).collect(),
+                    })
+                }),
+                attachments,
+                mention_uids: response.mentions.into_iter().map(|mention| mention.uid).collect(),
+            })
+        })
+        .collect()
+}
+
+pub fn collect_forwarded_snapshot_uids(
+    snapshots: &[ForwardedMessageSnapshot],
+    uids: &mut std::collections::HashSet<i32>,
+) {
+    for snapshot in snapshots {
+        uids.insert(snapshot.sender_uid);
+        uids.extend(snapshot.mention_uids.iter().copied());
+        if let Some(reply_to_message) = &snapshot.reply_to_message {
+            uids.insert(reply_to_message.sender_uid);
+            uids.extend(reply_to_message.mention_uids.iter().copied());
+        }
+    }
+}
+
+fn forwarded_messages_preview_response(
+    snapshots: &[ForwardedMessageSnapshot],
+    user_avatars: &std::collections::HashMap<i32, Option<String>>,
+    user_profiles: &std::collections::HashMap<i32, UserProfile>,
+) -> ForwardedMessagesPreviewResponse {
+    ForwardedMessagesPreviewResponse {
+        total: snapshots.len(),
+        messages: snapshots
+            .iter()
+            .take(FORWARDED_PREVIEW_LIMIT)
+            .map(|snapshot| ForwardedMessagePreviewResponse {
+                original_message_id: snapshot.original_message_id,
+                original_chat_id: snapshot.original_chat_id,
+                message: snapshot.message.clone(),
+                message_type: snapshot.message_type.clone(),
+                sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
+                original_created_at: snapshot.original_created_at,
+                attachments: snapshot
+                    .attachments
+                    .iter()
+                    .map(|attachment| MessagePreviewAttachment {
+                        kind: attachment.kind.clone(),
+                    })
+                    .collect(),
+                mentions: snapshot
+                    .mention_uids
+                    .iter()
+                    .copied()
+                    .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+pub fn forwarded_message_response(
+    state: &AppState,
+    snapshot: ForwardedMessageSnapshot,
+    user_avatars: &std::collections::HashMap<i32, Option<String>>,
+    user_profiles: &std::collections::HashMap<i32, UserProfile>,
+) -> ForwardedMessageResponse {
+    ForwardedMessageResponse {
+        original_message_id: snapshot.original_message_id,
+        original_chat_id: snapshot.original_chat_id,
+        message: snapshot.message,
+        message_type: snapshot.message_type,
+        sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
+        original_created_at: snapshot.original_created_at,
+        reply_to_message: snapshot.reply_to_message.map(|preview| {
+            Box::new(MessagePreview {
+                id: preview.id,
+                client_generated_id: preview.client_generated_id,
+                created_at: preview.created_at,
+                sender: build_sender(preview.sender_uid, user_avatars, user_profiles),
+                message: preview.message,
+                message_type: preview.message_type,
+                sticker: preview.sticker,
+                attachments: preview.attachments,
+                is_deleted: preview.is_deleted,
+                mentions: preview
+                    .mention_uids
+                    .into_iter()
+                    .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+                    .collect(),
+            })
+        }),
+        attachments: snapshot
+            .attachments
+            .into_iter()
+            .map(|attachment| AttachmentResponse {
+                id: attachment.id,
+                url: state.media.public_url(&attachment.external_reference),
+                kind: attachment.kind,
+                size: attachment.size,
+                file_name: attachment.file_name,
+                width: attachment.width,
+                height: attachment.height,
+            })
+            .collect(),
+        mentions: snapshot
+            .mention_uids
+            .into_iter()
+            .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+            .collect(),
+    }
 }
 
 fn sticker_preview_text(emoji: Option<&str>) -> String {
     match emoji.filter(|value| !value.trim().is_empty()) {
         Some(emoji) => format!("[Sticker] {emoji}"),
         None => "[Sticker]".to_string(),
+    }
+}
+
+fn attachment_preview_text(kind: Option<&str>) -> &'static str {
+    match kind {
+        Some(kind) if kind.starts_with("image/") => "[Image]",
+        Some(kind) if kind.starts_with("video/") => "[Video]",
+        Some(kind) if kind.starts_with("audio/") => "[Voice message]",
+        Some(_) | None => "[Attachment]",
     }
 }
 
@@ -569,7 +762,11 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
             MessageType::Sticker => Some(sticker_preview_text(
                 response.sticker.as_ref().map(|s| s.emoji.as_str()),
             )),
-            MessageType::File => Some("[Attachment]".to_string()),
+            MessageType::File => Some(attachment_preview_text(
+                response.attachments.first().map(|attachment| attachment.kind.as_str()),
+            )
+            .to_string()),
+            MessageType::Forwarded => Some("forwarded messages".to_string()),
             _ => rendered_message.clone(),
         }
     };
@@ -578,7 +775,7 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
         None
     } else {
         match response.message_type {
-            MessageType::Invite => None,
+            MessageType::Invite | MessageType::Forwarded => None,
             _ => rendered_message,
         }
     };
@@ -1136,6 +1333,7 @@ pub async fn send_prepared_message(
         has_reactions: false,
         is_published: prepared.publish_immediately,
         transcode_status,
+        forwarded_bundle_id: prepared.forwarded_bundle_id,
     };
 
     let inserted_msg: Option<Message> = diesel::insert_into(messages_schema::table)
@@ -1160,7 +1358,7 @@ pub async fn send_prepared_message(
             stored_message.as_deref(),
             &existing_attachment_ids,
         )?;
-        let response = attach_metadata(
+        let mut response = attach_metadata(
             conn,
             vec![existing],
             &state.media,
@@ -1171,6 +1369,12 @@ pub async fn send_prepared_message(
         .into_iter()
         .next()
         .ok_or(AppError::Internal("Failed to build message response"))?;
+        apply_forwarded_preview_override(
+            conn,
+            state,
+            &mut response,
+            prepared.forwarded_preview_snapshots.as_deref(),
+        );
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
     };
 
@@ -1228,7 +1432,7 @@ pub async fn send_prepared_message(
         }
     }
 
-    let response = attach_metadata(
+    let mut response = attach_metadata(
         conn,
         vec![inserted_msg.clone()],
         &state.media,
@@ -1239,6 +1443,12 @@ pub async fn send_prepared_message(
     .into_iter()
     .next()
     .ok_or(AppError::Internal("Failed to build message response"))?;
+    apply_forwarded_preview_override(
+        conn,
+        state,
+        &mut response,
+        prepared.forwarded_preview_snapshots.as_deref(),
+    );
 
     let (member_uids, side_effects) = if prepared.publish_immediately {
         let side_effects = build_message_side_effects(
@@ -1282,6 +1492,27 @@ pub async fn send_prepared_message(
     })))
 }
 
+fn apply_forwarded_preview_override(
+    conn: &mut PgConnection,
+    state: &AppState,
+    response: &mut MessageResponse,
+    snapshots: Option<&[ForwardedMessageSnapshot]>,
+) {
+    let Some(snapshots) = snapshots.filter(|_| !response.is_deleted) else {
+        return;
+    };
+    let mut forwarded_uids = std::collections::HashSet::new();
+    collect_forwarded_snapshot_uids(snapshots, &mut forwarded_uids);
+    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
+    let user_avatars = state.avatars.lookup(&forwarded_uids);
+    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
+    response.forwarded_preview = Some(forwarded_messages_preview_response(
+        snapshots,
+        &user_avatars,
+        &user_profiles,
+    ));
+}
+
 fn load_message_attachment_ids(conn: &mut PgConnection, message_id: i64) -> QueryResult<Vec<i64>> {
     use crate::schema::attachments::dsl as a_dsl;
     attachments::table
@@ -1307,6 +1538,7 @@ fn validate_idempotent_message_payload(
         && existing.sticker_id == prepared.sticker_id
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
+        && existing.forwarded_bundle_id == prepared.forwarded_bundle_id
         && attachment_ids_match
     {
         return Ok(());
@@ -1686,6 +1918,7 @@ pub async fn attach_metadata(
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
             },
+            forwarded_preview: None,
         };
         redact_deleted_message_response(&mut response);
         responses.push(response);
@@ -2054,12 +2287,16 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_messages_payload: None,
+            forwarded_bundle_id: None,
         }
     }
 
     fn test_prepared_message() -> PreparedMessageSend {
         PreparedMessageSend {
             chat_id: 42,
+            forwarded_bundle_id: None,
+            forwarded_preview_snapshots: None,
             sender_uid: 7,
             message: Some("hello".to_string()),
             message_type: MessageType::Text,
@@ -2069,6 +2306,7 @@ mod tests {
             client_generated_id: "client-1".to_string(),
             attachment_ids: vec![10, 11],
             publish_immediately: true,
+            forwarded_messages_payload: None,
         }
     }
 

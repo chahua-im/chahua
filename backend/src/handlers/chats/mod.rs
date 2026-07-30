@@ -54,6 +54,12 @@ pub struct ChatIdPath {
     chat_id: i64,
 }
 
+
+
+
+
+
+
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMessageBody {
@@ -77,7 +83,32 @@ pub struct CreateMessageBody {
     pub attachment_ids: Vec<String>,
 }
 
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardMessagesBody {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub source_chat_id: i64,
+    #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
+    #[schema(value_type = Vec<String>)]
+    pub message_ids: Vec<i64>,
+}
+
 // ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Chat listing endpoints
 // ---------------------------------------------------------------------------
 
@@ -380,7 +411,7 @@ pub struct MarkAsReadBody {
     message_id: i64,
 }
 
-/// POST /chats/:chat_id/messages/read — Mark messages as read up to a specific message ID.
+/// POST /chats/:chat_id/read — Mark messages as read up to a specific message ID.
 #[utoipa::path(
     post,
     path = "/read",
@@ -987,3 +1018,13 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .nest("/pins", super::pins::router()),
         )
 }
+
+
+
+
+
+
+
+
+
+

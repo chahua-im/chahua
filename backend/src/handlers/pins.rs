@@ -395,6 +395,10 @@ async fn send_pin_system_message(
                 client_generated_id: Uuid::new_v4().to_string(),
                 attachment_ids: vec![],
                 publish_immediately: true,
+                forwarded_bundle_id: None,
+                forwarded_preview_total: None,
+                forwarded_preview_contains_forwarded_messages: None,
+                forwarded_preview_items: None,
             },
         )
         .await
