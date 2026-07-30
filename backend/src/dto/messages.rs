@@ -68,6 +68,7 @@ pub struct MessageResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessagesPreviewResponse {
     pub total: usize,
+    pub contains_forwarded_messages: bool,
     pub messages: Vec<ForwardedMessagePreviewResponse>,
 }
 
@@ -93,6 +94,7 @@ pub struct ForwardedMessagePreviewResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessagesPreviewSnapshot {
     pub total: usize,
+    pub contains_forwarded_messages: bool,
     pub messages: Vec<ForwardedBundlePayloadItem>,
 }
 

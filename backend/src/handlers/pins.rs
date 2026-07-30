@@ -397,6 +397,7 @@ async fn send_pin_system_message(
                 publish_immediately: true,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
+                forwarded_preview_contains_forwarded_messages: None,
                 forwarded_preview_items: None,
             },
         )

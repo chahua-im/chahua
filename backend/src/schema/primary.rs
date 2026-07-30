@@ -146,6 +146,7 @@ diesel::table! {
         created_at -> Timestamptz,
         item_count -> Int4,
         payload -> Jsonb,
+        child_bundle_ids -> Array<Int8>,
     }
 }
 

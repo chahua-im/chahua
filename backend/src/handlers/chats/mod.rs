@@ -57,6 +57,7 @@ pub struct ChatIdPath {
 
 
 
+
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMessageBody {
@@ -92,6 +93,7 @@ pub struct ForwardMessagesBody {
 }
 
 // ---------------------------------------------------------------------------
+
 
 
 
@@ -899,6 +901,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .nest("/pins", super::pins::router()),
         )
 }
+
 
 
 
