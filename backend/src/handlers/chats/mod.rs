@@ -119,6 +119,7 @@ pub(crate) struct PreparedMessageSend {
     pub publish_immediately: bool,
     pub forwarded_bundle_id: Option<i64>,
     pub forwarded_preview_total: Option<usize>,
+    pub forwarded_preview_contains_forwarded_messages: Option<bool>,
     pub forwarded_preview_items: Option<Vec<ForwardedBundlePayloadItem>>,
 }
 
@@ -580,12 +581,14 @@ pub(crate) fn forwarded_message_preview_response(
 
 pub(crate) fn forwarded_messages_preview_response(
     total: usize,
+    contains_forwarded_messages: bool,
     items: &[ForwardedBundlePayloadItem],
     user_avatars: &std::collections::HashMap<i32, Option<String>>,
     user_profiles: &std::collections::HashMap<i32, UserProfile>,
 ) -> ForwardedMessagesPreviewResponse {
     ForwardedMessagesPreviewResponse {
         total,
+        contains_forwarded_messages,
         messages: items
             .iter()
             .map(|item| forwarded_bundle_item_preview_response(item, user_avatars, user_profiles))
@@ -693,6 +696,7 @@ fn forwarded_bundle_ref_response(
         forwarded_bundle_id: Some(bundle_ref.forwarded_bundle_id),
         forwarded_preview: Some(forwarded_messages_preview_response(
             bundle_ref.preview.total,
+            bundle_ref.preview.contains_forwarded_messages,
             &bundle_ref.preview.messages,
             user_avatars,
             user_profiles,
@@ -965,6 +969,7 @@ pub(crate) async fn send_prepared_message(
             state,
             &mut response,
             prepared.forwarded_preview_total,
+            prepared.forwarded_preview_contains_forwarded_messages,
             prepared.forwarded_preview_items.as_deref(),
         );
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
@@ -1004,6 +1009,7 @@ pub(crate) async fn send_prepared_message(
         state,
         &mut response,
         prepared.forwarded_preview_total,
+        prepared.forwarded_preview_contains_forwarded_messages,
         prepared.forwarded_preview_items.as_deref(),
     );
 
@@ -1092,9 +1098,12 @@ fn attach_prepared_forwarded_preview(
     state: &AppState,
     response: &mut MessageResponse,
     total: Option<usize>,
+    contains_forwarded_messages: Option<bool>,
     items: Option<&[ForwardedBundlePayloadItem]>,
 ) {
-    let (Some(total), Some(items)) = (total, items) else {
+    let (Some(total), Some(contains_forwarded_messages), Some(items)) =
+        (total, contains_forwarded_messages, items)
+    else {
         return;
     };
     if response.is_deleted {
@@ -1108,6 +1117,7 @@ fn attach_prepared_forwarded_preview(
     let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
     response.forwarded_preview = Some(forwarded_messages_preview_response(
         total,
+        contains_forwarded_messages,
         items,
         &user_avatars,
         &user_profiles,
@@ -1116,6 +1126,7 @@ fn attach_prepared_forwarded_preview(
 
 struct ForwardedBundlePreviewData {
     total: usize,
+    contains_forwarded_messages: bool,
     items: Vec<ForwardedBundlePayloadItem>,
 }
 
@@ -1194,8 +1205,14 @@ pub async fn attach_metadata(
             match serde_json::from_value::<Vec<ForwardedBundlePayloadItem>>(bundle.payload) {
                 Ok(items) => {
                     let items = items.into_iter().take(FORWARDED_PREVIEW_LIMIT).collect();
-                    forwarded_bundle_previews
-                        .insert(bundle_id, ForwardedBundlePreviewData { total, items });
+                    forwarded_bundle_previews.insert(
+                        bundle_id,
+                        ForwardedBundlePreviewData {
+                            total,
+                            contains_forwarded_messages: !bundle.child_bundle_ids.is_empty(),
+                            items,
+                        },
+                    );
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -1504,6 +1521,7 @@ pub async fn attach_metadata(
                 .map(|preview| {
                     forwarded_messages_preview_response(
                         preview.total,
+                        preview.contains_forwarded_messages,
                         &preview.items,
                         &user_avatars,
                         &user_profiles,
@@ -2398,9 +2416,10 @@ mod tests {
         let user_profiles = HashMap::new();
 
         let preview =
-            forwarded_messages_preview_response(12, &items, &user_avatars, &user_profiles);
+            forwarded_messages_preview_response(12, true, &items, &user_avatars, &user_profiles);
 
         assert_eq!(preview.total, 12);
+        assert!(preview.contains_forwarded_messages);
         assert_eq!(preview.messages.len(), 3);
     }
 
@@ -2429,6 +2448,7 @@ mod tests {
             original_created_at: Utc::now(),
             preview: ForwardedMessagesPreviewSnapshot {
                 total: 1,
+                contains_forwarded_messages: false,
                 messages: vec![nested_item],
             },
         };
@@ -2589,6 +2609,7 @@ mod tests {
             publish_immediately: true,
             forwarded_bundle_id: None,
             forwarded_preview_total: None,
+            forwarded_preview_contains_forwarded_messages: None,
             forwarded_preview_items: None,
         }
     }
@@ -2773,6 +2794,7 @@ mod tests {
             forwarded_bundle_id: Some(99),
             forwarded_preview: Some(super::ForwardedMessagesPreviewResponse {
                 total: 0,
+                contains_forwarded_messages: false,
                 messages: Vec::new(),
             }),
         };

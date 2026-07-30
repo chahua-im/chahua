@@ -508,6 +508,7 @@ pub struct ForwardedBundle {
     pub created_at: DateTime<Utc>,
     pub item_count: i32,
     pub payload: serde_json::Value,
+    pub child_bundle_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -518,6 +519,7 @@ pub struct NewForwardedBundle {
     pub created_at: DateTime<Utc>,
     pub item_count: i32,
     pub payload: serde_json::Value,
+    pub child_bundle_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]

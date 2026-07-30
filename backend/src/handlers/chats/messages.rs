@@ -320,6 +320,7 @@ fn load_forwarded_bundle_preview_items(
     bundles
         .into_iter()
         .map(|bundle| {
+            validate_forwarded_source_bundle_can_be_nested(&bundle)?;
             let total = bundle.item_count as usize;
             let messages: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
                 .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
@@ -327,11 +328,24 @@ fn load_forwarded_bundle_preview_items(
                 bundle.id,
                 ForwardedMessagesPreviewSnapshot {
                     total,
+                    contains_forwarded_messages: !bundle.child_bundle_ids.is_empty(),
                     messages: messages.into_iter().take(FORWARDED_PREVIEW_LIMIT).collect(),
                 },
             ))
         })
         .collect()
+}
+
+fn validate_forwarded_source_bundle_can_be_nested(
+    bundle: &ForwardedBundle,
+) -> Result<(), AppError> {
+    if bundle.child_bundle_ids.is_empty() {
+        return Ok(());
+    }
+
+    Err(AppError::BadRequest(
+        "Forwarded messages cannot include nested forwarded messages",
+    ))
 }
 
 fn load_forwarded_bundle(
@@ -355,32 +369,20 @@ fn deserialize_forwarded_bundle_payload(
     Ok((total, items))
 }
 
-fn forwarded_bundle_reaches(
+fn load_target_forwarded_bundle_from_root(
     conn: &mut PgConnection,
-    root_bundle_id: i64,
+    root_bundle: ForwardedBundle,
     target_bundle_id: i64,
-) -> Result<bool, AppError> {
-    let mut stack = vec![root_bundle_id];
-    let mut visited = std::collections::HashSet::new();
-
-    while let Some(bundle_id) = stack.pop() {
-        if !visited.insert(bundle_id) {
-            continue;
-        }
-        if bundle_id == target_bundle_id {
-            return Ok(true);
-        }
-
-        let bundle = load_forwarded_bundle(conn, bundle_id)?;
-        let (_, items) = deserialize_forwarded_bundle_payload(bundle)?;
-        for item in items {
-            if let ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } = item {
-                stack.push(bundle_ref.forwarded_bundle_id);
-            }
-        }
+) -> Result<ForwardedBundle, AppError> {
+    if root_bundle.id == target_bundle_id {
+        return Ok(root_bundle);
     }
 
-    Ok(false)
+    if root_bundle.child_bundle_ids.contains(&target_bundle_id) {
+        return load_forwarded_bundle(conn, target_bundle_id);
+    }
+
+    Err(AppError::NotFound("Forwarded messages not found"))
 }
 
 fn forwarded_messages_response_from_items(
@@ -902,6 +904,7 @@ async fn post_message(
                 publish_immediately,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
+                forwarded_preview_contains_forwarded_messages: None,
                 forwarded_preview_items: None,
             },
         )
@@ -1048,6 +1051,7 @@ async fn forward_messages(
             created_at: now,
             item_count: forwarded_message_count as i32,
             payload: forwarded_message_snapshots_payload,
+            child_bundle_ids: forwarded_source_bundle_ids.clone(),
         };
         diesel::insert_into(forwarded_bundles::table)
             .values(&new_bundle)
@@ -1069,6 +1073,9 @@ async fn forward_messages(
                 publish_immediately: true,
                 forwarded_bundle_id: Some(bundle_id),
                 forwarded_preview_total: Some(forwarded_message_count),
+                forwarded_preview_contains_forwarded_messages: Some(
+                    !forwarded_source_bundle_ids.is_empty(),
+                ),
                 forwarded_preview_items: Some(forwarded_preview_items),
             },
         )
@@ -1221,19 +1228,8 @@ async fn get_forwarded_bundle_messages(
         .forwarded_bundle_id
         .ok_or(AppError::NotFound("Forwarded messages not found"))?;
 
-    if !forwarded_bundle_reaches(conn, root_bundle_id, bundle_id)? {
-        return Err(AppError::NotFound("Forwarded messages not found"));
-    }
-
-    tracing::debug!(
-        chat_id,
-        message_id,
-        root_bundle_id,
-        bundle_id,
-        "get_forwarded_bundle_messages bundle lookup"
-    );
-
-    let bundle = load_forwarded_bundle(conn, bundle_id)?;
+    let root_bundle = load_forwarded_bundle(conn, root_bundle_id)?;
+    let bundle = load_target_forwarded_bundle_from_root(conn, root_bundle, bundle_id)?;
     let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
 
     Ok(Json(forwarded_messages_response_from_items(
@@ -1324,6 +1320,7 @@ pub(super) async fn post_thread_message(
                 publish_immediately,
                 forwarded_bundle_id: None,
                 forwarded_preview_total: None,
+                forwarded_preview_contains_forwarded_messages: None,
                 forwarded_preview_items: None,
             },
         )
@@ -1764,9 +1761,10 @@ mod tests {
     use super::{
         build_forwarded_bundle_ref_snapshot, build_forwarded_message_snapshot, search_limit,
         search_next_offset, search_offset, validate_client_message_type,
-        validate_forwardable_source_message_type, FORWARDED_MESSAGE_TYPE_FORBIDDEN,
-        INVITE_MESSAGE_FORWARD_FORBIDDEN, INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW,
-        SYSTEM_MESSAGE_FORWARD_FORBIDDEN, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
+        validate_forwardable_source_message_type, validate_forwarded_source_bundle_can_be_nested,
+        FORWARDED_MESSAGE_TYPE_FORBIDDEN, INVITE_MESSAGE_FORWARD_FORBIDDEN,
+        INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW, SYSTEM_MESSAGE_FORWARD_FORBIDDEN,
+        SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
     use crate::dto::{
         attachments::AttachmentResponse,
@@ -1777,7 +1775,7 @@ mod tests {
         users::User,
     };
     use crate::errors::AppError;
-    use crate::models::{Message, MessageType, TranscodeStatus};
+    use crate::models::{ForwardedBundle, Message, MessageType, TranscodeStatus};
     use crate::services::message_search::MessageSearchSort;
     use chrono::Utc;
     use std::collections::HashMap;
@@ -1802,6 +1800,17 @@ mod tests {
             is_published: true,
             transcode_status: TranscodeStatus::None,
             forwarded_bundle_id,
+        }
+    }
+
+    fn forwarded_bundle(id: i64, child_bundle_ids: Vec<i64>) -> ForwardedBundle {
+        ForwardedBundle {
+            id,
+            created_by_uid: 7,
+            created_at: Utc::now(),
+            item_count: 0,
+            payload: serde_json::Value::Array(Vec::new()),
+            child_bundle_ids,
         }
     }
 
@@ -1952,6 +1961,7 @@ mod tests {
             100,
             ForwardedMessagesPreviewSnapshot {
                 total: 5,
+                contains_forwarded_messages: false,
                 messages: preview_items.clone(),
             },
         )]);
@@ -1977,6 +1987,20 @@ mod tests {
 
         assert!(
             matches!(err, AppError::BadRequest(msg) if msg == "Forwarded source message has no bundle")
+        );
+    }
+
+    #[test]
+    fn forwarded_source_bundle_with_children_cannot_be_nested_again() {
+        let flat_bundle = forwarded_bundle(100, Vec::new());
+        assert!(validate_forwarded_source_bundle_can_be_nested(&flat_bundle).is_ok());
+
+        let nested_bundle = forwarded_bundle(101, vec![200]);
+        let err = validate_forwarded_source_bundle_can_be_nested(&nested_bundle)
+            .expect_err("bundle with children should be rejected");
+
+        assert!(
+            matches!(err, AppError::BadRequest(msg) if msg == "Forwarded messages cannot include nested forwarded messages")
         );
     }
 
