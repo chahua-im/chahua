@@ -278,6 +278,8 @@ ForwardedMessagesPreviewDto _$ForwardedMessagesPreviewDtoFromJson(
   Map<String, dynamic> json,
 ) => ForwardedMessagesPreviewDto(
   total: (json['total'] as num?)?.toInt() ?? 0,
+  containsForwardedMessages:
+      json['containsForwardedMessages'] as bool? ?? false,
   messages:
       (json['messages'] as List<dynamic>?)
           ?.map(
@@ -292,6 +294,7 @@ Map<String, dynamic> _$ForwardedMessagesPreviewDtoToJson(
   ForwardedMessagesPreviewDto instance,
 ) => <String, dynamic>{
   'total': instance.total,
+  'containsForwardedMessages': instance.containsForwardedMessages,
   'messages': instance.messages.map((e) => e.toJson()).toList(),
 };
 

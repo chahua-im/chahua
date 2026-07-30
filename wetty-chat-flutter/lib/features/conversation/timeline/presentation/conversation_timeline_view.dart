@@ -56,7 +56,9 @@ class ConversationTimelineView extends ConsumerStatefulWidget {
     this.onMessageVisibilityChanged,
     this.isForwardSelectionMode = false,
     this.selectedForwardMessageIds = const <int>{},
+    this.canSelectForwardMessage,
     this.onToggleForwardMessageSelection,
+    this.onForwardSelectionRejected,
   });
 
   final int chatId;
@@ -68,7 +70,9 @@ class ConversationTimelineView extends ConsumerStatefulWidget {
   final ValueChanged<MessageVisibilityWindow?>? onMessageVisibilityChanged;
   final bool isForwardSelectionMode;
   final Set<int> selectedForwardMessageIds;
+  final bool Function(ConversationMessageV2 message)? canSelectForwardMessage;
   final ValueChanged<ConversationMessageV2>? onToggleForwardMessageSelection;
+  final ValueChanged<ConversationMessageV2>? onForwardSelectionRejected;
 
   ConversationIdentity get _identity =>
       (chatId: chatId, threadRootId: threadRootId);
@@ -799,12 +803,19 @@ class _ConversationTimelineViewState
             showSenderName: rowPresentation.showSenderName,
             showAvatar: rowPresentation.showAvatar,
             isForwardSelectionMode: widget.isForwardSelectionMode,
+            isForwardSelectionEnabled:
+                !widget.isForwardSelectionMode ||
+                widget.canSelectForwardMessage?.call(message) != false,
             isForwardSelected:
                 messageId != null &&
                 widget.selectedForwardMessageIds.contains(messageId),
             onToggleForwardSelected:
                 widget.isForwardSelectionMode && messageId != null
                 ? () => widget.onToggleForwardMessageSelection?.call(message)
+                : null,
+            onForwardSelectionRejected:
+                widget.isForwardSelectionMode && messageId != null
+                ? () => widget.onForwardSelectionRejected?.call(message)
                 : null,
             onLongPress: _openMessageOverlay,
             onReply: () => ref

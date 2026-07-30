@@ -53,8 +53,10 @@ class MessageRowV2 extends StatefulWidget {
     this.onOpenSticker,
     this.onFailedMessageAction,
     this.isForwardSelectionMode = false,
+    this.isForwardSelectionEnabled = true,
     this.isForwardSelected = false,
     this.onToggleForwardSelected,
+    this.onForwardSelectionRejected,
     this.showSenderName = true,
     this.showAvatar = true,
     this.showDeliveryStatus = true,
@@ -71,8 +73,10 @@ class MessageRowV2 extends StatefulWidget {
   final ValueChanged<String>? onOpenSticker;
   final ValueChanged<ConversationMessageV2>? onFailedMessageAction;
   final bool isForwardSelectionMode;
+  final bool isForwardSelectionEnabled;
   final bool isForwardSelected;
   final VoidCallback? onToggleForwardSelected;
+  final VoidCallback? onForwardSelectionRejected;
   final bool showSenderName;
   final bool showAvatar;
   final bool showDeliveryStatus;
@@ -239,7 +243,9 @@ class _MessageRowV2State extends State<MessageRowV2>
         return GestureDetector(
           behavior: HitTestBehavior.translucent,
           onTap: widget.isForwardSelectionMode
-              ? widget.onToggleForwardSelected
+              ? widget.isForwardSelectionEnabled
+                    ? widget.onToggleForwardSelected
+                    : widget.onForwardSelectionRejected
               : null,
           onLongPress: widget.isForwardSelectionMode || _isDesktopPlatform
               ? null
@@ -281,6 +287,7 @@ class _MessageRowV2State extends State<MessageRowV2>
                       child: widget.isForwardSelectionMode
                           ? _ForwardSelectionIndicator(
                               isSelected: widget.isForwardSelected,
+                              isEnabled: widget.isForwardSelectionEnabled,
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -312,14 +319,20 @@ class _MessageRowV2State extends State<MessageRowV2>
 }
 
 class _ForwardSelectionIndicator extends StatelessWidget {
-  const _ForwardSelectionIndicator({required this.isSelected});
+  const _ForwardSelectionIndicator({
+    required this.isSelected,
+    required this.isEnabled,
+  });
 
   final bool isSelected;
+  final bool isEnabled;
 
   @override
   Widget build(BuildContext context) {
     final accentColor = context.appColors.accentPrimary;
-    final borderColor = CupertinoColors.systemGrey3.resolveFrom(context);
+    final borderColor = isEnabled
+        ? CupertinoColors.systemGrey3.resolveFrom(context)
+        : CupertinoColors.systemGrey.resolveFrom(context);
     return AnimatedContainer(
       key: messageRowForwardSelectionIndicatorKey,
       duration: const Duration(milliseconds: 140),
@@ -327,7 +340,11 @@ class _ForwardSelectionIndicator extends StatelessWidget {
       width: _forwardSelectionIndicatorSize,
       height: _forwardSelectionIndicatorSize,
       decoration: BoxDecoration(
-        color: isSelected ? accentColor : CupertinoColors.transparent,
+        color: isSelected
+            ? accentColor
+            : isEnabled
+            ? CupertinoColors.transparent
+            : CupertinoColors.systemGrey5.resolveFrom(context),
         shape: BoxShape.circle,
         border: Border.all(
           color: isSelected ? accentColor : borderColor,
@@ -335,17 +352,24 @@ class _ForwardSelectionIndicator extends StatelessWidget {
         ),
       ),
       alignment: Alignment.center,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 120),
-        child: isSelected
-            ? const Icon(
-                CupertinoIcons.checkmark,
-                key: messageRowForwardSelectionCheckmarkKey,
-                size: 15,
-                color: CupertinoColors.white,
-              )
-            : const SizedBox.shrink(),
-      ),
+      child: !isEnabled
+          ? const Icon(
+              CupertinoIcons.lock_fill,
+              key: ValueKey<String>('message-row-forward-selection-lock'),
+              size: 12,
+              color: CupertinoColors.systemGrey,
+            )
+          : AnimatedSwitcher(
+              duration: const Duration(milliseconds: 120),
+              child: isSelected
+                  ? const Icon(
+                      CupertinoIcons.checkmark,
+                      key: messageRowForwardSelectionCheckmarkKey,
+                      size: 15,
+                      color: CupertinoColors.white,
+                    )
+                  : const SizedBox.shrink(),
+            ),
     );
   }
 }

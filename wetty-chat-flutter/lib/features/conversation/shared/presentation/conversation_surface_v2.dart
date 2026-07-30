@@ -83,6 +83,8 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
   MessageVisibilityWindow? _pendingVisibilityWindow;
   bool _isVisibilityWindowUpdateScheduled = false;
   final Set<int> _selectedForwardMessageIds = <int>{};
+  OverlayEntry? _forwardSelectionToastEntry;
+  Timer? _forwardSelectionToastTimer;
 
   bool get _isForwardSelectionMode => _selectedForwardMessageIds.isNotEmpty;
 
@@ -130,6 +132,8 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
 
   @override
   void dispose() {
+    _forwardSelectionToastTimer?.cancel();
+    _forwardSelectionToastEntry?.remove();
     widget.onForwardSelectionChanged?.call(null);
     _refreshCoordinator.unregisterConversationRecovery(widget.identity);
     super.dispose();
@@ -216,9 +220,68 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
   }
 
   bool _canSelectForwardMessage(ConversationMessageV2 message) {
-    return message.serverMessageId != null &&
-        !message.isDeleted &&
-        message.content is! SystemMessageContent;
+    if (message.serverMessageId == null ||
+        message.isDeleted ||
+        message.content is SystemMessageContent) {
+      return false;
+    }
+    return switch (message.content) {
+      ForwardedPreviewContent(:final containsForwardedMessages) =>
+        !containsForwardedMessages,
+      _ => true,
+    };
+  }
+
+  void _handleRejectedForwardSelection(ConversationMessageV2 message) {
+    if (message.content is! ForwardedPreviewContent) {
+      return;
+    }
+    _showNestedForwardSelectionToast();
+  }
+
+  void _showNestedForwardSelectionToast() {
+    final overlay = Navigator.of(context).overlay;
+    if (overlay == null) {
+      return;
+    }
+    final l10n = AppLocalizations.of(context)!;
+    _forwardSelectionToastTimer?.cancel();
+    _forwardSelectionToastEntry?.remove();
+
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 24,
+        right: 24,
+        bottom: 92,
+        child: IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: CupertinoColors.systemGrey.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text(
+                l10n.nestedForwardMessagesCannotBeForwarded,
+                textAlign: TextAlign.center,
+                style: appBodyTextStyle(context, color: CupertinoColors.white),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    _forwardSelectionToastEntry = entry;
+    overlay.insert(entry);
+    _forwardSelectionToastTimer = Timer(const Duration(seconds: 2), () {
+      if (entry.mounted) {
+        entry.remove();
+      }
+      if (identical(_forwardSelectionToastEntry, entry)) {
+        _forwardSelectionToastEntry = null;
+      }
+    });
   }
 
   bool _canSelectAdditionalForwardMessage(int messageId) {
@@ -752,8 +815,11 @@ class _ConversationSurfaceV2State extends ConsumerState<ConversationSurfaceV2> {
                           _handleMessageVisibilityChanged,
                       isForwardSelectionMode: _isForwardSelectionMode,
                       selectedForwardMessageIds: _selectedForwardMessageIds,
+                      canSelectForwardMessage: _canSelectForwardMessage,
                       onToggleForwardMessageSelection:
                           _toggleForwardMessageSelection,
+                      onForwardSelectionRejected:
+                          _handleRejectedForwardSelection,
                     ),
                   ),
                 ),

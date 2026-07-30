@@ -14,6 +14,7 @@ void main() {
         sender: UserDto(uid: 1, name: 'Alice'),
         forwardedPreview: ForwardedMessagesPreviewDto(
           total: 2,
+          containsForwardedMessages: true,
           messages: <ForwardedMessagePreviewDto>[
             ForwardedMessagePreviewDto(
               originalMessageId: 20,
@@ -30,6 +31,7 @@ void main() {
     final content = message.content as ForwardedPreviewContent;
     expect(message.forwardedBundleId, 'bundle-nested-100');
     expect(content.total, 2);
+    expect(content.containsForwardedMessages, isTrue);
     expect(content.previewMessages.single.message, 'Nested message');
   });
 
@@ -45,6 +47,7 @@ void main() {
         clientGeneratedId: 'forwarded-client',
         forwardedPreview: const ForwardedMessagesPreviewDto(
           total: 2,
+          containsForwardedMessages: true,
           messages: <ForwardedMessagePreviewDto>[
             ForwardedMessagePreviewDto(
               originalMessageId: 20,
@@ -65,6 +68,7 @@ void main() {
     expect(content, isA<ForwardedPreviewContent>());
     final forwarded = content as ForwardedPreviewContent;
     expect(forwarded.forwardedBundleId, 'bundle-root-100');
+    expect(forwarded.containsForwardedMessages, isTrue);
     expect(forwarded.total, 2);
     expect(forwarded.previewMessages, hasLength(1));
     expect(forwarded.previewMessages.single.originalMessageId, 20);

@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:chahua/core/api/models/messages_api_models.dart';
 
 import 'attachment.dart';
@@ -46,6 +48,16 @@ class ConversationMessageV2 {
   });
 
   factory ConversationMessageV2.fromMessageItemDto(MessageItemDto dto) {
+    if (dto.messageType == 'forwarded') {
+      log(
+        'timeline forwarded metadata messageId=${dto.id} '
+        'chatId=${dto.chatId} bundleId=${dto.forwardedBundleId} '
+        'hasPreview=${dto.forwardedPreview != null} '
+        'containsForwardedMessages='
+        '${dto.forwardedPreview?.containsForwardedMessages}',
+        name: 'ConversationForward',
+      );
+    }
     final attachments = dto.attachments
         .map(AttachmentItem.fromDto)
         .toList(growable: false);
@@ -170,6 +182,8 @@ MessageContent _contentFromMessageItemDto({
   if (messageType == 'forwarded') {
     return ForwardedPreviewContent(
       total: forwardedPreview?.total ?? 0,
+      containsForwardedMessages:
+          forwardedPreview?.containsForwardedMessages ?? false,
       previewMessages: forwardedPreview?.messages ?? const [],
       forwardedBundleId: forwardedBundleId,
     );
@@ -239,20 +253,27 @@ class ForwardedPreviewContent extends MessageContent {
   const ForwardedPreviewContent({
     required this.total,
     required this.previewMessages,
+    this.containsForwardedMessages = false,
     this.forwardedBundleId,
   });
 
   final int total;
+  final bool containsForwardedMessages;
   final List<ForwardedMessagePreview> previewMessages;
   final String? forwardedBundleId;
 }
 
 class ForwardedMessagesPreview {
-  const ForwardedMessagesPreview({required this.total, required this.messages});
+  const ForwardedMessagesPreview({
+    required this.total,
+    required this.containsForwardedMessages,
+    required this.messages,
+  });
 
   factory ForwardedMessagesPreview.fromDto(ForwardedMessagesPreviewDto dto) {
     return ForwardedMessagesPreview(
       total: dto.total,
+      containsForwardedMessages: dto.containsForwardedMessages,
       messages: dto.messages
           .map(ForwardedMessagePreview.fromDto)
           .toList(growable: false),
@@ -260,6 +281,7 @@ class ForwardedMessagesPreview {
   }
 
   final int total;
+  final bool containsForwardedMessages;
   final List<ForwardedMessagePreview> messages;
 }
 
@@ -312,6 +334,16 @@ class ForwardedMessage {
   });
 
   factory ForwardedMessage.fromDto(ForwardedMessageResponseDto dto) {
+    if (dto.messageType == 'forwarded') {
+      log(
+        'detail forwarded metadata originalMessageId=${dto.originalMessageId} '
+        'originalChatId=${dto.originalChatId} bundleId=${dto.forwardedBundleId} '
+        'hasPreview=${dto.forwardedPreview != null} '
+        'containsForwardedMessages='
+        '${dto.forwardedPreview?.containsForwardedMessages}',
+        name: 'ConversationForward',
+      );
+    }
     final attachments = dto.attachments
         .map(AttachmentItem.fromDto)
         .toList(growable: false);

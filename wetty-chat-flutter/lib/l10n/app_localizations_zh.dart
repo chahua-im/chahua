@@ -267,6 +267,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get selectMessageAction => '选择';
 
   @override
+  String get nestedForwardMessagesCannotBeForwarded => '嵌套转发的消息不能再次转发。';
+
+  @override
   String get forwardMessagesAction => '转发';
 
   @override
@@ -821,6 +824,9 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get selectMessageAction => '選取';
+
+  @override
+  String get nestedForwardMessagesCannotBeForwarded => '巢狀轉發的訊息無法再次轉發。';
 
   @override
   String get forwardMessagesAction => '轉發';

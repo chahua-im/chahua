@@ -270,6 +270,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get selectMessageAction => 'Select';
 
   @override
+  String get nestedForwardMessagesCannotBeForwarded =>
+      'Nested forwarded messages can\'t be forwarded again.';
+
+  @override
   String get forwardMessagesAction => 'Forward';
 
   @override

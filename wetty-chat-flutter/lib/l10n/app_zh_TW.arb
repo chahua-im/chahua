@@ -92,6 +92,7 @@
   "reply": "回覆",
   "copyMessageAction": "複製",
   "selectMessageAction": "選取",
+  "nestedForwardMessagesCannotBeForwarded": "巢狀轉發的訊息無法再次轉發。",
   "forwardMessagesAction": "轉發",
   "forwardMessagesFailed": "傳送失敗",
   "forwardMessagesSelectionLimit": "一次最多可轉發 {count} 則訊息。",

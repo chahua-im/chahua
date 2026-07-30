@@ -259,6 +259,9 @@
   "selectMessageAction": "Select",
   "@selectMessageAction": { "description": "Message action label for selecting a message" },
 
+  "nestedForwardMessagesCannotBeForwarded": "Nested forwarded messages can't be forwarded again.",
+  "@nestedForwardMessagesCannotBeForwarded": { "description": "Toast shown when the user tries to select a nested forwarded message" },
+
   "forwardMessagesAction": "Forward",
   "@forwardMessagesAction": { "description": "Action label for forwarding selected messages" },
 

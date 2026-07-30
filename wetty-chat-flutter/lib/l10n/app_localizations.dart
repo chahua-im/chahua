@@ -615,6 +615,12 @@ abstract class AppLocalizations {
   /// **'Select'**
   String get selectMessageAction;
 
+  /// Toast shown when the user tries to select a nested forwarded message
+  ///
+  /// In en, this message translates to:
+  /// **'Nested forwarded messages can\'t be forwarded again.'**
+  String get nestedForwardMessagesCannotBeForwarded;
+
   /// Action label for forwarding selected messages
   ///
   /// In en, this message translates to:

@@ -311,11 +311,14 @@ class ForwardedMessagePreviewDto {
 class ForwardedMessagesPreviewDto {
   const ForwardedMessagesPreviewDto({
     this.total = 0,
+    this.containsForwardedMessages = false,
     this.messages = const <ForwardedMessagePreviewDto>[],
   });
 
   @JsonKey(defaultValue: 0)
   final int total;
+  @JsonKey(defaultValue: false)
+  final bool containsForwardedMessages;
   @JsonKey(defaultValue: <ForwardedMessagePreviewDto>[])
   final List<ForwardedMessagePreviewDto> messages;
 

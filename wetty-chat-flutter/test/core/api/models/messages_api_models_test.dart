@@ -39,6 +39,7 @@ void main() {
       'mentions': <dynamic>[],
       'forwardedPreview': <String, dynamic>{
         'total': 4,
+        'containsForwardedMessages': true,
         'messages': <dynamic>[
           <String, dynamic>{
             'originalMessageId': '123',
@@ -62,6 +63,7 @@ void main() {
     expect(dto.messageType, 'forwarded');
     expect(dto.forwardedBundleId, 'bundle-root-900');
     expect(dto.forwardedPreview?.total, 4);
+    expect(dto.forwardedPreview?.containsForwardedMessages, isTrue);
 
     final forwarded = dto.forwardedPreview!.messages.single;
     expect(forwarded.originalMessageId, 123);

@@ -92,6 +92,7 @@
   "reply": "回复",
   "copyMessageAction": "复制",
   "selectMessageAction": "选择",
+  "nestedForwardMessagesCannotBeForwarded": "嵌套转发的消息不能再次转发。",
   "forwardMessagesAction": "转发",
   "forwardMessagesFailed": "发送失败",
   "forwardMessagesSelectionLimit": "一次最多可转发 {count} 条消息。",

@@ -128,6 +128,30 @@ void main() {
     final decoration = highlightBox.decoration as BoxDecoration;
     expect(decoration.color, CupertinoColors.transparent);
   });
+
+  testWidgets('disabled forward selection indicator shows a lock', (
+    tester,
+  ) async {
+    var rejected = false;
+    await _pumpRow(
+      tester,
+      MessageRowV2(
+        message: _message(senderUid: 7),
+        isForwardSelectionMode: true,
+        isForwardSelectionEnabled: false,
+        onForwardSelectionRejected: () => rejected = true,
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey<String>('message-row-forward-selection-lock')),
+      findsOneWidget,
+    );
+    expect(find.byKey(messageRowForwardSelectionCheckmarkKey), findsNothing);
+
+    await tester.tap(find.byKey(messageRowForwardSelectionIndicatorKey));
+    expect(rejected, isTrue);
+  });
 }
 
 Future<void> _pumpRow(WidgetTester tester, Widget child) async {
