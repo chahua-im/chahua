@@ -781,70 +781,18 @@ class _ConversationTimelineViewState
     required Map<String, ({bool showSenderName, bool showAvatar})>
     rowPresentationByStableKey,
   }) {
-    final vmNotifier = ref.read(
-      conversationTimelineViewModelProvider(widget._identity).notifier,
-    );
     return SliverList.builder(
       key: key,
       itemCount: messages.length,
       itemBuilder: (context, index) {
         final message = messages[index];
-        final messageId = message.serverMessageId;
         final rowPresentation =
             rowPresentationByStableKey[message.stableKey] ??
             const (showSenderName: true, showAvatar: true);
-        return KeyedSubtree(
-          key: _keyForMessage(message),
-          child: MessageRowV2(
-            message: message,
-            highlight: message.stableKey == highlight?.stableKey
-                ? highlight
-                : null,
-            showSenderName: rowPresentation.showSenderName,
-            showAvatar: rowPresentation.showAvatar,
-            isForwardSelectionMode: widget.isForwardSelectionMode,
-            isForwardSelectionEnabled:
-                !widget.isForwardSelectionMode ||
-                widget.canSelectForwardMessage?.call(message) != false,
-            isForwardSelected:
-                messageId != null &&
-                widget.selectedForwardMessageIds.contains(messageId),
-            onToggleForwardSelected:
-                widget.isForwardSelectionMode && messageId != null
-                ? () => widget.onToggleForwardMessageSelection?.call(message)
-                : null,
-            onForwardSelectionRejected:
-                widget.isForwardSelectionMode && messageId != null
-                ? () => widget.onForwardSelectionRejected?.call(message)
-                : null,
-            onLongPress: _openMessageOverlay,
-            onReply: () => ref
-                .read(
-                  conversationComposerViewModelProvider(
-                    widget._identity,
-                  ).notifier,
-                )
-                .beginReply(message),
-            onToggleReaction:
-                message.content is StickerMessageContent || message.isDeleted
-                ? null
-                : (emoji) => unawaited(_toggleReaction(message, emoji)),
-            onTapReply: message.replyToMessage != null
-                ? () => vmNotifier.jumpToMessageServerId(
-                    message.replyToMessage!.id,
-                    highlight: true,
-                  )
-                : null,
-            onOpenThread:
-                widget.onOpenThread != null &&
-                    message.threadInfo != null &&
-                    message.threadInfo!.replyCount > 0
-                ? () => widget.onOpenThread!(message)
-                : null,
-            onOpenAttachment: _openAttachment,
-            onOpenSticker: _openSticker,
-            onFailedMessageAction: _openFailedMessageActions,
-          ),
+        return _buildMessageRow(
+          message: message,
+          highlight: highlight,
+          rowPresentation: rowPresentation,
         );
       },
     );
@@ -869,9 +817,6 @@ class _ConversationTimelineViewState
       );
     }
 
-    final vmNotifier = ref.read(
-      conversationTimelineViewModelProvider(widget._identity).notifier,
-    );
     return SliverList.builder(
       key: key,
       itemCount: rows.length,
@@ -887,57 +832,74 @@ class _ConversationTimelineViewState
           );
         }
         final message = (row as ConversationTimelineMessageRow).message;
-        final messageId = message.serverMessageId;
         final rowPresentation =
             rowPresentationByStableKey[message.stableKey] ??
             const (showSenderName: true, showAvatar: true);
-        return KeyedSubtree(
-          key: _keyForMessage(message),
-          child: MessageRowV2(
-            message: message,
-            highlight: message.stableKey == highlight?.stableKey
-                ? highlight
-                : null,
-            showSenderName: rowPresentation.showSenderName,
-            showAvatar: rowPresentation.showAvatar,
-            isForwardSelectionMode: widget.isForwardSelectionMode,
-            isForwardSelected:
-                messageId != null &&
-                widget.selectedForwardMessageIds.contains(messageId),
-            onToggleForwardSelected:
-                widget.isForwardSelectionMode && messageId != null
-                ? () => widget.onToggleForwardMessageSelection?.call(message)
-                : null,
-            onLongPress: _openMessageOverlay,
-            onReply: () => ref
-                .read(
-                  conversationComposerViewModelProvider(
-                    widget._identity,
-                  ).notifier,
-                )
-                .beginReply(message),
-            onToggleReaction:
-                message.content is StickerMessageContent || message.isDeleted
-                ? null
-                : (emoji) => unawaited(_toggleReaction(message, emoji)),
-            onTapReply: message.replyToMessage != null
-                ? () => vmNotifier.jumpToMessageServerId(
-                    message.replyToMessage!.id,
-                    highlight: true,
-                  )
-                : null,
-            onOpenThread:
-                widget.onOpenThread != null &&
-                    message.threadInfo != null &&
-                    message.threadInfo!.replyCount > 0
-                ? () => widget.onOpenThread!(message)
-                : null,
-            onOpenAttachment: _openAttachment,
-            onOpenSticker: _openSticker,
-            onFailedMessageAction: _openFailedMessageActions,
-          ),
+        return _buildMessageRow(
+          message: message,
+          highlight: highlight,
+          rowPresentation: rowPresentation,
         );
       },
+    );
+  }
+
+  Widget _buildMessageRow({
+    required ConversationMessageV2 message,
+    required ConversationMessageHighlight? highlight,
+    required ({bool showSenderName, bool showAvatar}) rowPresentation,
+  }) {
+    final messageId = message.serverMessageId;
+    final vmNotifier = ref.read(
+      conversationTimelineViewModelProvider(widget._identity).notifier,
+    );
+    return KeyedSubtree(
+      key: _keyForMessage(message),
+      child: MessageRowV2(
+        message: message,
+        highlight: message.stableKey == highlight?.stableKey ? highlight : null,
+        showSenderName: rowPresentation.showSenderName,
+        showAvatar: rowPresentation.showAvatar,
+        isForwardSelectionMode: widget.isForwardSelectionMode,
+        isForwardSelectionEnabled:
+            widget.canSelectForwardMessage?.call(message) != false,
+        isForwardSelected:
+            messageId != null &&
+            widget.selectedForwardMessageIds.contains(messageId),
+        onToggleForwardSelected:
+            widget.isForwardSelectionMode && messageId != null
+            ? () => widget.onToggleForwardMessageSelection?.call(message)
+            : null,
+        onForwardSelectionRejected:
+            widget.isForwardSelectionMode && messageId != null
+            ? () => widget.onForwardSelectionRejected?.call(message)
+            : null,
+        onLongPress: _openMessageOverlay,
+        onReply: () => ref
+            .read(
+              conversationComposerViewModelProvider(widget._identity).notifier,
+            )
+            .beginReply(message),
+        onToggleReaction:
+            message.content is StickerMessageContent || message.isDeleted
+            ? null
+            : (emoji) => unawaited(_toggleReaction(message, emoji)),
+        onTapReply: message.replyToMessage != null
+            ? () => vmNotifier.jumpToMessageServerId(
+                message.replyToMessage!.id,
+                highlight: true,
+              )
+            : null,
+        onOpenThread:
+            widget.onOpenThread != null &&
+                message.threadInfo != null &&
+                message.threadInfo!.replyCount > 0
+            ? () => widget.onOpenThread!(message)
+            : null,
+        onOpenAttachment: _openAttachment,
+        onOpenSticker: _openSticker,
+        onFailedMessageAction: _openFailedMessageActions,
+      ),
     );
   }
 
