@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { t } from '@lingui/core/macro';
 import {
   arrowUndoOutline,
+  arrowRedoOutline,
   bookmarkOutline,
   chatbubblesOutline,
   copyOutline,
@@ -48,6 +49,7 @@ interface UseMessageOverlayActionsArgs {
   onReply: (message: MessageResponse) => void;
   onStartThread: (messageId: string) => void;
   onEdit: (message: MessageResponse) => void;
+  onForward: (message: MessageResponse) => void;
   onOpenReactionDetails: (messageId: string) => void;
 }
 
@@ -64,6 +66,7 @@ export function useMessageOverlayActions({
   onReply,
   onStartThread,
   onEdit,
+  onForward,
   onOpenReactionDetails,
 }: UseMessageOverlayActionsArgs): MessageOverlayAction[] {
   const dispatch = useDispatch();
@@ -86,6 +89,7 @@ export function useMessageOverlayActions({
       savedMessagesEnabled,
       isPinned: existingPin != null,
       hasReactions: (message.reactions?.length ?? 0) > 0,
+      isForwarded: !!message.forwardedFrom,
     });
     const actions: MessageOverlayAction[] = [];
 
@@ -168,6 +172,16 @@ export function useMessageOverlayActions({
             icon: arrowUndoOutline,
             handler: () => {
               onReply(message);
+            },
+          });
+          break;
+        case 'forward':
+          actions.push({
+            key: 'forward',
+            label: t`Forward`,
+            icon: arrowRedoOutline,
+            handler: () => {
+              onForward(message);
             },
           });
           break;
@@ -272,6 +286,7 @@ export function useMessageOverlayActions({
     isAdmin,
     message,
     onEdit,
+    onForward,
     onOpenReactionDetails,
     onReply,
     onStartThread,

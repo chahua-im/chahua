@@ -5,7 +5,7 @@ import { createStore, type RootState } from '../index';
 import { selectAllChats, selectChatUnreadCount } from '../chatsSlice';
 import { messageAdded, messagePatched, messagesBulkDeleted } from '../messageEvents';
 import { selectThreadSubscriptionStatus, selectThreads, setThreadsList } from '../threadsSlice';
-import { insertAround } from './slice';
+import { insertAround, updateThreadReplyCount } from './slice';
 import {
   selectActiveTimelineMessages,
   selectCanLoadNewer,
@@ -159,5 +159,84 @@ describe('message listener projections', () => {
       attachments: [],
       mentions: [],
     });
+  });
+
+  it('removes thread root placeholder when all replies are deleted and root is then deleted', async () => {
+    const store = createStore();
+
+    // Load a thread root with threadInfo
+    store.dispatch(
+      insertAround({
+        chatId: '1',
+        targetMessageId: '10',
+        messages: [testMessage('10', 'client-10', { threadInfo: { replyCount: 1 } }), testMessage('11')],
+        olderCursor: '10',
+        newerCursor: null,
+      }),
+    );
+    store.dispatch(setThreadsList({ threads: [subscribedThread()], nextCursor: null }));
+
+    // Delete the root (it should stay as placeholder because threadInfo exists)
+    store.dispatch(
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null, threadInfo: { replyCount: 1 } }),
+      }),
+    );
+    await Promise.resolve();
+
+    // Root is placeholder
+    let messages = selectActiveTimelineMessages(store.getState() as RootState, '1');
+    expect(ids(messages)).toContain('10');
+    expect(messages.find((m) => m.id === '10')?.isDeleted).toBe(true);
+
+    // All replies deleted → replyCount becomes 0 → threadInfo removed
+    store.dispatch(updateThreadReplyCount({ chatId: '1', threadRootId: '10', replyCount: 0 }));
+    await Promise.resolve();
+
+    // Root no longer has threadInfo, but is still in timeline (isDeleted + no threadInfo)
+    // Now the server sends messagePatched to fully remove it
+    store.dispatch(
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null, threadInfo: null as any }),
+      }),
+    );
+    await Promise.resolve();
+
+    // Root should be removed from timeline
+    messages = selectActiveTimelineMessages(store.getState() as RootState, '1');
+    expect(ids(messages)).not.toContain('10');
+  });
+
+  it('removes thread root when threadInfo is explicitly set to null via messagePatched', async () => {
+    const store = createStore();
+
+    // Load thread root with threadInfo
+    store.dispatch(
+      insertAround({
+        chatId: '1',
+        targetMessageId: '10',
+        messages: [testMessage('10', 'client-10', { threadInfo: { replyCount: 3 } }), testMessage('11')],
+        olderCursor: '10',
+        newerCursor: null,
+      }),
+    );
+
+    // Server says threadInfo is null (thread deleted server-side)
+    store.dispatch(
+      messagePatched({
+        chatId: '1',
+        messageId: '10',
+        message: testMessage('10', 'client-10', { isDeleted: true, message: null, threadInfo: null as any }),
+      }),
+    );
+    await Promise.resolve();
+
+    // Root removed because threadInfo is null/falsy
+    const messages = selectActiveTimelineMessages(store.getState() as RootState, '1');
+    expect(ids(messages)).not.toContain('10');
   });
 });

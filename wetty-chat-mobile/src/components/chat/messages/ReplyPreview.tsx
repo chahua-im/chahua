@@ -2,11 +2,13 @@ import { useSelector } from 'react-redux';
 import { formatMessagePreview, type PreviewMessage, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { colorForUser } from '@/utils/userColor';
+import { ForwardedLabel } from './ForwardedLabel';
 import styles from './ChatBubble.module.scss';
 
 export interface ReplyPreviewInfo {
   senderName: string;
   preview: PreviewMessage;
+  forwardedFromName?: string | null;
 }
 
 interface ReplyPreviewProps {
@@ -33,9 +35,13 @@ export function ReplyPreview({ replyTo, isSent, interactive, onReplyTap }: Reply
           : undefined
       }
     >
-      <div className={styles.replyPreviewName} style={color ? { color } : undefined}>
-        {replyTo.senderName}
-      </div>
+      {replyTo.forwardedFromName ? (
+        <ForwardedLabel name={replyTo.forwardedFromName} />
+      ) : (
+        <div className={styles.replyPreviewName} style={color ? { color } : undefined}>
+          {replyTo.senderName}
+        </div>
+      )}
       <div className={styles.replyPreviewText}>
         {formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
       </div>

@@ -89,6 +89,7 @@ export function ConversationOverlayHost({
                 ? {
                     senderName: msg.replyToMessage.sender.name ?? `User ${msg.replyToMessage.sender.uid}`,
                     preview: msg.replyToMessage,
+                    forwardedFromName: msg.replyToMessage.forwardedFromName,
                   }
                 : undefined,
               sourceRect: overlayMessage.sourceRect,
@@ -105,6 +106,7 @@ export function ConversationOverlayHost({
                   },
               onClose: onCloseOverlay,
               mentions: msg.mentions ?? undefined,
+              forwardedFrom: msg.forwardedFrom ?? undefined,
               currentUserUid: currentUserId,
               onMentionClick: (uid: number) => onProfileSenderChange(mentionToUser(msg.mentions, uid)),
             } as const;

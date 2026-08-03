@@ -87,6 +87,7 @@ function TestComponent({
   onReply,
   onStartThread,
   onEdit,
+  onForward,
   onOpenReactionDetails,
 }: {
   message: MessageResponse | null;
@@ -97,6 +98,7 @@ function TestComponent({
   onReply: (message: MessageResponse) => void;
   onStartThread: (messageId: string) => void;
   onEdit: (message: MessageResponse) => void;
+  onForward: (message: MessageResponse) => void;
   onOpenReactionDetails: (messageId: string) => void;
 }) {
   const actions = useMessageOverlayActions({
@@ -112,6 +114,7 @@ function TestComponent({
     onReply,
     onStartThread,
     onEdit,
+    onForward,
     onOpenReactionDetails,
   });
   onRender({ actions });
@@ -127,6 +130,7 @@ describe('useMessageOverlayActions', () => {
   let onReply: MockFn<(message: MessageResponse) => void>;
   let onStartThread: MockFn<(messageId: string) => void>;
   let onEdit: MockFn<(message: MessageResponse) => void>;
+  let onForward: MockFn<(message: MessageResponse) => void>;
   let onOpenReactionDetails: MockFn<(messageId: string) => void>;
 
   function renderHook(nextMessage: MessageResponse | null, pins: PinResponse[] = []) {
@@ -140,6 +144,7 @@ describe('useMessageOverlayActions', () => {
           onReply={onReply}
           onStartThread={onStartThread}
           onEdit={onEdit}
+          onForward={onForward}
           onOpenReactionDetails={onOpenReactionDetails}
           onRender={(nextState) => (state = nextState)}
         />,
@@ -157,6 +162,7 @@ describe('useMessageOverlayActions', () => {
     onReply = vi.fn() as typeof onReply;
     onStartThread = vi.fn() as typeof onStartThread;
     onEdit = vi.fn() as typeof onEdit;
+    onForward = vi.fn() as typeof onForward;
     onOpenReactionDetails = vi.fn() as typeof onOpenReactionDetails;
     vi.mocked(createPin).mockResolvedValue(response(pinFor(message())));
     vi.mocked(deletePin).mockResolvedValue(response(undefined));
@@ -187,6 +193,7 @@ describe('useMessageOverlayActions', () => {
       'thread',
       'pin',
       'copy',
+      'forward',
       'edit',
       'save',
       'copy-link',
@@ -201,12 +208,14 @@ describe('useMessageOverlayActions', () => {
     state.actions.find((action) => action.key === 'reply')?.handler();
     state.actions.find((action) => action.key === 'thread')?.handler();
     state.actions.find((action) => action.key === 'edit')?.handler();
+    state.actions.find((action) => action.key === 'forward')?.handler();
     state.actions.find((action) => action.key === 'reaction-details')?.handler();
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('hello');
     expect(onReply).toHaveBeenCalledWith(expect.objectContaining({ id: 'message-1' }));
     expect(onStartThread).toHaveBeenCalledWith('message-1');
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'message-1' }));
+    expect(onForward).toHaveBeenCalledWith(expect.objectContaining({ id: 'message-1' }));
     expect(onOpenReactionDetails).toHaveBeenCalledWith('message-1');
   });
 

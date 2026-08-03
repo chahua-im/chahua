@@ -6,6 +6,7 @@ import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { useChatContext } from '@/components/chat/messages/ChatContext';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import type { EditingMessage, ReplyTo } from './types';
+import { ForwardedLabel } from '@/components/chat/messages/ForwardedLabel';
 import styles from './MessageComposeBar.module.scss';
 
 interface ComposeContextBannerProps {
@@ -45,7 +46,11 @@ export function ComposeContextBanner({ editing, replyTo, onCancelEdit, onCancelR
   return (
     <div className={styles.replyPreview}>
       <div className={`${styles.replyText} ${styles.replyPreviewTappable}`} onClick={handleJumpToReply}>
-        <span className={styles.replyUsername}>{t`Replying to ${replyTo.username}`}</span>
+        {replyTo.forwardedFromName ? (
+          <ForwardedLabel name={replyTo.forwardedFromName} as="span" />
+        ) : (
+          <span className={styles.replyUsername}>{t`Replying to ${replyTo.username}`}</span>
+        )}
         <span className={styles.replySnippet}>
           {formatMessagePreview(replyTo, getNotificationPreviewLabels(locale))}
         </span>

@@ -147,11 +147,13 @@ function MessageBubble({
     onAvatarClick: () => onAvatarClick(msg.sender),
     isLastInGroup,
     isConfirmed: !msg.id.startsWith('cg_'),
+    forwardedFrom: msg.forwardedFrom ?? undefined,
     bubbleProps: { 'data-message-id': msg.id, 'data-bubble-row': '' } as BubblePropsOverride,
     replyTo: replyToMessage
       ? {
           senderName: replyToMessage.sender.name ?? `User ${replyToMessage.sender.uid}`,
           preview: replyToMessage,
+          forwardedFromName: replyToMessage.forwardedFromName,
         }
       : undefined,
   } as const;
