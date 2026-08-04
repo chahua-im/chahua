@@ -27,6 +27,7 @@ import {
 import { friendsApi } from '@/api/friends';
 import { blocksApi } from '@/api/blocks';
 import { dmsApi } from '@/api/dms';
+import { AddFriendSheet } from '@/components/social/AddFriendSheet';
 import { getMembers, removeMember, updateMemberRole, type MemberResponse } from '@/api/group';
 import styles from './UserProfileModal.module.scss';
 
@@ -62,6 +63,7 @@ export function UserProfileModal({
   const [memberInfo, setMemberInfo] = useState<MemberResponse | null>(memberProp);
   const [memberLoading, setMemberLoading] = useState(false);
   const [initialBreakpoint, setInitialBreakpoint] = useState<number | null>(null);
+  const [addFriendOpen, setAddFriendOpen] = useState(false);
 
   const isAnimatingRef = useRef(false);
 
@@ -297,16 +299,10 @@ export function UserProfileModal({
     dispatch(fetchOutgoingRequests());
   }, [dispatch]);
 
-  const handleAddFriend = useCallback(async () => {
+  const handleAddFriend = useCallback(() => {
     if (!displaySender) return;
-    try {
-      await friendsApi.createRequest(displaySender.uid);
-      presentToast(t`Friend request sent`, 2000);
-      dispatch(fetchOutgoingRequests());
-    } catch (err) {
-      presentToast(err instanceof Error ? err.message : t`Failed to send request`, 2000);
-    }
-  }, [displaySender, presentToast, dispatch]);
+    setAddFriendOpen(true);
+  }, [displaySender]);
 
   const handleCancelRequest = useCallback(async () => {
     if (!outgoingReq) return;
@@ -400,7 +396,8 @@ export function UserProfileModal({
   }, [displaySender, dispatch, onDismiss, history, presentToast]);
 
   return (
-    <IonModal isOpen={sender != null} onDidPresent={handleDidPresent} onDidDismiss={onDismiss} {...mobileModalProps}>
+    <>
+      <IonModal isOpen={sender != null} onDidPresent={handleDidPresent} onDidDismiss={onDismiss} {...mobileModalProps}>
       <IonContent className="ion-padding" scrollY={false}>
         <button
           onClick={onDismiss}
@@ -591,6 +588,14 @@ export function UserProfileModal({
           </div>
         )}
       </IonContent>
-    </IonModal>
+      </IonModal>
+      <AddFriendSheet
+        targetUid={peerUid}
+        targetName={displayName}
+        isOpen={addFriendOpen}
+        onDismiss={() => setAddFriendOpen(false)}
+        onSent={() => dispatch(fetchOutgoingRequests())}
+      />
+    </>
   );
 }

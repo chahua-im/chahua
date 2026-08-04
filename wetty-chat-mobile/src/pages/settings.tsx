@@ -27,7 +27,7 @@ import { SettingsProfileHero } from '@/components/settings/SettingsProfileHero';
 
 import { type PushNotificationErrorCode, usePushNotifications } from '@/hooks/usePushNotifications';
 import { t } from '@lingui/core/macro';
-import { bookmarkOutline, codeWorking, cog, happyOutline, logIn, logOut, notifications } from 'ionicons/icons';
+import { bookmarkOutline, codeWorking, cog, happyOutline, logIn, logOut, notifications, shieldCheckmarkOutline } from 'ionicons/icons';
 import { BackButton } from '@/components/BackButton';
 import type { BackAction } from '@/types/back-action';
 
@@ -36,6 +36,7 @@ interface SettingsCoreProps {
   onOpenGeneral?: () => void;
   onOpenSavedMessages?: () => void;
   onOpenStickers?: () => void;
+  onOpenFriendVerification?: () => void;
 }
 
 function getPermissionLabel(permission: NotificationPermission) {
@@ -67,7 +68,7 @@ function getPushErrorMessage(code: PushNotificationErrorCode) {
   }
 }
 
-export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, onOpenStickers }: SettingsCoreProps) {
+export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, onOpenStickers, onOpenFriendVerification }: SettingsCoreProps) {
   const {
     uid: currentUid,
     username,
@@ -114,6 +115,14 @@ export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, o
       return;
     }
     history.push('/settings/saved-messages');
+  };
+
+  const handleOpenFriendVerification = () => {
+    if (onOpenFriendVerification) {
+      onOpenFriendVerification();
+      return;
+    }
+    history.push('/settings/friend-verification');
   };
 
   const handleSubscribeToPush = async () => {
@@ -165,6 +174,14 @@ export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, o
               <IonIcon aria-hidden="true" icon={bookmarkOutline} slot="start" color="medium" />
               <IonLabel>
                 <Trans>Saved Messages</Trans>
+              </IonLabel>
+            </IonItem>
+          </FeatureGate>
+          <FeatureGate feature="friends">
+            <IonItem button detail={true} onClick={handleOpenFriendVerification}>
+              <IonIcon aria-hidden="true" icon={shieldCheckmarkOutline} slot="start" color="medium" />
+              <IonLabel>
+                <Trans>Friend Verification</Trans>
               </IonLabel>
             </IonItem>
           </FeatureGate>
