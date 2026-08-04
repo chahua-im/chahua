@@ -1523,6 +1523,12 @@ msgstr "You are already a member"
 msgid "You are already a member of this chat."
 msgstr "You are already a member of this chat."
 
+msgid "You are no longer friends with this user."
+msgstr "You are no longer friends with this user."
+
+msgid "You blocked this user. Unblock to send messages."
+msgstr "You blocked this user. Unblock to send messages."
+
 msgid "You can only add up to {MAX_REACTIONS_PER_USER_PER_MESSAGE} reactions"
 msgstr "You can only add up to {MAX_REACTIONS_PER_USER_PER_MESSAGE} reactions"
 

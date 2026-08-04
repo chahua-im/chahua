@@ -25,6 +25,8 @@ interface ConversationFooterProps {
   editing?: EditingMessage;
   onCancelEdit: () => void;
   onRequestEditLastMessage: () => boolean;
+  composeDisabled?: boolean;
+  composeDisabledReason?: string;
 }
 
 export function ConversationFooter({
@@ -42,6 +44,8 @@ export function ConversationFooter({
   editing,
   onCancelEdit,
   onRequestEditLastMessage,
+  composeDisabled,
+  composeDisabledReason,
 }: ConversationFooterProps) {
   return (
     <IonFooter className={`conversation-footer${isKeyboardOpen ? ' keyboard-open' : ''}`}>
@@ -59,6 +63,8 @@ export function ConversationFooter({
         editing={editing}
         onCancelEdit={onCancelEdit}
         onRequestEditLastMessage={onRequestEditLastMessage}
+        composeDisabled={composeDisabled}
+        composeDisabledReason={composeDisabledReason}
       />
     </IonFooter>
   );

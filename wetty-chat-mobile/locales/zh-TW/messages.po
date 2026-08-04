@@ -1523,6 +1523,12 @@ msgstr "你已經是成員"
 msgid "You are already a member of this chat."
 msgstr "你已經是此聊天的成員。"
 
+msgid "You are no longer friends with this user."
+msgstr "你已不是對方好友。"
+
+msgid "You blocked this user. Unblock to send messages."
+msgstr "你已封鎖對方，解除封鎖後才能發送訊息。"
+
 msgid "You can only add up to {MAX_REACTIONS_PER_USER_PER_MESSAGE} reactions"
 msgstr "您最多只能添加 {MAX_REACTIONS_PER_USER_PER_MESSAGE} 個表態"
 
