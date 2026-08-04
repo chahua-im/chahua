@@ -19,6 +19,9 @@ msgstr "[已删除]"
 msgid "{count} attachments"
 msgstr "{count} 个附件"
 
+msgid "{targetName} will need to confirm your request."
+msgstr "{targetName} 需要确认你的请求。"
+
 msgid "1 attachment"
 msgstr "1 个附件"
 
@@ -43,8 +46,14 @@ msgstr "8 小时"
 msgid "A new version of the app is available!"
 msgstr "发现新版本！"
 
+msgid "A question is required."
+msgstr "必须设置一个问题。"
+
 msgid "About"
 msgstr "关于"
+
+msgid "Accept"
+msgstr "接受"
 
 msgid "Action failed"
 msgstr "操作失败"
@@ -54,6 +63,8 @@ msgstr "添加"
 
 msgid "Add attachment"
 msgstr "添加附件"
+msgid "Add Friend"
+msgstr "添加好友"
 
 msgid "Add Member"
 msgstr "添加成员"
@@ -73,11 +84,21 @@ msgstr "风纪委员"
 msgid "All"
 msgstr "全部"
 
+msgid "Allow anyone to add me"
+msgstr "允许任何人添加我"
+
 msgid "Allowed"
 msgstr "已允许"
 
 msgid "Already in this chat"
 msgstr "已在此聊天中"
+
+#. placeholder {0}: req.message ?? ''
+msgid "Answer: {0}"
+msgstr "回答：{0}"
+
+msgid "Anyone can send you a friend request. No verification message is needed; you just accept or decline."
+msgstr "任何人都可以向你发送好友请求。无需验证消息，你只需接受或拒绝。"
 
 msgid "Anyone with this invite link can use it until it expires or is revoked."
 msgstr "任何拥有此邀请链接的人都可以在链接过期或被撤销前使用它。"
@@ -125,6 +146,15 @@ msgstr "头像已上传"
 msgid "Back"
 msgstr "返回"
 
+msgid "Block"
+msgstr "拉黑"
+
+msgid "Block {name}? They won't be able to message you, and you will no longer be friends."
+msgstr "拉黑 {name}？对方将无法向你发消息，且你们将不再是好友。"
+
+msgid "Block User"
+msgstr "拉黑用户"
+
 msgid "Blocked"
 msgstr "已阻止"
 
@@ -136,6 +166,9 @@ msgstr "取消编辑"
 
 msgid "Cancel reply"
 msgstr "取消回复"
+
+msgid "Cancel Request"
+msgstr "取消请求"
 
 msgid "Cannot add more than {MAX_DISTINCT_REACTIONS_PER_MESSAGE} different reactions"
 msgstr "每条消息最多只能添加 {MAX_DISTINCT_REACTIONS_PER_MESSAGE} 种不同的表态"
@@ -194,6 +227,8 @@ msgstr "邀请码"
 
 msgid "Compressing"
 msgstr "压缩中"
+msgid "Contacts"
+msgstr "联系人"
 
 msgid "Continue"
 msgstr "继续"
@@ -233,6 +268,9 @@ msgstr "创建新的贴纸包"
 
 msgid "Creating…"
 msgstr "创建中…"
+
+msgid "Decline all friend requests"
+msgstr "拒绝所有好友请求"
 
 msgid "Delete"
 msgstr "撤回"
@@ -334,6 +372,8 @@ msgstr "输入用户 UID"
 
 msgid "Enter a valid User ID (integer from 1 to 2,147,483,647)"
 msgstr "请输入有效的用户 ID（1 到 2,147,483,647 之间的整数）"
+msgid "Enter a verification message"
+msgstr "请输入验证消息"
 
 msgid "Enter an exact UID to find a specific user."
 msgstr "输入精确 UID 以查找特定用户。"
@@ -356,6 +396,9 @@ msgstr "输入群组描述"
 msgid "Enter group name"
 msgstr "输入群组名称"
 
+msgid "Enter the question requesters must answer"
+msgstr "请输入请求者必须回答的问题"
+
 msgid "Enter user ID to add:"
 msgstr "输入要添加的用户 ID："
 
@@ -371,6 +414,9 @@ msgstr "过期时间"
 msgid "Expires"
 msgstr "过期时间"
 
+msgid "Failed to accept request"
+msgstr "接受请求失败"
+
 msgid "Failed to add member"
 msgstr "添加成员失败"
 
@@ -379,6 +425,9 @@ msgstr "添加表情失败"
 
 msgid "Failed to add sticker to favorites"
 msgstr "添加贴纸到收藏失败"
+
+msgid "Failed to cancel request"
+msgstr "取消请求失败"
 
 msgid "Failed to copy invite code"
 msgstr "复制邀请码失败"
@@ -406,6 +455,9 @@ msgstr "跳转到消息失败"
 
 msgid "Failed to leave group"
 msgstr "退出群组失败"
+
+msgid "Failed to load"
+msgstr "加载失败"
 
 msgid "Failed to load attachments"
 msgstr "无法加载附件"
@@ -455,6 +507,9 @@ msgstr "加载用户失败"
 msgid "Failed to mute"
 msgstr "静音失败"
 
+msgid "Failed to open conversation"
+msgstr "打开会话失败"
+
 msgid "Failed to open link"
 msgstr "打开链接失败"
 
@@ -463,6 +518,9 @@ msgstr "置顶消息失败"
 
 msgid "Failed to refresh chats"
 msgstr "刷新聊天失败"
+
+msgid "Failed to reject request"
+msgstr "拒绝请求失败"
 
 msgid "Failed to remove member"
 msgstr "移除成员失败"
@@ -475,6 +533,9 @@ msgstr "重命名贴纸包失败"
 
 msgid "Failed to revoke invite"
 msgstr "撤销邀请失败"
+
+msgid "Failed to save"
+msgstr "保存失败"
 
 msgid "Failed to save group info"
 msgstr "保存群组信息失败"
@@ -490,6 +551,9 @@ msgstr "发送失败"
 
 msgid "Failed to send invite"
 msgstr "发送邀请失败"
+
+msgid "Failed to send request"
+msgstr "发送请求失败"
 
 msgid "Failed to send voice message."
 msgstr "发送语音消息失败。"
@@ -542,6 +606,21 @@ msgstr "文件过大。贴纸文件大小上限为 10 MB。"
 
 msgid "Forever"
 msgstr "永久"
+
+msgid "Friend request"
+msgstr "好友请求"
+
+msgid "Friend request sent"
+msgstr "好友请求已发送"
+
+msgid "Friend Requests"
+msgstr "好友请求"
+
+msgid "Friend Verification"
+msgstr "好友验证"
+
+msgid "Friends"
+msgstr "好友"
 
 msgid "General"
 msgstr "通用"
@@ -767,6 +846,9 @@ msgstr "没有已归档话题"
 msgid "No chats yet"
 msgstr "暂无聊天"
 
+msgid "No friends yet. Tap Add to find someone."
+msgstr "还没有好友。点击「添加」查找好友。"
+
 msgid "No group description yet."
 msgstr "暂无群组描述。"
 
@@ -796,6 +878,9 @@ msgstr "未找到消息"
 
 msgid "No messages yet"
 msgstr "暂无消息"
+
+msgid "No one can send you a friend request."
+msgstr "任何人都无法向你发送好友请求。"
 
 msgid "No pinned messages"
 msgstr "暂无置顶消息"
@@ -863,6 +948,9 @@ msgstr "可选"
 msgid "Original message is no longer available"
 msgstr "原始消息已不可用"
 
+msgid "Outgoing Requests"
+msgstr "已发出的请求"
+
 msgid "Owned"
 msgstr "我的"
 
@@ -880,6 +968,9 @@ msgstr "此行以下的贴纸包不会自动排序"
 
 msgid "Paste code"
 msgstr "粘贴邀请码"
+
+msgid "Pending"
+msgstr "待处理"
 
 msgid "Permission"
 msgstr "权限"
@@ -961,6 +1052,13 @@ msgstr "推送通知已开启"
 msgid "Push notifications turned off"
 msgstr "推送通知已关闭"
 
+msgid "Question"
+msgstr "问题"
+
+#. placeholder {0}: req.question
+msgid "Question: {0}"
+msgstr "问题：{0}"
+
 msgid "Reactions"
 msgstr "回应"
 
@@ -975,6 +1073,9 @@ msgstr "录音"
 
 msgid "Recording is too short."
 msgstr "录音时间太短。"
+
+msgid "Reject"
+msgstr "拒绝"
 
 msgid "Release to save"
 msgstr "松开保存"
@@ -991,6 +1092,12 @@ msgstr "将 {displayName} 从 {chatLabel} 中移除？"
 
 msgid "Remove {displayName} from this group?"
 msgstr "将 {displayName} 从该群组中移除？"
+
+msgid "Remove {name} from your friends?"
+msgstr "将 {name} 从好友中移除？"
+
+msgid "Remove Friend"
+msgstr "移除好友"
 
 msgid "Remove from Favorites"
 msgstr "从收藏中移除"
@@ -1013,6 +1120,9 @@ msgstr "要将这个表情包从你的收藏中移除吗？"
 msgid "Remove this sticker from the pack?"
 msgstr "要从表情包中移除此表情吗？"
 
+msgid "Removed friend"
+msgstr "已移除好友"
+
 msgid "Rename pack"
 msgstr "重命名贴纸包"
 
@@ -1031,6 +1141,18 @@ msgstr "回复"
 #. placeholder {0}: replyTo.username
 msgid "Replying to {0}"
 msgstr "正在回复 {0}"
+
+msgid "Requesters must answer your question. You review the answer before accepting."
+msgstr "请求者必须回答你的问题。你可以在接受前查看回答。"
+
+msgid "Requesters must attach a verification message. You review it before accepting."
+msgstr "请求者必须附上验证消息。你可以在接受前查看。"
+
+msgid "Require a verification message"
+msgstr "需要验证消息"
+
+msgid "Require an answer to a question"
+msgstr "需要回答问题"
 
 msgid "Restricted To"
 msgstr "限制为"
@@ -1118,6 +1240,12 @@ msgstr "选择用户"
 
 msgid "Semi-Private"
 msgstr "半私密"
+
+msgid "Send"
+msgstr "发送"
+
+msgid "Send a friend request to {targetName}"
+msgstr "向 {targetName} 发送好友请求"
 
 msgid "Send invite"
 msgstr "发送邀请"
@@ -1222,6 +1350,12 @@ msgstr "此贴纸不属于任何贴纸包"
 msgid "This thread will move back to Threads. Continue?"
 msgstr "此话题将移回话题列表。要继续吗？"
 
+msgid "This user has set their account to decline all friend requests."
+msgstr "对方已设置拒绝所有好友请求。"
+
+msgid "This user requires a verification message."
+msgstr "对方需要验证消息。"
+
 msgid "Thread"
 msgstr "话题"
 
@@ -1263,8 +1397,20 @@ msgstr "取消归档聊天？"
 msgid "Unarchive thread?"
 msgstr "取消归档话题？"
 
+msgid "Unblock"
+msgstr "取消拉黑"
+
+msgid "Unblock this user?"
+msgstr "取消拉黑该用户？"
+
+msgid "Unblock User"
+msgstr "取消拉黑用户"
+
 msgid "Unfavorite"
 msgstr "取消收藏"
+
+msgid "Unfriend"
+msgstr "解除好友"
 
 msgid "Unknown"
 msgstr "未知"
@@ -1317,15 +1463,21 @@ msgstr "上传中..."
 
 #. placeholder {0}: invite.targetUid
 #. placeholder {0}: member.uid
-#. placeholder {0}: saved.sender.uid
+#. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "用户 {0}"
 
 msgid "User {uid}"
 msgstr "用户 {uid}"
 
+msgid "User blocked"
+msgstr "已拉黑用户"
+
 msgid "User ID"
 msgstr "用户 ID"
+
+msgid "User unblocked"
+msgstr "已取消拉黑"
 
 msgid "Videos"
 msgstr "视频"
@@ -1392,3 +1544,8 @@ msgstr "你的账户"
 #. js-lingui-explicit-id
 msgid "auth.bootstrap.signed-out.description"
 msgstr "你的会话已失效，请重新登录后继续。"
+msgid "Your answer"
+msgstr "你的回答"
+
+msgid "Your Question"
+msgstr "你的问题"
