@@ -19,6 +19,9 @@ msgstr "[Deleted]"
 msgid "{count} attachments"
 msgstr "{count} attachments"
 
+msgid "{targetName} will need to confirm your request."
+msgstr "{targetName} will need to confirm your request."
+
 msgid "1 attachment"
 msgstr "1 attachment"
 
@@ -43,8 +46,14 @@ msgstr "8 hours"
 msgid "A new version of the app is available!"
 msgstr "A new version of the app is available!"
 
+msgid "A question is required."
+msgstr "A question is required."
+
 msgid "About"
 msgstr "About"
+
+msgid "Accept"
+msgstr "Accept"
 
 msgid "Action failed"
 msgstr "Action failed"
@@ -54,6 +63,8 @@ msgstr "Add"
 
 msgid "Add attachment"
 msgstr "Add attachment"
+msgid "Add Friend"
+msgstr "Add Friend"
 
 msgid "Add Member"
 msgstr "Add Member"
@@ -73,11 +84,21 @@ msgstr "Alex"
 msgid "All"
 msgstr "All"
 
+msgid "Allow anyone to add me"
+msgstr "Allow anyone to add me"
+
 msgid "Allowed"
 msgstr "Allowed"
 
 msgid "Already in this chat"
 msgstr "Already in this chat"
+
+#. placeholder {0}: req.message ?? ''
+msgid "Answer: {0}"
+msgstr "Answer: {0}"
+
+msgid "Anyone can send you a friend request. No verification message is needed; you just accept or decline."
+msgstr "Anyone can send you a friend request. No verification message is needed; you just accept or decline."
 
 msgid "Anyone with this invite link can use it until it expires or is revoked."
 msgstr "Anyone with this invite link can use it until it expires or is revoked."
@@ -125,6 +146,15 @@ msgstr "Avatar uploaded"
 msgid "Back"
 msgstr "Back"
 
+msgid "Block"
+msgstr "Block"
+
+msgid "Block {name}? They won't be able to message you, and you will no longer be friends."
+msgstr "Block {name}? They won't be able to message you, and you will no longer be friends."
+
+msgid "Block User"
+msgstr "Block User"
+
 msgid "Blocked"
 msgstr "Blocked"
 
@@ -136,6 +166,9 @@ msgstr "Cancel edit"
 
 msgid "Cancel reply"
 msgstr "Cancel reply"
+
+msgid "Cancel Request"
+msgstr "Cancel Request"
 
 msgid "Cannot add more than {MAX_DISTINCT_REACTIONS_PER_MESSAGE} different reactions"
 msgstr "Cannot add more than {MAX_DISTINCT_REACTIONS_PER_MESSAGE} different reactions"
@@ -194,6 +227,8 @@ msgstr "Code"
 
 msgid "Compressing"
 msgstr "Compressing"
+msgid "Contacts"
+msgstr "Contacts"
 
 msgid "Continue"
 msgstr "Continue"
@@ -233,6 +268,9 @@ msgstr "Create new sticker pack"
 
 msgid "Creating…"
 msgstr "Creating…"
+
+msgid "Decline all friend requests"
+msgstr "Decline all friend requests"
 
 msgid "Delete"
 msgstr "Delete"
@@ -334,6 +372,8 @@ msgstr "Enter a user UID"
 
 msgid "Enter a valid User ID (integer from 1 to 2,147,483,647)"
 msgstr "Enter a valid User ID (integer from 1 to 2,147,483,647)"
+msgid "Enter a verification message"
+msgstr "Enter a verification message"
 
 msgid "Enter an exact UID to find a specific user."
 msgstr "Enter an exact UID to find a specific user."
@@ -356,6 +396,9 @@ msgstr "Enter group description"
 msgid "Enter group name"
 msgstr "Enter group name"
 
+msgid "Enter the question requesters must answer"
+msgstr "Enter the question requesters must answer"
+
 msgid "Enter user ID to add:"
 msgstr "Enter user ID to add:"
 
@@ -371,6 +414,9 @@ msgstr "Expire Date"
 msgid "Expires"
 msgstr "Expires"
 
+msgid "Failed to accept request"
+msgstr "Failed to accept request"
+
 msgid "Failed to add member"
 msgstr "Failed to add member"
 
@@ -379,6 +425,9 @@ msgstr "Failed to add sticker"
 
 msgid "Failed to add sticker to favorites"
 msgstr "Failed to add sticker to favorites"
+
+msgid "Failed to cancel request"
+msgstr "Failed to cancel request"
 
 msgid "Failed to copy invite code"
 msgstr "Failed to copy invite code"
@@ -406,6 +455,9 @@ msgstr "Failed to jump to message"
 
 msgid "Failed to leave group"
 msgstr "Failed to leave group"
+
+msgid "Failed to load"
+msgstr "Failed to load"
 
 msgid "Failed to load attachments"
 msgstr "Failed to load attachments"
@@ -455,6 +507,9 @@ msgstr "Failed to load users"
 msgid "Failed to mute"
 msgstr "Failed to mute"
 
+msgid "Failed to open conversation"
+msgstr "Failed to open conversation"
+
 msgid "Failed to open link"
 msgstr "Failed to open link"
 
@@ -463,6 +518,9 @@ msgstr "Failed to pin message"
 
 msgid "Failed to refresh chats"
 msgstr "Failed to refresh chats"
+
+msgid "Failed to reject request"
+msgstr "Failed to reject request"
 
 msgid "Failed to remove member"
 msgstr "Failed to remove member"
@@ -475,6 +533,9 @@ msgstr "Failed to rename pack"
 
 msgid "Failed to revoke invite"
 msgstr "Failed to revoke invite"
+
+msgid "Failed to save"
+msgstr "Failed to save"
 
 msgid "Failed to save group info"
 msgstr "Failed to save group info"
@@ -490,6 +551,9 @@ msgstr "Failed to send"
 
 msgid "Failed to send invite"
 msgstr "Failed to send invite"
+
+msgid "Failed to send request"
+msgstr "Failed to send request"
 
 msgid "Failed to send voice message."
 msgstr "Failed to send voice message."
@@ -542,6 +606,21 @@ msgstr "File is too large. Maximum sticker size is 10 MB."
 
 msgid "Forever"
 msgstr "Forever"
+
+msgid "Friend request"
+msgstr "Friend request"
+
+msgid "Friend request sent"
+msgstr "Friend request sent"
+
+msgid "Friend Requests"
+msgstr "Friend Requests"
+
+msgid "Friend Verification"
+msgstr "Friend Verification"
+
+msgid "Friends"
+msgstr "Friends"
 
 msgid "General"
 msgstr "General"
@@ -767,6 +846,9 @@ msgstr "No archived threads"
 msgid "No chats yet"
 msgstr "No chats yet"
 
+msgid "No friends yet. Tap Add to find someone."
+msgstr "No friends yet. Tap Add to find someone."
+
 msgid "No group description yet."
 msgstr "No group description yet."
 
@@ -796,6 +878,9 @@ msgstr "No messages found"
 
 msgid "No messages yet"
 msgstr "No messages yet"
+
+msgid "No one can send you a friend request."
+msgstr "No one can send you a friend request."
 
 msgid "No pinned messages"
 msgstr "No pinned messages"
@@ -863,6 +948,9 @@ msgstr "Optional"
 msgid "Original message is no longer available"
 msgstr "Original message is no longer available"
 
+msgid "Outgoing Requests"
+msgstr "Outgoing Requests"
+
 msgid "Owned"
 msgstr "Owned"
 
@@ -880,6 +968,9 @@ msgstr "Packs below this line are not auto-sorted"
 
 msgid "Paste code"
 msgstr "Paste code"
+
+msgid "Pending"
+msgstr "Pending"
 
 msgid "Permission"
 msgstr "Permission"
@@ -961,6 +1052,13 @@ msgstr "Push notifications enabled"
 msgid "Push notifications turned off"
 msgstr "Push notifications turned off"
 
+msgid "Question"
+msgstr "Question"
+
+#. placeholder {0}: req.question
+msgid "Question: {0}"
+msgstr "Question: {0}"
+
 msgid "Reactions"
 msgstr "Reactions"
 
@@ -975,6 +1073,9 @@ msgstr "Record audio"
 
 msgid "Recording is too short."
 msgstr "Recording is too short."
+
+msgid "Reject"
+msgstr "Reject"
 
 msgid "Release to save"
 msgstr "Release to save"
@@ -991,6 +1092,12 @@ msgstr "Remove {displayName} from {chatLabel}?"
 
 msgid "Remove {displayName} from this group?"
 msgstr "Remove {displayName} from this group?"
+
+msgid "Remove {name} from your friends?"
+msgstr "Remove {name} from your friends?"
+
+msgid "Remove Friend"
+msgstr "Remove Friend"
 
 msgid "Remove from Favorites"
 msgstr "Remove from Favorites"
@@ -1013,6 +1120,9 @@ msgstr "Remove this pack from your collection?"
 msgid "Remove this sticker from the pack?"
 msgstr "Remove this sticker from the pack?"
 
+msgid "Removed friend"
+msgstr "Removed friend"
+
 msgid "Rename pack"
 msgstr "Rename pack"
 
@@ -1031,6 +1141,18 @@ msgstr "Reply"
 #. placeholder {0}: replyTo.username
 msgid "Replying to {0}"
 msgstr "Replying to {0}"
+
+msgid "Requesters must answer your question. You review the answer before accepting."
+msgstr "Requesters must answer your question. You review the answer before accepting."
+
+msgid "Requesters must attach a verification message. You review it before accepting."
+msgstr "Requesters must attach a verification message. You review it before accepting."
+
+msgid "Require a verification message"
+msgstr "Require a verification message"
+
+msgid "Require an answer to a question"
+msgstr "Require an answer to a question"
 
 msgid "Restricted To"
 msgstr "Restricted To"
@@ -1118,6 +1240,12 @@ msgstr "Select User"
 
 msgid "Semi-Private"
 msgstr "Semi-Private"
+
+msgid "Send"
+msgstr "Send"
+
+msgid "Send a friend request to {targetName}"
+msgstr "Send a friend request to {targetName}"
 
 msgid "Send invite"
 msgstr "Send invite"
@@ -1222,6 +1350,12 @@ msgstr "This sticker is not part of any pack"
 msgid "This thread will move back to Threads. Continue?"
 msgstr "This thread will move back to Threads. Continue?"
 
+msgid "This user has set their account to decline all friend requests."
+msgstr "This user has set their account to decline all friend requests."
+
+msgid "This user requires a verification message."
+msgstr "This user requires a verification message."
+
 msgid "Thread"
 msgstr "Thread"
 
@@ -1263,8 +1397,20 @@ msgstr "Unarchive chat?"
 msgid "Unarchive thread?"
 msgstr "Unarchive thread?"
 
+msgid "Unblock"
+msgstr "Unblock"
+
+msgid "Unblock this user?"
+msgstr "Unblock this user?"
+
+msgid "Unblock User"
+msgstr "Unblock User"
+
 msgid "Unfavorite"
 msgstr "Unfavorite"
+
+msgid "Unfriend"
+msgstr "Unfriend"
 
 msgid "Unknown"
 msgstr "Unknown"
@@ -1317,15 +1463,21 @@ msgstr "Uploading..."
 
 #. placeholder {0}: invite.targetUid
 #. placeholder {0}: member.uid
-#. placeholder {0}: saved.sender.uid
+#. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "User {0}"
 
 msgid "User {uid}"
 msgstr "User {uid}"
 
+msgid "User blocked"
+msgstr "User blocked"
+
 msgid "User ID"
 msgstr "User ID"
+
+msgid "User unblocked"
+msgstr "User unblocked"
 
 msgid "Videos"
 msgstr "Videos"
@@ -1392,3 +1544,8 @@ msgstr "Your account"
 #. js-lingui-explicit-id
 msgid "auth.bootstrap.signed-out.description"
 msgstr "Your session is no longer valid. Please sign in again to continue."
+msgid "Your answer"
+msgstr "Your answer"
+
+msgid "Your Question"
+msgstr "Your Question"
