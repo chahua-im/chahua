@@ -41,6 +41,9 @@ interface MessageComposeBarProps {
   onRequestEditLastMessage?: () => boolean;
   onFocusChange?: (focused: boolean) => void;
   onError?: (message: string) => void;
+  /** When true, the compose bar renders a read-only banner instead of the input. */
+  composeDisabled?: boolean;
+  composeDisabledReason?: string;
 }
 
 export interface MessageComposeBarHandle {
@@ -72,6 +75,8 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       onRequestEditLastMessage,
       onFocusChange,
       onError,
+      composeDisabled,
+      composeDisabledReason,
     }: MessageComposeBarProps,
     ref,
   ) {
@@ -373,6 +378,16 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       e.target.value = '';
       setAttachmentDrawerOpen(false);
     };
+
+    if (composeDisabled) {
+      return (
+        <div ref={containerRef} style={{ position: 'relative' }}>
+          <div id="message-compose-bar" className={`${styles.bar} ${styles.disabledBar}`}>
+            <div className={styles.disabledBanner}>{composeDisabledReason}</div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div

@@ -6,6 +6,20 @@
   background: var(--ion-background-color, #fff);
 }
 
+.disabledBar {
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.disabledBanner {
+  color: var(--ion-color-medium);
+  font-size: 14px;
+  text-align: center;
+  padding: 8px 16px;
+  line-height: 1.4;
+}
+
 .attachBtn {
   width: 36px;
   height: 36px;
