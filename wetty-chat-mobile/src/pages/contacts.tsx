@@ -27,16 +27,52 @@ import {
   selectRequestsLoaded,
 } from '@/store/socialSlice';
 import { ChatMemberRow } from '@/components/chat-members/ChatMemberRow';
+import { UserAvatar } from '@/components/UserAvatar';
 import { UserProfileModal } from '@/components/chat/profiles/UserProfileModal';
 import { AddFriendModal } from '@/components/social/AddFriendModal';
 import { BackButton } from '@/components/BackButton';
 import { memberSummaryToUser } from '@/utils/userConvert';
+import type { FriendRequestResponse } from '@/api/friends';
 import type { BackAction } from '@/types/back-action';
 import type { User } from '@/api/messages';
 import type { MemberSummary } from '@/api/users';
 
 interface ContactsCoreProps {
   backAction?: BackAction;
+}
+
+/**
+ * Incoming request row that surfaces the requester's verification message or
+ * the target's question + the requester's answer, so the recipient can review
+ * before accepting. Falls back to a plain "Friend request" label for direct.
+ */
+function IncomingRequestRow({
+  req,
+  onSelect,
+}: {
+  req: FriendRequestResponse;
+  onSelect: (member: MemberSummary) => void;
+}) {
+  const member = req.from;
+  const displayName = member.username || t`User ${member.uid}`;
+  return (
+    <IonItem button detail={false} onClick={() => onSelect(member)}>
+      <UserAvatar name={displayName} avatarUrl={member.avatarUrl} size={40} />
+      <IonLabel className="ion-text-wrap">
+        <h3>{displayName}</h3>
+        {req.question ? (
+          <>
+            <p>{t`Question: ${req.question}`}</p>
+            <p>{t`Answer: ${req.message ?? ''}`}</p>
+          </>
+        ) : req.message ? (
+          <p>{req.message}</p>
+        ) : (
+          <p>{t`Friend request`}</p>
+        )}
+      </IonLabel>
+    </IonItem>
+  );
 }
 
 function ContactsCore({ backAction }: ContactsCoreProps) {
@@ -93,12 +129,7 @@ function ContactsCore({ backAction }: ContactsCoreProps) {
               </IonLabel>
             </IonListHeader>
             {incoming.map((req) => (
-              <ChatMemberRow
-                key={`in-${req.id}`}
-                member={req.from}
-                subtitle={t`Friend request`}
-                onSelect={openProfile}
-              />
+              <IncomingRequestRow key={`in-${req.id}`} req={req} onSelect={openProfile} />
             ))}
           </IonList>
         ) : null}

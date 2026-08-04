@@ -22,6 +22,7 @@ import GeneralSettingsPage from '@/pages/settings/general';
 import LanguagePage from '@/pages/settings/language';
 import StickerSettingsPage from '@/pages/settings/stickers';
 import StickerPackDetailPage from '@/pages/settings/sticker-pack-detail';
+import FriendVerificationPage from '@/pages/settings/friend-verification';
 import NotFoundPage from '@/pages/not-found';
 import ComponentDemoPage from '@/pages/component-demo';
 
@@ -114,6 +115,7 @@ const MobileLayout: React.FC = () => {
         <Route path="/settings/general" exact component={GeneralSettingsPage} />
         <Route path="/settings/language" exact component={LanguagePage} />
         {whenFeature('savedMessages', <Route path="/settings/saved-messages" exact component={SavedMessagesPage} />)}
+        {whenFeature('friends', <Route path="/settings/friend-verification" exact component={FriendVerificationPage} />)}
         <Route path="/settings/stickers/:packId" exact component={StickerPackDetailPage} />
         <Route path="/settings/stickers" exact component={StickerSettingsPage} />
         <Route path="/settings" exact component={SettingsPage} />

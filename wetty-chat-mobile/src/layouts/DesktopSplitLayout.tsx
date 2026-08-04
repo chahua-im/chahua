@@ -20,6 +20,7 @@ import { GeneralSettingsCore } from '@/pages/settings/general';
 import { LanguagePageCore } from '@/pages/settings/language';
 import { StickerSettingsCore } from '@/pages/settings/stickers';
 import { StickerPackDetailCore } from '@/pages/settings/sticker-pack-detail';
+import { FriendVerificationCore } from '@/pages/settings/friend-verification';
 import type { BackAction } from '@/types/back-action';
 import type { ConversationRouteState } from '@/types/conversationNavigation';
 import styles from './DesktopSplitLayout.module.scss';
@@ -47,6 +48,7 @@ interface DesktopRouteMatches {
   globalSettings: boolean;
   generalSettings: boolean;
   savedMessagesSettings: boolean;
+  friendVerificationSettings: boolean;
   languageSettings: boolean;
   stickerSettings: boolean;
   stickerPackSettings: { packId: string } | null;
@@ -109,6 +111,10 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     path: '/settings/saved-messages',
     exact: true,
   });
+  const friendVerificationSettings = !!matchPath(pathname, {
+    path: '/settings/friend-verification',
+    exact: true,
+  });
   const stickerPackRaw = matchPath<{ packId: string }>(pathname, {
     path: '/settings/stickers/:packId',
     exact: true,
@@ -121,6 +127,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     }) ||
     generalSettings ||
     savedMessagesSettings ||
+    friendVerificationSettings ||
     languageSettings ||
     stickerSettings;
 
@@ -147,6 +154,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     globalSettings,
     generalSettings,
     savedMessagesSettings,
+    friendVerificationSettings,
     languageSettings,
     stickerSettings,
     stickerPackSettings: stickerPackRaw?.params ?? null,
@@ -199,6 +207,7 @@ export function DesktopSplitLayout() {
   const location = useLocation<DesktopRouteState | undefined>();
   const canCreateChat = useHasGlobalPermission('chat.create');
   const savedMessagesEnabled = useFeatureGate('savedMessages');
+  const friendsEnabled = useFeatureGate('friends');
   const currentUser = useSelector((state: RootState) => state.user);
   useEscNavigation();
   const skipNextGlobalSettingsDismiss = useRef(false);
@@ -335,6 +344,17 @@ export function DesktopSplitLayout() {
       state: { backgroundPath },
     });
   }, [backgroundPath, history, savedMessagesEnabled]);
+
+  const openFriendVerification = useCallback(() => {
+    if (!friendsEnabled) {
+      return;
+    }
+
+    history.push({
+      pathname: '/settings/friend-verification',
+      state: { backgroundPath },
+    });
+  }, [backgroundPath, history, friendsEnabled]);
 
   const openStickerSettings = useCallback(() => {
     history.push({
@@ -521,6 +541,17 @@ export function DesktopSplitLayout() {
                   }),
               }}
             />
+          ) : friendsEnabled && currentRoute.friendVerificationSettings ? (
+            <FriendVerificationCore
+              backAction={{
+                type: 'callback',
+                onBack: () =>
+                  history.push({
+                    pathname: '/settings',
+                    state: { backgroundPath },
+                  }),
+              }}
+            />
           ) : currentRoute.generalSettings ? (
             <GeneralSettingsCore
               backAction={{
@@ -538,6 +569,7 @@ export function DesktopSplitLayout() {
               backAction={{ type: 'close', onClose: closeGlobalSettings }}
               onOpenGeneral={openGeneralSettings}
               onOpenSavedMessages={savedMessagesEnabled ? openSavedMessages : undefined}
+              onOpenFriendVerification={friendsEnabled ? openFriendVerification : undefined}
               onOpenStickers={openStickerSettings}
             />
           )}
