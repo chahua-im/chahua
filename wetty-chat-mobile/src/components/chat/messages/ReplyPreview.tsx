@@ -1,5 +1,6 @@
 import { useSelector } from 'react-redux';
 import { formatMessagePreview, type PreviewMessage, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { useIsDarkMode } from '@/hooks/platformHooks';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { colorForUser } from '@/utils/userColor';
 import styles from './ChatBubble.module.scss';
@@ -18,7 +19,8 @@ interface ReplyPreviewProps {
 
 export function ReplyPreview({ replyTo, isSent, interactive, onReplyTap }: ReplyPreviewProps) {
   const locale = useSelector(selectEffectiveLocale);
-  const color = isSent ? undefined : colorForUser(replyTo.senderName);
+  const isDarkMode = useIsDarkMode();
+  const color = isSent ? undefined : colorForUser(replyTo.senderName, isDarkMode);
 
   return (
     <div

@@ -393,7 +393,10 @@ export function ChatBubbleBase({
     >
       {showName && (
         <div className={styles.sender}>
-          <span className={styles.senderName} style={isSent ? undefined : { color: colorForUser(senderName) }}>
+          <span
+            className={styles.senderName}
+            style={isSent ? undefined : { color: colorForUser(senderName, isDarkMode) }}
+          >
             {senderName}
           </span>
           {senderGroup && (
