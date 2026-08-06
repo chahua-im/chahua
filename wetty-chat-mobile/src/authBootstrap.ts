@@ -39,6 +39,22 @@ async function clearAfterUnauthorized(): Promise<AuthBootstrapResult> {
   return { status: 'signed-out' };
 }
 
+/** Load a stored JWT and prove it still works via /auth/refresh. */
+async function refreshStoredSession(): Promise<AuthBootstrapResult> {
+  try {
+    const token = await loadStoredJwtToken();
+    if (!token) return clearAfterUnauthorized();
+    const refreshedToken = await refreshSessionToken(token);
+    await commitJwtToken(refreshedToken);
+    return { status: 'ready' };
+  } catch (error) {
+    if (error instanceof AuthBootstrapError && error.category === 'unauthorized') {
+      return clearAfterUnauthorized();
+    }
+    return errorResult(error);
+  }
+}
+
 async function runBootstrap(): Promise<AuthBootstrapResult> {
   const queryToken = captureJwtTokenFromUrl(new URL(window.location.href));
   if (queryToken) {
@@ -61,23 +77,25 @@ async function runBootstrap(): Promise<AuthBootstrapResult> {
       const token = await issueDevelopmentSession(getCurrentUserId(), clientId);
       await commitJwtToken(token);
       return { status: 'ready' };
-    } catch (error) {
-      return errorResult(error, true);
+    } catch (devError) {
+      // Dev-session is preferred (picks the sessionStorage UID), but if the
+      // endpoint is down we can still continue with a previously issued JWT.
+      try {
+        const token = await loadStoredJwtToken();
+        if (!token) return errorResult(devError, true);
+        const refreshedToken = await refreshSessionToken(token);
+        await commitJwtToken(refreshedToken);
+        return { status: 'ready' };
+      } catch (error) {
+        if (error instanceof AuthBootstrapError && error.category === 'unauthorized') {
+          return clearAfterUnauthorized();
+        }
+        return errorResult(devError, true);
+      }
     }
   }
 
-  try {
-    const token = await loadStoredJwtToken();
-    if (!token) return clearAfterUnauthorized();
-    const refreshedToken = await refreshSessionToken(token);
-    await commitJwtToken(refreshedToken);
-    return { status: 'ready' };
-  } catch (error) {
-    if (error instanceof AuthBootstrapError && error.category === 'unauthorized') {
-      return clearAfterUnauthorized();
-    }
-    return errorResult(error);
-  }
+  return refreshStoredSession();
 }
 
 export function bootstrapAuth(): Promise<AuthBootstrapResult> {
