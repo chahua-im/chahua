@@ -2,6 +2,7 @@ import { forwardRef } from 'react';
 import { IonIcon } from '@ionic/react';
 import { personCircle } from 'ionicons/icons';
 import styles from './UserAvatar.module.scss';
+import { useIsDarkMode } from '@/hooks/platformHooks';
 import { colorForUser } from '@/utils/userColor';
 
 interface UserAvatarProps {
@@ -27,6 +28,7 @@ export const UserAvatar = forwardRef<HTMLDivElement, UserAvatarProps>(function U
   { name, avatarUrl, size = 36, fallback = 'initials', className, style, onClick },
   ref,
 ) {
+  const isDarkMode = useIsDarkMode();
   const base: React.CSSProperties = {
     width: size,
     height: size,
@@ -64,7 +66,7 @@ export const UserAvatar = forwardRef<HTMLDivElement, UserAvatarProps>(function U
       className={`${classes} ${styles.fallback}`}
       style={{
         ...base,
-        backgroundColor: colorForUser(name),
+        backgroundColor: colorForUser(name, isDarkMode),
         fontSize: Math.round(size * 0.36),
       }}
       onClick={onClick}

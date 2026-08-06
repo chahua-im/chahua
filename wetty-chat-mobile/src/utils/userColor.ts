@@ -1,27 +1,12 @@
 /**
  * User display color configuration.
  *
- * Resolution order (highest first):
- *   1. USER_COLOR_OVERRIDES — explicit username → color mapping
- *   2. USER_COLOR_PALETTE   — fixed palette, indexed by name hash
- *
- * To pin a specific user's color: add an entry to USER_COLOR_OVERRIDES
- *   'username': '#rrggbb'
- * This color applies regardless of light/dark mode.
- *
- * To adjust the overall color set: edit USER_COLOR_PALETTE.
- * Array length is arbitrary; the hash is taken modulo its length.
+ * To adjust the overall color sets: edit USER_COLOR_PALETTE_LIGHT / _DARK.
+ * Array lengths may differ; the hash is taken modulo the active palette length.
  */
 
-/** Manual override map: username (case-sensitive) → color. Hits skip the hash. */
-const USER_COLOR_OVERRIDES: Record<string, string> = {
-  // Examples:
-  // 'admin': '#ff0000',
-  // 'Alice': '#3cb4f0',
-};
-
-/** Color palette for users not in the override map. Indexed by name hash. */
-const USER_COLOR_PALETTE: string[] = [
+/** Light-mode palette for users not in the override map. Indexed by name hash. */
+const USER_COLOR_PALETTE_LIGHT: string[] = [
   '#CA5650', // Red
   '#D87B29', // Orange
   '#9B66DC', // Violet
@@ -29,6 +14,17 @@ const USER_COLOR_PALETTE: string[] = [
   '#379EB8', // Cyan
   '#4E92CC', // Blue
   '#CF5C95', // Pink
+];
+
+/** Dark-mode palette for users not in the override map. Indexed by name hash. */
+const USER_COLOR_PALETTE_DARK: string[] = [
+  '#D45246', // Red
+  '#F68136', // Orange
+  '#6C61DF', // Violet
+  '#46BA43', // Green
+  '#5CAFFA', // Cyan
+  '#408ACF', // Blue
+  '#D95574', // Pink
 ];
 
 function hashName(name: string): number {
@@ -44,10 +40,9 @@ function hashName(name: string): number {
  * Resolve a user's display color.
  *
  * @param name username
+ * @param dark select the dark-mode palette when true (pass `useIsDarkMode()` from React)
  */
-export function colorForUser(name: string): string {
-  const override = USER_COLOR_OVERRIDES[name];
-  if (override) return override;
-
-  return USER_COLOR_PALETTE[hashName(name) % USER_COLOR_PALETTE.length];
+export function colorForUser(name: string, dark: boolean): string {
+  const palette = dark ? USER_COLOR_PALETTE_DARK : USER_COLOR_PALETTE_LIGHT;
+  return palette[hashName(name) % palette.length];
 }
