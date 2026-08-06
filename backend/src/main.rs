@@ -93,19 +93,21 @@ async fn main() {
 
     let metrics = Arc::new(metrics::Metrics::new());
     if matches!(command, Some(BackendCommand::MessageSearchReindex)) {
-        if let Err(err) = run_message_search_reindex(pool.clone(), metrics.clone()).await {
+        if let Err(err) =
+            run_message_search_reindex(pool.clone(), metrics.message_search.clone()).await
+        {
             tracing::error!(?err, "message search reindex failed");
             std::process::exit(1);
         }
         return;
     }
 
-    let message_search = build_message_search_service(metrics.clone())
+    let message_search = build_message_search_service(metrics.message_search.clone())
         .await
         .expect("Failed to initialize message search service");
 
     let ws_registry = Arc::new(services::ws_registry::ConnectionRegistry::new(
-        metrics.clone(),
+        metrics.ws.clone(),
     ));
     let unread_service = Arc::new(services::unread::UnreadService::new());
 
@@ -116,25 +118,25 @@ async fn main() {
         media: build_media_store(&config).await,
         avatars: Arc::new(services::avatars::AvatarService::new(
             config.avatars.clone(),
-            metrics.clone(),
+            metrics.avatars.clone(),
         )),
         authz_service: services::authz::AuthorizationService::start(),
         ws_registry: ws_registry.clone(),
         push_service: services::push::PushService::start(
             pool.clone(),
             ws_registry.clone(),
-            metrics.clone(),
+            metrics.push.clone(),
             unread_service.clone(),
         ),
         unread_service: unread_service.clone(),
         client_tracking: services::client_tracking::ClientTrackingService::start(
             pool.clone(),
-            metrics.clone(),
+            metrics.client_tracking.clone(),
         ),
         background_service: services::background::BackgroundService::start(
             pool.clone(),
             ws_registry.clone(),
-            metrics.clone(),
+            metrics.background.clone(),
             message_search.clone(),
             unread_service.clone(),
         ),
@@ -181,6 +183,7 @@ async fn main() {
         );
 
     let metrics_registry = state.metrics.clone();
+    let http_metrics = state.metrics.http.clone();
     let client_tracking_state = state.clone();
 
     let (api_router, api_openapi) = handlers::api_router().split_for_parts();
@@ -203,7 +206,7 @@ async fn main() {
             services::client_tracking::track_client_activity,
         ))
         .layer(middleware::from_fn_with_state(
-            metrics_registry.clone(),
+            http_metrics,
             metrics::track_http_metrics,
         ))
         .with_state(state);
@@ -310,7 +313,7 @@ fn read_command() -> Option<BackendCommand> {
 }
 
 async fn build_message_search_service(
-    metrics: Arc<metrics::Metrics>,
+    metrics: Arc<services::message_search::MessageSearchMetrics>,
 ) -> Result<
     Option<Arc<services::message_search::MessageSearchService>>,
     services::message_search::MessageSearchError,
@@ -335,7 +338,7 @@ async fn build_message_search_service(
 
 async fn run_message_search_reindex(
     pool: DbPool,
-    metrics: Arc<metrics::Metrics>,
+    metrics: Arc<services::message_search::MessageSearchMetrics>,
 ) -> Result<(), services::message_search::MessageSearchError> {
     let config = services::message_search::MessageSearchConfig::from_required_env()?;
     let index_uid = config.index_uid.clone();

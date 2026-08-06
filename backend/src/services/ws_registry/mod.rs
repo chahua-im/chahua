@@ -1,8 +1,10 @@
 //! WebSocket connection registry: maps user id to active connections, tracks app presence,
 //! supports broadcast and stale-connection pruning.
 
+mod metrics;
+pub(crate) use metrics::WsMetrics;
+
 use crate::dto::ws::{PresenceUpdatePayload, ServerWsMessage};
-use crate::metrics::Metrics;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,11 +74,11 @@ pub(crate) fn now_secs() -> u64 {
 pub struct ConnectionRegistry {
     /// uid -> list of connection entries (multiple tabs/devices per user).
     inner: dashmap::DashMap<i32, Vec<Arc<ConnectionEntry>>>,
-    metrics: Arc<Metrics>,
+    metrics: Arc<WsMetrics>,
 }
 
 impl ConnectionRegistry {
-    pub fn new(metrics: Arc<Metrics>) -> Self {
+    pub fn new(metrics: Arc<WsMetrics>) -> Self {
         Self {
             inner: dashmap::DashMap::new(),
             metrics,
@@ -100,7 +102,7 @@ impl ConnectionRegistry {
             last_state_at: AtomicU64::new(now),
         });
         self.inner.entry(uid).or_default().push(entry.clone());
-        self.metrics.record_ws_connection_open();
+        self.metrics.record_connection_open();
         self.update_metrics();
         self.broadcast_presence_to_user(uid);
         (entry, rx)
@@ -133,9 +135,9 @@ impl ConnectionRegistry {
                             conn_id = entry.conn_id,
                             "ws broadcast try_send full, message dropped"
                         );
-                        self.metrics.record_ws_message_dropped(msg_type);
+                        self.metrics.record_message_dropped(msg_type);
                     } else {
-                        self.metrics.record_ws_message_pushed(msg_type);
+                        self.metrics.record_message_pushed(msg_type);
                     }
                 }
             }
@@ -218,15 +220,9 @@ impl ConnectionRegistry {
             }
         }
 
-        self.metrics.set_ws_connected_users(self.inner.len());
+        self.metrics.set_connected_users(self.inner.len());
         self.metrics
-            .set_ws_connection_states(active_connections, inactive_connections);
-    }
-}
-
-impl Default for ConnectionRegistry {
-    fn default() -> Self {
-        Self::new(Arc::new(Metrics::new()))
+            .set_connection_states(active_connections, inactive_connections);
     }
 }
 
@@ -235,7 +231,7 @@ mod tests {
     use super::*;
 
     fn registry() -> ConnectionRegistry {
-        ConnectionRegistry::new(Arc::new(Metrics::new()))
+        ConnectionRegistry::new(Arc::new(WsMetrics::new(&prometheus::Registry::new())))
     }
 
     #[test]

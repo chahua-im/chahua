@@ -1,3 +1,6 @@
+mod metrics;
+pub(crate) use metrics::BackgroundMetrics;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,7 +14,6 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::dto::ws::{BulkDeletedPayload, ServerWsMessage};
-use crate::metrics::Metrics;
 use crate::schema::{attachments, group_membership, messages};
 use crate::services::message_search::MessageSearchService;
 use crate::services::unread::UnreadService;
@@ -63,7 +65,7 @@ impl BackgroundService {
     pub fn start(
         db: Pool<ConnectionManager<PgConnection>>,
         ws_registry: Arc<ConnectionRegistry>,
-        metrics: Arc<Metrics>,
+        metrics: Arc<BackgroundMetrics>,
         message_search: Option<Arc<MessageSearchService>>,
         unread_service: Arc<UnreadService>,
     ) -> Arc<Self> {
@@ -95,7 +97,7 @@ async fn supervise_worker(
     mut rx: mpsc::Receiver<BackgroundJob>,
     db: Pool<ConnectionManager<PgConnection>>,
     ws_registry: Arc<ConnectionRegistry>,
-    metrics: Arc<Metrics>,
+    metrics: Arc<BackgroundMetrics>,
     message_search: Option<Arc<MessageSearchService>>,
     unread_service: Arc<UnreadService>,
 ) {
@@ -134,7 +136,7 @@ async fn run_worker(
     rx: &mut mpsc::Receiver<BackgroundJob>,
     db: &Pool<ConnectionManager<PgConnection>>,
     ws_registry: &Arc<ConnectionRegistry>,
-    metrics: &Arc<Metrics>,
+    metrics: &Arc<BackgroundMetrics>,
     message_search: &Option<Arc<MessageSearchService>>,
     unread_service: &Arc<UnreadService>,
 ) {
@@ -161,10 +163,10 @@ async fn run_worker(
         let duration = started_at.elapsed().as_secs_f64();
         match &result {
             Ok(()) => {
-                metrics.record_background_job(job_kind, "success", duration);
+                metrics.record_job(job_kind, "success", duration);
             }
             Err(e) => {
-                metrics.record_background_job(job_kind, "failure", duration);
+                metrics.record_job(job_kind, "failure", duration);
                 error!(job_kind, "Background job failed: {}", e);
             }
         }

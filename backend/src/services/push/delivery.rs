@@ -134,7 +134,7 @@ impl PushService {
             Some(endpoint) => endpoint.clone(),
             None => {
                 self.metrics
-                    .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
+                    .record_notification(PushProvider::WebPush.as_metrics_label(), false);
                 return Err(DeliveryFailure::from_details(
                     sub,
                     DeliveryFailureDetails {
@@ -149,7 +149,7 @@ impl PushService {
             Ok(data) => data,
             Err(e) => {
                 self.metrics
-                    .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
+                    .record_notification(PushProvider::WebPush.as_metrics_label(), false);
                 warn!(
                     "web push subscription {} has invalid provider data: {:?}",
                     sub.id, e
@@ -177,7 +177,7 @@ impl PushService {
                         e
                     );
                     self.metrics
-                        .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
+                        .record_notification(PushProvider::WebPush.as_metrics_label(), false);
                     return Err(DeliveryFailure::from_details(
                         sub,
                         DeliveryFailureDetails {
@@ -196,7 +196,7 @@ impl PushService {
             Err(e) => {
                 error!("Failed to build VAPID signature: {:?}", e);
                 self.metrics
-                    .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
+                    .record_notification(PushProvider::WebPush.as_metrics_label(), false);
                 return Err(DeliveryFailure::from_details(
                     sub,
                     DeliveryFailureDetails {
@@ -216,12 +216,12 @@ impl PushService {
             Ok(message) => match self.client.send(message).await {
                 Ok(_) => {
                     self.metrics
-                        .record_push_notification(PushProvider::WebPush.as_metrics_label(), true);
+                        .record_notification(PushProvider::WebPush.as_metrics_label(), true);
                     Ok(())
                 }
                 Err(e) => {
                     self.metrics
-                        .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
+                        .record_notification(PushProvider::WebPush.as_metrics_label(), false);
                     let details = classify_web_push_error(&e);
                     if details.action == DeliveryFailureAction::PruneImmediate {
                         warn!(
@@ -249,7 +249,7 @@ impl PushService {
             Err(e) => {
                 error!("Failed to build web push message: {:?}", e);
                 self.metrics
-                    .record_push_notification(PushProvider::WebPush.as_metrics_label(), false);
+                    .record_notification(PushProvider::WebPush.as_metrics_label(), false);
                 Err(DeliveryFailure::from_details(
                     sub,
                     DeliveryFailureDetails {
@@ -275,7 +275,7 @@ impl PushService {
                     sub.id
                 );
                 self.metrics
-                    .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
+                    .record_notification(PushProvider::Apns.as_metrics_label(), false);
                 return Err(DeliveryFailure::from_details(
                     sub,
                     DeliveryFailureDetails {
@@ -291,7 +291,7 @@ impl PushService {
             None => {
                 warn!("APNs subscription {} missing device token", sub.id);
                 self.metrics
-                    .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
+                    .record_notification(PushProvider::Apns.as_metrics_label(), false);
                 return Err(DeliveryFailure::from_details(
                     sub,
                     DeliveryFailureDetails {
@@ -308,7 +308,7 @@ impl PushService {
                 sub.id, e
             );
             self.metrics
-                .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
+                .record_notification(PushProvider::Apns.as_metrics_label(), false);
             return Err(DeliveryFailure::from_details(
                 sub,
                 DeliveryFailureDetails {
@@ -323,7 +323,7 @@ impl PushService {
             None => {
                 warn!("APNs subscription {} missing environment", sub.id);
                 self.metrics
-                    .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
+                    .record_notification(PushProvider::Apns.as_metrics_label(), false);
                 return Err(DeliveryFailure::from_details(
                     sub,
                     DeliveryFailureDetails {
@@ -338,7 +338,7 @@ impl PushService {
         match sender.send(device_token, &environment, notification).await {
             Ok(()) => {
                 self.metrics
-                    .record_push_notification(PushProvider::Apns.as_metrics_label(), true);
+                    .record_notification(PushProvider::Apns.as_metrics_label(), true);
                 Ok(())
             }
             Err(details) if details.action == DeliveryFailureAction::PruneImmediate => {
@@ -351,7 +351,7 @@ impl PushService {
                     "stale APNs subscription"
                 );
                 self.metrics
-                    .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
+                    .record_notification(PushProvider::Apns.as_metrics_label(), false);
                 Err(DeliveryFailure::from_details(sub, details))
             }
             Err(details) => {
@@ -365,7 +365,7 @@ impl PushService {
                     "failed to send APNs notification"
                 );
                 self.metrics
-                    .record_push_notification(PushProvider::Apns.as_metrics_label(), false);
+                    .record_notification(PushProvider::Apns.as_metrics_label(), false);
                 Err(DeliveryFailure::from_details(sub, details))
             }
         }

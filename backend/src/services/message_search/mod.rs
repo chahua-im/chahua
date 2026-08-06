@@ -15,9 +15,10 @@ use meilisearch_sdk::tasks::Task;
 use serde::{Deserialize, Serialize};
 
 use crate::dto::messages::MessageResponse;
-use crate::metrics::Metrics;
 use crate::models::{Message, MessageType};
 use crate::schema::messages;
+mod metrics;
+pub(crate) use metrics::MessageSearchMetrics;
 
 pub const DEFAULT_INDEX_UID: &str = "messages_v1";
 pub const REINDEX_BATCH_SIZE: i64 = 500;
@@ -109,7 +110,7 @@ impl std::error::Error for MessageSearchConfigError {}
 pub struct MessageSearchService {
     client: Client,
     index_uid: String,
-    metrics: Arc<Metrics>,
+    metrics: Arc<MessageSearchMetrics>,
     setup_ready: Arc<AtomicBool>,
 }
 
@@ -238,7 +239,7 @@ pub enum SearchQueryError {
 impl MessageSearchService {
     pub fn new(
         config: MessageSearchConfig,
-        metrics: Arc<Metrics>,
+        metrics: Arc<MessageSearchMetrics>,
     ) -> Result<Self, MessageSearchError> {
         let client = Client::new(config.meili_url, Some(config.meili_master_key))?;
         Ok(Self {
@@ -405,7 +406,7 @@ impl MessageSearchService {
             Ok(indexed) => ("success", *indexed),
             Err(_) => ("failure", 0),
         };
-        self.metrics.record_message_search_reindex(
+        self.metrics.record_reindex(
             result_label,
             started_at.elapsed().as_secs_f64(),
             document_count,
@@ -548,32 +549,24 @@ impl MessageSearchService {
         let duration_seconds = started_at.elapsed().as_secs_f64();
         match result {
             Ok(()) => {
-                self.metrics
-                    .record_message_search_index_operation(operation, "success");
-                self.metrics.record_message_search_index_operation_duration(
+                self.metrics.record_index_operation(operation, "success");
+                self.metrics.record_index_operation_duration(
                     operation,
                     "success",
                     duration_seconds,
                 );
-                self.metrics.record_message_search_index_documents(
-                    operation,
-                    "success",
-                    document_count,
-                );
+                self.metrics
+                    .record_index_documents(operation, "success", document_count);
             }
             Err(err) => {
-                self.metrics
-                    .record_message_search_index_operation(operation, "failure");
-                self.metrics.record_message_search_index_operation_duration(
+                self.metrics.record_index_operation(operation, "failure");
+                self.metrics.record_index_operation_duration(
                     operation,
                     "failure",
                     duration_seconds,
                 );
-                self.metrics.record_message_search_index_documents(
-                    operation,
-                    "failure",
-                    document_count,
-                );
+                self.metrics
+                    .record_index_documents(operation, "failure", document_count);
                 tracing::warn!(operation, ?err, "message search indexing operation failed");
             }
         }
@@ -822,13 +815,12 @@ mod tests {
 
     use std::sync::Arc;
 
-    use crate::metrics::Metrics;
     use crate::models::{Message, MessageType, TranscodeStatus};
 
     use super::{
         filter_authoritative_hits_with_counts, normalize_search_text, project_message_document,
-        validate_search_query, MessageSearchConfig, MessageSearchService, SearchHitCandidate,
-        RANKING_RULES, SETUP_TASK_WAIT_TIMEOUT, TASK_WAIT_TIMEOUT,
+        validate_search_query, MessageSearchConfig, MessageSearchMetrics, MessageSearchService,
+        SearchHitCandidate, RANKING_RULES, SETUP_TASK_WAIT_TIMEOUT, TASK_WAIT_TIMEOUT,
     };
 
     fn message(id: i64, text: Option<&str>) -> Message {
@@ -892,7 +884,7 @@ mod tests {
                 meili_master_key: "master-key".to_string(),
                 index_uid: "messages_test".to_string(),
             },
-            Arc::new(Metrics::new()),
+            Arc::new(MessageSearchMetrics::new(&prometheus::Registry::new())),
         )
         .unwrap();
 

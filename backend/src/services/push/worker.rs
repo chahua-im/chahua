@@ -79,7 +79,7 @@ async fn run_push_worker(
                 error!("Push worker: failed to get DB connection: {:?}", e);
                 service
                     .metrics
-                    .record_push_job("failure", started_at.elapsed().as_secs_f64());
+                    .record_job("failure", started_at.elapsed().as_secs_f64());
                 continue;
             }
         };
@@ -87,7 +87,7 @@ async fn run_push_worker(
         match process_push_job(service, conn, ws_registry, &job).await {
             Ok(()) => service
                 .metrics
-                .record_push_job("success", started_at.elapsed().as_secs_f64()),
+                .record_job("success", started_at.elapsed().as_secs_f64()),
             Err(e) => {
                 error!(
                     "Push worker: job failed for message_id={}: {}",
@@ -95,7 +95,7 @@ async fn run_push_worker(
                 );
                 service
                     .metrics
-                    .record_push_job("failure", started_at.elapsed().as_secs_f64());
+                    .record_job("failure", started_at.elapsed().as_secs_f64());
             }
         }
     }
@@ -263,7 +263,7 @@ async fn process_push_job(
             match should_send_push(&context, now) {
                 PushDecision::Send | PushDecision::SendOneOffMention => Some(candidate.uid),
                 PushDecision::Skip(PushSkipReason::ActivePresence) => {
-                    service.metrics.record_push_suppressed();
+                    service.metrics.record_suppressed();
                     None
                 }
                 PushDecision::Skip(_) => None,
@@ -379,7 +379,7 @@ fn apply_delivery_results(
                 failure,
                 next_failure_count,
             } => {
-                service.metrics.record_push_delivery_failure(
+                service.metrics.record_delivery_failure(
                     failure.provider.as_metrics_label(),
                     failure.class.as_metrics_label(),
                 );
@@ -396,7 +396,7 @@ fn apply_delivery_results(
                             action = "prune",
                             "pruning push subscription after immediate delivery failure"
                         );
-                        service.metrics.record_push_subscription_prune(
+                        service.metrics.record_subscription_prune(
                             failure.provider.as_metrics_label(),
                             failure.reason.as_str(),
                         );
@@ -416,7 +416,7 @@ fn apply_delivery_results(
                             action = "prune",
                             "pruning push subscription after repeated delivery failures"
                         );
-                        service.metrics.record_push_subscription_prune(
+                        service.metrics.record_subscription_prune(
                             failure.provider.as_metrics_label(),
                             failure.reason.as_str(),
                         );

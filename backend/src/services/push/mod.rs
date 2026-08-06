@@ -8,13 +8,14 @@ use tracing::{error, warn};
 use web_push::HyperWebPushClient;
 
 mod delivery;
+mod metrics;
 mod payload;
 mod policy;
 mod worker;
 
+pub(crate) use metrics::PushMetrics;
 pub use payload::{PushMessagePreview, PushMessagePreviewSticker};
 
-use crate::metrics::Metrics;
 use crate::models::PushProvider;
 use crate::services::unread::UnreadService;
 use crate::services::ws_registry::ConnectionRegistry;
@@ -42,7 +43,7 @@ pub struct PushService {
     pub vapid_private_key: String,
     pub vapid_subject: String,
     apns_sender: Option<ApnsSender>,
-    metrics: Arc<Metrics>,
+    metrics: Arc<PushMetrics>,
     unread_service: Arc<UnreadService>,
     job_tx: mpsc::Sender<PushJob>,
 }
@@ -55,7 +56,7 @@ impl PushService {
     pub fn start(
         db: Pool<ConnectionManager<PgConnection>>,
         ws_registry: Arc<ConnectionRegistry>,
-        metrics: Arc<Metrics>,
+        metrics: Arc<PushMetrics>,
         unread_service: Arc<UnreadService>,
     ) -> Arc<Self> {
         let public_key = std::env::var("VAPID_PUBLIC_KEY")
@@ -603,7 +604,7 @@ mod tests {
             vapid_private_key: "private".to_string(),
             vapid_subject: "mailto:test@example.com".to_string(),
             apns_sender: None,
-            metrics: Arc::new(Metrics::new()),
+            metrics: Arc::new(PushMetrics::new(&prometheus::Registry::new())),
             unread_service: Arc::new(UnreadService::new()),
             job_tx: mpsc::channel(1).0,
         };
