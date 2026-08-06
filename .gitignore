@@ -26,3 +26,5 @@ superpowers
 *.log
 *.err
 .repo-ssh
+
+/.omp/
