@@ -184,7 +184,8 @@ async fn handle_socket(
     registry.remove_connection(uid, conn_id);
     state
         .metrics
-        .record_ws_connection_duration(started_at.elapsed().as_secs_f64());
+        .ws
+        .record_connection_duration(started_at.elapsed().as_secs_f64());
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

@@ -1,5 +1,6 @@
 mod chat_attachments;
 mod messages;
+mod metrics;
 mod reactions;
 mod saved_messages;
 
@@ -10,6 +11,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::PgConnection;
+pub(crate) use metrics::ChatMetrics;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
@@ -730,7 +732,7 @@ pub(crate) async fn send_prepared_message(
         .ok_or(AppError::Internal("Failed to build message response"))?;
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
     };
-    state.metrics.record_message(prepared.chat_id);
+    state.metrics.chat.record_message(prepared.chat_id);
 
     if prepared.publish_immediately && prepared.reply_root_id.is_none() {
         use crate::schema::groups::dsl as g_dsl;

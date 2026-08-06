@@ -1,3 +1,6 @@
+mod metrics;
+pub(crate) use metrics::AudioTranscodeMetrics;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -311,7 +314,8 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
     if let Some(attachment) = &current_attachment {
         state
             .metrics
-            .record_audio_transcode_source(&attachment.kind);
+            .audio_transcode
+            .record_source(&attachment.kind);
     }
     let mut metric_guard = AudioTranscodeMetricGuard::new(state.clone(), started_at);
 
@@ -763,7 +767,8 @@ impl AudioTranscodeMetricGuard {
         if let Some(result) = result {
             self.state
                 .metrics
-                .record_audio_transcode_job(result, self.started_at.elapsed().as_secs_f64());
+                .audio_transcode
+                .record_job(result, self.started_at.elapsed().as_secs_f64());
         }
     }
 }
@@ -773,7 +778,8 @@ impl Drop for AudioTranscodeMetricGuard {
         if !self.finished {
             self.state
                 .metrics
-                .record_audio_transcode_job("failure", self.started_at.elapsed().as_secs_f64());
+                .audio_transcode
+                .record_job("failure", self.started_at.elapsed().as_secs_f64());
         }
     }
 }

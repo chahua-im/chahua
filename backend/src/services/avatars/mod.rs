@@ -4,21 +4,26 @@
 //! at a public URL. We stat each file to build a cache-busting URL from its
 //! mtime, falling back to the shared placeholder when a user has no avatar.
 
+mod metrics;
+pub(crate) use metrics::AvatarMetrics;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, UNIX_EPOCH};
 
 use crate::config::DiscuzAvatarConfig;
-use crate::metrics::Metrics;
 
 pub(crate) struct AvatarService {
     /// `None` disables avatar resolution entirely; every lookup returns empty.
     config: Option<Arc<DiscuzAvatarConfig>>,
-    metrics: Arc<Metrics>,
+    metrics: Arc<AvatarMetrics>,
 }
 
 impl AvatarService {
-    pub(crate) fn new(config: Option<Arc<DiscuzAvatarConfig>>, metrics: Arc<Metrics>) -> Self {
+    pub(crate) fn new(
+        config: Option<Arc<DiscuzAvatarConfig>>,
+        metrics: Arc<AvatarMetrics>,
+    ) -> Self {
         Self { config, metrics }
     }
 
@@ -45,7 +50,7 @@ impl AvatarService {
             fs_duration_seconds += fs_start.elapsed().as_secs_f64();
             map.insert(uid, Some(entry));
         }
-        self.metrics.record_discuz_avatar_lookup(
+        self.metrics.record_lookup(
             uids.len(),
             start.elapsed().as_secs_f64(),
             fs_duration_seconds,

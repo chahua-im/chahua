@@ -1,3 +1,6 @@
+mod metrics;
+pub(crate) use metrics::{ActivityTodaySnapshot, ClientTrackingMetrics};
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -14,7 +17,6 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use tracing::{error, info, warn};
 
-use crate::metrics::{ActivityTodaySnapshot, Metrics};
 use crate::models::{
     ActivityDailyMetric, ClientRecord, NewActivityDailyMetric, NewClientRecord, NewUserExtra,
     UserExtra,
@@ -72,12 +74,15 @@ impl DailyMetricDelta {
 
 pub struct ClientTrackingService {
     db: Pool<ConnectionManager<PgConnection>>,
-    metrics: Arc<Metrics>,
+    metrics: Arc<ClientTrackingMetrics>,
     recent_writes: DashMap<String, CachedActivity>,
 }
 
 impl ClientTrackingService {
-    pub fn start(db: Pool<ConnectionManager<PgConnection>>, metrics: Arc<Metrics>) -> Arc<Self> {
+    pub fn start(
+        db: Pool<ConnectionManager<PgConnection>>,
+        metrics: Arc<ClientTrackingMetrics>,
+    ) -> Arc<Self> {
         let service = Arc::new(Self {
             db,
             metrics,
@@ -116,8 +121,7 @@ impl ClientTrackingService {
     ) -> Result<(), (StatusCode, &'static str)> {
         if let Some(entry) = self.recent_writes.get(client_id) {
             if entry.uid == uid && entry.last_written_at.elapsed() < ACTIVITY_WRITE_THROTTLE {
-                self.metrics
-                    .record_client_activity_write_skipped("throttled");
+                self.metrics.record_activity_write_skipped("throttled");
                 return Ok(());
             }
         }
@@ -126,7 +130,7 @@ impl ClientTrackingService {
         let today = now.date();
         let conn = &mut self.db.get().map_err(|e| {
             error!("client tracking: failed to get DB connection: {:?}", e);
-            self.metrics.record_client_activity_write("error");
+            self.metrics.record_activity_write("error");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Database connection failed",
@@ -228,15 +232,15 @@ impl ClientTrackingService {
         })
         .map_err(|e| {
             error!("client tracking: failed to record activity: {:?}", e);
-            self.metrics.record_client_activity_write("error");
-            self.metrics.record_activity_daily_rollup_update("error");
+            self.metrics.record_activity_write("error");
+            self.metrics.record_daily_rollup_update("error");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to record client activity",
             )
         })?;
 
-        self.metrics.record_client_activity_write("success");
+        self.metrics.record_activity_write("success");
         self.recent_writes.insert(
             client_id.to_string(),
             CachedActivity {
@@ -315,7 +319,7 @@ impl ClientTrackingService {
 
         if deleted_clients > 0 {
             self.metrics
-                .record_client_tracking_purge("stale_clients", deleted_clients as u64);
+                .record_purge("stale_clients", deleted_clients as u64);
         }
 
         if deleted_subscriptions > 0 || deleted_clients > 0 {
@@ -424,9 +428,9 @@ impl ClientTrackingService {
             }
             .as_activity_today_snapshot(),
         );
-        self.metrics.record_activity_daily_rollup_update("success");
+        self.metrics.record_daily_rollup_update("success");
         if delta.client_rebinds > 0 {
-            self.metrics.record_client_rebind();
+            self.metrics.record_rebind();
         }
         Ok(())
     }
@@ -464,6 +468,7 @@ pub async fn track_client_activity(
         let version = app_version.as_deref().unwrap_or("unknown");
         state
             .metrics
+            .client_tracking
             .record_app_version_request(version, resolved_client_id.as_deref());
     }
 
