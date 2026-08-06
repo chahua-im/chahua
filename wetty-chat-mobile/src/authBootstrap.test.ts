@@ -65,6 +65,26 @@ describe('auth bootstrap coordinator', () => {
     expect(mocks.load).not.toHaveBeenCalled();
   });
 
+  it('falls back to a valid stored JWT when development session issuance fails', async () => {
+    vi.stubEnv('DEV', true);
+    mocks.issue.mockRejectedValueOnce(new AuthBootstrapError('transient'));
+    await expect(bootstrapAuth()).resolves.toEqual({ status: 'ready' });
+    expect(mocks.load).toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalledWith('stored-token');
+    expect(mocks.commit).toHaveBeenCalledWith('refreshed-token');
+  });
+
+  it('reports development-session when issuance fails and no stored JWT exists', async () => {
+    vi.stubEnv('DEV', true);
+    mocks.issue.mockRejectedValueOnce(new AuthBootstrapError('transient'));
+    mocks.load.mockResolvedValueOnce('');
+    await expect(bootstrapAuth()).resolves.toEqual({
+      status: 'error',
+      category: 'development-session',
+    });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
   it('refreshes stored credentials before reporting ready', async () => {
     await expect(bootstrapAuth()).resolves.toEqual({ status: 'ready' });
     expect(mocks.refresh).toHaveBeenCalledWith('stored-token');

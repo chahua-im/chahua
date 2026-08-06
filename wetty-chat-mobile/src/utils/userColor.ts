@@ -22,15 +22,13 @@ const USER_COLOR_OVERRIDES: Record<string, string> = {
 
 /** Color palette for users not in the override map. Indexed by name hash. */
 const USER_COLOR_PALETTE: string[] = [
-  '#D95574',
-  '#17becf',
-  '#D45246',
-  '#5CAFFA',
-  '#F68136',
-  '#408ACF',
-  '#46BA43',
-  '#6C61DF',
-  '#4db6ac',
+  '#CA5650', // Red
+  '#D87B29', // Orange
+  '#9B66DC', // Violet
+  '#50B232', // Green
+  '#379EB8', // Cyan
+  '#4E92CC', // Blue
+  '#CF5C95', // Pink
 ];
 
 function hashName(name: string): number {
