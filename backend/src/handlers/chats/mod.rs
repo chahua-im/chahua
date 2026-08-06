@@ -32,7 +32,7 @@ use crate::{
     services::{
         chat,
         push::{PushJob, PushMessagePreview, PushMessagePreviewSticker},
-        user::{lookup_user_profiles, UserProfile},
+        user_provider::{UserProfile, UserProvider},
     },
     utils::{auth::CurrentUid, ids, pagination::validate_limit},
 };
@@ -185,16 +185,24 @@ pub struct CreateMessageBody {
 // Shared helper functions
 // ---------------------------------------------------------------------------
 
-fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option<String>> {
-    lookup_user_profiles(conn, &[uid])
-        .map(|mut profiles| profiles.remove(&uid).and_then(|profile| profile.username))
+async fn load_username_by_uid(
+    users: &dyn UserProvider,
+    uid: i32,
+) -> Result<Option<String>, AppError> {
+    Ok(users
+        .lookup_profiles(&[uid])
+        .await?
+        .remove(&uid)
+        .and_then(|profile| profile.username))
 }
 
-fn load_usernames_by_uids(
-    conn: &mut PgConnection,
+async fn load_usernames_by_uids(
+    users: &dyn UserProvider,
     uids: &[i32],
 ) -> std::collections::HashMap<i32, Option<String>> {
-    lookup_user_profiles(conn, uids)
+    users
+        .lookup_profiles(uids)
+        .await
         .unwrap_or_default()
         .into_iter()
         .map(|(uid, profile)| (uid, profile.username))
@@ -589,8 +597,9 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
     }
 }
 
-pub(crate) fn build_message_side_effects(
+pub(crate) async fn build_message_side_effects(
     conn: &mut PgConnection,
+    users: &dyn UserProvider,
     response: &MessageResponse,
     sender_uid: i32,
     chat_id: i64,
@@ -608,8 +617,9 @@ pub(crate) fn build_message_side_effects(
 
     let is_system_message = matches!(response.message_type, MessageType::System);
     let push_job = if enqueue_push && !is_system_message {
-        let sender_username =
-            load_username_by_uid(conn, sender_uid)?.unwrap_or_else(|| "Someone".to_string());
+        let sender_username = load_username_by_uid(users, sender_uid)
+            .await?
+            .unwrap_or_else(|| "Someone".to_string());
         let chat_name = groups::table
             .filter(groups::dsl::id.eq(chat_id))
             .select(groups::dsl::name)
@@ -723,7 +733,7 @@ pub(crate) async fn send_prepared_message(
             conn,
             vec![existing],
             &state.media,
-            &state.avatars,
+            state.users.as_ref(),
             prepared.sender_uid,
         )
         .await
@@ -755,7 +765,7 @@ pub(crate) async fn send_prepared_message(
         conn,
         vec![inserted_msg.clone()],
         &state.media,
-        &state.avatars,
+        state.users.as_ref(),
         prepared.sender_uid,
     )
     .await
@@ -766,11 +776,13 @@ pub(crate) async fn send_prepared_message(
     let (member_uids, side_effects) = if prepared.publish_immediately {
         let side_effects = build_message_side_effects(
             conn,
+            state.users.as_ref(),
             &response,
             prepared.sender_uid,
             prepared.chat_id,
             !is_system_message,
-        )?;
+        )
+        .await?;
         let member_uids = side_effects.broadcast_uids.clone();
         (member_uids, side_effects)
     } else {
@@ -851,7 +863,7 @@ pub async fn attach_metadata(
     conn: &mut PgConnection,
     messages_to_process: Vec<Message>,
     media: &crate::services::media::MediaStore,
-    avatars: &crate::services::avatars::AvatarService,
+    users: &dyn UserProvider,
     current_user_uid: i32,
 ) -> Vec<MessageResponse> {
     let mut reply_target_contexts: std::collections::HashMap<
@@ -892,8 +904,14 @@ pub async fn attach_metadata(
         avatar_uids.insert(reply_msg.sender_uid);
     }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
-    let mut user_avatars = avatars.lookup(&target_uids);
-    let mut user_profiles = lookup_user_profiles(conn, &target_uids).unwrap_or_default();
+    let mut user_avatars = users
+        .lookup_avatar_urls(&target_uids)
+        .await
+        .unwrap_or_default();
+    let mut user_profiles = users
+        .lookup_profiles(&target_uids)
+        .await
+        .unwrap_or_default();
 
     let mut message_attachments_map: std::collections::HashMap<i64, Vec<Attachment>> =
         std::collections::HashMap::new();
@@ -1031,8 +1049,11 @@ pub async fn attach_metadata(
             .collect::<std::collections::HashSet<i32>>()
             .into_iter()
             .collect();
-        let reactor_names = load_usernames_by_uids(conn, &all_reactor_uids);
-        let reactor_avatars = avatars.lookup(&all_reactor_uids);
+        let reactor_names = load_usernames_by_uids(users, &all_reactor_uids).await;
+        let reactor_avatars = users
+            .lookup_avatar_urls(&all_reactor_uids)
+            .await
+            .unwrap_or_default();
 
         for (msg_id, emoji, count) in counts {
             let reacted_by_me = Some(my_reactions.contains(&(msg_id, emoji.clone())));
@@ -1093,8 +1114,18 @@ pub async fn attach_metadata(
         .filter(|uid| !user_profiles.contains_key(uid))
         .collect();
     if !extra_mention_uids.is_empty() {
-        user_profiles.extend(lookup_user_profiles(conn, &extra_mention_uids).unwrap_or_default());
-        user_avatars.extend(avatars.lookup(&extra_mention_uids));
+        user_profiles.extend(
+            users
+                .lookup_profiles(&extra_mention_uids)
+                .await
+                .unwrap_or_default(),
+        );
+        user_avatars.extend(
+            users
+                .lookup_avatar_urls(&extra_mention_uids)
+                .await
+                .unwrap_or_default(),
+        );
     }
 
     let mut responses = Vec::with_capacity(messages_to_process.len());
@@ -1409,8 +1440,14 @@ async fn get_chats(
         .unread_service
         .count_membership_unreads(conn, &memberships)?;
 
-    let message_responses =
-        attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
+    let message_responses = attach_metadata(
+        conn,
+        messages_to_process,
+        &state.media,
+        state.users.as_ref(),
+        uid,
+    )
+    .await;
 
     let mut message_response_map: std::collections::HashMap<i64, MessageResponse> =
         message_responses

@@ -30,9 +30,7 @@ use crate::{
         media, sticker_pack_stickers, sticker_packs, stickers, user_favorite_stickers,
         user_sticker_pack_subscriptions,
     },
-    services::{
-        image_processing::process_sticker, media::build_storage_key, user::lookup_user_profiles,
-    },
+    services::{image_processing::process_sticker, media::build_storage_key},
     utils::{auth::CurrentUid, ids},
     AppState,
 };
@@ -208,7 +206,7 @@ fn load_first_stickers_for_packs(
         .collect())
 }
 
-fn build_pack_summaries(
+async fn build_pack_summaries(
     conn: &mut PgConnection,
     state: &AppState,
     uid: i32,
@@ -225,7 +223,11 @@ fn build_pack_summaries(
     let counts = load_pack_counts(conn, &pack_ids)?;
     let subscribed = load_subscribed_pack_ids(conn, uid, &pack_ids)?;
     let mut previews = load_first_stickers_for_packs(conn, state, &pack_ids)?;
-    let owner_profiles = lookup_user_profiles(conn, &owner_uids).unwrap_or_default();
+    let owner_profiles = state
+        .users
+        .lookup_profiles(&owner_uids)
+        .await
+        .unwrap_or_default();
 
     Ok(packs
         .into_iter()
@@ -339,7 +341,8 @@ async fn post_pack(
             .first(conn)
     })?;
 
-    let summary = build_pack_summaries(conn, &state, uid, vec![pack])?
+    let summary = build_pack_summaries(conn, &state, uid, vec![pack])
+        .await?
         .into_iter()
         .next()
         .unwrap();
@@ -389,7 +392,8 @@ async fn patch_pack(
         .first(conn)
         .optional()?
         .ok_or(AppError::NotFound("Sticker pack not found"))?;
-    let summary = build_pack_summaries(conn, &state, uid, vec![pack])?
+    let summary = build_pack_summaries(conn, &state, uid, vec![pack])
+        .await?
         .into_iter()
         .next()
         .unwrap();
@@ -451,7 +455,8 @@ async fn get_pack(
 
     let sticker_rows = load_sticker_rows_for_pack(conn, pack_id)?;
     let stickers = build_sticker_summaries(conn, &state, uid, sticker_rows)?;
-    let pack = build_pack_summaries(conn, &state, uid, vec![pack])?
+    let pack = build_pack_summaries(conn, &state, uid, vec![pack])
+        .await?
         .into_iter()
         .next()
         .unwrap();
@@ -482,7 +487,7 @@ async fn get_my_subscribed_packs(
         .load(conn)?;
 
     Ok(AxumJson(StickerPackListResponse {
-        packs: build_pack_summaries(conn, &state, uid, packs)?,
+        packs: build_pack_summaries(conn, &state, uid, packs).await?,
     }))
 }
 
@@ -508,7 +513,7 @@ async fn get_my_owned_packs(
         .load(conn)?;
 
     Ok(AxumJson(StickerPackListResponse {
-        packs: build_pack_summaries(conn, &state, uid, packs)?,
+        packs: build_pack_summaries(conn, &state, uid, packs).await?,
     }))
 }
 
@@ -913,7 +918,7 @@ async fn get_sticker(
 
     Ok(AxumJson(StickerDetailResponse {
         sticker: sticker_summary,
-        packs: build_pack_summaries(conn, &state, uid, packs)?,
+        packs: build_pack_summaries(conn, &state, uid, packs).await?,
     }))
 }
 

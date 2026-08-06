@@ -18,7 +18,7 @@ use crate::{
         Attachment, Group, Media, Message, MessageType, NewSavedMessage, SavedMessage, Sticker,
     },
     schema::{attachments, group_membership, groups, media, messages, saved_messages, stickers},
-    services::{avatars::AvatarService, media::MediaStore, user::lookup_user_profiles},
+    services::{media::MediaStore, user_provider::UserProvider},
     utils::{ids, ids::IdGen, pagination::validate_limit},
 };
 
@@ -227,9 +227,8 @@ fn load_attachment_snapshots(
         .collect())
 }
 
-fn load_sender_and_mentions_snapshots(
-    conn: &mut PgConnection,
-    avatars: &AvatarService,
+async fn load_sender_and_mentions_snapshots(
+    users: &dyn UserProvider,
     message: &Message,
 ) -> Result<(SavedSenderSnapshot, Vec<MentionInfo>), AppError> {
     let mention_uids = message
@@ -246,8 +245,8 @@ fn load_sender_and_mentions_snapshots(
         }
     }
 
-    let user_profiles = lookup_user_profiles(conn, &lookup_uids)?;
-    let user_avatars = avatars.lookup(&lookup_uids);
+    let user_profiles = users.lookup_profiles(&lookup_uids).await?;
+    let user_avatars = users.lookup_avatar_urls(&lookup_uids).await?;
     let sender_profile = user_profiles.get(&message.sender_uid);
     let sender = SavedSenderSnapshot {
         uid: message.sender_uid,
@@ -388,7 +387,7 @@ fn load_locatable_chat_ids(
 pub async fn save_message_snapshot(
     conn: &mut PgConnection,
     media: &MediaStore,
-    avatars: &AvatarService,
+    users: &dyn UserProvider,
     id_gen: &IdGen,
     uid: i32,
     message_id: i64,
@@ -409,7 +408,7 @@ pub async fn save_message_snapshot(
 
     let attachments = load_attachment_snapshots(conn, media, &message)?;
     let sticker = load_sticker_snapshot(conn, media, message.sticker_id)?;
-    let (sender, mentions) = load_sender_and_mentions_snapshots(conn, avatars, &message)?;
+    let (sender, mentions) = load_sender_and_mentions_snapshots(users, &message).await?;
     let chat = load_chat_snapshot(conn, media, message.chat_id)?;
 
     if let Some(existing) = load_existing_saved_message(conn, uid, message_id)? {

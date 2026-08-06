@@ -16,7 +16,6 @@ use crate::extractors::DbConn;
 use crate::models::{NewUserExtra, UserExtra};
 use crate::schema::{group_membership, sticker_packs, user_extra, user_sticker_pack_subscriptions};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
-use crate::services::user::{lookup_user_profiles, search_user_uids_by_prefix};
 use crate::utils::auth::{extract_auth_context, required_client_id, AuthSource, CurrentUid};
 use crate::AppState;
 use diesel::prelude::*;
@@ -167,17 +166,16 @@ fn normalize_user_search_limit(limit: Option<i64>) -> i64 {
         .clamp(1, MAX_USER_SEARCH_LIMIT)
 }
 
-fn lookup_member_summary(
-    conn: &mut PgConnection,
+async fn lookup_member_summary(
     state: &AppState,
     uid: i32,
 ) -> Result<Option<MemberSummary>, AppError> {
-    let mut profiles = lookup_user_profiles(conn, &[uid])?;
+    let mut profiles = state.users.lookup_profiles(&[uid]).await?;
     let Some(profile) = profiles.remove(&uid) else {
         return Ok(None);
     };
 
-    let mut avatars = state.avatars.lookup(&[uid]);
+    let mut avatars = state.users.lookup_avatar_urls(&[uid]).await?;
     Ok(Some(MemberSummary {
         uid,
         username: profile.username,
@@ -187,13 +185,12 @@ fn lookup_member_summary(
     }))
 }
 
-fn build_member_summary_map(
-    conn: &mut PgConnection,
+async fn build_member_summary_map(
     state: &AppState,
     uids: &[i32],
 ) -> Result<HashMap<i32, MemberSummary>, AppError> {
-    let profiles = lookup_user_profiles(conn, uids)?;
-    let mut avatars = state.avatars.lookup(uids);
+    let profiles = state.users.lookup_profiles(uids).await?;
+    let mut avatars = state.users.lookup_avatar_urls(uids).await?;
 
     Ok(uids
         .iter()
@@ -286,13 +283,13 @@ async fn get_me(
 ) -> Result<Json<MeResponse>, AppError> {
     let conn = &mut *conn;
 
-    let profiles = lookup_user_profiles(conn, &[uid])?;
+    let profiles = state.users.lookup_profiles(&[uid]).await?;
     let profile = profiles.get(&uid);
     let username = profile
         .and_then(|profile| profile.username.clone())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let mut avatars = state.avatars.lookup(&[uid]);
+    let mut avatars = state.users.lookup_avatar_urls(&[uid]).await?;
     let avatar_url = avatars.remove(&uid).flatten();
 
     let extra = user_extra::table
@@ -347,7 +344,7 @@ async fn get_user_search(
     let mut seen_uids = HashSet::new();
 
     if let Ok(exact_uid) = q.parse::<i32>() {
-        if let Some(summary) = lookup_member_summary(conn, &state, exact_uid)? {
+        if let Some(summary) = lookup_member_summary(&state, exact_uid).await? {
             seen_uids.insert(summary.uid);
             merged_uids.push(summary.uid);
         }
@@ -361,14 +358,14 @@ async fn get_user_search(
             AuthzResource::Global,
         )?
     {
-        for found_uid in search_user_uids_by_prefix(conn, q, limit)? {
+        for found_uid in state.users.search_uids_by_username_prefix(q, limit).await? {
             if seen_uids.insert(found_uid) {
                 merged_uids.push(found_uid);
             }
         }
     }
 
-    let summaries_by_uid = build_member_summary_map(conn, &state, &merged_uids)?;
+    let summaries_by_uid = build_member_summary_map(&state, &merged_uids).await?;
     let summaries: Vec<MemberSummary> = merged_uids
         .into_iter()
         .filter_map(|member_uid| summaries_by_uid.get(&member_uid).cloned())

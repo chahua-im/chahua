@@ -18,9 +18,7 @@ use crate::handlers::groups::load_requester_group_role;
 use crate::models::{GroupJoinReason, GroupMembership, GroupRole, NewGroupMembership};
 use crate::schema::{self, group_membership};
 
-use crate::services::user::{
-    lookup_user_profiles, parse_user_search_query, search_group_member_uids, UserSearchMode,
-};
+use crate::services::user::{parse_user_search_query, search_group_member_uids, UserSearchMode};
 use crate::utils::{auth::CurrentUid, pagination::validate_limit};
 use crate::{AppState, MAX_MEMBERS_LIMIT};
 
@@ -58,14 +56,13 @@ struct ListMembersQuery {
     mode: Option<UserSearchMode>,
 }
 
-fn build_member_responses(
-    conn: &mut diesel::PgConnection,
+async fn build_member_responses(
     state: &AppState,
     page_rows: Vec<(i32, GroupRole, DateTime<Utc>)>,
 ) -> Result<Vec<MemberResponse>, AppError> {
     let uids: Vec<i32> = page_rows.iter().map(|(uid, _, _)| *uid).collect();
-    let profiles = lookup_user_profiles(conn, &uids)?;
-    let mut avatars = state.avatars.lookup(&uids);
+    let profiles = state.users.lookup_profiles(&uids).await?;
+    let mut avatars = state.users.lookup_avatar_urls(&uids).await?;
 
     Ok(page_rows
         .into_iter()
@@ -188,7 +185,7 @@ async fn get_members(
                 .map(|row| (row.uid, row.role.clone(), row.joined_at))
         })
         .collect();
-    let members = build_member_responses(conn, &state, page_rows)?;
+    let members = build_member_responses(&state, page_rows).await?;
 
     let next_cursor = has_more
         .then(|| members.last().map(|member| member.uid))
@@ -227,7 +224,7 @@ async fn post_add_member(
     // Check if requester is admin
     require_admin_role(conn, chat_id, uid)?;
 
-    let profiles = lookup_user_profiles(conn, &[body.uid])?;
+    let profiles = state.users.lookup_profiles(&[body.uid]).await?;
     let profile = profiles.get(&body.uid);
 
     if profile.is_none() {
@@ -298,8 +295,9 @@ async fn post_add_member(
     }
 
     let avatar_url = state
-        .avatars
-        .lookup(&[body.uid])
+        .users
+        .lookup_avatar_urls(&[body.uid])
+        .await?
         .remove(&body.uid)
         .flatten();
 
@@ -372,7 +370,10 @@ async fn delete_remove_member(
         return Err(AppError::NotFound("Member not found"));
     };
 
-    let target_username = crate::services::user::lookup_user_profiles(conn, &[target_uid])
+    let target_username = state
+        .users
+        .lookup_profiles(&[target_uid])
+        .await
         .ok()
         .and_then(|mut profiles| profiles.remove(&target_uid))
         .and_then(|p| p.username)
@@ -512,12 +513,13 @@ async fn patch_member(
         .select((gm_dsl::role, gm_dsl::joined_at))
         .first(conn)?;
 
-    let profiles = lookup_user_profiles(conn, &[target_uid])?;
+    let profiles = state.users.lookup_profiles(&[target_uid]).await?;
     let profile = profiles.get(&target_uid);
 
     let avatar_url = state
-        .avatars
-        .lookup(&[target_uid])
+        .users
+        .lookup_avatar_urls(&[target_uid])
+        .await?
         .remove(&target_uid)
         .flatten();
 

@@ -404,7 +404,7 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
         conn,
         vec![updated_message],
         &state.media,
-        &state.avatars,
+        state.users.as_ref(),
         message.sender_uid,
     )
     .await
@@ -432,8 +432,15 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
     }
 
     let conn = &mut state.db.get()?;
-    let side_effects =
-        build_message_side_effects(conn, &response, message.sender_uid, message.chat_id, true)?;
+    let side_effects = build_message_side_effects(
+        conn,
+        state.users.as_ref(),
+        &response,
+        message.sender_uid,
+        message.chat_id,
+        true,
+    )
+    .await?;
     let member_uids = side_effects.broadcast_uids.clone();
     side_effects.fire(&state);
 
@@ -450,7 +457,7 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
                 conn,
                 vec![root_msg],
                 &state.media,
-                &state.avatars,
+                state.users.as_ref(),
                 message.sender_uid,
             )
             .await

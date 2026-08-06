@@ -261,7 +261,8 @@ async fn get_messages(
         let mut combined: Vec<Message> = older_to_use.into_iter().rev().collect();
         combined.extend(newer_to_use);
 
-        let messages_vec = attach_metadata(conn, combined, &state.media, &state.avatars, uid).await;
+        let messages_vec =
+            attach_metadata(conn, combined, &state.media, state.users.as_ref(), uid).await;
 
         return Ok(Json(ListMessagesResponse {
             messages: messages_vec,
@@ -287,8 +288,14 @@ async fn get_messages(
             .then(|| messages_to_process.last().map(|m| m.id))
             .flatten();
 
-        let messages_vec =
-            attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
+        let messages_vec = attach_metadata(
+            conn,
+            messages_to_process,
+            &state.media,
+            state.users.as_ref(),
+            uid,
+        )
+        .await;
 
         return Ok(Json(ListMessagesResponse {
             messages: messages_vec,
@@ -323,8 +330,14 @@ async fn get_messages(
     // Reverse to return ASC (oldest first)
     let messages_to_process: Vec<Message> = messages_to_process.into_iter().rev().collect();
 
-    let messages_vec =
-        attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
+    let messages_vec = attach_metadata(
+        conn,
+        messages_to_process,
+        &state.media,
+        state.users.as_ref(),
+        uid,
+    )
+    .await;
 
     Ok(Json(ListMessagesResponse {
         messages: messages_vec,
@@ -481,7 +494,7 @@ async fn search_messages(
         conn,
         authoritative_hits.messages,
         &state.media,
-        &state.avatars,
+        state.users.as_ref(),
         uid,
     )
     .await;
@@ -561,7 +574,7 @@ async fn get_message(
         .ok_or(AppError::NotFound("Message not found"))?;
 
     let messages_vec =
-        attach_metadata(conn, vec![message], &state.media, &state.avatars, uid).await;
+        attach_metadata(conn, vec![message], &state.media, state.users.as_ref(), uid).await;
     let response = messages_vec.into_iter().next().unwrap();
 
     Ok(Json(response))
@@ -844,12 +857,17 @@ pub(super) async fn post_thread_message(
 
     if publish_immediately {
         if let Some(root_msg) = root_msg_updated {
-            let root_response =
-                attach_metadata(conn, vec![root_msg], &state.media, &state.avatars, uid)
-                    .await
-                    .into_iter()
-                    .next()
-                    .unwrap();
+            let root_response = attach_metadata(
+                conn,
+                vec![root_msg],
+                &state.media,
+                state.users.as_ref(),
+                uid,
+            )
+            .await
+            .into_iter()
+            .next()
+            .unwrap();
             let ws_msg =
                 std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response.clone()));
             state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
@@ -968,7 +986,7 @@ async fn patch_message(
         conn,
         vec![updated_message],
         &state.media,
-        &state.avatars,
+        state.users.as_ref(),
         uid,
     )
     .await
@@ -1098,7 +1116,7 @@ async fn delete_message(
         conn,
         vec![deleted_message],
         &state.media,
-        &state.avatars,
+        state.users.as_ref(),
         uid,
     )
     .await
@@ -1149,11 +1167,16 @@ async fn delete_message(
             .first(conn)
             .ok();
         if let Some(root_msg) = root_msg_updated {
-            let root_response =
-                attach_metadata(conn, vec![root_msg], &state.media, &state.avatars, uid)
-                    .await
-                    .into_iter()
-                    .next();
+            let root_response = attach_metadata(
+                conn,
+                vec![root_msg],
+                &state.media,
+                state.users.as_ref(),
+                uid,
+            )
+            .await
+            .into_iter()
+            .next();
             if let Some(root_response) = root_response {
                 let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response));
                 state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);

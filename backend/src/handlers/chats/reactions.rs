@@ -43,7 +43,7 @@ fn validate_emoji(input: &str) -> Result<String, AppError> {
     Ok(input.to_string())
 }
 
-fn broadcast_reaction_update(
+async fn broadcast_reaction_update(
     conn: &mut PgConnection,
     state: &AppState,
     chat_id: i64,
@@ -79,8 +79,12 @@ fn broadcast_reaction_update(
         .collect::<std::collections::HashSet<i32>>()
         .into_iter()
         .collect();
-    let names = load_usernames_by_uids(conn, &all_uids);
-    let avatars = state.avatars.lookup(&all_uids);
+    let names = load_usernames_by_uids(state.users.as_ref(), &all_uids).await;
+    let avatars = state
+        .users
+        .lookup_avatar_urls(&all_uids)
+        .await
+        .unwrap_or_default();
 
     let reactions: Vec<ReactionSummary> = counts
         .into_iter()
@@ -189,8 +193,8 @@ async fn get_reaction_details(
 
     // Resolve names + avatars
     let uids_vec: Vec<i32> = all_uids.into_iter().collect();
-    let names = load_usernames_by_uids(conn, &uids_vec);
-    let avatars = state.avatars.lookup(&uids_vec);
+    let names = load_usernames_by_uids(state.users.as_ref(), &uids_vec).await;
+    let avatars = state.users.lookup_avatar_urls(&uids_vec).await?;
 
     for group in &mut groups {
         for reactor in &mut group.reactors {
@@ -252,7 +256,7 @@ async fn put_reaction(
         .set(messages::has_reactions.eq(true))
         .execute(conn)?;
 
-    broadcast_reaction_update(conn, &state, chat_id, message_id);
+    broadcast_reaction_update(conn, &state, chat_id, message_id).await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -312,7 +316,7 @@ async fn delete_reaction(
                 .execute(conn)?;
         }
 
-        broadcast_reaction_update(conn, &state, chat_id, message_id);
+        broadcast_reaction_update(conn, &state, chat_id, message_id).await;
     }
 
     Ok(StatusCode::NO_CONTENT)

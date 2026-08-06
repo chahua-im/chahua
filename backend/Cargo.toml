@@ -9,6 +9,7 @@ unused_must_use = "deny"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
 axum = { version = "0.8", features = ["ws", "multipart"] }
 diesel = { version = "2", features = [
     "postgres",

@@ -15,4 +15,5 @@ pub mod service_tokens;
 pub mod threads;
 pub mod unread;
 pub mod user;
+pub mod user_provider;
 pub mod ws_registry;

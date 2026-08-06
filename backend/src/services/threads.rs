@@ -16,9 +16,8 @@ use crate::handlers::chats::{
 };
 use crate::models::{Attachment, Message, MessageType};
 use crate::schema::{attachments, messages, stickers, thread_meta, thread_user_states};
-use crate::services::avatars::AvatarService;
 use crate::services::media::MediaStore;
-use crate::services::user::lookup_user_profiles;
+use crate::services::user_provider::UserProvider;
 use crate::services::ws_registry::ConnectionRegistry;
 use std::sync::Arc;
 
@@ -667,16 +666,16 @@ struct ParticipantRow {
 /// `rows` — the thread subscription rows (already trimmed to the page size).
 /// `has_more` — whether there are more results beyond this page.
 /// `root_messages` — raw root `Message` rows (no heavy enrichment needed).
-/// `media` / `avatars` — URL construction for attachments and user avatars.
-pub fn enrich_thread_list(
+/// `media` / `users` — URL construction for attachments and provider-owned users.
+pub async fn enrich_thread_list(
     conn: &mut PgConnection,
     rows: Vec<ThreadListRow>,
     has_more: bool,
     root_messages: Vec<Message>,
     uid: i32,
     media: &MediaStore,
-    avatars: &AvatarService,
-) -> Result<ListThreadsResponse, diesel::result::Error> {
+    users: &dyn UserProvider,
+) -> Result<ListThreadsResponse, crate::errors::AppError> {
     let root_ids: Vec<i64> = rows.iter().map(|r| r.thread_root_id).collect();
 
     if root_ids.is_empty() {
@@ -814,8 +813,8 @@ pub fn enrich_thread_list(
     all_uids.dedup();
 
     // Single batched profile + avatar lookup
-    let user_profiles = lookup_user_profiles(conn, &all_uids)?;
-    let user_avatars = avatars.lookup(&all_uids);
+    let user_profiles = users.lookup_profiles(&all_uids).await?;
+    let user_avatars = users.lookup_avatar_urls(&all_uids).await?;
 
     let make_sender = |uid: i32| -> User { build_sender(uid, &user_avatars, &user_profiles) };
 

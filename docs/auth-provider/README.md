@@ -46,12 +46,12 @@ These rules resolve most detailed questions mechanically:
 1. **One issuer.** The wetty-chat backend is the sole issuer of tokens its API
    accepts. Every external credential — a Discuz-signed JWT, an OIDC ID token,
    a password — is an authentication *proof* that is exchanged for a wetty-chat
-   session. No external party ever holds the session signing key.
+   session.
 
-   This is a target-state invariant. During the legacy migration window the
-   external PHP property still possesses the shared HS256 key and can therefore
-   mint credentials accepted by the backend. Each implementation slice must
-   state whether it narrows or preserves that temporary exception.
+   The backend and the external PHP property share one HS256 signing key, and
+   that is accepted. The PHP side can therefore mint credentials the backend
+   accepts; "one issuer" describes which component *should* issue sessions, not
+   a cryptographic guarantee that no other component can.
 2. **One owner per data domain.** Provider-owned data (identity, profile,
    groups) flows one way: provider → replica. App-owned data (sessions,
    policies, chat membership, friends, preferences) is never written by the
@@ -137,7 +137,7 @@ wetty-chat session issuance:
 
 | Method | Proof | Notes |
 | --- | --- | --- |
-| Discuz | Discuz-signed assertion JWT | Signed with a **dedicated keypair** (not the session key), short expiry, `aud` = wetty-chat. The PHP side keeps minting its token; it becomes a login credential, not an API credential. |
+| Discuz | Discuz-signed assertion JWT | Short expiry, `aud` = wetty-chat. The PHP side keeps minting its token; it becomes a login credential, not an API credential. |
 | OIDC third-party | ID token from code flow | Generic OIDC support; the connector/provider validates issuer, audience, nonce. |
 | Internal | Username + password | Argon2id, rate-limited; direct exchange endpoint. |
 
@@ -153,9 +153,9 @@ for a measured window:
    reissued as a v2 session token — users never see a login screen.
 3. Legacy-decode usage is metered; the legacy path is disabled when it
    approaches zero.
-4. Sole custody of the session signing key moves to the backend; the external
-   PHP service's minting role is retired (its signature becomes the Discuz
-   assertion proof above, under a different key).
+4. The external PHP service's minting role is retired by convention: it issues
+   only Discuz assertion proofs, not API sessions. Both sides continue to hold
+   the same signing key.
 
 Note: `gen` in legacy tokens is hardcoded to `0` and has never been validated;
 generation enforcement is entirely new machinery, not a tightening of existing
@@ -189,12 +189,10 @@ but returns `404 Not Found` unless the gate stored in `AppState` is enabled. Set
 the override in a release deployment intentionally enables arbitrary-UID
 impersonation and must therefore be treated as a privileged development configuration.
 Existing `GET /users/auth-token` and `GET /ws/ticket` continue issuing
-legacy-shaped tokens for client compatibility. Both old and new endpoints
-currently reuse the existing shared signing key, as explicitly chosen for this
-migration step. Consequently backend-only issuance is **not yet a security
-property**; key separation remains required before the external PHP minting
-role can be considered retired. Generation storage/enforcement and
-legacy-decay metrics are also deferred.
+legacy-shaped tokens for client compatibility. All endpoints, legacy and v2,
+sign with the one shared key; separating them was considered and **explicitly
+dropped** as unnecessary for this system. Generation storage/enforcement and
+legacy-decay metrics remain deferred.
 
 **PWA slice 1b (implemented):** the React PWA resolves exactly one session before
 React, Redux, or the WebSocket starts. It captures a `?token=` handoff, refreshes it
@@ -219,9 +217,6 @@ change that.
 
 These are recorded risks, not requirements to design every remaining phase now:
 
-- **Signing-key custody:** move v2 to a backend-only key and make `kid` select
-  from an explicit verification keyring before claiming the one-issuer
-  invariant is complete.
 - **WebSocket session transport:** WebSocket authentication intentionally uses
   the same reusable session credential as HTTP API authentication. Send it only
   inside the initial authentication message over WSS, never in a URL or logs.
@@ -241,6 +236,30 @@ These are recorded risks, not requirements to design every remaining phase now:
 - **Session semantics:** decide whether sessions remain purely stateless with
   per-user revocation only or require individual device/session management
   before extending the v2 claim contract.
+
+### Provider migration plan
+
+Ordered slices from the current state to a working provider abstraction. Each is
+independently shippable; sizes assume no surprises in the touched call sites.
+
+| # | Slice | Size | Blocked on |
+| --- | --- | --- | --- |
+| A | `UserProvider` trait + `DiscuzProvider` implementation wrapping today's queries | ~1 day | nothing |
+| B | Replica tables + `(provider_id, subject) → uid` mapping, with backfill migration | 1-2 days | UID allocation decision |
+| C | Proof-exchange login endpoint: Discuz assertion → v2 session | 1-2 days | B |
+| D | Sync worker + `token_generation` storage and enforcement | 2-3 days | session-semantics decision, B |
+
+Slice A is a pure refactor: `services/user.rs`, `services/avatars.rs`, and the
+user-search path currently read `discuz.common_member` directly. Moving them
+behind one trait with a single implementation changes no SQL, no schema, and no
+API response, so every later slice becomes a change behind an interface instead
+of edits spread across handlers.
+
+Standalone mode (a built-in provider with no Discuz) and retiring the PHP
+minting role follow slice D and are not scheduled here.
+
+Two decisions are prerequisites, both recorded above: **UID allocation** blocks
+slice B, and **session semantics** blocks slice D. Neither blocks slice A.
 
 ## Data Ownership
 

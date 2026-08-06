@@ -88,8 +88,9 @@ async fn get_threads(
         root_messages,
         uid,
         &state.media,
-        &state.avatars,
-    )?;
+        state.users.as_ref(),
+    )
+    .await?;
 
     Ok(Json(response))
 }

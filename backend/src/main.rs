@@ -116,9 +116,12 @@ async fn main() {
         id_gen: Arc::new(utils::ids::new_generator()),
         metrics: metrics.clone(),
         media: build_media_store(&config).await,
-        avatars: Arc::new(services::avatars::AvatarService::new(
-            config.avatars.clone(),
-            metrics.avatars.clone(),
+        users: Arc::new(services::user_provider::DiscuzProvider::new(
+            pool.clone(),
+            Arc::new(services::avatars::AvatarService::new(
+                config.avatars.clone(),
+                metrics.avatars.clone(),
+            )),
         )),
         authz_service: services::authz::AuthorizationService::start(),
         ws_registry: ws_registry.clone(),
