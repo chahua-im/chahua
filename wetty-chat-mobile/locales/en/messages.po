@@ -192,6 +192,9 @@ msgstr "Close viewer"
 msgid "Code"
 msgstr "Code"
 
+msgid "Compressing"
+msgstr "Compressing"
+
 msgid "Continue"
 msgstr "Continue"
 

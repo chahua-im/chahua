@@ -16,6 +16,7 @@ import {
   isVideoFile,
 } from '@/utils/heicMedia';
 import { createClientGeneratedId } from '@/utils/clientGeneratedId';
+import { compressVideo } from '@/utils/videoCompression';
 
 const isAbortError = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
 
@@ -169,12 +170,60 @@ export function useComposeAttachments({
           ),
         );
 
+        let fileToUpload = file;
+        let isCompressing = false;
+
+        if (isVideoFile(file)) {
+          isCompressing = true;
+          
+          setUploads((prev) =>
+            prev.map((record) =>
+              record.state.localId === localId
+                ? { ...record, state: { ...record.state, status: 'compressing' } }
+                : record,
+            ),
+          );
+
+          fileToUpload = await compressVideo(file, {
+            signal: abortController.signal,
+            originalWidth: dimensions.width,
+            originalHeight: dimensions.height,
+            onProgress: (progress) => {
+              const overallProgress = Math.round(progress * 100 * 0.5);
+              setUploads((prev) =>
+                prev.map((record) =>
+                  record.state.localId === localId
+                    ? {
+                        ...record,
+                        state: {
+                          ...record.state,
+                          progress: overallProgress,
+                        },
+                      }
+                    : record,
+                ),
+              );
+            },
+          });
+        }
+
+        if (isCompressing) {
+          setUploads((prev) =>
+            prev.map((record) =>
+              record.state.localId === localId
+                ? { ...record, state: { ...record.state, status: 'uploading' } }
+                : record,
+            ),
+          );
+        }
+
         const result = await uploadAttachment({
-          file,
+          file: fileToUpload,
           dimensions,
           order: currentState?.order,
           signal: abortController.signal,
           onProgress: (progress) => {
+            const overallProgress = isCompressing ? Math.round(50 + progress * 0.5) : progress;
             setUploads((prev) =>
               prev.map((record) =>
                 record.state.localId === localId
@@ -182,7 +231,7 @@ export function useComposeAttachments({
                       ...record,
                       state: {
                         ...record.state,
-                        progress,
+                        progress: overallProgress,
                       },
                     }
                   : record,

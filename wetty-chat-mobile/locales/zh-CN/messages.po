@@ -192,6 +192,9 @@ msgstr "关闭查看器"
 msgid "Code"
 msgstr "邀请码"
 
+msgid "Compressing"
+msgstr "压缩中"
+
 msgid "Continue"
 msgstr "继续"
 

@@ -7,7 +7,7 @@ import { isHeicLikeMedia } from '@/utils/heicMedia';
 import { ImageViewer, type ImageViewerItem } from '@/components/chat/messages/media/ImageViewer';
 import styles from './UploadPreview.module.scss';
 
-export type UploadStatus = 'uploading' | 'uploaded' | 'error';
+export type UploadStatus = 'compressing' | 'uploading' | 'uploaded' | 'error';
 
 export interface UploadFileState {
   localId: string;
@@ -154,7 +154,7 @@ export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) 
 
               {item.itemType === 'pending' && item.status !== 'uploaded' && (
                 <div className={`${styles.overlay} ${item.status === 'error' ? styles.overlayError : ''}`}>
-                  {item.status === 'uploading' ? (
+                  {item.status === 'uploading' || item.status === 'compressing' ? (
                     <>
                       <div className={styles.progressRing} aria-hidden="true">
                         <svg viewBox="0 0 36 36">
@@ -170,7 +170,9 @@ export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) 
                         </svg>
                         <span className={styles.progressLabel}>{item.progress}%</span>
                       </div>
-                      <span className={styles.statusText}>{t`Uploading`}</span>
+                      <span className={styles.statusText}>
+                        {item.status === 'compressing' ? t`Compressing` : t`Uploading`}
+                      </span>
                     </>
                   ) : (
                     <>
