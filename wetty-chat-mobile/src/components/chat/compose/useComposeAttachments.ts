@@ -175,7 +175,7 @@ export function useComposeAttachments({
 
         if (isVideoFile(file)) {
           isCompressing = true;
-          
+
           setUploads((prev) =>
             prev.map((record) =>
               record.state.localId === localId

@@ -17,11 +17,15 @@ export interface CompressVideoOptions {
   originalHeight?: number;
 }
 
-export function calculateTargetVideoDimensions(width: number, height: number, max = 1280): { width?: number; height?: number } {
+export function calculateTargetVideoDimensions(
+  width: number,
+  height: number,
+  max = 1280,
+): { width?: number; height?: number } {
   if (width <= max && height <= max) {
     return {};
   }
-  
+
   if (width > height) {
     return { width: max };
   } else {
