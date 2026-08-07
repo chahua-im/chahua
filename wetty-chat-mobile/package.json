@@ -9,7 +9,7 @@
     "dev": "vite -c vite.config.dev.ts",
     "build:stg": "tsc -b && vite build -c vite.config.staging.ts --mode development",
     "build:prod": "tsc -b && vite build --base=/ --outDir prod-dist -c vite.config.prod.ts",
-    "dev:online": "API_PROXY_TARGET=https://chahui.app/_api vite -c vite.config.dev.ts --mode development",
+    "dev:online": "API_PROXY_TARGET=https://d3tmiz1pin85hh.cloudfront.net/_api vite -c vite.config.dev.ts --mode development",
     "generate-pwa-assets": "pwa-assets-generator && rm -f public/icon/*-icon-*.png public/icon-maskable/pwa-*.png",
     "lint": "eslint .",
     "verify": "npm run lint && npm run typecheck && npm run test:run",
