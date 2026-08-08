@@ -3,6 +3,7 @@ import {
   BlobSource,
   BufferTarget,
   Conversion,
+  getFirstEncodableVideoCodec,
   Input,
   Mp4OutputFormat,
   Output,
@@ -75,20 +76,24 @@ export async function compressVideo(
   dimensions: { width?: number; height?: number },
   { signal, onProgress }: CompressVideoOptions = {},
 ): Promise<File> {
-  const originalWidth = dimensions.width;
-  const originalHeight = dimensions.height;
-  if (!originalWidth || !originalHeight || !('VideoEncoder' in window)) return file;
-
-  const targetDims = calculateTargetVideoDimensions(originalWidth, originalHeight);
+  if (!dimensions.width || !dimensions.height) return file;
+  const targetDims = calculateTargetVideoDimensions(dimensions.width, dimensions.height);
 
   // TODO: 开始压缩之前预检一下源文件的分辨率和码率，以及支持的格式。如果预期压缩无法取得显著成效，就应该放弃压缩，改用源文件。
   try {
+    const codec = await getFirstEncodableVideoCodec(['hevc', 'av1', 'vp9', 'avc', 'vp8'], {
+      ...targetDims,
+      quality: new Quality('low'),
+    });
+    if (signal?.aborted) return file;
+    if (!codec) return file;
+
     const target = new BufferTarget();
     const conversion = await Conversion.init({
       input: new Input({ source: new BlobSource(file), formats: ALL_FORMATS }),
       output: new Output({ format: new Mp4OutputFormat(), target }),
       tracks: 'primary',
-      video: { ...targetDims, quality: new Quality('low') },
+      video: { codec, ...targetDims, quality: new Quality('low') },
       audio: { quality: new Quality('low') },
     });
 
@@ -109,7 +114,7 @@ export async function compressVideo(
     console.log('[upload:compression] Compression finished:', target.buffer!.byteLength);
     // 压缩后再检查一遍，如果压缩没有取得显著成效，就应该放弃压缩后的，改用源文件。
     if (target.buffer!.byteLength < file.size * 0.5) {
-      const outputDims = calculateOutputVideoDimensions(originalWidth, originalHeight, targetDims);
+      const outputDims = calculateOutputVideoDimensions(dimensions.width, dimensions.height, targetDims);
       dimensions.width = outputDims.width;
       dimensions.height = outputDims.height;
 
