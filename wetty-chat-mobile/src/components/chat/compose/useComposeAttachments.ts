@@ -16,7 +16,7 @@ import {
   isVideoFile,
 } from '@/utils/heicMedia';
 import { createClientGeneratedId } from '@/utils/clientGeneratedId';
-import { compressVideo } from '@/utils/videoCompression';
+import { compressVideo, compressImage } from '@/utils/compression.ts';
 
 const isAbortError = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
 
@@ -184,10 +184,8 @@ export function useComposeAttachments({
             ),
           );
 
-          fileToUpload = await compressVideo(file, {
+          fileToUpload = await compressVideo(file, dimensions, {
             signal: abortController.signal,
-            originalWidth: dimensions.width,
-            originalHeight: dimensions.height,
             onProgress: (progress) => {
               const overallProgress = Math.round(progress * 100 * 0.5);
               setUploads((prev) =>
@@ -205,6 +203,40 @@ export function useComposeAttachments({
               );
             },
           });
+        } else if (isImageFile(file) && dimensions.width && dimensions.height) {
+          isCompressing = true;
+
+          setUploads((prev) =>
+            prev.map((record) =>
+              record.state.localId === localId
+                ? { ...record, state: { ...record.state, status: 'compressing' } }
+                : record,
+            ),
+          );
+
+          try {
+            fileToUpload = await compressImage(file, dimensions as { width: number; height: number }, {
+              signal: abortController.signal,
+              onProgress: (progress) => {
+                const overallProgress = Math.round(progress * 100 * 0.5);
+                setUploads((prev) =>
+                  prev.map((record) =>
+                    record.state.localId === localId
+                      ? {
+                          ...record,
+                          state: {
+                            ...record.state,
+                            progress: overallProgress,
+                          },
+                        }
+                      : record,
+                  ),
+                );
+              },
+            });
+          } catch (error) {
+            console.warn('[upload:compression] Image compression failed, using original file', error);
+          }
         }
 
         if (isCompressing) {
