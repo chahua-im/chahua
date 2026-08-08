@@ -75,8 +75,8 @@ export function buildOptimisticUploadedAttachments(uploadedAttachments: ComposeU
       kind: attachment.mimeType,
       size: attachment.size,
       fileName: attachment.file.name,
-      width: attachment.width ?? null,
-      height: attachment.height ?? null,
+      width: attachment.dimensions?.width ?? null,
+      height: attachment.dimensions?.height ?? null,
     };
   });
 

@@ -92,8 +92,6 @@ describe('conversation utility helpers', () => {
         file,
         mimeType: 'audio/mp4',
         size: 99,
-        width: undefined,
-        height: undefined,
       },
     ]);
 

@@ -15,7 +15,7 @@ import { useMentionAutocomplete } from './useMentionAutocomplete';
 import { MentionAutocomplete } from './MentionAutocomplete';
 import type { StickerSummary } from '@/api/stickers';
 import type { ComposeSendPayload, ComposeUploadInput, ComposeUploadResult, EditingMessage, ReplyTo } from './types';
-import { isSupportedMediaFile } from '@/utils/heicMedia';
+import { isSupportedMediaFile } from '@/types/attachmentKind';
 import { useChatDraft, loadDraft } from '@/hooks/useChatDraft';
 export type {
   ComposeSendAudioPayload,
@@ -202,8 +202,7 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
           file: record.file,
           mimeType: record.state.mimeType,
           size: record.state.size,
-          width: record.state.width,
-          height: record.state.height,
+          dimensions: record.state.dimensions,
         })),
       });
       setText('');

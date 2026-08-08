@@ -1,6 +1,15 @@
-import { isHeicLikeMedia } from '@/utils/heicMedia';
-
 export type AttachmentMimeCategory = 'image' | 'video' | 'audio' | 'other';
+
+const HEIC_MIME_TYPES = new Set(['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence']);
+const HEIC_EXTENSION_PATTERN = /\.(heic|heif)(?:$|[?#])/i;
+
+function normalizeMimeType(mimeType?: string | null) {
+  return mimeType?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+}
+
+function isHeicFileName(fileName?: string | null) {
+  return fileName != null && HEIC_EXTENSION_PATTERN.test(fileName);
+}
 
 export function categorizeAttachmentKind(kind: string): AttachmentMimeCategory {
   if (kind.startsWith('image/')) return 'image';
@@ -9,14 +18,32 @@ export function categorizeAttachmentKind(kind: string): AttachmentMimeCategory {
   return 'other';
 }
 
-export function isImageKind(kind: string, meta?: { fileName?: string | null; url?: string | null }): boolean {
-  return kind.startsWith('image/') || isHeicLikeMedia({ mimeType: kind, ...meta });
+export function isHeicLikeMedia({
+  mimeType,
+  fileName,
+  url,
+}: {
+  mimeType?: string | null;
+  fileName?: string | null;
+  url?: string | null;
+}) {
+  return HEIC_MIME_TYPES.has(normalizeMimeType(mimeType)) || isHeicFileName(fileName) || isHeicFileName(url);
 }
 
-export function isVideoKind(kind: string): boolean {
-  return kind.startsWith('video/');
+export function isImageKind(kind: string, meta?: { fileName?: string | null; url?: string | null }) {
+  return normalizeMimeType(kind).startsWith('image/') || isHeicLikeMedia({ mimeType: kind, ...meta });
 }
 
-export function isAudioKind(kind: string): boolean {
-  return kind.startsWith('audio/');
+export function isImageFile(file: File) {
+  return file.type.startsWith('image/') || isHeicFileName(file.name);
+}
+
+export function isSupportedMediaFile(file: File) {
+  return isImageFile(file) || file.type.startsWith('video/');
+}
+
+export function getUploadMimeType(file: File) {
+  if (file.type) return file.type;
+  if (isHeicFileName(file.name)) return 'image/heic';
+  return 'application/octet-stream';
 }

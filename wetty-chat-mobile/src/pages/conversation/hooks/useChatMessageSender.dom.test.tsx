@@ -59,7 +59,8 @@ vi.mock('@/utils/badges', () => ({
   syncAppBadgeCount: vi.fn(),
 }));
 
-vi.mock('@/utils/heicMedia', () => ({
+vi.mock('@/types/attachmentKind', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/types/attachmentKind')>()),
   getUploadMimeType: () => 'text/plain',
 }));
 

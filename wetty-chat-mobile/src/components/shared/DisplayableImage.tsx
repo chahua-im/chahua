@@ -1,13 +1,12 @@
 import { type ImgHTMLAttributes, type SyntheticEvent, useEffect, useRef, useState } from 'react';
-import { convertHeicSourceToJpegBlob, isHeicLikeMedia, shouldPreferNativeHeicRendering } from '@/utils/heicMedia';
+import { convertHeicSourceToWebpBlob } from '@/utils/compression';
+import { isHeicLikeMedia } from '@/types/attachmentKind';
 
 interface DisplayableImageProps extends ImgHTMLAttributes<HTMLImageElement> {
   src: string;
   mimeType?: string | null;
   fileName?: string | null;
 }
-
-const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
 export function DisplayableImage({ src, mimeType, fileName, onError, ...imgProps }: DisplayableImageProps) {
   return (
@@ -23,10 +22,9 @@ export function DisplayableImage({ src, mimeType, fileName, onError, ...imgProps
 }
 
 function DisplayableImageInner({ src, mimeType, fileName, onError, ...imgProps }: DisplayableImageProps) {
-  const rawHeicLike = isHeicLikeMedia({ mimeType, fileName, url: src });
-  const needsConversion = rawHeicLike && !shouldPreferNativeHeicRendering();
-  const [displaySrc, setDisplaySrc] = useState(() => (needsConversion ? TRANSPARENT_PIXEL : src));
-  const [isResolving, setIsResolving] = useState(needsConversion);
+  const heicLike = isHeicLikeMedia({ mimeType, fileName, url: src });
+  const [displaySrc, setDisplaySrc] = useState(src);
+  const [isResolving, setIsResolving] = useState(false);
   const mountedRef = useRef(true);
   const conversionStartedRef = useRef(false);
 
@@ -37,23 +35,24 @@ function DisplayableImageInner({ src, mimeType, fileName, onError, ...imgProps }
     };
   }, []);
 
-  useEffect(() => {
-    if (!needsConversion || conversionStartedRef.current) {
+  const handleError = (event: SyntheticEvent<HTMLImageElement, Event>) => {
+    if (!heicLike || conversionStartedRef.current) {
+      onError?.(event);
       return;
     }
 
     conversionStartedRef.current = true;
-    convertHeicSourceToJpegBlob(src)
+    setIsResolving(true);
+    void convertHeicSourceToWebpBlob(src)
       .then((blob) => {
         if (!mountedRef.current) return;
-        const convertedUrl = URL.createObjectURL(blob);
-        setDisplaySrc(convertedUrl);
+        setDisplaySrc(URL.createObjectURL(blob));
         setIsResolving(false);
       })
       .catch((error) => {
         if (!mountedRef.current) return;
-        setDisplaySrc(src);
         setIsResolving(false);
+        onError?.(event);
         console.warn('[media:heic] Failed to convert HEIC preview', {
           src,
           mimeType,
@@ -61,18 +60,11 @@ function DisplayableImageInner({ src, mimeType, fileName, onError, ...imgProps }
           error,
         });
       });
-  }, [fileName, mimeType, needsConversion, src]);
-
-  const handleError = (event: SyntheticEvent<HTMLImageElement, Event>) => {
-    setIsResolving(false);
-    onError?.(event);
   };
 
   useEffect(() => {
-    if (displaySrc === src || displaySrc === TRANSPARENT_PIXEL) return;
-    return () => {
-      URL.revokeObjectURL(displaySrc);
-    };
+    if (displaySrc === src) return;
+    return () => URL.revokeObjectURL(displaySrc);
   }, [displaySrc, src]);
 
   return (

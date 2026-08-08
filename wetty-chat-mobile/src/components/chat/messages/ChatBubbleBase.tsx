@@ -29,7 +29,7 @@ import { SingleMediaAttachment } from './media/SingleMediaAttachment';
 import { JustifiedMediaGallery } from './media/JustifiedMediaGallery';
 import { VideoPreview } from './media/VideoPreview';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
-import { isHeicLikeMedia } from '@/utils/heicMedia';
+import { isImageKind } from '@/types/attachmentKind';
 import {
   parseChatBubbleContentToRichItems,
   getMessageLayoutStats,
@@ -37,19 +37,12 @@ import {
   getChatBubbleMaxWidth,
 } from '@/utils/chatTextMeasure';
 
-function isImageAttachment(attachment: Attachment) {
-  return (
-    attachment.kind.startsWith('image/') ||
-    isHeicLikeMedia({
-      mimeType: attachment.kind,
-      fileName: attachment.fileName,
-      url: attachment.url,
-    })
-  );
-}
-
 function isVideoAttachment(attachment: Attachment) {
   return attachment.kind.startsWith('video/');
+}
+
+function isImageAttachment(attachment: Attachment) {
+  return isImageKind(attachment.kind, attachment);
 }
 
 function getImageLayoutStyle(

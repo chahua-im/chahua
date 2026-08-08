@@ -4,7 +4,7 @@ import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import type { ChatAttachmentListItem } from '@/api/attachments';
 import { ImageViewer, type ImageViewerItem } from '@/components/chat/messages/media/ImageViewer';
-import { isHeicLikeMedia } from '@/utils/heicMedia';
+import { isImageKind } from '@/types/attachmentKind';
 import { ChatAttachmentGrid } from './ChatAttachmentGrid';
 import { ChatAttachmentTabs, type AttachmentTabFilter } from './ChatAttachmentTabs';
 import { useChatAttachments } from './useChatAttachments';
@@ -15,11 +15,7 @@ interface ChatAttachmentSectionProps {
 }
 
 function isVisualAttachment(attachment: ChatAttachmentListItem) {
-  return (
-    attachment.kind.startsWith('image/') ||
-    attachment.kind.startsWith('video/') ||
-    isHeicLikeMedia({ mimeType: attachment.kind, fileName: attachment.fileName, url: attachment.url })
-  );
+  return isImageKind(attachment.kind, attachment) || attachment.kind.startsWith('video/');
 }
 
 function toViewerItem(attachment: ChatAttachmentListItem): ImageViewerItem {

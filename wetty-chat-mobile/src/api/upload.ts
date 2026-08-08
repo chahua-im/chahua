@@ -1,28 +1,36 @@
 import axios, { type AxiosResponse } from 'axios';
 import apiClient from './client';
 
-export interface UploadUrlRequest {
+interface Dimensions {
+  width: number;
+  height: number;
+}
+
+interface UploadUrlRequest {
   filename: string;
   contentType: string;
   size: number;
-  width?: number;
-  height?: number;
   order?: number;
+  dimensions?: Dimensions;
 }
 
-export interface UploadUrlResponse {
+interface UploadUrlResponse {
   attachmentId: string;
   uploadUrl: string;
   uploadHeaders: Record<string, string>;
 }
 
-export interface UploadFileToS3Options {
+interface UploadFileToS3Options {
   signal?: AbortSignal;
   onProgress?: (progress: number) => void;
 }
 
-export function requestUploadUrl(body: UploadUrlRequest): Promise<AxiosResponse<UploadUrlResponse>> {
-  return apiClient.post('/attachments/upload-url', body);
+export function requestUploadUrl(
+  body: UploadUrlRequest,
+  signal?: AbortSignal,
+): Promise<AxiosResponse<UploadUrlResponse>> {
+  const { dimensions, ...upload } = body;
+  return apiClient.post('/attachments/upload-url', { ...upload, ...dimensions }, { signal });
 }
 
 export async function uploadFileToS3(

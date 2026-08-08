@@ -3,39 +3,10 @@ import { IonIcon } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { alertCircleOutline, closeCircle, documentOutline, refreshOutline } from 'ionicons/icons';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
-import { isHeicLikeMedia } from '@/utils/heicMedia';
+import { isImageKind } from '@/types/attachmentKind';
 import { ImageViewer, type ImageViewerItem } from '@/components/chat/messages/media/ImageViewer';
+import type { UploadPreviewItem } from './types';
 import styles from './UploadPreview.module.scss';
-
-export type UploadStatus = 'compressing' | 'uploading' | 'uploaded' | 'error';
-
-export interface UploadFileState {
-  localId: string;
-  kind: 'image' | 'video';
-  name: string;
-  previewUrl: string;
-  mimeType: string;
-  size: number;
-  width?: number;
-  height?: number;
-  order?: number;
-  progress: number;
-  status: UploadStatus;
-  attachmentId?: string;
-  errorMessage?: string;
-}
-
-export interface ExistingAttachmentPreview {
-  localId: string;
-  attachmentId: string;
-  kind: string;
-  name: string;
-  previewUrl?: string;
-}
-
-export type UploadPreviewItem =
-  | ({ itemType: 'pending' } & UploadFileState)
-  | ({ itemType: 'existing' } & ExistingAttachmentPreview);
 
 interface UploadPreviewProps {
   items: UploadPreviewItem[];
@@ -43,29 +14,20 @@ interface UploadPreviewProps {
   onRetry: (localId: string) => void;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function isVideoMedia(kind: string, mimeType: string): boolean {
-  return kind === 'video' || kind.startsWith('video/') || mimeType.startsWith('video/');
-}
-
 interface DerivedItem {
   item: UploadPreviewItem;
   mimeType: string;
   isImagePreview: boolean;
-  isVideoPreview: boolean;
-  isUploaded: boolean;
   canPreview: boolean;
 }
 
 function deriveItemFlags(item: UploadPreviewItem): DerivedItem {
   const mimeType = item.itemType === 'pending' ? item.mimeType : item.kind;
-  const isImagePreview =
-    item.kind === 'image' || item.kind.startsWith('image/') || isHeicLikeMedia({ mimeType, fileName: item.name });
-  const isVideoPreview = isVideoMedia(item.kind, mimeType);
+  const isImagePreview = item.kind === 'image' || isImageKind(mimeType, { fileName: item.name, url: item.previewUrl });
+  const isVideoPreview = item.kind === 'video' || item.kind.startsWith('video/') || mimeType.startsWith('video/');
   const isUploaded = item.itemType !== 'pending' || item.status === 'uploaded';
   const canPreview = (isImagePreview || isVideoPreview) && !!item.previewUrl && isUploaded;
-  return { item, mimeType, isImagePreview, isVideoPreview, isUploaded, canPreview };
+  return { item, mimeType, isImagePreview, canPreview };
 }
 
 function renderCardMedia(derived: DerivedItem, onPreview: () => void): ReactNode {
@@ -80,17 +42,20 @@ function renderCardMedia(derived: DerivedItem, onPreview: () => void): ReactNode
     );
   }
 
-  const thumbnail = isImagePreview ? (
-    <DisplayableImage
-      src={item.previewUrl}
-      mimeType={mimeType}
-      fileName={item.name}
-      alt={item.name}
-      className={styles.previewImage}
-    />
-  ) : (
-    <video src={item.previewUrl} autoPlay loop muted className={styles.previewImage} />
-  );
+  const thumbnail =
+    isImagePreview && item.itemType === 'pending' ? (
+      <img src={item.previewUrl} alt={item.name} className={styles.previewImage} />
+    ) : isImagePreview ? (
+      <DisplayableImage
+        src={item.previewUrl}
+        mimeType={mimeType}
+        fileName={item.name}
+        alt={item.name}
+        className={styles.previewImage}
+      />
+    ) : (
+      <video src={item.previewUrl} autoPlay loop muted className={styles.previewImage} />
+    );
 
   if (canPreview) {
     return (
@@ -108,8 +73,6 @@ function renderCardMedia(derived: DerivedItem, onPreview: () => void): ReactNode
   return thumbnail;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
-
 export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) {
   const [viewingLocalId, setViewingLocalId] = useState<string | null>(null);
 
@@ -126,8 +89,8 @@ export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) 
           src: item.previewUrl,
           kind: mimeType,
           fileName: item.name,
-          width: item.itemType === 'pending' ? item.width : undefined,
-          height: item.itemType === 'pending' ? item.height : undefined,
+          width: item.itemType === 'pending' ? item.dimensions?.width : undefined,
+          height: item.itemType === 'pending' ? item.dimensions?.height : undefined,
         },
       ];
     },
@@ -196,6 +159,3 @@ export function UploadPreview({ items, onRemove, onRetry }: UploadPreviewProps) 
     </>
   );
 }
-
-// TODO: add audio preview support when needed. The tray-level API (items, onRemove, onRetry)
-// should remain unchanged; branch on item.kind inside renderCardMedia.

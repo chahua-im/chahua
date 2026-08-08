@@ -7,7 +7,7 @@ import { useIsDesktop } from '@/hooks/platformHooks';
 import { appHistory } from '@/utils/navigationHistory';
 import { getOverlayPortalTarget } from '@/utils/dom';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
-import { isHeicLikeMedia } from '@/utils/heicMedia';
+import { isImageKind } from '@/types/attachmentKind';
 import styles from './ImageViewer.module.scss';
 
 const MAX_SCALE = 5;
@@ -29,21 +29,18 @@ interface ImageViewerProps {
   onClose: () => void;
 }
 
-interface Dimensions {
-  width: number;
-  height: number;
-}
-
 interface Point {
   x: number;
   y: number;
 }
 
+interface Dimensions {
+  width: number;
+  height: number;
+}
+
 function isImageViewerImage(item: ImageViewerItem | undefined) {
-  if (!item) return false;
-  return (
-    item.kind.startsWith('image/') || isHeicLikeMedia({ mimeType: item.kind, fileName: item.fileName, url: item.src })
-  );
+  return item != null && isImageKind(item.kind, { fileName: item.fileName, url: item.src });
 }
 
 function clamp(value: number, min: number, max: number) {

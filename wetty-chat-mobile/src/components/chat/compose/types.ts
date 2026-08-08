@@ -1,6 +1,37 @@
 import type { Attachment, MentionInfo } from '@/api/messages';
 import type { StickerSummary } from '@/api/stickers';
-import type { UploadFileState } from '@/components/chat/compose/UploadPreview';
+
+export interface Dimensions {
+  width: number;
+  height: number;
+}
+
+type UploadStatus = 'compressing' | 'uploading' | 'uploaded' | 'error';
+
+interface UploadFileState {
+  localId: string;
+  kind: 'image' | 'video';
+  name: string;
+  previewUrl: string;
+  mimeType: string;
+  size: number;
+  dimensions?: Dimensions;
+  progress: number;
+  status: UploadStatus;
+  attachmentId?: string;
+  errorMessage?: string;
+}
+
+interface ExistingAttachmentPreview {
+  localId: string;
+  kind: string;
+  name: string;
+  previewUrl?: string;
+}
+
+export type UploadPreviewItem =
+  | ({ itemType: 'pending' } & UploadFileState)
+  | ({ itemType: 'existing' } & ExistingAttachmentPreview);
 
 export interface ReplyTo {
   messageId: string;
@@ -24,10 +55,7 @@ export interface ComposeUploadInput {
   signal: AbortSignal;
   order?: number;
   onProgress: (progress: number) => void;
-  dimensions?: {
-    width?: number;
-    height?: number;
-  };
+  dimensions?: Dimensions;
 }
 
 export interface ComposeUploadResult {
@@ -39,8 +67,7 @@ export interface ComposeUploadedAttachment {
   file: File;
   mimeType: string;
   size: number;
-  width?: number;
-  height?: number;
+  dimensions?: Dimensions;
 }
 
 export interface ComposeSendTextPayload {
@@ -68,6 +95,7 @@ export type ComposeSendPayload = ComposeSendTextPayload | ComposeSendAudioPayloa
 export interface UploadRecord {
   state: UploadFileState;
   file: File;
+  order: number;
   abortController?: AbortController;
 }
 

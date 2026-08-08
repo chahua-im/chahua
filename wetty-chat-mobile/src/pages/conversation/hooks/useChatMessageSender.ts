@@ -19,7 +19,7 @@ import { setChatLastReadMessageId, setChatUnreadCount } from '@/store/chatsSlice
 import { messageAdded, messageConfirmed, messagePatched } from '@/store/messageEvents';
 import { setThreadReadState } from '@/store/threadsSlice';
 import { syncAppBadgeCount } from '@/utils/badges';
-import { getUploadMimeType } from '@/utils/heicMedia';
+import { getUploadMimeType } from '@/types/attachmentKind';
 import {
   areAttachmentIdsEqual,
   buildOptimisticUploadedAttachments,
@@ -83,13 +83,16 @@ export function useChatMessageSender({
   const dispatch = useDispatch();
 
   const uploadAttachment = useCallback(async ({ file, dimensions, onProgress, signal, order }: ComposeUploadInput) => {
-    const res = await requestUploadUrl({
-      filename: file.name,
-      contentType: getUploadMimeType(file),
-      size: file.size,
-      order,
-      ...dimensions,
-    });
+    const res = await requestUploadUrl(
+      {
+        filename: file.name,
+        contentType: getUploadMimeType(file),
+        size: file.size,
+        order,
+        dimensions,
+      },
+      signal,
+    );
 
     const { uploadUrl, attachmentId, uploadHeaders } = res.data;
     await uploadFileToS3(uploadUrl, file, uploadHeaders, { onProgress, signal });

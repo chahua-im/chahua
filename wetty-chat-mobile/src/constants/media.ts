@@ -1,13 +1,6 @@
 export const MEDIA_CONSTANTS = {
-  // 多图 Grid/Justified 目标比例和限制
-  JUSTIFIED_TARGET_ROW_RATIO: 1.8, // 一行目标期望铺满的累计宽高比
-  JUSTIFIED_MIN_ROW_RATIO: 1.2, // 一行的最低比例（低于此比例将被限制高度，产生带模糊背景的效果，防止刷屏）
-  JUSTIFIED_MIN_ITEM_RATIO: 0.5, // 单图参与网格排版的最极端细长比例
-  JUSTIFIED_MAX_ITEM_RATIO: 3.0, // 单图参与网格排版的最极端宽扁比例
-
   // 图片/视频之间的间距
   GAP: 2,
-
   // 模糊效果半径
   BLUR_RADIUS: '20px',
   // 暗化背景，防止亮图模糊后文字看不清或对比度太弱

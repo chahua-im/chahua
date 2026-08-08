@@ -1,65 +1,68 @@
-import {
-  ALL_FORMATS,
-  BlobSource,
-  BufferTarget,
-  Conversion,
-  getFirstEncodableVideoCodec,
-  Input,
-  Mp4OutputFormat,
-  Output,
-  Quality,
-  VIDEO_CODECS,
-} from 'mediabunny';
+import { isHeicLikeMedia } from '@/types/attachmentKind';
 
-export interface CompressVideoOptions {
+interface Dimensions {
+  width: number;
+  height: number;
+}
+
+interface MediaProcessingOptions {
   signal?: AbortSignal;
   onProgress?: (progress: number) => void;
 }
 
-export interface CompressImageOptions {
-  signal?: AbortSignal;
-  onProgress?: (progress: number) => void;
+interface CompressedMedia {
+  file: File;
+  dimensions?: Dimensions;
 }
 
-export function calculateTargetVideoDimensions(
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+}
+
+function appendFileExtension(fileName: string, extension: string) {
+  return `${fileName}${extension}`;
+}
+
+const MAX_MEDIA_DIMENSION = 1280;
+const VIDEO_COMPRESSION_RATIO = 0.5;
+const IMAGE_COMPRESSION_RATIO = 0.75;
+const IMAGE_EXPORT_FORMATS = [
+  { type: 'image/avif', quality: 0.6, extension: '.avif' },
+  { type: 'image/webp', quality: 0.6, extension: '.webp' },
+  { type: 'image/jpeg', quality: 0.8, extension: '.jpg' },
+] as const;
+
+function calculateTargetVideoDimensions(
   width: number,
   height: number,
-  max = 1280,
+  max = MAX_MEDIA_DIMENSION,
 ): { width?: number; height?: number } {
   if (width <= max && height <= max) {
     return {};
   }
 
-  if (width > height) {
-    return { width: max };
-  } else {
-    return { height: max };
-  }
+  return width > height ? { width: max } : { height: max };
 }
 
-export const ceilToMultipleOfTwo = (v: number) => (v % 2 === 0 ? v : v + 1);
+const ceilToMultipleOfTwo = (value: number) => (value % 2 === 0 ? value : value + 1);
 
-export function calculateOutputVideoDimensions(
+function calculateOutputVideoDimensions(
   originalWidth: number,
   originalHeight: number,
-  targetDims: { width?: number; height?: number },
-): { width: number; height: number } {
+  target: { width?: number; height?: number },
+): Dimensions {
   const aspectRatio = originalWidth / originalHeight;
 
-  if (targetDims.width !== undefined) {
-    const width = ceilToMultipleOfTwo(targetDims.width);
-    return {
-      width,
-      height: ceilToMultipleOfTwo(Math.round(width / aspectRatio)),
-    };
+  if (target.width !== undefined) {
+    const width = ceilToMultipleOfTwo(target.width);
+    return { width, height: ceilToMultipleOfTwo(Math.round(width / aspectRatio)) };
   }
 
-  if (targetDims.height !== undefined) {
-    const height = ceilToMultipleOfTwo(targetDims.height);
-    return {
-      width: ceilToMultipleOfTwo(Math.round(height * aspectRatio)),
-      height,
-    };
+  if (target.height !== undefined) {
+    const height = ceilToMultipleOfTwo(target.height);
+    return { width: ceilToMultipleOfTwo(Math.round(height * aspectRatio)), height };
   }
 
   return {
@@ -68,144 +71,204 @@ export function calculateOutputVideoDimensions(
   };
 }
 
-// @ts-expect-error force change readonly value.
-VIDEO_CODECS.splice(0, VIDEO_CODECS.length, 'hevc', 'av1', 'vp9', 'avc', 'vp8');
-
 export async function compressVideo(
   file: File,
-  dimensions: { width?: number; height?: number },
-  { signal, onProgress }: CompressVideoOptions = {},
-): Promise<File> {
-  if (!dimensions.width || !dimensions.height) return file;
-  const targetDims = calculateTargetVideoDimensions(dimensions.width, dimensions.height);
+  dimensions?: Dimensions,
+  { signal, onProgress }: MediaProcessingOptions = {},
+): Promise<CompressedMedia> {
+  if (!dimensions) return { file };
 
-  // TODO: 开始压缩之前预检一下源文件的分辨率和码率，以及支持的格式。如果预期压缩无法取得显著成效，就应该放弃压缩，改用源文件。
+  const targetDimensions = calculateTargetVideoDimensions(dimensions.width, dimensions.height);
+
   try {
+    const {
+      ALL_FORMATS,
+      BlobSource,
+      BufferTarget,
+      Conversion,
+      getFirstEncodableVideoCodec,
+      Input,
+      Mp4OutputFormat,
+      Output,
+      Quality,
+    } = await import('mediabunny');
+
+    throwIfAborted(signal);
     const codec = await getFirstEncodableVideoCodec(['hevc', 'av1', 'vp9', 'avc', 'vp8'], {
-      ...targetDims,
+      ...targetDimensions,
       quality: new Quality('low'),
     });
-    if (signal?.aborted) return file;
-    if (!codec) return file;
+    throwIfAborted(signal);
+    if (!codec) return { file, dimensions };
 
     const target = new BufferTarget();
     const conversion = await Conversion.init({
       input: new Input({ source: new BlobSource(file), formats: ALL_FORMATS }),
       output: new Output({ format: new Mp4OutputFormat(), target }),
       tracks: 'primary',
-      video: { codec, ...targetDims, quality: new Quality('low') },
+      video: { codec, ...targetDimensions, quality: new Quality('low') },
       audio: { quality: new Quality('low') },
     });
 
     conversion.onProgress = onProgress;
-
     const abortHandler = () => {
-      conversion.cancel().catch(console.error);
+      void conversion.cancel();
     };
     signal?.addEventListener('abort', abortHandler);
 
     try {
-      if (signal?.aborted) abortHandler();
+      throwIfAborted(signal);
       await conversion.execute();
     } finally {
       signal?.removeEventListener('abort', abortHandler);
     }
 
-    console.log('[upload:compression] Compression finished:', target.buffer!.byteLength);
-    // 压缩后再检查一遍，如果压缩没有取得显著成效，就应该放弃压缩后的，改用源文件。
-    if (target.buffer!.byteLength < file.size * 0.5) {
-      const outputDims = calculateOutputVideoDimensions(dimensions.width, dimensions.height, targetDims);
-      dimensions.width = outputDims.width;
-      dimensions.height = outputDims.height;
-
-      return new File([target.buffer!], file.name + '.mp4', { type: 'video/mp4' });
-    } else {
-      console.log('[upload:compression] Compression not significant, use original file:', file);
-      return file;
+    throwIfAborted(signal);
+    const buffer = target.buffer;
+    if (!buffer || buffer.byteLength >= file.size * VIDEO_COMPRESSION_RATIO) {
+      return { file, dimensions };
     }
+
+    const outputDimensions = calculateOutputVideoDimensions(dimensions.width, dimensions.height, targetDimensions);
+    return {
+      file: new File([buffer], appendFileExtension(file.name, '.mp4'), { type: 'video/mp4' }),
+      dimensions: outputDimensions,
+    };
   } catch (error) {
-    console.warn('[upload:compression] Compression skipped/failed:', error);
-    return file;
+    throwIfAborted(signal);
+    console.warn('[upload:compression] Video compression skipped/failed', error);
+    return { file, dimensions };
   }
 }
 
-export function calculateTargetImageDimensions(
-  width: number,
-  height: number,
-  max = 1280,
-): { resizeWidth?: number; resizeHeight?: number } {
+function calculateTargetImageDimensions(width: number, height: number, max = MAX_MEDIA_DIMENSION): Dimensions {
   if (width <= max && height <= max) {
-    return {};
+    return { width, height };
   }
 
-  if (width > height) {
-    return { resizeWidth: max };
-  } else {
-    return { resizeHeight: max };
+  const scale = max / Math.max(width, height);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+let heicToModulePromise: Promise<typeof import('heic-to/csp')> | undefined;
+let heicConversionTail = Promise.resolve();
+
+function loadHeicTo() {
+  heicToModulePromise ??= import('heic-to/csp');
+  return heicToModulePromise;
+}
+
+function runHeicConversion<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  const guardedOperation = () => {
+    throwIfAborted(signal);
+    return operation();
+  };
+  const result = heicConversionTail.then(guardedOperation);
+  heicConversionTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+const heicSourceConversions = new Map<string, Promise<Blob>>();
+
+export function convertHeicSourceToWebpBlob(src: string) {
+  const cached = heicSourceConversions.get(src);
+  if (cached) return cached;
+
+  const conversion = runHeicConversion(async () => {
+    const response = await fetch(src);
+    if (!response.ok) {
+      throw new Error(`Failed to load HEIC media: ${response.status}`);
+    }
+    const { heicTo } = await loadHeicTo();
+    return heicTo({ blob: await response.blob(), type: 'image/webp', quality: 0.8 });
+  });
+
+  heicSourceConversions.set(src, conversion);
+  const clearConversion = () => {
+    heicSourceConversions.delete(src);
+  };
+  void conversion.then(clearConversion, clearConversion);
+  return conversion;
+}
+
+async function compressImageSource(
+  file: File,
+  source: File | ImageBitmap,
+  sourceDimensions: Dimensions,
+  { signal, onProgress }: MediaProcessingOptions = {},
+): Promise<CompressedMedia> {
+  throwIfAborted(signal);
+
+  const outputDimensions = calculateTargetImageDimensions(sourceDimensions.width, sourceDimensions.height);
+  const isFileSource = source instanceof File;
+  const bitmap = isFileSource
+    ? await createImageBitmap(source, {
+        imageOrientation: 'from-image',
+        resizeWidth: outputDimensions.width,
+        resizeHeight: outputDimensions.height,
+        resizeQuality: 'high',
+      })
+    : source;
+
+  const canvas = new OffscreenCanvas(outputDimensions.width, outputDimensions.height);
+  try {
+    throwIfAborted(signal);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Could not create image compression canvas');
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(bitmap, 0, 0, outputDimensions.width, outputDimensions.height);
+  } finally {
+    bitmap.close();
   }
+  onProgress?.(0.5);
+
+  for (const format of IMAGE_EXPORT_FORMATS) {
+    throwIfAborted(signal);
+    try {
+      const blob = await canvas.convertToBlob({ type: format.type, quality: format.quality });
+      if (blob.type !== format.type) continue;
+
+      throwIfAborted(signal);
+      onProgress?.(1);
+      if (!isFileSource || blob.size < file.size * IMAGE_COMPRESSION_RATIO) {
+        return {
+          file: new File([blob], appendFileExtension(file.name, format.extension), { type: blob.type }),
+          dimensions: outputDimensions,
+        };
+      }
+      break;
+    } catch (error) {
+      throwIfAborted(signal);
+      console.debug('[upload:compression] Image format unavailable', { type: format.type, error });
+    }
+  }
+
+  return { file, dimensions: sourceDimensions };
 }
 
 export async function compressImage(
   file: File,
-  dimensions: { width?: number; height?: number },
-  { signal, onProgress }: CompressImageOptions = {},
-): Promise<File> {
-  if (signal?.aborted) return file;
-  if (!dimensions.width || !dimensions.height) return file;
-  const targetDims = calculateTargetImageDimensions(dimensions.width, dimensions.height);
-  const bitmap = await createImageBitmap(file, {
-    imageOrientation: 'from-image',
-    ...targetDims,
-    resizeQuality: 'high',
-  });
-
-  if (signal?.aborted) {
-    bitmap.close();
-    return file;
+  dimensions?: Dimensions,
+  options: MediaProcessingOptions = {},
+): Promise<CompressedMedia> {
+  if (dimensions) {
+    return compressImageSource(file, file, dimensions, options);
   }
 
-  onProgress?.(0.5);
-
-  let blob: Blob | null = null;
-  let selectedExt = '';
-
-  const exportFormats = [
-    { type: 'image/avif', quality: 0.6, ext: '.avif' },
-    { type: 'image/webp', quality: 0.6, ext: '.webp' },
-    { type: 'image/jpeg', quality: 0.8, ext: '.jpg' },
-  ];
-
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(bitmap, 0, 0);
-  bitmap.close();
-
-  for (const { type, quality, ext } of exportFormats) {
-    if (signal?.aborted) return file;
-    try {
-      const b = await canvas.convertToBlob({ type, quality });
-      if (b.type === type) {
-        blob = b;
-        selectedExt = ext;
-        break;
-      }
-    } catch {
-      // Ignore and try next format
-    }
+  if (!isHeicLikeMedia({ fileName: file.name, mimeType: file.type })) {
+    return { file };
   }
 
-  if (signal?.aborted) return file;
-
-  if (blob) {
-    onProgress?.(1.0);
-  }
-
-  // 压缩后再检查一遍，如果体积小于原来的 75%，则认为压缩有效
-  if (blob && blob.size < file.size * 0.75) {
-    dimensions.width = bitmap.width;
-    dimensions.height = bitmap.height;
-    return new File([blob], file.name + selectedExt, { type: blob.type });
-  }
-
-  return file;
+  return runHeicConversion(async () => {
+    const { heicTo } = await loadHeicTo();
+    throwIfAborted(options.signal);
+    const bitmap = await heicTo({ blob: file, type: 'bitmap' });
+    return compressImageSource(file, bitmap, { width: bitmap.width, height: bitmap.height }, options);
+  }, options.signal);
 }

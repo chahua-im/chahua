@@ -2,87 +2,48 @@ import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { t } from '@lingui/core/macro';
 import type { Attachment } from '@/api/messages';
-import type { UploadPreviewItem } from '@/components/chat/compose/UploadPreview';
-import type { ComposeUploadInput, ComposeUploadResult, UploadRecord } from './types';
+import type { ComposeUploadInput, ComposeUploadResult, Dimensions, UploadPreviewItem, UploadRecord } from './types';
 
 import { MAX_ATTACHMENTS_PER_MESSAGE } from '@/constants/media';
-import {
-  convertHeicBlobToJpegBlob,
-  getImageDimensionsFromBlob,
-  getUploadMimeType,
-  isHeicLikeMedia,
-  isImageFile,
-  isSupportedMediaFile,
-  isVideoFile,
-} from '@/utils/heicMedia';
+import { getUploadMimeType, isImageFile, isImageKind, isSupportedMediaFile } from '@/types/attachmentKind';
 import { createClientGeneratedId } from '@/utils/clientGeneratedId';
-import { compressVideo, compressImage } from '@/utils/compression.ts';
+import { compressVideo, compressImage } from '@/utils/compression';
 
 const isAbortError = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
 
-const getNativeImageDimensions = (file: File): Promise<{ width?: number; height?: number }> =>
+const getNativeImageDimensions = (file: File): Promise<Dimensions | undefined> =>
   new Promise((resolve) => {
-    if (!isImageFile(file)) {
-      resolve({});
-      return;
-    }
-
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      resolve({ width: img.width, height: img.height });
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
     };
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      resolve({});
+      resolve(undefined);
     };
     img.src = objectUrl;
   });
 
-async function getMediaDimensions(file: File): Promise<{ width?: number; height?: number }> {
-  const mimeType = getUploadMimeType(file);
-
+function getMediaDimensions(file: File): Promise<Dimensions | undefined> {
   if (isImageFile(file)) {
-    const nativeDimensions = await getNativeImageDimensions(file);
-    if (nativeDimensions.width && nativeDimensions.height) {
-      return nativeDimensions;
-    }
-
-    if (isHeicLikeMedia({ mimeType, fileName: file.name })) {
-      try {
-        const jpegBlob = await convertHeicBlobToJpegBlob(file);
-        return getImageDimensionsFromBlob(jpegBlob);
-      } catch (error) {
-        console.warn('[media:heic] Failed to read HEIC dimensions', {
-          fileName: file.name,
-          mimeType,
-          error,
-        });
-        return {};
-      }
-    }
-
-    return {};
+    return getNativeImageDimensions(file);
   }
 
   return new Promise((resolve) => {
-    if (isVideoFile(file)) {
-      const video = document.createElement('video');
-      const objectUrl = URL.createObjectURL(file);
-      video.onloadedmetadata = () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve({ width: video.videoWidth, height: video.videoHeight });
-      };
-      video.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve({});
-      };
-      video.src = objectUrl;
-      return;
-    }
-
-    resolve({});
+    const video = document.createElement('video');
+    const objectUrl = URL.createObjectURL(file);
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve({ width: video.videoWidth, height: video.videoHeight });
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(undefined);
+    };
+    video.preload = 'metadata';
+    video.src = objectUrl;
   });
 }
 
@@ -110,13 +71,11 @@ export function useComposeAttachments({
     URL.revokeObjectURL(record.state.previewUrl);
   }, []);
 
-  const clearUploads = useCallback(
-    (currentUploads: UploadRecord[]) => {
-      currentUploads.forEach(cleanupRecord);
-      setUploads([]);
-    },
-    [cleanupRecord],
-  );
+  const clearUploads = useCallback(() => {
+    uploadsRef.current.forEach(cleanupRecord);
+    uploadsRef.current = [];
+    setUploads([]);
+  }, [cleanupRecord]);
 
   useEffect(() => {
     uploadsRef.current = uploads;
@@ -130,81 +89,42 @@ export function useComposeAttachments({
   );
 
   const startUpload = useCallback(
-    async (localId: string, file: File) => {
+    async (localId: string, file: File, shouldProcess = true) => {
       const abortController = new AbortController();
 
-      setUploads((prev) =>
-        prev.map((record) =>
-          record.state.localId === localId
-            ? {
-                ...record,
-                abortController,
-                state: {
-                  ...record.state,
-                  status: 'uploading',
-                  progress: 0,
-                  errorMessage: undefined,
-                  attachmentId: undefined,
-                },
-              }
-            : record,
-        ),
-      );
+      const attachController = (record: UploadRecord): UploadRecord =>
+        record.state.localId === localId
+          ? {
+              ...record,
+              abortController,
+              state: {
+                ...record.state,
+                status: 'uploading',
+                progress: 0,
+                errorMessage: undefined,
+                attachmentId: undefined,
+              },
+            }
+          : record;
+      uploadsRef.current = uploadsRef.current.map(attachController);
+      setUploads((prev) => prev.map(attachController));
 
-      try {
-        const dimensions = await getMediaDimensions(file);
-        const currentState = uploadsRef.current.find((r) => r.state.localId === localId)?.state;
-
+      const updateProgress = (progress: number) => {
         setUploads((prev) =>
           prev.map((record) =>
-            record.state.localId === localId
-              ? {
-                  ...record,
-                  state: {
-                    ...record.state,
-                    width: dimensions.width,
-                    height: dimensions.height,
-                  },
-                }
-              : record,
+            record.state.localId === localId ? { ...record, state: { ...record.state, progress } } : record,
           ),
         );
+      };
+
+      try {
+        let dimensions = await getMediaDimensions(file);
+        const queuedRecord = uploadsRef.current.find((record) => record.state.localId === localId);
+        if (abortController.signal.aborted || !queuedRecord) return;
 
         let fileToUpload = file;
-        let isCompressing = false;
-
-        if (isVideoFile(file)) {
-          isCompressing = true;
-
-          setUploads((prev) =>
-            prev.map((record) =>
-              record.state.localId === localId
-                ? { ...record, state: { ...record.state, status: 'compressing' } }
-                : record,
-            ),
-          );
-
-          fileToUpload = await compressVideo(file, dimensions, {
-            signal: abortController.signal,
-            onProgress: (progress) => {
-              const overallProgress = Math.round(progress * 100 * 0.5);
-              setUploads((prev) =>
-                prev.map((record) =>
-                  record.state.localId === localId
-                    ? {
-                        ...record,
-                        state: {
-                          ...record.state,
-                          progress: overallProgress,
-                        },
-                      }
-                    : record,
-                ),
-              );
-            },
-          });
-        } else if (isImageFile(file) && dimensions.width && dimensions.height) {
-          isCompressing = true;
+        if (shouldProcess) {
+          const compress = isImageFile(file) ? compressImage : compressVideo;
 
           setUploads((prev) =>
             prev.map((record) =>
@@ -215,60 +135,51 @@ export function useComposeAttachments({
           );
 
           try {
-            fileToUpload = await compressImage(file, dimensions as { width: number; height: number }, {
+            const result = await compress(file, dimensions, {
               signal: abortController.signal,
-              onProgress: (progress) => {
-                const overallProgress = Math.round(progress * 100 * 0.5);
-                setUploads((prev) =>
-                  prev.map((record) =>
-                    record.state.localId === localId
-                      ? {
-                          ...record,
-                          state: {
-                            ...record.state,
-                            progress: overallProgress,
-                          },
-                        }
-                      : record,
-                  ),
-                );
-              },
+              onProgress: (progress) => updateProgress(Math.round(progress * 50)),
             });
+            fileToUpload = result.file;
+            dimensions = result.dimensions;
           } catch (error) {
-            console.warn('[upload:compression] Image compression failed, using original file', error);
+            if (isAbortError(error)) throw error;
+            console.warn('[upload:compression] Compression failed, using original file', error);
           }
         }
 
-        if (isCompressing) {
-          setUploads((prev) =>
-            prev.map((record) =>
-              record.state.localId === localId
-                ? { ...record, state: { ...record.state, status: 'uploading' } }
-                : record,
-            ),
-          );
+        const currentRecord = uploadsRef.current.find((record) => record.state.localId === localId);
+        if (abortController.signal.aborted || !currentRecord) return;
+        const nextPreviewUrl =
+          fileToUpload === file ? currentRecord.state.previewUrl : URL.createObjectURL(fileToUpload);
+        const applyProcessedFile = (record: UploadRecord): UploadRecord =>
+          record.state.localId === localId
+            ? {
+                ...record,
+                file: fileToUpload,
+                state: {
+                  ...record.state,
+                  name: fileToUpload.name,
+                  previewUrl: nextPreviewUrl,
+                  mimeType: getUploadMimeType(fileToUpload),
+                  size: fileToUpload.size,
+                  dimensions,
+                  status: 'uploading',
+                },
+              }
+            : record;
+        uploadsRef.current = uploadsRef.current.map(applyProcessedFile);
+        setUploads((prev) => prev.map(applyProcessedFile));
+        if (nextPreviewUrl !== currentRecord.state.previewUrl) {
+          URL.revokeObjectURL(currentRecord.state.previewUrl);
         }
 
         const result = await uploadAttachment({
           file: fileToUpload,
           dimensions,
-          order: currentState?.order,
+          order: queuedRecord.order,
           signal: abortController.signal,
           onProgress: (progress) => {
-            const overallProgress = isCompressing ? Math.round(50 + progress * 0.5) : progress;
-            setUploads((prev) =>
-              prev.map((record) =>
-                record.state.localId === localId
-                  ? {
-                      ...record,
-                      state: {
-                        ...record.state,
-                        progress: overallProgress,
-                      },
-                    }
-                  : record,
-              ),
-            );
+            updateProgress(shouldProcess ? Math.round(50 + progress * 0.5) : progress);
           },
         });
 
@@ -283,7 +194,6 @@ export function useComposeAttachments({
                     status: 'uploaded',
                     progress: 100,
                     attachmentId: result.attachmentId,
-                    errorMessage: undefined,
                   },
                 }
               : record,
@@ -305,7 +215,6 @@ export function useComposeAttachments({
                     ...record.state,
                     status: 'error',
                     progress: 0,
-                    attachmentId: undefined,
                     errorMessage: t`Upload failed`,
                   },
                 }
@@ -326,28 +235,31 @@ export function useComposeAttachments({
       const currentCount = existingAttachments.length + uploadsRef.current.length;
       if (currentCount + mediaFiles.length > maxAttachments) {
         const available = Math.max(0, maxAttachments - currentCount);
-        if (onError) {
-          onError(t`You can only upload up to ${maxAttachments} media files at once.`);
-        }
+        onError?.(t`You can only upload up to ${maxAttachments} media files at once.`);
         if (available === 0) return;
         allowedFiles = mediaFiles.slice(0, available);
       }
 
-      const queuedRecords: UploadRecord[] = allowedFiles.map((file, index) => ({
-        file,
-        state: {
-          localId: createClientGeneratedId('upload_'),
-          kind: isImageFile(file) ? 'image' : 'video',
-          name: file.name,
-          previewUrl: URL.createObjectURL(file),
-          mimeType: getUploadMimeType(file),
-          size: file.size,
-          order: index,
-          progress: 0,
-          status: 'uploading' as const,
-        },
-      }));
+      const queuedRecords: UploadRecord[] = allowedFiles.map((file, index) => {
+        const localId = createClientGeneratedId('upload_');
 
+        return {
+          file,
+          order: currentCount + index,
+          state: {
+            localId,
+            kind: isImageFile(file) ? 'image' : 'video',
+            name: file.name,
+            previewUrl: URL.createObjectURL(file),
+            mimeType: getUploadMimeType(file),
+            size: file.size,
+            progress: 0,
+            status: 'uploading',
+          },
+        };
+      });
+
+      uploadsRef.current = [...uploadsRef.current, ...queuedRecords];
       setUploads((prev) => [...prev, ...queuedRecords]);
       queuedRecords.forEach(({ state, file }) => {
         void startUpload(state.localId, file);
@@ -383,14 +295,10 @@ export function useComposeAttachments({
 
   const removeUpload = useCallback(
     (localId: string) => {
-      setUploads((prev) => {
-        const toRemove = prev.find((record) => record.state.localId === localId);
-        if (toRemove) {
-          cleanupRecord(toRemove);
-        }
-
-        return prev.filter((record) => record.state.localId !== localId);
-      });
+      const toRemove = uploadsRef.current.find((record) => record.state.localId === localId);
+      if (toRemove) cleanupRecord(toRemove);
+      uploadsRef.current = uploadsRef.current.filter((record) => record.state.localId !== localId);
+      setUploads((prev) => prev.filter((record) => record.state.localId !== localId));
     },
     [cleanupRecord],
   );
@@ -399,7 +307,7 @@ export function useComposeAttachments({
     (localId: string) => {
       const file = uploadsRef.current.find((record) => record.state.localId === localId)?.file;
       if (!file) return;
-      void startUpload(localId, file);
+      void startUpload(localId, file, false);
     },
     [startUpload],
   );
@@ -411,28 +319,21 @@ export function useComposeAttachments({
 
   const clearAll = useCallback(() => {
     setExistingAttachments([]);
-    clearUploads(uploadsRef.current);
+    clearUploads();
   }, [clearUploads]);
 
-  const hasPending = uploads.some((record) => record.state.status === 'uploading');
+  const hasPending = uploads.some(
+    (record) => record.state.status === 'compressing' || record.state.status === 'uploading',
+  );
   const hasFailed = uploads.some((record) => record.state.status === 'error');
 
   const previewItems: UploadPreviewItem[] = [
     ...existingAttachments.map((attachment) => ({
       itemType: 'existing' as const,
       localId: `existing-${attachment.id}`,
-      attachmentId: attachment.id,
       kind: attachment.kind,
       name: attachment.fileName,
-      previewUrl:
-        attachment.kind.startsWith('image/') ||
-        isHeicLikeMedia({
-          mimeType: attachment.kind,
-          fileName: attachment.fileName,
-          url: attachment.url,
-        })
-          ? attachment.url
-          : undefined,
+      previewUrl: isImageKind(attachment.kind, attachment) ? attachment.url : undefined,
     })),
     ...uploads.map((record) => ({
       itemType: 'pending' as const,

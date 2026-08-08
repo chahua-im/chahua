@@ -34,7 +34,7 @@ type BadgeCapableWorkerNavigator = WorkerNavigator & {
 const EXTERNAL_ASSET_CACHE_NAME = 'external-assets-v1';
 const EXTERNAL_CACHEABLE_DESTINATIONS = new Set(['audio', 'font', 'image', 'script', 'style', 'video']);
 const EXTERNAL_ASSET_EXTENSION_RE =
-  /\.(?:avif|css|eot|gif|heic|ico|jpeg|jpg|js|json|m4a|mp3|mp4|ogg|otf|png|svg|ttf|wav|webm|webp|woff2?)(?:$|\?)/i;
+  /\.(?:avif|css|eot|gif|heic|heif|ico|jpeg|jpg|js|json|m4a|mp3|mp4|ogg|otf|png|svg|ttf|wav|webm|webp|woff2?)(?:$|\?)/i;
 
 const assetBaseUrl = typeof __ASSET_BASE__ !== 'undefined' && __ASSET_BASE__ ? new URL(__ASSET_BASE__) : null;
 const normalizedAssetBasePath = assetBaseUrl ? normalizeBasePath(assetBaseUrl.pathname) : null;
