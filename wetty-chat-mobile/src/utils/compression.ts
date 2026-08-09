@@ -109,7 +109,15 @@ export async function compressVideo(
       tracks: 'primary',
       video: { codec, ...targetDimensions, quality: new Quality('low') },
       audio: { quality: new Quality('low') },
+      showWarnings: false,
     });
+
+    if (conversion.discardedTracks.length > 0) {
+      console.warn('[upload:compression] Video compression skipped, conversion would drop tracks', {
+        discarded: conversion.discardedTracks.map(({ track, reason }) => ({ type: track.type, reason })),
+      });
+      return { file, dimensions };
+    }
 
     conversion.onProgress = onProgress;
     const abortHandler = () => {

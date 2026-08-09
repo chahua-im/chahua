@@ -1,9 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { compressImage } from './compression';
+import { compressImage, compressVideo } from './compression';
 
 const heicMocks = vi.hoisted(() => ({ heicTo: vi.fn() }));
+const mediabunnyMocks = vi.hoisted(() => ({ init: vi.fn(), execute: vi.fn() }));
 
 vi.mock('heic-to/csp', () => ({ heicTo: heicMocks.heicTo }));
+vi.mock('mediabunny', () => ({
+  ALL_FORMATS: [],
+  BlobSource: class {},
+  BufferTarget: class {
+    buffer = new ArrayBuffer(8);
+  },
+  Conversion: { init: mediabunnyMocks.init },
+  getFirstEncodableVideoCodec: vi.fn().mockResolvedValue('avc'),
+  Input: class {},
+  Mp4OutputFormat: class {},
+  Output: class {},
+  Quality: class {},
+}));
 
 function mockCanvas(output: Blob) {
   const context = {
@@ -84,5 +98,45 @@ describe('image compression sources', () => {
     expect(result.file).toBe(file);
     expect(result.dimensions).toEqual({ width: 4032, height: 3024 });
     expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('video compression', () => {
+  const dimensions = { width: 1920, height: 1080 };
+
+  it('preserves the original when conversion would discard a video track', async () => {
+    const file = new File([new Uint8Array(1024 * 1024)], 'video.mp4', { type: 'video/mp4' });
+    mediabunnyMocks.init.mockResolvedValue({
+      discardedTracks: [{ track: { type: 'video' }, reason: 'undecodable_source_codec' }],
+      utilizedTracks: [],
+      execute: mediabunnyMocks.execute,
+      cancel: vi.fn(),
+    });
+
+    const result = await compressVideo(file, dimensions);
+
+    expect(result.file).toBe(file);
+    expect(result.dimensions).toEqual(dimensions);
+    expect(mediabunnyMocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('uses a healthy conversion result', async () => {
+    const file = new File([new Uint8Array(1024 * 1024)], 'video.mp4', { type: 'video/mp4' });
+    mediabunnyMocks.init.mockResolvedValue({
+      discardedTracks: [],
+      utilizedTracks: [{ type: 'video' }],
+      execute: mediabunnyMocks.execute,
+      cancel: vi.fn(),
+    });
+
+    const result = await compressVideo(file, dimensions);
+
+    expect(mediabunnyMocks.init).toHaveBeenCalledWith(
+      expect.objectContaining({ showWarnings: false, tracks: 'primary' }),
+    );
+    expect(mediabunnyMocks.execute).toHaveBeenCalledOnce();
+    expect(result.file).not.toBe(file);
+    expect(result.file).toMatchObject({ name: 'video.mp4.mp4', type: 'video/mp4' });
+    expect(result.dimensions).toEqual({ width: 1280, height: 720 });
   });
 });
