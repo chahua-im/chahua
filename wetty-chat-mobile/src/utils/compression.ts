@@ -1,4 +1,5 @@
 import { isHeicLikeMedia } from '@/types/attachmentKind';
+import { isAnimatedImageFile } from '@/utils/animatedImage';
 
 interface Dimensions {
   width: number;
@@ -257,6 +258,10 @@ export async function compressImage(
   dimensions?: Dimensions,
   options: MediaProcessingOptions = {},
 ): Promise<CompressedMedia> {
+  if (await isAnimatedImageFile(file)) {
+    return { file, dimensions };
+  }
+
   if (dimensions) {
     return compressImageSource(file, file, dimensions, options);
   }

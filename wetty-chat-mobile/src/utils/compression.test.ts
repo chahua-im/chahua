@@ -73,4 +73,16 @@ describe('image compression sources', () => {
     expect(result.file.name).toBe('photo.heic.avif');
     expect(result.dimensions).toEqual({ width: 1280, height: 960 });
   });
+
+  it('preserves animated GIFs without creating a bitmap', async () => {
+    const file = new File(['animated GIF'], 'loop.gif', { type: 'image/gif' });
+    const createImageBitmapMock = vi.fn();
+    vi.stubGlobal('createImageBitmap', createImageBitmapMock);
+
+    const result = await compressImage(file, { width: 4032, height: 3024 });
+
+    expect(result.file).toBe(file);
+    expect(result.dimensions).toEqual({ width: 4032, height: 3024 });
+    expect(createImageBitmapMock).not.toHaveBeenCalled();
+  });
 });
