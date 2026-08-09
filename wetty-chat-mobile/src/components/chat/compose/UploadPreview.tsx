@@ -42,10 +42,14 @@ function renderCardMedia(derived: DerivedItem, onPreview: () => void): ReactNode
     );
   }
 
-  const thumbnail =
-    isImagePreview && item.itemType === 'pending' ? (
-      <img src={item.previewUrl} alt={item.name} className={styles.previewImage} />
-    ) : isImagePreview ? (
+  let thumbnail: ReactNode;
+
+  if (!isImagePreview) {
+    thumbnail = <video src={item.previewUrl} autoPlay loop muted className={styles.previewImage} />;
+  } else if (item.itemType === 'pending') {
+    thumbnail = <img src={item.previewUrl} alt={item.name} className={styles.previewImage} />;
+  } else {
+    thumbnail = (
       <DisplayableImage
         src={item.previewUrl}
         mimeType={mimeType}
@@ -53,9 +57,8 @@ function renderCardMedia(derived: DerivedItem, onPreview: () => void): ReactNode
         alt={item.name}
         className={styles.previewImage}
       />
-    ) : (
-      <video src={item.previewUrl} autoPlay loop muted className={styles.previewImage} />
     );
+  }
 
   if (canPreview) {
     return (
