@@ -140,6 +140,9 @@ const externalAssetCacheControlPlugin = {
     return isCacheControlDisabled(cacheControl) ? null : response;
   },
 
+  // TODO: An opaque response cached for a no-cors <img> can be returned to the CORS fetch used by
+  // convertHeicSourceToWebpBlob, causing HEIC fallback to fail with status 0. Bypass opaque cache entries for non-no-cors requests.
+
   async cachedResponseWillBeUsed({
     cachedResponse,
   }: {
