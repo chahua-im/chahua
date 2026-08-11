@@ -14,13 +14,27 @@ pub enum ChatAttachmentKindFilter {
     All,
 }
 
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentResponse {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
     pub url: String,
+    pub kind: String,
+    pub size: i64,
+    pub file_name: String,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentSnapshot {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub id: i64,
+    pub external_reference: String,
     pub kind: String,
     pub size: i64,
     pub file_name: String,
