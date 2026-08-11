@@ -26,7 +26,7 @@ function appendFileExtension(fileName: string, extension: string) {
   return `${fileName}${extension}`;
 }
 
-const MAX_MEDIA_DIMENSION = 1280;
+const MAX_MEDIA_DIMENSION = 1920;
 const VIDEO_COMPRESSION_RATIO = 0.5;
 const IMAGE_COMPRESSION_RATIO = 0.75;
 const IMAGE_EXPORT_FORMATS = [

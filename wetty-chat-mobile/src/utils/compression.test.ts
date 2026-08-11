@@ -47,8 +47,8 @@ afterEach(() => {
 
 describe('image compression sources', () => {
   it.each([
-    [4032, 3024, 1280, 960],
-    [3024, 4032, 960, 1280],
+    [4032, 3024, 1920, 1440],
+    [3024, 4032, 1440, 1920],
     [640, 480, 640, 480],
   ])('resizes %sx%s files to %sx%s while creating the bitmap', async (width, height, targetWidth, targetHeight) => {
     const file = new File([new Uint8Array(100)], 'photo.jpg', { type: 'image/jpeg' });
@@ -81,11 +81,11 @@ describe('image compression sources', () => {
     const result = await compressImage(file);
 
     expect(createImageBitmapMock).not.toHaveBeenCalled();
-    expect(context.drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1280, 960);
+    expect(context.drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1920, 1440);
     expect(context.imageSmoothingQuality).toBe('high');
     expect(bitmap.close).toHaveBeenCalledOnce();
     expect(result.file.name).toBe('photo.heic.avif');
-    expect(result.dimensions).toEqual({ width: 1280, height: 960 });
+    expect(result.dimensions).toEqual({ width: 1920, height: 1440 });
   });
 
   it('preserves animated GIFs without creating a bitmap', async () => {
@@ -137,6 +137,6 @@ describe('video compression', () => {
     expect(mediabunnyMocks.execute).toHaveBeenCalledOnce();
     expect(result.file).not.toBe(file);
     expect(result.file).toMatchObject({ name: 'video.mp4.mp4', type: 'video/mp4' });
-    expect(result.dimensions).toEqual({ width: 1280, height: 720 });
+    expect(result.dimensions).toEqual({ width: 1920, height: 1080 });
   });
 });
