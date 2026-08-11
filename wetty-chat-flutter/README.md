@@ -9,11 +9,11 @@ The app reads the API base URL from a compile-time define:
 ```dart
 const String apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://d3tmiz1pin85hh.cloudfront.net/_api',
+  defaultValue: 'https://chahui.app/_api',
 );
 ```
 
-If `API_BASE_URL` is not provided, the app uses `https://d3tmiz1pin85hh.cloudfront.net/_api`.
+If `API_BASE_URL` is not provided, the app uses `https://chahui.app/_api`.
 
 ## Run with a development API
 

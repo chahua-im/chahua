@@ -1,6 +1,6 @@
 const String apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://d3tmiz1pin85hh.cloudfront.net/_api',
+  defaultValue: 'https://chahui.app/_api',
 );
 
 Map<String, String> legacyApiAuthHeadersForUser(int userId) {
