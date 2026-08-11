@@ -1,7 +1,7 @@
 import { defineConfig, mergeConfig } from 'vite';
 import { createBaseConfig } from './vite.config.base';
 
-const ASSET_URL = 'https://d3tmiz1pin85hh.cloudfront.net';
+const ASSET_URL = 'https://chahui.app';
 const ASSET_BASE = `${ASSET_URL}/assets`;
 const API_BASE_URL = `${ASSET_URL}/_api`;
 
