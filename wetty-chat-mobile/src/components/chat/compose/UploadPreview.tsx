@@ -3,7 +3,7 @@ import { IonIcon } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { alertCircleOutline, closeCircle, documentOutline, refreshOutline } from 'ionicons/icons';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
-import { isImageKind } from '@/types/attachmentKind';
+import { isImageKind } from '@/utils/fileType';
 import { ImageViewer, type ImageViewerItem } from '@/components/chat/messages/media/ImageViewer';
 import type { UploadPreviewItem } from './types';
 import styles from './UploadPreview.module.scss';

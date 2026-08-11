@@ -11,8 +11,34 @@ function webpHeader(animationFlag: number) {
   return [...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WEBP'), ...ascii('VP8X'), 10, 0, 0, 0, animationFlag];
 }
 
+function pngChunk(type: string, data: number[] = []) {
+  return [
+    (data.length >>> 24) & 0xff,
+    (data.length >>> 16) & 0xff,
+    (data.length >>> 8) & 0xff,
+    data.length & 0xff,
+    ...ascii(type),
+    ...data,
+    0,
+    0,
+    0,
+    0,
+  ];
+}
+
 function pngHeader(...chunkTypes: string[]) {
-  return [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...chunkTypes.flatMap(ascii)];
+  return [
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    ...pngChunk('IHDR', Array(13).fill(0)),
+    ...chunkTypes.flatMap((type) => pngChunk(type)),
+  ];
 }
 
 function avifHeader(...brands: string[]) {

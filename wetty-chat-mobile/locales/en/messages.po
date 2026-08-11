@@ -1153,6 +1153,9 @@ msgstr "Sticker preview"
 msgid "stickers"
 msgstr "stickers"
 
+msgid "Stickers must be an image or a WebM video."
+msgstr "Stickers must be an image or a WebM video."
+
 msgid "Subscribe"
 msgstr "Subscribe"
 
@@ -1177,6 +1180,9 @@ msgstr "The invite code entered is not valid."
 
 msgid "this group"
 msgstr "this group"
+
+msgid "This image format isn't supported. Please choose a JPEG or PNG."
+msgstr "This image format isn't supported. Please choose a JPEG or PNG."
 
 msgid "This invite is invalid or has expired."
 msgstr "This invite is invalid or has expired."

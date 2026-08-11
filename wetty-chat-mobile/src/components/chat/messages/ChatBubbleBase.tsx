@@ -29,7 +29,7 @@ import { SingleMediaAttachment } from './media/SingleMediaAttachment';
 import { JustifiedMediaGallery } from './media/JustifiedMediaGallery';
 import { VideoPreview } from './media/VideoPreview';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
-import { isImageKind } from '@/types/attachmentKind';
+import { isImageKind } from '@/utils/fileType';
 import {
   parseChatBubbleContentToRichItems,
   getMessageLayoutStats,

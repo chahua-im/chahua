@@ -16,6 +16,7 @@ import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { requestGroupAvatarUploadUrl, updateGroupInfo } from '@/api/group';
 import { uploadFileToS3 } from '@/api/upload';
+import { categorizeAttachmentKind, detectFileMimeType, isHeicLikeMedia } from '@/utils/fileType';
 import { setChatMeta } from '@/store/chatsSlice';
 import { BackButton } from '@/components/BackButton';
 import { GroupProfile } from '@/components/chat/profiles/GroupProfile';
@@ -210,8 +211,13 @@ function GroupSettingsSession({ chatId, backAction }: { chatId: string; backActi
   };
 
   const handleAvatarUpload = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
+    const contentType = await detectFileMimeType(file);
+    if (categorizeAttachmentKind(contentType) !== 'image') {
       presentToast({ message: t`Please choose an image file`, duration: 3000 });
+      return;
+    }
+    if (isHeicLikeMedia({ mimeType: contentType, fileName: file.name })) {
+      presentToast({ message: t`This image format isn't supported. Please choose a JPEG or PNG.`, duration: 3000 });
       return;
     }
 
@@ -228,7 +234,7 @@ function GroupSettingsSession({ chatId, backAction }: { chatId: string; backActi
     try {
       const uploadRes = await requestGroupAvatarUploadUrl(chatId, {
         filename: file.name,
-        contentType: file.type || 'application/octet-stream',
+        contentType,
         size: file.size,
       });
       const { imageId, uploadUrl, uploadHeaders } = uploadRes.data;

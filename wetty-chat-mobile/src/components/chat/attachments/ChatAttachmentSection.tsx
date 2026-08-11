@@ -4,7 +4,7 @@ import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import type { ChatAttachmentListItem } from '@/api/attachments';
 import { ImageViewer, type ImageViewerItem } from '@/components/chat/messages/media/ImageViewer';
-import { isImageKind } from '@/types/attachmentKind';
+import { isImageKind } from '@/utils/fileType';
 import { ChatAttachmentGrid } from './ChatAttachmentGrid';
 import { ChatAttachmentTabs, type AttachmentTabFilter } from './ChatAttachmentTabs';
 import { useChatAttachments } from './useChatAttachments';
