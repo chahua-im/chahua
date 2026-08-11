@@ -5,7 +5,13 @@ import type { Attachment } from '@/api/messages';
 import type { ComposeUploadInput, ComposeUploadResult, Dimensions, UploadPreviewItem, UploadRecord } from './types';
 
 import { MAX_ATTACHMENTS_PER_MESSAGE } from '@/constants/media';
-import { getUploadMimeType, isImageFile, isImageKind, isSupportedMediaFile } from '@/types/attachmentKind';
+import {
+  categorizeAttachmentKind,
+  detectFileMimeType,
+  isImageKind,
+  mayBeMediaFile,
+  withDetectedMimeType,
+} from '@/utils/fileType';
 import { createClientGeneratedId } from '@/utils/clientGeneratedId';
 import { compressVideo, compressImage } from '@/utils/compression';
 
@@ -26,8 +32,8 @@ const getNativeImageDimensions = (file: File): Promise<Dimensions | undefined> =
     img.src = objectUrl;
   });
 
-function getMediaDimensions(file: File): Promise<Dimensions | undefined> {
-  if (isImageFile(file)) {
+function getMediaDimensions(file: File, mimeType: string): Promise<Dimensions | undefined> {
+  if (categorizeAttachmentKind(mimeType) === 'image') {
     return getNativeImageDimensions(file);
   }
 
@@ -89,7 +95,7 @@ export function useComposeAttachments({
   );
 
   const startUpload = useCallback(
-    async (localId: string, file: File, shouldProcess = true) => {
+    async (localId: string, file: File, mimeType: string, shouldProcess = true) => {
       const abortController = new AbortController();
 
       const attachController = (record: UploadRecord): UploadRecord =>
@@ -118,13 +124,13 @@ export function useComposeAttachments({
       };
 
       try {
-        let dimensions = await getMediaDimensions(file);
+        let dimensions = await getMediaDimensions(file, mimeType);
         const queuedRecord = uploadsRef.current.find((record) => record.state.localId === localId);
         if (abortController.signal.aborted || !queuedRecord) return;
 
         let fileToUpload = file;
         if (shouldProcess) {
-          const compress = isImageFile(file) ? compressImage : compressVideo;
+          const compress = categorizeAttachmentKind(mimeType) === 'image' ? compressImage : compressVideo;
 
           setUploads((prev) =>
             prev.map((record) =>
@@ -147,6 +153,11 @@ export function useComposeAttachments({
           }
         }
 
+        let uploadMimeType = mimeType;
+        if (fileToUpload !== file) {
+          uploadMimeType = await detectFileMimeType(fileToUpload);
+        }
+
         const currentRecord = uploadsRef.current.find((record) => record.state.localId === localId);
         if (abortController.signal.aborted || !currentRecord) return;
         const nextPreviewUrl =
@@ -160,7 +171,7 @@ export function useComposeAttachments({
                   ...record.state,
                   name: fileToUpload.name,
                   previewUrl: nextPreviewUrl,
-                  mimeType: getUploadMimeType(fileToUpload),
+                  mimeType: uploadMimeType,
                   size: fileToUpload.size,
                   dimensions,
                   status: 'uploading',
@@ -227,8 +238,14 @@ export function useComposeAttachments({
   );
 
   const queueFiles = useCallback(
-    (files: File[]) => {
-      const mediaFiles = files.filter(isSupportedMediaFile);
+    async (files: File[]) => {
+      const detectedTypes = await Promise.all(files.map(detectFileMimeType));
+      const mediaFiles = files
+        .map((file, index) => ({ file, mimeType: detectedTypes[index] }))
+        .filter(({ mimeType }) => {
+          const kind = categorizeAttachmentKind(mimeType);
+          return kind === 'image' || kind === 'video';
+        });
       if (mediaFiles.length === 0) return;
 
       let allowedFiles = mediaFiles;
@@ -240,19 +257,20 @@ export function useComposeAttachments({
         allowedFiles = mediaFiles.slice(0, available);
       }
 
-      const queuedRecords: UploadRecord[] = allowedFiles.map((file, index) => {
+      const queuedRecords: UploadRecord[] = allowedFiles.map(({ file, mimeType }, index) => {
         const localId = createClientGeneratedId('upload_');
+        const fileWithDetectedMimeType = withDetectedMimeType(file, mimeType);
 
         return {
-          file,
+          file: fileWithDetectedMimeType,
           order: currentCount + index,
           state: {
             localId,
-            kind: isImageFile(file) ? 'image' : 'video',
-            name: file.name,
-            previewUrl: URL.createObjectURL(file),
-            mimeType: getUploadMimeType(file),
-            size: file.size,
+            kind: categorizeAttachmentKind(mimeType) === 'image' ? 'image' : 'video',
+            name: fileWithDetectedMimeType.name,
+            previewUrl: URL.createObjectURL(fileWithDetectedMimeType),
+            mimeType,
+            size: fileWithDetectedMimeType.size,
             progress: 0,
             status: 'uploading',
           },
@@ -262,7 +280,7 @@ export function useComposeAttachments({
       uploadsRef.current = [...uploadsRef.current, ...queuedRecords];
       setUploads((prev) => [...prev, ...queuedRecords]);
       queuedRecords.forEach(({ state, file }) => {
-        void startUpload(state.localId, file);
+        void startUpload(state.localId, file, state.mimeType);
       });
     },
     [startUpload, existingAttachments, maxAttachments, onError],
@@ -278,14 +296,14 @@ export function useComposeAttachments({
       const files: File[] = [];
       for (let index = 0; index < items.length; index += 1) {
         const file = items[index].getAsFile();
-        if (file && isSupportedMediaFile(file)) {
+        if (file && mayBeMediaFile(file)) {
           files.push(file);
         }
       }
 
       if (files.length > 0) {
         event.preventDefault();
-        queueFiles(files);
+        void queueFiles(files);
       }
     };
 
@@ -305,9 +323,9 @@ export function useComposeAttachments({
 
   const retryUpload = useCallback(
     (localId: string) => {
-      const file = uploadsRef.current.find((record) => record.state.localId === localId)?.file;
-      if (!file) return;
-      void startUpload(localId, file, false);
+      const record = uploadsRef.current.find((upload) => upload.state.localId === localId);
+      if (!record) return;
+      void startUpload(localId, record.file, record.state.mimeType, false);
     },
     [startUpload],
   );

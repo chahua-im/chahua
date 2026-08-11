@@ -1,4 +1,4 @@
-import { isHeicLikeMedia } from '@/types/attachmentKind';
+import { isHeicLikeMedia } from '@/utils/fileType';
 import { isAnimatedImageFile } from '@/utils/animatedImage';
 
 interface Dimensions {

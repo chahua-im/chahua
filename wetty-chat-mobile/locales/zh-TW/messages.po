@@ -1153,6 +1153,9 @@ msgstr "貼紙預覽"
 msgid "stickers"
 msgstr "個貼紙"
 
+msgid "Stickers must be an image or a WebM video."
+msgstr "貼圖必須是圖片或 WebM 影片。"
+
 msgid "Subscribe"
 msgstr "訂閱"
 
@@ -1177,6 +1180,9 @@ msgstr "輸入的邀請碼無效。"
 
 msgid "this group"
 msgstr "此群組"
+
+msgid "This image format isn't supported. Please choose a JPEG or PNG."
+msgstr "不支援此圖片格式，請選擇 JPEG 或 PNG 圖片。"
 
 msgid "This invite is invalid or has expired."
 msgstr "此邀請無效或已過期。"

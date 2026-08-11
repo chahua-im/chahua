@@ -1,6 +1,6 @@
 import { type ImgHTMLAttributes, type SyntheticEvent, useEffect, useRef, useState } from 'react';
 import { convertHeicSourceToWebpBlob } from '@/utils/compression';
-import { isHeicLikeMedia } from '@/types/attachmentKind';
+import { isHeicLikeMedia } from '@/utils/fileType';
 
 interface DisplayableImageProps extends ImgHTMLAttributes<HTMLImageElement> {
   src: string;

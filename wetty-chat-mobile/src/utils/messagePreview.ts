@@ -1,5 +1,4 @@
-import type { AttachmentMimeCategory } from '@/types/attachmentKind';
-import { categorizeAttachmentKind } from '@/types/attachmentKind';
+import { categorizeAttachmentKind, type AttachmentMimeCategory } from '@/utils/fileType';
 export const MESSAGE_PREVIEW_MAX = 100;
 
 export interface PreviewAttachmentLike {

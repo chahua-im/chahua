@@ -7,7 +7,7 @@ import { useIsDesktop } from '@/hooks/platformHooks';
 import { appHistory } from '@/utils/navigationHistory';
 import { getOverlayPortalTarget } from '@/utils/dom';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
-import { isImageKind } from '@/types/attachmentKind';
+import { isImageKind } from '@/utils/fileType';
 import styles from './ImageViewer.module.scss';
 
 const MAX_SCALE = 5;

@@ -34,6 +34,7 @@
     "axios": "^1.13.6",
     "emoji-picker-react": "^4.18.0",
     "emoji-regex-xs": "^2.0.1",
+    "file-type": "^21.3.4",
     "heic-to": "^1.4.2",
     "idb": "^8.0.3",
     "ionicons": "^8.0.13",

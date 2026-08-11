@@ -15,7 +15,6 @@ import { useMentionAutocomplete } from './useMentionAutocomplete';
 import { MentionAutocomplete } from './MentionAutocomplete';
 import type { StickerSummary } from '@/api/stickers';
 import type { ComposeSendPayload, ComposeUploadInput, ComposeUploadResult, EditingMessage, ReplyTo } from './types';
-import { isSupportedMediaFile } from '@/types/attachmentKind';
 import { useChatDraft, loadDraft } from '@/hooks/useChatDraft';
 export type {
   ComposeSendAudioPayload,
@@ -283,9 +282,9 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
 
         if (containerRef.current && containerRef.current.offsetParent === null) return;
 
-        const files = Array.from(e.dataTransfer.files).filter(isSupportedMediaFile);
+        const files = Array.from(e.dataTransfer.files);
         if (files.length > 0) {
-          queueFiles(files);
+          void queueFiles(files);
         }
       },
       [queueFiles],

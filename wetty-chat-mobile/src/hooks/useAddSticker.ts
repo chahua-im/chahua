@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { useIonToast } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { uploadStickerToPack, MAX_STICKER_FILE_BYTES, type StickerSummary } from '@/api/stickers';
+import { categorizeAttachmentKind, detectFileMimeType, isHeicLikeMedia, normalizeMimeType } from '@/utils/fileType';
 
 interface UseAddStickerOptions {
   packId?: string;
@@ -13,7 +14,7 @@ export function useAddSticker({ packId, onSuccess }: UseAddStickerOptions) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [presentToast] = useIonToast();
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     e.target.value = '';
     if (!file) return;
@@ -26,7 +27,23 @@ export function useAddSticker({ packId, onSuccess }: UseAddStickerOptions) {
       });
       return;
     }
-    setAddStickerFile(file);
+
+    const contentType = await detectFileMimeType(file);
+    const isAllowed =
+      (categorizeAttachmentKind(contentType) === 'image' &&
+        !isHeicLikeMedia({ mimeType: contentType, fileName: file.name })) ||
+      normalizeMimeType(contentType) === 'video/webm';
+    if (!isAllowed) {
+      presentToast({
+        message: t`Stickers must be an image or a WebM video.`,
+        duration: 3000,
+        position: 'bottom',
+        cssClass: 'toast-center',
+      });
+      return;
+    }
+
+    setAddStickerFile(contentType === file.type ? file : new File([file], file.name, { type: contentType }));
   };
 
   const handleAddSticker = async (file: File, emoji: string, name: string) => {

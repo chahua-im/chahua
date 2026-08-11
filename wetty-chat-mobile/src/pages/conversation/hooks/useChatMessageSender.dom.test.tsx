@@ -59,9 +59,9 @@ vi.mock('@/utils/badges', () => ({
   syncAppBadgeCount: vi.fn(),
 }));
 
-vi.mock('@/types/attachmentKind', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/types/attachmentKind')>()),
-  getUploadMimeType: () => 'text/plain',
+vi.mock('@/utils/fileType', async (importOriginal) => ({
+  ...(await importOriginal()),
+  detectFileMimeType: async () => 'text/plain',
 }));
 
 vi.mock('@lingui/core/macro', () => ({
