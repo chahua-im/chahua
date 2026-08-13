@@ -13,6 +13,7 @@ import {
   withDetectedMimeType,
 } from '@/utils/fileType';
 import { createClientGeneratedId } from '@/utils/clientGeneratedId';
+import { isFeatureEnabled } from '@/features';
 import { compressVideo, compressImage } from '@/utils/compression';
 
 const isAbortError = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
@@ -71,6 +72,7 @@ export function useComposeAttachments({
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<Attachment[]>(initialExistingAttachments);
   const uploadsRef = useRef<UploadRecord[]>([]);
+  const mediaCompressionEnabled = isFeatureEnabled('mediaCompression');
 
   const cleanupRecord = useCallback((record: UploadRecord) => {
     record.abortController?.abort();
@@ -95,7 +97,7 @@ export function useComposeAttachments({
   );
 
   const startUpload = useCallback(
-    async (localId: string, file: File, mimeType: string, shouldProcess = true) => {
+    async (localId: string, file: File, mimeType: string, shouldProcess = mediaCompressionEnabled) => {
       const abortController = new AbortController();
 
       const attachController = (record: UploadRecord): UploadRecord =>
@@ -234,7 +236,7 @@ export function useComposeAttachments({
         );
       }
     },
-    [uploadAttachment],
+    [uploadAttachment, mediaCompressionEnabled],
   );
 
   const queueFiles = useCallback(
