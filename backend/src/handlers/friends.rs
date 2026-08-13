@@ -413,12 +413,12 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_friends))
         .routes(routes!(delete_friend))
         .routes(routes!(create_friend_request))
-        .routes(routes!(list_incoming_requests, list_outgoing_requests))
-        .routes(routes!(
-            accept_friend_request,
-            reject_friend_request,
-            cancel_friend_request
-        ))
-        .routes(routes!(get_my_friend_settings, update_my_friend_settings))
+        .routes(routes!(list_incoming_requests))
+        .routes(routes!(list_outgoing_requests))
+        .routes(routes!(accept_friend_request))
+        .routes(routes!(reject_friend_request))
+        .routes(routes!(cancel_friend_request))
+        .routes(routes!(get_my_friend_settings))
+        .routes(routes!(update_my_friend_settings))
         .routes(routes!(get_user_friend_add_info))
 }
