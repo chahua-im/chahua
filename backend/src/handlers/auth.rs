@@ -6,8 +6,9 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::dto::auth::{AuthTokenResponse, DevSessionRequest};
 use crate::errors::AppError;
-use crate::utils::auth::{required_client_id, BearerSession};
+use crate::utils::auth::{is_valid_client_id, BearerSession, X_CLIENT_ID};
 use crate::AppState;
+use uuid::Uuid;
 
 #[utoipa::path(
     post,
@@ -37,7 +38,7 @@ async fn post_refresh(
     request_body = DevSessionRequest,
     responses(
         (status = 200, description = "Development v2 session token", body = AuthTokenResponse),
-        (status = 400, description = "Invalid UID or client ID"),
+        (status = 400, description = "Invalid UID or missing client ID"),
         (status = 404, description = "Not found")
     )
 )]
@@ -53,12 +54,26 @@ async fn post_dev_session(
         return Err(AppError::BadRequest("UID must be a positive i32"));
     }
 
-    let client_id = required_client_id(&headers)?;
+    let client_id = dev_session_client_id(&headers)?;
     let token = state
         .auth_token_service
         .issue_session(request.uid, &client_id)?;
 
     Ok(Json(AuthTokenResponse { token }))
+}
+
+fn dev_session_client_id(headers: &HeaderMap) -> Result<String, AppError> {
+    let value = headers
+        .get(X_CLIENT_ID)
+        .ok_or(AppError::BadRequest("Missing X-Client-Id header"))?
+        .to_str()
+        .ok()
+        .map(str::trim)
+        .filter(|value| is_valid_client_id(value));
+
+    Ok(value
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| Uuid::new_v4().to_string()))
 }
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -69,7 +84,9 @@ pub fn router() -> OpenApiRouter<AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::router;
+    use super::{dev_session_client_id, router};
+    use crate::utils::auth::{is_valid_client_id, X_CLIENT_ID};
+    use axum::http::{HeaderMap, HeaderValue};
     #[test]
     fn development_session_is_in_openapi() {
         assert!(router()
@@ -77,5 +94,15 @@ mod tests {
             .paths
             .paths
             .contains_key("/dev-session"));
+    }
+
+    #[test]
+    fn development_session_generates_client_id_when_header_is_invalid() {
+        let mut headers = HeaderMap::new();
+        headers.insert(X_CLIENT_ID, HeaderValue::from_static("invalid client id"));
+
+        let client_id = dev_session_client_id(&headers).expect("invalid IDs are replaced");
+
+        assert!(is_valid_client_id(&client_id));
     }
 }
