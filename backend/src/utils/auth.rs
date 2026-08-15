@@ -149,7 +149,7 @@ fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, (StatusCode, &'stat
     Ok(Some(token))
 }
 
-fn validate_client_id(value: &str) -> bool {
+pub(crate) fn is_valid_client_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value
@@ -170,7 +170,7 @@ pub fn optional_client_id(
                 )
             })?;
             let value = value.trim();
-            if !validate_client_id(value) {
+            if !is_valid_client_id(value) {
                 return Err((StatusCode::BAD_REQUEST, "X-Client-Id is invalid"));
             }
             Ok(Some(value.to_string()))
