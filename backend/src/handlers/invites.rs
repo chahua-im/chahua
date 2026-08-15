@@ -18,7 +18,6 @@ use crate::dto::invites::{
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::handlers::chats::{send_prepared_message, PreparedMessageSend, SendMessageOutcome};
 use crate::handlers::groups::load_group_info;
 use crate::handlers::members::{check_membership, require_admin_role};
 use crate::models::{
@@ -26,6 +25,7 @@ use crate::models::{
 };
 use crate::schema::{group_membership, invites};
 use crate::services::invites as invite_service;
+use crate::services::messages::{send_prepared_message, PreparedMessageSend, SendMessageOutcome};
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
@@ -711,10 +711,10 @@ async fn post_redeem_invite(
     };
 
     if let Ok(SendMessageOutcome::Created(send_result)) =
-        crate::handlers::chats::send_prepared_message(
+        crate::services::messages::send_prepared_message(
             conn,
             &state,
-            crate::handlers::chats::PreparedMessageSend {
+            crate::services::messages::PreparedMessageSend {
                 chat_id,
                 sender_uid: uid,
                 message: Some("joined the chat".to_string()),

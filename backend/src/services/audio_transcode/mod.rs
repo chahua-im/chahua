@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use aws_sdk_s3::primitives::ByteStream;
-use chrono::Utc;
 use dashmap::DashSet;
 use diesel::prelude::*;
 use diesel::PgConnection;
@@ -17,12 +16,11 @@ use uuid::Uuid;
 
 use crate::dto::ws::ServerWsMessage;
 use crate::errors::AppError;
-use crate::handlers::chats::{
-    attach_metadata, build_message_side_effects, recalculate_group_last_message,
-};
 use crate::models::{Attachment, Message, MessageType, NewAttachment, TranscodeStatus};
 use crate::schema::{attachments, messages};
+use crate::services::chat::recalculate_group_last_message;
 use crate::services::media::MediaStore;
+use crate::services::messages::{attach_metadata, build_message_side_effects};
 use crate::AppState;
 
 const CHANNEL_BUFFER: usize = 64;
@@ -323,17 +321,15 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
         Some(attachment) if is_canonical_attachment(attachment) => AudioPublishOutcome::Done {
             swap_attachment: None,
         },
-        Some(attachment) => {
-            match transcode_attachment(&state.media, state.id_gen.as_ref(), attachment).await {
-                Ok(new_attachment) => AudioPublishOutcome::Done {
-                    swap_attachment: Some(new_attachment),
-                },
-                Err(err) => {
-                    tracing::warn!(message_id, attachment_id = attachment.id, error = %err, "audio transcode failed, publishing original attachment");
-                    AudioPublishOutcome::Failed
-                }
+        Some(attachment) => match transcode_attachment(&state.media, attachment).await {
+            Ok(new_attachment) => AudioPublishOutcome::Done {
+                swap_attachment: Some(new_attachment),
+            },
+            Err(err) => {
+                tracing::warn!(message_id, attachment_id = attachment.id, error = %err, "audio transcode failed, publishing original attachment");
+                AudioPublishOutcome::Failed
             }
-        }
+        },
         None => {
             tracing::warn!(
                 message_id,
@@ -350,18 +346,18 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
             use crate::schema::messages::dsl as m_dsl;
 
             if let AudioPublishOutcome::Done {
-                swap_attachment: Some(ref new_attachment),
-            } = outcome
+                swap_attachment: Some(new_attachment),
+            } = &outcome
             {
-                let mut linked_attachment = new_attachment.clone();
-                linked_attachment.message_id = Some(message.id);
-
-                diesel::update(attachments::table.filter(a_dsl::message_id.eq(message.id)))
-                    .set(a_dsl::message_id.eq::<Option<i64>>(None))
-                    .execute(conn)?;
-
-                diesel::insert_into(attachments::table)
-                    .values(&linked_attachment)
+                diesel::update(attachments::table.filter(a_dsl::id.eq(new_attachment.id)))
+                    .set((
+                        a_dsl::file_name.eq(&new_attachment.file_name),
+                        a_dsl::kind.eq(&new_attachment.kind),
+                        a_dsl::external_reference.eq(&new_attachment.external_reference),
+                        a_dsl::size.eq(new_attachment.size),
+                        a_dsl::width.eq(new_attachment.width),
+                        a_dsl::height.eq(new_attachment.height),
+                    ))
                     .execute(conn)?;
             }
 
@@ -398,6 +394,22 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
             Ok(updated_message)
         })?
     };
+    if let (
+        Some(previous),
+        AudioPublishOutcome::Done {
+            swap_attachment: Some(canonical),
+        },
+    ) = (&current_attachment, &outcome)
+    {
+        state
+            .media
+            .delete_object(&previous.external_reference)
+            .await;
+        tracing::debug!(
+            attachment_id = canonical.id,
+            "replaced source audio object with canonical object"
+        );
+    }
 
     let conn = &mut state.db.get()?;
     let response = attach_metadata(
@@ -414,7 +426,7 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
 
     if was_published {
         if matches!(
-            outcome,
+            &outcome,
             AudioPublishOutcome::Done {
                 swap_attachment: Some(_)
             }
@@ -545,7 +557,6 @@ fn is_canonical_attachment(attachment: &Attachment) -> bool {
 
 async fn transcode_attachment(
     media: &MediaStore,
-    id_gen: &crate::utils::ids::IdGen,
     attachment: &Attachment,
 ) -> Result<NewAttachment, String> {
     let source_bytes = media
@@ -567,19 +578,16 @@ async fn transcode_attachment(
         .await
         .map_err(|err| format!("upload canonical object: {err:?}"))?;
 
-    let new_attachment_id = crate::utils::ids::next_message_id(id_gen)
-        .await
-        .map_err(|err| format!("generate canonical attachment id: {err:?}"))?;
-
     Ok(NewAttachment {
-        id: new_attachment_id,
-        message_id: None,
+        id: attachment.id,
+        message_id: attachment.message_id,
+        uploader_uid: attachment.uploader_uid,
         file_name: canonical_file_name,
         kind: "audio/ogg".to_string(),
         external_reference: storage_key,
         size: output_bytes.len() as i64,
-        created_at: Utc::now(),
-        deleted_at: None,
+        created_at: attachment.created_at,
+        deleted_at: attachment.deleted_at,
         width: None,
         height: None,
         order: attachment.order,

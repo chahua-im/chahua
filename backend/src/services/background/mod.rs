@@ -290,7 +290,7 @@ fn process_bulk_delete(
     if total_deleted > 0 {
         unread_service.invalidate_chat(chat_id);
 
-        crate::handlers::chats::recalculate_group_last_message(conn, chat_id)
+        crate::services::chat::recalculate_group_last_message(conn, chat_id)
             .map_err(|e| format!("recalculate last message: {e:?}"))?;
 
         for &thread_root_id in thread_clamp.keys() {
@@ -326,7 +326,7 @@ fn process_bulk_delete(
         // batches are soft-deleted so the clamp subqueries' `deleted_at IS NULL`
         // filter excludes the full deleted set in one pass.
         if !chat_clamp_ids.is_empty() {
-            crate::handlers::chats::shift_chat_read_pointers_on_delete(
+            crate::services::chat::shift_chat_read_pointers_on_delete(
                 conn,
                 chat_id,
                 &chat_clamp_ids,

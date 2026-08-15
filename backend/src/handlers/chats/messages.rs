@@ -28,11 +28,11 @@ use crate::{
     AppState, MAX_MESSAGES_LIMIT,
 };
 
-use super::{
-    attach_metadata, extract_mention_uids, send_prepared_message, ChatIdPath, CreateMessageBody,
-    PreparedMessageSend, SendMessageOutcome,
+use super::{ChatIdPath, CreateMessageBody};
+use crate::services::messages::{
+    attach_metadata, extract_mention_uids, parse_attachment_ids, send_prepared_message,
+    validate_message, PreparedMessageSend, SendMessageOutcome,
 };
-
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesQuery {
@@ -130,43 +130,6 @@ fn search_offset(offset: Option<usize>, limit: usize) -> Result<usize, AppError>
 
 fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize> {
     next_offset.filter(|offset| offset.saturating_add(limit) <= MAX_SEARCH_RESULT_WINDOW)
-}
-
-const MAX_ATTACHMENTS_PER_MESSAGE: usize = 20;
-
-fn validate_message_payload(
-    body: &CreateMessageBody,
-    attachment_ids: &[i64],
-) -> Result<(), AppError> {
-    if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
-        return Err(AppError::BadRequest(
-            "Too many attachments (maximum of 20 allowed)",
-        ));
-    }
-
-    if matches!(body.message_type, MessageType::Sticker) {
-        body.sticker_id
-            .ok_or(AppError::BadRequest("Sticker ID is required"))?;
-
-        if !attachment_ids.is_empty() {
-            return Err(AppError::BadRequest(
-                "Sticker messages cannot include attachments",
-            ));
-        }
-        if body
-            .message
-            .as_deref()
-            .is_some_and(|message| !message.trim().is_empty())
-        {
-            return Err(AppError::BadRequest("Sticker messages cannot include text"));
-        }
-    } else if body.sticker_id.is_some() {
-        return Err(AppError::BadRequest(
-            "Sticker ID is only valid for sticker messages",
-        ));
-    }
-
-    Ok(())
 }
 
 /// GET /chats/:chat_id/messages — List messages in a chat (cursor-based).
@@ -592,12 +555,7 @@ async fn post_message(
 
     check_membership(conn, chat_id, uid)?;
     validate_client_message_type(&body.message_type)?;
-    let attachment_ids: Vec<i64> = body
-        .attachment_ids
-        .iter()
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    validate_message_payload(&body, &attachment_ids)?;
+    let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
 
     // Keep message creation and read-position advancement atomic.
     diesel::sql_query("BEGIN").execute(conn)?;
@@ -610,11 +568,7 @@ async fn post_message(
             PreparedMessageSend {
                 chat_id,
                 sender_uid: uid,
-                message: if matches!(body.message_type, MessageType::Sticker) {
-                    None
-                } else {
-                    body.message
-                },
+                message: body.message,
                 message_type: body.message_type,
                 sticker_id: body.sticker_id,
                 reply_to_id: body.reply_to_id,
@@ -713,12 +667,7 @@ pub(super) async fn post_thread_message(
             "Threads can only be created on text messages",
         ));
     }
-    let attachment_ids: Vec<i64> = body
-        .attachment_ids
-        .iter()
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    validate_message_payload(&body, &attachment_ids)?;
+    let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
 
     // Begin transaction: message insert + thread_meta + subscriptions are atomic.
     // send_prepared_message is async so we use raw BEGIN/COMMIT.
@@ -732,11 +681,7 @@ pub(super) async fn post_thread_message(
             PreparedMessageSend {
                 chat_id,
                 sender_uid: uid,
-                message: if matches!(body.message_type, MessageType::Sticker) {
-                    None
-                } else {
-                    body.message
-                },
+                message: body.message,
                 message_type: body.message_type,
                 sticker_id: body.sticker_id,
                 reply_to_id: body.reply_to_id,
@@ -902,63 +847,81 @@ async fn patch_message(
 
     check_membership(conn, chat_id, uid)?;
 
-    // Verify message exists and belongs to the user
+    let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
+    let now = Utc::now();
+    let updated_message: Message = conn.transaction::<_, AppError, _>(|conn| {
+        use crate::schema::attachments::dsl as a_dsl;
+        let message: Message = messages::table
+            .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
+            .for_update()
+            .select(Message::as_select())
+            .first(conn)
+            .optional()?
+            .ok_or(AppError::NotFound("Message not found"))?;
+        if message.sender_uid != uid {
+            return Err(AppError::Forbidden("You can only edit your own messages"));
+        }
+        if message.deleted_at.is_some() {
+            return Err(AppError::BadRequest("Cannot edit deleted message"));
+        }
+        if !message.is_published {
+            return Err(AppError::BadRequest("Cannot edit unpublished message"));
+        }
+        // Only user-composed messages carry editable content. Invite and system
+        // bodies are generated server-side (an invite code, a membership
+        // notice), and stickers and voice notes have no editable text.
+        if !matches!(message.message_type, MessageType::Text | MessageType::File) {
+            return Err(AppError::BadRequest("This message type cannot be edited"));
+        }
 
-    let message: Message = messages::table
-        .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
-        .select(Message::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Message not found"))?;
+        let requested = attachments::table
+            .filter(a_dsl::id.eq_any(&attachment_ids))
+            .order(a_dsl::id.asc())
+            .for_update()
+            .select(crate::models::Attachment::as_select())
+            .load::<crate::models::Attachment>(conn)?;
+        if requested.len() != attachment_ids.len()
+            || requested.iter().any(|attachment| {
+                attachment.deleted_at.is_some()
+                    || (attachment.message_id != Some(message_id)
+                        && (attachment.message_id.is_some()
+                            || attachment.uploader_uid != Some(uid)))
+            })
+        {
+            return Err(AppError::BadRequest("Invalid attachment selection"));
+        }
+        validate_message(
+            &message.message_type,
+            Some(&body.message),
+            message.sticker_id,
+            &requested,
+        )?;
 
-    if message.sender_uid != uid {
-        return Err(AppError::Forbidden("You can only edit your own messages"));
-    }
-
-    if message.deleted_at.is_some() {
-        return Err(AppError::BadRequest("Cannot edit deleted message"));
-    }
-    if !message.is_published {
-        return Err(AppError::BadRequest("Cannot edit unpublished message"));
-    }
-
-    if body.message.trim().is_empty() && body.attachment_ids.is_empty() {
-        return Err(AppError::BadRequest("Message cannot be empty"));
-    }
-
-    let attachment_ids: Vec<i64> = body
-        .attachment_ids
-        .iter()
-        .filter_map(|s| s.parse().ok())
-        .collect();
-
-    if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
-        return Err(AppError::BadRequest(
-            "Too many attachments (maximum of 20 allowed)",
-        ));
-    }
-
-    use crate::schema::attachments::dsl as a_dsl;
-    diesel::update(attachments::table.filter(a_dsl::message_id.eq(message_id)))
-        .set(a_dsl::message_id.eq::<Option<i64>>(None))
-        .execute(conn)?;
-
-    if !attachment_ids.is_empty() {
-        diesel::update(attachments::table.filter(a_dsl::id.eq_any(&attachment_ids)))
+        diesel::update(attachments::table.filter(a_dsl::message_id.eq(message_id)))
+            .set(a_dsl::message_id.eq::<Option<i64>>(None))
+            .execute(conn)?;
+        if !attachment_ids.is_empty() {
+            let attached = diesel::update(
+                attachments::table
+                    .filter(a_dsl::id.eq_any(&attachment_ids))
+                    .filter(a_dsl::message_id.is_null()),
+            )
             .set(a_dsl::message_id.eq(message_id))
             .execute(conn)?;
-    }
-
-    // Update message
-    let now = Utc::now();
-    let updated_message: Message = diesel::update(messages::table.filter(dsl::id.eq(message_id)))
-        .set((
-            dsl::message.eq(&body.message),
-            dsl::has_attachments.eq(!attachment_ids.is_empty()),
-            dsl::updated_at.eq(Some(now)),
-        ))
-        .returning(Message::as_returning())
-        .get_result(conn)?;
+            if attached != attachment_ids.len() {
+                return Err(AppError::BadRequest("Invalid attachment selection"));
+            }
+        }
+        diesel::update(messages::table.filter(dsl::id.eq(message_id)))
+            .set((
+                dsl::message.eq(&body.message),
+                dsl::has_attachments.eq(!attachment_ids.is_empty()),
+                dsl::updated_at.eq(Some(now)),
+            ))
+            .returning(Message::as_returning())
+            .get_result(conn)
+            .map_err(Into::into)
+    })?;
 
     if let Some(search_service) = state.message_search.clone() {
         search_service.upsert_message_best_effort(updated_message.clone());
@@ -1061,7 +1024,7 @@ async fn delete_message(
                 .first::<Option<i64>>(conn)?;
 
             if group_last_msg == Some(message_id) {
-                super::recalculate_group_last_message(conn, chat_id)
+                crate::services::chat::recalculate_group_last_message(conn, chat_id)
                     .map_err(|_| diesel::result::Error::RollbackTransaction)?;
             }
         }
@@ -1077,7 +1040,11 @@ async fn delete_message(
                 &[message_id],
             )?;
         } else if !deleted_message.has_thread {
-            super::shift_chat_read_pointers_on_delete(conn, chat_id, &[message_id])?;
+            crate::services::chat::shift_chat_read_pointers_on_delete(
+                conn,
+                chat_id,
+                &[message_id],
+            )?;
         }
 
         Ok(deleted_message)

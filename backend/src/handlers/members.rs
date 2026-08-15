@@ -274,11 +274,11 @@ async fn post_add_member(
         .and_then(|p| p.username.clone())
         .unwrap_or_else(|| "Someone".to_string());
 
-    if let Ok(crate::handlers::chats::SendMessageOutcome::Created(send_result)) =
-        crate::handlers::chats::send_prepared_message(
+    if let Ok(crate::services::messages::SendMessageOutcome::Created(send_result)) =
+        crate::services::messages::send_prepared_message(
             conn,
             &state,
-            crate::handlers::chats::PreparedMessageSend {
+            crate::services::messages::PreparedMessageSend {
                 chat_id,
                 sender_uid: uid,
                 message: Some(format!("added {}", target_username)),
@@ -406,11 +406,11 @@ async fn delete_remove_member(
         (target_uid, "left the chat".to_string())
     };
 
-    if let Ok(crate::handlers::chats::SendMessageOutcome::Created(send_result)) =
-        crate::handlers::chats::send_prepared_message(
+    if let Ok(crate::services::messages::SendMessageOutcome::Created(send_result)) =
+        crate::services::messages::send_prepared_message(
             conn,
             &state,
-            crate::handlers::chats::PreparedMessageSend {
+            crate::services::messages::PreparedMessageSend {
                 chat_id,
                 sender_uid: sys_sender_uid,
                 message: Some(sys_msg),

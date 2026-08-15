@@ -660,6 +660,8 @@ mod tests {
 pub struct Attachment {
     pub id: i64,
     pub message_id: Option<i64>,
+    pub uploader_uid: Option<i32>,
+
     pub file_name: String,
     pub kind: String,
     pub external_reference: String,
@@ -676,6 +678,8 @@ pub struct Attachment {
 pub struct NewAttachment {
     pub id: i64,
     pub message_id: Option<i64>,
+    pub uploader_uid: Option<i32>,
+
     pub file_name: String,
     pub kind: String,
     pub external_reference: String,

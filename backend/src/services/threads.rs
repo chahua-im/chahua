@@ -11,13 +11,13 @@ use crate::dto::{
     users::User,
     ws::{ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload},
 };
-use crate::handlers::chats::{
-    build_message_preview, build_sender, extract_mention_uids, MessagePreviewInput,
-};
 use crate::models::{Attachment, Message, MessageType};
 use crate::schema::{attachments, messages, stickers, thread_meta, thread_user_states};
 use crate::services::avatars::AvatarService;
 use crate::services::media::MediaStore;
+use crate::services::messages::{
+    build_message_preview, build_sender, extract_mention_uids, MessagePreviewInput,
+};
 use crate::services::user::lookup_user_profiles;
 use crate::services::ws_registry::ConnectionRegistry;
 use std::sync::Arc;
@@ -1029,6 +1029,7 @@ mod tests {
         Attachment {
             id,
             message_id: Some(message_id),
+            uploader_uid: Some(1),
             file_name: format!("{id}.bin"),
             kind: kind.to_string(),
             external_reference: format!("attachments/{id}.bin"),

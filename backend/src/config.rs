@@ -12,6 +12,7 @@ use std::sync::Arc;
 use base64::Engine;
 
 const LOG_FORMAT_ENV: &str = "BACKEND_LOG_FORMAT";
+pub(crate) const DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES: i64 = 50 * 1024 * 1024;
 
 /// Stdout log format: `pretty` for local development, `json` for production
 /// collection by agents such as Grafana Alloy.
@@ -55,6 +56,7 @@ pub(crate) struct MediaConfig {
     pub base_url: Option<String>,
     /// Custom S3 endpoint, for MinIO and friends. Forces path-style addressing.
     pub endpoint_url: Option<String>,
+    pub max_attachment_file_size_bytes: i64,
 }
 
 /// Discuz avatars are served from a filesystem path mirrored behind a public URL.
@@ -129,6 +131,10 @@ impl AppConfig {
                     .unwrap_or_else(|_| "attachments".to_string()),
                 base_url: std::env::var("S3_BASE_URL").ok(),
                 endpoint_url: std::env::var("S3_ENDPOINT_URL").ok(),
+                max_attachment_file_size_bytes: read_positive_i64_env(
+                    "ATTACHMENT_MAX_FILE_SIZE_BYTES",
+                    DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES,
+                ),
             }),
             avatars: read_discuz_avatar_config().map(Arc::new),
             auth: AuthConfig {
@@ -158,6 +164,20 @@ fn parse_log_format(value: Option<&str>) -> LogFormat {
 
 fn debug_auth_enabled(debug_build: bool, raw_env: Option<&str>) -> bool {
     debug_build || raw_env == Some("true")
+}
+
+fn read_positive_i64_env(var_name: &str, default: i64) -> i64 {
+    match std::env::var(var_name) {
+        Ok(raw) => raw
+            .parse::<i64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .unwrap_or_else(|| panic!("{var_name} must be a positive integer")),
+        Err(std::env::VarError::NotPresent) => default,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            panic!("{var_name} must be a positive integer")
+        }
+    }
 }
 
 fn decode_key_at_least_32_bytes(var_name: &str, raw: &str) -> Vec<u8> {
@@ -233,7 +253,10 @@ fn read_cors_allowed_origins(var_name: &str) -> Option<Vec<HeaderValue>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{debug_auth_enabled, parse_log_format, LogFormat};
+    use super::{
+        debug_auth_enabled, parse_log_format, read_positive_i64_env, LogFormat,
+        DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES,
+    };
 
     #[test]
     fn log_format_defaults_to_pretty_when_unset() {
@@ -263,5 +286,20 @@ mod tests {
         assert!(!debug_auth_enabled(false, Some("TRUE")));
         assert!(!debug_auth_enabled(false, Some("1")));
         assert!(!debug_auth_enabled(false, Some(" true ")));
+    }
+
+    #[test]
+    fn attachment_size_default_is_fifty_mebibytes() {
+        assert_eq!(DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES, 52_428_800);
+    }
+
+    #[test]
+    fn attachment_size_parser_accepts_positive_values() {
+        std::env::set_var("ATTACHMENT_MAX_FILE_SIZE_BYTES", "1024");
+        assert_eq!(
+            read_positive_i64_env("ATTACHMENT_MAX_FILE_SIZE_BYTES", 1),
+            1024
+        );
+        std::env::remove_var("ATTACHMENT_MAX_FILE_SIZE_BYTES");
     }
 }

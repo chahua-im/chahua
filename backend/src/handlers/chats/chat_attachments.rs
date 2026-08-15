@@ -20,7 +20,7 @@ use crate::{
     AppState, MAX_CHAT_ATTACHMENTS_LIMIT,
 };
 
-use super::build_sender;
+use crate::services::messages::build_sender;
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]

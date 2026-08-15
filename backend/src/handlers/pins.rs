@@ -16,10 +16,10 @@ use crate::dto::{
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::handlers::chats::{attach_metadata, PreparedMessageSend, SendMessageOutcome};
 use crate::handlers::members::{check_membership, require_admin_role};
 use crate::models::{Message, MessageType, NewPinnedMessage, PinnedMessage};
 use crate::schema::{group_membership, messages, pinned_messages};
+use crate::services::messages::{attach_metadata, PreparedMessageSend, SendMessageOutcome};
 use crate::utils::auth::CurrentUid;
 use crate::utils::ids;
 use crate::AppState;
@@ -211,7 +211,7 @@ async fn create_pin(
 
     // Send system message (best-effort — pin already saved)
     if let Ok(SendMessageOutcome::Created(send_result)) =
-        crate::handlers::chats::send_prepared_message(
+        crate::services::messages::send_prepared_message(
             conn,
             &state,
             PreparedMessageSend {
@@ -288,7 +288,7 @@ async fn delete_pin(
 
     // Send system message (best-effort — unpin already saved)
     if let Ok(SendMessageOutcome::Created(send_result)) =
-        crate::handlers::chats::send_prepared_message(
+        crate::services::messages::send_prepared_message(
             conn,
             &state,
             PreparedMessageSend {

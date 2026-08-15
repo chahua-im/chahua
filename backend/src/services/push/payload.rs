@@ -127,10 +127,20 @@ pub(super) fn build_apns_notification(job: &PushJob, unread_count: i64) -> ApnsN
                 _ => (APNS_BODY_LOC_KEY_STICKER, vec![job.sender_username.clone()]),
             },
             MessageType::Invite => (APNS_BODY_LOC_KEY_INVITE, vec![job.sender_username.clone()]),
+            MessageType::File => match &preview.message {
+                Some(message) if !message.trim().is_empty() => (
+                    APNS_BODY_LOC_KEY_ATTACHMENT_WITH_PREVIEW,
+                    vec![job.sender_username.clone(), truncate_preview(message)],
+                ),
+                _ => (
+                    APNS_BODY_LOC_KEY_ATTACHMENT,
+                    vec![job.sender_username.clone()],
+                ),
+            },
             _ => {
                 if let Some(first_att) = preview.attachments.first() {
                     let kind = &first_att.kind;
-                    if let Some(ref msg) = preview.message {
+                    if let Some(msg) = &preview.message {
                         (
                             attachment_kind_loc_key(kind, true),
                             vec![job.sender_username.clone(), truncate_preview(msg)],
@@ -141,7 +151,7 @@ pub(super) fn build_apns_notification(job: &PushJob, unread_count: i64) -> ApnsN
                             vec![job.sender_username.clone()],
                         )
                     }
-                } else if let Some(ref msg) = preview.message {
+                } else if let Some(msg) = &preview.message {
                     (
                         APNS_BODY_LOC_KEY_WITH_PREVIEW,
                         vec![job.sender_username.clone(), truncate_preview(msg)],
