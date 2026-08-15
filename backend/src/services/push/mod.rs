@@ -155,9 +155,8 @@ mod tests {
     };
     use super::payload::{
         build_apns_notification, build_push_payload, format_push_body, truncate_preview,
-        APNS_BODY_LOC_KEY_AUDIO, APNS_BODY_LOC_KEY_IMAGE, APNS_BODY_LOC_KEY_IMAGE_WITH_PREVIEW,
-        APNS_BODY_LOC_KEY_INVITE, APNS_BODY_LOC_KEY_NO_PREVIEW, APNS_BODY_LOC_KEY_STICKER_EMOJI,
-        APNS_BODY_LOC_KEY_VIDEO, APNS_BODY_LOC_KEY_WITH_PREVIEW, APNS_TITLE_LOC_KEY,
+        APNS_BODY_LOC_KEY_AUDIO, APNS_BODY_LOC_KEY_INVITE, APNS_BODY_LOC_KEY_NO_PREVIEW,
+        APNS_BODY_LOC_KEY_STICKER_EMOJI, APNS_BODY_LOC_KEY_WITH_PREVIEW, APNS_TITLE_LOC_KEY,
         MESSAGE_PREVIEW_MAX,
     };
     use super::*;
@@ -369,7 +368,7 @@ mod tests {
             chat_name: "DMs".to_string(),
             message_preview: PushMessagePreview {
                 message: None,
-                message_type: MessageType::File,
+                message_type: MessageType::Text,
                 sticker: None,
                 attachments: vec![MessagePreviewAttachment {
                     kind: "image/jpeg".to_string(),
@@ -384,7 +383,7 @@ mod tests {
         };
 
         let n = build_apns_notification(&job, 1);
-        assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_IMAGE);
+        assert_eq!(n.body_loc_key, "push.message.body.image");
         assert_eq!(n.body_loc_args, vec!["bob".to_string()]);
     }
 
@@ -412,7 +411,7 @@ mod tests {
         };
 
         let n = build_apns_notification(&job, 0);
-        assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_IMAGE_WITH_PREVIEW);
+        assert_eq!(n.body_loc_key, "push.message.body.attachment.with_preview");
         assert_eq!(
             n.body_loc_args,
             vec!["bob".to_string(), "look at this".to_string()]
@@ -428,7 +427,7 @@ mod tests {
             chat_name: "DMs".to_string(),
             message_preview: PushMessagePreview {
                 message: None,
-                message_type: MessageType::File,
+                message_type: MessageType::Text,
                 sticker: None,
                 attachments: vec![MessagePreviewAttachment {
                     kind: "video/mp4".to_string(),
@@ -443,7 +442,35 @@ mod tests {
         };
 
         let n = build_apns_notification(&job, 0);
-        assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_VIDEO);
+        assert_eq!(n.body_loc_key, "push.message.body.video");
+    }
+
+    #[test]
+    fn build_apns_notification_file_attachment_uses_generic_key() {
+        let job = PushJob {
+            chat_id: 5,
+            sender_uid: 1,
+            sender_username: "bob".to_string(),
+            chat_name: "DMs".to_string(),
+            message_preview: PushMessagePreview {
+                message: None,
+                message_type: MessageType::File,
+                sticker: None,
+                attachments: vec![MessagePreviewAttachment {
+                    kind: "application/pdf".to_string(),
+                }],
+                is_deleted: false,
+            },
+            body_preview: None,
+            message_id: 55,
+            thread_root_id: None,
+            mentioned_uids: Vec::new(),
+            reply_target_uid: None,
+        };
+
+        let n = build_apns_notification(&job, 0);
+        assert_eq!(n.body_loc_key, "push.message.body.attachment");
+        assert_eq!(n.body_loc_args, vec!["bob".to_string()]);
     }
 
     #[test]

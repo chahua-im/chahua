@@ -2,12 +2,29 @@ use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 use axum::http::StatusCode;
 use chrono::Duration;
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use std::collections::BTreeMap;
+
 use std::sync::Arc;
 
 use crate::config::MediaConfig;
 
 pub(crate) const PUBLIC_MEDIA_CACHE_CONTROL: &str = "public,max-age=31536000,immutable";
+/// RFC 5987 allows only `attr-char` unescaped in an extended parameter value,
+/// so everything outside that set is percent-encoded.
+const CONTENT_DISPOSITION_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'!')
+    .remove(b'#')
+    .remove(b'$')
+    .remove(b'&')
+    .remove(b'+')
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'^')
+    .remove(b'_')
+    .remove(b'`')
+    .remove(b'|')
+    .remove(b'~');
 
 pub struct PresignedUpload {
     pub upload_url: String,
@@ -51,6 +68,8 @@ impl MediaStore {
         &self,
         storage_key: &str,
         content_type: &str,
+        content_length: i64,
+        content_disposition: Option<&str>,
         expires_in: Duration,
     ) -> Result<PresignedUpload, (StatusCode, &'static str)> {
         let presigning_config = PresigningConfig::expires_in(
@@ -66,30 +85,37 @@ impl MediaStore {
             )
         })?;
 
-        let presigned_request = self
+        let mut request = self
             .client
             .put_object()
             .bucket(&self.config.bucket)
             .key(storage_key)
             .content_type(content_type)
             .cache_control(PUBLIC_MEDIA_CACHE_CONTROL)
-            .acl(aws_sdk_s3::types::ObjectCannedAcl::PublicRead)
-            .presigned(presigning_config)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to generate presigned URL: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to generate upload URL",
-                )
-            })?;
+            .content_length(content_length)
+            .acl(aws_sdk_s3::types::ObjectCannedAcl::PublicRead);
+        if let Some(content_disposition) = content_disposition {
+            request = request.content_disposition(content_disposition);
+        }
+        let presigned_request = request.presigned(presigning_config).await.map_err(|e| {
+            tracing::error!("Failed to generate presigned URL: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to generate upload URL",
+            )
+        })?;
 
+        let mut upload_headers: BTreeMap<String, String> = presigned_request
+            .headers()
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("content-length"))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        if content_disposition.is_none() {
+            upload_headers.remove("content-disposition");
+        }
         Ok(PresignedUpload {
             upload_url: presigned_request.uri().to_string(),
-            upload_headers: presigned_request
-                .headers()
-                .map(|(name, value)| (name.to_string(), value.to_string()))
-                .collect(),
+            upload_headers,
         })
     }
 
@@ -173,9 +199,31 @@ pub fn build_storage_key(prefix: &str, filename: &str, object_id: &str) -> Strin
     format!("{}/{}.{}", prefix, object_id, extension)
 }
 
+/// Builds a safe RFC 5987 attachment disposition without trusting filename syntax.
+pub fn attachment_content_disposition(filename: &str) -> String {
+    let fallback: String = filename
+        .chars()
+        .map(|c| {
+            if c.is_ascii() && !c.is_control() && c != '"' && c != '\\' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let fallback = if fallback.is_empty() {
+        "attachment"
+    } else {
+        &fallback
+    };
+    format!(
+        "attachment; filename=\"{fallback}\"; filename*=UTF-8''{}",
+        utf8_percent_encode(filename, CONTENT_DISPOSITION_ENCODE_SET)
+    )
+}
 #[cfg(test)]
 mod tests {
-    use super::build_storage_key;
+    use super::{attachment_content_disposition, build_storage_key};
 
     #[test]
     fn storage_key_uses_file_extension() {
@@ -190,6 +238,14 @@ mod tests {
         assert_eq!(
             build_storage_key("stickers", "noextension", "abc"),
             "stickers/abc.bin"
+        );
+    }
+
+    #[test]
+    fn attachment_disposition_uses_safe_fallback_and_utf8_filename() {
+        assert_eq!(
+            attachment_content_disposition("résumé \"draft\".pdf"),
+            "attachment; filename=\"r_sum_ _draft_.pdf\"; filename*=UTF-8''r%C3%A9sum%C3%A9%20%22draft%22.pdf"
         );
     }
 }

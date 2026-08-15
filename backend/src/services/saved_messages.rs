@@ -13,11 +13,11 @@ use crate::{
         users::UserGroupTagInfo,
     },
     errors::AppError,
-    handlers::chats::{build_mention_info, extract_mention_uids},
     models::{
         Attachment, Group, Media, Message, MessageType, NewSavedMessage, SavedMessage, Sticker,
     },
     schema::{attachments, group_membership, groups, media, messages, saved_messages, stickers},
+    services::messages::{build_mention_info, extract_mention_uids},
     services::{avatars::AvatarService, media::MediaStore, user::lookup_user_profiles},
     utils::{ids, ids::IdGen, pagination::validate_limit},
 };

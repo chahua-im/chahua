@@ -23,7 +23,7 @@ use crate::{
     AppState,
 };
 
-use super::load_usernames_by_uids;
+use crate::services::messages::load_usernames_by_uids;
 
 fn validate_emoji(input: &str) -> Result<String, AppError> {
     if input.is_empty() {

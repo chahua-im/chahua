@@ -14,6 +14,9 @@ pub enum AppError {
     DbQuery(diesel::result::Error),
     /// 400 Bad Request with a static message.
     BadRequest(&'static str),
+    /// 413 Payload Too Large with a static message.
+    PayloadTooLarge(&'static str),
+
     /// 401 Unauthorized with a static message.
     Unauthorized(&'static str),
     /// 403 Forbidden with a static message.
@@ -76,6 +79,7 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
             }
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
+            AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg).into_response(),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg).into_response(),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg).into_response(),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg).into_response(),
@@ -99,5 +103,12 @@ mod tests {
     fn service_unavailable_maps_to_503() {
         let response = AppError::ServiceUnavailable("Message search unavailable").into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn payload_too_large_maps_to_413() {
+        let response =
+            AppError::PayloadTooLarge("Attachment exceeds maximum file size").into_response();
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

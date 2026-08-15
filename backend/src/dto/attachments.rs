@@ -60,6 +60,12 @@ pub struct ListChatAttachmentsResponse {
     pub newer_cursor: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentConfigResponse {
+    pub max_file_size_bytes: i64,
+}
+
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadUrlResponse {

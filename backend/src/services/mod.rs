@@ -9,6 +9,7 @@ pub mod image_processing;
 pub mod invites;
 pub mod media;
 pub mod message_search;
+pub mod messages;
 pub mod push;
 pub mod saved_messages;
 pub mod service_tokens;

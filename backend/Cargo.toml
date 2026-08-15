@@ -59,6 +59,8 @@ meilisearch-sdk = "0.33"
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+mime = "0.3"
+percent-encoding = "2"
 
 [profile.dev]
 overflow-checks = false

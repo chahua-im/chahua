@@ -462,6 +462,8 @@ async fn post_avatar_upload_url(
         .presign_upload(
             &storage_key,
             &payload.content_type,
+            payload.size,
+            None,
             chrono::Duration::minutes(15),
         )
         .await?;
