@@ -20,7 +20,7 @@ export const FEATURES = {
     description: 'Shows the chat attachments section in the group info page.',
   },
   mediaCompression: {
-    enabled: false,
+    enabled: true,
     description: 'Compresses image and video attachments before upload.',
   },
   fileAttachments: {
