@@ -218,7 +218,7 @@ export function DesktopSplitLayout() {
       ? [
           {
             id: 'create-chat',
-            label: <Trans>Create Chat</Trans>,
+            label: <Trans>Create Group</Trans>,
             onSelect: () => history.push('/chats/new'),
           },
         ]

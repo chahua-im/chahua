@@ -255,8 +255,8 @@ msgstr "Could not validate invite code"
 msgid "Create"
 msgstr "Create"
 
-msgid "Create Chat"
-msgstr "Create Chat"
+msgid "Create Group"
+msgstr "Create Group"
 
 msgid "Create Invite"
 msgstr "Create Invite"
