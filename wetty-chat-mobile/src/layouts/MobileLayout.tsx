@@ -6,7 +6,6 @@ import { useSelector } from 'react-redux';
 import { Redirect, Route, useLocation, matchPath } from 'react-router-dom';
 
 import ChatsPage from '@/pages/chats';
-import ContactsPage from '@/pages/contacts';
 import ArchivedPage from '@/pages/archived';
 import ThreadsPage from '@/pages/threads';
 import { CreateChatPage } from '@/pages/create-chat';
@@ -35,7 +34,7 @@ import styles from './MobileLayout.module.scss';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
 
-const TAB_ROOT_PATHS = ['/', '/chats', '/contacts', '/settings', '/demo'];
+const TAB_ROOT_PATHS = ['/', '/chats', '/settings', '/demo'];
 
 const MobileLayout: React.FC = () => {
   const location = useLocation();
@@ -80,7 +79,6 @@ const MobileLayout: React.FC = () => {
     <IonTabs className={`${isTabRoot ? '' : styles.tabBarHidden}`}>
       <IonRouterOutlet animation={safariSafeRouteAnimation}>
         <Route path="/chats" exact component={ChatsPage} />
-        {whenFeature('friends', <Route path="/contacts" exact component={ContactsPage} />)}
         <Route path="/chats/archived/:tab?" exact component={ArchivedPage} />
         <Route path="/chats/threads" exact component={ThreadsPage} />
         <Route path="/chats/new" exact component={CreateChatPage} />
@@ -101,7 +99,10 @@ const MobileLayout: React.FC = () => {
         <Route path="/settings/general" exact component={GeneralSettingsPage} />
         <Route path="/settings/language" exact component={LanguagePage} />
         {whenFeature('savedMessages', <Route path="/settings/saved-messages" exact component={SavedMessagesPage} />)}
-        {whenFeature('friends', <Route path="/settings/friend-verification" exact component={FriendVerificationPage} />)}
+        {whenFeature(
+          'friends',
+          <Route path="/settings/friend-verification" exact component={FriendVerificationPage} />,
+        )}
         <Route path="/settings/stickers/:packId" exact component={StickerPackDetailPage} />
         <Route path="/settings/stickers" exact component={StickerSettingsPage} />
         <Route path="/settings" exact component={SettingsPage} />

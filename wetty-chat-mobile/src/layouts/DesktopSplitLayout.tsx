@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { AddFriendModalHost } from '@/components/social/AddFriendModalHost';
 import { matchPath, useHistory, useLocation } from 'react-router-dom';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { Trans } from '@lingui/react/macro';
 import { IonButton, IonButtons, IonHeader, IonIcon, IonModal, IonTitle, IonToolbar } from '@ionic/react';
 import { addCircleOutline, arrowBack } from 'ionicons/icons';
@@ -21,7 +22,6 @@ import { LanguagePageCore } from '@/pages/settings/language';
 import { StickerSettingsCore } from '@/pages/settings/stickers';
 import { StickerPackDetailCore } from '@/pages/settings/sticker-pack-detail';
 import { FriendVerificationCore } from '@/pages/settings/friend-verification';
-import { ContactsCore } from '@/pages/contacts';
 import type { BackAction } from '@/types/back-action';
 import type { ConversationRouteState } from '@/types/conversationNavigation';
 import styles from './DesktopSplitLayout.module.scss';
@@ -29,8 +29,7 @@ import { HeaderActionMenu, type HeaderActionMenuItem } from '@/components/Header
 import { useHasGlobalPermission } from '@/hooks/useHasGlobalPermission';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
-import type { RootState, AppDispatch } from '@/store';
-import { setContactsPanelOpen, selectContactsPanelOpen } from '@/store/socialSlice';
+import type { RootState } from '@/store';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 type DesktopRouteState = ConversationRouteState;
@@ -211,7 +210,7 @@ export function DesktopSplitLayout() {
   const savedMessagesEnabled = useFeatureGate('savedMessages');
   const friendsEnabled = useFeatureGate('friends');
   const currentUser = useSelector((state: RootState) => state.user);
-  const dispatch = useDispatch<AppDispatch>();
+  const [addFriendOpen, setAddFriendOpen] = useState(false);
   useEscNavigation();
   const skipNextGlobalSettingsDismiss = useRef(false);
   const headerActions: HeaderActionMenuItem[] = [
@@ -226,9 +225,18 @@ export function DesktopSplitLayout() {
       : []),
     {
       id: 'join-via-code',
-      label: <Trans>Join via Code</Trans>,
+      label: <Trans>Join Group</Trans>,
       onSelect: () => history.push('/chats/join'),
     },
+    ...(friendsEnabled
+      ? [
+          {
+            id: 'add-friend',
+            label: <Trans>Add Friend</Trans>,
+            onSelect: () => setAddFriendOpen(true),
+          },
+        ]
+      : []),
   ];
   const currentRoute = getDesktopRouteMatches(location.pathname);
   const backgroundPath = location.state?.backgroundPath ?? '/chats';
@@ -260,20 +268,6 @@ export function DesktopSplitLayout() {
   const [archivedSidebarTab, setArchivedSidebarTab] = useState<ChatListTab | null>(initialArchivedTab);
   const archivedMode = archivedSidebarTab != null;
   const archivedTab = archivedSidebarTab ?? 'all';
-  const contactsSidebarOpen = useSelector(selectContactsPanelOpen);
-  const openContacts = useCallback(() => dispatch(setContactsPanelOpen(true)), [dispatch]);
-  const closeContacts = useCallback(() => dispatch(setContactsPanelOpen(false)), [dispatch]);
-
-  // Collapse the contacts sidebar once navigation moves elsewhere (e.g. a DM
-  // opened from a friend's profile). Adjusting state during render avoids a
-  // cascading setState-in-effect.
-  const [prevPathname, setPrevPathname] = useState(location.pathname);
-  if (prevPathname !== location.pathname) {
-    setPrevPathname(location.pathname);
-    if (contactsSidebarOpen) {
-      dispatch(setContactsPanelOpen(false));
-    }
-  }
   const groupInfoModalChatId =
     groupInfoSavedMessagesMatch?.id ?? groupInfoSettingsMatch?.id ?? groupInfoMatch?.id ?? null;
   const groupInfoModalRoutePath = groupInfoSavedMessagesMatch
@@ -417,48 +411,41 @@ export function DesktopSplitLayout() {
   return (
     <div className={styles.desktopSplitLayout}>
       <div className={styles.desktopSplitLeft}>
-        {contactsSidebarOpen ? (
-          <ContactsCore backAction={{ type: 'callback', onBack: closeContacts }} />
-        ) : (
-          <>
-            <IonHeader>
-              <IonToolbar>
-                <IonButtons slot="start">
-                  {archivedMode ? (
-                    <IonButton onClick={() => setArchivedSidebarTab(null)} aria-label="Back to chats">
-                      <IonIcon slot="icon-only" icon={arrowBack} />
-                    </IonButton>
-                  ) : (
-                    <IonButton onClick={openSettingsModal} aria-label="Open settings">
-                      <UserAvatar
-                        name={currentUser.username ?? 'User'}
-                        avatarUrl={currentUser.avatarUrl}
-                        size={26}
-                        fallback="icon"
-                        className={styles.settingsAvatar}
-                      />
-                    </IonButton>
-                  )}
-                </IonButtons>
-                <IonTitle>{archivedMode ? <Trans>Archived</Trans> : <Trans>Chats</Trans>}</IonTitle>
-                <IonButtons slot="end">
-                  <HeaderActionMenu icon={addCircleOutline} actions={headerActions} />
-                </IonButtons>
-              </IonToolbar>
-            </IonHeader>
-            <ChatList
-              key={archivedMode ? `archived-${archivedTab}` : 'active'}
-              activeChatId={activeChatId}
-              activeThreadId={threadMatch?.threadId}
-              archivedMode={archivedMode}
-              initialTab={archivedTab}
-              onOpenArchived={setArchivedSidebarTab}
-              onOpenContacts={friendsEnabled ? openContacts : undefined}
-              onChatSelect={handleChatSelect}
-              onThreadSelect={handleThreadSelect}
-            />
-          </>
-        )}
+        <IonHeader>
+          <IonToolbar>
+            <IonButtons slot="start">
+              {archivedMode ? (
+                <IonButton onClick={() => setArchivedSidebarTab(null)} aria-label="Back to chats">
+                  <IonIcon slot="icon-only" icon={arrowBack} />
+                </IonButton>
+              ) : (
+                <IonButton onClick={openSettingsModal} aria-label="Open settings">
+                  <UserAvatar
+                    name={currentUser.username ?? 'User'}
+                    avatarUrl={currentUser.avatarUrl}
+                    size={26}
+                    fallback="icon"
+                    className={styles.settingsAvatar}
+                  />
+                </IonButton>
+              )}
+            </IonButtons>
+            <IonTitle>{archivedMode ? <Trans>Archived</Trans> : <Trans>Chats</Trans>}</IonTitle>
+            <IonButtons slot="end">
+              <HeaderActionMenu icon={addCircleOutline} actions={headerActions} />
+            </IonButtons>
+          </IonToolbar>
+        </IonHeader>
+        <ChatList
+          key={archivedMode ? `archived-${archivedTab}` : 'active'}
+          activeChatId={activeChatId}
+          activeThreadId={threadMatch?.threadId}
+          archivedMode={archivedMode}
+          initialTab={archivedTab}
+          onOpenArchived={setArchivedSidebarTab}
+          onChatSelect={handleChatSelect}
+          onThreadSelect={handleThreadSelect}
+        />
       </div>
       <div className={styles.desktopSplitRight}>
         {/* Base layer: always render ConversationPane when a chat is selected */}
@@ -629,6 +616,7 @@ export function DesktopSplitLayout() {
           </div>
         )}
       </div>
+      <AddFriendModalHost open={addFriendOpen} onClose={() => setAddFriendOpen(false)} />
     </div>
   );
 }

@@ -32,9 +32,14 @@ export interface SettingsState {
   locale: string | null;
   messageFontSize: ChatFontSizeOption;
   showAllTab: boolean;
+  showGroupsTab: boolean;
+  showFriendsTab: boolean;
+  showThreadsTab: boolean;
   showAllAvatars: boolean;
   pinnedReactions: string[];
   recentReactions: string[];
+  /** Selected chat list segment tab; ephemeral UI state, never persisted. */
+  chatListTab: 'all' | 'groups' | 'friends' | 'threads';
 }
 
 export function isChatFontSizeOption(value: unknown): value is ChatFontSizeOption {
@@ -51,6 +56,9 @@ function persistSettings(state: SettingsState) {
     locale: currentState.locale,
     messageFontSize: currentState.messageFontSize,
     showAllTab: currentState.showAllTab,
+    showGroupsTab: currentState.showGroupsTab,
+    showFriendsTab: currentState.showFriendsTab,
+    showThreadsTab: currentState.showThreadsTab,
     showAllAvatars: currentState.showAllAvatars,
     pinnedReactions: currentState.pinnedReactions,
     recentReactions: currentState.recentReactions,
@@ -70,9 +78,13 @@ const defaultSettings: SettingsState = {
   locale: null,
   messageFontSize: defaultChatFontSize,
   showAllTab: true,
+  showGroupsTab: true,
+  showFriendsTab: true,
+  showThreadsTab: true,
   showAllAvatars: false,
   pinnedReactions: normalizePinnedReactions(['👍']),
   recentReactions: ['❤️', '😂', '😮', '😢', '🎉'],
+  chatListTab: 'all',
 };
 
 export function hydrateSettings(saved: Partial<SettingsState> | null | undefined): SettingsState {
@@ -82,6 +94,8 @@ export function hydrateSettings(saved: Partial<SettingsState> | null | undefined
     messageFontSize: isChatFontSizeOption(saved?.messageFontSize) ? saved.messageFontSize : defaultChatFontSize,
     pinnedReactions: normalizePinnedReactions(saved?.pinnedReactions ?? defaultSettings.pinnedReactions),
     recentReactions: saved?.recentReactions ?? defaultSettings.recentReactions,
+    // UI state, never persisted - always reset on hydrate.
+    chatListTab: 'all',
   };
 }
 
@@ -101,6 +115,21 @@ const settingsSlice = createSlice({
     setShowAllTab(state, action: PayloadAction<boolean>) {
       state.showAllTab = action.payload;
       persistSettings(state);
+    },
+    setShowGroupsTab(state, action: PayloadAction<boolean>) {
+      state.showGroupsTab = action.payload;
+      persistSettings(state);
+    },
+    setShowFriendsTab(state, action: PayloadAction<boolean>) {
+      state.showFriendsTab = action.payload;
+      persistSettings(state);
+    },
+    setShowThreadsTab(state, action: PayloadAction<boolean>) {
+      state.showThreadsTab = action.payload;
+      persistSettings(state);
+    },
+    setChatListTab(state, action: PayloadAction<SettingsState['chatListTab']>) {
+      state.chatListTab = action.payload;
     },
     setShowAllAvatars(state, action: PayloadAction<boolean>) {
       state.showAllAvatars = action.payload;
@@ -124,6 +153,10 @@ export const {
   setLocale,
   setMessageFontSize,
   setShowAllTab,
+  setShowGroupsTab,
+  setShowFriendsTab,
+  setShowThreadsTab,
+  setChatListTab,
   setShowAllAvatars,
   setPinnedReactions,
   addRecentReaction,
@@ -132,6 +165,10 @@ export const selectLocale = (state: RootState) => state.settings.locale;
 export const selectEffectiveLocale = (state: RootState) => state.settings.locale ?? detectLocale();
 export const selectMessageFontSize = (state: RootState) => state.settings.messageFontSize;
 export const selectShowAllTab = (state: RootState) => state.settings.showAllTab;
+export const selectShowGroupsTab = (state: RootState) => state.settings.showGroupsTab;
+export const selectShowFriendsTab = (state: RootState) => state.settings.showFriendsTab;
+export const selectShowThreadsTab = (state: RootState) => state.settings.showThreadsTab;
+export const selectChatListTab = (state: RootState) => state.settings.chatListTab;
 export const selectShowAllAvatars = (state: RootState) => state.settings.showAllAvatars;
 export const selectPinnedReactions = (state: RootState) => state.settings.pinnedReactions;
 export const selectRecentReactions = (state: RootState) => state.settings.recentReactions;

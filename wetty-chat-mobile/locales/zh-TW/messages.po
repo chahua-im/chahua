@@ -225,11 +225,12 @@ msgstr "關閉檢視器"
 msgid "Code"
 msgstr "邀請碼"
 
-msgid "Compressing"
+14: msgid "Compressing"
+msgstr "Compressing"
+15: msgid "Compressing"
+msgstr "压缩中"
+16: msgid "Compressing"
 msgstr "壓縮中"
-msgid "Contacts"
-msgstr "聯絡人"
-
 msgid "Continue"
 msgstr "繼續"
 
@@ -699,11 +700,11 @@ msgstr "邀請無法使用"
 msgid "Join chat"
 msgstr "加入聊天"
 
+msgid "Join Group"
+msgstr "加入群聊"
+
 msgid "Join this chat to start reading and sending messages."
 msgstr "加入此聊天即可開始閱讀與傳送訊息。"
-
-msgid "Join via Code"
-msgstr "透過邀請碼加入"
 
 msgid "Joining…"
 msgstr "正在加入…"
@@ -846,8 +847,8 @@ msgstr "沒有已封存話題"
 msgid "No chats yet"
 msgstr "暫無聊天"
 
-msgid "No friends yet. Tap Add to find someone."
-msgstr "還沒有好友。點擊「加入」查找好友。"
+msgid "No friend chats yet"
+msgstr "暂无好友会话"
 
 msgid "No group description yet."
 msgstr "尚無群組描述。"
@@ -1274,6 +1275,15 @@ msgstr "分享邀請"
 msgid "Show \"All\" Tab in Chats"
 msgstr "在聊天中顯示「全部」標籤"
 
+msgid "Show \"Friends\" Tab in Chats"
+msgstr "在聊天中显示“好友”标签"
+
+msgid "Show \"Groups\" Tab in Chats"
+msgstr "在聊天中显示“群组”标签"
+
+msgid "Show \"Threads\" Tab in Chats"
+msgstr "在聊天中显示“话题”标签"
+
 msgid "Show Avatars Next to All Messages"
 msgstr "在所有訊息旁顯示頭像"
 
@@ -1489,7 +1499,7 @@ msgid "Videos"
 msgstr "影片"
 
 msgid "View"
-msgstr ""
+msgstr "查看"
 
 msgid "View all pinned messages"
 msgstr "查看所有已釘選的訊息"

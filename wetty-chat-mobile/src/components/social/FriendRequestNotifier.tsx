@@ -3,9 +3,8 @@ import { IonToast } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { useDispatch, useSelector } from 'react-redux';
 import type { AppDispatch } from '@/store';
-import { fetchIncomingRequests, selectIncomingRequests, setContactsPanelOpen } from '@/store/socialSlice';
-import { appHistory } from '@/utils/navigationHistory';
-import { useIsDesktop } from '@/hooks/platformHooks';
+import { fetchIncomingRequests, selectIncomingRequests } from '@/store/socialSlice';
+import { setChatListTab } from '@/store/settingsSlice';
 import { isFeatureEnabled } from '@/features';
 
 const TOAST_DURATION_MS = 6000;
@@ -14,21 +13,20 @@ const TOAST_DURATION_MS = 6000;
  * Global friend-request alert. Watches the incoming request list and shows a
  * toast whenever a request that has not been seen before appears - whether it
  * arrived via the friendRequestReceived WS event (which triggers a refetch)
- * or via the always-refetch-on-open contacts page. The "View" action jumps
- * straight to the contacts list (route on mobile, sidebar on desktop).
+ * or via a list refetch. The "View" action switches the chat list to the
+ * Friends tab on both mobile and desktop.
  */
 export function FriendRequestNotifier() {
   const dispatch = useDispatch<AppDispatch>();
   const incoming = useSelector(selectIncomingRequests);
-  const isDesktop = useIsDesktop();
   const [toastText, setToastText] = useState<string | null>(null);
   const seenIdsRef = useRef<Set<string> | null>(null);
   const bootFetchSettledRef = useRef(false);
 
   useEffect(() => {
     // Fetch once at boot so pre-existing pending requests light up the
-    // Friends segment badge without waiting for a WS event or a contacts
-    // visit. Boot-time requests are badge-only, never toasted.
+    // Friends tab badge without waiting for a WS event. Boot-time requests
+    // are badge-only, never toasted.
     if (isFeatureEnabled('friends')) {
       dispatch(fetchIncomingRequests());
     }
@@ -61,15 +59,6 @@ export function FriendRequestNotifier() {
     }
   }, [incoming]);
 
-  const openContacts = () => {
-    setToastText(null);
-    if (isDesktop) {
-      dispatch(setContactsPanelOpen(true));
-    } else {
-      appHistory.push('/contacts');
-    }
-  };
-
   if (!isFeatureEnabled('friends')) {
     return null;
   }
@@ -84,7 +73,10 @@ export function FriendRequestNotifier() {
         {
           text: t`View`,
           role: 'info',
-          handler: openContacts,
+          handler: () => {
+            setToastText(null);
+            dispatch(setChatListTab('friends'));
+          },
         },
         {
           text: t`Dismiss`,

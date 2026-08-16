@@ -225,11 +225,12 @@ msgstr "Close viewer"
 msgid "Code"
 msgstr "Code"
 
-msgid "Compressing"
+14: msgid "Compressing"
 msgstr "Compressing"
-msgid "Contacts"
-msgstr "Contacts"
-
+15: msgid "Compressing"
+msgstr "压缩中"
+16: msgid "Compressing"
+msgstr "壓縮中"
 msgid "Continue"
 msgstr "Continue"
 
@@ -699,11 +700,11 @@ msgstr "Invite unavailable"
 msgid "Join chat"
 msgstr "Join chat"
 
+msgid "Join Group"
+msgstr "Join Group"
+
 msgid "Join this chat to start reading and sending messages."
 msgstr "Join this chat to start reading and sending messages."
-
-msgid "Join via Code"
-msgstr "Join via Code"
 
 msgid "Joining…"
 msgstr "Joining…"
@@ -846,8 +847,8 @@ msgstr "No archived threads"
 msgid "No chats yet"
 msgstr "No chats yet"
 
-msgid "No friends yet. Tap Add to find someone."
-msgstr "No friends yet. Tap Add to find someone."
+msgid "No friend chats yet"
+msgstr "No friend chats yet"
 
 msgid "No group description yet."
 msgstr "No group description yet."
@@ -1273,6 +1274,15 @@ msgstr "Share Invite"
 
 msgid "Show \"All\" Tab in Chats"
 msgstr "Show \"All\" Tab in Chats"
+
+msgid "Show \"Friends\" Tab in Chats"
+msgstr "Show \"Friends\" Tab in Chats"
+
+msgid "Show \"Groups\" Tab in Chats"
+msgstr "Show \"Groups\" Tab in Chats"
+
+msgid "Show \"Threads\" Tab in Chats"
+msgstr "Show \"Threads\" Tab in Chats"
 
 msgid "Show Avatars Next to All Messages"
 msgstr "Show Avatars Next to All Messages"
