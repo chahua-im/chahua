@@ -42,7 +42,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   actions.push({ key: 'reply' });
 
   // 2. Thread
-  if (!input.isThreadView && !input.hasThreadInfo && !input.isDeleted) {
+  if (input.messageType === 'text' && !input.isThreadView && !input.hasThreadInfo && !input.isDeleted) {
     actions.push({ key: 'thread' });
   }
 
