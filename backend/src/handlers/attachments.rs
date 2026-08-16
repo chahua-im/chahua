@@ -32,7 +32,7 @@ pub struct UploadUrlRequest {
     filename: String,
     content_type: String,
     size: i64,
-    purpose: AttachmentUploadPurpose,
+    purpose: Option<AttachmentUploadPurpose>,
     width: Option<i32>,
     height: Option<i32>,
     order: Option<i16>,
@@ -85,7 +85,8 @@ async fn post_upload_url(
     Json(payload): Json<UploadUrlRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
-    validate_upload_request(&payload, state.config.media.max_attachment_file_size_bytes)?;
+    let purpose =
+        validate_upload_request(&payload, state.config.media.max_attachment_file_size_bytes)?;
     let content_type = payload
         .content_type
         .parse::<mime::Mime>()
@@ -103,8 +104,9 @@ async fn post_upload_url(
     let key = state.media.attachment_key(&payload.filename, &s3_item_id);
     let expires_in = Duration::minutes(15);
 
-    let content_disposition = matches!(payload.purpose, AttachmentUploadPurpose::File)
-        .then(|| crate::services::media::attachment_content_disposition(&payload.filename));
+    let content_disposition = (matches!(purpose, AttachmentUploadPurpose::File)
+        && payload.purpose.is_some())
+    .then(|| crate::services::media::attachment_content_disposition(&payload.filename));
     let presigned_upload = state
         .media
         .presign_upload(
@@ -160,7 +162,20 @@ async fn get_config(
     })
 }
 
-fn validate_upload_request(payload: &UploadUrlRequest, maximum_size: i64) -> Result<(), AppError> {
+fn legacy_upload_purpose(mime: &mime::Mime) -> AttachmentUploadPurpose {
+    if mime.type_() == mime::IMAGE || mime.type_() == mime::VIDEO {
+        AttachmentUploadPurpose::Media
+    } else if mime.type_() == mime::AUDIO {
+        AttachmentUploadPurpose::Voice
+    } else {
+        AttachmentUploadPurpose::File
+    }
+}
+
+fn validate_upload_request(
+    payload: &UploadUrlRequest,
+    maximum_size: i64,
+) -> Result<AttachmentUploadPurpose, AppError> {
     if payload.filename.trim().is_empty() {
         return Err(AppError::BadRequest("Attachment filename is required"));
     }
@@ -179,7 +194,10 @@ fn validate_upload_request(payload: &UploadUrlRequest, maximum_size: i64) -> Res
             "Attachment exceeds maximum file size",
         ));
     }
-    match payload.purpose {
+    let purpose = payload
+        .purpose
+        .unwrap_or_else(|| legacy_upload_purpose(&mime));
+    match purpose {
         AttachmentUploadPurpose::Media
             if mime.type_() != mime::IMAGE && mime.type_() != mime::VIDEO =>
         {
@@ -197,7 +215,7 @@ fn validate_upload_request(payload: &UploadUrlRequest, maximum_size: i64) -> Res
                 "Image and video uploads must use media purpose",
             ))
         }
-        _ => Ok(()),
+        _ => Ok(purpose),
     }
 }
 
@@ -210,7 +228,7 @@ mod tests {
 
     fn request(
         size: i64,
-        purpose: AttachmentUploadPurpose,
+        purpose: Option<AttachmentUploadPurpose>,
         content_type: &str,
     ) -> UploadUrlRequest {
         UploadUrlRequest {
@@ -227,31 +245,67 @@ mod tests {
     #[test]
     fn validates_size_boundaries_and_purpose_mime_pairs() {
         assert!(validate_upload_request(
-            &request(52_428_800, AttachmentUploadPurpose::File, "application/pdf"),
+            &request(
+                52_428_800,
+                Some(AttachmentUploadPurpose::File),
+                "application/pdf"
+            ),
             52_428_800,
         )
         .is_ok());
         assert!(validate_upload_request(
-            &request(0, AttachmentUploadPurpose::File, "application/pdf"),
+            &request(0, Some(AttachmentUploadPurpose::File), "application/pdf"),
             52_428_800,
         )
         .is_err());
         assert!(matches!(
             validate_upload_request(
-                &request(52_428_801, AttachmentUploadPurpose::File, "application/pdf"),
+                &request(
+                    52_428_801,
+                    Some(AttachmentUploadPurpose::File),
+                    "application/pdf"
+                ),
                 52_428_800,
             ),
             Err(crate::errors::AppError::PayloadTooLarge(_))
         ));
         assert!(validate_upload_request(
-            &request(1, AttachmentUploadPurpose::Media, "application/pdf"),
+            &request(1, Some(AttachmentUploadPurpose::Media), "application/pdf"),
             52_428_800,
         )
         .is_err());
         assert!(validate_upload_request(
-            &request(1, AttachmentUploadPurpose::Voice, "audio/ogg"),
+            &request(1, Some(AttachmentUploadPurpose::Voice), "audio/ogg"),
             52_428_800,
         )
         .is_ok());
+
+        assert!(matches!(
+            validate_upload_request(&request(1, None, "image/png"), 52_428_800),
+            Ok(AttachmentUploadPurpose::Media)
+        ));
+        assert!(matches!(
+            validate_upload_request(&request(1, None, "audio/ogg"), 52_428_800),
+            Ok(AttachmentUploadPurpose::Voice)
+        ));
+        assert!(matches!(
+            validate_upload_request(&request(1, None, "application/pdf"), 52_428_800),
+            Ok(AttachmentUploadPurpose::File)
+        ));
+    }
+
+    #[test]
+    fn legacy_upload_url_request_without_purpose_is_accepted() {
+        let request: UploadUrlRequest = serde_json::from_value(serde_json::json!({
+            "filename": "photo.jpg",
+            "contentType": "image/jpeg",
+            "size": 1,
+        }))
+        .expect("legacy upload request should deserialize");
+
+        assert!(matches!(
+            validate_upload_request(&request, 52_428_800),
+            Ok(AttachmentUploadPurpose::Media)
+        ));
     }
 }
