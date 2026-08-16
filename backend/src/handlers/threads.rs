@@ -109,6 +109,10 @@ pub struct ThreadRootIdPath {
 }
 
 /// Resolve `chat_id` from a thread root message ID, or return 404.
+///
+/// This only locates the thread's chat; it performs no authorization. Callers
+/// MUST pass the resolved `chat_id` to `check_membership` before reading or
+/// writing any thread state.
 fn resolve_chat_id_for_thread(
     conn: &mut PgConnection,
     thread_root_id: i64,
@@ -144,6 +148,8 @@ async fn mark_thread_read(
     let conn = &mut *conn;
 
     let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
+    check_membership(conn, chat_id, uid)?;
+
     // If the client reports reading the root message itself (no replies),
     // there is nothing to track — skip the write.
     if body.message_id == thread_root_id {
@@ -184,6 +190,7 @@ async fn get_thread_read_state(
     let conn = &mut *conn;
 
     let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
+    check_membership(conn, chat_id, uid)?;
 
     let last_read_message_id =
         thread_svc::get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
