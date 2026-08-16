@@ -11,6 +11,8 @@ interface SocialState {
   requestsLoaded: boolean;
   blocks: BlockResponse[];
   blocksLoaded: boolean;
+  /** Desktop: the left sidebar is currently showing the contacts view. */
+  contactsPanelOpen: boolean;
 }
 
 const initialState: SocialState = {
@@ -21,6 +23,7 @@ const initialState: SocialState = {
   requestsLoaded: false,
   blocks: [],
   blocksLoaded: false,
+  contactsPanelOpen: false,
 };
 
 export const fetchFriends = createAsyncThunk('social/fetchFriends', async () => {
@@ -72,6 +75,9 @@ const socialSlice = createSlice({
     blockRemoved(state, action: PayloadAction<number>) {
       state.blocks = state.blocks.filter((b) => b.user.uid !== action.payload);
     },
+    setContactsPanelOpen(state, action: PayloadAction<boolean>) {
+      state.contactsPanelOpen = action.payload;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -102,17 +108,17 @@ export const {
   incomingRequestRemoved,
   blockAdded,
   blockRemoved,
+  setContactsPanelOpen,
 } = socialSlice.actions;
 
 export const selectFriends = (state: RootState): FriendResponse[] => state.social.friends;
 export const selectFriendsLoaded = (state: RootState): boolean => state.social.friendsLoaded;
-export const selectIncomingRequests = (state: RootState): FriendRequestResponse[] =>
-  state.social.incomingRequests;
-export const selectOutgoingRequests = (state: RootState): FriendRequestResponse[] =>
-  state.social.outgoingRequests;
+export const selectIncomingRequests = (state: RootState): FriendRequestResponse[] => state.social.incomingRequests;
+export const selectOutgoingRequests = (state: RootState): FriendRequestResponse[] => state.social.outgoingRequests;
 export const selectRequestsLoaded = (state: RootState): boolean => state.social.requestsLoaded;
 export const selectBlocks = (state: RootState): BlockResponse[] => state.social.blocks;
 export const selectBlocksLoaded = (state: RootState): boolean => state.social.blocksLoaded;
+export const selectContactsPanelOpen = (state: RootState): boolean => state.social.contactsPanelOpen;
 
 export const selectIsFriend = (state: RootState, uid: number): boolean =>
   state.social.friends.some((f) => f.user.uid === uid);
@@ -120,14 +126,10 @@ export const selectIsFriend = (state: RootState, uid: number): boolean =>
 export const selectIsBlocked = (state: RootState, uid: number): boolean =>
   state.social.blocks.some((b) => b.user.uid === uid);
 
-export const selectIncomingRequestFrom = (
-  state: RootState,
-  uid: number,
-): FriendRequestResponse | undefined => state.social.incomingRequests.find((r) => r.from.uid === uid);
+export const selectIncomingRequestFrom = (state: RootState, uid: number): FriendRequestResponse | undefined =>
+  state.social.incomingRequests.find((r) => r.from.uid === uid);
 
-export const selectOutgoingRequestTo = (
-  state: RootState,
-  uid: number,
-): FriendRequestResponse | undefined => state.social.outgoingRequests.find((r) => r.to.uid === uid);
+export const selectOutgoingRequestTo = (state: RootState, uid: number): FriendRequestResponse | undefined =>
+  state.social.outgoingRequests.find((r) => r.to.uid === uid);
 
 export default socialSlice.reducer;

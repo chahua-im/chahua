@@ -1,6 +1,8 @@
 import { IonBadge, IonLabel, IonSegment, IonSegmentButton } from '@ionic/react';
 import { Trans } from '@lingui/react/macro';
+import { useSelector } from 'react-redux';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
+import { selectIncomingRequests } from '@/store/socialSlice';
 import styles from './ChatListSegment.module.scss';
 
 export type ChatListTab = 'all' | 'groups' | 'threads';
@@ -34,6 +36,7 @@ export function ChatListSegment({
   showAllTab = true,
   onOpenContacts,
 }: ChatListSegmentProps) {
+  const incomingRequestCount = useSelector(selectIncomingRequests).length;
   return (
     <div className={styles.segmentWrapper}>
       <IonSegment
@@ -60,6 +63,7 @@ export function ChatListSegment({
           <IonSegmentButton value="contacts">
             <IonLabel>
               <Trans>Friends</Trans>
+              <UnreadBadge count={incomingRequestCount} />
             </IonLabel>
           </IonSegmentButton>
         )}
