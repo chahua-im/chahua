@@ -639,7 +639,7 @@ pub fn validate_search_query(input: &str) -> Result<String, SearchQueryError> {
 pub fn project_message_document(message: &Message) -> Option<MessageSearchDocument> {
     if message.deleted_at.is_some()
         || !message.is_published
-        || !matches!(message.message_type, MessageType::Text | MessageType::File)
+        || message.message_type != MessageType::Text
     {
         return None;
     }
@@ -699,9 +699,7 @@ pub fn filter_authoritative_hits_with_counts(
 }
 
 fn project_message_response_document(response: &MessageResponse) -> Option<MessageSearchDocument> {
-    if response.is_deleted
-        || !matches!(response.message_type, MessageType::Text | MessageType::File)
-    {
+    if response.is_deleted || response.message_type != MessageType::Text {
         return None;
     }
 
@@ -735,8 +733,8 @@ fn load_reindex_batch(
     messages::table
         .filter(dsl::id.gt(after_id))
         .filter(dsl::deleted_at.is_null())
-        .filter(dsl::message_type.eq_any([MessageType::Text, MessageType::File]))
-        .order(dsl::id.asc())
+        .filter(dsl::is_published.eq(true))
+        .filter(dsl::message_type.eq(MessageType::Text))
         .limit(batch_size)
         .select(Message::as_select())
         .load(conn)

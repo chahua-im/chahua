@@ -682,10 +682,12 @@ pub(crate) fn validate_message(
             }
         }
         MessageType::File => {
-            if attachments.iter().any(|attachment| !is_visual(attachment)) {
-                Ok(())
-            } else {
+            if has_text {
+                Err(AppError::BadRequest("File messages cannot include text"))
+            } else if attachments.is_empty() {
                 Err(AppError::BadRequest("File messages must include a file"))
+            } else {
+                Ok(())
             }
         }
         MessageType::Audio => {
@@ -1391,17 +1393,18 @@ mod tests {
         )
         .is_err());
 
-        // File: needs at least one non-visual attachment; a caption is optional.
+        // File: needs at least one attachment and cannot carry a caption.
+        assert!(
+            validate_message(&MessageType::File, None, None, &[attachment("image/png")]).is_ok()
+        );
         assert!(validate_message(
             &MessageType::File,
             Some("caption"),
             None,
             &[attachment("application/pdf")]
         )
-        .is_ok());
-        assert!(
-            validate_message(&MessageType::File, None, None, &[attachment("image/png")]).is_err()
-        );
+        .is_err());
+        assert!(validate_message(&MessageType::File, None, None, &[]).is_err());
 
         // Audio: exactly one audio attachment and no text.
         assert!(
