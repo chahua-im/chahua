@@ -561,6 +561,7 @@ pub struct PinnedMessage {
     pub pinned_by: i32,
     pub pinned_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
+    pub thread_root_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -572,6 +573,7 @@ pub struct NewPinnedMessage {
     pub pinned_by: i32,
     pub pinned_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
+    pub thread_root_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]

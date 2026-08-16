@@ -529,6 +529,7 @@ msgstr "收藏"
 
 msgid "Favorites"
 msgstr "收藏"
+
 msgid "File"
 msgstr "檔案"
 
@@ -568,6 +569,7 @@ msgstr "群組設定"
 
 msgid "Groups"
 msgstr "群組"
+
 msgid "Image"
 msgstr "圖片"
 
@@ -890,6 +892,9 @@ msgstr "釘選訊息"
 
 msgid "Pin this message in the group?"
 msgstr "確定要釘選此訊息嗎？"
+
+msgid "Pin this message in the thread?"
+msgstr "確定要在此話題中釘選此訊息嗎？"
 
 msgid "Pinned message"
 msgstr "已釘選的訊息"

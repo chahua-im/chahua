@@ -451,15 +451,14 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
           onToggleThreadSubscription={handleToggleThreadSubscription}
         />
 
-        {!threadId && (
-          <PinBanner
-            chatId={chatId}
-            bottomVisibleMessageDate={bottomVisibleMessageDate}
-            onClickPin={jumpToMessage}
-            onClickThread={handleSelectThread}
-            onClickCounter={openPinList}
-          />
-        )}
+        <PinBanner
+          chatId={chatId}
+          threadRootId={threadId}
+          bottomVisibleMessageDate={bottomVisibleMessageDate}
+          onClickPin={jumpToMessage}
+          onClickThread={handleSelectThread}
+          onClickCounter={openPinList}
+        />
         <IonContent className="conversation-content" scrollX={false} scrollY={false}>
           <ChatVirtualScroll
             key={storeChatId}
@@ -529,6 +528,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
         />
         <ConversationOverlayHost
           chatId={chatId}
+          threadRootId={threadId}
           currentUserId={currentUser.uid}
           isAdmin={isAdmin}
           profileSender={profileSender}

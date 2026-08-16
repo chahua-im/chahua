@@ -64,7 +64,6 @@ diesel::table! {
     attachments (id) {
         id -> Int8,
         message_id -> Nullable<Int8>,
-        uploader_uid -> Nullable<Int4>,
         #[max_length = 255]
         kind -> Varchar,
         external_reference -> Text,
@@ -76,6 +75,7 @@ diesel::table! {
         width -> Nullable<Int4>,
         height -> Nullable<Int4>,
         order -> Int2,
+        uploader_uid -> Nullable<Int4>,
     }
 }
 
@@ -210,6 +210,7 @@ diesel::table! {
         pinned_by -> Int4,
         pinned_at -> Timestamptz,
         expires_at -> Nullable<Timestamptz>,
+        thread_root_id -> Nullable<Int8>,
     }
 }
 
@@ -359,9 +360,9 @@ diesel::table! {
         chat_id -> Int8,
         thread_root_id -> Int8,
         uid -> Int4,
+        last_read_message_id -> Nullable<Int8>,
         subscribed_at -> Timestamptz,
         archived -> Bool,
-        last_read_message_id -> Nullable<Int8>,
         subscribed -> Bool,
     }
 }
@@ -407,7 +408,6 @@ diesel::joinable!(groups -> media (avatar_image_id));
 diesel::joinable!(message_reactions -> messages (message_id));
 diesel::joinable!(messages -> stickers (sticker_id));
 diesel::joinable!(pinned_messages -> groups (chat_id));
-diesel::joinable!(pinned_messages -> messages (message_id));
 diesel::joinable!(policy_assignments -> policies (policy_id));
 diesel::joinable!(policy_permissions -> policies (policy_id));
 diesel::joinable!(saved_messages -> groups (original_chat_id));

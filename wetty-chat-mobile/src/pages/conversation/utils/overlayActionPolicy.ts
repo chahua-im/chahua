@@ -47,7 +47,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 3. Pin
-  if (!input.isThreadView && !input.isDeleted && input.isAdmin) {
+  if (!input.isDeleted && input.isAdmin) {
     actions.push({ key: 'pin', pinState: input.isPinned ? 'pinned' : 'unpinned' });
   }
 

@@ -640,10 +640,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(mark_as_unread))
                 .routes(utoipa_axum::routes!(get_chat_unread_count))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
-                .nest(
-                    "/threads/{thread_root_id}",
-                    super::threads::subscribe_router(),
-                )
+                .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())
                 .nest("/pins", super::pins::router()),
         )

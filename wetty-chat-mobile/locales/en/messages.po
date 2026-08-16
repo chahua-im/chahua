@@ -893,6 +893,9 @@ msgstr "Pin Message"
 msgid "Pin this message in the group?"
 msgstr "Pin this message in the group?"
 
+msgid "Pin this message in the thread?"
+msgstr "Pin this message in the thread?"
+
 msgid "Pinned message"
 msgstr "Pinned message"
 

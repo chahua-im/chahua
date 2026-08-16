@@ -64,8 +64,19 @@ describe('overlay action policy', () => {
     });
   });
 
-  it('does not offer thread or pin actions inside thread view', () => {
-    expect(keys({ isThreadView: true, isAdmin: true })).toEqual(['reply', 'copy', 'save', 'copy-link', 'delete']);
+  it('offers pin but not start thread inside thread view for admins', () => {
+    expect(keys({ isThreadView: true, isAdmin: true })).toEqual([
+      'reply',
+      'pin',
+      'copy',
+      'save',
+      'copy-link',
+      'delete',
+    ]);
+  });
+
+  it('does not offer pin inside thread view for non-admins', () => {
+    expect(keys({ isThreadView: true, isAdmin: false })).not.toContain('pin');
   });
 
   it('does not offer start thread when the message already has thread info', () => {

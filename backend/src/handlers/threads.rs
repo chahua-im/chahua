@@ -454,8 +454,11 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(mark_thread_read))
         .routes(utoipa_axum::routes!(get_thread_read_state))
 }
-/// Routes that are nested under /chats/:chat_id/threads/:thread_root_id
-pub fn subscribe_router() -> OpenApiRouter<crate::AppState> {
+/// Routes nested under `/chats/:chat_id/threads/:thread_root_id`.
+///
+/// Keep every thread-scoped endpoint in this router so callers mount one
+/// cohesive subtree rather than composing individual thread features.
+pub fn thread_router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .nest(
             "/subscribe",
@@ -469,4 +472,5 @@ pub fn subscribe_router() -> OpenApiRouter<crate::AppState> {
             "/archive",
             OpenApiRouter::new().routes(utoipa_axum::routes!(archive_thread, unarchive_thread)),
         )
+        .nest("/pins", super::pins::thread_router())
 }

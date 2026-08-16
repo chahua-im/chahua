@@ -14,6 +14,8 @@ interface OverlayMessageState {
 
 interface ConversationOverlayHostProps {
   chatId: string;
+  /** When set, the pin list modal shows that thread's pins. */
+  threadRootId?: string;
   currentUserId: number | null;
   isAdmin: boolean;
   profileSender: User | null;
@@ -36,6 +38,7 @@ interface ConversationOverlayHostProps {
 
 export function ConversationOverlayHost({
   chatId,
+  threadRootId,
   currentUserId,
   isAdmin,
   profileSender,
@@ -70,6 +73,7 @@ export function ConversationOverlayHost({
       <StickerPreviewModal stickerId={stickerPreviewId} onDismiss={onDismissStickerPreview} />
       <PinListModal
         chatId={chatId}
+        threadRootId={threadRootId}
         isOpen={pinListOpen}
         onDismiss={onDismissPinList}
         onSelectPin={onSelectPin}

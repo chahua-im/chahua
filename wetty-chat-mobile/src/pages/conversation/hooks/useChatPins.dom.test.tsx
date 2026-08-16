@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { AxiosResponse } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PinResponse } from '@/api/pins';
-import { listPins } from '@/api/pins';
+import { listPins, listThreadPins } from '@/api/pins';
 import { useChatPins } from './useChatPins';
 
 function response<T>(data: T): AxiosResponse<T> {
@@ -12,12 +12,13 @@ function response<T>(data: T): AxiosResponse<T> {
 
 vi.mock('@/api/pins', () => ({
   listPins: vi.fn(),
+  listThreadPins: vi.fn(),
 }));
 
 const dispatch = vi.fn();
 const selectorState = {
   pins: {
-    byChatId: {} as Record<string, { pins: PinResponse[]; loaded: boolean }>,
+    byScope: {} as Record<string, { pins: PinResponse[]; loaded: boolean }>,
     dismissedPinId: {},
   },
 };
@@ -28,6 +29,7 @@ vi.mock('react-redux', () => ({
 
 interface HookState {
   pins: PinResponse[];
+  scopeKey: string;
   pinListOpen: boolean;
   openPinList: () => void;
   closePinList: () => void;
@@ -64,8 +66,9 @@ describe('useChatPins', () => {
     document.body.appendChild(host);
     root = createRoot(host);
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    selectorState.pins.byChatId = {};
+    selectorState.pins.byScope = {};
     vi.mocked(listPins).mockResolvedValue(response({ pins: [] }));
+    vi.mocked(listThreadPins).mockResolvedValue(response({ pins: [] }));
   });
 
   afterEach(() => {
@@ -83,19 +86,36 @@ describe('useChatPins', () => {
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'pins/setPins',
-        payload: { chatId: 'chat-1', pins: [] },
+        payload: { chatId: 'chat-1', threadRootId: undefined, pins: [] },
       }),
     );
   });
 
-  it('does not load pins inside a thread', async () => {
+  it('loads the thread pin list inside a thread', async () => {
     await renderHook('thread-1');
 
+    expect(listThreadPins).toHaveBeenCalledWith('chat-1', 'thread-1');
     expect(listPins).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'pins/setPins',
+        payload: { chatId: 'chat-1', threadRootId: 'thread-1', pins: [] },
+      }),
+    );
+    expect(state.scopeKey).toBe('chat-1_thread_thread-1');
+  });
+
+  it('keeps chat and thread pin lists separate', async () => {
+    selectorState.pins.byScope['chat-1'] = { pins: [], loaded: true };
+
+    await renderHook('thread-1');
+
+    // The chat scope being loaded must not satisfy the thread scope.
+    expect(listThreadPins).toHaveBeenCalledWith('chat-1', 'thread-1');
   });
 
   it('does not load pins when the chat pins are already loaded', async () => {
-    selectorState.pins.byChatId['chat-1'] = { pins: [], loaded: true };
+    selectorState.pins.byScope['chat-1'] = { pins: [], loaded: true };
 
     await renderHook();
 

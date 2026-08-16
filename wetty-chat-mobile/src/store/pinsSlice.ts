@@ -9,14 +9,23 @@ interface ChatPins {
   loaded: boolean;
 }
 
-interface PinsState {
-  byChatId: Record<string, ChatPins>;
-  /** Per-user banner dismissal: chatId -> dismissed pin ID */
+export interface PinsState {
+  byScope: Record<string, ChatPins>;
+  /** Per-user banner dismissal: pin scope key -> dismissed pin ID */
   dismissedPinId: Record<string, string>;
 }
 
+/**
+ * Chat pins and each thread's pins are independent lists. Threads reuse the
+ * `${chatId}_thread_${threadRootId}` composite key format used elsewhere for
+ * thread-scoped state.
+ */
+export function pinScopeKey(chatId: string, threadRootId?: string | null): string {
+  return threadRootId ? `${chatId}_thread_${threadRootId}` : chatId;
+}
+
 const initialState: PinsState = {
-  byChatId: {},
+  byScope: {},
   dismissedPinId: {},
 };
 
@@ -24,18 +33,21 @@ const pinsSlice = createSlice({
   name: 'pins',
   initialState,
   reducers: {
-    setPins(state, action: PayloadAction<{ chatId: string; pins: PinResponse[] }>) {
+    setPins(
+      state,
+      action: PayloadAction<{ chatId: string; threadRootId?: string | null; pins: PinResponse[] }>,
+    ) {
       const sortedPins = [...action.payload.pins].sort(
         (a, b) => new Date(b.message.createdAt).getTime() - new Date(a.message.createdAt).getTime(),
       );
-      state.byChatId[action.payload.chatId] = {
+      state.byScope[pinScopeKey(action.payload.chatId, action.payload.threadRootId)] = {
         pins: sortedPins,
         loaded: true,
       };
     },
     addPin(state, action: PayloadAction<PinResponse>) {
-      const chatId = action.payload.chatId;
-      const entry = state.byChatId[chatId];
+      const scopeKey = pinScopeKey(action.payload.chatId, action.payload.threadRootId);
+      const entry = state.byScope[scopeKey];
       if (entry) {
         // Avoid duplicates
         if (!entry.pins.some((p) => p.id === action.payload.id)) {
@@ -43,33 +55,42 @@ const pinsSlice = createSlice({
           entry.pins.sort((a, b) => new Date(b.message.createdAt).getTime() - new Date(a.message.createdAt).getTime());
         }
       } else {
-        state.byChatId[chatId] = { pins: [action.payload], loaded: true };
+        state.byScope[scopeKey] = { pins: [action.payload], loaded: true };
       }
       // Clear dismissed state so new pin shows in banner
-      delete state.dismissedPinId[chatId];
+      delete state.dismissedPinId[scopeKey];
     },
-    removePin(state, action: PayloadAction<{ chatId: string; pinId: string }>) {
-      const entry = state.byChatId[action.payload.chatId];
+    removePin(
+      state,
+      action: PayloadAction<{ chatId: string; threadRootId?: string | null; pinId: string }>,
+    ) {
+      const entry = state.byScope[pinScopeKey(action.payload.chatId, action.payload.threadRootId)];
       if (entry) {
         entry.pins = entry.pins.filter((p) => p.id !== action.payload.pinId);
       }
     },
-    dismissBanner(state, action: PayloadAction<{ chatId: string; pinId: string }>) {
-      state.dismissedPinId[action.payload.chatId] = action.payload.pinId;
+    dismissBanner(
+      state,
+      action: PayloadAction<{ chatId: string; threadRootId?: string | null; pinId: string }>,
+    ) {
+      state.dismissedPinId[pinScopeKey(action.payload.chatId, action.payload.threadRootId)] =
+        action.payload.pinId;
     },
   },
   extraReducers: (builder) => {
     builder.addCase(messagePatched, (state, action) => {
       const { chatId, messageId, message } = action.payload;
-      const entry = state.byChatId[chatId];
-      if (!entry) return;
-      for (let i = 0; i < entry.pins.length; i++) {
-        if (entry.pins[i].message.id === messageId) {
+      // The same message can be pinned chat-wide and inside a thread, so patch
+      // every scope of this chat rather than a single entry.
+      for (const entry of Object.values(state.byScope)) {
+        for (let i = 0; i < entry.pins.length; i++) {
+          const pin = entry.pins[i];
+          if (pin.chatId !== chatId || pin.message.id !== messageId) continue;
           if (message.isDeleted) {
-            entry.pins[i].message = { ...entry.pins[i].message, isDeleted: true, message: null };
+            pin.message = { ...pin.message, isDeleted: true, message: null };
           } else {
-            entry.pins[i].message = {
-              ...entry.pins[i].message,
+            pin.message = {
+              ...pin.message,
               message: message.message,
               messageType: message.messageType,
               isEdited: message.isEdited,
@@ -79,7 +100,6 @@ const pinsSlice = createSlice({
               sticker: message.sticker,
             };
           }
-          break;
         }
       }
     });
@@ -88,19 +108,19 @@ const pinsSlice = createSlice({
 
 export const { setPins, addPin, removePin, dismissBanner } = pinsSlice.actions;
 
-export const selectPinsForChat = (state: RootState, chatId: string): PinResponse[] =>
-  state.pins.byChatId[chatId]?.pins ?? [];
+export const selectPinsForScope = (state: RootState, scopeKey: string): PinResponse[] =>
+  state.pins.byScope[scopeKey]?.pins ?? [];
 
-export const selectPinsLoaded = (state: RootState, chatId: string): boolean =>
-  state.pins.byChatId[chatId]?.loaded ?? false;
+export const selectPinsLoadedForScope = (state: RootState, scopeKey: string): boolean =>
+  state.pins.byScope[scopeKey]?.loaded ?? false;
 
-export const selectLatestPin = (state: RootState, chatId: string): PinResponse | null =>
-  state.pins.byChatId[chatId]?.pins[0] ?? null;
+export const selectLatestPinForScope = (state: RootState, scopeKey: string): PinResponse | null =>
+  state.pins.byScope[scopeKey]?.pins[0] ?? null;
 
-export const selectIsBannerDismissed = (state: RootState, chatId: string): boolean => {
-  const latestPin = state.pins.byChatId[chatId]?.pins[0];
+export const selectIsBannerDismissedForScope = (state: RootState, scopeKey: string): boolean => {
+  const latestPin = state.pins.byScope[scopeKey]?.pins[0];
   if (!latestPin) return true;
-  return state.pins.dismissedPinId[chatId] === latestPin.id;
+  return state.pins.dismissedPinId[scopeKey] === latestPin.id;
 };
 
 export default pinsSlice.reducer;

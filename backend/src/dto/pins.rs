@@ -12,6 +12,12 @@ pub struct PinResponse {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub chat_id: i64,
+    #[serde(
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub thread_root_id: Option<i64>,
     pub message: MessageResponse,
     pub pinned_by: i32,
     pub pinned_at: DateTime<Utc>,

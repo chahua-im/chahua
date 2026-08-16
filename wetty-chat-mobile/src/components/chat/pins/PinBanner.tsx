@@ -5,14 +5,16 @@ import { useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import type { RootState } from '@/store/index';
 import { useChatRole } from '@/components/chat/permissions/useChatRole';
-import { selectPinsForChat } from '@/store/pinsSlice';
+import { pinScopeKey, selectPinsForScope } from '@/store/pinsSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
-import { deletePin } from '@/api/pins';
+import { deletePin, deleteThreadPin } from '@/api/pins';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import styles from './PinBanner.module.scss';
 
 interface PinBannerProps {
   chatId: string;
+  /** When set, the banner shows that thread's pins instead of the chat's. */
+  threadRootId?: string;
   bottomVisibleMessageDate?: string | null;
   onClickPin: (messageId: string) => void;
   onClickThread: (messageId: string) => void;
@@ -21,6 +23,7 @@ interface PinBannerProps {
 
 export function PinBanner({
   chatId,
+  threadRootId,
   bottomVisibleMessageDate,
   onClickPin,
   onClickThread,
@@ -29,7 +32,9 @@ export function PinBanner({
   const [presentAlert] = useIonAlert();
   const { role } = useChatRole(chatId);
   const isAdmin = role === 'admin';
-  const pins = useSelector((state: RootState) => selectPinsForChat(state, chatId));
+  const pins = useSelector((state: RootState) =>
+    selectPinsForScope(state, pinScopeKey(chatId, threadRootId)),
+  );
   const locale = useSelector(selectEffectiveLocale);
 
   const activePin = useMemo(() => {
@@ -62,13 +67,16 @@ export function PinBanner({
             text: t`Unpin`,
             role: 'destructive',
             handler: () => {
-              deletePin(chatId, activePin.id).catch(() => {});
+              const unpin = threadRootId
+                ? deleteThreadPin(chatId, threadRootId, activePin.id)
+                : deletePin(chatId, activePin.id);
+              unpin.catch(() => {});
             },
           },
         ],
       });
     },
-    [chatId, activePin, presentAlert],
+    [chatId, threadRootId, activePin, presentAlert],
   );
 
   const handleThreadClick = useCallback(
@@ -112,7 +120,7 @@ export function PinBanner({
         </div>
       </div>
 
-      {msg.threadInfo && (
+      {!threadRootId && msg.threadInfo && (
         <button className={styles.threadBtn} onClick={handleThreadClick} aria-label={t`Open thread`}>
           <IonIcon icon={chatbubbles} />
         </button>

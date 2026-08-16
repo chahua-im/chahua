@@ -15,7 +15,7 @@ import {
 import { useDispatch } from 'react-redux';
 import { deleteMessage, type MessageResponse } from '@/api/messages';
 import type { PinResponse } from '@/api/pins';
-import { createPin, deletePin } from '@/api/pins';
+import { createPin, createThreadPin, deletePin, deleteThreadPin } from '@/api/pins';
 import { favoriteSticker } from '@/api/stickers';
 import { saveMessage } from '@/api/savedMessages';
 import type { MessageOverlayAction } from '@/components/chat/messages/MessageOverlay';
@@ -33,6 +33,11 @@ interface AlertOptions {
   header: string;
   message: string;
   buttons: AlertButton[];
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
 }
 
 interface UseMessageOverlayActionsArgs {
@@ -228,7 +233,11 @@ export function useMessageOverlayActions({
             handler: () => {
               presentAlert({
                 header: existingPin ? t`Unpin Message` : t`Pin Message`,
-                message: existingPin ? t`Would you like to unpin this message?` : t`Pin this message in the group?`,
+                message: existingPin
+                  ? t`Would you like to unpin this message?`
+                  : threadId
+                    ? t`Pin this message in the thread?`
+                    : t`Pin this message in the group?`,
                 buttons: [
                   { text: t`Cancel`, role: 'cancel' },
                   {
@@ -236,12 +245,18 @@ export function useMessageOverlayActions({
                     role: existingPin ? 'destructive' : undefined,
                     handler: () => {
                       if (existingPin) {
-                        deletePin(chatId, existingPin.id).catch((e: any) => {
-                          showToast(e.message || t`Failed to unpin message`);
+                        const unpin = threadId
+                          ? deleteThreadPin(chatId, threadId, existingPin.id)
+                          : deletePin(chatId, existingPin.id);
+                        unpin.catch((e: unknown) => {
+                          showToast(errorMessage(e, t`Failed to unpin message`));
                         });
                       } else {
-                        createPin(chatId, message.id).catch((e: any) => {
-                          showToast(e.message || t`Failed to pin message`);
+                        const pin = threadId
+                          ? createThreadPin(chatId, threadId, message.id)
+                          : createPin(chatId, message.id);
+                        pin.catch((e: unknown) => {
+                          showToast(errorMessage(e, t`Failed to pin message`));
                         });
                       }
                     },

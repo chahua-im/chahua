@@ -32,8 +32,14 @@ pub enum ServerWsMessage {
     ThreadUpdate(ThreadUpdatePayload),
     ThreadMembershipChanged(ThreadMembershipChangedPayload),
     ChatArchiveStateChanged(ChatArchiveStateChangedPayload),
+    /// Chat-level pin event. Kept stable for already-deployed clients.
     PinAdded(PinUpdatePayload),
+    /// Thread-scoped pin event. Old clients ignore this unknown event type.
+    ThreadPinAdded(PinUpdatePayload),
+    /// Chat-level pin event. Kept stable for already-deployed clients.
     PinRemoved(PinUpdatePayload),
+    /// Thread-scoped pin event. Old clients ignore this unknown event type.
+    ThreadPinRemoved(PinUpdatePayload),
     StickerPackOrderUpdated(StickerPackOrderUpdatePayload),
 }
 
@@ -50,7 +56,9 @@ impl ServerWsMessage {
             Self::ThreadMembershipChanged(_) => "threadMembershipChanged",
             Self::ChatArchiveStateChanged(_) => "chatArchiveStateChanged",
             Self::PinAdded(_) => "pinAdded",
+            Self::ThreadPinAdded(_) => "threadPinAdded",
             Self::PinRemoved(_) => "pinRemoved",
+            Self::ThreadPinRemoved(_) => "threadPinRemoved",
             Self::StickerPackOrderUpdated(_) => "stickerPackOrderUpdated",
         }
     }
@@ -121,6 +129,12 @@ pub struct PinUpdatePayload {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub message_id: i64,
+    #[serde(
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub thread_root_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pin: Option<PinResponse>,
 }
@@ -133,7 +147,9 @@ pub struct StickerPackOrderUpdatePayload {
 
 #[cfg(test)]
 mod tests {
-    use super::{PresenceUpdatePayload, ServerWsMessage, ThreadMembershipChangedPayload};
+    use super::{
+        PinUpdatePayload, PresenceUpdatePayload, ServerWsMessage, ThreadMembershipChangedPayload,
+    };
     use serde_json::json;
 
     #[test]
@@ -161,5 +177,50 @@ mod tests {
         assert_eq!(value["type"], json!("threadMembershipChanged"));
         assert_eq!(value["payload"]["threadRootId"], json!("42"));
         assert_eq!(value["payload"]["chatId"], json!("7"));
+    }
+
+    #[test]
+    fn serializes_thread_pin_events_with_a_distinct_type() {
+        let value = serde_json::to_value(ServerWsMessage::ThreadPinAdded(PinUpdatePayload {
+            chat_id: 1,
+            pin_id: 2,
+            message_id: 3,
+            thread_root_id: Some(4),
+            pin: None,
+        }))
+        .expect("serialize thread pin added event");
+
+        assert_eq!(value["type"], json!("threadPinAdded"));
+        assert_eq!(value["payload"]["threadRootId"], json!("4"));
+    }
+
+    #[test]
+    fn serializes_thread_pin_removal_with_a_distinct_type() {
+        let value = serde_json::to_value(ServerWsMessage::ThreadPinRemoved(PinUpdatePayload {
+            chat_id: 1,
+            pin_id: 2,
+            message_id: 3,
+            thread_root_id: Some(4),
+            pin: None,
+        }))
+        .expect("serialize thread pin removed event");
+
+        assert_eq!(value["type"], json!("threadPinRemoved"));
+        assert_eq!(value["payload"]["threadRootId"], json!("4"));
+    }
+
+    #[test]
+    fn omits_thread_scope_for_chat_level_pins() {
+        let value = serde_json::to_value(ServerWsMessage::PinRemoved(PinUpdatePayload {
+            chat_id: 1,
+            pin_id: 2,
+            message_id: 3,
+            thread_root_id: None,
+            pin: None,
+        }))
+        .expect("serialize pin removed event");
+
+        assert_eq!(value["type"], json!("pinRemoved"));
+        assert!(value["payload"].get("threadRootId").is_none());
     }
 }

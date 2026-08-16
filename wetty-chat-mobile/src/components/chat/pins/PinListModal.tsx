@@ -5,28 +5,39 @@ import { useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import type { RootState } from '@/store/index';
 import { useChatRole } from '@/components/chat/permissions/useChatRole';
-import { selectPinsForChat } from '@/store/pinsSlice';
+import { pinScopeKey, selectPinsForScope } from '@/store/pinsSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import type { PinResponse } from '@/api/pins';
-import { deletePin } from '@/api/pins';
+import { deletePin, deleteThreadPin } from '@/api/pins';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import styles from './PinListModal.module.scss';
 import { useIsDesktop } from '@/hooks/platformHooks';
 
 interface PinListModalProps {
   chatId: string;
+  /** When set, the modal lists that thread's pins instead of the chat's. */
+  threadRootId?: string;
   isOpen: boolean;
   onDismiss: () => void;
   onSelectPin: (messageId: string) => void;
   onSelectThread: (messageId: string) => void;
 }
 
-export function PinListModal({ chatId, isOpen, onDismiss, onSelectPin, onSelectThread }: PinListModalProps) {
+export function PinListModal({
+  chatId,
+  threadRootId,
+  isOpen,
+  onDismiss,
+  onSelectPin,
+  onSelectThread,
+}: PinListModalProps) {
   const [presentAlert] = useIonAlert();
   const isDesktop = useIsDesktop();
   const { role } = useChatRole(chatId);
   const isAdmin = role === 'admin';
-  const pins = useSelector((state: RootState) => selectPinsForChat(state, chatId));
+  const pins = useSelector((state: RootState) =>
+    selectPinsForScope(state, pinScopeKey(chatId, threadRootId)),
+  );
   const locale = useSelector(selectEffectiveLocale);
 
   const handleItemClick = useCallback(
@@ -50,13 +61,16 @@ export function PinListModal({ chatId, isOpen, onDismiss, onSelectPin, onSelectT
             text: t`Unpin`,
             role: 'destructive',
             handler: () => {
-              deletePin(chatId, pin.id).catch(() => {});
+              const unpin = threadRootId
+                ? deleteThreadPin(chatId, threadRootId, pin.id)
+                : deletePin(chatId, pin.id);
+              unpin.catch(() => {});
             },
           },
         ],
       });
     },
-    [chatId, presentAlert],
+    [chatId, threadRootId, presentAlert],
   );
 
   const handleThreadClick = useCallback(
@@ -108,7 +122,7 @@ export function PinListModal({ chatId, isOpen, onDismiss, onSelectPin, onSelectT
                       <span className={styles.pinMessage}>{previewText}</span>
                     </div>
                     <div className={styles.actions}>
-                      {msg.threadInfo && (
+                      {!threadRootId && msg.threadInfo && (
                         <IonButton fill="clear" size="small" onClick={(e) => handleThreadClick(e, pin)}>
                           <IonIcon icon={chatbubbles} slot="icon-only" className={styles.threadBadge} />
                         </IonButton>

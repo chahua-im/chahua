@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { listPins } from '@/api/pins';
+import { listPins, listThreadPins } from '@/api/pins';
 import type { RootState } from '@/store';
-import { selectPinsForChat, selectPinsLoaded, setPins } from '@/store/pinsSlice';
+import {
+  pinScopeKey,
+  selectPinsForScope,
+  selectPinsLoadedForScope,
+  setPins,
+} from '@/store/pinsSlice';
 
 interface UseChatPinsArgs {
   chatId: string;
@@ -11,15 +16,16 @@ interface UseChatPinsArgs {
 
 export function useChatPins({ chatId, threadId }: UseChatPinsArgs) {
   const dispatch = useDispatch();
-  const pins = useSelector((state: RootState) => selectPinsForChat(state, chatId));
-  const pinsLoaded = useSelector((state: RootState) => selectPinsLoaded(state, chatId));
+  const scopeKey = pinScopeKey(chatId, threadId);
+  const pins = useSelector((state: RootState) => selectPinsForScope(state, scopeKey));
+  const pinsLoaded = useSelector((state: RootState) => selectPinsLoadedForScope(state, scopeKey));
   const [pinListOpen, setPinListOpen] = useState(false);
 
   useEffect(() => {
-    if (threadId || pinsLoaded) return;
+    if (pinsLoaded) return;
 
-    listPins(chatId)
-      .then((res) => dispatch(setPins({ chatId, pins: res.data.pins })))
+    (threadId ? listThreadPins(chatId, threadId) : listPins(chatId))
+      .then((res) => dispatch(setPins({ chatId, threadRootId: threadId, pins: res.data.pins })))
       .catch(() => {});
   }, [chatId, threadId, pinsLoaded, dispatch]);
 
@@ -33,6 +39,7 @@ export function useChatPins({ chatId, threadId }: UseChatPinsArgs) {
 
   return {
     pins,
+    scopeKey,
     pinListOpen,
     openPinList,
     closePinList,

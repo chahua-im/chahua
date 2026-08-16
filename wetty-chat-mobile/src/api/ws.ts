@@ -431,7 +431,7 @@ async function connectWebSocket(): Promise<void> {
           return;
         }
 
-        if (message.type === 'pinAdded' && message.payload != null) {
+        if ((message.type === 'pinAdded' || message.type === 'threadPinAdded') && message.payload != null) {
           const payload = message.payload as { pin?: PinResponse };
           if (payload.pin) {
             store.dispatch(addPin(payload.pin));
@@ -439,10 +439,20 @@ async function connectWebSocket(): Promise<void> {
           return;
         }
 
-        if (message.type === 'pinRemoved' && message.payload != null) {
-          const payload = message.payload as { chatId: string; pinId: string };
+        if ((message.type === 'pinRemoved' || message.type === 'threadPinRemoved') && message.payload != null) {
+          const payload = message.payload as {
+            chatId: string;
+            pinId: string;
+            threadRootId?: string | null;
+          };
           if (payload.chatId && payload.pinId) {
-            store.dispatch(removePin({ chatId: payload.chatId, pinId: payload.pinId }));
+            store.dispatch(
+              removePin({
+                chatId: payload.chatId,
+                threadRootId: payload.threadRootId,
+                pinId: payload.pinId,
+              }),
+            );
           }
           return;
         }
