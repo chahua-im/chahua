@@ -1,13 +1,6 @@
 import { useMemo, useState, type CSSProperties, type HTMLAttributes, type Ref } from 'react';
 import { IonIcon } from '@ionic/react';
-import {
-  chatbubbles,
-  checkmarkCircle,
-  checkmarkCircleOutline,
-  documentOutline,
-  femaleOutline,
-  maleOutline,
-} from 'ionicons/icons';
+import { chatbubbles, checkmarkCircle, checkmarkCircleOutline, femaleOutline, maleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { useSelector } from 'react-redux';
 import styles from './ChatBubble.module.scss';
@@ -29,44 +22,13 @@ import { SingleMediaAttachment } from './media/SingleMediaAttachment';
 import { JustifiedMediaGallery } from './media/JustifiedMediaGallery';
 import { VideoPreview } from './media/VideoPreview';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
-import { isImageKind } from '@/utils/fileType';
+import { FileAttachmentCard } from './FileAttachmentCard';
 import {
   parseChatBubbleContentToRichItems,
   getMessageLayoutStats,
   getChatBaseFont,
   getChatBubbleMaxWidth,
 } from '@/utils/chatTextMeasure';
-
-function isVideoAttachment(attachment: Attachment) {
-  return attachment.kind.startsWith('video/');
-}
-
-function isImageAttachment(attachment: Attachment) {
-  return isImageKind(attachment.kind, attachment);
-}
-
-function getImageLayoutStyle(
-  width: number | null | undefined,
-  height: number | null | undefined,
-  maxImageHeight: number,
-): CSSProperties | undefined {
-  if (!width || !height || width <= 0 || height <= 0) {
-    return undefined;
-  }
-
-  const aspectRatio = width / height;
-  const imageStyle: CSSProperties = {
-    aspectRatio: `${width} / ${height}`,
-  };
-
-  if (height > maxImageHeight) {
-    imageStyle.width = Math.min(width, maxImageHeight * aspectRatio);
-  } else {
-    imageStyle.width = width;
-  }
-
-  return imageStyle;
-}
 
 export type BubblePropsOverride = Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'className' | 'style'> & {
   className?: string;
@@ -75,7 +37,7 @@ export type BubblePropsOverride = Omit<HTMLAttributes<HTMLDivElement>, 'children
 };
 
 export interface ChatBubbleBaseProps {
-  messageType?: 'text' | 'audio';
+  messageType?: 'text' | 'audio' | 'file';
   senderName: string;
   senderGender?: number;
   senderGroup?: UserGroupTagInfo | null;
@@ -97,7 +59,6 @@ export interface ChatBubbleBaseProps {
   threadInfo?: { replyCount: number };
   onThreadClick?: () => void;
   attachments?: Attachment[];
-  maxImageHeight?: number;
   reactions?: ReactionSummary[];
   onReactionToggle?: (emoji: string, currentlyReacted: boolean) => void;
   reactionsInteractive?: boolean;
@@ -109,6 +70,7 @@ export interface ChatBubbleBaseProps {
   currentUserUid?: number | null;
   onMentionClick?: (uid: number) => void;
   showDroplet?: boolean;
+  uploadProgress?: number;
 }
 
 export function ChatBubbleBase({
@@ -131,7 +93,6 @@ export function ChatBubbleBase({
   threadInfo,
   onThreadClick,
   attachments,
-  maxImageHeight = 300,
   reactions,
   onReactionToggle,
   reactionsInteractive,
@@ -143,19 +104,20 @@ export function ChatBubbleBase({
   currentUserUid,
   onMentionClick,
   showDroplet: showDropletProp,
+  uploadProgress,
 }: ChatBubbleBaseProps) {
   const [viewingAttachmentIndex, setViewingAttachmentIndex] = useState<number | null>(null);
   const mouseDetected = useMouseDetected();
   const isDarkMode = useIsDarkMode();
   const chatFontSizeStyle = useSelector(selectChatFontSizeStyle);
   const interactive = interactionMode === 'interactive';
-  const imageAttachments = attachments?.filter((att) => isImageAttachment(att) || isVideoAttachment(att)) ?? [];
-  const otherAttachments = attachments?.filter((att) => !(isImageAttachment(att) || isVideoAttachment(att))) ?? [];
+  const mediaAttachments = messageType === 'file' || messageType === 'audio' ? [] : (attachments ?? []);
+  const imageAttachments = mediaAttachments;
   const { className: bubbleClassName, style: bubbleStyle, ...bubbleRestProps } = bubbleProps ?? {};
 
   const hasTopContent = showName || replyTo;
-  const hasBottomContent = message && message.trim() !== '';
-  const isMediaOnly = imageAttachments.length > 0 && !hasBottomContent && otherAttachments.length === 0;
+  const hasBottomContent = messageType !== 'file' && !!message && message.trim() !== '';
+  const isMediaOnly = imageAttachments.length > 0 && !hasBottomContent;
   const showDroplet = (showDropletProp ?? (showAvatar || layout === 'bubble-only')) && !isMediaOnly;
 
   const baseFont = getChatBaseFont(chatFontSizeStyle as string);
@@ -174,11 +136,15 @@ export function ChatBubbleBase({
 
   const mediaContainerClasses = [
     styles.attachmentsContainer,
-    (styles as any).edgeToEdgeHorizontal,
-    !hasTopContent ? (styles as any).edgeToEdgeTop : (styles as any).hasTopContent,
+    (styles as Record<string, string>).edgeToEdgeHorizontal,
+    !hasTopContent
+      ? (styles as Record<string, string>).edgeToEdgeTop
+      : (styles as Record<string, string>).hasTopContent,
     // When a thread indicator follows the media grid, keep normal bottom spacing so the
     // indicator's divider sits at the grid bottom instead of being pulled into it.
-    !hasBottomContent && !threadInfo ? (styles as any).edgeToEdgeBottom : (styles as any).hasBottomContent,
+    !hasBottomContent && !threadInfo
+      ? (styles as Record<string, string>).edgeToEdgeBottom
+      : (styles as Record<string, string>).hasBottomContent,
   ]
     .filter(Boolean)
     .join(' ');
@@ -231,134 +197,6 @@ export function ChatBubbleBase({
     );
   };
 
-  function renderAttachment(att: Attachment) {
-    if (isImageAttachment(att)) {
-      const imageLayoutStyle = getImageLayoutStyle(att.width, att.height, maxImageHeight);
-      const imageContainerStyle: CSSProperties = {
-        maxHeight: maxImageHeight,
-        ...(imageLayoutStyle ?? {}),
-      };
-
-      const image = (
-        <DisplayableImage
-          src={att.url}
-          mimeType={att.kind}
-          fileName={att.fileName}
-          alt={t`Attachment`}
-          className={styles.attachmentImage}
-          style={imageLayoutStyle ? undefined : { maxHeight: maxImageHeight }}
-          onLoad={(event) => {
-            logAttachmentLoad('image', att, event.currentTarget);
-          }}
-        />
-      );
-
-      if (!interactive) {
-        return (
-          <div key={att.id} className={styles.attachmentStatic} style={imageContainerStyle}>
-            {image}
-          </div>
-        );
-      }
-
-      return (
-        <button
-          key={att.id}
-          type="button"
-          className={styles.attachmentImageButton}
-          style={imageContainerStyle}
-          onClick={() => {
-            const imageIndex = imageAttachments.findIndex((imageAttachment) => imageAttachment.id === att.id);
-            setViewingAttachmentIndex(imageIndex >= 0 ? imageIndex : 0);
-          }}
-        >
-          {image}
-        </button>
-      );
-    }
-
-    if (att.kind.startsWith('video/')) {
-      const imageLayoutStyle = getImageLayoutStyle(att.width, att.height, maxImageHeight);
-      const imageContainerStyle: CSSProperties = {
-        maxHeight: maxImageHeight,
-        ...(imageLayoutStyle ?? {}),
-      };
-
-      const video = (
-        <VideoPreview
-          src={att.url}
-          className={styles.attachmentImage}
-          style={imageLayoutStyle ? undefined : { maxHeight: maxImageHeight }}
-          autoPlay={isOnlyAttachment}
-          showPlayButton={!isOnlyAttachment}
-          onLoaded={(el) => logAttachmentLoad('video', att, el)}
-        />
-      );
-
-      if (!interactive) {
-        return (
-          <div key={att.id} className={styles.attachmentStatic} style={imageContainerStyle}>
-            {video}
-          </div>
-        );
-      }
-
-      return (
-        <button
-          key={att.id}
-          type="button"
-          rel="noopener noreferrer"
-          className={styles.attachmentImageButton}
-          style={imageContainerStyle}
-          onClick={() => {
-            const imageIndex = imageAttachments.findIndex((imageAttachment) => imageAttachment.id === att.id);
-            setViewingAttachmentIndex(imageIndex >= 0 ? imageIndex : 0);
-          }}
-        >
-          {video}
-        </button>
-      );
-    }
-
-    if (att.kind.startsWith('audio/')) {
-      if (messageType === 'audio') {
-        return <VoiceMessageBubble key={att.id} src={att.url} />;
-      }
-
-      if (!interactive) {
-        return (
-          <div key={att.id} className={styles.filePlaceholder}>
-            <IonIcon icon={documentOutline} className={styles.fileIcon} />
-            <span className={styles.fileName}>{att.fileName}</span>
-          </div>
-        );
-      }
-
-      return (
-        <a key={att.id} className={styles.filePlaceholder} href={att.url} target="_blank" rel="noopener noreferrer">
-          <IonIcon icon={documentOutline} className={styles.fileIcon} />
-          <span className={styles.fileName}>{att.fileName}</span>
-        </a>
-      );
-    }
-
-    if (!interactive) {
-      return (
-        <div key={att.id} className={styles.filePlaceholder}>
-          <IonIcon icon={documentOutline} className={styles.fileIcon} />
-          <span className={styles.fileName}>{att.fileName}</span>
-        </div>
-      );
-    }
-
-    return (
-      <a key={att.id} className={styles.filePlaceholder} href={att.url} target="_blank" rel="noopener noreferrer">
-        <IonIcon icon={documentOutline} className={styles.fileIcon} />
-        <span className={styles.fileName}>{att.fileName}</span>
-      </a>
-    );
-  }
-
   const senderGroupBadgeStyle = (() => {
     if (isSent || !senderGroup?.chatGroupColor) return undefined;
     const groupColor = isDarkMode
@@ -406,7 +244,26 @@ export function ChatBubbleBase({
         </div>
       )}
       {replyTo && <ReplyPreview replyTo={replyTo} isSent={isSent} interactive={interactive} onReplyTap={onReplyTap} />}
-      {imageAttachments.length > 0 && (
+      {messageType === 'file' && (
+        <div className={styles.attachmentsContainer}>
+          {(attachments ?? []).map((attachment) => (
+            <FileAttachmentCard
+              key={attachment.id}
+              attachment={attachment}
+              interactive={interactive}
+              uploadProgress={uploadProgress}
+            />
+          ))}
+        </div>
+      )}
+      {messageType === 'audio' && (
+        <div className={styles.attachmentsContainer}>
+          {(attachments ?? []).map((attachment) => (
+            <VoiceMessageBubble key={attachment.id} src={attachment.url} />
+          ))}
+        </div>
+      )}
+      {messageType !== 'file' && messageType !== 'audio' && imageAttachments.length > 0 && (
         <div className={mediaContainerClasses}>
           {imageAttachments.length === 1 ? (
             <SingleMediaAttachment
@@ -420,14 +277,16 @@ export function ChatBubbleBase({
               attachments={imageAttachments}
               interactive={interactive}
               onView={(id) => {
-                const index = imageAttachments.findIndex((a) => a.id === id);
+                const index = imageAttachments.findIndex((attachment) => attachment.id === id);
                 setViewingAttachmentIndex(index >= 0 ? index : 0);
               }}
-              renderElement={(id, style) => renderMediaItem(imageAttachments.find((a) => a.id === id)!, style)}
+              renderElement={(id, style) =>
+                renderMediaItem(imageAttachments.find((attachment) => attachment.id === id)!, style)
+              }
             />
           )}
           {isMediaOnly && timestamp && (
-            <span className={(styles as any).mediaTimestamp}>
+            <span className={(styles as Record<string, string>).mediaTimestamp}>
               {formatTime(timestamp)}
               {edited && ` (${t`Edited`})`}
               {isSent && (
@@ -436,9 +295,6 @@ export function ChatBubbleBase({
             </span>
           )}
         </div>
-      )}
-      {otherAttachments.length > 0 && (
-        <div className={styles.attachmentsContainer}>{otherAttachments.map(renderAttachment)}</div>
       )}
       {(hasBottomContent || !isMediaOnly) && (
         <div
@@ -468,7 +324,7 @@ export function ChatBubbleBase({
       )}
       {threadInfo && (
         <div
-          className={`${styles.threadIndicator} ${isMediaOnly ? (styles as any).threadIndicatorMediaOnly : ''}`}
+          className={`${styles.threadIndicator} ${isMediaOnly ? (styles as Record<string, string>).threadIndicatorMediaOnly : ''}`}
           onClick={interactive ? onThreadClick : undefined}
         >
           <IonIcon icon={chatbubbles} />

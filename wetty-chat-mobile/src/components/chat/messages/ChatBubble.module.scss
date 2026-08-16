@@ -372,37 +372,6 @@
   opacity: 0.95;
 }
 
-.attachmentImageButton {
-  display: block;
-  width: fit-content;
-  max-width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  overflow: hidden;
-  background: rgba(128, 128, 128, 0.2);
-  cursor: pointer;
-  appearance: none;
-}
-
-.attachmentStatic {
-  display: block;
-  width: fit-content;
-  max-width: 100%;
-  border-radius: 8px;
-  overflow: hidden;
-  background: rgba(128, 128, 128, 0.2);
-}
-
-.attachmentImage {
-  display: block;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  object-fit: contain;
-  -webkit-touch-callout: none;
-}
-
 .filePlaceholder {
   display: flex;
   align-items: center;

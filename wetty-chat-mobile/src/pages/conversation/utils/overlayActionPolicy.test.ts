@@ -48,6 +48,11 @@ describe('overlay action policy', () => {
     expect(keys({ isOwn: true, isDeleted: true, text: null })).toEqual(['reply', 'copy-link']);
   });
 
+  it('does not offer edit for own file messages', () => {
+    expect(keys({ messageType: 'file', isOwn: true, text: '' })).not.toContain('edit');
+    expect(keys({ messageType: 'text', isOwn: true })).toContain('edit');
+  });
+
   it('adds delete and pin state for admins in main chat', () => {
     expect(keys({ isAdmin: true })).toEqual(['reply', 'thread', 'pin', 'copy', 'save', 'copy-link', 'delete']);
     expect(getOverlayActionPolicy({ ...baseInput, isAdmin: true, isPinned: true }).at(2)).toEqual({

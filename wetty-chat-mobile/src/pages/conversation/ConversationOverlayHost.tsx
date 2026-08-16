@@ -127,7 +127,7 @@ export function ConversationOverlayHost({
 
             return (
               <MessageOverlay
-                messageType={msg.messageType as 'text' | 'audio'}
+                messageType={msg.messageType as 'text' | 'audio' | 'file'}
                 message={msg.isDeleted ? t`[Deleted]` : (msg.message ?? '')}
                 attachments={msg.attachments}
                 {...sharedOverlayProps}

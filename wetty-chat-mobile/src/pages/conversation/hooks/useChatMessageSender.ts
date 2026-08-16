@@ -16,7 +16,8 @@ import type {
   EditingMessage,
 } from '@/components/chat/compose/MessageComposeBar';
 import { setChatLastReadMessageId, setChatUnreadCount } from '@/store/chatsSlice';
-import { messageAdded, messageConfirmed, messagePatched } from '@/store/messageEvents';
+import { messageAdded, messageConfirmed, messagePatched, messagesBulkDeleted } from '@/store/messageEvents';
+import { uploadProgressCleared, uploadProgressSet } from '@/store/uploadProgressSlice';
 import { setThreadReadState } from '@/store/threadsSlice';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { detectFileMimeType } from '@/utils/fileType';
@@ -82,24 +83,28 @@ export function useChatMessageSender({
 }: UseChatMessageSenderArgs) {
   const dispatch = useDispatch();
 
-  const uploadAttachment = useCallback(async ({ file, dimensions, onProgress, signal, order }: ComposeUploadInput) => {
-    const contentType = await detectFileMimeType(file);
-    const res = await requestUploadUrl(
-      {
-        filename: file.name,
-        contentType,
-        size: file.size,
-        order,
-        dimensions,
-      },
-      signal,
-    );
+  const uploadAttachment = useCallback(
+    async ({ file, purpose, dimensions, onProgress, signal, order }: ComposeUploadInput) => {
+      const contentType = await detectFileMimeType(file);
+      const res = await requestUploadUrl(
+        {
+          filename: file.name,
+          contentType,
+          size: file.size,
+          purpose,
+          order,
+          dimensions,
+        },
+        signal,
+      );
 
-    const { uploadUrl, attachmentId, uploadHeaders } = res.data;
-    await uploadFileToS3(uploadUrl, file, uploadHeaders, { onProgress, signal });
+      const { uploadUrl, attachmentId, uploadHeaders } = res.data;
+      await uploadFileToS3(uploadUrl, file, uploadHeaders, { onProgress, signal });
 
-    return { attachmentId };
-  }, []);
+      return { attachmentId };
+    },
+    [],
+  );
 
   const markConfirmedMessageAsRead = useCallback(
     (confirmedMessageId: string) => {
@@ -282,6 +287,98 @@ export function useChatMessageSender({
           })
           .finally(() => {
             revoke();
+          });
+        return;
+      }
+
+      if (payload.kind === 'file') {
+        const clientGeneratedId = generateClientId();
+        const objectUrl = URL.createObjectURL(payload.file);
+        const replyPreview = buildReplyPreview(replyingTo);
+        const optimistic: MessageResponse = {
+          id: clientGeneratedId,
+          message: '',
+          messageType: 'file',
+          replyRootId: threadId ?? null,
+          replyToMessage: replyPreview,
+          clientGeneratedId,
+          sender: {
+            uid: currentUserId || 0,
+            gender: 0,
+            name: currentUserName ?? null,
+            avatarUrl: currentUserAvatarUrl || undefined,
+          },
+          chatId,
+          createdAt: new Date().toISOString(),
+          isEdited: false,
+          isDeleted: false,
+          hasAttachments: true,
+          attachments: [
+            {
+              id: `local_${clientGeneratedId}`,
+              url: objectUrl,
+              kind: payload.file.type || 'application/octet-stream',
+              size: payload.file.size,
+              fileName: payload.file.name,
+            },
+          ],
+          threadInfo: undefined,
+        };
+        dispatch(
+          messageAdded({
+            chatId,
+            storeChatId,
+            message: optimistic,
+            origin: 'optimistic',
+            scope: threadId ? 'thread' : 'main',
+          }),
+        );
+        setReplyingTo(null);
+        revealLatestAfterSend();
+        dispatch(uploadProgressSet({ clientGeneratedId, progress: 0 }));
+
+        const controller = new AbortController();
+        uploadAttachment({
+          file: payload.file,
+          purpose: 'file',
+          signal: controller.signal,
+          onProgress: (progress) => dispatch(uploadProgressSet({ clientGeneratedId, progress })),
+        })
+          .then(({ attachmentId }) => {
+            const messagePayload = {
+              message: '',
+              messageType: 'file' as const,
+              clientGeneratedId,
+              replyToId: replyingTo?.id,
+              attachmentIds: [attachmentId],
+            };
+            return threadId ? sendThreadMessage(chatId, threadId, messagePayload) : sendMessage(chatId, messagePayload);
+          })
+          .then((res) => {
+            const postResponse = res.data;
+            const confirmed: MessageResponse = {
+              ...postResponse,
+              replyToMessage: postResponse.replyToMessage ?? optimistic.replyToMessage,
+            };
+            dispatch(
+              messageConfirmed({
+                chatId,
+                storeChatId,
+                clientGeneratedId,
+                message: confirmed,
+                origin: 'api_confirm',
+                scope: threadId ? 'thread' : 'main',
+              }),
+            );
+            markConfirmedMessageAsRead(confirmed.id);
+          })
+          .catch((err: Error) => {
+            showToast(err.message || t`Failed to send`);
+            dispatch(messagesBulkDeleted({ chatId, messageIds: [clientGeneratedId] }));
+          })
+          .finally(() => {
+            dispatch(uploadProgressCleared({ clientGeneratedId }));
+            URL.revokeObjectURL(objectUrl);
           });
         return;
       }
@@ -482,6 +579,7 @@ export function useChatMessageSender({
       storeChatId,
       threadId,
       threadSubscribed,
+      uploadAttachment,
     ],
   );
 
