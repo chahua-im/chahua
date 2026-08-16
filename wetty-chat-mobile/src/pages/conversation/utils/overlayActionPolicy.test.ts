@@ -48,9 +48,12 @@ describe('overlay action policy', () => {
     expect(keys({ isOwn: true, isDeleted: true, text: null })).toEqual(['reply', 'copy-link']);
   });
 
-  it('does not offer edit for own file messages', () => {
-    expect(keys({ messageType: 'file', isOwn: true, text: '' })).not.toContain('edit');
-    expect(keys({ messageType: 'text', isOwn: true })).toContain('edit');
+  it('only offers start thread for text messages', () => {
+    expect(keys({ messageType: 'text' })).toContain('thread');
+
+    for (const messageType of ['audio', 'file', 'sticker', 'invite', 'system'] as const) {
+      expect(keys({ messageType })).not.toContain('thread');
+    }
   });
 
   it('adds delete and pin state for admins in main chat', () => {
@@ -84,10 +87,9 @@ describe('overlay action policy', () => {
     ).toEqual(['reply', 'favorite', 'copy-link', 'delete']);
   });
 
-  it('uses audio action rules without copy or edit', () => {
+  it('uses audio action rules without thread, copy, or edit', () => {
     expect(keys({ messageType: 'audio', isOwn: true, isAdmin: true })).toEqual([
       'reply',
-      'thread',
       'pin',
       'save',
       'copy-link',
@@ -101,6 +103,6 @@ describe('overlay action policy', () => {
 
   it('disables save when the feature is off or the message is system', () => {
     expect(keys({ savedMessagesEnabled: false })).toEqual(['reply', 'thread', 'copy', 'copy-link']);
-    expect(keys({ messageType: 'system' })).toEqual(['reply', 'thread', 'copy', 'copy-link']);
+    expect(keys({ messageType: 'system' })).toEqual(['reply', 'copy', 'copy-link']);
   });
 });
