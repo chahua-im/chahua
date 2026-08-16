@@ -867,10 +867,11 @@ async fn patch_message(
         if !message.is_published {
             return Err(AppError::BadRequest("Cannot edit unpublished message"));
         }
-        // Only user-composed messages carry editable content. Invite and system
+        // Only text messages have user-editable content. Invite and system
         // bodies are generated server-side (an invite code, a membership
-        // notice), and stickers and voice notes have no editable text.
-        if !matches!(message.message_type, MessageType::Text | MessageType::File) {
+        // notice), and stickers, voice notes, and file messages have no
+        // editable text.
+        if !matches!(message.message_type, MessageType::Text) {
             return Err(AppError::BadRequest("This message type cannot be edited"));
         }
 
