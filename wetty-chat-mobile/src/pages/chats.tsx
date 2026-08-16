@@ -5,10 +5,12 @@ import { addCircleOutline } from 'ionicons/icons';
 import { ChatList } from '@/components/chat/lists/ChatList';
 import { HeaderActionMenu } from '@/components/HeaderActionMenu';
 import { useHasGlobalPermission } from '@/hooks/useHasGlobalPermission';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { TitleWithConnectionStatus } from '@/components/TitleWithConnectionStatus';
 
 export default function Chats() {
   const canCreateChat = useHasGlobalPermission('chat.create');
+  const friendsEnabled = useFeatureGate('friends');
   const history = useHistory();
   const menuActions = [
     {
@@ -44,6 +46,7 @@ export default function Chats() {
         onThreadSelect={(chatId, threadRootId, resumeHash) =>
           history.push({ pathname: `/chats/chat/${chatId}/thread/${threadRootId}`, hash: resumeHash })
         }
+        onOpenContacts={friendsEnabled ? () => history.push('/contacts') : undefined}
       />
     </IonPage>
   );
