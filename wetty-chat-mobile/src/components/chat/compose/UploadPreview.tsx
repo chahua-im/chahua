@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { IonIcon } from '@ionic/react';
 import { t } from '@lingui/core/macro';
-import { alertCircleOutline, closeCircle, documentOutline, refreshOutline } from 'ionicons/icons';
+import { alertCircleOutline, closeCircle, refreshOutline } from 'ionicons/icons';
 import { DisplayableImage } from '@/components/shared/DisplayableImage';
 import { isImageKind } from '@/utils/fileType';
 import { ImageViewer, type ImageViewerItem } from '@/components/chat/messages/media/ImageViewer';
@@ -33,14 +33,7 @@ function deriveItemFlags(item: UploadPreviewItem): DerivedItem {
 function renderCardMedia(derived: DerivedItem, onPreview: () => void): ReactNode {
   const { item, mimeType, isImagePreview, canPreview } = derived;
 
-  if (!item.previewUrl) {
-    return (
-      <div className={styles.fileCard}>
-        <IonIcon icon={documentOutline} className={styles.fileCardIcon} />
-        <span className={styles.fileCardName}>{item.name}</span>
-      </div>
-    );
-  }
+  if (!item.previewUrl) return null;
 
   let thumbnail: ReactNode;
 

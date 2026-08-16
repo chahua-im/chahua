@@ -23,6 +23,10 @@ export const FEATURES = {
     enabled: false,
     description: 'Compresses image and video attachments before upload.',
   },
+  fileAttachments: {
+    enabled: true,
+    description: 'Allows ordinary files to be attached to chat messages.',
+  },
   messageSearch: {
     enabled: true,
     description: 'Shows chat-scoped message search from the group info page.',

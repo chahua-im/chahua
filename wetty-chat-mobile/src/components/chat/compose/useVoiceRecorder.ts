@@ -7,6 +7,8 @@ import type {
   RecordedVoiceData,
   VoiceRecorderState,
 } from './types';
+import { AttachmentTooLargeError } from '@/api/upload';
+import { formatFileSize } from '@/utils/formatFileSize';
 
 const MIN_VOICE_DURATION_MS = 500;
 
@@ -148,6 +150,7 @@ export function useVoiceRecorder({
       try {
         const result = await uploadAttachment({
           file: voiceData.file,
+          purpose: 'voice',
           signal: uploadAbortController.signal,
           onProgress: (progress) => {
             setVoiceRecorder((currentVoice) =>
@@ -176,7 +179,11 @@ export function useVoiceRecorder({
       } catch (error) {
         if (!isAbortError(error) && !uploadAbortController.signal.aborted) {
           console.error('Failed to upload voice message:', error);
-          reportVoiceError(t`Failed to send voice message.`);
+          reportVoiceError(
+            error instanceof AttachmentTooLargeError
+              ? t`File is too large. Maximum size is ${formatFileSize(error.maxFileSizeBytes)}.`
+              : t`Failed to send voice message.`,
+          );
           setVoiceRecorderState({
             phase: 'recorded',
             ...voiceData,

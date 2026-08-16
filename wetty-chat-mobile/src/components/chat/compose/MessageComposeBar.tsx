@@ -3,6 +3,7 @@ import { IonButton, IonIcon } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { addCircleOutline, send } from 'ionicons/icons';
 import { AudioRecordButton } from './AudioRecordButton';
+import { AttachmentDrawer } from './AttachmentDrawer';
 import { StickerPicker } from './StickerPicker';
 import styles from './MessageComposeBar.module.scss';
 import { UploadPreview } from '@/components/chat/compose/UploadPreview';
@@ -79,10 +80,12 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
     const { saveDebounced, clear: clearDraft } = useChatDraft(isEditing ? undefined : draftKeyValue);
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const imageInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [text, setText] = useState(() => editing?.text ?? '');
     const [draftLoaded, setDraftLoaded] = useState(false);
+    const [attachmentDrawerOpen, setAttachmentDrawerOpen] = useState(false);
     const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
     const stickerOverlayActiveRef = useRef(false);
     const [isDragOver, setIsDragOver] = useState(false);
@@ -231,7 +234,6 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
     const canSend = !hasPending && !hasFailed && (trimmedText.length > 0 || hasAttachment) && !isUnchangedEdit;
     const canStartVoiceBase = trimmedText.length === 0 && !hasAttachment && !editing && !hasPending && !hasFailed;
     const canRequestRecentEdit = !editing && !replyTo && text.length === 0 && !hasAttachment && uploads.length === 0;
-
     const {
       voiceRecorder,
       voiceActive,
@@ -291,14 +293,26 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
     );
 
     useEffect(() => {
-      if (!stickerPickerOpen) return;
+      if (!stickerPickerOpen && !attachmentDrawerOpen) return;
 
       const handleClickOutside = (e: MouseEvent | TouchEvent) => {
         const target = e.target as HTMLElement;
         if (target.closest('ion-alert, ion-action-sheet, ion-modal, ion-backdrop, ion-toast')) return;
-        if (stickerOverlayActiveRef.current) return;
-        if (!target.closest('[data-sticker-picker]') && !target.closest('[data-sticker-btn]')) {
+
+        if (
+          stickerPickerOpen &&
+          !stickerOverlayActiveRef.current &&
+          !target.closest('[data-sticker-picker]') &&
+          !target.closest('[data-sticker-btn]')
+        ) {
           setStickerPickerOpen(false);
+        }
+        if (
+          attachmentDrawerOpen &&
+          !target.closest('[data-attachment-drawer]') &&
+          !target.closest('[data-attach-btn]')
+        ) {
+          setAttachmentDrawerOpen(false);
         }
       };
 
@@ -306,19 +320,29 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       return () => {
         document.removeEventListener('click', handleClickOutside, { capture: true });
       };
-    }, [stickerPickerOpen]);
+    }, [attachmentDrawerOpen, stickerPickerOpen]);
+
+    const handleAttachPress = useCallback(() => {
+      setAttachmentDrawerOpen((prev) => {
+        if (!prev) textareaRef.current?.blur();
+        return !prev;
+      });
+      setStickerPickerOpen(false);
+    }, []);
 
     const handleStickerPress = useCallback(() => {
       setStickerPickerOpen((prev) => {
         if (!prev) textareaRef.current?.blur();
         return !prev;
       });
+      setAttachmentDrawerOpen(false);
     }, []);
 
     const handleInputFocusChange = useCallback(
       (focused: boolean) => {
         if (focused) {
           setStickerPickerOpen(false);
+          setAttachmentDrawerOpen(false);
         }
         onFocusChange?.(focused);
       },
@@ -333,11 +357,21 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
       [onSend],
     );
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       queueFiles(files);
       e.target.value = '';
+      setAttachmentDrawerOpen(false);
       textareaRef.current?.focus();
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        onSend({ kind: 'file', file });
+      }
+      e.target.value = '';
+      setAttachmentDrawerOpen(false);
     };
 
     return (
@@ -369,14 +403,17 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
             accept="image/*,image/heic,image/heif,.heic,.heif,video/*"
             multiple
             style={{ display: 'none' }}
-            ref={fileInputRef}
-            onChange={handleFileChange}
+            ref={imageInputRef}
+            onChange={handleImageChange}
           />
+          <input type="file" style={{ display: 'none' }} ref={fileInputRef} onChange={handleFileChange} />
           <button
             type="button"
             className={styles.attachBtn}
-            aria-label={t`Attach image`}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleAttachPress}
+            aria-label={t`Add attachment`}
+            aria-pressed={attachmentDrawerOpen}
+            data-attach-btn
             disabled={voiceActive}
           >
             <IonIcon icon={addCircleOutline} />
@@ -462,6 +499,11 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
             )}
           </div>
         </div>
+        <AttachmentDrawer
+          isOpen={attachmentDrawerOpen}
+          onPickImage={() => imageInputRef.current?.click()}
+          onPickFile={() => fileInputRef.current?.click()}
+        />
         <StickerPicker
           isOpen={stickerPickerOpen}
           onStickerSelect={handleStickerSelect}

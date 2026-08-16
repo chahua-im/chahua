@@ -240,8 +240,9 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     const recentMessages = messages.slice(-30);
     const lastOwnMessage = [...recentMessages]
       .reverse()
-      .find((message) => message.sender.uid === currentUser.uid && !message.isDeleted);
-
+      .find(
+        (message) => message.sender.uid === currentUser.uid && !message.isDeleted && message.messageType === 'text',
+      );
     if (!lastOwnMessage) {
       return false;
     }

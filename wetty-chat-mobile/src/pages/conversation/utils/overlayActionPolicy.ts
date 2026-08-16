@@ -57,7 +57,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 5. Edit
-  if (input.isOwn && !input.isDeleted && !audioMessage && !stickerMessage) {
+  if (input.isOwn && !input.isDeleted && !audioMessage && !stickerMessage && input.messageType !== 'file') {
     actions.push({ key: 'edit' });
   }
 

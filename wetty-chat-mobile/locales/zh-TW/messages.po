@@ -52,6 +52,9 @@ msgstr "操作失敗"
 msgid "Add"
 msgstr "新增"
 
+msgid "Add attachment"
+msgstr "新增附件"
+
 msgid "Add Member"
 msgstr "新增成員"
 
@@ -97,9 +100,6 @@ msgstr "確定要退出這個群組嗎？"
 
 msgid "Ask first"
 msgstr "先詢問"
-
-msgid "Attach image"
-msgstr "附加圖片"
 
 msgid "Attachment"
 msgstr "附件"
@@ -294,6 +294,10 @@ msgstr "完成"
 
 msgid "Download"
 msgstr "下載"
+
+#. placeholder {0}: attachment.fileName
+msgid "Download {0}"
+msgstr "下載 {0}"
 
 msgid "Download image"
 msgstr "下載圖片"
@@ -525,6 +529,12 @@ msgstr "收藏"
 
 msgid "Favorites"
 msgstr "收藏"
+msgid "File"
+msgstr "檔案"
+
+#. placeholder {0}: formatFileSize(error.maxFileSizeBytes)
+msgid "File is too large. Maximum size is {0}."
+msgstr "檔案過大。允許的最大大小為 {0}。"
 
 msgid "File is too large. Maximum sticker size is 10 MB."
 msgstr "檔案過大。貼圖檔案大小上限為 10 MB。"
@@ -558,6 +568,8 @@ msgstr "群組設定"
 
 msgid "Groups"
 msgstr "群組"
+msgid "Image"
+msgstr "圖片"
 
 msgid "Images"
 msgstr "圖片"
@@ -1233,6 +1245,9 @@ msgstr "開啟推播通知"
 #. placeholder {0}: member.uid
 msgid "UID {0}"
 msgstr "UID {0}"
+
+msgid "Unable to load attachment settings. Try again."
+msgstr "無法載入附件設定。請再試一次。"
 
 msgid "Unarchive"
 msgstr "取消封存"

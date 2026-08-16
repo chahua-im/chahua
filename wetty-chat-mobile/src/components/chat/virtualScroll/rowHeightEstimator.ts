@@ -11,7 +11,12 @@ import type { ChatRow } from './types';
 function estimateMessageHeight(message: MessageResponse, chatFontSizeStyle: string): number {
   if (message.isDeleted) return 48;
 
-  let estimate = message.attachments?.length || message.sticker ? 220 : 76;
+  let estimate =
+    message.messageType === 'file'
+      ? 56 * Math.max(1, message.attachments?.length ?? 0) + 44
+      : message.attachments?.length || message.sticker
+        ? 220
+        : 76;
 
   if (message.messageType === 'text' && !message.attachments?.length && !message.sticker && message.message) {
     try {

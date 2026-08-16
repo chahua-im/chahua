@@ -157,6 +157,10 @@ export function formatMessagePreview(preview: PreviewMessage, labels: PreviewLab
     return labels.voiceMessage;
   }
 
+  if (messageType === 'file') {
+    return labels.attachment;
+  }
+
   // Build one label per attachment
   const attachmentLabels: string[] =
     attachments?.map((a) => attachmentKindToLabel(categorizeAttachmentKind(a.kind), labels)) ?? [];

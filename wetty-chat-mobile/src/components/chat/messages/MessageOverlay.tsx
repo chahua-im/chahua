@@ -56,7 +56,7 @@ interface StickerOverlayProps extends MessageOverlayBaseProps {
 }
 
 interface RegularOverlayProps extends MessageOverlayBaseProps {
-  messageType?: 'text' | 'audio';
+  messageType?: 'text' | 'audio' | 'file';
   message: string;
   attachments?: Attachment[];
   stickerUrl?: never;

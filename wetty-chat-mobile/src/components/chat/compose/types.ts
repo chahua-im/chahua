@@ -1,4 +1,5 @@
 import type { Attachment, MentionInfo } from '@/api/messages';
+import type { AttachmentUploadPurpose } from '@/api/upload';
 import type { StickerSummary } from '@/api/stickers';
 
 export interface Dimensions {
@@ -12,7 +13,7 @@ interface UploadFileState {
   localId: string;
   kind: 'image' | 'video';
   name: string;
-  previewUrl: string;
+  previewUrl?: string;
   mimeType: string;
   size: number;
   dimensions?: Dimensions;
@@ -26,6 +27,7 @@ interface ExistingAttachmentPreview {
   localId: string;
   kind: string;
   name: string;
+  size: number;
   previewUrl?: string;
 }
 
@@ -52,6 +54,7 @@ export interface EditingMessage {
 
 export interface ComposeUploadInput {
   file: File;
+  purpose: AttachmentUploadPurpose;
   signal: AbortSignal;
   order?: number;
   onProgress: (progress: number) => void;
@@ -70,12 +73,20 @@ export interface ComposeUploadedAttachment {
   dimensions?: Dimensions;
 }
 
-export interface ComposeSendTextPayload {
-  kind: 'text';
+interface ComposeSendAttachmentPayload {
   text: string;
   attachmentIds: string[];
   existingAttachments: Attachment[];
   uploadedAttachments: ComposeUploadedAttachment[];
+}
+
+export interface ComposeSendTextPayload extends ComposeSendAttachmentPayload {
+  kind: 'text';
+}
+
+export interface ComposeSendFilePayload {
+  kind: 'file';
+  file: File;
 }
 
 export interface ComposeSendAudioPayload {
@@ -90,7 +101,11 @@ export interface ComposeSendStickerPayload {
   sticker: StickerSummary;
 }
 
-export type ComposeSendPayload = ComposeSendTextPayload | ComposeSendAudioPayload | ComposeSendStickerPayload;
+export type ComposeSendPayload =
+  | ComposeSendTextPayload
+  | ComposeSendFilePayload
+  | ComposeSendAudioPayload
+  | ComposeSendStickerPayload;
 
 export interface UploadRecord {
   state: UploadFileState;

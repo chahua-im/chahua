@@ -109,7 +109,7 @@ function getMessagePreview(saved: SavedMessageResponse): string {
   }
 
   if (saved.messageType === 'file') {
-    return saved.attachments[0]?.fileName?.trim() || text || t`Attachment`;
+    return saved.attachments[0]?.fileName?.trim() || t`Attachment`;
   }
 
   if (text) {

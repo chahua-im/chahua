@@ -52,6 +52,9 @@ msgstr "Action failed"
 msgid "Add"
 msgstr "Add"
 
+msgid "Add attachment"
+msgstr "Add attachment"
+
 msgid "Add Member"
 msgstr "Add Member"
 
@@ -97,9 +100,6 @@ msgstr "Are you sure you want to leave this group?"
 
 msgid "Ask first"
 msgstr "Ask first"
-
-msgid "Attach image"
-msgstr "Attach image"
 
 msgid "Attachment"
 msgstr "Attachment"
@@ -294,6 +294,10 @@ msgstr "Done"
 
 msgid "Download"
 msgstr "Download"
+
+#. placeholder {0}: attachment.fileName
+msgid "Download {0}"
+msgstr "Download {0}"
 
 msgid "Download image"
 msgstr "Download image"
@@ -526,6 +530,13 @@ msgstr "Favorite"
 msgid "Favorites"
 msgstr "Favorites"
 
+msgid "File"
+msgstr "File"
+
+#. placeholder {0}: formatFileSize(error.maxFileSizeBytes)
+msgid "File is too large. Maximum size is {0}."
+msgstr "File is too large. Maximum size is {0}."
+
 msgid "File is too large. Maximum sticker size is 10 MB."
 msgstr "File is too large. Maximum sticker size is 10 MB."
 
@@ -558,6 +569,9 @@ msgstr "Group Settings"
 
 msgid "Groups"
 msgstr "Groups"
+
+msgid "Image"
+msgstr "Image"
 
 msgid "Images"
 msgstr "Images"
@@ -1233,6 +1247,9 @@ msgstr "Turn On Push Notifications"
 #. placeholder {0}: member.uid
 msgid "UID {0}"
 msgstr "UID {0}"
+
+msgid "Unable to load attachment settings. Try again."
+msgstr "Unable to load attachment settings. Try again."
 
 msgid "Unarchive"
 msgstr "Unarchive"

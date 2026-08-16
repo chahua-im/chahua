@@ -1,5 +1,6 @@
 import { combineReducers, configureStore, createListenerMiddleware } from '@reduxjs/toolkit';
 import connectionReducer from './connectionSlice';
+import uploadProgressReducer from './uploadProgressSlice';
 import { getMessages } from '@/api/messages';
 import messagesReducer, { updateThreadReplyCount, refreshLatest } from './messages/slice';
 import settingsReducer, { type SettingsState } from './settingsSlice';
@@ -316,6 +317,7 @@ const rootReducer = combineReducers({
   threads: threadsReducer,
   pins: pinsReducer,
   user: userReducer,
+  uploadProgress: uploadProgressReducer,
 });
 
 export function createStore(initialSettings?: SettingsState, initialStickerPreferences?: StickerPreferencesState) {

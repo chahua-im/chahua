@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import { type MessageResponse, mentionToUser, type User } from '@/api/messages';
 import { InviteMessageModal } from '@/components/invites/InviteMessageModal';
@@ -9,6 +10,8 @@ import { SenderGroup } from './SenderGroup';
 import { SystemMessage } from './SystemMessage';
 import { isInviteMessage, isStickerMessage } from './messageTypePredicates';
 import type { ChatRow } from '../virtualScroll/types';
+import type { RootState } from '@/store';
+import { selectUploadProgress } from '@/store/uploadProgressSlice';
 
 /**
  * Message-interaction callbacks shared by ChatMessageRow and MessageBubble.
@@ -116,6 +119,7 @@ function MessageBubble({
   onStickerTap,
 }: MessageBubbleProps) {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const uploadProgress = useSelector((state: RootState) => selectUploadProgress(state, msg.clientGeneratedId));
 
   const replyToMessage = msg.replyToMessage;
 
@@ -147,6 +151,7 @@ function MessageBubble({
     onAvatarClick: () => onAvatarClick(msg.sender),
     isLastInGroup,
     isConfirmed: !msg.id.startsWith('cg_'),
+    uploadProgress,
     bubbleProps: { 'data-message-id': msg.id, 'data-bubble-row': '' } as BubblePropsOverride,
     replyTo: replyToMessage
       ? {
@@ -188,7 +193,7 @@ function MessageBubble({
     <ChatBubble
       {...sharedBubbleProps}
       showDroplet={showDroplet}
-      messageType={msg.messageType as 'text' | 'audio'}
+      messageType={msg.messageType as 'text' | 'audio' | 'file'}
       senderGender={msg.sender.gender}
       senderGroup={msg.sender.userGroup}
       message={msg.isDeleted ? t`[Deleted]` : (msg.message ?? '')}
