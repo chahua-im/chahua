@@ -12,6 +12,8 @@ interface ChatListSegmentProps {
   groupsUnreadCount: number;
   threadsUnreadCount: number;
   showAllTab?: boolean;
+  /** When provided, shows a Friends entry that opens the contacts list instead of filtering. */
+  onOpenContacts?: () => void;
 }
 
 function UnreadBadge({ count }: { count: number }) {
@@ -30,6 +32,7 @@ export function ChatListSegment({
   groupsUnreadCount,
   threadsUnreadCount,
   showAllTab = true,
+  onOpenContacts,
 }: ChatListSegmentProps) {
   return (
     <div className={styles.segmentWrapper}>
@@ -37,7 +40,11 @@ export function ChatListSegment({
         mode="ios"
         value={value}
         onIonChange={(e) => {
-          const val = e.detail.value as ChatListTab | undefined;
+          const val = e.detail.value as ChatListTab | 'contacts' | undefined;
+          if (val === 'contacts') {
+            onOpenContacts?.();
+            return;
+          }
           if (val) onChange(val);
         }}
       >
@@ -46,6 +53,13 @@ export function ChatListSegment({
             <IonLabel>
               <Trans>All</Trans>
               <UnreadBadge count={allUnreadCount} />
+            </IonLabel>
+          </IonSegmentButton>
+        )}
+        {onOpenContacts && (
+          <IonSegmentButton value="contacts">
+            <IonLabel>
+              <Trans>Friends</Trans>
             </IonLabel>
           </IonSegmentButton>
         )}

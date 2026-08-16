@@ -75,7 +75,7 @@ function IncomingRequestRow({
   );
 }
 
-function ContactsCore({ backAction }: ContactsCoreProps) {
+export function ContactsCore({ backAction }: ContactsCoreProps) {
   const dispatch = useDispatch<AppDispatch>();
   const friends = useSelector(selectFriends);
   const incoming = useSelector(selectIncomingRequests);
@@ -142,12 +142,7 @@ function ContactsCore({ backAction }: ContactsCoreProps) {
               </IonLabel>
             </IonListHeader>
             {outgoing.map((req) => (
-              <ChatMemberRow
-                key={`out-${req.id}`}
-                member={req.to}
-                subtitle={t`Pending`}
-                onSelect={openProfile}
-              />
+              <ChatMemberRow key={`out-${req.id}`} member={req.to} subtitle={t`Pending`} onSelect={openProfile} />
             ))}
           </IonList>
         ) : null}
@@ -166,21 +161,13 @@ function ContactsCore({ backAction }: ContactsCoreProps) {
             </IonItem>
           ) : (
             friends.map((friend) => (
-              <ChatMemberRow
-                key={`friend-${friend.user.uid}`}
-                member={friend.user}
-                onSelect={openProfile}
-              />
+              <ChatMemberRow key={`friend-${friend.user.uid}`} member={friend.user} onSelect={openProfile} />
             ))
           )}
         </IonList>
 
         <UserProfileModal sender={profileUser} onDismiss={() => setProfileUser(null)} />
-        <AddFriendModal
-          isOpen={searchOpen}
-          onDismiss={() => setSearchOpen(false)}
-          onSelect={handleSearchSelect}
-        />
+        <AddFriendModal isOpen={searchOpen} onDismiss={() => setSearchOpen(false)} onSelect={handleSearchSelect} />
       </IonContent>
     </div>
   );
