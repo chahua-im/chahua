@@ -255,8 +255,8 @@ msgstr "無法驗證邀請碼"
 msgid "Create"
 msgstr "建立"
 
-msgid "Create Chat"
-msgstr "建立聊天"
+msgid "Create Group"
+msgstr "创建群聊"
 
 msgid "Create Invite"
 msgstr "建立邀請"
