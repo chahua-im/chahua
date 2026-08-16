@@ -146,6 +146,8 @@ interface ChatListProps {
   archivedMode?: boolean;
   initialTab?: ChatListTab;
   onOpenArchived?: (tab: ChatListTab) => void;
+  /** Shows the Friends entry in the segment bar; opens the contacts list. */
+  onOpenContacts?: () => void;
   onChatSelect: (chatId: string, resumeHash?: string) => void;
   onThreadSelect?: (chatId: string, threadRootId: string, resumeHash?: string) => void;
 }
@@ -156,6 +158,7 @@ export function ChatList({
   archivedMode = false,
   initialTab,
   onOpenArchived,
+  onOpenContacts,
   onChatSelect,
   onThreadSelect,
 }: ChatListProps) {
@@ -664,6 +667,7 @@ export function ChatList({
         groupsUnreadCount={archivedMode ? archivedChatsWithUnread : chatsWithUnread}
         threadsUnreadCount={archivedMode ? archivedThreadsWithUnread : threadsWithUnread}
         showAllTab={showAllTab}
+        onOpenContacts={!archivedMode ? onOpenContacts : undefined}
       />
       {renderContent()}
     </IonContent>

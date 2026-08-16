@@ -4,6 +4,7 @@
 }
 
 .desktop-split-left {
+  position: relative;
   width: 360px;
   border-right: 1px solid var(--ion-color-step-150, #d7d8da);
   height: 100%;

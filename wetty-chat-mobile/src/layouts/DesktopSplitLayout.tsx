@@ -21,6 +21,7 @@ import { LanguagePageCore } from '@/pages/settings/language';
 import { StickerSettingsCore } from '@/pages/settings/stickers';
 import { StickerPackDetailCore } from '@/pages/settings/sticker-pack-detail';
 import { FriendVerificationCore } from '@/pages/settings/friend-verification';
+import { ContactsCore } from '@/pages/contacts';
 import type { BackAction } from '@/types/back-action';
 import type { ConversationRouteState } from '@/types/conversationNavigation';
 import styles from './DesktopSplitLayout.module.scss';
@@ -257,6 +258,20 @@ export function DesktopSplitLayout() {
   const [archivedSidebarTab, setArchivedSidebarTab] = useState<ChatListTab | null>(initialArchivedTab);
   const archivedMode = archivedSidebarTab != null;
   const archivedTab = archivedSidebarTab ?? 'all';
+  const [contactsSidebarOpen, setContactsSidebarOpen] = useState(false);
+  const openContacts = useCallback(() => setContactsSidebarOpen(true), []);
+  const closeContacts = useCallback(() => setContactsSidebarOpen(false), []);
+
+  // Collapse the contacts sidebar once navigation moves elsewhere (e.g. a DM
+  // opened from a friend's profile). Adjusting state during render avoids a
+  // cascading setState-in-effect.
+  const [prevPathname, setPrevPathname] = useState(location.pathname);
+  if (prevPathname !== location.pathname) {
+    setPrevPathname(location.pathname);
+    if (contactsSidebarOpen) {
+      setContactsSidebarOpen(false);
+    }
+  }
   const groupInfoModalChatId =
     groupInfoSavedMessagesMatch?.id ?? groupInfoSettingsMatch?.id ?? groupInfoMatch?.id ?? null;
   const groupInfoModalRoutePath = groupInfoSavedMessagesMatch
@@ -400,41 +415,48 @@ export function DesktopSplitLayout() {
   return (
     <div className={styles.desktopSplitLayout}>
       <div className={styles.desktopSplitLeft}>
-        <IonHeader>
-          <IonToolbar>
-            <IonButtons slot="start">
-              {archivedMode ? (
-                <IonButton onClick={() => setArchivedSidebarTab(null)} aria-label="Back to chats">
-                  <IonIcon slot="icon-only" icon={arrowBack} />
-                </IonButton>
-              ) : (
-                <IonButton onClick={openSettingsModal} aria-label="Open settings">
-                  <UserAvatar
-                    name={currentUser.username ?? 'User'}
-                    avatarUrl={currentUser.avatarUrl}
-                    size={26}
-                    fallback="icon"
-                    className={styles.settingsAvatar}
-                  />
-                </IonButton>
-              )}
-            </IonButtons>
-            <IonTitle>{archivedMode ? <Trans>Archived</Trans> : <Trans>Chats</Trans>}</IonTitle>
-            <IonButtons slot="end">
-              <HeaderActionMenu icon={addCircleOutline} actions={headerActions} />
-            </IonButtons>
-          </IonToolbar>
-        </IonHeader>
-        <ChatList
-          key={archivedMode ? `archived-${archivedTab}` : 'active'}
-          activeChatId={activeChatId}
-          activeThreadId={threadMatch?.threadId}
-          archivedMode={archivedMode}
-          initialTab={archivedTab}
-          onOpenArchived={setArchivedSidebarTab}
-          onChatSelect={handleChatSelect}
-          onThreadSelect={handleThreadSelect}
-        />
+        {contactsSidebarOpen ? (
+          <ContactsCore backAction={{ type: 'callback', onBack: closeContacts }} />
+        ) : (
+          <>
+            <IonHeader>
+              <IonToolbar>
+                <IonButtons slot="start">
+                  {archivedMode ? (
+                    <IonButton onClick={() => setArchivedSidebarTab(null)} aria-label="Back to chats">
+                      <IonIcon slot="icon-only" icon={arrowBack} />
+                    </IonButton>
+                  ) : (
+                    <IonButton onClick={openSettingsModal} aria-label="Open settings">
+                      <UserAvatar
+                        name={currentUser.username ?? 'User'}
+                        avatarUrl={currentUser.avatarUrl}
+                        size={26}
+                        fallback="icon"
+                        className={styles.settingsAvatar}
+                      />
+                    </IonButton>
+                  )}
+                </IonButtons>
+                <IonTitle>{archivedMode ? <Trans>Archived</Trans> : <Trans>Chats</Trans>}</IonTitle>
+                <IonButtons slot="end">
+                  <HeaderActionMenu icon={addCircleOutline} actions={headerActions} />
+                </IonButtons>
+              </IonToolbar>
+            </IonHeader>
+            <ChatList
+              key={archivedMode ? `archived-${archivedTab}` : 'active'}
+              activeChatId={activeChatId}
+              activeThreadId={threadMatch?.threadId}
+              archivedMode={archivedMode}
+              initialTab={archivedTab}
+              onOpenArchived={setArchivedSidebarTab}
+              onOpenContacts={friendsEnabled ? openContacts : undefined}
+              onChatSelect={handleChatSelect}
+              onThreadSelect={handleThreadSelect}
+            />
+          </>
+        )}
       </div>
       <div className={styles.desktopSplitRight}>
         {/* Base layer: always render ConversationPane when a chat is selected */}
