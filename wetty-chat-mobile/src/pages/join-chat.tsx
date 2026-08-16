@@ -72,7 +72,7 @@ export function JoinChatCore({ backAction }: JoinChatCoreProps) {
         <IonToolbar>
           <IonButtons slot="start">{backAction && <BackButton action={backAction} />}</IonButtons>
           <IonTitle>
-            <Trans>Join via Code</Trans>
+            <Trans>Join Group</Trans>
           </IonTitle>
           <IonButtons slot="end">
             <IonButton disabled={continueDisabled} onClick={handleSubmit}>

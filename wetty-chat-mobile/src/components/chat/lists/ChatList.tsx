@@ -51,7 +51,17 @@ import {
   setThreadSubscriptionStatus,
   setThreadsList,
 } from '@/store/threadsSlice';
-import { selectEffectiveLocale, selectShowAllTab } from '@/store/settingsSlice';
+import {
+  selectEffectiveLocale,
+  selectChatListTab,
+  selectShowAllTab,
+  selectShowFriendsTab,
+  selectShowGroupsTab,
+  selectShowThreadsTab,
+  setChatListTab,
+} from '@/store/settingsSlice';
+import { useFeatureGate } from '@/hooks/useFeatureGate';
+import { FriendsTabSection } from '@/components/social/FriendsTabSection';
 import { markChatAsUnread, markMessagesAsRead, type MessagePreview, type MessageResponse } from '@/api/messages';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { getChatDisplayName } from '@/utils/chatDisplay';
@@ -146,8 +156,6 @@ interface ChatListProps {
   archivedMode?: boolean;
   initialTab?: ChatListTab;
   onOpenArchived?: (tab: ChatListTab) => void;
-  /** Shows the Friends entry in the segment bar; opens the contacts list. */
-  onOpenContacts?: () => void;
   onChatSelect: (chatId: string, resumeHash?: string) => void;
   onThreadSelect?: (chatId: string, threadRootId: string, resumeHash?: string) => void;
 }
@@ -158,7 +166,6 @@ export function ChatList({
   archivedMode = false,
   initialTab,
   onOpenArchived,
-  onOpenContacts,
   onChatSelect,
   onThreadSelect,
 }: ChatListProps) {
@@ -178,14 +185,49 @@ export function ChatList({
   const threadsWithUnread = useSelector(selectThreadsWithUnreadCount);
   const archivedThreadsWithUnread = useSelector(selectArchivedThreadsWithUnreadCount);
   const showAllTab = useSelector(selectShowAllTab);
+  const showGroupsTab = useSelector(selectShowGroupsTab);
+  const showFriendsTab = useSelector(selectShowFriendsTab);
+  const showThreadsTab = useSelector(selectShowThreadsTab);
+  const friendsEnabled = useFeatureGate('friends');
+  const globalTab = useSelector(selectChatListTab);
   const messageChats = useSelector((state: RootState) => state.messages.chats);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { text: string; savedAt: number }>>({});
-  const [activeTab, setActiveTab] = useState<ChatListTab>(initialTab ?? (showAllTab ? 'all' : 'groups'));
-  const effectiveTab = activeTab === 'all' && !showAllTab ? 'groups' : activeTab;
+  // The main list's tab lives in redux so outside actors (friend-request
+  // toast) can switch it; archived views keep a local tab seeded from the route.
+  const [archivedTab, setArchivedTab] = useState<ChatListTab>(initialTab ?? 'all');
+  const activeTab = initialTab != null ? archivedTab : globalTab;
+  const setActiveTab = useCallback(
+    (tab: ChatListTab) => {
+      if (initialTab != null) {
+        setArchivedTab(tab);
+      } else {
+        dispatch(setChatListTab(tab));
+      }
+    },
+    [dispatch, initialTab],
+  );
+  // Fall back to a visible tab when the selected one is toggled off.
+  const effectiveTab =
+    (activeTab === 'all' && !showAllTab) ||
+    (activeTab === 'groups' && !showGroupsTab) ||
+    (activeTab === 'friends' && !(showFriendsTab && friendsEnabled)) ||
+    (activeTab === 'threads' && !showThreadsTab)
+      ? showAllTab
+        ? 'all'
+        : showGroupsTab
+          ? 'groups'
+          : showThreadsTab
+            ? 'threads'
+            : 'groups'
+      : activeTab;
   const chats = archivedMode ? archivedChats : activeChats;
   const threads = archivedMode ? archivedThreads : activeThreads;
+  const groupChats = useMemo(() => chats.filter((c) => c.kind !== 'dm'), [chats]);
+  const friendChats = useMemo(() => chats.filter((c) => c.kind === 'dm'), [chats]);
+  const groupChatsWithUnread = groupChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
+  const friendChatsWithUnread = friendChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
 
   const updateAppBadge = useCallback(async () => {
     if (!archivedMode) {
@@ -379,14 +421,17 @@ export function ChatList({
     return items;
   }, [chats, threads, drafts]);
 
+  // Chats shown by the Groups/Friends filter tabs (the All tab merges chats
+  // and threads via mergedItems instead).
+  const tabListChats = effectiveTab === 'friends' ? friendChats : groupChats;
   const sortedChats = useMemo(() => {
-    if (Object.keys(drafts).length === 0) return chats;
-    return [...chats].sort((a, b) => {
+    if (Object.keys(drafts).length === 0) return tabListChats;
+    return [...tabListChats].sort((a, b) => {
       const aTime = Math.max(a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0, drafts[a.id]?.savedAt ?? 0);
       const bTime = Math.max(b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0, drafts[b.id]?.savedAt ?? 0);
       return bTime - aTime;
     });
-  }, [chats, drafts]);
+  }, [tabListChats, drafts]);
 
   const handleThreadSelect = useCallback(
     (chatId: string, threadRootId: string, thread: StoredThreadListItem) => {
@@ -610,8 +655,35 @@ export function ChatList({
       return <IonList>{threads.map(renderThreadItem)}</IonList>;
     }
 
+    if (effectiveTab === 'friends') {
+      if (friendChats.length === 0 && !archivedMode) {
+        return (
+          <>
+            <FriendsTabSection />
+            <IonList inset>
+              <IonItem lines="none">
+                <IonLabel color="medium" className="ion-text-wrap">
+                  <Trans>No friend chats yet</Trans>
+                </IonLabel>
+              </IonItem>
+            </IonList>
+          </>
+        );
+      }
+
+      return (
+        <>
+          {!archivedMode && <FriendsTabSection />}
+          <IonList inset={false}>
+            {!archivedMode && archivedGroupsVisible ? renderArchivedEntry(archivedUnreadChats) : null}
+            {sortedChats.map(renderChatItem)}
+          </IonList>
+        </>
+      );
+    }
+
     if (effectiveTab === 'groups') {
-      if (chats.length === 0 && (!archivedGroupsVisible || archivedMode)) {
+      if (groupChats.length === 0 && (!archivedGroupsVisible || archivedMode)) {
         return (
           <IonList>
             <IonItem>
@@ -664,10 +736,10 @@ export function ChatList({
           (archivedMode ? archivedChatsWithUnread : chatsWithUnread) +
           (archivedMode ? archivedThreadsWithUnread : threadsWithUnread)
         }
-        groupsUnreadCount={archivedMode ? archivedChatsWithUnread : chatsWithUnread}
+        groupsUnreadCount={archivedMode ? archivedChatsWithUnread : groupChatsWithUnread}
+        friendsUnreadCount={friendChatsWithUnread}
         threadsUnreadCount={archivedMode ? archivedThreadsWithUnread : threadsWithUnread}
-        showAllTab={showAllTab}
-        onOpenContacts={!archivedMode ? onOpenContacts : undefined}
+        friendsEnabled={friendsEnabled}
       />
       {renderContent()}
     </IonContent>

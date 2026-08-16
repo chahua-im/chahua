@@ -7,7 +7,7 @@ import { BackButton } from '@/components/BackButton';
 import type { ChatListTab } from '@/components/chat/lists/ChatListSegment';
 
 function normalizeTab(tab?: string): ChatListTab {
-  if (tab === 'threads' || tab === 'groups' || tab === 'all') {
+  if (tab === 'threads' || tab === 'groups' || tab === 'friends' || tab === 'all') {
     return tab;
   }
   return 'all';
