@@ -145,6 +145,8 @@ const chatsSlice = createSlice({
           ...entry.details,
           name: chat.name ?? entry.details.name,
           avatar: chat.avatar ?? entry.details.avatar ?? null,
+          kind: chat.kind ?? entry.details.kind,
+          peer: chat.peer ?? entry.details.peer ?? null,
         };
         entry.listSnapshot = {
           lastMessage: chat.lastMessage,
@@ -373,6 +375,8 @@ function mapChatEntry(id: string, entry: ChatStateEntry): ChatListEntry {
     lastMessage: listMeta.lastMessage ?? null,
     mutedUntil: resolveMutedUntil(entry?.listSnapshot, entry?.liveProjection),
     archived: listMeta.archived ?? false,
+    kind: entry.details.kind,
+    peer: entry.details.peer ?? null,
   };
 }
 
