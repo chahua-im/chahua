@@ -1065,6 +1065,12 @@ msgstr "Reactions"
 msgid "Read"
 msgstr "Read"
 
+msgid "Received a friend request from {name}"
+msgstr "Received a friend request from {name}"
+
+msgid "Received friend requests from {name} and others"
+msgstr "Received friend requests from {name} and others"
+
 msgid "Reconnecting..."
 msgstr "Reconnecting..."
 
@@ -1461,9 +1467,9 @@ msgstr "Uploading {0}%"
 msgid "Uploading..."
 msgstr "Uploading..."
 
+#. placeholder {0}: fresh[0].from.uid
 #. placeholder {0}: invite.targetUid
 #. placeholder {0}: member.uid
-#. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "User {0}"
 
@@ -1481,6 +1487,9 @@ msgstr "User unblocked"
 
 msgid "Videos"
 msgstr "Videos"
+
+msgid "View"
+msgstr "View"
 
 msgid "View all pinned messages"
 msgstr "View all pinned messages"

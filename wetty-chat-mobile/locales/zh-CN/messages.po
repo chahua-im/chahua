@@ -1065,6 +1065,12 @@ msgstr "回应"
 msgid "Read"
 msgstr "标记已读"
 
+msgid "Received a friend request from {name}"
+msgstr "收到来自 {name} 的好友申请"
+
+msgid "Received friend requests from {name} and others"
+msgstr "收到来自 {name} 等人的好友申请"
+
 msgid "Reconnecting..."
 msgstr "正在重新连接..."
 
@@ -1461,9 +1467,9 @@ msgstr "正在上传 {0}%"
 msgid "Uploading..."
 msgstr "上传中..."
 
+#. placeholder {0}: fresh[0].from.uid
 #. placeholder {0}: invite.targetUid
 #. placeholder {0}: member.uid
-#. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "用户 {0}"
 
@@ -1481,6 +1487,9 @@ msgstr "已取消拉黑"
 
 msgid "Videos"
 msgstr "视频"
+
+msgid "View"
+msgstr ""
 
 msgid "View all pinned messages"
 msgstr "查看全部置顶消息"

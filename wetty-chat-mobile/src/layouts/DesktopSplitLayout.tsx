@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { matchPath, useHistory, useLocation } from 'react-router-dom';
-import { useSelector } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { Trans } from '@lingui/react/macro';
 import { IonButton, IonButtons, IonHeader, IonIcon, IonModal, IonTitle, IonToolbar } from '@ionic/react';
 import { addCircleOutline, arrowBack } from 'ionicons/icons';
@@ -29,7 +29,8 @@ import { HeaderActionMenu, type HeaderActionMenuItem } from '@/components/Header
 import { useHasGlobalPermission } from '@/hooks/useHasGlobalPermission';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
-import type { RootState } from '@/store';
+import type { RootState, AppDispatch } from '@/store';
+import { setContactsPanelOpen, selectContactsPanelOpen } from '@/store/socialSlice';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 type DesktopRouteState = ConversationRouteState;
@@ -210,6 +211,7 @@ export function DesktopSplitLayout() {
   const savedMessagesEnabled = useFeatureGate('savedMessages');
   const friendsEnabled = useFeatureGate('friends');
   const currentUser = useSelector((state: RootState) => state.user);
+  const dispatch = useDispatch<AppDispatch>();
   useEscNavigation();
   const skipNextGlobalSettingsDismiss = useRef(false);
   const headerActions: HeaderActionMenuItem[] = [
@@ -258,9 +260,9 @@ export function DesktopSplitLayout() {
   const [archivedSidebarTab, setArchivedSidebarTab] = useState<ChatListTab | null>(initialArchivedTab);
   const archivedMode = archivedSidebarTab != null;
   const archivedTab = archivedSidebarTab ?? 'all';
-  const [contactsSidebarOpen, setContactsSidebarOpen] = useState(false);
-  const openContacts = useCallback(() => setContactsSidebarOpen(true), []);
-  const closeContacts = useCallback(() => setContactsSidebarOpen(false), []);
+  const contactsSidebarOpen = useSelector(selectContactsPanelOpen);
+  const openContacts = useCallback(() => dispatch(setContactsPanelOpen(true)), [dispatch]);
+  const closeContacts = useCallback(() => dispatch(setContactsPanelOpen(false)), [dispatch]);
 
   // Collapse the contacts sidebar once navigation moves elsewhere (e.g. a DM
   // opened from a friend's profile). Adjusting state during render avoids a
@@ -269,7 +271,7 @@ export function DesktopSplitLayout() {
   if (prevPathname !== location.pathname) {
     setPrevPathname(location.pathname);
     if (contactsSidebarOpen) {
-      setContactsSidebarOpen(false);
+      dispatch(setContactsPanelOpen(false));
     }
   }
   const groupInfoModalChatId =

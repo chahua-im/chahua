@@ -21,10 +21,8 @@ import {
   fetchIncomingRequests,
   fetchOutgoingRequests,
   selectFriends,
-  selectFriendsLoaded,
   selectIncomingRequests,
   selectOutgoingRequests,
-  selectRequestsLoaded,
 } from '@/store/socialSlice';
 import { ChatMemberRow } from '@/components/chat-members/ChatMemberRow';
 import { UserAvatar } from '@/components/UserAvatar';
@@ -80,18 +78,17 @@ export function ContactsCore({ backAction }: ContactsCoreProps) {
   const friends = useSelector(selectFriends);
   const incoming = useSelector(selectIncomingRequests);
   const outgoing = useSelector(selectOutgoingRequests);
-  const friendsLoaded = useSelector(selectFriendsLoaded);
-  const requestsLoaded = useSelector(selectRequestsLoaded);
   const [profileUser, setProfileUser] = useState<User | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
-    if (!friendsLoaded) dispatch(fetchFriends());
-    if (!requestsLoaded) {
-      dispatch(fetchIncomingRequests());
-      dispatch(fetchOutgoingRequests());
-    }
-  }, [friendsLoaded, requestsLoaded, dispatch]);
+    // Always refetch on mount: the recipient may have missed the WS
+    // friendRequestReceived event (backgrounded PWA, reconnect gap), and a
+    // cached empty list would hide pending requests until a full reload.
+    dispatch(fetchFriends());
+    dispatch(fetchIncomingRequests());
+    dispatch(fetchOutgoingRequests());
+  }, [dispatch]);
 
   const openProfile = useCallback((member: MemberSummary) => {
     setProfileUser(memberSummaryToUser(member));
