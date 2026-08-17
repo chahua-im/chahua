@@ -455,14 +455,21 @@ pub async fn create_friend_request(
         }
         // Reciprocal pending request (to -> from): auto-accept it.
         let request = conn.transaction::<FriendRequest, AppError, _>(|conn| {
-            let updated =
-                diesel::update(friend_requests::table.filter(friend_requests::id.eq(existing.id)))
-                    .set((
-                        friend_requests::status.eq(FriendRequestStatus::Accepted),
-                        friend_requests::decided_at.eq(now),
-                    ))
-                    .returning(FriendRequest::as_returning())
-                    .get_result(conn)?;
+            let updated = diesel::update(
+                friend_requests::table
+                    .filter(friend_requests::id.eq(existing.id))
+                    .filter(friend_requests::from_uid.eq(to))
+                    .filter(friend_requests::to_uid.eq(from))
+                    .filter(friend_requests::status.eq(FriendRequestStatus::Pending)),
+            )
+            .set((
+                friend_requests::status.eq(FriendRequestStatus::Accepted),
+                friend_requests::decided_at.eq(now),
+            ))
+            .returning(FriendRequest::as_returning())
+            .get_result::<FriendRequest>(conn)
+            .optional()?
+            .ok_or(AppError::Conflict("Friend request is no longer pending"))?;
             insert_friendship(conn, from, to, from, now)?;
             Ok(updated)
         })?;
@@ -512,35 +519,39 @@ pub fn resolve_friend_request(
 ) -> Result<FriendRequest, AppError> {
     let now = Utc::now();
     conn.transaction::<FriendRequest, AppError, _>(|conn| {
-        let request = friend_requests::table
-            .filter(friend_requests::id.eq(request_id))
-            .select(FriendRequest::as_select())
-            .first::<FriendRequest>(conn)
-            .optional()?
-            .ok_or(AppError::NotFound("Friend request not found"))?;
-
-        if request.to_uid != resolver_uid {
-            return Err(AppError::Forbidden(
-                "Only the recipient can respond to this friend request",
-            ));
-        }
-        if request.status != FriendRequestStatus::Pending {
-            return Err(AppError::Conflict("Friend request is no longer pending"));
-        }
-
         let new_status = if accept {
             FriendRequestStatus::Accepted
         } else {
             FriendRequestStatus::Rejected
         };
-        let updated =
-            diesel::update(friend_requests::table.filter(friend_requests::id.eq(request_id)))
-                .set((
-                    friend_requests::status.eq(new_status),
-                    friend_requests::decided_at.eq(now),
-                ))
-                .returning(FriendRequest::as_returning())
-                .get_result(conn)?;
+        let request = diesel::update(
+            friend_requests::table
+                .filter(friend_requests::id.eq(request_id))
+                .filter(friend_requests::to_uid.eq(resolver_uid))
+                .filter(friend_requests::status.eq(FriendRequestStatus::Pending)),
+        )
+        .set((
+            friend_requests::status.eq(new_status),
+            friend_requests::decided_at.eq(now),
+        ))
+        .returning(FriendRequest::as_returning())
+        .get_result::<FriendRequest>(conn)
+        .optional()?;
+
+        let Some(request) = request else {
+            let existing_recipient = friend_requests::table
+                .filter(friend_requests::id.eq(request_id))
+                .select(friend_requests::to_uid)
+                .first::<i32>(conn)
+                .optional()?;
+            return match existing_recipient {
+                None => Err(AppError::NotFound("Friend request not found")),
+                Some(to_uid) if to_uid != resolver_uid => Err(AppError::Forbidden(
+                    "Only the recipient can respond to this friend request",
+                )),
+                Some(_) => Err(AppError::Conflict("Friend request is no longer pending")),
+            };
+        };
 
         if accept {
             insert_friendship(
@@ -551,7 +562,7 @@ pub fn resolve_friend_request(
                 now,
             )?;
         }
-        Ok(updated)
+        Ok(request)
     })
 }
 
