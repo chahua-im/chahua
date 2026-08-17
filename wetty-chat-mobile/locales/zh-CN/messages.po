@@ -63,6 +63,7 @@ msgstr "添加"
 
 msgid "Add attachment"
 msgstr "添加附件"
+
 msgid "Add Friend"
 msgstr "添加好友"
 
@@ -225,12 +226,9 @@ msgstr "关闭查看器"
 msgid "Code"
 msgstr "邀请码"
 
-14: msgid "Compressing"
-msgstr "Compressing"
-15: msgid "Compressing"
+msgid "Compressing"
 msgstr "压缩中"
-16: msgid "Compressing"
-msgstr "壓縮中"
+
 msgid "Continue"
 msgstr "继续"
 
@@ -373,6 +371,7 @@ msgstr "输入用户 UID"
 
 msgid "Enter a valid User ID (integer from 1 to 2,147,483,647)"
 msgstr "请输入有效的用户 ID（1 到 2,147,483,647 之间的整数）"
+
 msgid "Enter a verification message"
 msgstr "请输入验证消息"
 
@@ -629,6 +628,9 @@ msgstr "通用"
 msgid "Group"
 msgstr "群组"
 
+msgid "Group Chats"
+msgstr "群聊"
+
 msgid "Group details saved"
 msgstr "群组资料已保存"
 
@@ -646,9 +648,6 @@ msgstr "群组名称"
 
 msgid "Group Settings"
 msgstr "群组设置"
-
-msgid "Groups"
-msgstr "群组"
 
 msgid "Image"
 msgstr "图片"
@@ -1278,8 +1277,8 @@ msgstr "在聊天中显示\"全部\"标签"
 msgid "Show \"Friends\" Tab in Chats"
 msgstr "在聊天中显示“好友”标签"
 
-msgid "Show \"Groups\" Tab in Chats"
-msgstr "在聊天中显示“群组”标签"
+msgid "Show \"Group Chats\" Tab in Chats"
+msgstr "在聊天中显示“群聊”标签"
 
 msgid "Show \"Threads\" Tab in Chats"
 msgstr "在聊天中显示“话题”标签"
@@ -1566,11 +1565,12 @@ msgstr "你已收到邀请"
 msgid "Your account"
 msgstr "你的账户"
 
-#. js-lingui-explicit-id
-msgid "auth.bootstrap.signed-out.description"
-msgstr "你的会话已失效，请重新登录后继续。"
 msgid "Your answer"
 msgstr "你的回答"
 
 msgid "Your Question"
 msgstr "你的问题"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.description"
+msgstr "你的会话已失效，请重新登录后继续。"
