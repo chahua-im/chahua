@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ThreadPushState {
+pub enum ThreadPushState {
     NotThreadMessage,
     NoSubscription,
     ActiveSubscription,
@@ -9,7 +9,7 @@ pub(crate) enum ThreadPushState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PushRecipientContext {
+pub struct PushRecipientContext {
     pub uid: i32,
     pub is_sender: bool,
     pub is_mentioned: bool,
@@ -21,14 +21,14 @@ pub(crate) struct PushRecipientContext {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PushDecision {
+pub enum PushDecision {
     Send,
     SendOneOffMention,
     Skip(PushSkipReason),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PushSkipReason {
+pub enum PushSkipReason {
     Sender,
     ChatArchived,
     ActivePresence,
@@ -37,10 +37,7 @@ pub(crate) enum PushSkipReason {
     NoThreadSubscription,
 }
 
-pub(crate) fn should_send_push(
-    recipient: &PushRecipientContext,
-    now: DateTime<Utc>,
-) -> PushDecision {
+pub fn should_send_push(recipient: &PushRecipientContext, now: DateTime<Utc>) -> PushDecision {
     if recipient.is_sender {
         return PushDecision::Skip(PushSkipReason::Sender);
     }

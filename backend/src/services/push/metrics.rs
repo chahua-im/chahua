@@ -3,7 +3,7 @@ use prometheus::{
     register_int_counter_with_registry, HistogramVec, IntCounter, IntCounterVec, Registry,
 };
 
-pub(crate) struct PushMetrics {
+pub struct PushMetrics {
     notifications_total: IntCounterVec,
     notification_jobs_total: IntCounterVec,
     notification_job_duration_seconds: HistogramVec,
@@ -13,7 +13,7 @@ pub(crate) struct PushMetrics {
 }
 
 impl PushMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let notifications_total = register_int_counter_vec_with_registry!(
             "push_notifications_total",
             "Total number of push notification delivery attempts",
@@ -67,14 +67,14 @@ impl PushMetrics {
         }
     }
 
-    pub(crate) fn record_notification(&self, provider: &str, success: bool) {
+    pub fn record_notification(&self, provider: &str, success: bool) {
         let result = if success { "success" } else { "failure" };
         self.notifications_total
             .with_label_values(&[provider, result])
             .inc();
     }
 
-    pub(crate) fn record_job(&self, result: &str, duration_seconds: f64) {
+    pub fn record_job(&self, result: &str, duration_seconds: f64) {
         self.notification_jobs_total
             .with_label_values(&[result])
             .inc();
@@ -83,17 +83,17 @@ impl PushMetrics {
             .observe(duration_seconds);
     }
 
-    pub(crate) fn record_suppressed(&self) {
+    pub fn record_suppressed(&self) {
         self.notifications_suppressed_total.inc();
     }
 
-    pub(crate) fn record_delivery_failure(&self, provider: &str, class: &str) {
+    pub fn record_delivery_failure(&self, provider: &str, class: &str) {
         self.delivery_failures_total
             .with_label_values(&[provider, class])
             .inc();
     }
 
-    pub(crate) fn record_subscription_prune(&self, provider: &str, reason: &str) {
+    pub fn record_subscription_prune(&self, provider: &str, reason: &str) {
         self.subscription_prunes_total
             .with_label_values(&[provider, reason])
             .inc();

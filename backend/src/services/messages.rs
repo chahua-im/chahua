@@ -19,13 +19,16 @@ use crate::{
         ws::ServerWsMessage,
     },
     errors::AppError,
-    models::{Attachment, Media, Message, MessageType, NewMessage, Sticker, TranscodeStatus},
+    models::{
+        Attachment, GroupKind, Media, Message, MessageType, NewMessage, Sticker, TranscodeStatus,
+    },
     schema::{
         attachments, group_membership, groups, media, message_reactions,
         messages as messages_schema, stickers, user_favorite_stickers,
     },
     services::{
         push::{PushJob, PushMessagePreview, PushMessagePreviewSticker},
+        social::{self, DmSendAuthorizationError},
         user::{lookup_user_profiles, UserProfile},
     },
     utils::ids,
@@ -77,7 +80,7 @@ pub fn extract_mention_uids(text: &str) -> Vec<i32> {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
-pub(crate) struct PreparedMessageSend {
+pub struct PreparedMessageSend {
     pub chat_id: i64,
     pub sender_uid: i32,
     pub message: Option<String>,
@@ -90,30 +93,79 @@ pub(crate) struct PreparedMessageSend {
     pub publish_immediately: bool,
 }
 
-pub(crate) struct SendMessageResult {
+/// Authorization failures for a user-originated message send.
+#[derive(Debug)]
+pub enum MessageSendAuthorizationError {
+    NotChatMember,
+    ThreadRootNotFound,
+    ThreadRootNotText,
+    InvalidDmParticipants,
+    DirectMessage(DmSendAuthorizationError),
+    Database(diesel::result::Error),
+}
+
+impl From<diesel::result::Error> for MessageSendAuthorizationError {
+    fn from(error: diesel::result::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<DmSendAuthorizationError> for MessageSendAuthorizationError {
+    fn from(error: DmSendAuthorizationError) -> Self {
+        Self::DirectMessage(error)
+    }
+}
+
+impl From<MessageSendAuthorizationError> for AppError {
+    fn from(error: MessageSendAuthorizationError) -> Self {
+        match error {
+            MessageSendAuthorizationError::NotChatMember => {
+                AppError::Forbidden("Not a member of this chat")
+            }
+            MessageSendAuthorizationError::ThreadRootNotFound => {
+                AppError::NotFound("Thread root message not found")
+            }
+            MessageSendAuthorizationError::ThreadRootNotText => {
+                AppError::BadRequest("Threads can only be created on text messages")
+            }
+            MessageSendAuthorizationError::InvalidDmParticipants => {
+                AppError::Internal("DM participants missing")
+            }
+            MessageSendAuthorizationError::DirectMessage(error) => AppError::from(error),
+            MessageSendAuthorizationError::Database(error) => AppError::from(error),
+        }
+    }
+}
+
+/// Target context established by [`authorize_message_send`].
+pub struct AuthorizedMessageTarget {
+    pub thread_root: Option<Message>,
+}
+
+pub struct SendMessageResult {
     pub inserted_message: Message,
     pub response: MessageResponse,
     pub member_uids: Vec<i32>,
     pub side_effects: PendingSideEffects,
 }
 
-pub(crate) enum SendMessageOutcome {
+pub enum SendMessageOutcome {
     Created(Box<SendMessageResult>),
     Duplicate(Box<MessageResponse>),
 }
 
 #[must_use = "side effects must be fired via .fire()"]
-pub(crate) struct PendingSideEffects {
-    pub(crate) ws_msg: std::sync::Arc<ServerWsMessage>,
-    pub(crate) broadcast_uids: Vec<i32>,
-    pub(crate) push_job: Option<PushJob>,
-    pub(crate) unread_event: Option<TopLevelUnreadCacheEvent>,
+pub struct PendingSideEffects {
+    pub ws_msg: std::sync::Arc<ServerWsMessage>,
+    pub broadcast_uids: Vec<i32>,
+    pub push_job: Option<PushJob>,
+    pub unread_event: Option<TopLevelUnreadCacheEvent>,
 }
 
-pub(crate) struct TopLevelUnreadCacheEvent {
-    pub(crate) chat_id: i64,
-    pub(crate) message_id: i64,
-    pub(crate) countable: bool,
+pub struct TopLevelUnreadCacheEvent {
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub countable: bool,
 }
 
 impl PendingSideEffects {
@@ -144,7 +196,7 @@ fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option
         .map(|mut profiles| profiles.remove(&uid).and_then(|profile| profile.username))
 }
 
-pub(crate) fn load_usernames_by_uids(
+pub fn load_usernames_by_uids(
     conn: &mut PgConnection,
     uids: &[i32],
 ) -> std::collections::HashMap<i32, Option<String>> {
@@ -263,7 +315,7 @@ fn build_message_sticker_response(
     }
 }
 
-pub(crate) fn build_sender(
+pub fn build_sender(
     uid: i32,
     user_avatars: &std::collections::HashMap<i32, Option<String>>,
     user_profiles: &std::collections::HashMap<i32, UserProfile>,
@@ -279,7 +331,7 @@ pub(crate) fn build_sender(
     }
 }
 
-pub(crate) fn message_response_preview(response: MessageResponse) -> MessagePreview {
+pub fn message_response_preview(response: MessageResponse) -> MessagePreview {
     let is_deleted = response.is_deleted;
     MessagePreview {
         id: response.id,
@@ -335,7 +387,7 @@ fn attachment_previews(
         .unwrap_or_default()
 }
 
-pub(crate) struct MessagePreviewInput {
+pub struct MessagePreviewInput {
     pub id: i64,
     pub client_generated_id: String,
     pub created_at: DateTime<Utc>,
@@ -349,7 +401,7 @@ pub(crate) struct MessagePreviewInput {
     pub mention_uids: Option<Vec<i32>>,
 }
 
-pub(crate) fn build_message_preview(
+pub fn build_message_preview(
     input: MessagePreviewInput,
     sticker_emoji_map: &std::collections::HashMap<i64, String>,
     user_avatars: &std::collections::HashMap<i32, Option<String>>,
@@ -402,7 +454,7 @@ pub(crate) fn build_message_preview(
 }
 
 #[cfg(test)]
-pub(crate) fn message_is_visible_in_thread_scope(message: &Message, thread_root_id: i64) -> bool {
+pub fn message_is_visible_in_thread_scope(message: &Message, thread_root_id: i64) -> bool {
     if !message.is_published {
         return false;
     }
@@ -414,7 +466,7 @@ pub(crate) fn message_is_visible_in_thread_scope(message: &Message, thread_root_
     message.reply_root_id == Some(thread_root_id) && message.deleted_at.is_none()
 }
 
-pub(crate) fn redact_deleted_message_response(response: &mut MessageResponse) {
+pub fn redact_deleted_message_response(response: &mut MessageResponse) {
     if !response.is_deleted {
         return;
     }
@@ -530,7 +582,7 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
     }
 }
 
-pub(crate) fn build_message_side_effects(
+pub fn build_message_side_effects(
     conn: &mut PgConnection,
     response: &MessageResponse,
     sender_uid: i32,
@@ -592,13 +644,13 @@ pub(crate) fn build_message_side_effects(
 }
 
 /// Maximum attachments a single message may carry.
-pub(crate) const MAX_ATTACHMENTS_PER_MESSAGE: usize = 20;
+pub const MAX_ATTACHMENTS_PER_MESSAGE: usize = 20;
 
 /// Parses attachment IDs while preserving the request order.
 ///
 /// The sequence is part of the message-composition contract. Callers that
 /// need a deterministic database lock order must order their query separately.
-pub(crate) fn parse_attachment_ids(raw_ids: &[String]) -> Result<Vec<i64>, AppError> {
+pub fn parse_attachment_ids(raw_ids: &[String]) -> Result<Vec<i64>, AppError> {
     let mut ids = std::collections::HashSet::with_capacity(raw_ids.len());
     let mut parsed = Vec::with_capacity(raw_ids.len());
     for raw in raw_ids {
@@ -650,7 +702,7 @@ fn validate_message_shape(
 /// rows are loaded, so message-type semantics live in exactly one place.
 /// Row-level attachment checks (ownership, deletion, existing linkage) stay
 /// with the queries that lock those rows.
-pub(crate) fn validate_message(
+pub fn validate_message(
     message_type: &MessageType,
     message: Option<&str>,
     sticker_id: Option<i64>,
@@ -712,11 +764,79 @@ pub(crate) fn validate_message(
     }
 }
 
+/// Authorize a user-originated message send and return its validated target
+/// context. System messages intentionally bypass this boundary because some
+/// lifecycle events are recorded after the actor's membership is removed.
+pub fn authorize_message_send(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    thread_id: Option<i64>,
+    uid: i32,
+) -> Result<AuthorizedMessageTarget, MessageSendAuthorizationError> {
+    let is_member = group_membership::table
+        .filter(
+            group_membership::chat_id
+                .eq(chat_id)
+                .and(group_membership::uid.eq(uid)),
+        )
+        .select(group_membership::uid)
+        .first::<i32>(conn)
+        .optional()?
+        .is_some();
+    if !is_member {
+        return Err(MessageSendAuthorizationError::NotChatMember);
+    }
+
+    let (kind, dm_uid1, dm_uid2) = groups::table
+        .filter(groups::id.eq(chat_id))
+        .select((groups::kind, groups::dm_uid1, groups::dm_uid2))
+        .first::<(GroupKind, Option<i32>, Option<i32>)>(conn)
+        .optional()?
+        .ok_or(MessageSendAuthorizationError::NotChatMember)?;
+
+    if kind == GroupKind::Dm {
+        let peer = match (dm_uid1, dm_uid2) {
+            (Some(uid1), Some(uid2)) if uid1 == uid => uid2,
+            (Some(uid1), Some(uid2)) if uid2 == uid => uid1,
+            _ => return Err(MessageSendAuthorizationError::InvalidDmParticipants),
+        };
+        social::check_can_dm(conn, uid, peer)?;
+    }
+
+    let thread_root = thread_id
+        .map(|thread_id| {
+            let root = messages_schema::table
+                .filter(
+                    messages_schema::id
+                        .eq(thread_id)
+                        .and(messages_schema::chat_id.eq(chat_id))
+                        .and(messages_schema::is_published.eq(true))
+                        .and(
+                            messages_schema::deleted_at
+                                .is_null()
+                                .or(messages_schema::has_thread.eq(true)),
+                        ),
+                )
+                .select(Message::as_select())
+                .first::<Message>(conn)
+                .optional()?
+                .ok_or(MessageSendAuthorizationError::ThreadRootNotFound)?;
+
+            if root.message_type != MessageType::Text {
+                return Err(MessageSendAuthorizationError::ThreadRootNotText);
+            }
+            Ok(root)
+        })
+        .transpose()?;
+
+    Ok(AuthorizedMessageTarget { thread_root })
+}
+
 // ---------------------------------------------------------------------------
 // send_prepared_message (shared by messages, invites, pins)
 // ---------------------------------------------------------------------------
 
-pub(crate) async fn send_prepared_message(
+pub async fn send_prepared_message(
     conn: &mut PgConnection,
     state: &AppState,
     prepared: PreparedMessageSend,
@@ -1346,13 +1466,16 @@ mod tests {
         message_is_visible_in_thread_scope, parse_attachment_ids, redact_deleted_message_response,
         render_mentions_as_text, sticker_preview_text, validate_message, validate_message_shape,
         MentionInfo, MessagePreview, MessagePreviewAttachment, MessagePreviewInput,
-        MessageResponse, MessageStickerResponse, PreparedMessageSend, ReactionSummary,
-        StickerMediaResponse,
+        MessageResponse, MessageSendAuthorizationError, MessageStickerResponse,
+        PreparedMessageSend, ReactionSummary, StickerMediaResponse,
     };
     use crate::{
         dto::{attachments::AttachmentResponse, users::User},
+        errors::AppError,
         models::{Attachment, Message, MessageType, TranscodeStatus},
+        services::social::DmSendAuthorizationError,
     };
+    use axum::{http::StatusCode, response::IntoResponse};
     use chrono::{TimeZone, Utc};
     use serde_json::json;
     use std::collections::HashMap;
@@ -1921,5 +2044,34 @@ mod tests {
         assert!(preview.sticker.is_none());
         assert!(preview.attachments.is_empty());
         assert!(preview.mentions.is_empty());
+    }
+    #[test]
+    fn message_send_authorization_errors_preserve_http_statuses() {
+        let status = |error| AppError::from(error).into_response().status();
+
+        assert_eq!(
+            status(MessageSendAuthorizationError::NotChatMember),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status(MessageSendAuthorizationError::ThreadRootNotFound),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status(MessageSendAuthorizationError::ThreadRootNotText),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status(MessageSendAuthorizationError::DirectMessage(
+                DmSendAuthorizationError::FriendshipRequired,
+            )),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status(MessageSendAuthorizationError::DirectMessage(
+                DmSendAuthorizationError::Blocked,
+            )),
+            StatusCode::FORBIDDEN
+        );
     }
 }

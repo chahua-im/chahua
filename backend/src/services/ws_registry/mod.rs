@@ -2,7 +2,7 @@
 //! supports broadcast and stale-connection pruning.
 
 mod metrics;
-pub(crate) use metrics::WsMetrics;
+pub use metrics::WsMetrics;
 
 use crate::dto::ws::{PresenceUpdatePayload, ServerWsMessage};
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
@@ -63,7 +63,7 @@ fn next_conn_id() -> u64 {
     NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(crate) fn now_secs() -> u64 {
+pub fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

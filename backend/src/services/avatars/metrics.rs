@@ -3,14 +3,14 @@ use prometheus::{
     Registry,
 };
 
-pub(crate) struct AvatarMetrics {
+pub struct AvatarMetrics {
     lookup_duration_seconds: Histogram,
     lookup_fs_duration_seconds: Histogram,
     lookup_users_total: IntCounter,
 }
 
 impl AvatarMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let lookup_duration_seconds = register_histogram_with_registry!(
             "discuz_avatar_lookup_duration_seconds",
             "Discuz avatar lookup latency in seconds",
@@ -39,7 +39,7 @@ impl AvatarMetrics {
         }
     }
 
-    pub(crate) fn record_lookup(
+    pub fn record_lookup(
         &self,
         requested_users: usize,
         duration_seconds: f64,

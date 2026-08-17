@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::config::MediaConfig;
 
-pub(crate) const PUBLIC_MEDIA_CACHE_CONTROL: &str = "public,max-age=31536000,immutable";
+pub const PUBLIC_MEDIA_CACHE_CONTROL: &str = "public,max-age=31536000,immutable";
 /// RFC 5987 allows only `attr-char` unescaped in an extended parameter value,
 /// so everything outside that set is percent-encoded.
 const CONTENT_DISPOSITION_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC

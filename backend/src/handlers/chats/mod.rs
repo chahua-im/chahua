@@ -10,7 +10,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
-pub(crate) use metrics::ChatMetrics;
+pub use metrics::ChatMetrics;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{

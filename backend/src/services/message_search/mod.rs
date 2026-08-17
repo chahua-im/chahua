@@ -18,7 +18,7 @@ use crate::dto::messages::MessageResponse;
 use crate::models::{Message, MessageType};
 use crate::schema::messages;
 mod metrics;
-pub(crate) use metrics::MessageSearchMetrics;
+pub use metrics::MessageSearchMetrics;
 
 pub const DEFAULT_INDEX_UID: &str = "messages_v1";
 pub const REINDEX_BATCH_SIZE: i64 = 500;

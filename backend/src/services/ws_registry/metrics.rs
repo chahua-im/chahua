@@ -4,7 +4,7 @@ use prometheus::{
     IntCounterVec, IntGauge, Registry,
 };
 
-pub(crate) struct WsMetrics {
+pub struct WsMetrics {
     connected_users: IntGauge,
     active_connections: IntGauge,
     inactive_connections: IntGauge,
@@ -15,7 +15,7 @@ pub(crate) struct WsMetrics {
 }
 
 impl WsMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let connected_users = register_int_gauge_with_registry!(
             "ws_connected_users",
             "Current number of users with at least one active websocket connection",
@@ -73,34 +73,30 @@ impl WsMetrics {
         }
     }
 
-    pub(crate) fn set_connected_users(&self, connected_users: usize) {
+    pub fn set_connected_users(&self, connected_users: usize) {
         self.connected_users.set(connected_users as i64);
     }
 
-    pub(crate) fn set_connection_states(
-        &self,
-        active_connections: usize,
-        inactive_connections: usize,
-    ) {
+    pub fn set_connection_states(&self, active_connections: usize, inactive_connections: usize) {
         self.active_connections.set(active_connections as i64);
         self.inactive_connections.set(inactive_connections as i64);
     }
 
-    pub(crate) fn record_connection_open(&self) {
+    pub fn record_connection_open(&self) {
         self.connections_total.inc();
     }
 
-    pub(crate) fn record_connection_duration(&self, duration_seconds: f64) {
+    pub fn record_connection_duration(&self, duration_seconds: f64) {
         self.connection_duration_seconds.observe(duration_seconds);
     }
 
-    pub(crate) fn record_message_pushed(&self, message_type: &str) {
+    pub fn record_message_pushed(&self, message_type: &str) {
         self.messages_pushed_total
             .with_label_values(&[message_type])
             .inc();
     }
 
-    pub(crate) fn record_message_dropped(&self, message_type: &str) {
+    pub fn record_message_dropped(&self, message_type: &str) {
         self.messages_dropped_total
             .with_label_values(&[message_type])
             .inc();

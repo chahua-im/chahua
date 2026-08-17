@@ -149,7 +149,7 @@ fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, (StatusCode, &'stat
     Ok(Some(token))
 }
 
-pub(crate) fn is_valid_client_id(value: &str) -> bool {
+pub fn is_valid_client_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value

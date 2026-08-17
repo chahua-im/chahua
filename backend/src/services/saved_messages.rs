@@ -72,11 +72,7 @@ pub fn saved_messages_limit(limit: Option<i64>) -> i64 {
     )
 }
 
-pub(crate) fn split_saved_messages_page<T, F>(
-    rows: Vec<T>,
-    limit: i64,
-    id_for: F,
-) -> (Vec<T>, Option<i64>)
+pub fn split_saved_messages_page<T, F>(rows: Vec<T>, limit: i64, id_for: F) -> (Vec<T>, Option<i64>)
 where
     F: Fn(&T) -> i64,
 {
@@ -86,7 +82,7 @@ where
     (page, next_cursor)
 }
 
-pub(crate) fn saved_message_row_to_response(
+pub fn saved_message_row_to_response(
     row: SavedMessage,
     can_locate_context: bool,
 ) -> Result<SavedMessageResponse, AppError> {

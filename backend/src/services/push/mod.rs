@@ -13,7 +13,7 @@ mod payload;
 mod policy;
 mod worker;
 
-pub(crate) use metrics::PushMetrics;
+pub use metrics::PushMetrics;
 pub use payload::{PushMessagePreview, PushMessagePreviewSticker};
 
 use crate::models::PushProvider;
@@ -110,7 +110,7 @@ impl PushService {
     }
 }
 
-pub(crate) fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&'static str>() {
         (*message).to_string()
     } else if let Some(message) = payload.downcast_ref::<String>() {
@@ -120,11 +120,8 @@ pub(crate) fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> Str
     }
 }
 
-pub(crate) async fn supervise_worker<F, Fut>(
-    worker_name: &str,
-    restart_delay: Duration,
-    mut worker: F,
-) where
+pub async fn supervise_worker<F, Fut>(worker_name: &str, restart_delay: Duration, mut worker: F)
+where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {

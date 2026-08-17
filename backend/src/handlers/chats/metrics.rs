@@ -1,11 +1,11 @@
 use prometheus::{register_int_counter_vec_with_registry, IntCounterVec, Registry};
 
-pub(crate) struct ChatMetrics {
+pub struct ChatMetrics {
     messages_total: IntCounterVec,
 }
 
 impl ChatMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let messages_total = register_int_counter_vec_with_registry!(
             "messages_total",
             "Total number of messages successfully persisted",
@@ -17,7 +17,7 @@ impl ChatMetrics {
         Self { messages_total }
     }
 
-    pub(crate) fn record_message(&self, chat_id: i64) {
+    pub fn record_message(&self, chat_id: i64) {
         let chat_id = chat_id.to_string();
         self.messages_total.with_label_values(&[&chat_id]).inc();
     }

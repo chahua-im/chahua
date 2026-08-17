@@ -3,7 +3,7 @@ use std::time::Instant;
 
 const SLOW_QUERY_THRESHOLD_MS: u128 = 10;
 
-pub(crate) struct TracingInstrumentation {
+pub struct TracingInstrumentation {
     query_start: Option<Instant>,
 }
 
@@ -42,7 +42,7 @@ impl Instrumentation for TracingInstrumentation {
 }
 
 /// Call once at startup. Only installs instrumentation in debug builds.
-pub(crate) fn install() {
+pub fn install() {
     {
         diesel::connection::set_default_instrumentation(|| {
             Some(Box::new(TracingInstrumentation::new()))
