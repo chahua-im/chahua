@@ -33,10 +33,7 @@ const pinsSlice = createSlice({
   name: 'pins',
   initialState,
   reducers: {
-    setPins(
-      state,
-      action: PayloadAction<{ chatId: string; threadRootId?: string | null; pins: PinResponse[] }>,
-    ) {
+    setPins(state, action: PayloadAction<{ chatId: string; threadRootId?: string | null; pins: PinResponse[] }>) {
       const sortedPins = [...action.payload.pins].sort(
         (a, b) => new Date(b.message.createdAt).getTime() - new Date(a.message.createdAt).getTime(),
       );
@@ -60,21 +57,14 @@ const pinsSlice = createSlice({
       // Clear dismissed state so new pin shows in banner
       delete state.dismissedPinId[scopeKey];
     },
-    removePin(
-      state,
-      action: PayloadAction<{ chatId: string; threadRootId?: string | null; pinId: string }>,
-    ) {
+    removePin(state, action: PayloadAction<{ chatId: string; threadRootId?: string | null; pinId: string }>) {
       const entry = state.byScope[pinScopeKey(action.payload.chatId, action.payload.threadRootId)];
       if (entry) {
         entry.pins = entry.pins.filter((p) => p.id !== action.payload.pinId);
       }
     },
-    dismissBanner(
-      state,
-      action: PayloadAction<{ chatId: string; threadRootId?: string | null; pinId: string }>,
-    ) {
-      state.dismissedPinId[pinScopeKey(action.payload.chatId, action.payload.threadRootId)] =
-        action.payload.pinId;
+    dismissBanner(state, action: PayloadAction<{ chatId: string; threadRootId?: string | null; pinId: string }>) {
+      state.dismissedPinId[pinScopeKey(action.payload.chatId, action.payload.threadRootId)] = action.payload.pinId;
     },
   },
   extraReducers: (builder) => {

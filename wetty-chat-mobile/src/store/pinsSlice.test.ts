@@ -3,14 +3,7 @@ import type { MessageResponse } from '@/api/messages';
 import type { PinResponse } from '@/api/pins';
 import type { RootState } from './index';
 import { messagePatched } from './messageEvents';
-import reducer, {
-  addPin,
-  pinScopeKey,
-  removePin,
-  selectPinsForScope,
-  setPins,
-  type PinsState,
-} from './pinsSlice';
+import reducer, { addPin, pinScopeKey, removePin, selectPinsForScope, setPins, type PinsState } from './pinsSlice';
 
 function message(id: string, createdAt: string): MessageResponse {
   return {

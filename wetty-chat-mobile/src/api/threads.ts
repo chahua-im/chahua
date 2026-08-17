@@ -57,10 +57,11 @@ export function getThreads(params?: {
 }
 
 export function markThreadAsRead(
+  chatId: string,
   threadRootId: string,
   messageId: string,
 ): Promise<AxiosResponse<MarkThreadReadResponse>> {
-  return apiClient.post(`/threads/${threadRootId}/read`, { messageId });
+  return apiClient.post(`/chats/${chatId}/threads/${threadRootId}/read`, { messageId });
 }
 
 export function getUnreadThreadCount(): Promise<AxiosResponse<UnreadThreadCountResponse>> {
@@ -100,6 +101,9 @@ export interface ThreadReadStateResponse {
   lastReadMessageId: string | null;
 }
 
-export function getThreadReadState(threadRootId: string): Promise<AxiosResponse<ThreadReadStateResponse>> {
-  return apiClient.get(`/threads/${threadRootId}/read-state`);
+export function getThreadReadState(
+  chatId: string,
+  threadRootId: string,
+): Promise<AxiosResponse<ThreadReadStateResponse>> {
+  return apiClient.get(`/chats/${chatId}/threads/${threadRootId}/read-state`);
 }

@@ -125,7 +125,71 @@ fn resolve_chat_id_for_thread(
         .ok_or(AppError::NotFound("Thread root message not found"))
 }
 
+/// Authorize `uid` for `thread_root_id` **within an explicitly supplied
+/// `chat_id`**, rejecting a mismatch with 404.
+///
+/// Membership is verified before the thread lookup on purpose: a non-member
+/// then receives 403 for every thread root alike, so the mismatch 404 cannot
+/// be used to probe which chat a thread belongs to. Reversing the order would
+/// let an outsider distinguish "root lives in this chat" (403) from "root
+/// lives elsewhere" (404).
+fn authorize_thread_in_chat(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    thread_root_id: i64,
+    uid: i32,
+) -> Result<(), AppError> {
+    check_membership(conn, chat_id, uid)?;
+
+    // Never trust the caller's chat_id: the thread root itself decides which
+    // chat the thread belongs to.
+    let belongs_to_chat: bool = diesel::select(diesel::dsl::exists(
+        messages::table.filter(
+            messages::id
+                .eq(thread_root_id)
+                .and(messages::chat_id.eq(chat_id)),
+        ),
+    ))
+    .get_result(conn)?;
+
+    if !belongs_to_chat {
+        return Err(AppError::NotFound("Thread root message not found"));
+    }
+
+    Ok(())
+}
+
+/// Shared body of the chat-scoped and legacy "mark thread read" routes.
+/// Callers MUST have authorized `uid` for `chat_id` first.
+fn apply_thread_read(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    thread_root_id: i64,
+    uid: i32,
+    message_id: i64,
+) -> Result<MarkThreadReadResponse, AppError> {
+    // If the client reports reading the root message itself (no replies),
+    // there is nothing to track — skip the write.
+    if message_id == thread_root_id {
+        return Ok(MarkThreadReadResponse {
+            last_read_message_id: None,
+            unread_count: 0,
+        });
+    }
+
+    let _ = thread_svc::ensure_thread_user_state(conn, chat_id, thread_root_id, uid, false)?;
+    let read_state = thread_svc::mark_thread_read(conn, chat_id, thread_root_id, uid, message_id)?;
+
+    Ok(MarkThreadReadResponse {
+        last_read_message_id: read_state.last_read_message_id,
+        unread_count: read_state.unread_count,
+    })
+}
+
 /// POST /threads/:thread_root_id/read — Mark a thread as read.
+///
+/// Deprecated: use `POST /chats/{chat_id}/threads/{thread_root_id}/read`.
+/// Retained so clients released before the chat-scoped route keep working.
 #[utoipa::path(
     post,
     path = "/{thread_root_id}/read",
@@ -150,26 +214,19 @@ async fn mark_thread_read(
     let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
     check_membership(conn, chat_id, uid)?;
 
-    // If the client reports reading the root message itself (no replies),
-    // there is nothing to track — skip the write.
-    if body.message_id == thread_root_id {
-        return Ok(Json(MarkThreadReadResponse {
-            last_read_message_id: None,
-            unread_count: 0,
-        }));
-    }
-
-    let _ = thread_svc::ensure_thread_user_state(conn, chat_id, thread_root_id, uid, false)?;
-    let read_state =
-        thread_svc::mark_thread_read(conn, chat_id, thread_root_id, uid, body.message_id)?;
-
-    Ok(Json(MarkThreadReadResponse {
-        last_read_message_id: read_state.last_read_message_id,
-        unread_count: read_state.unread_count,
-    }))
+    Ok(Json(apply_thread_read(
+        conn,
+        chat_id,
+        thread_root_id,
+        uid,
+        body.message_id,
+    )?))
 }
 
 /// GET /threads/:thread_root_id/read-state — Get the user's read position for a thread.
+///
+/// Deprecated: use `GET /chats/{chat_id}/threads/{thread_root_id}/read-state`.
+/// Retained so clients released before the chat-scoped route keep working.
 #[utoipa::path(
     get,
     path = "/{thread_root_id}/read-state",
@@ -192,13 +249,16 @@ async fn get_thread_read_state(
     let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
     check_membership(conn, chat_id, uid)?;
 
-    let last_read_message_id =
-        thread_svc::get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
-
     Ok(Json(ThreadReadStateResponse {
-        last_read_message_id,
+        last_read_message_id: thread_svc::get_thread_last_read_message_id(
+            conn,
+            chat_id,
+            thread_root_id,
+            uid,
+        )?,
     }))
 }
+
 /// GET /threads/unread — Get total unread thread and message counts for the current user.
 #[utoipa::path(
     get,
@@ -230,6 +290,79 @@ pub struct ThreadSubscribePath {
     chat_id: i64,
     #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
     thread_root_id: i64,
+}
+
+/// POST /chats/:chat_id/threads/:thread_root_id/read — Mark a thread as read.
+#[utoipa::path(
+    post,
+    path = "/",
+    tag = "threads",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+    ),
+    request_body = MarkThreadReadBody,
+    responses(
+        (status = OK, body = MarkThreadReadResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn mark_thread_read_in_chat(
+    CurrentUid(uid): CurrentUid,
+    Path(ThreadSubscribePath {
+        chat_id,
+        thread_root_id,
+    }): Path<ThreadSubscribePath>,
+    mut conn: DbConn,
+    Json(body): Json<MarkThreadReadBody>,
+) -> Result<Json<MarkThreadReadResponse>, AppError> {
+    let conn = &mut *conn;
+
+    authorize_thread_in_chat(conn, chat_id, thread_root_id, uid)?;
+
+    Ok(Json(apply_thread_read(
+        conn,
+        chat_id,
+        thread_root_id,
+        uid,
+        body.message_id,
+    )?))
+}
+
+/// GET /chats/:chat_id/threads/:thread_root_id/read-state — Read position in a thread.
+#[utoipa::path(
+    get,
+    path = "/",
+    tag = "threads",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+    ),
+    responses(
+        (status = OK, body = ThreadReadStateResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn get_thread_read_state_in_chat(
+    CurrentUid(uid): CurrentUid,
+    Path(ThreadSubscribePath {
+        chat_id,
+        thread_root_id,
+    }): Path<ThreadSubscribePath>,
+    mut conn: DbConn,
+) -> Result<Json<ThreadReadStateResponse>, AppError> {
+    let conn = &mut *conn;
+
+    authorize_thread_in_chat(conn, chat_id, thread_root_id, uid)?;
+
+    Ok(Json(ThreadReadStateResponse {
+        last_read_message_id: thread_svc::get_thread_last_read_message_id(
+            conn,
+            chat_id,
+            thread_root_id,
+            uid,
+        )?,
+    }))
 }
 
 /// PUT /chats/:chat_id/threads/:thread_root_id/subscribe — Follow a thread.
@@ -454,6 +587,10 @@ async fn unarchive_thread(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Top-level `/threads` routes.
+///
+/// These are the cross-chat inbox endpoints, plus the deprecated per-thread
+/// read routes that predate the chat-scoped equivalents in [`thread_router`].
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_threads))
@@ -461,6 +598,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(mark_thread_read))
         .routes(utoipa_axum::routes!(get_thread_read_state))
 }
+
 /// Routes nested under `/chats/:chat_id/threads/:thread_root_id`.
 ///
 /// Keep every thread-scoped endpoint in this router so callers mount one
@@ -478,6 +616,14 @@ pub fn thread_router() -> OpenApiRouter<crate::AppState> {
         .nest(
             "/archive",
             OpenApiRouter::new().routes(utoipa_axum::routes!(archive_thread, unarchive_thread)),
+        )
+        .nest(
+            "/read",
+            OpenApiRouter::new().routes(utoipa_axum::routes!(mark_thread_read_in_chat)),
+        )
+        .nest(
+            "/read-state",
+            OpenApiRouter::new().routes(utoipa_axum::routes!(get_thread_read_state_in_chat)),
         )
         .nest("/pins", super::pins::thread_router())
 }

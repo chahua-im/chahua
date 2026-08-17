@@ -32,9 +32,7 @@ export function PinBanner({
   const [presentAlert] = useIonAlert();
   const { role } = useChatRole(chatId);
   const isAdmin = role === 'admin';
-  const pins = useSelector((state: RootState) =>
-    selectPinsForScope(state, pinScopeKey(chatId, threadRootId)),
-  );
+  const pins = useSelector((state: RootState) => selectPinsForScope(state, pinScopeKey(chatId, threadRootId)));
   const locale = useSelector(selectEffectiveLocale);
 
   const activePin = useMemo(() => {

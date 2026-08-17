@@ -375,7 +375,7 @@ export function useConversationTimeline({
     } else if (!initialLoadCompletedRef.current) {
       initialLoadCompletedRef.current = true;
       if (threadId) {
-        getThreadReadState(threadId)
+        getThreadReadState(chatId, threadId)
           .then((res) => {
             threadLastReadMessageIdRef.current = res.data.lastReadMessageId;
           })

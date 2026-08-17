@@ -142,7 +142,7 @@ describe('useChatReadTracking', () => {
 
     await advanceReadCooldown();
 
-    expect(markThreadAsRead).toHaveBeenCalledWith('thread-1', '20');
+    expect(markThreadAsRead).toHaveBeenCalledWith('chat-1', 'thread-1', '20');
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'threads/setThreadReadState',

@@ -35,9 +35,7 @@ export function PinListModal({
   const isDesktop = useIsDesktop();
   const { role } = useChatRole(chatId);
   const isAdmin = role === 'admin';
-  const pins = useSelector((state: RootState) =>
-    selectPinsForScope(state, pinScopeKey(chatId, threadRootId)),
-  );
+  const pins = useSelector((state: RootState) => selectPinsForScope(state, pinScopeKey(chatId, threadRootId)));
   const locale = useSelector(selectEffectiveLocale);
 
   const handleItemClick = useCallback(
@@ -61,9 +59,7 @@ export function PinListModal({
             text: t`Unpin`,
             role: 'destructive',
             handler: () => {
-              const unpin = threadRootId
-                ? deleteThreadPin(chatId, threadRootId, pin.id)
-                : deletePin(chatId, pin.id);
+              const unpin = threadRootId ? deleteThreadPin(chatId, threadRootId, pin.id) : deletePin(chatId, pin.id);
               unpin.catch(() => {});
             },
           },

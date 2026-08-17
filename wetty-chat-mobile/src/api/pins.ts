@@ -29,10 +29,7 @@ export function deletePin(chatId: string, pinId: string): Promise<AxiosResponse<
   return apiClient.delete(`/chats/${chatId}/pins/${pinId}`);
 }
 
-export function listThreadPins(
-  chatId: string,
-  threadRootId: string,
-): Promise<AxiosResponse<ListPinsResponse>> {
+export function listThreadPins(chatId: string, threadRootId: string): Promise<AxiosResponse<ListPinsResponse>> {
   return apiClient.get(`/chats/${chatId}/threads/${threadRootId}/pins`);
 }
 
@@ -44,10 +41,6 @@ export function createThreadPin(
   return apiClient.post(`/chats/${chatId}/threads/${threadRootId}/pins`, { messageId });
 }
 
-export function deleteThreadPin(
-  chatId: string,
-  threadRootId: string,
-  pinId: string,
-): Promise<AxiosResponse<void>> {
+export function deleteThreadPin(chatId: string, threadRootId: string, pinId: string): Promise<AxiosResponse<void>> {
   return apiClient.delete(`/chats/${chatId}/threads/${threadRootId}/pins/${pinId}`);
 }

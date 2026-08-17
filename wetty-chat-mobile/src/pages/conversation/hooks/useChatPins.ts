@@ -2,12 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { listPins, listThreadPins } from '@/api/pins';
 import type { RootState } from '@/store';
-import {
-  pinScopeKey,
-  selectPinsForScope,
-  selectPinsLoadedForScope,
-  setPins,
-} from '@/store/pinsSlice';
+import { pinScopeKey, selectPinsForScope, selectPinsLoadedForScope, setPins } from '@/store/pinsSlice';
 
 interface UseChatPinsArgs {
   chatId: string;

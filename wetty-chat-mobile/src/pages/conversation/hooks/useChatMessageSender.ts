@@ -109,7 +109,7 @@ export function useChatMessageSender({
   const markConfirmedMessageAsRead = useCallback(
     (confirmedMessageId: string) => {
       if (threadId) {
-        void apiMarkThreadAsRead(threadId, confirmedMessageId).then((res) => {
+        void apiMarkThreadAsRead(chatId, threadId, confirmedMessageId).then((res) => {
           dispatch(
             setThreadReadState({
               threadRootId: threadId,

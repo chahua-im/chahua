@@ -104,7 +104,7 @@ export function useChatReadTracking({
     pendingThreadReadIdRef.current = null;
     threadReadTimerRef.current = null;
     lastThreadReadIdRef.current = targetId;
-    apiMarkThreadAsRead(threadId, targetId)
+    apiMarkThreadAsRead(chatId, threadId, targetId)
       .then((res) => {
         dispatch(
           setThreadReadState({
