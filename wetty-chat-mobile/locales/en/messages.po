@@ -63,6 +63,7 @@ msgstr "Add"
 
 msgid "Add attachment"
 msgstr "Add attachment"
+
 msgid "Add Friend"
 msgstr "Add Friend"
 
@@ -225,12 +226,9 @@ msgstr "Close viewer"
 msgid "Code"
 msgstr "Code"
 
-14: msgid "Compressing"
+msgid "Compressing"
 msgstr "Compressing"
-15: msgid "Compressing"
-msgstr "压缩中"
-16: msgid "Compressing"
-msgstr "壓縮中"
+
 msgid "Continue"
 msgstr "Continue"
 
@@ -373,6 +371,7 @@ msgstr "Enter a user UID"
 
 msgid "Enter a valid User ID (integer from 1 to 2,147,483,647)"
 msgstr "Enter a valid User ID (integer from 1 to 2,147,483,647)"
+
 msgid "Enter a verification message"
 msgstr "Enter a verification message"
 
@@ -629,6 +628,9 @@ msgstr "General"
 msgid "Group"
 msgstr "Group"
 
+msgid "Group Chats"
+msgstr "Group Chats"
+
 msgid "Group details saved"
 msgstr "Group details saved"
 
@@ -646,9 +648,6 @@ msgstr "Group Name"
 
 msgid "Group Settings"
 msgstr "Group Settings"
-
-msgid "Groups"
-msgstr "Groups"
 
 msgid "Image"
 msgstr "Image"
@@ -1278,8 +1277,8 @@ msgstr "Show \"All\" Tab in Chats"
 msgid "Show \"Friends\" Tab in Chats"
 msgstr "Show \"Friends\" Tab in Chats"
 
-msgid "Show \"Groups\" Tab in Chats"
-msgstr "Show \"Groups\" Tab in Chats"
+msgid "Show \"Group Chats\" Tab in Chats"
+msgstr "Show \"Group Chats\" Tab in Chats"
 
 msgid "Show \"Threads\" Tab in Chats"
 msgstr "Show \"Threads\" Tab in Chats"
@@ -1566,11 +1565,12 @@ msgstr "You’ve been invited"
 msgid "Your account"
 msgstr "Your account"
 
-#. js-lingui-explicit-id
-msgid "auth.bootstrap.signed-out.description"
-msgstr "Your session is no longer valid. Please sign in again to continue."
 msgid "Your answer"
 msgstr "Your answer"
 
 msgid "Your Question"
 msgstr "Your Question"
+
+#. js-lingui-explicit-id
+msgid "auth.bootstrap.signed-out.description"
+msgstr "Your session is no longer valid. Please sign in again to continue."
