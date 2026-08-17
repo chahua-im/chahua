@@ -116,11 +116,7 @@ export function FriendVerificationCore({ backAction }: FriendVerificationCorePro
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            {backAction ? (
-              <BackButton action={backAction} />
-            ) : (
-              <IonBackButton text={t`Back`} defaultHref="/settings" />
-            )}
+            {backAction ? <BackButton action={backAction} /> : <IonBackButton text={t`Back`} defaultHref="/settings" />}
           </IonButtons>
           <IonTitle>
             <Trans>Friend Verification</Trans>
@@ -134,10 +130,7 @@ export function FriendVerificationCore({ backAction }: FriendVerificationCorePro
       </IonHeader>
       <IonContent color="light">
         <IonList inset>
-          <IonRadioGroup
-            value={mode}
-            onIonChange={(e) => setMode(e.detail.value as FriendAddVerificationMode)}
-          >
+          <IonRadioGroup value={mode} onIonChange={(e) => setMode(e.detail.value as FriendAddVerificationMode)}>
             {MODE_OPTIONS.map((option) => (
               <IonItem key={option}>
                 <IonRadio value={option} labelPlacement="end" justify="start" disabled={loading || saving}>

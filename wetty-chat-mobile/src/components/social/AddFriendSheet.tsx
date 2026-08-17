@@ -64,11 +64,7 @@ export function AddFriendSheet({ targetUid, targetName, isOpen, onDismiss, onSen
   const mode = info?.mode ?? null;
 
   const trimmed = text.trim();
-  const canSend =
-    !sending &&
-    mode !== null &&
-    mode !== 'forbid' &&
-    (mode === 'direct' ? true : trimmed.length > 0);
+  const canSend = !sending && mode !== null && mode !== 'forbid' && (mode === 'direct' ? true : trimmed.length > 0);
 
   const handleSend = async () => {
     if (!canSend || mode === null) return;
