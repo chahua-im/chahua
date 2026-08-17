@@ -83,16 +83,12 @@ export const friendsApi = {
   },
 
   acceptRequest: async (requestId: string): Promise<FriendRequestResponse> => {
-    const res = await apiClient.post<FriendRequestResponse>(
-      `/friends/requests/${requestId}/accept`,
-    );
+    const res = await apiClient.post<FriendRequestResponse>(`/friends/requests/${requestId}/accept`);
     return res.data;
   },
 
   rejectRequest: async (requestId: string): Promise<FriendRequestResponse> => {
-    const res = await apiClient.post<FriendRequestResponse>(
-      `/friends/requests/${requestId}/reject`,
-    );
+    const res = await apiClient.post<FriendRequestResponse>(`/friends/requests/${requestId}/reject`);
     return res.data;
   },
 

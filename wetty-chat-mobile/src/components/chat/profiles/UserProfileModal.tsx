@@ -366,16 +366,10 @@ export function UserProfileModal({
 
   const handleUnblock = useCallback(() => {
     if (!displaySender) return;
-    handleConfirmAction(
-      t`Unblock User`,
-      t`Unblock this user?`,
-      t`User unblocked`,
-      t`Unblock`,
-      async () => {
-        await blocksApi.unblockUser(displaySender.uid);
-        dispatch(fetchBlocks());
-      },
-    );
+    handleConfirmAction(t`Unblock User`, t`Unblock this user?`, t`User unblocked`, t`Unblock`, async () => {
+      await blocksApi.unblockUser(displaySender.uid);
+      dispatch(fetchBlocks());
+    });
   }, [displaySender, handleConfirmAction, dispatch]);
 
   const handleMessage = useCallback(async () => {
@@ -398,196 +392,171 @@ export function UserProfileModal({
   return (
     <>
       <IonModal isOpen={sender != null} onDidPresent={handleDidPresent} onDidDismiss={onDismiss} {...mobileModalProps}>
-      <IonContent className="ion-padding" scrollY={false}>
-        <button
-          onClick={onDismiss}
-          aria-label={t`Close`}
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 12,
-            background: 'rgba(128, 128, 128, 0.2)',
-            border: 'none',
-            borderRadius: '50%',
-            width: 32,
-            height: 32,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            zIndex: 10,
-            transition: 'transform 0.2s',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-        >
-          <IonIcon icon={close} style={{ fontSize: 20, color: 'var(--ion-text-color)' }} />
-        </button>
-        {displaySender && (
-          <div ref={contentRef} style={{ textAlign: 'center', paddingTop: 44 }}>
-            <UserAvatar
-              name={displayName}
-              avatarUrl={displaySender.avatarUrl}
-              size={80}
-              style={{ display: 'inline-flex' }}
-            />
-            <h2>{displayName}</h2>
-            {groupName && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  marginTop: 4,
-                }}
+        <IonContent className="ion-padding" scrollY={false}>
+          <button
+            onClick={onDismiss}
+            aria-label={t`Close`}
+            style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              background: 'rgba(128, 128, 128, 0.2)',
+              border: 'none',
+              borderRadius: '50%',
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              zIndex: 10,
+              transition: 'transform 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+          >
+            <IonIcon icon={close} style={{ fontSize: 20, color: 'var(--ion-text-color)' }} />
+          </button>
+          {displaySender && (
+            <div ref={contentRef} style={{ textAlign: 'center', paddingTop: 44 }}>
+              <UserAvatar
+                name={displayName}
+                avatarUrl={displaySender.avatarUrl}
+                size={80}
+                style={{ display: 'inline-flex' }}
+              />
+              <h2>{displayName}</h2>
+              {groupName && (
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    marginTop: 4,
+                  }}
+                >
+                  <IonChip
+                    outline
+                    style={groupNameColor ? { color: groupNameColor, borderColor: groupNameColor } : undefined}
+                  >
+                    <IonLabel>{groupName}</IonLabel>
+                  </IonChip>
+                </div>
+              )}
+              <IonButton
+                fill="outline"
+                href={'https://www.shireyishunjian.com/main/home.php?mod=space&uid=' + displaySender.uid}
+                target="_blank"
+                size="small"
               >
-                <IonChip
-                  outline
-                  style={groupNameColor ? { color: groupNameColor, borderColor: groupNameColor } : undefined}
-                >
-                  <IonLabel>{groupName}</IonLabel>
-                </IonChip>
-              </div>
-            )}
-            <IonButton
-              fill="outline"
-              href={'https://www.shireyishunjian.com/main/home.php?mod=space&uid=' + displaySender.uid}
-              target="_blank"
-              size="small"
-            >
-              个人空间
-              <IonIcon slot="end" icon={openOutline}></IonIcon>
-            </IonButton>
-            {isOwn && (
-              <>
-                <IonButton
-                  fill="outline"
-                  href="https://www.shireyishunjian.com/main/forum.php?mod=viewthread&tid=209934"
-                  target="_blank"
-                  size="small"
-                >
-                  修改用户名
-                  <IonIcon slot="end" icon={openOutline}></IonIcon>
-                </IonButton>
-                <IonButton
-                  fill="outline"
-                  href="https://www.shireyishunjian.com/main/home.php?mod=spacecp&ac=avatar"
-                  target="_blank"
-                  size="small"
-                >
-                  修改头像
-                  <IonIcon slot="end" icon={openOutline}></IonIcon>
-                </IonButton>
-              </>
-            )}
-            {canManage && !isOwn && (
-              <div className={styles.buttonRow}>
-                {memberLoading ? (
-                  <div style={{ color: 'var(--ion-text-color)' }}>{t`Loading...`}</div>
-                ) : memberInfo?.role === 'admin' ? (
-                  <IonButton color="danger" fill="solid" onClick={handleDemote} className={styles.singleButton}>
-                    {t`Demote to Member`}
-                  </IonButton>
-                ) : memberInfo?.role === 'member' ? (
-                  <>
-                    <IonButton color="primary" fill="solid" onClick={handlePromote} className={styles.splitButton}>
-                      {t`Promote to Admin`}
-                    </IonButton>
-                    <IonButton color="danger" fill="solid" onClick={handleRemove} className={styles.splitButton}>
-                      {t`Remove from Group`}
-                    </IonButton>
-                  </>
-                ) : null}
-              </div>
-            )}
-            {socialEnabled && !isOwn && displaySender && (
-              <div className={styles.buttonRow}>
-                {friendsEnabled && dmEnabled && isFriend && (
-                  <IonButton
-                    fill="solid"
-                    color="primary"
-                    onClick={handleMessage}
-                    className={styles.splitButton}
-                  >
-                    <IonIcon slot="start" icon={chatbubbleEllipsesOutline} />
-                    {t`Message`}
-                  </IonButton>
-                )}
-                {friendsEnabled && isFriend && (
+                个人空间
+                <IonIcon slot="end" icon={openOutline}></IonIcon>
+              </IonButton>
+              {isOwn && (
+                <>
                   <IonButton
                     fill="outline"
-                    color="danger"
-                    onClick={handleUnfriend}
-                    className={styles.splitButton}
+                    href="https://www.shireyishunjian.com/main/forum.php?mod=viewthread&tid=209934"
+                    target="_blank"
+                    size="small"
                   >
-                    {t`Unfriend`}
+                    修改用户名
+                    <IonIcon slot="end" icon={openOutline}></IonIcon>
                   </IonButton>
-                )}
-                {friendsEnabled && !isFriend && outgoingReq && (
                   <IonButton
                     fill="outline"
-                    color="medium"
-                    onClick={handleCancelRequest}
-                    className={styles.singleButton}
+                    href="https://www.shireyishunjian.com/main/home.php?mod=spacecp&ac=avatar"
+                    target="_blank"
+                    size="small"
                   >
-                    {t`Cancel Request`}
+                    修改头像
+                    <IonIcon slot="end" icon={openOutline}></IonIcon>
                   </IonButton>
-                )}
-                {friendsEnabled && !isFriend && incomingReq && (
-                  <>
-                    <IonButton
-                      fill="solid"
-                      color="primary"
-                      onClick={handleAcceptRequest}
-                      className={styles.splitButton}
-                    >
-                      {t`Accept`}
+                </>
+              )}
+              {canManage && !isOwn && (
+                <div className={styles.buttonRow}>
+                  {memberLoading ? (
+                    <div style={{ color: 'var(--ion-text-color)' }}>{t`Loading...`}</div>
+                  ) : memberInfo?.role === 'admin' ? (
+                    <IonButton color="danger" fill="solid" onClick={handleDemote} className={styles.singleButton}>
+                      {t`Demote to Member`}
                     </IonButton>
-                    <IonButton
-                      fill="outline"
-                      color="danger"
-                      onClick={handleRejectRequest}
-                      className={styles.splitButton}
-                    >
-                      {t`Reject`}
+                  ) : memberInfo?.role === 'member' ? (
+                    <>
+                      <IonButton color="primary" fill="solid" onClick={handlePromote} className={styles.splitButton}>
+                        {t`Promote to Admin`}
+                      </IonButton>
+                      <IonButton color="danger" fill="solid" onClick={handleRemove} className={styles.splitButton}>
+                        {t`Remove from Group`}
+                      </IonButton>
+                    </>
+                  ) : null}
+                </div>
+              )}
+              {socialEnabled && !isOwn && displaySender && (
+                <div className={styles.buttonRow}>
+                  {friendsEnabled && dmEnabled && isFriend && (
+                    <IonButton fill="solid" color="primary" onClick={handleMessage} className={styles.splitButton}>
+                      <IonIcon slot="start" icon={chatbubbleEllipsesOutline} />
+                      {t`Message`}
                     </IonButton>
-                  </>
-                )}
-                {friendsEnabled && !isFriend && !outgoingReq && !incomingReq && (
-                  <IonButton
-                    fill="solid"
-                    color="primary"
-                    onClick={handleAddFriend}
-                    className={styles.singleButton}
-                  >
-                    <IonIcon slot="start" icon={personAddOutline} />
-                    {t`Add Friend`}
-                  </IonButton>
-                )}
-                {blockEnabled &&
-                  (isBlocked ? (
+                  )}
+                  {friendsEnabled && isFriend && (
+                    <IonButton fill="outline" color="danger" onClick={handleUnfriend} className={styles.splitButton}>
+                      {t`Unfriend`}
+                    </IonButton>
+                  )}
+                  {friendsEnabled && !isFriend && outgoingReq && (
                     <IonButton
                       fill="outline"
                       color="medium"
-                      onClick={handleUnblock}
+                      onClick={handleCancelRequest}
                       className={styles.singleButton}
                     >
-                      {t`Unblock`}
+                      {t`Cancel Request`}
                     </IonButton>
-                  ) : (
-                    <IonButton
-                      fill="outline"
-                      color="danger"
-                      onClick={handleBlock}
-                      className={styles.singleButton}
-                    >
-                      {t`Block`}
+                  )}
+                  {friendsEnabled && !isFriend && incomingReq && (
+                    <>
+                      <IonButton
+                        fill="solid"
+                        color="primary"
+                        onClick={handleAcceptRequest}
+                        className={styles.splitButton}
+                      >
+                        {t`Accept`}
+                      </IonButton>
+                      <IonButton
+                        fill="outline"
+                        color="danger"
+                        onClick={handleRejectRequest}
+                        className={styles.splitButton}
+                      >
+                        {t`Reject`}
+                      </IonButton>
+                    </>
+                  )}
+                  {friendsEnabled && !isFriend && !outgoingReq && !incomingReq && (
+                    <IonButton fill="solid" color="primary" onClick={handleAddFriend} className={styles.singleButton}>
+                      <IonIcon slot="start" icon={personAddOutline} />
+                      {t`Add Friend`}
                     </IonButton>
-                  ))}
-              </div>
-            )}
-          </div>
-        )}
-      </IonContent>
+                  )}
+                  {blockEnabled &&
+                    (isBlocked ? (
+                      <IonButton fill="outline" color="medium" onClick={handleUnblock} className={styles.singleButton}>
+                        {t`Unblock`}
+                      </IonButton>
+                    ) : (
+                      <IonButton fill="outline" color="danger" onClick={handleBlock} className={styles.singleButton}>
+                        {t`Block`}
+                      </IonButton>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+        </IonContent>
       </IonModal>
       <AddFriendSheet
         targetUid={peerUid}

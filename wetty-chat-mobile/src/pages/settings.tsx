@@ -27,7 +27,16 @@ import { SettingsProfileHero } from '@/components/settings/SettingsProfileHero';
 
 import { type PushNotificationErrorCode, usePushNotifications } from '@/hooks/usePushNotifications';
 import { t } from '@lingui/core/macro';
-import { bookmarkOutline, codeWorking, cog, happyOutline, logIn, logOut, notifications, shieldCheckmarkOutline } from 'ionicons/icons';
+import {
+  bookmarkOutline,
+  codeWorking,
+  cog,
+  happyOutline,
+  logIn,
+  logOut,
+  notifications,
+  shieldCheckmarkOutline,
+} from 'ionicons/icons';
 import { BackButton } from '@/components/BackButton';
 import type { BackAction } from '@/types/back-action';
 
@@ -68,7 +77,13 @@ function getPushErrorMessage(code: PushNotificationErrorCode) {
   }
 }
 
-export function SettingsCore({ backAction, onOpenGeneral, onOpenSavedMessages, onOpenStickers, onOpenFriendVerification }: SettingsCoreProps) {
+export function SettingsCore({
+  backAction,
+  onOpenGeneral,
+  onOpenSavedMessages,
+  onOpenStickers,
+  onOpenFriendVerification,
+}: SettingsCoreProps) {
   const {
     uid: currentUid,
     username,

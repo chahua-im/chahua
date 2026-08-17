@@ -96,8 +96,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     if (blockEnabled && !blocksLoaded) dispatch(fetchBlocks());
   }, [isDm, peer, friendsEnabled, blockEnabled, friendsLoaded, blocksLoaded, dispatch]);
 
-  const dmComposeDisabled =
-    isDm && !!peer && ((blockEnabled && isBlocked) || (friendsEnabled && !isFriend));
+  const dmComposeDisabled = isDm && !!peer && ((blockEnabled && isBlocked) || (friendsEnabled && !isFriend));
   const composeDisabledReason = isBlocked
     ? t`You blocked this user. Unblock to send messages.`
     : t`You are no longer friends with this user.`;
