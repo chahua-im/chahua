@@ -28,6 +28,28 @@ use crate::services::user::lookup_user_profiles;
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
+const MAX_FRIEND_REQUEST_MESSAGE_CHARS: usize = 200;
+const MAX_FRIEND_VERIFICATION_QUESTION_CHARS: usize = 100;
+
+fn validate_friend_request_message(message: Option<&str>) -> Result<(), AppError> {
+    if message.is_some_and(|value| value.chars().count() > MAX_FRIEND_REQUEST_MESSAGE_CHARS) {
+        return Err(AppError::BadRequest(
+            "Friend request message must not exceed 200 characters",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_friend_verification_question(question: Option<&str>) -> Result<(), AppError> {
+    if question.is_some_and(|value| value.chars().count() > MAX_FRIEND_VERIFICATION_QUESTION_CHARS)
+    {
+        return Err(AppError::BadRequest(
+            "Friend verification question must not exceed 100 characters",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct CreateFriendRequestBody {
@@ -35,6 +57,7 @@ struct CreateFriendRequestBody {
     /// Verification message (mode 1) or the answer to the target's question (mode 3).
     /// Ignored for `direct` mode; required for `need_message` / `question` modes.
     #[serde(default)]
+    #[schema(max_length = 200)]
     message: Option<String>,
 }
 
@@ -191,6 +214,7 @@ async fn create_friend_request(
     mut conn: DbConn,
     Json(body): Json<CreateFriendRequestBody>,
 ) -> Result<(StatusCode, Json<FriendRequestResponse>), AppError> {
+    validate_friend_request_message(body.message.as_deref())?;
     let conn = &mut *conn;
 
     let target_profiles = lookup_user_profiles(conn, &[body.to_uid])?;
@@ -385,6 +409,7 @@ async fn update_my_friend_settings(
     mut conn: DbConn,
     Json(body): Json<UpdateFriendSettingsBody>,
 ) -> Result<Json<FriendSettingsResponse>, AppError> {
+    validate_friend_verification_question(body.question.as_deref())?;
     let conn = &mut *conn;
     let (mode, question) = social::upsert_friend_settings(conn, uid, body.mode, body.question)?;
     Ok(Json(FriendSettingsResponse { mode, question }))
@@ -421,4 +446,44 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_my_friend_settings))
         .routes(routes!(update_my_friend_settings))
         .routes(routes!(get_user_friend_add_info))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        validate_friend_request_message, validate_friend_verification_question,
+        MAX_FRIEND_REQUEST_MESSAGE_CHARS, MAX_FRIEND_VERIFICATION_QUESTION_CHARS,
+    };
+    use crate::errors::AppError;
+
+    fn assert_character_limit(
+        validator: fn(Option<&str>) -> Result<(), AppError>,
+        max: usize,
+        expected_error: &'static str,
+    ) {
+        let at_limit = "界".repeat(max);
+        let over_limit = "界".repeat(max + 1);
+        assert!(validator(Some(&at_limit)).is_ok());
+        assert!(
+            matches!(validator(Some(&over_limit)), Err(AppError::BadRequest(message)) if message == expected_error)
+        );
+    }
+
+    #[test]
+    fn friend_request_message_has_a_200_character_limit() {
+        assert_character_limit(
+            validate_friend_request_message,
+            MAX_FRIEND_REQUEST_MESSAGE_CHARS,
+            "Friend request message must not exceed 200 characters",
+        );
+    }
+
+    #[test]
+    fn friend_verification_question_has_a_100_character_limit() {
+        assert_character_limit(
+            validate_friend_verification_question,
+            MAX_FRIEND_VERIFICATION_QUESTION_CHARS,
+            "Friend verification question must not exceed 100 characters",
+        );
+    }
 }

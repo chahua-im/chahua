@@ -56,6 +56,7 @@ pub struct FriendSettingsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateFriendSettingsBody {
     pub mode: FriendAddVerificationMode,
+    #[schema(max_length = 100)]
     pub question: Option<String>,
 }
 
