@@ -3,14 +3,14 @@ use prometheus::{
     IntCounterVec, Registry,
 };
 
-pub(crate) struct AudioTranscodeMetrics {
+pub struct AudioTranscodeMetrics {
     source_total: IntCounterVec,
     jobs_total: IntCounterVec,
     job_duration_seconds: HistogramVec,
 }
 
 impl AudioTranscodeMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let source_total = register_int_counter_vec_with_registry!(
             "audio_transcode_source_total",
             "Total number of audio transcode jobs by normalized source media type",
@@ -45,14 +45,14 @@ impl AudioTranscodeMetrics {
         }
     }
 
-    pub(crate) fn record_source(&self, content_type: &str) {
+    pub fn record_source(&self, content_type: &str) {
         let normalized = normalize_metric_content_type(content_type);
         self.source_total
             .with_label_values(&[normalized.as_str()])
             .inc();
     }
 
-    pub(crate) fn record_job(&self, result: &str, duration_seconds: f64) {
+    pub fn record_job(&self, result: &str, duration_seconds: f64) {
         self.jobs_total.with_label_values(&[result]).inc();
         self.job_duration_seconds
             .with_label_values(&[result])

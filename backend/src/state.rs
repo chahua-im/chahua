@@ -26,9 +26,9 @@ use crate::services::unread::UnreadService;
 use crate::services::ws_registry::ConnectionRegistry;
 use crate::utils::ids::IdGen;
 
-pub(crate) type DbPool = Pool<ConnectionManager<PgConnection>>;
+pub type DbPool = Pool<ConnectionManager<PgConnection>>;
 
-pub(crate) struct AppInner {
+pub struct AppInner {
     pub db: DbPool,
     pub id_gen: Arc<IdGen>,
     pub metrics: Arc<Metrics>,
@@ -48,7 +48,7 @@ pub(crate) struct AppInner {
 }
 
 #[derive(Clone)]
-pub(crate) struct AppState(Arc<AppInner>);
+pub struct AppState(Arc<AppInner>);
 
 impl AppState {
     pub fn new(inner: AppInner) -> Self {

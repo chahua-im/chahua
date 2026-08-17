@@ -9,14 +9,14 @@ use prometheus::{
 use std::sync::Arc;
 use std::time::Instant;
 
-pub(crate) struct HttpMetrics {
+pub struct HttpMetrics {
     requests_total: IntCounterVec,
     request_duration_seconds: HistogramVec,
     multipart_duration_seconds: HistogramVec,
 }
 
 impl HttpMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let requests_total = register_int_counter_vec_with_registry!(
             "http_requests_total",
             "Total number of HTTP requests handled by the API server",
@@ -48,13 +48,7 @@ impl HttpMetrics {
         }
     }
 
-    pub(crate) fn record(
-        &self,
-        method: &str,
-        route: &str,
-        status: StatusCode,
-        duration_seconds: f64,
-    ) {
+    pub fn record(&self, method: &str, route: &str, status: StatusCode, duration_seconds: f64) {
         let status = status.as_u16().to_string();
         self.requests_total
             .with_label_values(&[method, route, &status])
@@ -64,7 +58,7 @@ impl HttpMetrics {
             .observe(duration_seconds);
     }
 
-    pub(crate) fn record_multipart(
+    pub fn record_multipart(
         &self,
         method: &str,
         route: &str,
@@ -78,7 +72,7 @@ impl HttpMetrics {
     }
 }
 
-pub(crate) async fn track_http_metrics(
+pub async fn track_http_metrics(
     State(metrics): State<Arc<HttpMetrics>>,
     request: Request<axum::body::Body>,
     next: Next,

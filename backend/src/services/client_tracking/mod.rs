@@ -1,5 +1,5 @@
 mod metrics;
-pub(crate) use metrics::{ActivityTodaySnapshot, ClientTrackingMetrics};
+pub use metrics::{ActivityTodaySnapshot, ClientTrackingMetrics};
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

@@ -22,8 +22,8 @@ mod config;
 mod constants;
 mod db_tracing;
 mod dto;
-pub(crate) mod errors;
-pub(crate) mod extractors;
+pub mod errors;
+pub mod extractors;
 mod handlers;
 mod metrics;
 mod models;
@@ -37,7 +37,7 @@ mod utils;
 use config::{AppConfig, LogFormat};
 use state::{AppInner, DbPool};
 
-pub(crate) use state::AppState;
+pub use state::AppState;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
@@ -54,11 +54,11 @@ impl MakeRequestId for RequestIdMaker {
     }
 }
 
-pub(crate) const MAX_AUTO_SORT_LIMIT: usize = 20;
-pub(crate) const MAX_CHATS_LIMIT: i64 = 100;
-pub(crate) const MAX_CHAT_ATTACHMENTS_LIMIT: i64 = 100;
-pub(crate) const MAX_MESSAGES_LIMIT: i64 = 100;
-pub(crate) const MAX_MEMBERS_LIMIT: i64 = 100;
+pub const MAX_AUTO_SORT_LIMIT: usize = 20;
+pub const MAX_CHATS_LIMIT: i64 = 100;
+pub const MAX_CHAT_ATTACHMENTS_LIMIT: i64 = 100;
+pub const MAX_MESSAGES_LIMIT: i64 = 100;
+pub const MAX_MEMBERS_LIMIT: i64 = 100;
 const MAX_REQUEST_BODY_BYTES: usize = 50 * 1024 * 1024;
 const MESSAGE_SEARCH_REINDEX_COMMAND: &str = "message-search-reindex";
 

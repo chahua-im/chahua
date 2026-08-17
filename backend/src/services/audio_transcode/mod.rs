@@ -1,5 +1,5 @@
 mod metrics;
-pub(crate) use metrics::AudioTranscodeMetrics;
+pub use metrics::AudioTranscodeMetrics;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};

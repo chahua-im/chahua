@@ -80,7 +80,7 @@ pub fn mark_chat_as_read_state(
 /// by finding the most recent non-deleted, top-level message in the group.
 ///
 /// Call this after soft-deleting messages that might have been the latest.
-pub(crate) fn recalculate_group_last_message(
+pub fn recalculate_group_last_message(
     conn: &mut PgConnection,
     chat_id: i64,
 ) -> Result<(), AppError> {
@@ -139,7 +139,7 @@ pub(crate) fn recalculate_group_last_message(
 ///
 /// Served by `idx_messages_visible_top_level_last` (chat_id, id DESC) WHERE
 /// deleted_at IS NULL AND is_published AND reply_root_id IS NULL.
-pub(crate) fn shift_chat_read_pointers_on_delete(
+pub fn shift_chat_read_pointers_on_delete(
     conn: &mut PgConnection,
     chat_id: i64,
     deleted_message_ids: &[i64],

@@ -5,7 +5,7 @@ use prometheus::{
     register_int_gauge_with_registry, HistogramVec, IntCounterVec, IntGauge, Registry,
 };
 
-pub(crate) struct MessageSearchMetrics {
+pub struct MessageSearchMetrics {
     index_operations_total: IntCounterVec,
     queries_total: IntCounterVec,
     query_duration_seconds: HistogramVec,
@@ -20,7 +20,7 @@ pub(crate) struct MessageSearchMetrics {
 }
 
 impl MessageSearchMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let index_operations_total = register_int_counter_vec_with_registry!(
             "message_search_index_operations_total",
             "Total number of message search index operations",
@@ -155,23 +155,23 @@ impl MessageSearchMetrics {
         }
     }
 
-    pub(crate) fn record_index_operation(&self, operation: &str, result: &str) {
+    pub fn record_index_operation(&self, operation: &str, result: &str) {
         self.index_operations_total
             .with_label_values(&[operation, result])
             .inc();
     }
 
-    pub(crate) fn record_query(&self, sort: &str, result: &str) {
+    pub fn record_query(&self, sort: &str, result: &str) {
         self.queries_total.with_label_values(&[sort, result]).inc();
     }
 
-    pub(crate) fn record_query_duration(&self, sort: &str, result: &str, duration_seconds: f64) {
+    pub fn record_query_duration(&self, sort: &str, result: &str, duration_seconds: f64) {
         self.query_duration_seconds
             .with_label_values(&[sort, result])
             .observe(duration_seconds);
     }
 
-    pub(crate) fn record_index_operation_duration(
+    pub fn record_index_operation_duration(
         &self,
         operation: &str,
         result: &str,
@@ -182,19 +182,19 @@ impl MessageSearchMetrics {
             .observe(duration_seconds);
     }
 
-    pub(crate) fn observe_candidates(&self, sort: &str, count: usize) {
+    pub fn observe_candidates(&self, sort: &str, count: usize) {
         self.candidates_per_query
             .with_label_values(&[sort])
             .observe(count as f64);
     }
 
-    pub(crate) fn observe_results(&self, sort: &str, count: usize) {
+    pub fn observe_results(&self, sort: &str, count: usize) {
         self.results_per_query
             .with_label_values(&[sort])
             .observe(count as f64);
     }
 
-    pub(crate) fn record_candidate_drop(&self, reason: &str, count: usize) {
+    pub fn record_candidate_drop(&self, reason: &str, count: usize) {
         if count == 0 {
             return;
         }
@@ -203,7 +203,7 @@ impl MessageSearchMetrics {
             .inc_by(count as u64);
     }
 
-    pub(crate) fn record_index_documents(&self, operation: &str, result: &str, count: usize) {
+    pub fn record_index_documents(&self, operation: &str, result: &str, count: usize) {
         if count == 0 {
             return;
         }
@@ -212,12 +212,7 @@ impl MessageSearchMetrics {
             .inc_by(count as u64);
     }
 
-    pub(crate) fn record_reindex(
-        &self,
-        result: &str,
-        duration_seconds: f64,
-        document_count: usize,
-    ) {
+    pub fn record_reindex(&self, result: &str, duration_seconds: f64, document_count: usize) {
         self.reindex_duration_seconds
             .with_label_values(&[result])
             .observe(duration_seconds);

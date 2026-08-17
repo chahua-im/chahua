@@ -19,13 +19,15 @@ use crate::dto::invites::{
 use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::handlers::groups::load_group_info;
-use crate::handlers::members::{check_membership, require_admin_role};
+use crate::handlers::members::require_admin_role;
 use crate::models::{
     GroupJoinReason, GroupRole, Invite, InviteType, MessageType, NewGroupMembership,
 };
 use crate::schema::{group_membership, invites};
 use crate::services::invites as invite_service;
-use crate::services::messages::{send_prepared_message, PreparedMessageSend, SendMessageOutcome};
+use crate::services::messages::{
+    authorize_message_send, send_prepared_message, PreparedMessageSend, SendMessageOutcome,
+};
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
@@ -328,7 +330,7 @@ async fn post_send_invite_message(
     let conn = &mut *conn;
 
     require_admin_role(conn, body.source_chat_id, uid)?;
-    check_membership(conn, body.destination_chat_id, uid)?;
+    authorize_message_send(conn, body.destination_chat_id, None, uid)?;
 
     let now = Utc::now();
     let invite = if let Some(invite_id) = body.invite_id {

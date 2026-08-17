@@ -12,19 +12,19 @@ use std::sync::Arc;
 use base64::Engine;
 
 const LOG_FORMAT_ENV: &str = "BACKEND_LOG_FORMAT";
-pub(crate) const DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES: i64 = 50 * 1024 * 1024;
+pub const DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES: i64 = 50 * 1024 * 1024;
 
 /// Stdout log format: `pretty` for local development, `json` for production
 /// collection by agents such as Grafana Alloy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LogFormat {
+pub enum LogFormat {
     Pretty,
     Json,
 }
 
 /// How user identity is established when no bearer token is present.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
-pub(crate) enum AuthMethod {
+pub enum AuthMethod {
     UIDHeader,
     #[default]
     JwtOnly,
@@ -40,7 +40,7 @@ impl AuthMethod {
 }
 
 /// Where the API and metrics servers bind, and which origins may call them.
-pub(crate) struct ServerConfig {
+pub struct ServerConfig {
     pub app_addr: SocketAddr,
     pub metrics_addr: SocketAddr,
     pub cors_allowed_origins: Option<Vec<HeaderValue>>,
@@ -48,7 +48,7 @@ pub(crate) struct ServerConfig {
 
 /// S3 object storage settings. The client itself lives in
 /// [`crate::services::media::MediaStore`].
-pub(crate) struct MediaConfig {
+pub struct MediaConfig {
     pub bucket: String,
     pub attachment_prefix: String,
     /// Public base URL objects are served from. Defaults to the virtual-hosted
@@ -61,13 +61,13 @@ pub(crate) struct MediaConfig {
 
 /// Discuz avatars are served from a filesystem path mirrored behind a public URL.
 /// Both halves are required, so they are modelled as one optional unit.
-pub(crate) struct DiscuzAvatarConfig {
+pub struct DiscuzAvatarConfig {
     pub public_url: String,
     pub path: String,
 }
 
 /// Authentication and token-signing material.
-pub(crate) struct AuthConfig {
+pub struct AuthConfig {
     pub method: AuthMethod,
     /// Allows arbitrary UID impersonation. Always on in debug builds.
     pub debug_auth_enabled: bool,
@@ -75,7 +75,7 @@ pub(crate) struct AuthConfig {
     pub service_token_hash_key: Vec<u8>,
 }
 
-pub(crate) struct AppConfig {
+pub struct AppConfig {
     pub server: ServerConfig,
     pub database_url: String,
     pub media: Arc<MediaConfig>,
@@ -149,7 +149,7 @@ impl AppConfig {
 
 /// Read separately from [`AppConfig::from_env`]: tracing must be initialised
 /// before anything else so that configuration errors are themselves logged.
-pub(crate) fn log_format_from_env() -> LogFormat {
+pub fn log_format_from_env() -> LogFormat {
     parse_log_format(std::env::var(LOG_FORMAT_ENV).ok().as_deref())
 }
 

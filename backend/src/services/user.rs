@@ -12,7 +12,7 @@ pub struct UserProfile {
     pub user_group: Option<UserGroupTagInfo>,
 }
 
-pub(crate) fn normalize_discuz_username(username: &str) -> String {
+pub fn normalize_discuz_username(username: &str) -> String {
     username.trim_end().to_string()
 }
 

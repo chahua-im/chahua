@@ -5,7 +5,7 @@
 //! mtime, falling back to the shared placeholder when a user has no avatar.
 
 mod metrics;
-pub(crate) use metrics::AvatarMetrics;
+pub use metrics::AvatarMetrics;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,23 +13,20 @@ use std::time::{Instant, UNIX_EPOCH};
 
 use crate::config::DiscuzAvatarConfig;
 
-pub(crate) struct AvatarService {
+pub struct AvatarService {
     /// `None` disables avatar resolution entirely; every lookup returns empty.
     config: Option<Arc<DiscuzAvatarConfig>>,
     metrics: Arc<AvatarMetrics>,
 }
 
 impl AvatarService {
-    pub(crate) fn new(
-        config: Option<Arc<DiscuzAvatarConfig>>,
-        metrics: Arc<AvatarMetrics>,
-    ) -> Self {
+    pub fn new(config: Option<Arc<DiscuzAvatarConfig>>, metrics: Arc<AvatarMetrics>) -> Self {
         Self { config, metrics }
     }
 
     /// Maps each requested uid to its avatar URL. Returns an empty map when
     /// avatar resolution is not configured.
-    pub(crate) fn lookup(&self, uids: &[i32]) -> HashMap<i32, Option<String>> {
+    pub fn lookup(&self, uids: &[i32]) -> HashMap<i32, Option<String>> {
         let Some(config) = self.config.as_ref() else {
             return HashMap::new();
         };

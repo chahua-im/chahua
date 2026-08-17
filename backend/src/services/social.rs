@@ -73,46 +73,52 @@ pub fn find_pending_request_between(
         .optional()
 }
 
-/// Authorization gate for DM: sender and peer must be mutual friends and not
-/// blocked in either direction.
-pub fn check_can_dm(conn: &mut PgConnection, sender: i32, peer: i32) -> Result<(), AppError> {
-    if sender == peer {
-        return Err(AppError::BadRequest("Cannot send a message to yourself"));
-    }
-    if !are_mutual_friends(conn, sender, peer)? {
-        return Err(AppError::Forbidden(
-            "You can only direct-message mutual friends",
-        ));
-    }
-    if is_blocked_either_direction(conn, sender, peer)? {
-        return Err(AppError::Forbidden("Cannot direct-message this user"));
-    }
-    Ok(())
+/// Domain failures when a direct-message send is no longer permitted.
+#[derive(Debug)]
+pub enum DmSendAuthorizationError {
+    CannotMessageSelf,
+    FriendshipRequired,
+    Blocked,
+    Database(diesel::result::Error),
 }
 
-/// Authorization gate for posting into a chat. For DM chats, require that the
-/// sender and peer are still mutual friends and not blocked (friendship/block
-/// state can change after the DM was created). Regular groups are gated by
-/// membership elsewhere; this is a no-op for them.
-pub fn assert_can_send_to_chat(
-    conn: &mut PgConnection,
-    chat_id: i64,
-    sender_uid: i32,
-) -> Result<(), AppError> {
-    let (kind, dm_uid1, dm_uid2) = groups::table
-        .filter(groups::id.eq(chat_id))
-        .select((groups::kind, groups::dm_uid1, groups::dm_uid2))
-        .first::<(GroupKind, Option<i32>, Option<i32>)>(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Chat not found"))?;
+impl From<diesel::result::Error> for DmSendAuthorizationError {
+    fn from(error: diesel::result::Error) -> Self {
+        Self::Database(error)
+    }
+}
 
-    if kind == GroupKind::Dm {
-        // The sender is one of the canonical pair; the other is the peer.
-        let peer = dm_uid1
-            .filter(|&u| u != sender_uid)
-            .or(dm_uid2)
-            .ok_or(AppError::Internal("DM peer missing"))?;
-        check_can_dm(conn, sender_uid, peer)?;
+impl From<DmSendAuthorizationError> for AppError {
+    fn from(error: DmSendAuthorizationError) -> Self {
+        match error {
+            DmSendAuthorizationError::CannotMessageSelf => {
+                AppError::BadRequest("Cannot send a message to yourself")
+            }
+            DmSendAuthorizationError::FriendshipRequired => {
+                AppError::Forbidden("You can only direct-message mutual friends")
+            }
+            DmSendAuthorizationError::Blocked => {
+                AppError::Forbidden("Cannot direct-message this user")
+            }
+            DmSendAuthorizationError::Database(error) => AppError::from(error),
+        }
+    }
+}
+
+/// Authorize sending a direct message to `peer`.
+pub fn check_can_dm(
+    conn: &mut PgConnection,
+    sender: i32,
+    peer: i32,
+) -> Result<(), DmSendAuthorizationError> {
+    if sender == peer {
+        return Err(DmSendAuthorizationError::CannotMessageSelf);
+    }
+    if !are_mutual_friends(conn, sender, peer)? {
+        return Err(DmSendAuthorizationError::FriendshipRequired);
+    }
+    if is_blocked_either_direction(conn, sender, peer)? {
+        return Err(DmSendAuthorizationError::Blocked);
     }
     Ok(())
 }

@@ -30,8 +30,8 @@ use crate::{
 
 use super::{ChatIdPath, CreateMessageBody};
 use crate::services::messages::{
-    attach_metadata, extract_mention_uids, parse_attachment_ids, send_prepared_message,
-    validate_message, PreparedMessageSend, SendMessageOutcome,
+    attach_metadata, authorize_message_send, extract_mention_uids, parse_attachment_ids,
+    send_prepared_message, validate_message, PreparedMessageSend, SendMessageOutcome,
 };
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -553,7 +553,7 @@ async fn post_message(
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
 
-    check_membership(conn, chat_id, uid)?;
+    authorize_message_send(conn, chat_id, None, uid)?;
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
 
@@ -641,32 +641,12 @@ pub(super) async fn post_thread_message(
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
 
-    check_membership(conn, chat_id, uid)?;
+    let root_msg = authorize_message_send(conn, chat_id, Some(thread_id), uid)?
+        .thread_root
+        .ok_or(AppError::Internal(
+            "Thread authorization did not return a thread root",
+        ))?;
     validate_client_message_type(&body.message_type)?;
-
-    // Load root message: validate existence. Allow deleted roots only when a
-    // thread already exists (has_thread=true) so existing discussions stay usable.
-    // A deleted message with has_thread=false means the discussion is fully
-    // terminated, so it's excluded here and surfaces as NotFound.
-
-    let root_msg: Message = messages::table
-        .filter(
-            dsl::id
-                .eq(thread_id)
-                .and(dsl::chat_id.eq(chat_id))
-                .and(dsl::is_published.eq(true))
-                .and(dsl::deleted_at.is_null().or(dsl::has_thread.eq(true))),
-        )
-        .select(Message::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Thread root message not found"))?;
-
-    if root_msg.message_type != MessageType::Text {
-        return Err(AppError::BadRequest(
-            "Threads can only be created on text messages",
-        ));
-    }
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
 
     // Begin transaction: message insert + thread_meta + subscriptions are atomic.

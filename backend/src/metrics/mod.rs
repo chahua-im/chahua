@@ -15,25 +15,25 @@ use crate::services::message_search::MessageSearchMetrics;
 use crate::services::push::PushMetrics;
 use crate::services::ws_registry::WsMetrics;
 
-pub(crate) use http::track_http_metrics;
+pub use http::track_http_metrics;
 use http::HttpMetrics;
 
 #[derive(Clone)]
-pub(crate) struct Metrics {
+pub struct Metrics {
     registry: Registry,
-    pub(crate) http: Arc<HttpMetrics>,
-    pub(crate) chat: Arc<ChatMetrics>,
-    pub(crate) ws: Arc<WsMetrics>,
-    pub(crate) push: Arc<PushMetrics>,
-    pub(crate) avatars: Arc<AvatarMetrics>,
-    pub(crate) client_tracking: Arc<ClientTrackingMetrics>,
-    pub(crate) message_search: Arc<MessageSearchMetrics>,
-    pub(crate) background: Arc<BackgroundMetrics>,
-    pub(crate) audio_transcode: Arc<AudioTranscodeMetrics>,
+    pub http: Arc<HttpMetrics>,
+    pub chat: Arc<ChatMetrics>,
+    pub ws: Arc<WsMetrics>,
+    pub push: Arc<PushMetrics>,
+    pub avatars: Arc<AvatarMetrics>,
+    pub client_tracking: Arc<ClientTrackingMetrics>,
+    pub message_search: Arc<MessageSearchMetrics>,
+    pub background: Arc<BackgroundMetrics>,
+    pub audio_transcode: Arc<AudioTranscodeMetrics>,
 }
 
 impl Metrics {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let registry = Registry::new();
         Self {
             http: Arc::new(HttpMetrics::new(&registry)),
@@ -49,19 +49,19 @@ impl Metrics {
         }
     }
 
-    pub(crate) fn render(&self) -> Result<String, prometheus::Error> {
+    pub fn render(&self) -> Result<String, prometheus::Error> {
         encode(&self.registry)
     }
 }
 
-pub(crate) fn encode(registry: &Registry) -> Result<String, prometheus::Error> {
+pub fn encode(registry: &Registry) -> Result<String, prometheus::Error> {
     let metric_families = registry.gather();
     let mut output = Vec::new();
     TextEncoder::new().encode(&metric_families, &mut output)?;
     String::from_utf8(output).map_err(|err| prometheus::Error::Msg(err.utf8_error().to_string()))
 }
 
-pub(crate) async fn metrics_handler(
+pub async fn metrics_handler(
     State(metrics): State<Arc<Metrics>>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let body = metrics

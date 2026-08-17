@@ -6,18 +6,18 @@ use prometheus::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ActivityTodaySnapshot {
-    pub(crate) active_users: i64,
-    pub(crate) new_users: i64,
-    pub(crate) active_clients: i64,
-    pub(crate) new_clients: i64,
-    pub(crate) client_rebinds: i64,
-    pub(crate) stale_clients_purged: i64,
-    pub(crate) legacy_subscriptions_purged: i64,
+pub struct ActivityTodaySnapshot {
+    pub active_users: i64,
+    pub new_users: i64,
+    pub active_clients: i64,
+    pub new_clients: i64,
+    pub client_rebinds: i64,
+    pub stale_clients_purged: i64,
+    pub legacy_subscriptions_purged: i64,
 }
 
 impl ActivityTodaySnapshot {
-    pub(crate) const fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self {
             active_users: 0,
             new_users: 0,
@@ -30,7 +30,7 @@ impl ActivityTodaySnapshot {
     }
 }
 
-pub(crate) struct ClientTrackingMetrics {
+pub struct ClientTrackingMetrics {
     activity_writes_total: IntCounterVec,
     activity_writes_skipped_total: IntCounterVec,
     rebinds_total: IntCounter,
@@ -49,7 +49,7 @@ pub(crate) struct ClientTrackingMetrics {
 }
 
 impl ClientTrackingMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let activity_writes_total = register_int_counter_vec_with_registry!(
             "client_activity_writes_total",
             "Total number of client activity writes attempted",
@@ -160,33 +160,33 @@ impl ClientTrackingMetrics {
         }
     }
 
-    pub(crate) fn record_activity_write(&self, result: &str) {
+    pub fn record_activity_write(&self, result: &str) {
         self.activity_writes_total
             .with_label_values(&[result])
             .inc();
     }
 
-    pub(crate) fn record_activity_write_skipped(&self, reason: &str) {
+    pub fn record_activity_write_skipped(&self, reason: &str) {
         self.activity_writes_skipped_total
             .with_label_values(&[reason])
             .inc();
     }
 
-    pub(crate) fn record_rebind(&self) {
+    pub fn record_rebind(&self) {
         self.rebinds_total.inc();
     }
 
-    pub(crate) fn record_purge(&self, kind: &str, count: u64) {
+    pub fn record_purge(&self, kind: &str, count: u64) {
         self.purge_total.with_label_values(&[kind]).inc_by(count);
     }
 
-    pub(crate) fn record_daily_rollup_update(&self, result: &str) {
+    pub fn record_daily_rollup_update(&self, result: &str) {
         self.daily_rollup_updates_total
             .with_label_values(&[result])
             .inc();
     }
 
-    pub(crate) fn record_app_version_request(&self, version: &str, client_id: Option<&str>) {
+    pub fn record_app_version_request(&self, version: &str, client_id: Option<&str>) {
         self.app_version_requests_total
             .with_label_values(&[version])
             .inc();
@@ -203,7 +203,7 @@ impl ClientTrackingMetrics {
         }
     }
 
-    pub(crate) fn set_activity_today(&self, snapshot: ActivityTodaySnapshot) {
+    pub fn set_activity_today(&self, snapshot: ActivityTodaySnapshot) {
         self.today_active_users.set(snapshot.active_users);
         self.today_new_users.set(snapshot.new_users);
         self.today_active_clients.set(snapshot.active_clients);

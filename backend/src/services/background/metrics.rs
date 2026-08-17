@@ -3,13 +3,13 @@ use prometheus::{
     IntCounterVec, Registry,
 };
 
-pub(crate) struct BackgroundMetrics {
+pub struct BackgroundMetrics {
     jobs_total: IntCounterVec,
     job_duration_seconds: HistogramVec,
 }
 
 impl BackgroundMetrics {
-    pub(crate) fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry) -> Self {
         let jobs_total = register_int_counter_vec_with_registry!(
             "background_jobs_total",
             "Total number of background jobs processed",
@@ -36,7 +36,7 @@ impl BackgroundMetrics {
         }
     }
 
-    pub(crate) fn record_job(&self, job_kind: &str, result: &str, duration_seconds: f64) {
+    pub fn record_job(&self, job_kind: &str, result: &str, duration_seconds: f64) {
         self.jobs_total.with_label_values(&[job_kind, result]).inc();
         self.job_duration_seconds
             .with_label_values(&[job_kind, result])
