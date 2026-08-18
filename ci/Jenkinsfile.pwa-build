@@ -69,39 +69,55 @@ spec:
           }
         }
 
-        stage('Install Dependencies') {
-          steps {
-            dir('wetty-chat-mobile') {
-              sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-npm ci
-              '''
-            }
-          }
-        }
-
         stage('Build') {
           parallel {
             stage('Staging') {
               steps {
-                dir('wetty-chat-mobile') {
-                  sh '''#!/usr/bin/env bash
+                dir('pwa-staging') {
+                  checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: env.PWA_BUILD_REF]],
+                    userRemoteConfigs: [[
+                      credentialsId: 'github-app',
+                      refspec: '+refs/heads/*:refs/remotes/origin/*',
+                      url: 'https://github.com/chahua-im/chahua.git'
+                    ]]
+                  ])
+
+                  dir('wetty-chat-mobile') {
+                    sh '''#!/usr/bin/env bash
 set -euo pipefail
 
+npm ci
 export CI_BUILD_VERSION="PWA-${BUILD_NUMBER}"
-npx vite build -c vite.config.staging.ts --mode development
-                  '''
+npm run build:stg
+                    '''
+
+                  }
+                  stash name: 'pwa-staging-dist',
+                    includes: 'wetty-chat-mobile/dist/**',
+                    useDefaultExcludes: false
                 }
               }
             }
 
             stage('Image') {
               steps {
-                container('docker') {
-                  withCredentials([usernamePassword(credentialsId: 'ghcr', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')]) {
-                    dir('wetty-chat-mobile') {
-                      sh '''#!/usr/bin/env sh
+                dir('pwa-image') {
+                  checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: env.PWA_BUILD_REF]],
+                    userRemoteConfigs: [[
+                      credentialsId: 'github-app',
+                      refspec: '+refs/heads/*:refs/remotes/origin/*',
+                      url: 'https://github.com/chahua-im/chahua.git'
+                    ]]
+                  ])
+
+                  container('docker') {
+                    withCredentials([usernamePassword(credentialsId: 'ghcr', usernameVariable: 'GHCR_USERNAME', passwordVariable: 'GHCR_TOKEN')]) {
+                      dir('wetty-chat-mobile') {
+                        sh '''#!/usr/bin/env sh
 set -eu
 
 git config --global --add safe.directory "$WORKSPACE"
@@ -129,7 +145,8 @@ docker buildx build \
   .
 
 docker logout ghcr.io || true
-                      '''
+                        '''
+                      }
                     }
                   }
                 }
@@ -138,13 +155,30 @@ docker logout ghcr.io || true
 
             stage('Prod') {
               steps {
-                dir('wetty-chat-mobile') {
-                  sh '''#!/usr/bin/env bash
+                dir('pwa-prod') {
+                  checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: env.PWA_BUILD_REF]],
+                    userRemoteConfigs: [[
+                      credentialsId: 'github-app',
+                      refspec: '+refs/heads/*:refs/remotes/origin/*',
+                      url: 'https://github.com/chahua-im/chahua.git'
+                    ]]
+                  ])
+
+                  dir('wetty-chat-mobile') {
+                    sh '''#!/usr/bin/env bash
 set -euo pipefail
 
+npm ci
 export CI_BUILD_VERSION="PWA-${BUILD_NUMBER}"
-npx vite build --base=/ --outDir prod-dist -c vite.config.prod.ts
-                  '''
+npm run build:prod
+                    '''
+
+                  }
+                  stash name: 'pwa-prod-dist',
+                    includes: 'wetty-chat-mobile/prod-dist/**',
+                    useDefaultExcludes: false
                 }
               }
             }
@@ -153,6 +187,9 @@ npx vite build --base=/ --outDir prod-dist -c vite.config.prod.ts
 
         stage('Archive') {
           steps {
+            unstash 'pwa-staging-dist'
+            unstash 'pwa-prod-dist'
+
             zip zipFile: 'wetty-chat-mobile/chahua-staging.zip',
               dir: 'wetty-chat-mobile/dist',
               archive: false
