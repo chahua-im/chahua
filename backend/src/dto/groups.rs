@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use crate::models::{GroupRole, GroupVisibility};
+use crate::dto::users::MemberSummary;
+use crate::models::{GroupKind, GroupRole, GroupVisibility};
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +31,9 @@ pub struct GroupInfoResponse {
     pub created_at: DateTime<Utc>,
     pub muted_until: Option<DateTime<Utc>>,
     pub my_role: Option<GroupRole>,
+    pub kind: GroupKind,
+    /// The other participant, for DM chats; `None` for regular groups.
+    pub peer: Option<MemberSummary>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

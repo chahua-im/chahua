@@ -21,7 +21,7 @@ use crate::{
     },
     errors::AppError,
     extractors::DbConn,
-    handlers::members::check_membership,
+    handlers::{members::check_membership, users::build_member_summary_map},
     services::{
         chat,
         messages::{attach_metadata, message_response_preview},
@@ -29,7 +29,7 @@ use crate::{
     utils::{auth::CurrentUid, pagination::validate_limit},
 };
 use crate::{
-    models::MessageType,
+    models::{GroupKind, MessageType},
     schema::{group_membership, groups, media, messages as messages_schema},
 };
 use crate::{AppState, MAX_CHATS_LIMIT};
@@ -138,6 +138,9 @@ async fn get_chats(
         Option<crate::models::Message>,
         Option<DateTime<Utc>>,
         bool,
+        GroupKind,
+        Option<i32>,
+        Option<i32>,
     );
 
     let rows: Vec<RowType> = match q.after {
@@ -151,6 +154,9 @@ async fn get_chats(
                 messages_schema::all_columns.nullable(),
                 group_membership::muted_until,
                 group_membership::archived,
+                groups::kind,
+                groups::dm_uid1,
+                groups::dm_uid2,
             ))
             .order_by((
                 groups::last_message_at.desc().nulls_last(),
@@ -189,6 +195,9 @@ async fn get_chats(
                         messages_schema::all_columns.nullable(),
                         group_membership::muted_until,
                         group_membership::archived,
+                        groups::kind,
+                        groups::dm_uid1,
+                        groups::dm_uid2,
                     ))
                     .filter(
                         groups::last_message_at
@@ -214,6 +223,9 @@ async fn get_chats(
                         messages_schema::all_columns.nullable(),
                         group_membership::muted_until,
                         group_membership::archived,
+                        groups::kind,
+                        groups::dm_uid1,
+                        groups::dm_uid2,
                     ))
                     .filter(
                         groups::last_message_at
@@ -235,7 +247,7 @@ async fn get_chats(
 
     let messages_to_process: Vec<crate::models::Message> = items_to_process
         .iter()
-        .filter_map(|(_, _, _, _, _, msg, _, _)| msg.clone())
+        .filter_map(|(_, _, _, _, _, msg, _, _, _, _, _)| msg.clone())
         .collect();
 
     let memberships = items_to_process
@@ -250,6 +262,9 @@ async fn get_chats(
                 _msg,
                 muted_until,
                 archived,
+                _kind,
+                _dm_uid1,
+                _dm_uid2,
             )| crate::services::unread::ChatUnreadMembership {
                 chat_id: *id,
                 last_read_message_id: *last_read_message_id,
@@ -271,6 +286,22 @@ async fn get_chats(
             .map(|mr| (mr.id, mr))
             .collect();
 
+    let dm_peer_uids: Vec<i32> = items_to_process
+        .iter()
+        .filter_map(|(.., kind, dm_uid1, dm_uid2)| {
+            if *kind == GroupKind::Dm {
+                if *dm_uid1 == Some(uid) {
+                    *dm_uid2
+                } else {
+                    *dm_uid1
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+    let dm_peer_summaries = build_member_summary_map(conn, &state, &dm_peer_uids)?;
+
     let chats: Vec<ChatListItem> = items_to_process
         .into_iter()
         .map(
@@ -283,11 +314,24 @@ async fn get_chats(
                 msg,
                 muted_until,
                 archived,
+                kind,
+                dm_uid1,
+                dm_uid2,
             )| {
                 let unread_count = unread_counts.get(&id).copied().unwrap_or(0);
                 let mr = msg
                     .and_then(|m| message_response_map.remove(&m.id))
                     .map(message_response_preview);
+                let peer = if kind == GroupKind::Dm {
+                    let peer_uid = if dm_uid1 == Some(uid) {
+                        dm_uid2
+                    } else {
+                        dm_uid1
+                    };
+                    peer_uid.and_then(|puid| dm_peer_summaries.get(&puid).cloned())
+                } else {
+                    None
+                };
                 ChatListItem {
                     id,
                     name: Some(name),
@@ -300,6 +344,8 @@ async fn get_chats(
                     last_message: mr,
                     muted_until,
                     archived,
+                    kind,
+                    peer,
                 }
             },
         )

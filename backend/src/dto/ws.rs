@@ -41,6 +41,9 @@ pub enum ServerWsMessage {
     /// Thread-scoped pin event. Old clients ignore this unknown event type.
     ThreadPinRemoved(PinUpdatePayload),
     StickerPackOrderUpdated(StickerPackOrderUpdatePayload),
+    FriendRequestReceived(FriendRequestReceivedPayload),
+    FriendRequestResolved(FriendRequestResolvedPayload),
+    FriendshipRemoved(FriendshipRemovedPayload),
 }
 
 impl ServerWsMessage {
@@ -60,6 +63,9 @@ impl ServerWsMessage {
             Self::PinRemoved(_) => "pinRemoved",
             Self::ThreadPinRemoved(_) => "threadPinRemoved",
             Self::StickerPackOrderUpdated(_) => "stickerPackOrderUpdated",
+            Self::FriendRequestReceived(_) => "friendRequestReceived",
+            Self::FriendRequestResolved(_) => "friendRequestResolved",
+            Self::FriendshipRemoved(_) => "friendshipRemoved",
         }
     }
 }
@@ -143,6 +149,30 @@ pub struct PinUpdatePayload {
 #[serde(rename_all = "camelCase")]
 pub struct StickerPackOrderUpdatePayload {
     pub order: Vec<StickerPackOrderItem>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendRequestReceivedPayload {
+    pub from_uid: i32,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendRequestResolvedPayload {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub request_id: i64,
+    pub status: crate::models::FriendRequestStatus,
+    /// The uid of the user who accepted/rejected the request.
+    pub by_uid: i32,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendshipRemovedPayload {
+    /// The uid of the user who removed the friendship.
+    pub actor_uid: i32,
 }
 
 #[cfg(test)]

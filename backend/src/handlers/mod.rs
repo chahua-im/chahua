@@ -1,7 +1,10 @@
 pub mod attachments;
 pub mod auth;
+pub mod blocks;
 pub mod chats;
+pub mod dms;
 pub mod external;
+pub mod friends;
 pub mod groups;
 pub mod invites;
 pub mod members;
@@ -32,4 +35,7 @@ pub fn api_router() -> OpenApiRouter<AppState> {
         .nest("/stickers", stickers::router())
         .nest("/users", users::router())
         .nest("/attachments", attachments::router())
+        .nest("/friends", friends::router())
+        .nest("/blocks", blocks::router())
+        .nest("/dms", dms::router())
 }

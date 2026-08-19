@@ -16,9 +16,10 @@ use crate::dto::groups::{
 use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::handlers::members::{check_membership, require_admin_role};
+use crate::handlers::users::build_member_summary_map;
 use crate::models::{
-    GroupJoinReason, GroupRole, GroupVisibility, Media, MediaPurpose, NewGroup, NewGroupMembership,
-    NewMedia, UpdateGroup,
+    GroupJoinReason, GroupKind, GroupRole, GroupVisibility, Media, MediaPurpose, NewGroup,
+    NewGroupMembership, NewMedia, UpdateGroup,
 };
 use crate::schema::{group_membership, groups, media};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
@@ -194,6 +195,24 @@ pub(super) fn load_group_info(
         .optional()?
         .flatten();
 
+    // For a DM, resolve the other participant so the client can render the
+    // peer's name/avatar instead of the (empty) group name.
+    let peer = if group.kind == GroupKind::Dm {
+        let peer_uid = if group.dm_uid1 == Some(requester_uid) {
+            group.dm_uid2
+        } else {
+            group.dm_uid1
+        };
+        if let Some(puid) = peer_uid {
+            let mut summaries = build_member_summary_map(conn, state, &[puid])?;
+            summaries.remove(&puid)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     Ok(GroupInfoResponse {
         id: group.id,
         name: group.name,
@@ -207,6 +226,8 @@ pub(super) fn load_group_info(
         created_at: group.created_at,
         muted_until,
         my_role,
+        kind: group.kind,
+        peer,
     })
 }
 
@@ -255,6 +276,9 @@ async fn post_group(
             avatar_image_id: None,
             created_at: now,
             visibility: GroupVisibility::Public,
+            kind: GroupKind::Group,
+            dm_uid1: None,
+            dm_uid2: None,
         })
         .execute(conn)?;
 
@@ -341,6 +365,9 @@ async fn get_groups(
             group_membership::role.nullable(),
         ))
         .into_boxed();
+
+    // DMs are 1:1 chats, never selectable/searchable groups.
+    query = query.filter(groups::kind.eq(GroupKind::Group));
 
     query = match scope {
         GroupSelectorScope::Joined => query.filter(group_membership::uid.is_not_null()),

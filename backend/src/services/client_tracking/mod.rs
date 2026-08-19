@@ -18,8 +18,8 @@ use diesel::PgConnection;
 use tracing::{error, info, warn};
 
 use crate::models::{
-    ActivityDailyMetric, ClientRecord, NewActivityDailyMetric, NewClientRecord, NewUserExtra,
-    UserExtra,
+    ActivityDailyMetric, ClientRecord, FriendAddVerificationMode, NewActivityDailyMetric,
+    NewClientRecord, NewUserExtra, UserExtra,
 };
 use crate::schema::{activity_daily_metrics, clients, push_subscriptions, user_extra};
 use crate::utils::auth::{extract_auth_context, optional_client_id, X_APP_VERSION};
@@ -204,6 +204,8 @@ impl ClientTrackingService {
                 sticker_pack_order: existing_user
                     .as_ref()
                     .map_or(serde_json::json!([]), |u| u.sticker_pack_order.clone()),
+                verification_mode: FriendAddVerificationMode::Direct,
+                verification_question: None,
             };
 
             diesel::insert_into(user_extra::table)

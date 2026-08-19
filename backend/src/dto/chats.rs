@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::dto::messages::MessagePreview;
+use crate::dto::users::MemberSummary;
+use crate::models::GroupKind;
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +21,9 @@ pub struct ChatListItem {
     pub last_message: Option<MessagePreview>,
     pub muted_until: Option<DateTime<Utc>>,
     pub archived: bool,
+    pub kind: GroupKind,
+    /// The other participant, for DM chats; `None` for regular groups.
+    pub peer: Option<MemberSummary>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
