@@ -150,8 +150,8 @@ msgstr "返回"
 msgid "Block"
 msgstr "拉黑"
 
-msgid "Block {name}? They won't be able to message you, and you will no longer be friends."
-msgstr "拉黑 {name}？对方将无法向你发消息，且你们将不再是好友。"
+msgid "Block {name}? You won't be able to message each other."
+msgstr "拉黑 {name}？你们将无法互相发送消息。"
 
 msgid "Block User"
 msgstr "拉黑用户"

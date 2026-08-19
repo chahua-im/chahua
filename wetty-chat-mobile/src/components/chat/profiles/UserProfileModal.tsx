@@ -352,13 +352,12 @@ export function UserProfileModal({
     const name = displaySender.name ?? `User ${displaySender.uid}`;
     handleConfirmAction(
       t`Block User`,
-      t`Block ${name}? They won't be able to message you, and you will no longer be friends.`,
+      t`Block ${name}? You won't be able to message each other.`,
       t`User blocked`,
       t`Block`,
       async () => {
         await blocksApi.blockUser(displaySender.uid);
         dispatch(fetchBlocks());
-        dispatch(fetchFriends());
       },
       true,
     );
