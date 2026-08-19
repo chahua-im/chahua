@@ -1,5 +1,6 @@
 use crate::dto::ws::{
-    ChatArchiveStateChangedPayload, PinUpdatePayload, PresenceUpdatePayload, ReactionUpdatePayload,
+    ChatArchiveStateChangedPayload, FriendRequestReceivedPayload, FriendRequestResolvedPayload,
+    FriendshipRemovedPayload, PinUpdatePayload, PresenceUpdatePayload, ReactionUpdatePayload,
     ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload,
 };
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, Http, HttpAuthScheme, SecurityScheme};
@@ -22,6 +23,9 @@ use utoipa::OpenApi;
             ThreadMembershipChangedPayload,
             ChatArchiveStateChangedPayload,
             PinUpdatePayload,
+            FriendRequestReceivedPayload,
+            FriendRequestResolvedPayload,
+            FriendshipRemovedPayload,
         )
     ),
     modifiers(&SecurityAddon),

@@ -2,8 +2,20 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "friend_add_verification_mode"))]
+    pub struct FriendAddVerificationMode;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "friend_request_status"))]
+    pub struct FriendRequestStatus;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "group_join_reason"))]
     pub struct GroupJoinReason;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "group_kind"))]
+    pub struct GroupKind;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "group_role"))]
@@ -80,12 +92,45 @@ diesel::table! {
 }
 
 diesel::table! {
+    blocks (blocker_uid, blocked_uid) {
+        blocker_uid -> Int4,
+        blocked_uid -> Int4,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     clients (client_id) {
         #[max_length = 64]
         client_id -> Varchar,
         created_at -> Timestamp,
         last_active -> Timestamp,
         last_active_uid -> Int4,
+    }
+}
+
+diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::FriendRequestStatus;
+
+    friend_requests (id) {
+        id -> Int8,
+        from_uid -> Int4,
+        to_uid -> Int4,
+        status -> FriendRequestStatus,
+        created_at -> Timestamptz,
+        decided_at -> Nullable<Timestamptz>,
+        message -> Nullable<Text>,
+        question -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    friendships (uid1, uid2) {
+        uid1 -> Int4,
+        uid2 -> Int4,
+        initiated_by -> Int4,
+        created_at -> Timestamptz,
     }
 }
 
@@ -110,6 +155,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::GroupVisibility;
+    use super::sql_types::GroupKind;
 
     groups (id) {
         id -> Int8,
@@ -121,6 +167,9 @@ diesel::table! {
         last_message_id -> Nullable<Int8>,
         last_message_at -> Nullable<Timestamptz>,
         avatar_image_id -> Nullable<Int8>,
+        kind -> GroupKind,
+        dm_uid1 -> Nullable<Int4>,
+        dm_uid2 -> Nullable<Int4>,
     }
 }
 
@@ -368,11 +417,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::FriendAddVerificationMode;
+
     user_extra (uid) {
         uid -> Int4,
         first_seen_at -> Timestamp,
         last_seen_at -> Timestamp,
         sticker_pack_order -> Jsonb,
+        verification_mode -> FriendAddVerificationMode,
+        verification_question -> Nullable<Text>,
     }
 }
 
@@ -424,7 +478,10 @@ diesel::joinable!(user_sticker_pack_subscriptions -> sticker_packs (pack_id));
 diesel::allow_tables_to_appear_in_same_query!(
     activity_daily_metrics,
     attachments,
+    blocks,
     clients,
+    friend_requests,
+    friendships,
     group_membership,
     groups,
     invites,

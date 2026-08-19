@@ -13,6 +13,7 @@ pub mod messages;
 pub mod push;
 pub mod saved_messages;
 pub mod service_tokens;
+pub mod social;
 pub mod threads;
 pub mod unread;
 pub mod user;

@@ -33,6 +33,24 @@ pub enum GroupVisibility {
     Eq,
     utoipa::ToSchema,
 )]
+#[ExistingTypePath = "crate::schema::sql_types::GroupKind"]
+#[serde(rename_all = "snake_case")]
+pub enum GroupKind {
+    Group,
+    Dm,
+}
+
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
 #[ExistingTypePath = "crate::schema::sql_types::MediaPurpose"]
 #[serde(rename_all = "snake_case")]
 pub enum MediaPurpose {
@@ -225,6 +243,11 @@ pub struct Group {
     pub visibility: GroupVisibility,
     pub last_message_id: Option<i64>,
     pub last_message_at: Option<DateTime<Utc>>,
+    pub kind: GroupKind,
+    /// Canonical min uid of the DM pair; `None` for non-DM groups.
+    pub dm_uid1: Option<i32>,
+    /// Canonical max uid of the DM pair; `None` for non-DM groups.
+    pub dm_uid2: Option<i32>,
 }
 
 /// For inserting a group. Set `id` and `created_at` (e.g. `Utc::now()`) when not relying on DB defaults.
@@ -237,6 +260,9 @@ pub struct NewGroup {
     pub avatar_image_id: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub visibility: GroupVisibility,
+    pub kind: GroupKind,
+    pub dm_uid1: Option<i32>,
+    pub dm_uid2: Option<i32>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
@@ -754,6 +780,8 @@ pub struct UserExtra {
     pub first_seen_at: chrono::NaiveDateTime,
     pub last_seen_at: chrono::NaiveDateTime,
     pub sticker_pack_order: serde_json::Value,
+    pub verification_mode: FriendAddVerificationMode,
+    pub verification_question: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -763,6 +791,8 @@ pub struct NewUserExtra {
     pub first_seen_at: chrono::NaiveDateTime,
     pub last_seen_at: chrono::NaiveDateTime,
     pub sticker_pack_order: serde_json::Value,
+    pub verification_mode: FriendAddVerificationMode,
+    pub verification_question: Option<String>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
@@ -847,4 +877,113 @@ pub struct NewPushSubscription {
     pub delivery_failure_count: i32,
     pub last_delivery_error: Option<String>,
     pub last_delivery_error_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::FriendRequestStatus"]
+#[serde(rename_all = "snake_case")]
+pub enum FriendRequestStatus {
+    Pending,
+    Accepted,
+    Rejected,
+    Cancelled,
+}
+
+/// How a user wants incoming friend requests to be gated.
+/// `Direct` is the default (switch off); the other variants are the three
+/// "switch on" sub-modes.
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::FriendAddVerificationMode"]
+#[serde(rename_all = "snake_case")]
+pub enum FriendAddVerificationMode {
+    /// Default (switch off): anyone may request; no verification message allowed.
+    Direct,
+    /// Switch on, mode 1: requester must attach a verification message.
+    NeedMessage,
+    /// Switch on, mode 2: no friend requests accepted.
+    Forbid,
+    /// Switch on, mode 3: requester must answer a pre-set question (manual review).
+    Question,
+}
+
+/// Canonical friendship row: `uid1 < uid2`, so each pair is stored once.
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
+#[diesel(table_name = schema::friendships)]
+pub struct Friendship {
+    pub uid1: i32,
+    pub uid2: i32,
+    pub initiated_by: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = schema::friendships)]
+pub struct NewFriendship {
+    pub uid1: i32,
+    pub uid2: i32,
+    pub initiated_by: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
+#[diesel(table_name = schema::friend_requests)]
+pub struct FriendRequest {
+    pub id: i64,
+    pub from_uid: i32,
+    pub to_uid: i32,
+    pub status: FriendRequestStatus,
+    pub created_at: DateTime<Utc>,
+    pub decided_at: Option<DateTime<Utc>>,
+    /// Verification message (mode 1) or the requester's answer (mode 3); null for direct.
+    pub message: Option<String>,
+    /// Snapshot of the target's question (mode 3 only); null otherwise.
+    pub question: Option<String>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = schema::friend_requests)]
+pub struct NewFriendRequest {
+    pub id: i64,
+    pub from_uid: i32,
+    pub to_uid: i32,
+    pub status: FriendRequestStatus,
+    pub created_at: DateTime<Utc>,
+    pub message: Option<String>,
+    pub question: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
+#[diesel(table_name = schema::blocks)]
+pub struct Block {
+    pub blocker_uid: i32,
+    pub blocked_uid: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = schema::blocks)]
+pub struct NewBlock {
+    pub blocker_uid: i32,
+    pub blocked_uid: i32,
+    pub created_at: DateTime<Utc>,
 }
