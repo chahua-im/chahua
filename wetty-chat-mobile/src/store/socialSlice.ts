@@ -66,8 +66,6 @@ const socialSlice = createSlice({
       if (!state.blocks.some((b) => b.user.uid === action.payload.user.uid)) {
         state.blocks.unshift(action.payload);
       }
-      // Blocking tears down the friendship on the server side; mirror locally.
-      state.friends = state.friends.filter((f) => f.user.uid !== action.payload.user.uid);
     },
     blockRemoved(state, action: PayloadAction<number>) {
       state.blocks = state.blocks.filter((b) => b.user.uid !== action.payload);

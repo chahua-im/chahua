@@ -275,35 +275,6 @@ fn insert_friendship(
     Ok(())
 }
 
-/// Cancel any pending friend requests between the pair (both directions).
-fn cancel_pending_requests_between(
-    conn: &mut PgConnection,
-    a: i32,
-    b: i32,
-    now: chrono::DateTime<Utc>,
-) -> QueryResult<usize> {
-    let (u1, u2) = canonical_pair(a, b);
-    diesel::update(
-        friend_requests::table.filter(
-            friend_requests::status
-                .eq(FriendRequestStatus::Pending)
-                .and(
-                    friend_requests::from_uid
-                        .eq(u1)
-                        .and(friend_requests::to_uid.eq(u2))
-                        .or(friend_requests::from_uid
-                            .eq(u2)
-                            .and(friend_requests::to_uid.eq(u1))),
-                ),
-        ),
-    )
-    .set((
-        friend_requests::status.eq(FriendRequestStatus::Cancelled),
-        friend_requests::decided_at.eq(now),
-    ))
-    .execute(conn)
-}
-
 pub enum CreateRequestOutcome {
     /// A new pending request was created (notify `to_uid`).
     Created { request: FriendRequest },
@@ -634,28 +605,22 @@ pub fn list_outgoing_requests(
         .load::<FriendRequest>(conn)
 }
 
-/// Block a user. Idempotent. Side effects: removes any friendship and cancels
-/// any pending friend requests between the pair (both directions). Silent to
-/// the blocked user (no WS event); their client refreshes on next fetch.
+/// Block a user. Idempotent. Blocking only gates communication: it preserves
+/// existing friendships and pending friend requests.
 pub fn block_user(conn: &mut PgConnection, blocker: i32, blocked: i32) -> Result<(), AppError> {
     if blocker == blocked {
         return Err(AppError::BadRequest("Cannot block yourself"));
     }
     let now = Utc::now();
-    conn.transaction::<(), AppError, _>(|conn| {
-        diesel::insert_into(blocks::table)
-            .values(&NewBlock {
-                blocker_uid: blocker,
-                blocked_uid: blocked,
-                created_at: now,
-            })
-            .on_conflict((blocks::blocker_uid, blocks::blocked_uid))
-            .do_nothing()
-            .execute(conn)?;
-        remove_friendship(conn, blocker, blocked)?;
-        cancel_pending_requests_between(conn, blocker, blocked, now)?;
-        Ok(())
-    })?;
+    diesel::insert_into(blocks::table)
+        .values(&NewBlock {
+            blocker_uid: blocker,
+            blocked_uid: blocked,
+            created_at: now,
+        })
+        .on_conflict((blocks::blocker_uid, blocks::blocked_uid))
+        .do_nothing()
+        .execute(conn)?;
     Ok(())
 }
 

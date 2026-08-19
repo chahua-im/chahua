@@ -150,8 +150,8 @@ msgstr "返回"
 msgid "Block"
 msgstr "封鎖"
 
-msgid "Block {name}? They won't be able to message you, and you will no longer be friends."
-msgstr "封鎖 {name}？對方將無法向你發訊息，且你們將不再是好友。"
+msgid "Block {name}? You won't be able to message each other."
+msgstr "封鎖 {name}？你們將無法互相傳送訊息。"
 
 msgid "Block User"
 msgstr "封鎖使用者"

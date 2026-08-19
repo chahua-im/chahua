@@ -150,8 +150,8 @@ msgstr "Back"
 msgid "Block"
 msgstr "Block"
 
-msgid "Block {name}? They won't be able to message you, and you will no longer be friends."
-msgstr "Block {name}? They won't be able to message you, and you will no longer be friends."
+msgid "Block {name}? You won't be able to message each other."
+msgstr "Block {name}? You won't be able to message each other."
 
 msgid "Block User"
 msgstr "Block User"
