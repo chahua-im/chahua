@@ -735,6 +735,7 @@ fn load_reindex_batch(
         .filter(dsl::deleted_at.is_null())
         .filter(dsl::is_published.eq(true))
         .filter(dsl::message_type.eq(MessageType::Text))
+        .order(dsl::id.asc())
         .limit(batch_size)
         .select(Message::as_select())
         .load(conn)
