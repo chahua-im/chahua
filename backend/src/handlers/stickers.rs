@@ -30,9 +30,7 @@ use crate::{
         media, sticker_pack_stickers, sticker_packs, stickers, user_favorite_stickers,
         user_sticker_pack_subscriptions,
     },
-    services::{
-        image_processing::process_sticker, media::build_storage_key, user::lookup_user_profiles,
-    },
+    services::{image_processing::process_sticker, media::build_storage_key},
     utils::{auth::CurrentUid, ids},
     AppState,
 };
@@ -225,7 +223,7 @@ fn build_pack_summaries(
     let counts = load_pack_counts(conn, &pack_ids)?;
     let subscribed = load_subscribed_pack_ids(conn, uid, &pack_ids)?;
     let mut previews = load_first_stickers_for_packs(conn, state, &pack_ids)?;
-    let owner_profiles = lookup_user_profiles(conn, &owner_uids).unwrap_or_default();
+    let owner_profiles = state.discuz.user_profiles(&owner_uids).unwrap_or_default();
 
     Ok(packs
         .into_iter()

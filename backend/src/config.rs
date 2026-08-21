@@ -78,6 +78,8 @@ pub struct AuthConfig {
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database_url: String,
+    /// Discuz forum MySQL, the identity source behind `services::discuz`.
+    pub discuz_database_url: String,
     pub media: Arc<MediaConfig>,
     pub avatars: Option<Arc<DiscuzAvatarConfig>>,
     pub auth: AuthConfig,
@@ -125,6 +127,8 @@ impl AppConfig {
                 cors_allowed_origins: read_cors_allowed_origins("CORS_ALLOWED_ORIGINS"),
             },
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
+            discuz_database_url: std::env::var("DISCUZ_DATABASE_URL")
+                .expect("DISCUZ_DATABASE_URL must be set"),
             media: Arc::new(MediaConfig {
                 bucket: std::env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set"),
                 attachment_prefix: std::env::var("ATTACHMENTS_PREFIX")

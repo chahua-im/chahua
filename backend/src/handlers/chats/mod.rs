@@ -277,8 +277,15 @@ async fn get_chats(
         .unread_service
         .count_membership_unreads(conn, &memberships)?;
 
-    let message_responses =
-        attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
+    let message_responses = attach_metadata(
+        conn,
+        &state.discuz,
+        messages_to_process,
+        &state.media,
+        &state.avatars,
+        uid,
+    )
+    .await;
 
     let mut message_response_map: std::collections::HashMap<i64, MessageResponse> =
         message_responses

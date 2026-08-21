@@ -61,6 +61,7 @@ utoipa-axum = "0.2"
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 mime = "0.3"
 percent-encoding = "2"
+mysql = "28.0.0"
 
 [profile.dev]
 overflow-checks = false

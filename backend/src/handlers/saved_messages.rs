@@ -85,6 +85,7 @@ async fn put_saved_message(
 
     let response = saved_messages_svc::save_message_snapshot(
         conn,
+        &state.discuz,
         &state.media,
         &state.avatars,
         state.id_gen.as_ref(),

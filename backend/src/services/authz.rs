@@ -8,8 +8,8 @@ use diesel::PgConnection;
 
 use crate::errors::AppError;
 use crate::models::{PermissionResourceType, PolicySubjectType};
-use crate::schema::discuz::discuz::common_member;
 use crate::schema::{policy_assignments, policy_permissions};
+use crate::services::discuz::DiscuzProvider;
 const CACHE_TTL: Duration = Duration::from_secs(60);
 
 #[allow(dead_code)]
@@ -68,12 +68,14 @@ struct CachedPermissionSet {
 
 pub struct AuthorizationService {
     cache: DashMap<CacheKey, CachedPermissionSet>,
+    discuz: Arc<DiscuzProvider>,
 }
 
 impl AuthorizationService {
-    pub fn start() -> Arc<Self> {
+    pub fn start(discuz: Arc<DiscuzProvider>) -> Arc<Self> {
         Arc::new(Self {
             cache: DashMap::new(),
+            discuz,
         })
     }
 
@@ -121,7 +123,7 @@ impl AuthorizationService {
         uid: i32,
         resource: Resource,
     ) -> Result<Arc<HashSet<String>>, AppError> {
-        let discuz_group_id = self.lookup_discuz_group_id(conn, uid)?;
+        let discuz_group_id = self.discuz.group_id(uid)?;
         self.load_cached_actions(
             conn,
             CacheSubject::User {
@@ -202,20 +204,6 @@ impl AuthorizationService {
         }
 
         Err(AppError::Forbidden("Permission required"))
-    }
-
-    fn lookup_discuz_group_id(
-        &self,
-        conn: &mut PgConnection,
-        uid: i32,
-    ) -> Result<Option<i32>, AppError> {
-        use crate::schema::discuz::discuz::common_member::dsl as cm_dsl;
-
-        Ok(common_member::table
-            .filter(cm_dsl::uid.eq(uid))
-            .select(cm_dsl::groupid)
-            .first::<i32>(conn)
-            .optional()?)
     }
 
     fn load_actions_for_resource(
@@ -352,6 +340,9 @@ mod tests {
     fn empty_service() -> AuthorizationService {
         AuthorizationService {
             cache: Default::default(),
+            discuz: std::sync::Arc::new(crate::services::discuz::DiscuzProvider::new(
+                "mysql://localhost",
+            )),
         }
     }
 

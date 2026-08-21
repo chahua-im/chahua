@@ -79,7 +79,7 @@ fn broadcast_reaction_update(
         .collect::<std::collections::HashSet<i32>>()
         .into_iter()
         .collect();
-    let names = load_usernames_by_uids(conn, &all_uids);
+    let names = load_usernames_by_uids(&state.discuz, &all_uids);
     let avatars = state.avatars.lookup(&all_uids);
 
     let reactions: Vec<ReactionSummary> = counts
@@ -189,7 +189,7 @@ async fn get_reaction_details(
 
     // Resolve names + avatars
     let uids_vec: Vec<i32> = all_uids.into_iter().collect();
-    let names = load_usernames_by_uids(conn, &uids_vec);
+    let names = load_usernames_by_uids(&state.discuz, &uids_vec);
     let avatars = state.avatars.lookup(&uids_vec);
 
     for group in &mut groups {

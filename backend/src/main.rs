@@ -110,6 +110,9 @@ async fn main() {
         metrics.ws.clone(),
     ));
     let unread_service = Arc::new(services::unread::UnreadService::new());
+    let discuz = Arc::new(services::discuz::DiscuzProvider::new(
+        &config.discuz_database_url,
+    ));
 
     let state = AppState::new(AppInner {
         db: pool.clone(),
@@ -120,7 +123,8 @@ async fn main() {
             config.avatars.clone(),
             metrics.avatars.clone(),
         )),
-        authz_service: services::authz::AuthorizationService::start(),
+        discuz: discuz.clone(),
+        authz_service: services::authz::AuthorizationService::start(discuz),
         ws_registry: ws_registry.clone(),
         push_service: services::push::PushService::start(
             pool.clone(),

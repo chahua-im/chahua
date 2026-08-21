@@ -446,16 +446,6 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    usergroup_extra (groupid) {
-        groupid -> Int4,
-        #[max_length = 8]
-        chat_group_color -> Nullable<Varchar>,
-        #[max_length = 8]
-        chat_group_color_dark -> Nullable<Varchar>,
-    }
-}
-
 diesel::joinable!(attachments -> messages (message_id));
 diesel::joinable!(group_membership -> groups (chat_id));
 diesel::joinable!(groups -> media (avatar_image_id));
@@ -503,5 +493,4 @@ diesel::allow_tables_to_appear_in_same_query!(
     user_extra,
     user_favorite_stickers,
     user_sticker_pack_subscriptions,
-    usergroup_extra,
 );

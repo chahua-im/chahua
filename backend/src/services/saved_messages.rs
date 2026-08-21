@@ -18,7 +18,7 @@ use crate::{
     },
     schema::{attachments, group_membership, groups, media, messages, saved_messages, stickers},
     services::messages::{build_mention_info, extract_mention_uids},
-    services::{avatars::AvatarService, media::MediaStore, user::lookup_user_profiles},
+    services::{avatars::AvatarService, discuz::DiscuzProvider, media::MediaStore},
     utils::{ids, ids::IdGen, pagination::validate_limit},
 };
 
@@ -224,7 +224,7 @@ fn load_attachment_snapshots(
 }
 
 fn load_sender_and_mentions_snapshots(
-    conn: &mut PgConnection,
+    discuz: &DiscuzProvider,
     avatars: &AvatarService,
     message: &Message,
 ) -> Result<(SavedSenderSnapshot, Vec<MentionInfo>), AppError> {
@@ -242,7 +242,7 @@ fn load_sender_and_mentions_snapshots(
         }
     }
 
-    let user_profiles = lookup_user_profiles(conn, &lookup_uids)?;
+    let user_profiles = discuz.user_profiles(&lookup_uids)?;
     let user_avatars = avatars.lookup(&lookup_uids);
     let sender_profile = user_profiles.get(&message.sender_uid);
     let sender = SavedSenderSnapshot {
@@ -383,6 +383,7 @@ fn load_locatable_chat_ids(
 
 pub async fn save_message_snapshot(
     conn: &mut PgConnection,
+    discuz: &DiscuzProvider,
     media: &MediaStore,
     avatars: &AvatarService,
     id_gen: &IdGen,
@@ -405,7 +406,7 @@ pub async fn save_message_snapshot(
 
     let attachments = load_attachment_snapshots(conn, media, &message)?;
     let sticker = load_sticker_snapshot(conn, media, message.sticker_id)?;
-    let (sender, mentions) = load_sender_and_mentions_snapshots(conn, avatars, &message)?;
+    let (sender, mentions) = load_sender_and_mentions_snapshots(discuz, avatars, &message)?;
     let chat = load_chat_snapshot(conn, media, message.chat_id)?;
 
     if let Some(existing) = load_existing_saved_message(conn, uid, message_id)? {

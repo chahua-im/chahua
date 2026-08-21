@@ -15,7 +15,6 @@ use crate::{
     handlers::{chats::ChatIdPath, members::check_membership},
     models::Attachment,
     schema::{attachments, messages},
-    services::user::lookup_user_profiles,
     utils::{auth::CurrentUid, pagination::validate_limit},
     AppState, MAX_CHAT_ATTACHMENTS_LIMIT,
 };
@@ -252,7 +251,7 @@ async fn get_chat_attachments(
         .into_iter()
         .collect();
     let user_avatars = state.avatars.lookup(&sender_uids);
-    let user_profiles = lookup_user_profiles(conn, &sender_uids).unwrap_or_default();
+    let user_profiles = state.discuz.user_profiles(&sender_uids).unwrap_or_default();
     let message_map: std::collections::HashMap<i64, AttachmentMessageRow> = message_rows
         .into_iter()
         .map(|message| (message.message_id, message))

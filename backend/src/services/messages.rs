@@ -27,9 +27,9 @@ use crate::{
         messages as messages_schema, stickers, user_favorite_stickers,
     },
     services::{
+        discuz::{DiscuzProvider, UserProfile},
         push::{PushJob, PushMessagePreview, PushMessagePreviewSticker},
         social::{self, DmSendAuthorizationError},
-        user::{lookup_user_profiles, UserProfile},
     },
     utils::ids,
     AppState,
@@ -191,16 +191,18 @@ impl PendingSideEffects {
 // Shared helper functions
 // ---------------------------------------------------------------------------
 
-fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option<String>> {
-    lookup_user_profiles(conn, &[uid])
+fn load_username_by_uid(discuz: &DiscuzProvider, uid: i32) -> QueryResult<Option<String>> {
+    discuz
+        .user_profiles(&[uid])
         .map(|mut profiles| profiles.remove(&uid).and_then(|profile| profile.username))
 }
 
-pub fn load_usernames_by_uids(
-    conn: &mut PgConnection,
+pub(crate) fn load_usernames_by_uids(
+    discuz: &DiscuzProvider,
     uids: &[i32],
 ) -> std::collections::HashMap<i32, Option<String>> {
-    lookup_user_profiles(conn, uids)
+    discuz
+        .user_profiles(uids)
         .unwrap_or_default()
         .into_iter()
         .map(|(uid, profile)| (uid, profile.username))
@@ -584,6 +586,7 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
 
 pub fn build_message_side_effects(
     conn: &mut PgConnection,
+    discuz: &DiscuzProvider,
     response: &MessageResponse,
     sender_uid: i32,
     chat_id: i64,
@@ -602,7 +605,7 @@ pub fn build_message_side_effects(
     let is_system_message = matches!(response.message_type, MessageType::System);
     let push_job = if enqueue_push && !is_system_message {
         let sender_username =
-            load_username_by_uid(conn, sender_uid)?.unwrap_or_else(|| "Someone".to_string());
+            load_username_by_uid(discuz, sender_uid)?.unwrap_or_else(|| "Someone".to_string());
         let chat_name = groups::table
             .filter(groups::dsl::id.eq(chat_id))
             .select(groups::dsl::name)
@@ -923,6 +926,7 @@ pub async fn send_prepared_message(
         )?;
         let response = attach_metadata(
             conn,
+            &state.discuz,
             vec![existing],
             &state.media,
             &state.avatars,
@@ -988,6 +992,7 @@ pub async fn send_prepared_message(
 
     let response = attach_metadata(
         conn,
+        &state.discuz,
         vec![inserted_msg.clone()],
         &state.media,
         &state.avatars,
@@ -1001,6 +1006,7 @@ pub async fn send_prepared_message(
     let (member_uids, side_effects) = if prepared.publish_immediately {
         let side_effects = build_message_side_effects(
             conn,
+            &state.discuz,
             &response,
             prepared.sender_uid,
             prepared.chat_id,
@@ -1086,6 +1092,7 @@ fn validate_idempotent_message_payload(
 /// Attach reply_to_message to a list of messages by fetching referenced messages in one query.
 pub async fn attach_metadata(
     conn: &mut PgConnection,
+    discuz: &DiscuzProvider,
     messages_to_process: Vec<Message>,
     media: &crate::services::media::MediaStore,
     avatars: &crate::services::avatars::AvatarService,
@@ -1130,7 +1137,7 @@ pub async fn attach_metadata(
     }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
     let mut user_avatars = avatars.lookup(&target_uids);
-    let mut user_profiles = lookup_user_profiles(conn, &target_uids).unwrap_or_default();
+    let mut user_profiles = discuz.user_profiles(&target_uids).unwrap_or_default();
 
     let mut message_attachments_map: std::collections::HashMap<i64, Vec<Attachment>> =
         std::collections::HashMap::new();
@@ -1268,7 +1275,7 @@ pub async fn attach_metadata(
             .collect::<std::collections::HashSet<i32>>()
             .into_iter()
             .collect();
-        let reactor_names = load_usernames_by_uids(conn, &all_reactor_uids);
+        let reactor_names = load_usernames_by_uids(discuz, &all_reactor_uids);
         let reactor_avatars = avatars.lookup(&all_reactor_uids);
 
         for (msg_id, emoji, count) in counts {
@@ -1330,7 +1337,11 @@ pub async fn attach_metadata(
         .filter(|uid| !user_profiles.contains_key(uid))
         .collect();
     if !extra_mention_uids.is_empty() {
-        user_profiles.extend(lookup_user_profiles(conn, &extra_mention_uids).unwrap_or_default());
+        user_profiles.extend(
+            discuz
+                .user_profiles(&extra_mention_uids)
+                .unwrap_or_default(),
+        );
         user_avatars.extend(avatars.lookup(&extra_mention_uids));
     }
 

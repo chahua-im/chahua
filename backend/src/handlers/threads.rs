@@ -83,6 +83,7 @@ async fn get_threads(
 
     let response = thread_svc::enrich_thread_list(
         conn,
+        &state.discuz,
         rows,
         has_more,
         root_messages,

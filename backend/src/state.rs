@@ -19,6 +19,7 @@ use crate::services::authz::AuthorizationService;
 use crate::services::avatars::AvatarService;
 use crate::services::background::BackgroundService;
 use crate::services::client_tracking::ClientTrackingService;
+use crate::services::discuz::DiscuzProvider;
 use crate::services::media::MediaStore;
 use crate::services::message_search::MessageSearchService;
 use crate::services::push::PushService;
@@ -37,6 +38,8 @@ pub struct AppInner {
     pub media: MediaStore,
     /// Discuz user-avatar resolution.
     pub avatars: Arc<AvatarService>,
+    /// Discuz identity provider (forum MySQL).
+    pub discuz: Arc<DiscuzProvider>,
     pub authz_service: Arc<AuthorizationService>,
     pub ws_registry: Arc<ConnectionRegistry>,
     pub push_service: Arc<PushService>,

@@ -130,7 +130,8 @@ async fn list_pins_in_scope(
         .filter(messages::is_published.eq(true))
         .load(conn)?;
 
-    let enriched = attach_metadata(conn, msgs, &state.media, &state.avatars, uid).await;
+    let enriched =
+        attach_metadata(conn, &state.discuz, msgs, &state.media, &state.avatars, uid).await;
 
     let mut msg_map: std::collections::HashMap<i64, MessageResponse> =
         enriched.into_iter().map(|m| (m.id, m)).collect();
@@ -239,7 +240,15 @@ async fn create_pin_in_scope(
             AppError::Internal("Database error")
         })?;
 
-    let enriched = attach_metadata(conn, vec![msg], &state.media, &state.avatars, uid).await;
+    let enriched = attach_metadata(
+        conn,
+        &state.discuz,
+        vec![msg],
+        &state.media,
+        &state.avatars,
+        uid,
+    )
+    .await;
     let msg_response = enriched
         .into_iter()
         .next()

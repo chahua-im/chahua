@@ -796,22 +796,6 @@ pub struct NewUserExtra {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
-#[diesel(table_name = schema::usergroup_extra)]
-pub struct UserGroupExtra {
-    pub groupid: i32,
-    pub chat_group_color: Option<String>,
-    pub chat_group_color_dark: Option<String>,
-}
-
-#[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = schema::usergroup_extra)]
-pub struct NewUserGroupExtra {
-    pub groupid: i32,
-    pub chat_group_color: Option<String>,
-    pub chat_group_color_dark: Option<String>,
-}
-
-#[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
 #[diesel(table_name = schema::thread_user_states)]
 pub struct ThreadUserState {
     pub chat_id: i64,

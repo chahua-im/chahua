@@ -14,11 +14,11 @@ use crate::dto::{
 use crate::models::{Attachment, Message, MessageType};
 use crate::schema::{attachments, messages, stickers, thread_meta, thread_user_states};
 use crate::services::avatars::AvatarService;
+use crate::services::discuz::DiscuzProvider;
 use crate::services::media::MediaStore;
 use crate::services::messages::{
     build_message_preview, build_sender, extract_mention_uids, MessagePreviewInput,
 };
-use crate::services::user::lookup_user_profiles;
 use crate::services::ws_registry::ConnectionRegistry;
 use std::sync::Arc;
 
@@ -668,8 +668,10 @@ struct ParticipantRow {
 /// `has_more` — whether there are more results beyond this page.
 /// `root_messages` — raw root `Message` rows (no heavy enrichment needed).
 /// `media` / `avatars` — URL construction for attachments and user avatars.
+#[allow(clippy::too_many_arguments)]
 pub fn enrich_thread_list(
     conn: &mut PgConnection,
+    discuz: &DiscuzProvider,
     rows: Vec<ThreadListRow>,
     has_more: bool,
     root_messages: Vec<Message>,
@@ -814,7 +816,7 @@ pub fn enrich_thread_list(
     all_uids.dedup();
 
     // Single batched profile + avatar lookup
-    let user_profiles = lookup_user_profiles(conn, &all_uids)?;
+    let user_profiles = discuz.user_profiles(&all_uids)?;
     let user_avatars = avatars.lookup(&all_uids);
 
     let make_sender = |uid: i32| -> User { build_sender(uid, &user_avatars, &user_profiles) };
