@@ -327,9 +327,10 @@ Identity lives in Discuz-compatible tables (`discuz.common_member`). The fronten
 
 ```bash
 psql "postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat" <<'SQL'
-INSERT INTO discuz.common_member (uid, username, email, groupid, regdate)
+INSERT INTO discuz.common_member (uid, loginname, username, email, groupid, regdate)
 VALUES (
   1,
+  'devuser',
   'devuser',
   'dev@example.com',
   10,
@@ -339,7 +340,7 @@ ON CONFLICT (uid) DO NOTHING;
 SQL
 ```
 
-`username` is unique and limited to 15 characters.
+`username` is unique and limited to 50 characters.
 
 ### 6.2 Grant permission to create chats (and more)
 
