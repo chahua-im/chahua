@@ -12,7 +12,7 @@ pub mod discuz {
             uid -> Int4,
             #[max_length = 255]
             email -> Varchar,
-            #[max_length = 15]
+            #[max_length = 50]
             username -> Bpchar,
             #[max_length = 32]
             password -> Bpchar,
@@ -24,7 +24,6 @@ pub mod discuz {
             emailstatus -> Int2,
             avatarstatus -> Int2,
             secmobilestatus -> Int2,
-            videophotostatus -> Int2,
             adminid -> Int2,
             groupid -> Int4,
             groupexpiry -> Int8,
@@ -42,6 +41,8 @@ pub mod discuz {
             onlyacceptfriendpm -> Int2,
             conisbind -> Int2,
             freeze -> Int2,
+            #[max_length = 50]
+            loginname -> Bpchar,
         }
     }
 
