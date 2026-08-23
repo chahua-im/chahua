@@ -1,7 +1,7 @@
 import apiClient from './client';
 import type { MemberSummary } from './users';
 
-export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled';
+export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected';
 
 /**
  * How a user gates incoming friend requests.
@@ -90,10 +90,6 @@ export const friendsApi = {
   rejectRequest: async (requestId: string): Promise<FriendRequestResponse> => {
     const res = await apiClient.post<FriendRequestResponse>(`/friends/requests/${requestId}/reject`);
     return res.data;
-  },
-
-  cancelRequest: async (requestId: string): Promise<void> => {
-    await apiClient.post(`/friends/requests/${requestId}/cancel`);
   },
 
   getMySettings: async (): Promise<FriendSettingsResponse> => {

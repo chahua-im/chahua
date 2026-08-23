@@ -525,7 +525,7 @@ async function connectWebSocket(): Promise<void> {
         if (message.type === 'friendRequestResolved' && message.payload != null) {
           const payload = message.payload as {
             requestId: string;
-            status: 'accepted' | 'rejected' | 'cancelled';
+            status: 'accepted' | 'rejected';
             byUid: number;
           };
           // An accepted request changes the friends list for both sides; any resolution

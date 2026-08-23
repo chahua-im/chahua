@@ -896,7 +896,6 @@ pub enum FriendRequestStatus {
     Pending,
     Accepted,
     Rejected,
-    Cancelled,
 }
 
 /// How a user wants incoming friend requests to be gated.

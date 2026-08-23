@@ -2,6 +2,7 @@ import { IonButton, IonChip, IonContent, IonIcon, IonLabel, IonModal, useIonAler
 import { close, openOutline, personAddOutline, chatbubbleEllipsesOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import axios from 'axios';
 import type { User } from '@/api/messages';
 import { useIsDarkMode, useIsDesktop } from '@/hooks/platformHooks';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
@@ -304,16 +305,6 @@ export function UserProfileModal({
     setAddFriendOpen(true);
   }, [displaySender]);
 
-  const handleCancelRequest = useCallback(async () => {
-    if (!outgoingReq) return;
-    try {
-      await friendsApi.cancelRequest(outgoingReq.id);
-      dispatch(fetchOutgoingRequests());
-    } catch (err) {
-      presentToast(err instanceof Error ? err.message : t`Failed to cancel request`, 2000);
-    }
-  }, [outgoingReq, dispatch, presentToast]);
-
   const handleAcceptRequest = useCallback(async () => {
     if (!incomingReq) return;
     try {
@@ -326,11 +317,28 @@ export function UserProfileModal({
 
   const handleRejectRequest = useCallback(async () => {
     if (!incomingReq) return;
+    const peerRequestUid = incomingReq.from.uid;
     try {
       await friendsApi.rejectRequest(incomingReq.id);
       dispatch(fetchIncomingRequests());
     } catch (err) {
-      presentToast(err instanceof Error ? err.message : t`Failed to reject request`, 2000);
+      // A 409 means the server already dismissed the request; refresh both lists
+      // so the row disappears, then explain which conflict happened.
+      const [friends] = await Promise.all([
+        dispatch(fetchFriends()).unwrap(),
+        dispatch(fetchIncomingRequests()).unwrap(),
+      ]);
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      if (status === 409) {
+        presentToast(
+          friends.some((f) => f.user.uid === peerRequestUid)
+            ? t`You are already friends with this user`
+            : t`This friend request is no longer pending`,
+          2000,
+        );
+        return;
+      }
+      presentToast(t`Failed to reject request`, 2000);
     }
   }, [incomingReq, dispatch, presentToast]);
 
@@ -506,13 +514,8 @@ export function UserProfileModal({
                     </IonButton>
                   )}
                   {friendsEnabled && !isFriend && outgoingReq && (
-                    <IonButton
-                      fill="outline"
-                      color="medium"
-                      onClick={handleCancelRequest}
-                      className={styles.singleButton}
-                    >
-                      {t`Cancel Request`}
+                    <IonButton fill="outline" color="medium" disabled className={styles.singleButton}>
+                      {t`Request Pending`}
                     </IonButton>
                   )}
                   {friendsEnabled && !isFriend && incomingReq && (
