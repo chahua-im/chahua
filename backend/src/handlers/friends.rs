@@ -23,7 +23,7 @@ use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::handlers::users::build_member_summary_map;
 use crate::models::{FriendRequest, FriendRequestStatus};
-use crate::services::social::{self, CreateRequestOutcome};
+use crate::services::social::{self, CreateRequestOutcome, ResolveOutcome};
 use crate::services::user::lookup_user_profiles;
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
@@ -308,7 +308,8 @@ async fn accept_friend_request(
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     let conn = &mut *conn;
-    let request = social::resolve_friend_request(conn, uid, request_id, true)?;
+    let outcome = social::resolve_friend_request(conn, uid, request_id, true)?;
+    let request = outcome.request();
     fire_ws(
         &state,
         &[request.from_uid],
@@ -318,7 +319,7 @@ async fn accept_friend_request(
             by_uid: uid,
         }),
     );
-    let response = build_request_response(conn, &state, &request)?;
+    let response = build_request_response(conn, &state, request)?;
     Ok(Json(response))
 }
 
@@ -327,7 +328,10 @@ async fn accept_friend_request(
     path = "/requests/{request_id}/reject",
     tag = "friends",
     params(("request_id" = i64, Path, description = "Friend request ID")),
-    responses((status = 200, description = "Request rejected", body = FriendRequestResponse)),
+    responses(
+        (status = 200, description = "Request rejected", body = FriendRequestResponse),
+        (status = 409, description = "Already friends; the request was dismissed")
+    ),
     security(("uid_header" = []), ("bearer_jwt" = []))
 )]
 async fn reject_friend_request(
@@ -337,7 +341,8 @@ async fn reject_friend_request(
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     let conn = &mut *conn;
-    let request = social::resolve_friend_request(conn, uid, request_id, false)?;
+    let outcome = social::resolve_friend_request(conn, uid, request_id, false)?;
+    let request = outcome.request();
     fire_ws(
         &state,
         &[request.from_uid],
@@ -347,37 +352,11 @@ async fn reject_friend_request(
             by_uid: uid,
         }),
     );
-    let response = build_request_response(conn, &state, &request)?;
+    if matches!(&outcome, ResolveOutcome::RejectedWhileFriends(_)) {
+        return Err(AppError::Conflict("You are already friends with this user"));
+    }
+    let response = build_request_response(conn, &state, request)?;
     Ok(Json(response))
-}
-
-#[utoipa::path(
-    post,
-    path = "/requests/{request_id}/cancel",
-    tag = "friends",
-    params(("request_id" = i64, Path, description = "Friend request ID")),
-    responses((status = 204, description = "Request cancelled")),
-    security(("uid_header" = []), ("bearer_jwt" = []))
-)]
-async fn cancel_friend_request(
-    CurrentUid(uid): CurrentUid,
-    State(state): State<AppState>,
-    mut conn: DbConn,
-    Path(RequestIdPath { request_id }): Path<RequestIdPath>,
-) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-    let request = social::cancel_friend_request(conn, uid, request_id)?;
-    // Notify the recipient so their incoming list drops the cancelled request.
-    fire_ws(
-        &state,
-        &[request.to_uid],
-        ServerWsMessage::FriendRequestResolved(FriendRequestResolvedPayload {
-            request_id: request.id,
-            status: FriendRequestStatus::Cancelled,
-            by_uid: uid,
-        }),
-    );
-    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -442,7 +421,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_outgoing_requests))
         .routes(routes!(accept_friend_request))
         .routes(routes!(reject_friend_request))
-        .routes(routes!(cancel_friend_request))
         .routes(routes!(get_my_friend_settings))
         .routes(routes!(update_my_friend_settings))
         .routes(routes!(get_user_friend_add_info))

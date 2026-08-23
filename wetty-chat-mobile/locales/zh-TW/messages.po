@@ -168,9 +168,6 @@ msgstr "取消編輯"
 msgid "Cancel reply"
 msgstr "取消回覆"
 
-msgid "Cancel Request"
-msgstr "取消請求"
-
 msgid "Cannot add more than {MAX_DISTINCT_REACTIONS_PER_MESSAGE} different reactions"
 msgstr "每條訊息最多只能添加 {MAX_DISTINCT_REACTIONS_PER_MESSAGE} 種不同的表態"
 
@@ -425,9 +422,6 @@ msgstr "新增表情失敗"
 
 msgid "Failed to add sticker to favorites"
 msgstr "添加貼紙到收藏失敗"
-
-msgid "Failed to cancel request"
-msgstr "取消請求失敗"
 
 msgid "Failed to copy invite code"
 msgstr "複製邀請碼失敗"
@@ -1148,6 +1142,9 @@ msgstr "回覆"
 msgid "Replying to {0}"
 msgstr "正在回覆 {0}"
 
+msgid "Request Pending"
+msgstr "請求待處理"
+
 msgid "Requesters must answer your question. You review the answer before accepting."
 msgstr "請求者必須回答你的問題。你可以在接受前查看回答。"
 
@@ -1337,6 +1334,9 @@ msgstr "應用程式無法重新整理你的工作階段。"
 
 msgid "The invite code entered is not valid."
 msgstr "輸入的邀請碼無效。"
+
+msgid "This friend request is no longer pending"
+msgstr "該好友請求已不再等待處理"
 
 msgid "this group"
 msgstr "此群組"
@@ -1540,6 +1540,9 @@ msgstr "你已經是成員"
 
 msgid "You are already a member of this chat."
 msgstr "你已經是此聊天的成員。"
+
+msgid "You are already friends with this user"
+msgstr "你已經和該使用者是好友"
 
 msgid "You are no longer friends with this user."
 msgstr "你已不是對方好友。"

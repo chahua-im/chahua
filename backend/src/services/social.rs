@@ -481,15 +481,33 @@ pub async fn create_friend_request(
     Ok(CreateRequestOutcome::Created { request })
 }
 
+/// Result of a recipient resolving a friend request.
+pub enum ResolveOutcome {
+    /// The request reached its terminal status normally.
+    Resolved(FriendRequest),
+    /// A reject claimed a pending request whose users are already friends. The
+    /// request is dismissed as `Rejected` and the friendship is left intact;
+    /// the caller must report the anomaly to the recipient.
+    RejectedWhileFriends(FriendRequest),
+}
+
+impl ResolveOutcome {
+    pub fn request(&self) -> &FriendRequest {
+        match self {
+            Self::Resolved(request) | Self::RejectedWhileFriends(request) => request,
+        }
+    }
+}
+
 /// Accept or reject a friend request. Only the recipient (`to_uid`) may resolve.
 pub fn resolve_friend_request(
     conn: &mut PgConnection,
     resolver_uid: i32,
     request_id: i64,
     accept: bool,
-) -> Result<FriendRequest, AppError> {
+) -> Result<ResolveOutcome, AppError> {
     let now = Utc::now();
-    conn.transaction::<FriendRequest, AppError, _>(|conn| {
+    conn.transaction::<ResolveOutcome, AppError, _>(|conn| {
         let new_status = if accept {
             FriendRequestStatus::Accepted
         } else {
@@ -525,6 +543,7 @@ pub fn resolve_friend_request(
         };
 
         if accept {
+            // Idempotent: an existing friendship makes acceptance a no-op.
             insert_friendship(
                 conn,
                 request.from_uid,
@@ -532,44 +551,12 @@ pub fn resolve_friend_request(
                 request.from_uid,
                 now,
             )?;
+            return Ok(ResolveOutcome::Resolved(request));
         }
-        Ok(request)
-    })
-}
-
-/// Cancel a pending friend request. Only the sender (`from_uid`) may cancel.
-pub fn cancel_friend_request(
-    conn: &mut PgConnection,
-    sender_uid: i32,
-    request_id: i64,
-) -> Result<FriendRequest, AppError> {
-    let now = Utc::now();
-    conn.transaction::<FriendRequest, AppError, _>(|conn| {
-        let request = friend_requests::table
-            .filter(friend_requests::id.eq(request_id))
-            .select(FriendRequest::as_select())
-            .first::<FriendRequest>(conn)
-            .optional()?
-            .ok_or(AppError::NotFound("Friend request not found"))?;
-
-        if request.from_uid != sender_uid {
-            return Err(AppError::Forbidden(
-                "Only the sender can cancel this friend request",
-            ));
+        if are_mutual_friends(conn, request.from_uid, request.to_uid)? {
+            return Ok(ResolveOutcome::RejectedWhileFriends(request));
         }
-        if request.status != FriendRequestStatus::Pending {
-            return Err(AppError::Conflict("Friend request is no longer pending"));
-        }
-
-        let updated =
-            diesel::update(friend_requests::table.filter(friend_requests::id.eq(request_id)))
-                .set((
-                    friend_requests::status.eq(FriendRequestStatus::Cancelled),
-                    friend_requests::decided_at.eq(now),
-                ))
-                .returning(FriendRequest::as_returning())
-                .get_result(conn)?;
-        Ok(updated)
+        Ok(ResolveOutcome::Resolved(request))
     })
 }
 

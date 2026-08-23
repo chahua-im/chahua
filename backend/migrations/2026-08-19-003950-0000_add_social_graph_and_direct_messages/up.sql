@@ -13,7 +13,7 @@ CREATE TABLE friendships (
 -- "WHERE uid1 = X OR uid2 = X" friend-list queries.
 CREATE INDEX idx_friendships_uid2 ON friendships(uid2);
 
-CREATE TYPE friend_request_status AS ENUM ('pending', 'accepted', 'rejected', 'cancelled');
+CREATE TYPE friend_request_status AS ENUM ('pending', 'accepted', 'rejected');
 CREATE TYPE friend_add_verification_mode AS ENUM ('direct', 'need_message', 'forbid', 'question');
 
 CREATE TABLE friend_requests (
