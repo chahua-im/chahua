@@ -794,6 +794,9 @@ msgstr "Message not found"
 msgid "Message saved"
 msgstr "Message saved"
 
+msgid "Messages"
+msgstr "Messages"
+
 msgid "Messages Font Size"
 msgstr "Messages Font Size"
 
@@ -1277,17 +1280,8 @@ msgstr "Share"
 msgid "Share Invite"
 msgstr "Share Invite"
 
-msgid "Show \"All\" Tab in Chats"
-msgstr "Show \"All\" Tab in Chats"
-
-msgid "Show \"Friends\" Tab in Chats"
-msgstr "Show \"Friends\" Tab in Chats"
-
-msgid "Show \"Groups\" Tab in Chats"
-msgstr "Show \"Groups\" Tab in Chats"
-
-msgid "Show \"Threads\" Tab in Chats"
-msgstr "Show \"Threads\" Tab in Chats"
+msgid "Show 'Threads' in Messages"
+msgstr "Show 'Threads' in Messages"
 
 msgid "Show Avatars Next to All Messages"
 msgstr "Show Avatars Next to All Messages"

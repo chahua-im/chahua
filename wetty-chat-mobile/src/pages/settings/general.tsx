@@ -25,18 +25,11 @@ import {
   selectLocale,
   selectMessageFontSize,
   selectShowAllAvatars,
-  selectShowAllTab,
-  selectShowFriendsTab,
-  selectShowGroupsTab,
-  selectShowThreadsTab,
+  selectShowThreadsInMessages,
   setMessageFontSize,
-  setShowAllTab,
-  setShowGroupsTab,
-  setShowFriendsTab,
-  setShowThreadsTab,
   setShowAllAvatars,
+  setShowThreadsInMessages,
 } from '@/store/settingsSlice';
-import { useFeatureGate } from '@/hooks/useFeatureGate';
 import type { BackAction } from '@/types/back-action';
 import styles from './GeneralSettings.module.scss';
 
@@ -56,11 +49,7 @@ export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSetti
   const history = useHistory();
   const locale = useSelector(selectLocale);
   const messageFontSize = useSelector(selectMessageFontSize);
-  const showAllTab = useSelector(selectShowAllTab);
-  const showGroupsTab = useSelector(selectShowGroupsTab);
-  const showFriendsTab = useSelector(selectShowFriendsTab);
-  const showThreadsTab = useSelector(selectShowThreadsTab);
-  const friendsEnabled = useFeatureGate('friends');
+  const showThreadsInMessages = useSelector(selectShowThreadsInMessages);
   const showAllAvatars = useSelector(selectShowAllAvatars);
   const sliderValue = chatFontSizeOptions.indexOf(messageFontSize);
 
@@ -95,25 +84,11 @@ export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSetti
             </IonLabel>
           </IonItem>
           <IonItem>
-            <IonToggle checked={showAllTab} onIonChange={(e) => dispatch(setShowAllTab(e.detail.checked))}>
-              <Trans>Show "All" Tab in Chats</Trans>
-            </IonToggle>
-          </IonItem>
-          <IonItem>
-            <IonToggle checked={showGroupsTab} onIonChange={(e) => dispatch(setShowGroupsTab(e.detail.checked))}>
-              <Trans>Show "Groups" Tab in Chats</Trans>
-            </IonToggle>
-          </IonItem>
-          {friendsEnabled && (
-            <IonItem>
-              <IonToggle checked={showFriendsTab} onIonChange={(e) => dispatch(setShowFriendsTab(e.detail.checked))}>
-                <Trans>Show "Friends" Tab in Chats</Trans>
-              </IonToggle>
-            </IonItem>
-          )}
-          <IonItem>
-            <IonToggle checked={showThreadsTab} onIonChange={(e) => dispatch(setShowThreadsTab(e.detail.checked))}>
-              <Trans>Show "Threads" Tab in Chats</Trans>
+            <IonToggle
+              checked={showThreadsInMessages}
+              onIonChange={(e) => dispatch(setShowThreadsInMessages(e.detail.checked))}
+            >
+              <Trans>Show 'Threads' in Messages</Trans>
             </IonToggle>
           </IonItem>
           <IonItem>

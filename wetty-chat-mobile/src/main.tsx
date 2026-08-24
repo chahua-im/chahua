@@ -21,7 +21,12 @@ import { I18nProvider } from '@lingui/react';
 import { activateDetectedLocale, i18n } from '@/i18n';
 import { createStore, setStoreInstance } from '@/store/index';
 import { kvDelete, kvGet, kvSet } from '@/utils/db';
-import { hydrateSettings, type SettingsState } from '@/store/settingsSlice';
+import {
+  hasLegacyChatListSettings,
+  hydrateSettings,
+  serializeSettings,
+  type StoredSettings,
+} from '@/store/settingsSlice';
 import { hydrateStickerPreferences } from '@/store/stickerPreferencesSlice';
 import { installBootstrapRecoveryHandlers } from '@/bootstrapRecovery';
 import { bootstrapAuth } from '@/authBootstrap';
@@ -41,7 +46,7 @@ async function bootstrap() {
   // Load persisted state from IndexedDB
   const [savedSettings, savedStickerPackOrder, savedAutoSort, savedFavoriteOrder, savedAutoSortFavorites] =
     await Promise.all([
-      kvGet<Partial<SettingsState>>('settings'),
+      kvGet<StoredSettings>('settings'),
       kvGet<unknown>('stickerPackOrder'),
       kvGet<unknown>('autoSortStickerPacks'),
       kvGet<unknown>('favoriteStickerOrder'),
@@ -49,6 +54,10 @@ async function bootstrap() {
     ]);
 
   const settings = hydrateSettings(savedSettings);
+
+  if (hasLegacyChatListSettings(savedSettings)) {
+    await kvSet('settings', serializeSettings(settings));
+  }
   const hydratedStickerPreferences = hydrateStickerPreferences(
     savedStickerPackOrder,
     savedAutoSort,

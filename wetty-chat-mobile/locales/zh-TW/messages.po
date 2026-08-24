@@ -794,6 +794,9 @@ msgstr "找不到訊息"
 msgid "Message saved"
 msgstr "訊息已收藏"
 
+msgid "Messages"
+msgstr "訊息"
+
 msgid "Messages Font Size"
 msgstr "訊息字體大小"
 
@@ -1277,17 +1280,8 @@ msgstr "分享"
 msgid "Share Invite"
 msgstr "分享邀請"
 
-msgid "Show \"All\" Tab in Chats"
-msgstr "在聊天中顯示「全部」標籤"
-
-msgid "Show \"Friends\" Tab in Chats"
-msgstr "在聊天中显示“好友”标签"
-
-msgid "Show \"Groups\" Tab in Chats"
-msgstr "在聊天中顯示「群組」標籤"
-
-msgid "Show \"Threads\" Tab in Chats"
-msgstr "在聊天中显示“话题”标签"
+msgid "Show 'Threads' in Messages"
+msgstr "在訊息中顯示「话题」"
 
 msgid "Show Avatars Next to All Messages"
 msgstr "在所有訊息旁顯示頭像"

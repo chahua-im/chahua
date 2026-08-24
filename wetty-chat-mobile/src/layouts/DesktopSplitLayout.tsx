@@ -277,15 +277,15 @@ export function DesktopSplitLayout() {
   const disabledSavedMessagesSettings = !savedMessagesEnabled && currentRoute.savedMessagesSettings;
   const globalSettingsOpen = currentRoute.globalSettings;
   const initialArchivedTab: ChatListTab | null =
-    archivedMatch?.tab === 'threads' || archivedMatch?.tab === 'groups' || archivedMatch?.tab === 'all'
+    archivedMatch?.tab === 'threads' || archivedMatch?.tab === 'groups' || archivedMatch?.tab === 'messages'
       ? archivedMatch.tab
       : archivedMatch
-        ? 'all'
+        ? 'messages'
         : null;
   const [archivedSidebarTab, setArchivedSidebarTab] = useState<ChatListTab | null>(initialArchivedTab);
   const [friendRequestsSidebarOpen, setFriendRequestsSidebarOpen] = useState(friendRequestsMatch && friendsEnabled);
   const archivedMode = archivedSidebarTab != null;
-  const archivedTab = archivedSidebarTab ?? 'all';
+  const archivedTab = archivedSidebarTab ?? 'messages';
   const groupInfoModalChatId =
     groupInfoSavedMessagesMatch?.id ?? groupInfoSettingsMatch?.id ?? groupInfoMatch?.id ?? null;
   const groupInfoModalRoutePath = groupInfoSavedMessagesMatch

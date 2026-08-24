@@ -2,25 +2,21 @@ import { IonBadge, IonLabel, IonSegment, IonSegmentButton } from '@ionic/react';
 import { Trans } from '@lingui/react/macro';
 import { useSelector } from 'react-redux';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
-import {
-  selectShowAllTab,
-  selectShowFriendsTab,
-  selectShowGroupsTab,
-  selectShowThreadsTab,
-} from '@/store/settingsSlice';
 import { selectPendingIncomingCount } from '@/store/socialSlice';
 import styles from './ChatListSegment.module.scss';
 
-export type ChatListTab = 'all' | 'groups' | 'friends' | 'threads';
+export type ChatListTab = 'messages' | 'groups' | 'friends' | 'threads';
 
 interface ChatListSegmentProps {
   value: ChatListTab;
   onChange: (tab: ChatListTab) => void;
-  allUnreadCount: number;
+  messagesUnreadCount: number;
   groupsUnreadCount: number;
   friendsUnreadCount: number;
   threadsUnreadCount: number;
-  /** Feature gate for the Friends tab; also needs the settings toggle on. */
+  /** Whether this segment controls an archived chat list. */
+  archivedMode: boolean;
+  /** Feature gate for the Friends tab. */
   friendsEnabled: boolean;
 }
 
@@ -34,24 +30,21 @@ function UnreadBadge({ count }: { count: number }) {
 }
 
 /**
- * Second-level navigation over the chat list. Which tabs exist is controlled
- * from Settings > General; the Friends tab additionally requires the friends
- * feature gate. Pending friend requests surface as a badge on the Friends
- * tab (overriding the unread count - the request needs attention first).
+ * Second-level navigation over the chat list. The Friends tab requires the
+ * friends feature gate and is unavailable in archived chat lists. Pending
+ * friend requests surface as a badge on the active Friends tab (overriding
+ * the unread count - the request needs attention first).
  */
 export function ChatListSegment({
   value,
   onChange,
-  allUnreadCount,
+  messagesUnreadCount,
   groupsUnreadCount,
   friendsUnreadCount,
   threadsUnreadCount,
+  archivedMode,
   friendsEnabled,
 }: ChatListSegmentProps) {
-  const showAllTab = useSelector(selectShowAllTab);
-  const showGroupsTab = useSelector(selectShowGroupsTab);
-  const showFriendsTab = useSelector(selectShowFriendsTab) && friendsEnabled;
-  const showThreadsTab = useSelector(selectShowThreadsTab);
   const incomingRequestCount = useSelector(selectPendingIncomingCount);
 
   return (
@@ -64,23 +57,19 @@ export function ChatListSegment({
           if (val) onChange(val);
         }}
       >
-        {showAllTab && (
-          <IonSegmentButton value="all">
-            <IonLabel>
-              <Trans>All</Trans>
-              <UnreadBadge count={allUnreadCount} />
-            </IonLabel>
-          </IonSegmentButton>
-        )}
-        {showGroupsTab && (
-          <IonSegmentButton value="groups">
-            <IonLabel>
-              <Trans>Groups</Trans>
-              <UnreadBadge count={groupsUnreadCount} />
-            </IonLabel>
-          </IonSegmentButton>
-        )}
-        {showFriendsTab && (
+        <IonSegmentButton value="messages">
+          <IonLabel>
+            <Trans>Messages</Trans>
+            <UnreadBadge count={messagesUnreadCount} />
+          </IonLabel>
+        </IonSegmentButton>
+        <IonSegmentButton value="groups">
+          <IonLabel>
+            <Trans>Groups</Trans>
+            <UnreadBadge count={groupsUnreadCount} />
+          </IonLabel>
+        </IonSegmentButton>
+        {friendsEnabled && !archivedMode && (
           <IonSegmentButton value="friends">
             <IonLabel>
               <Trans>Friends</Trans>
@@ -94,14 +83,12 @@ export function ChatListSegment({
             </IonLabel>
           </IonSegmentButton>
         )}
-        {showThreadsTab && (
-          <IonSegmentButton value="threads">
-            <IonLabel>
-              <Trans>Threads</Trans>
-              <UnreadBadge count={threadsUnreadCount} />
-            </IonLabel>
-          </IonSegmentButton>
-        )}
+        <IonSegmentButton value="threads">
+          <IonLabel>
+            <Trans>Threads</Trans>
+            <UnreadBadge count={threadsUnreadCount} />
+          </IonLabel>
+        </IonSegmentButton>
       </IonSegment>
     </div>
   );

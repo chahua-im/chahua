@@ -7,10 +7,10 @@ import { BackButton } from '@/components/BackButton';
 import type { ChatListTab } from '@/components/chat/lists/ChatListSegment';
 
 function normalizeTab(tab?: string): ChatListTab {
-  if (tab === 'threads' || tab === 'groups' || tab === 'friends' || tab === 'all') {
+  if (tab === 'threads' || tab === 'groups' || tab === 'messages') {
     return tab;
   }
-  return 'all';
+  return 'messages';
 }
 
 interface ArchivedPageParams {
@@ -34,7 +34,7 @@ export default function ArchivedPage() {
         </IonToolbar>
       </IonHeader>
       <ChatList
-        key={tab ?? 'all'}
+        key={normalizeTab(tab)}
         archivedMode
         initialTab={normalizeTab(tab)}
         onChatSelect={(chatId, resumeHash) => history.push({ pathname: `/chats/chat/${chatId}`, hash: resumeHash })}

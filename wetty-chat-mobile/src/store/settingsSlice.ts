@@ -31,15 +31,28 @@ export function detectLocale(): string {
 export interface SettingsState {
   locale: string | null;
   messageFontSize: ChatFontSizeOption;
-  showAllTab: boolean;
-  showGroupsTab: boolean;
-  showFriendsTab: boolean;
-  showThreadsTab: boolean;
+  showThreadsInMessages: boolean;
   showAllAvatars: boolean;
   pinnedReactions: string[];
   recentReactions: string[];
   /** Selected chat list segment tab; ephemeral UI state, never persisted. */
-  chatListTab: 'all' | 'groups' | 'friends' | 'threads';
+  chatListTab: 'messages' | 'groups' | 'friends' | 'threads';
+}
+
+type LegacyChatListSettings = {
+  showAllTab?: boolean;
+  showGroupsTab?: boolean;
+  showFriendsTab?: boolean;
+  showThreadsTab?: boolean;
+};
+
+export type StoredSettings = Partial<SettingsState> & LegacyChatListSettings;
+
+export function hasLegacyChatListSettings(saved: StoredSettings | null | undefined): boolean {
+  return Boolean(
+    saved &&
+    ('showAllTab' in saved || 'showGroupsTab' in saved || 'showFriendsTab' in saved || 'showThreadsTab' in saved),
+  );
 }
 
 export function isChatFontSizeOption(value: unknown): value is ChatFontSizeOption {
@@ -50,19 +63,19 @@ function normalizePinnedReactions(reactions: string[]): string[] {
   return Array.from(new Set(reactions)).slice(0, MAX_PINNED_REACTIONS);
 }
 
+export function serializeSettings(state: SettingsState) {
+  return {
+    locale: state.locale,
+    messageFontSize: state.messageFontSize,
+    showThreadsInMessages: state.showThreadsInMessages,
+    showAllAvatars: state.showAllAvatars,
+    pinnedReactions: state.pinnedReactions,
+    recentReactions: state.recentReactions,
+  };
+}
+
 function persistSettings(state: SettingsState) {
-  const currentState = current(state);
-  void kvSet('settings', {
-    locale: currentState.locale,
-    messageFontSize: currentState.messageFontSize,
-    showAllTab: currentState.showAllTab,
-    showGroupsTab: currentState.showGroupsTab,
-    showFriendsTab: currentState.showFriendsTab,
-    showThreadsTab: currentState.showThreadsTab,
-    showAllAvatars: currentState.showAllAvatars,
-    pinnedReactions: currentState.pinnedReactions,
-    recentReactions: currentState.recentReactions,
-  });
+  void kvSet('settings', serializeSettings(current(state)));
 }
 
 function persistEffectiveLocale(locale: string | null) {
@@ -77,25 +90,28 @@ export function getChatFontSizeStyle(messageFontSize: ChatFontSizeOption): strin
 const defaultSettings: SettingsState = {
   locale: null,
   messageFontSize: defaultChatFontSize,
-  showAllTab: true,
-  showGroupsTab: true,
-  showFriendsTab: true,
-  showThreadsTab: true,
+  showThreadsInMessages: true,
   showAllAvatars: false,
   pinnedReactions: normalizePinnedReactions(['👍']),
   recentReactions: ['❤️', '😂', '😮', '😢', '🎉'],
-  chatListTab: 'all',
+  chatListTab: 'messages',
 };
 
-export function hydrateSettings(saved: Partial<SettingsState> | null | undefined): SettingsState {
+export function hydrateSettings(saved: StoredSettings | null | undefined): SettingsState {
+  const persistedSettings = { ...saved };
+  delete persistedSettings.showAllTab;
+  delete persistedSettings.showGroupsTab;
+  delete persistedSettings.showFriendsTab;
+  delete persistedSettings.showThreadsTab;
+
   return {
     ...defaultSettings,
-    ...saved,
+    ...persistedSettings,
     messageFontSize: isChatFontSizeOption(saved?.messageFontSize) ? saved.messageFontSize : defaultChatFontSize,
     pinnedReactions: normalizePinnedReactions(saved?.pinnedReactions ?? defaultSettings.pinnedReactions),
     recentReactions: saved?.recentReactions ?? defaultSettings.recentReactions,
     // UI state, never persisted - always reset on hydrate.
-    chatListTab: 'all',
+    chatListTab: 'messages',
   };
 }
 
@@ -112,20 +128,8 @@ const settingsSlice = createSlice({
       state.messageFontSize = action.payload;
       persistSettings(state);
     },
-    setShowAllTab(state, action: PayloadAction<boolean>) {
-      state.showAllTab = action.payload;
-      persistSettings(state);
-    },
-    setShowGroupsTab(state, action: PayloadAction<boolean>) {
-      state.showGroupsTab = action.payload;
-      persistSettings(state);
-    },
-    setShowFriendsTab(state, action: PayloadAction<boolean>) {
-      state.showFriendsTab = action.payload;
-      persistSettings(state);
-    },
-    setShowThreadsTab(state, action: PayloadAction<boolean>) {
-      state.showThreadsTab = action.payload;
+    setShowThreadsInMessages(state, action: PayloadAction<boolean>) {
+      state.showThreadsInMessages = action.payload;
       persistSettings(state);
     },
     setChatListTab(state, action: PayloadAction<SettingsState['chatListTab']>) {
@@ -152,10 +156,7 @@ const settingsSlice = createSlice({
 export const {
   setLocale,
   setMessageFontSize,
-  setShowAllTab,
-  setShowGroupsTab,
-  setShowFriendsTab,
-  setShowThreadsTab,
+  setShowThreadsInMessages,
   setChatListTab,
   setShowAllAvatars,
   setPinnedReactions,
@@ -164,10 +165,7 @@ export const {
 export const selectLocale = (state: RootState) => state.settings.locale;
 export const selectEffectiveLocale = (state: RootState) => state.settings.locale ?? detectLocale();
 export const selectMessageFontSize = (state: RootState) => state.settings.messageFontSize;
-export const selectShowAllTab = (state: RootState) => state.settings.showAllTab;
-export const selectShowGroupsTab = (state: RootState) => state.settings.showGroupsTab;
-export const selectShowFriendsTab = (state: RootState) => state.settings.showFriendsTab;
-export const selectShowThreadsTab = (state: RootState) => state.settings.showThreadsTab;
+export const selectShowThreadsInMessages = (state: RootState) => state.settings.showThreadsInMessages;
 export const selectChatListTab = (state: RootState) => state.settings.chatListTab;
 export const selectShowAllAvatars = (state: RootState) => state.settings.showAllAvatars;
 export const selectPinnedReactions = (state: RootState) => state.settings.pinnedReactions;

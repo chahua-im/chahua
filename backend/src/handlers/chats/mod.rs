@@ -575,6 +575,7 @@ async fn get_unread_count(
     ),
     responses(
         (status = NO_CONTENT),
+        (status = 400, description = "DM chats cannot be archived"),
     ),
     security(("uid_header" = []), ("bearer_jwt" = [])),
 )]
@@ -587,6 +588,14 @@ async fn archive_chat(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+
+    let kind: GroupKind = groups::table
+        .find(chat_id)
+        .select(groups::kind)
+        .first(conn)?;
+    if kind == GroupKind::Dm {
+        return Err(AppError::BadRequest("DM chats cannot be archived"));
+    }
 
     diesel::update(
         group_membership::table.filter(
