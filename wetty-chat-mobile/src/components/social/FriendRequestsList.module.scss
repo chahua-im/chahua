@@ -1,0 +1,67 @@
+.content {
+  --overflow: hidden;
+}
+
+.scrollHost {
+  height: 100%;
+}
+
+.chatsListAvatar {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chatsListLabel {
+  overflow: hidden;
+
+  h3 {
+    margin: 0;
+    color: var(--ion-text-color);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+  }
+}
+
+.chatsListTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chatsListTitleText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+
+.chatsListPreview {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  color: var(--ion-color-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatListItem {
+  color: inherit;
+}
+
+.requestActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusNote {
+  white-space: nowrap;
+}

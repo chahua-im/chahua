@@ -1,15 +1,14 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { friendsApi, type FriendRequestResponse, type FriendResponse } from '@/api/friends';
+import { friendsApi, type FriendRequestHistoryEntry, type FriendResponse } from '@/api/friends';
 import { blocksApi, type BlockResponse } from '@/api/blocks';
 import type { RootState } from './index';
 
 interface SocialState {
   friends: FriendResponse[];
   friendsLoaded: boolean;
-  incomingRequests: FriendRequestResponse[];
-  outgoingRequests: FriendRequestResponse[];
-  incomingRequestsLoaded: boolean;
-  outgoingRequestsLoaded: boolean;
+  requestHistory: FriendRequestHistoryEntry[];
+  requestHistoryLoaded: boolean;
+  pendingIncomingCount: number;
   blocks: BlockResponse[];
   blocksLoaded: boolean;
 }
@@ -17,10 +16,9 @@ interface SocialState {
 const initialState: SocialState = {
   friends: [],
   friendsLoaded: false,
-  incomingRequests: [],
-  outgoingRequests: [],
-  incomingRequestsLoaded: false,
-  outgoingRequestsLoaded: false,
+  requestHistory: [],
+  requestHistoryLoaded: false,
+  pendingIncomingCount: 0,
   blocks: [],
   blocksLoaded: false,
 };
@@ -29,12 +27,12 @@ export const fetchFriends = createAsyncThunk('social/fetchFriends', async () => 
   return await friendsApi.listFriends();
 });
 
-export const fetchIncomingRequests = createAsyncThunk('social/fetchIncomingRequests', async () => {
-  return await friendsApi.listIncomingRequests();
+export const fetchRequestHistory = createAsyncThunk('social/fetchRequestHistory', async () => {
+  return await friendsApi.listRequestHistory();
 });
 
-export const fetchOutgoingRequests = createAsyncThunk('social/fetchOutgoingRequests', async () => {
-  return await friendsApi.listOutgoingRequests();
+export const fetchPendingIncomingCount = createAsyncThunk('social/fetchPendingIncomingCount', async () => {
+  return await friendsApi.getPendingIncomingCount();
 });
 
 export const fetchBlocks = createAsyncThunk('social/fetchBlocks', async () => {
@@ -53,17 +51,6 @@ const socialSlice = createSlice({
     friendRemoved(state, action: PayloadAction<number>) {
       state.friends = state.friends.filter((f) => f.user.uid !== action.payload);
     },
-    outgoingRequestAdded(state, action: PayloadAction<FriendRequestResponse>) {
-      if (!state.outgoingRequests.some((r) => r.id === action.payload.id)) {
-        state.outgoingRequests.unshift(action.payload);
-      }
-    },
-    outgoingRequestRemoved(state, action: PayloadAction<string>) {
-      state.outgoingRequests = state.outgoingRequests.filter((r) => r.id !== action.payload);
-    },
-    incomingRequestRemoved(state, action: PayloadAction<string>) {
-      state.incomingRequests = state.incomingRequests.filter((r) => r.id !== action.payload);
-    },
     blockAdded(state, action: PayloadAction<BlockResponse>) {
       if (!state.blocks.some((b) => b.user.uid === action.payload.user.uid)) {
         state.blocks.unshift(action.payload);
@@ -79,13 +66,16 @@ const socialSlice = createSlice({
         state.friends = action.payload;
         state.friendsLoaded = true;
       })
-      .addCase(fetchIncomingRequests.fulfilled, (state, action) => {
-        state.incomingRequests = action.payload;
-        state.incomingRequestsLoaded = true;
+      .addCase(fetchRequestHistory.fulfilled, (state, action) => {
+        state.requestHistory = action.payload;
+        state.requestHistoryLoaded = true;
+        // History is authoritative for the badge at this instant.
+        state.pendingIncomingCount = action.payload.filter(
+          (request) => request.direction === 'incoming' && request.status === 'pending',
+        ).length;
       })
-      .addCase(fetchOutgoingRequests.fulfilled, (state, action) => {
-        state.outgoingRequests = action.payload;
-        state.outgoingRequestsLoaded = true;
+      .addCase(fetchPendingIncomingCount.fulfilled, (state, action) => {
+        state.pendingIncomingCount = action.payload;
       })
       .addCase(fetchBlocks.fulfilled, (state, action) => {
         state.blocks = action.payload;
@@ -94,22 +84,13 @@ const socialSlice = createSlice({
   },
 });
 
-export const {
-  friendAdded,
-  friendRemoved,
-  outgoingRequestAdded,
-  outgoingRequestRemoved,
-  incomingRequestRemoved,
-  blockAdded,
-  blockRemoved,
-} = socialSlice.actions;
+export const { friendAdded, friendRemoved, blockAdded, blockRemoved } = socialSlice.actions;
 
 export const selectFriends = (state: RootState): FriendResponse[] => state.social.friends;
 export const selectFriendsLoaded = (state: RootState): boolean => state.social.friendsLoaded;
-export const selectIncomingRequests = (state: RootState): FriendRequestResponse[] => state.social.incomingRequests;
-export const selectOutgoingRequests = (state: RootState): FriendRequestResponse[] => state.social.outgoingRequests;
-export const selectIncomingRequestsLoaded = (state: RootState): boolean => state.social.incomingRequestsLoaded;
-export const selectOutgoingRequestsLoaded = (state: RootState): boolean => state.social.outgoingRequestsLoaded;
+export const selectRequestHistory = (state: RootState): FriendRequestHistoryEntry[] => state.social.requestHistory;
+export const selectRequestHistoryLoaded = (state: RootState): boolean => state.social.requestHistoryLoaded;
+export const selectPendingIncomingCount = (state: RootState): number => state.social.pendingIncomingCount;
 export const selectBlocks = (state: RootState): BlockResponse[] => state.social.blocks;
 export const selectBlocksLoaded = (state: RootState): boolean => state.social.blocksLoaded;
 
@@ -119,10 +100,17 @@ export const selectIsFriend = (state: RootState, uid: number): boolean =>
 export const selectIsBlocked = (state: RootState, uid: number): boolean =>
   state.social.blocks.some((b) => b.user.uid === uid);
 
-export const selectIncomingRequestFrom = (state: RootState, uid: number): FriendRequestResponse | undefined =>
-  state.social.incomingRequests.find((r) => r.from.uid === uid);
+export const selectPendingIncomingRequestFrom = (
+  state: RootState,
+  uid: number,
+): FriendRequestHistoryEntry | undefined =>
+  state.social.requestHistory.find(
+    (request) => request.direction === 'incoming' && request.status === 'pending' && request.from.uid === uid,
+  );
 
-export const selectOutgoingRequestTo = (state: RootState, uid: number): FriendRequestResponse | undefined =>
-  state.social.outgoingRequests.find((r) => r.to.uid === uid);
+export const selectPendingOutgoingRequestTo = (state: RootState, uid: number): FriendRequestHistoryEntry | undefined =>
+  state.social.requestHistory.find(
+    (request) => request.direction === 'outgoing' && request.status === 'pending' && request.to.uid === uid,
+  );
 
 export default socialSlice.reducer;

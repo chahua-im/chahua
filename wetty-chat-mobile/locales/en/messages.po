@@ -55,6 +55,9 @@ msgstr "About"
 msgid "Accept"
 msgstr "Accept"
 
+msgid "Accepted"
+msgstr "Accepted"
+
 msgid "Action failed"
 msgstr "Action failed"
 
@@ -93,10 +96,6 @@ msgstr "Allowed"
 
 msgid "Already in this chat"
 msgstr "Already in this chat"
-
-#. placeholder {0}: req.message ?? ''
-msgid "Answer: {0}"
-msgstr "Answer: {0}"
 
 msgid "Anyone can send you a friend request. No verification message is needed; you just accept or decline."
 msgstr "Anyone can send you a friend request. No verification message is needed; you just accept or decline."
@@ -843,6 +842,9 @@ msgstr "No chats yet"
 msgid "No friend chats yet"
 msgstr "No friend chats yet"
 
+msgid "No friend requests"
+msgstr "No friend requests"
+
 msgid "No group description yet."
 msgstr "No group description yet."
 
@@ -875,9 +877,6 @@ msgstr "No messages yet"
 
 msgid "No one can send you a friend request."
 msgstr "No one can send you a friend request."
-
-msgid "No pending friend requests"
-msgstr "No pending friend requests"
 
 msgid "No pinned messages"
 msgstr "No pinned messages"
@@ -945,9 +944,6 @@ msgstr "Optional"
 msgid "Original message is no longer available"
 msgstr "Original message is no longer available"
 
-msgid "Outgoing Requests"
-msgstr "Outgoing Requests"
-
 msgid "Owned"
 msgstr "Owned"
 
@@ -966,8 +962,8 @@ msgstr "Packs below this line are not auto-sorted"
 msgid "Paste code"
 msgstr "Paste code"
 
-msgid "Pending"
-msgstr "Pending"
+msgid "Pending approval"
+msgstr "Pending approval"
 
 msgid "Permission"
 msgstr "Permission"
@@ -1049,24 +1045,19 @@ msgstr "Push notifications enabled"
 msgid "Push notifications turned off"
 msgstr "Push notifications turned off"
 
+#. placeholder {0}: request.question
+#. placeholder {1}: request.message ?? ''
+msgid "Q: {0} · A: {1}"
+msgstr "Q: {0} · A: {1}"
+
 msgid "Question"
 msgstr "Question"
-
-#. placeholder {0}: req.question
-msgid "Question: {0}"
-msgstr "Question: {0}"
 
 msgid "Reactions"
 msgstr "Reactions"
 
 msgid "Read"
 msgstr "Read"
-
-msgid "Received a friend request from {name}"
-msgstr "Received a friend request from {name}"
-
-msgid "Received friend requests from {name} and others"
-msgstr "Received friend requests from {name} and others"
 
 msgid "Reconnecting..."
 msgstr "Reconnecting..."
@@ -1079,6 +1070,15 @@ msgstr "Recording is too short."
 
 msgid "Reject"
 msgstr "Reject"
+
+msgid "Reject Friend Request"
+msgstr "Reject Friend Request"
+
+msgid "Reject this friend request?"
+msgstr "Reject this friend request?"
+
+msgid "Rejected"
+msgstr "Rejected"
 
 msgid "Release to save"
 msgstr "Release to save"
@@ -1482,9 +1482,9 @@ msgstr "Uploading {0}%"
 msgid "Uploading..."
 msgstr "Uploading..."
 
-#. placeholder {0}: fresh[0].from.uid
 #. placeholder {0}: invite.targetUid
 #. placeholder {0}: member.uid
+#. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "User {0}"
 
@@ -1502,9 +1502,6 @@ msgstr "User unblocked"
 
 msgid "Videos"
 msgstr "Videos"
-
-msgid "View"
-msgstr "View"
 
 msgid "View all pinned messages"
 msgstr "View all pinned messages"

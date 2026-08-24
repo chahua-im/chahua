@@ -62,7 +62,7 @@ import {
   setChatListTab,
 } from '@/store/settingsSlice';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
-import { fetchIncomingRequests, selectIncomingRequests } from '@/store/socialSlice';
+import { fetchPendingIncomingCount, selectPendingIncomingCount } from '@/store/socialSlice';
 import { markChatAsUnread, markMessagesAsRead, type MessagePreview, type MessageResponse } from '@/api/messages';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { getChatDisplayName } from '@/utils/chatDisplay';
@@ -194,7 +194,7 @@ export function ChatList({
   const friendsEnabled = useFeatureGate('friends');
   const globalTab = useSelector(selectChatListTab);
   const messageChats = useSelector((state: RootState) => state.messages.chats);
-  const incomingRequests = useSelector(selectIncomingRequests);
+  const pendingIncomingCount = useSelector(selectPendingIncomingCount);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { text: string; savedAt: number }>>({});
@@ -245,7 +245,7 @@ export function ChatList({
       getThreads({ archived: false }),
       getChats({ archived: true }),
       getThreads({ archived: true }),
-      dispatch(fetchIncomingRequests()).unwrap(),
+      dispatch(fetchPendingIncomingCount()).unwrap(),
     ]);
 
     dispatch(setChatsList({ chats: activeChatRes.data.chats || [], archived: false }));
@@ -495,9 +495,9 @@ export function ChatList({
       <div slot="end" className={styles.chatsListEndSlot}>
         <div className={styles.chatsListTime} />
         <div className={styles.chatsListBadge}>
-          {incomingRequests.length > 0 ? (
+          {pendingIncomingCount > 0 ? (
             <IonBadge mode="ios" color="primary">
-              {formatUnreadBadge(incomingRequests.length)}
+              {formatUnreadBadge(pendingIncomingCount)}
             </IonBadge>
           ) : null}
         </div>

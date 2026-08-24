@@ -11,8 +11,10 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::friends::{
-    FriendAddInfoResponse, FriendRequestResponse, FriendResponse, FriendSettingsResponse,
-    ListFriendRequestsResponse, ListFriendsResponse, UpdateFriendSettingsBody,
+    FriendAddInfoResponse, FriendRequestDirection, FriendRequestHistoryEntry,
+    FriendRequestResponse, FriendResponse, FriendSettingsResponse,
+    ListFriendRequestHistoryResponse, ListFriendsResponse, PendingFriendRequestCountResponse,
+    UpdateFriendSettingsBody,
 };
 use crate::dto::users::MemberSummary;
 use crate::dto::ws::{
@@ -259,38 +261,52 @@ async fn create_friend_request(
 
 #[utoipa::path(
     get,
-    path = "/requests/incoming",
+    path = "/requests/pending/count",
     tag = "friends",
-    responses((status = 200, description = "Pending incoming friend requests", body = ListFriendRequestsResponse)),
+    responses((status = 200, description = "Number of pending incoming friend requests", body = PendingFriendRequestCountResponse)),
     security(("uid_header" = []), ("bearer_jwt" = []))
 )]
-async fn list_incoming_requests(
+async fn count_pending_incoming_requests(
     CurrentUid(uid): CurrentUid,
-    State(state): State<AppState>,
     mut conn: DbConn,
-) -> Result<Json<ListFriendRequestsResponse>, AppError> {
+) -> Result<Json<PendingFriendRequestCountResponse>, AppError> {
     let conn = &mut *conn;
-    let requests = social::list_incoming_requests(conn, uid)?;
-    let requests = build_request_responses(conn, &state, &requests)?;
-    Ok(Json(ListFriendRequestsResponse { requests }))
+    let pending_incoming_count = social::count_incoming_requests(conn, uid)?;
+    Ok(Json(PendingFriendRequestCountResponse {
+        pending_incoming_count,
+    }))
 }
 
 #[utoipa::path(
     get,
-    path = "/requests/outgoing",
+    path = "/requests",
     tag = "friends",
-    responses((status = 200, description = "Pending outgoing friend requests", body = ListFriendRequestsResponse)),
+    responses((status = 200, description = "Friend request history in both directions, newest first", body = ListFriendRequestHistoryResponse)),
     security(("uid_header" = []), ("bearer_jwt" = []))
 )]
-async fn list_outgoing_requests(
+async fn list_friend_request_history(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     mut conn: DbConn,
-) -> Result<Json<ListFriendRequestsResponse>, AppError> {
+) -> Result<Json<ListFriendRequestHistoryResponse>, AppError> {
     let conn = &mut *conn;
-    let requests = social::list_outgoing_requests(conn, uid)?;
-    let requests = build_request_responses(conn, &state, &requests)?;
-    Ok(Json(ListFriendRequestsResponse { requests }))
+    let rows = social::list_friend_request_history(conn, uid)?;
+    let directions: Vec<FriendRequestDirection> = rows
+        .iter()
+        .map(|row| {
+            if row.to_uid == uid {
+                FriendRequestDirection::Incoming
+            } else {
+                FriendRequestDirection::Outgoing
+            }
+        })
+        .collect();
+    let requests = build_request_responses(conn, &state, &rows)?
+        .into_iter()
+        .zip(directions)
+        .map(|(request, direction)| FriendRequestHistoryEntry { request, direction })
+        .collect();
+    Ok(Json(ListFriendRequestHistoryResponse { requests }))
 }
 
 #[utoipa::path(
@@ -417,8 +433,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_friends))
         .routes(routes!(delete_friend))
         .routes(routes!(create_friend_request))
-        .routes(routes!(list_incoming_requests))
-        .routes(routes!(list_outgoing_requests))
+        .routes(routes!(count_pending_incoming_requests))
+        .routes(routes!(list_friend_request_history))
         .routes(routes!(accept_friend_request))
         .routes(routes!(reject_friend_request))
         .routes(routes!(get_my_friend_settings))

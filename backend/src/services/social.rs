@@ -560,36 +560,67 @@ pub fn resolve_friend_request(
     })
 }
 
-/// List pending friend requests directed at `uid`.
-pub fn list_incoming_requests(
+/// List all friend request history directed at `uid`, newest first.
+pub fn list_incoming_request_history(
     conn: &mut PgConnection,
     uid: i32,
 ) -> QueryResult<Vec<FriendRequest>> {
+    friend_requests::table
+        .filter(friend_requests::to_uid.eq(uid))
+        .order((
+            friend_requests::created_at.desc(),
+            friend_requests::id.desc(),
+        ))
+        .select(FriendRequest::as_select())
+        .load::<FriendRequest>(conn)
+}
+
+/// List all friend request history sent by `uid`, newest first.
+pub fn list_outgoing_request_history(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> QueryResult<Vec<FriendRequest>> {
+    friend_requests::table
+        .filter(friend_requests::from_uid.eq(uid))
+        .order((
+            friend_requests::created_at.desc(),
+            friend_requests::id.desc(),
+        ))
+        .select(FriendRequest::as_select())
+        .load::<FriendRequest>(conn)
+}
+
+/// Newest-first merge of both history directions, ties broken by descending id.
+fn merge_request_history(
+    incoming: Vec<FriendRequest>,
+    outgoing: Vec<FriendRequest>,
+) -> Vec<FriendRequest> {
+    let mut merged = incoming;
+    merged.extend(outgoing);
+    merged.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+    merged
+}
+
+/// All friend request history involving `uid` in either direction, newest first.
+pub fn list_friend_request_history(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> QueryResult<Vec<FriendRequest>> {
+    let incoming = list_incoming_request_history(conn, uid)?;
+    let outgoing = list_outgoing_request_history(conn, uid)?;
+    Ok(merge_request_history(incoming, outgoing))
+}
+
+/// Number of pending friend requests directed at `uid`; drives the request badge.
+pub fn count_incoming_requests(conn: &mut PgConnection, uid: i32) -> QueryResult<i64> {
     friend_requests::table
         .filter(
             friend_requests::to_uid
                 .eq(uid)
                 .and(friend_requests::status.eq(FriendRequestStatus::Pending)),
         )
-        .order(friend_requests::created_at.desc())
-        .select(FriendRequest::as_select())
-        .load::<FriendRequest>(conn)
-}
-
-/// List pending friend requests sent by `uid`.
-pub fn list_outgoing_requests(
-    conn: &mut PgConnection,
-    uid: i32,
-) -> QueryResult<Vec<FriendRequest>> {
-    friend_requests::table
-        .filter(
-            friend_requests::from_uid
-                .eq(uid)
-                .and(friend_requests::status.eq(FriendRequestStatus::Pending)),
-        )
-        .order(friend_requests::created_at.desc())
-        .select(FriendRequest::as_select())
-        .load::<FriendRequest>(conn)
+        .count()
+        .get_result(conn)
 }
 
 /// Block a user. Idempotent. Blocking only gates communication: it preserves
@@ -626,7 +657,48 @@ pub fn unblock_user(conn: &mut PgConnection, blocker: i32, blocked: i32) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use super::canonical_pair;
+    use super::{canonical_pair, merge_request_history};
+    use crate::models::{FriendRequest, FriendRequestStatus};
+    use chrono::{DateTime, Utc};
+
+    fn request_history_entry(
+        id: i64,
+        created_at_seconds: i64,
+        status: FriendRequestStatus,
+    ) -> FriendRequest {
+        FriendRequest {
+            id,
+            from_uid: 1,
+            to_uid: 2,
+            status,
+            created_at: DateTime::<Utc>::from_timestamp(created_at_seconds, 0).unwrap(),
+            decided_at: None,
+            message: None,
+            question: None,
+        }
+    }
+
+    #[test]
+    fn merge_request_history_orders_all_statuses_with_id_tiebreak() {
+        let incoming = vec![
+            request_history_entry(10, 100, FriendRequestStatus::Pending),
+            request_history_entry(30, 300, FriendRequestStatus::Accepted),
+        ];
+        let outgoing = vec![
+            request_history_entry(20, 200, FriendRequestStatus::Rejected),
+            request_history_entry(40, 300, FriendRequestStatus::Pending),
+        ];
+
+        let merged = merge_request_history(incoming, outgoing);
+
+        assert_eq!(
+            merged
+                .into_iter()
+                .map(|request| request.id)
+                .collect::<Vec<_>>(),
+            vec![40, 30, 20, 10],
+        );
+    }
 
     #[test]
     fn canonical_pair_orders_low_high() {
