@@ -1,0 +1,2 @@
+DROP INDEX idx_friend_requests_from_created_id;
+DROP INDEX idx_friend_requests_to_created_id;

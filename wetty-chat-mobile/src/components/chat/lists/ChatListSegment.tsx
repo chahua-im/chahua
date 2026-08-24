@@ -8,7 +8,7 @@ import {
   selectShowGroupsTab,
   selectShowThreadsTab,
 } from '@/store/settingsSlice';
-import { selectIncomingRequests } from '@/store/socialSlice';
+import { selectPendingIncomingCount } from '@/store/socialSlice';
 import styles from './ChatListSegment.module.scss';
 
 export type ChatListTab = 'all' | 'groups' | 'friends' | 'threads';
@@ -52,7 +52,7 @@ export function ChatListSegment({
   const showGroupsTab = useSelector(selectShowGroupsTab);
   const showFriendsTab = useSelector(selectShowFriendsTab) && friendsEnabled;
   const showThreadsTab = useSelector(selectShowThreadsTab);
-  const incomingRequestCount = useSelector(selectIncomingRequests).length;
+  const incomingRequestCount = useSelector(selectPendingIncomingCount);
 
   return (
     <div className={styles.segmentWrapper}>

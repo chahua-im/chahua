@@ -1,67 +1,81 @@
 import { useCallback, useEffect, useState } from 'react';
-import { IonContent, IonItem, IonLabel, IonList, IonListHeader } from '@ionic/react';
+import { IonButton, IonContent, IonItem, IonLabel, IonList, IonNote } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { useDispatch, useSelector } from 'react-redux';
-import type { AppDispatch } from '@/store';
-import {
-  fetchIncomingRequests,
-  fetchOutgoingRequests,
-  selectIncomingRequests,
-  selectOutgoingRequests,
-} from '@/store/socialSlice';
-import { UserAvatar } from '@/components/UserAvatar';
-import { UserProfileModal } from '@/components/chat/profiles/UserProfileModal';
-import { memberSummaryToUser } from '@/utils/userConvert';
-import type { FriendRequestResponse } from '@/api/friends';
+import { Virtuoso } from 'react-virtuoso';
+import type { FriendRequestHistoryEntry } from '@/api/friends';
 import type { User } from '@/api/messages';
 import type { MemberSummary } from '@/api/users';
+import { UserAvatar } from '@/components/UserAvatar';
+import { UserProfileModal } from '@/components/chat/profiles/UserProfileModal';
+import type { AppDispatch } from '@/store';
+import { fetchRequestHistory, selectRequestHistory } from '@/store/socialSlice';
+import { memberSummaryToUser } from '@/utils/userConvert';
+import { useFriendRequestActions } from './useFriendRequestActions';
+import styles from './FriendRequestsList.module.scss';
 
-/**
- * Incoming request row that surfaces the requester's verification message or
- * the target's question + the requester's answer, so the recipient can review
- * before accepting. Falls back to a plain "Friend request" label for direct.
- */
-function IncomingRequestRow({
-  req,
-  onSelect,
+function RequestHistoryRow({
+  request,
+  onOpenProfile,
+  onAccept,
+  onReject,
 }: {
-  req: FriendRequestResponse;
-  onSelect: (member: MemberSummary) => void;
+  request: FriendRequestHistoryEntry;
+  onOpenProfile: (member: MemberSummary) => void;
+  onAccept: (request: FriendRequestHistoryEntry) => void;
+  onReject: (request: FriendRequestHistoryEntry) => void;
 }) {
-  const member = req.from;
-  const displayName = member.username || t`User ${member.uid}`;
+  const incoming = request.direction === 'incoming';
+  const peer = incoming ? request.from : request.to;
+  const displayName = peer.username || t`User ${peer.uid}`;
+  const preview = request.question
+    ? t`Q: ${request.question} · A: ${request.message ?? ''}`
+    : request.message
+      ? request.message
+      : incoming
+        ? t`Friend request`
+        : t`Friend request sent`;
+  const pending = request.status === 'pending';
+
   return (
-    <IonItem button detail={false} onClick={() => onSelect(member)}>
-      <UserAvatar name={displayName} avatarUrl={member.avatarUrl} size={40} />
-      <IonLabel className="ion-text-wrap">
-        <h3>{displayName}</h3>
-        {req.question ? (
-          <>
-            <p>{t`Question: ${req.question}`}</p>
-            <p>{t`Answer: ${req.message ?? ''}`}</p>
-          </>
-        ) : req.message ? (
-          <p>{req.message}</p>
-        ) : (
-          <p>{t`Friend request`}</p>
-        )}
+    <IonItem button detail={false} className={styles.chatListItem} onClick={() => onOpenProfile(peer)}>
+      <span slot="start">
+        <UserAvatar name={displayName} avatarUrl={peer.avatarUrl} size={48} className={styles.chatsListAvatar} />
+      </span>
+      <IonLabel className={styles.chatsListLabel}>
+        <h3 className={styles.chatsListTitle}>
+          <span className={styles.chatsListTitleText}>{displayName}</span>
+        </h3>
+        <p className={styles.chatsListPreview}>{preview}</p>
       </IonLabel>
+      {pending && incoming ? (
+        <div slot="end" className={styles.requestActions} onClick={(event) => event.stopPropagation()}>
+          <IonButton size="small" fill="solid" color="primary" onClick={() => onAccept(request)}>
+            {t`Accept`}
+          </IonButton>
+          <IonButton size="small" fill="outline" color="danger" onClick={() => onReject(request)}>
+            {t`Reject`}
+          </IonButton>
+        </div>
+      ) : (
+        <IonNote slot="end" color="medium" className={styles.statusNote}>
+          {pending ? t`Pending approval` : request.status === 'accepted' ? t`Accepted` : t`Rejected`}
+        </IonNote>
+      )}
     </IonItem>
   );
 }
 
 export function FriendRequestsList() {
   const dispatch = useDispatch<AppDispatch>();
-  const incoming = useSelector(selectIncomingRequests);
-  const outgoing = useSelector(selectOutgoingRequests);
+  const requestHistory = useSelector(selectRequestHistory);
+  const { acceptRequest, rejectRequest } = useFriendRequestActions();
   const [profileUser, setProfileUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // Requests are never persisted; refetch both directions on entry so a missed
-    // friendRequestReceived / friendRequestResolved WS event cannot leave stale rows.
-    dispatch(fetchIncomingRequests());
-    dispatch(fetchOutgoingRequests());
+    // History is never persisted; refetch on entry so a missed WS event cannot leave stale rows.
+    dispatch(fetchRequestHistory());
   }, [dispatch]);
 
   const openProfile = useCallback((member: MemberSummary) => {
@@ -69,51 +83,29 @@ export function FriendRequestsList() {
   }, []);
 
   return (
-    <IonContent fullscreen>
-      {incoming.length === 0 && outgoing.length === 0 ? (
+    <IonContent fullscreen scrollY={false} className={styles.content}>
+      {requestHistory.length === 0 ? (
         <IonList>
           <IonItem lines="none">
             <IonLabel color="medium" className="ion-text-wrap">
-              <Trans>No pending friend requests</Trans>
+              <Trans>No friend requests</Trans>
             </IonLabel>
           </IonItem>
         </IonList>
       ) : (
-        <>
-          {incoming.length > 0 && (
-            <IonList>
-              <IonListHeader>
-                <IonLabel>
-                  <Trans>Friend Requests</Trans>
-                </IonLabel>
-              </IonListHeader>
-              {incoming.map((req) => (
-                <IncomingRequestRow key={`in-${req.id}`} req={req} onSelect={openProfile} />
-              ))}
-            </IonList>
+        <Virtuoso
+          className={`ion-content-scroll-host ${styles.scrollHost}`}
+          data={requestHistory}
+          itemContent={(_, request) => (
+            <RequestHistoryRow
+              request={request}
+              onOpenProfile={openProfile}
+              onAccept={(entry) => void acceptRequest(entry.id)}
+              onReject={(entry) => void rejectRequest(entry.id, entry.from.uid)}
+            />
           )}
-
-          {outgoing.length > 0 && (
-            <IonList>
-              <IonListHeader>
-                <IonLabel>
-                  <Trans>Outgoing Requests</Trans>
-                </IonLabel>
-              </IonListHeader>
-              {outgoing.map((req) => (
-                <IonItem key={`out-${req.id}`} onClick={() => openProfile(req.to)}>
-                  <UserAvatar name={req.to.username || t`User ${req.to.uid}`} avatarUrl={req.to.avatarUrl} size={40} />
-                  <IonLabel className="ion-text-wrap">
-                    <h3>{req.to.username || t`User ${req.to.uid}`}</h3>
-                    <p>{t`Pending`}</p>
-                  </IonLabel>
-                </IonItem>
-              ))}
-            </IonList>
-          )}
-        </>
+        />
       )}
-
       <UserProfileModal sender={profileUser} onDismiss={() => setProfileUser(null)} />
     </IonContent>
   );

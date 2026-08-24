@@ -2,7 +2,6 @@ import { IonButton, IonChip, IonContent, IonIcon, IonLabel, IonModal, useIonAler
 import { close, openOutline, personAddOutline, chatbubbleEllipsesOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
-import axios from 'axios';
 import type { User } from '@/api/messages';
 import { useIsDarkMode, useIsDesktop } from '@/hooks/platformHooks';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
@@ -15,16 +14,14 @@ import { selectChatName, setChatsList } from '@/store/chatsSlice';
 import {
   fetchBlocks,
   fetchFriends,
-  fetchIncomingRequests,
-  fetchOutgoingRequests,
+  fetchRequestHistory,
   selectBlocksLoaded,
   selectFriendsLoaded,
-  selectIncomingRequestFrom,
   selectIsBlocked,
   selectIsFriend,
-  selectOutgoingRequestTo,
-  selectIncomingRequestsLoaded,
-  selectOutgoingRequestsLoaded,
+  selectPendingIncomingRequestFrom,
+  selectPendingOutgoingRequestTo,
+  selectRequestHistoryLoaded,
 } from '@/store/socialSlice';
 import { friendsApi } from '@/api/friends';
 import { blocksApi } from '@/api/blocks';
@@ -32,6 +29,7 @@ import { dmsApi } from '@/api/dms';
 import { AddFriendSheet } from '@/components/social/AddFriendSheet';
 import { getMembers, removeMember, updateMemberRole, type MemberResponse } from '@/api/group';
 import styles from './UserProfileModal.module.scss';
+import { useFriendRequestActions } from '@/components/social/useFriendRequestActions';
 
 interface UserProfileModalProps {
   sender: User | null;
@@ -95,14 +93,13 @@ export function UserProfileModal({
     blockEnabled && peerUid ? selectIsBlocked(state, peerUid) : false,
   );
   const incomingReq = useSelector((state: RootState) =>
-    friendsEnabled && peerUid ? selectIncomingRequestFrom(state, peerUid) : undefined,
+    friendsEnabled && peerUid ? selectPendingIncomingRequestFrom(state, peerUid) : undefined,
   );
   const outgoingReq = useSelector((state: RootState) =>
-    friendsEnabled && peerUid ? selectOutgoingRequestTo(state, peerUid) : undefined,
+    friendsEnabled && peerUid ? selectPendingOutgoingRequestTo(state, peerUid) : undefined,
   );
   const friendsLoaded = useSelector(selectFriendsLoaded);
-  const incomingRequestsLoaded = useSelector(selectIncomingRequestsLoaded);
-  const outgoingRequestsLoaded = useSelector(selectOutgoingRequestsLoaded);
+  const requestHistoryLoaded = useSelector(selectRequestHistoryLoaded);
   const blocksLoaded = useSelector(selectBlocksLoaded);
 
   // Lazily hydrate social state the first time the sheet is opened so the
@@ -112,20 +109,10 @@ export function UserProfileModal({
     if (!sender) return;
     if (friendsEnabled) {
       if (!friendsLoaded) dispatch(fetchFriends());
-      if (!incomingRequestsLoaded) dispatch(fetchIncomingRequests());
-      if (!outgoingRequestsLoaded) dispatch(fetchOutgoingRequests());
+      if (!requestHistoryLoaded) dispatch(fetchRequestHistory());
     }
     if (blockEnabled && !blocksLoaded) dispatch(fetchBlocks());
-  }, [
-    sender,
-    friendsEnabled,
-    blockEnabled,
-    friendsLoaded,
-    incomingRequestsLoaded,
-    outgoingRequestsLoaded,
-    blocksLoaded,
-    dispatch,
-  ]);
+  }, [sender, friendsEnabled, blockEnabled, friendsLoaded, requestHistoryLoaded, blocksLoaded, dispatch]);
 
   const measure = useCallback(() => {
     const node = contentRef.current;
@@ -303,53 +290,11 @@ export function UserProfileModal({
     );
   }, [chatId, displaySender, chatNameFromStore, handleConfirmAction]);
 
-  const refreshSocial = useCallback(() => {
-    dispatch(fetchFriends());
-    dispatch(fetchIncomingRequests());
-    dispatch(fetchOutgoingRequests());
-  }, [dispatch]);
-
   const handleAddFriend = useCallback(() => {
     if (!displaySender) return;
     setAddFriendOpen(true);
   }, [displaySender]);
-
-  const handleAcceptRequest = useCallback(async () => {
-    if (!incomingReq) return;
-    try {
-      await friendsApi.acceptRequest(incomingReq.id);
-      refreshSocial();
-    } catch (err) {
-      presentToast(err instanceof Error ? err.message : t`Failed to accept request`, 2000);
-    }
-  }, [incomingReq, refreshSocial, presentToast]);
-
-  const handleRejectRequest = useCallback(async () => {
-    if (!incomingReq) return;
-    const peerRequestUid = incomingReq.from.uid;
-    try {
-      await friendsApi.rejectRequest(incomingReq.id);
-      dispatch(fetchIncomingRequests());
-    } catch (err) {
-      // A 409 means the server already dismissed the request; refresh both lists
-      // so the row disappears, then explain which conflict happened.
-      const [friends] = await Promise.all([
-        dispatch(fetchFriends()).unwrap(),
-        dispatch(fetchIncomingRequests()).unwrap(),
-      ]);
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      if (status === 409) {
-        presentToast(
-          friends.some((f) => f.user.uid === peerRequestUid)
-            ? t`You are already friends with this user`
-            : t`This friend request is no longer pending`,
-          2000,
-        );
-        return;
-      }
-      presentToast(t`Failed to reject request`, 2000);
-    }
-  }, [incomingReq, dispatch, presentToast]);
+  const { acceptRequest, rejectRequest } = useFriendRequestActions();
 
   const handleUnfriend = useCallback(() => {
     if (!displaySender) return;
@@ -532,7 +477,7 @@ export function UserProfileModal({
                       <IonButton
                         fill="solid"
                         color="primary"
-                        onClick={handleAcceptRequest}
+                        onClick={() => void acceptRequest(incomingReq.id)}
                         className={styles.splitButton}
                       >
                         {t`Accept`}
@@ -540,7 +485,7 @@ export function UserProfileModal({
                       <IonButton
                         fill="outline"
                         color="danger"
-                        onClick={handleRejectRequest}
+                        onClick={() => void rejectRequest(incomingReq.id, incomingReq.from.uid)}
                         className={styles.splitButton}
                       >
                         {t`Reject`}
@@ -574,7 +519,7 @@ export function UserProfileModal({
         targetName={displayName}
         isOpen={addFriendOpen}
         onDismiss={() => setAddFriendOpen(false)}
-        onSent={() => dispatch(fetchOutgoingRequests())}
+        onSent={() => dispatch(fetchRequestHistory())}
       />
     </>
   );

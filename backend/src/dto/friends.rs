@@ -37,10 +37,33 @@ pub struct FriendRequestResponse {
     pub question: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum FriendRequestDirection {
+    Incoming,
+    Outgoing,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ListFriendRequestsResponse {
-    pub requests: Vec<FriendRequestResponse>,
+pub struct FriendRequestHistoryEntry {
+    #[serde(flatten)]
+    #[schema(inline)]
+    pub request: FriendRequestResponse,
+    /// Direction relative to the calling user.
+    pub direction: FriendRequestDirection,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListFriendRequestHistoryResponse {
+    pub requests: Vec<FriendRequestHistoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingFriendRequestCountResponse {
+    pub pending_incoming_count: i64,
 }
 
 /// A user's own friend-acceptance settings (GET /me/friend-settings).

@@ -55,6 +55,9 @@ msgstr "关于"
 msgid "Accept"
 msgstr "接受"
 
+msgid "Accepted"
+msgstr "已接受"
+
 msgid "Action failed"
 msgstr "操作失败"
 
@@ -93,10 +96,6 @@ msgstr "已允许"
 
 msgid "Already in this chat"
 msgstr "已在此聊天中"
-
-#. placeholder {0}: req.message ?? ''
-msgid "Answer: {0}"
-msgstr "回答：{0}"
 
 msgid "Anyone can send you a friend request. No verification message is needed; you just accept or decline."
 msgstr "任何人都可以向你发送好友请求。无需验证消息，你只需接受或拒绝。"
@@ -843,6 +842,9 @@ msgstr "暂无聊天"
 msgid "No friend chats yet"
 msgstr "暂无好友会话"
 
+msgid "No friend requests"
+msgstr "没有好友请求"
+
 msgid "No group description yet."
 msgstr "暂无群组描述。"
 
@@ -875,9 +877,6 @@ msgstr "暂无消息"
 
 msgid "No one can send you a friend request."
 msgstr "任何人都无法向你发送好友请求。"
-
-msgid "No pending friend requests"
-msgstr "没有待处理的好友请求"
 
 msgid "No pinned messages"
 msgstr "暂无置顶消息"
@@ -945,9 +944,6 @@ msgstr "可选"
 msgid "Original message is no longer available"
 msgstr "原始消息已不可用"
 
-msgid "Outgoing Requests"
-msgstr "已发出的请求"
-
 msgid "Owned"
 msgstr "我的"
 
@@ -966,8 +962,8 @@ msgstr "此行以下的贴纸包不会自动排序"
 msgid "Paste code"
 msgstr "粘贴邀请码"
 
-msgid "Pending"
-msgstr "待处理"
+msgid "Pending approval"
+msgstr "等待对方同意"
 
 msgid "Permission"
 msgstr "权限"
@@ -1049,24 +1045,19 @@ msgstr "推送通知已开启"
 msgid "Push notifications turned off"
 msgstr "推送通知已关闭"
 
+#. placeholder {0}: request.question
+#. placeholder {1}: request.message ?? ''
+msgid "Q: {0} · A: {1}"
+msgstr "问：{0} · 答：{1}"
+
 msgid "Question"
 msgstr "问题"
-
-#. placeholder {0}: req.question
-msgid "Question: {0}"
-msgstr "问题：{0}"
 
 msgid "Reactions"
 msgstr "回应"
 
 msgid "Read"
 msgstr "标记已读"
-
-msgid "Received a friend request from {name}"
-msgstr "收到来自 {name} 的好友申请"
-
-msgid "Received friend requests from {name} and others"
-msgstr "收到来自 {name} 等人的好友申请"
 
 msgid "Reconnecting..."
 msgstr "正在重新连接..."
@@ -1079,6 +1070,15 @@ msgstr "录音时间太短。"
 
 msgid "Reject"
 msgstr "拒绝"
+
+msgid "Reject Friend Request"
+msgstr "拒绝好友请求"
+
+msgid "Reject this friend request?"
+msgstr "要拒绝这个好友请求吗？"
+
+msgid "Rejected"
+msgstr "已拒绝"
 
 msgid "Release to save"
 msgstr "松开保存"
@@ -1482,9 +1482,9 @@ msgstr "正在上传 {0}%"
 msgid "Uploading..."
 msgstr "上传中..."
 
-#. placeholder {0}: fresh[0].from.uid
 #. placeholder {0}: invite.targetUid
 #. placeholder {0}: member.uid
+#. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "用户 {0}"
 
@@ -1502,9 +1502,6 @@ msgstr "已取消拉黑"
 
 msgid "Videos"
 msgstr "视频"
-
-msgid "View"
-msgstr "查看"
 
 msgid "View all pinned messages"
 msgstr "查看全部置顶消息"

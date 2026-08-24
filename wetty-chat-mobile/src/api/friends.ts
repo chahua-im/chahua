@@ -34,8 +34,19 @@ export interface FriendRequestResponse {
   question?: string | null;
 }
 
-export interface ListFriendRequestsResponse {
-  requests: FriendRequestResponse[];
+export type FriendRequestDirection = 'incoming' | 'outgoing';
+
+export interface FriendRequestHistoryEntry extends FriendRequestResponse {
+  /** Direction relative to the current user, as decided by the server. */
+  direction: FriendRequestDirection;
+}
+
+export interface ListFriendRequestHistoryResponse {
+  requests: FriendRequestHistoryEntry[];
+}
+
+export interface PendingIncomingRequestCountResponse {
+  pendingIncomingCount: number;
 }
 
 export interface FriendSettingsResponse {
@@ -72,14 +83,15 @@ export const friendsApi = {
     return res.data;
   },
 
-  listIncomingRequests: async (): Promise<FriendRequestResponse[]> => {
-    const res = await apiClient.get<ListFriendRequestsResponse>('/friends/requests/incoming');
+  /** Complete friend-request history in server-defined order. */
+  listRequestHistory: async (): Promise<FriendRequestHistoryEntry[]> => {
+    const res = await apiClient.get<ListFriendRequestHistoryResponse>('/friends/requests');
     return res.data.requests;
   },
 
-  listOutgoingRequests: async (): Promise<FriendRequestResponse[]> => {
-    const res = await apiClient.get<ListFriendRequestsResponse>('/friends/requests/outgoing');
-    return res.data.requests;
+  getPendingIncomingCount: async (): Promise<number> => {
+    const res = await apiClient.get<PendingIncomingRequestCountResponse>('/friends/requests/pending/count');
+    return res.data.pendingIncomingCount;
   },
 
   acceptRequest: async (requestId: string): Promise<FriendRequestResponse> => {
