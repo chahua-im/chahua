@@ -27,7 +27,6 @@ import { parseResumeHash } from '@/types/conversationNavigation';
 import { PinBanner } from '@/components/chat/pins/PinBanner';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
-import { memberSummaryToUser } from '@/utils/userConvert';
 import { ConversationFooter } from './ConversationFooter';
 import { ConversationHeader } from './ConversationHeader';
 import { ConversationOverlayHost } from './ConversationOverlayHost';
@@ -414,9 +413,9 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     history.push(`/chats/chat/${chatId}/group-info`);
   }, [chatId, history]);
 
-  const handleOpenPeerProfile = useCallback(() => {
-    if (peer) setProfileSender(memberSummaryToUser(peer));
-  }, [peer]);
+  const handleOpenDmInfo = useCallback(() => {
+    history.push(`/chats/chat/${chatId}/dm-info`);
+  }, [chatId, history]);
 
   const handleRestoreReply = useCallback(
     async (replyToMessageId: string, replyToUsername?: string) => {
@@ -490,7 +489,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
           isDm={isDm}
           onOpenMembers={handleOpenMembers}
           onOpenGroupInfo={handleOpenGroupInfo}
-          onOpenPeerProfile={handleOpenPeerProfile}
+          onOpenDmInfo={handleOpenDmInfo}
           onToggleThreadSubscription={handleToggleThreadSubscription}
         />
 

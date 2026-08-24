@@ -149,8 +149,8 @@ msgstr "返回"
 msgid "Block"
 msgstr "封鎖"
 
-msgid "Block {name}? You won't be able to message each other."
-msgstr "封鎖 {name}？你們將無法互相傳送訊息。"
+msgid "Block {displayName}? You won't be able to message each other."
+msgstr "封鎖 {displayName}？你們將無法互相傳送訊息。"
 
 msgid "Block User"
 msgstr "封鎖使用者"
@@ -184,6 +184,9 @@ msgstr "聊天 {chatId}"
 
 msgid "Chat Details"
 msgstr "聊天詳細資料"
+
+msgid "Chat Info"
+msgstr "聊天資訊"
 
 msgid "Chat name is required."
 msgstr "聊天名稱為必填。"
@@ -227,6 +230,9 @@ msgstr "壓縮中"
 
 msgid "Continue"
 msgstr "繼續"
+
+msgid "Conversation is not available"
+msgstr "對話無法使用"
 
 msgid "Copy"
 msgstr "複製"
@@ -621,9 +627,6 @@ msgstr "一般"
 msgid "Group"
 msgstr "群組"
 
-msgid "Group Chats"
-msgstr "群聊"
-
 msgid "Group details saved"
 msgstr "群組資料已儲存"
 
@@ -641,6 +644,9 @@ msgstr "群組名稱"
 
 msgid "Group Settings"
 msgstr "群組設定"
+
+msgid "Groups"
+msgstr "群組"
 
 msgid "Image"
 msgstr "圖片"
@@ -1096,8 +1102,8 @@ msgstr "將 {displayName} 從 {chatLabel} 中移除？"
 msgid "Remove {displayName} from this group?"
 msgstr "將 {displayName} 從該群組中移除？"
 
-msgid "Remove {name} from your friends?"
-msgstr "將 {name} 從好友中移除？"
+msgid "Remove {displayName} from your friends?"
+msgstr "將 {displayName} 從好友中移除？"
 
 msgid "Remove Friend"
 msgstr "移除好友"
@@ -1144,9 +1150,6 @@ msgstr "回覆"
 #. placeholder {0}: replyTo.username
 msgid "Replying to {0}"
 msgstr "正在回覆 {0}"
-
-msgid "Request Pending"
-msgstr "請求待處理"
 
 msgid "Requesters must answer your question. You review the answer before accepting."
 msgstr "請求者必須回答你的問題。你可以在接受前查看回答。"
@@ -1280,8 +1283,8 @@ msgstr "在聊天中顯示「全部」標籤"
 msgid "Show \"Friends\" Tab in Chats"
 msgstr "在聊天中显示“好友”标签"
 
-msgid "Show \"Group Chats\" Tab in Chats"
-msgstr "在聊天中显示“群聊”标签"
+msgid "Show \"Groups\" Tab in Chats"
+msgstr "在聊天中顯示「群組」標籤"
 
 msgid "Show \"Threads\" Tab in Chats"
 msgstr "在聊天中显示“话题”标签"
@@ -1487,6 +1490,9 @@ msgstr "上傳中..."
 #. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "使用者 {0}"
+
+msgid "User {peerUid}"
+msgstr "使用者 {peerUid}"
 
 msgid "User {uid}"
 msgstr "使用者 {uid}"

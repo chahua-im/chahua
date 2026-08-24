@@ -8,6 +8,14 @@
   flex-wrap: wrap;
 }
 
+.socialActions {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
 .singleButton {
   flex: 1 1 90%;
 }

@@ -324,7 +324,7 @@ async fn accept_friend_request(
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     let conn = &mut *conn;
-    let outcome = social::resolve_friend_request(conn, uid, request_id, true)?;
+    let outcome = social::resolve_friend_request(conn, &state, uid, request_id, true).await?;
     let request = outcome.request();
     fire_ws(
         &state,
@@ -357,7 +357,7 @@ async fn reject_friend_request(
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     let conn = &mut *conn;
-    let outcome = social::resolve_friend_request(conn, uid, request_id, false)?;
+    let outcome = social::resolve_friend_request(conn, &state, uid, request_id, false).await?;
     let request = outcome.request();
     fire_ws(
         &state,

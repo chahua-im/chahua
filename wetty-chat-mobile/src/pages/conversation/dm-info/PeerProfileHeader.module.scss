@@ -1,0 +1,40 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 24px 20px;
+  background: var(--ion-color-light);
+}
+
+.avatarButton {
+  position: relative;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatarButton:not(:disabled) {
+  cursor: pointer;
+}
+
+.avatar {
+  display: inline-flex;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.14);
+}
+
+.title {
+  margin: 16px 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--ion-color-dark);
+}

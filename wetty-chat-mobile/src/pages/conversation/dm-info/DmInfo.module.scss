@@ -1,0 +1,14 @@
+.loadingState {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+}
+
+.shareActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 20px 8px;
+  background: var(--ion-color-light);
+}

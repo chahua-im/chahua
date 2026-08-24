@@ -75,7 +75,7 @@ export function ChatListSegment({
         {showGroupsTab && (
           <IonSegmentButton value="groups">
             <IonLabel>
-              <Trans>Group Chats</Trans>
+              <Trans>Groups</Trans>
               <UnreadBadge count={groupsUnreadCount} />
             </IonLabel>
           </IonSegmentButton>

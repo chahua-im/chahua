@@ -123,93 +123,70 @@ pub fn check_can_dm(
     Ok(())
 }
 
-/// Find the existing 1:1 DM group for `(user_a, user_b)`, or create one.
-/// `user_a` is the initiating user. Returns the group id.
-pub async fn find_or_create_dm(
+/// Create the canonical DM group for an accepted friendship.
+///
+/// Called from the friendship-acceptance transaction, so a committed
+/// friendship always has its DM group. `id` is generated before entering the
+/// transaction because ID generation is asynchronous.
+fn create_dm_for_friendship(
     conn: &mut PgConnection,
-    state: &AppState,
+    id: i64,
     user_a: i32,
     user_b: i32,
-) -> Result<i64, AppError> {
-    if user_a == user_b {
-        return Err(AppError::BadRequest("Cannot start a DM with yourself"));
-    }
+    now: chrono::DateTime<Utc>,
+) -> Result<(), AppError> {
     let (u1, u2) = canonical_pair(user_a, user_b);
-
     let pair_filter = groups::kind
         .eq(GroupKind::Dm)
         .and(groups::dm_uid1.eq(u1))
         .and(groups::dm_uid2.eq(u2));
 
-    // Fast path: existing DM for this pair.
-    if let Some(id) = groups::table
-        .filter(pair_filter.clone())
-        .select(groups::id)
-        .first::<i64>(conn)
-        .optional()?
-    {
-        return Ok(id);
+    let inserted = diesel::insert_into(groups::table)
+        .values(&NewGroup {
+            id,
+            name: String::new(),
+            description: None,
+            avatar_image_id: None,
+            created_at: now,
+            visibility: GroupVisibility::Private,
+            kind: GroupKind::Dm,
+            dm_uid1: Some(u1),
+            dm_uid2: Some(u2),
+        })
+        .on_conflict_do_nothing()
+        .execute(conn)?;
+    if inserted == 0 {
+        groups::table
+            .filter(pair_filter)
+            .select(groups::id)
+            .first::<i64>(conn)
+            .map_err(|_| AppError::Internal("Concurrent DM disappeared"))?;
+        return Ok(());
     }
 
-    // Creating a new DM requires mutual friendship and no block in either
-    // direction. (An existing DM is returned above regardless of current
-    // friendship state, so history stays accessible; sending is gated
-    // separately by `assert_can_send_to_chat`.)
-    check_can_dm(conn, user_a, user_b)?;
-
-    let id = ids::next_gid(state.id_gen.as_ref()).await.map_err(|err| {
-        tracing::error!("failed to generate dm group id: {:?}", err);
-        AppError::Internal("Failed to generate id")
-    })?;
-    let now = Utc::now();
-
-    conn.transaction::<i64, AppError, _>(|conn| {
-        let inserted = diesel::insert_into(groups::table)
-            .values(&NewGroup {
-                id,
-                name: String::new(),
-                description: None,
-                avatar_image_id: None,
-                created_at: now,
-                visibility: GroupVisibility::Private,
-                kind: GroupKind::Dm,
-                dm_uid1: Some(u1),
-                dm_uid2: Some(u2),
-            })
-            .on_conflict_do_nothing()
-            .execute(conn)?;
-        if inserted == 0 {
-            // A concurrent request created this DM; reuse it.
-            return groups::table
-                .filter(pair_filter.clone())
-                .select(groups::id)
-                .first::<i64>(conn)
-                .map_err(|_| AppError::Internal("Concurrent DM disappeared"));
-        }
-        diesel::insert_into(group_membership::table)
-            .values(&[
-                NewGroupMembership {
-                    chat_id: id,
-                    uid: user_a,
-                    role: GroupRole::Member,
-                    joined_at: now,
-                    join_reason: GroupJoinReason::Creator,
-                    join_reason_extra: None,
-                    last_read_message_id: None,
-                },
-                NewGroupMembership {
-                    chat_id: id,
-                    uid: user_b,
-                    role: GroupRole::Member,
-                    joined_at: now,
-                    join_reason: GroupJoinReason::DirectInvite,
-                    join_reason_extra: None,
-                    last_read_message_id: None,
-                },
-            ])
-            .execute(conn)?;
-        Ok(id)
-    })
+    diesel::insert_into(group_membership::table)
+        .values(&[
+            NewGroupMembership {
+                chat_id: id,
+                uid: user_a,
+                role: GroupRole::Member,
+                joined_at: now,
+                join_reason: GroupJoinReason::Creator,
+                join_reason_extra: None,
+                last_read_message_id: None,
+            },
+            NewGroupMembership {
+                chat_id: id,
+                uid: user_b,
+                role: GroupRole::Member,
+                joined_at: now,
+                join_reason: GroupJoinReason::DirectInvite,
+                join_reason_extra: None,
+                last_read_message_id: None,
+            },
+        ])
+        .execute(conn)?;
+    Ok(())
 }
 
 /// A user's friends with the friendship creation time (unordered).
@@ -425,6 +402,10 @@ pub async fn create_friend_request(
             return Ok(CreateRequestOutcome::AlreadyPending);
         }
         // Reciprocal pending request (to -> from): auto-accept it.
+        let dm_group_id = ids::next_gid(state.id_gen.as_ref()).await.map_err(|err| {
+            tracing::error!("failed to generate dm group id: {:?}", err);
+            AppError::Internal("Failed to generate id")
+        })?;
         let request = conn.transaction::<FriendRequest, AppError, _>(|conn| {
             let updated = diesel::update(
                 friend_requests::table
@@ -442,6 +423,7 @@ pub async fn create_friend_request(
             .optional()?
             .ok_or(AppError::Conflict("Friend request is no longer pending"))?;
             insert_friendship(conn, from, to, from, now)?;
+            create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
             Ok(updated)
         })?;
         return Ok(CreateRequestOutcome::AutoAccepted { request });
@@ -500,12 +482,21 @@ impl ResolveOutcome {
 }
 
 /// Accept or reject a friend request. Only the recipient (`to_uid`) may resolve.
-pub fn resolve_friend_request(
+pub async fn resolve_friend_request(
     conn: &mut PgConnection,
+    state: &AppState,
     resolver_uid: i32,
     request_id: i64,
     accept: bool,
 ) -> Result<ResolveOutcome, AppError> {
+    let dm_group_id = if accept {
+        Some(ids::next_gid(state.id_gen.as_ref()).await.map_err(|err| {
+            tracing::error!("failed to generate dm group id: {:?}", err);
+            AppError::Internal("Failed to generate id")
+        })?)
+    } else {
+        None
+    };
     let now = Utc::now();
     conn.transaction::<ResolveOutcome, AppError, _>(|conn| {
         let new_status = if accept {
@@ -542,8 +533,7 @@ pub fn resolve_friend_request(
             };
         };
 
-        if accept {
-            // Idempotent: an existing friendship makes acceptance a no-op.
+        if let Some(dm_group_id) = dm_group_id {
             insert_friendship(
                 conn,
                 request.from_uid,
@@ -551,6 +541,7 @@ pub fn resolve_friend_request(
                 request.from_uid,
                 now,
             )?;
+            create_dm_for_friendship(conn, dm_group_id, request.from_uid, request.to_uid, now)?;
             return Ok(ResolveOutcome::Resolved(request));
         }
         if are_mutual_friends(conn, request.from_uid, request.to_uid)? {

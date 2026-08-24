@@ -3,7 +3,7 @@ import { createSelector, createSlice } from '@reduxjs/toolkit';
 import type { RootState } from './index';
 import { toMessagePreview, type MessagePreview, type MessageResponse } from '@/api/messages';
 import type { ChatListEntry } from '@/api/chats';
-import type { GroupKind } from '@/api/dms';
+import type { GroupKind } from '@/api/chats';
 import type { MemberSummary } from '@/api/users';
 import type { GroupRole } from '@/api/group';
 import { UNREAD_BADGE_COUNT_CAP } from '@/utils/unreadBadge';
