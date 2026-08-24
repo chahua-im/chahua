@@ -21,6 +21,7 @@ import {
   folderOpenOutline,
   mailUnreadOutline,
   notificationsOffOutline,
+  personAddOutline,
 } from 'ionicons/icons';
 import { useHistory } from 'react-router-dom';
 import { Trans } from '@lingui/react/macro';
@@ -61,7 +62,7 @@ import {
   setChatListTab,
 } from '@/store/settingsSlice';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
-import { FriendsTabSection } from '@/components/social/FriendsTabSection';
+import { fetchIncomingRequests, selectIncomingRequests } from '@/store/socialSlice';
 import { markChatAsUnread, markMessagesAsRead, type MessagePreview, type MessageResponse } from '@/api/messages';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { getChatDisplayName } from '@/utils/chatDisplay';
@@ -69,12 +70,12 @@ import { UserAvatar } from '@/components/UserAvatar';
 import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
 import { getAllDrafts } from '@/utils/draftSync';
 import { onDraftChange } from '@/utils/draftEvents';
+import type { AppDispatch, RootState } from '@/store';
 import { loadDraft } from '@/hooks/useChatDraft';
 import { buildResumeHash } from '@/types/conversationNavigation';
 import { CHAT_LIST_REFRESH_MIN_DURATION_MS } from '@/constants/chatTiming';
 import { type ChatListTab, ChatListSegment } from '@/components/chat/lists/ChatListSegment';
 import { ThreadListRow } from '@/components/chat/lists/ThreadListRow';
-import type { RootState } from '@/store';
 import { compareMessageOrder, isOptimisticMessageId } from '@/store/messageProjection';
 import type { ChatTimelineState } from '@/store/messages/types';
 import type { StoredThreadListItem } from '@/api/threads';
@@ -156,6 +157,7 @@ interface ChatListProps {
   archivedMode?: boolean;
   initialTab?: ChatListTab;
   onOpenArchived?: (tab: ChatListTab) => void;
+  onOpenFriendRequests?: () => void;
   onChatSelect: (chatId: string, resumeHash?: string) => void;
   onThreadSelect?: (chatId: string, threadRootId: string, resumeHash?: string) => void;
 }
@@ -166,10 +168,11 @@ export function ChatList({
   archivedMode = false,
   initialTab,
   onOpenArchived,
+  onOpenFriendRequests,
   onChatSelect,
   onThreadSelect,
 }: ChatListProps) {
-  const dispatch = useDispatch();
+  const dispatch = useDispatch<AppDispatch>();
   const history = useHistory();
   const locale = useSelector(selectEffectiveLocale);
   const activeChats = useSelector(selectAllChats);
@@ -191,6 +194,7 @@ export function ChatList({
   const friendsEnabled = useFeatureGate('friends');
   const globalTab = useSelector(selectChatListTab);
   const messageChats = useSelector((state: RootState) => state.messages.chats);
+  const incomingRequests = useSelector(selectIncomingRequests);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { text: string; savedAt: number }>>({});
@@ -241,6 +245,7 @@ export function ChatList({
       getThreads({ archived: false }),
       getChats({ archived: true }),
       getThreads({ archived: true }),
+      dispatch(fetchIncomingRequests()).unwrap(),
     ]);
 
     dispatch(setChatsList({ chats: activeChatRes.data.chats || [], archived: false }));
@@ -458,6 +463,48 @@ export function ChatList({
     [history, onOpenArchived],
   );
 
+  const openFriendRequests = useCallback(() => {
+    if (onOpenFriendRequests) {
+      onOpenFriendRequests();
+      return;
+    }
+    history.push('/chats/friend-requests');
+  }, [history, onOpenFriendRequests]);
+
+  const renderFriendRequestsEntry = () => (
+    <IonItem
+      key="friend-requests-entry"
+      button
+      detail={false}
+      className={styles.chatListItem}
+      onClick={openFriendRequests}
+    >
+      <span slot="start" className={styles.threadsRowIcon}>
+        <IonIcon icon={personAddOutline} />
+      </span>
+      <IonLabel className={styles.chatsListLabel}>
+        <h3 className={styles.chatsListTitle}>
+          <span className={styles.chatsListTitleText}>
+            <Trans>Friend Requests</Trans>
+          </span>
+        </h3>
+        <p className={styles.chatsListPreview}>
+          <Trans>Review pending friend requests</Trans>
+        </p>
+      </IonLabel>
+      <div slot="end" className={styles.chatsListEndSlot}>
+        <div className={styles.chatsListTime} />
+        <div className={styles.chatsListBadge}>
+          {incomingRequests.length > 0 ? (
+            <IonBadge mode="ios" color="primary">
+              {formatUnreadBadge(incomingRequests.length)}
+            </IonBadge>
+          ) : null}
+        </div>
+      </div>
+    </IonItem>
+  );
+
   const renderArchivedEntry = (count: number) => (
     <IonItem button detail={false} className={styles.chatListItem} onClick={() => openArchived(effectiveTab)}>
       <span slot="start" className={styles.threadsRowIcon}>
@@ -656,29 +703,27 @@ export function ChatList({
     }
 
     if (effectiveTab === 'friends') {
+      const requestsEntry = !archivedMode ? renderFriendRequestsEntry() : null;
+
       if (friendChats.length === 0 && !archivedMode) {
         return (
-          <>
-            <FriendsTabSection />
-            <IonList inset>
-              <IonItem lines="none">
-                <IonLabel color="medium" className="ion-text-wrap">
-                  <Trans>No friend chats yet</Trans>
-                </IonLabel>
-              </IonItem>
-            </IonList>
-          </>
+          <IonList>
+            {requestsEntry}
+            <IonItem lines="none">
+              <IonLabel color="medium" className="ion-text-wrap">
+                <Trans>No friend chats yet</Trans>
+              </IonLabel>
+            </IonItem>
+          </IonList>
         );
       }
 
       return (
-        <>
-          {!archivedMode && <FriendsTabSection />}
-          <IonList inset={false}>
-            {!archivedMode && archivedGroupsVisible ? renderArchivedEntry(archivedUnreadChats) : null}
-            {sortedChats.map(renderChatItem)}
-          </IonList>
-        </>
+        <IonList>
+          {requestsEntry}
+          {!archivedMode && archivedGroupsVisible ? renderArchivedEntry(archivedUnreadChats) : null}
+          {sortedChats.map(renderChatItem)}
+        </IonList>
       );
     }
 

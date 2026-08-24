@@ -8,7 +8,8 @@ interface SocialState {
   friendsLoaded: boolean;
   incomingRequests: FriendRequestResponse[];
   outgoingRequests: FriendRequestResponse[];
-  requestsLoaded: boolean;
+  incomingRequestsLoaded: boolean;
+  outgoingRequestsLoaded: boolean;
   blocks: BlockResponse[];
   blocksLoaded: boolean;
 }
@@ -18,7 +19,8 @@ const initialState: SocialState = {
   friendsLoaded: false,
   incomingRequests: [],
   outgoingRequests: [],
-  requestsLoaded: false,
+  incomingRequestsLoaded: false,
+  outgoingRequestsLoaded: false,
   blocks: [],
   blocksLoaded: false,
 };
@@ -79,11 +81,11 @@ const socialSlice = createSlice({
       })
       .addCase(fetchIncomingRequests.fulfilled, (state, action) => {
         state.incomingRequests = action.payload;
-        state.requestsLoaded = true;
+        state.incomingRequestsLoaded = true;
       })
       .addCase(fetchOutgoingRequests.fulfilled, (state, action) => {
         state.outgoingRequests = action.payload;
-        state.requestsLoaded = true;
+        state.outgoingRequestsLoaded = true;
       })
       .addCase(fetchBlocks.fulfilled, (state, action) => {
         state.blocks = action.payload;
@@ -106,7 +108,8 @@ export const selectFriends = (state: RootState): FriendResponse[] => state.socia
 export const selectFriendsLoaded = (state: RootState): boolean => state.social.friendsLoaded;
 export const selectIncomingRequests = (state: RootState): FriendRequestResponse[] => state.social.incomingRequests;
 export const selectOutgoingRequests = (state: RootState): FriendRequestResponse[] => state.social.outgoingRequests;
-export const selectRequestsLoaded = (state: RootState): boolean => state.social.requestsLoaded;
+export const selectIncomingRequestsLoaded = (state: RootState): boolean => state.social.incomingRequestsLoaded;
+export const selectOutgoingRequestsLoaded = (state: RootState): boolean => state.social.outgoingRequestsLoaded;
 export const selectBlocks = (state: RootState): BlockResponse[] => state.social.blocks;
 export const selectBlocksLoaded = (state: RootState): boolean => state.social.blocksLoaded;
 
