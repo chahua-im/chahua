@@ -14,6 +14,7 @@ use crate::models::{
     NewGroupMembership, NewUserExtra,
 };
 use crate::schema::{blocks, friend_requests, friendships, group_membership, groups, user_extra};
+use crate::services::user;
 use crate::utils::ids;
 use crate::AppState;
 
@@ -140,11 +141,21 @@ fn create_dm_for_friendship(
         .eq(GroupKind::Dm)
         .and(groups::dm_uid1.eq(u1))
         .and(groups::dm_uid2.eq(u2));
+    let profiles = user::lookup_user_profiles(conn, &[u1, u2])?;
+    let username_a = profiles
+        .get(&u1)
+        .and_then(|profile| profile.username.as_deref())
+        .ok_or(AppError::Internal("DM participant username missing"))?;
+    let username_b = profiles
+        .get(&u2)
+        .and_then(|profile| profile.username.as_deref())
+        .ok_or(AppError::Internal("DM participant username missing"))?;
+    let name = format!("{username_a} - {username_b}");
 
     let inserted = diesel::insert_into(groups::table)
         .values(&NewGroup {
             id,
-            name: String::new(),
+            name,
             description: None,
             avatar_image_id: None,
             created_at: now,
