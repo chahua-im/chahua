@@ -876,6 +876,9 @@ msgstr "No messages yet"
 msgid "No one can send you a friend request."
 msgstr "No one can send you a friend request."
 
+msgid "No pending friend requests"
+msgstr "No pending friend requests"
+
 msgid "No pinned messages"
 msgstr "No pinned messages"
 
@@ -1170,6 +1173,9 @@ msgstr "Retry"
 #. js-lingui-explicit-id
 msgid "auth.bootstrap.retrying"
 msgstr "Retrying…"
+
+msgid "Review pending friend requests"
+msgstr "Review pending friend requests"
 
 msgid "Review to confirm if you want to join. Nothing changes until you click join."
 msgstr "Review to confirm if you want to join. Nothing changes until you click join."

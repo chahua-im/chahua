@@ -15,7 +15,6 @@ import { useAppLifecycle } from './hooks/useAppLifecycle';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { usePushNotificationBootstrap } from './hooks/usePushNotifications';
 import { DesktopSplitLayout } from './layouts/DesktopSplitLayout';
-import { FriendRequestNotifier } from '@/components/social/FriendRequestNotifier';
 import OobePage from '@/pages/oobe';
 import LandingPage from './pages/landing';
 import PushOpenPage from '@/pages/push-open';
@@ -124,7 +123,6 @@ function AppShell() {
           <AppRouter isDesktop={isDesktop} />
         </IonReactRouter>
       </div>
-      <FriendRequestNotifier />
     </IonApp>
   );
 }

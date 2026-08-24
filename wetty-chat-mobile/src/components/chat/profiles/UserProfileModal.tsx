@@ -23,7 +23,8 @@ import {
   selectIsBlocked,
   selectIsFriend,
   selectOutgoingRequestTo,
-  selectRequestsLoaded,
+  selectIncomingRequestsLoaded,
+  selectOutgoingRequestsLoaded,
 } from '@/store/socialSlice';
 import { friendsApi } from '@/api/friends';
 import { blocksApi } from '@/api/blocks';
@@ -100,7 +101,8 @@ export function UserProfileModal({
     friendsEnabled && peerUid ? selectOutgoingRequestTo(state, peerUid) : undefined,
   );
   const friendsLoaded = useSelector(selectFriendsLoaded);
-  const requestsLoaded = useSelector(selectRequestsLoaded);
+  const incomingRequestsLoaded = useSelector(selectIncomingRequestsLoaded);
+  const outgoingRequestsLoaded = useSelector(selectOutgoingRequestsLoaded);
   const blocksLoaded = useSelector(selectBlocksLoaded);
 
   // Lazily hydrate social state the first time the sheet is opened so the
@@ -110,13 +112,20 @@ export function UserProfileModal({
     if (!sender) return;
     if (friendsEnabled) {
       if (!friendsLoaded) dispatch(fetchFriends());
-      if (!requestsLoaded) {
-        dispatch(fetchIncomingRequests());
-        dispatch(fetchOutgoingRequests());
-      }
+      if (!incomingRequestsLoaded) dispatch(fetchIncomingRequests());
+      if (!outgoingRequestsLoaded) dispatch(fetchOutgoingRequests());
     }
     if (blockEnabled && !blocksLoaded) dispatch(fetchBlocks());
-  }, [sender, friendsEnabled, blockEnabled, friendsLoaded, requestsLoaded, blocksLoaded, dispatch]);
+  }, [
+    sender,
+    friendsEnabled,
+    blockEnabled,
+    friendsLoaded,
+    incomingRequestsLoaded,
+    outgoingRequestsLoaded,
+    blocksLoaded,
+    dispatch,
+  ]);
 
   const measure = useCallback(() => {
     const node = contentRef.current;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BlockResponse } from '@/api/blocks';
 import type { FriendResponse } from '@/api/friends';
-import reducer, { blockAdded, fetchFriends } from './socialSlice';
+import reducer, { blockAdded, fetchFriends, fetchIncomingRequests } from './socialSlice';
 
 const user = { uid: 2, username: 'Bob', gender: 0 };
 const friend: FriendResponse = { user, since: '2026-08-18T00:00:00Z' };
@@ -15,5 +15,14 @@ describe('socialSlice blocking', () => {
 
     expect(state.blocks).toEqual([block]);
     expect(state.friends).toEqual([friend]);
+  });
+});
+
+describe('socialSlice request hydration', () => {
+  it('tracks incoming and outgoing request hydration independently', () => {
+    const state = reducer(undefined, fetchIncomingRequests.fulfilled([], 'incoming-request', undefined));
+
+    expect(state.incomingRequestsLoaded).toBe(true);
+    expect(state.outgoingRequestsLoaded).toBe(false);
   });
 });
