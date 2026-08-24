@@ -44,15 +44,15 @@ export const FEATURES = {
     description: 'Stores landing auth/invite state for PWA handoff and shows pending invites inside the installed app.',
   },
   friends: {
-    enabled: false,
+    enabled: true,
     description: 'Friends list, friend requests, and unfriend actions.',
   },
   directMessages: {
-    enabled: false,
+    enabled: true,
     description: '1:1 direct messages with mutual friends.',
   },
   userBlock: {
-    enabled: false,
+    enabled: true,
     description: 'Blocklist (Chahua-side 「拉黑」) affecting DM and friend relationships only.',
   },
 } as const;
