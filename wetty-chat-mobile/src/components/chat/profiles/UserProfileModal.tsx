@@ -12,24 +12,18 @@ import type { AppDispatch, RootState } from '@/store';
 import { getChats } from '@/api/chats';
 import { selectChatName, setChatsList } from '@/store/chatsSlice';
 import {
-  fetchBlocks,
   fetchFriends,
   fetchRequestHistory,
-  selectBlocksLoaded,
   selectFriendsLoaded,
-  selectIsBlocked,
   selectIsFriend,
   selectPendingIncomingRequestFrom,
   selectPendingOutgoingRequestTo,
   selectRequestHistoryLoaded,
 } from '@/store/socialSlice';
-import { friendsApi } from '@/api/friends';
-import { blocksApi } from '@/api/blocks';
-import { dmsApi } from '@/api/dms';
 import { AddFriendSheet } from '@/components/social/AddFriendSheet';
 import { getMembers, removeMember, updateMemberRole, type MemberResponse } from '@/api/group';
+import { GroupSettingsActionButton } from '@/components/chat/settings/GroupSettingsActionButton';
 import styles from './UserProfileModal.module.scss';
-import { useFriendRequestActions } from '@/components/social/useFriendRequestActions';
 
 interface UserProfileModalProps {
   sender: User | null;
@@ -54,8 +48,6 @@ export function UserProfileModal({
   const history = useHistory();
   const friendsEnabled = useFeatureGate('friends');
   const dmEnabled = useFeatureGate('directMessages');
-  const blockEnabled = useFeatureGate('userBlock');
-  const socialEnabled = friendsEnabled || dmEnabled || blockEnabled;
 
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [prevSender, setPrevSender] = useState<User | null>(sender);
@@ -89,30 +81,29 @@ export function UserProfileModal({
   const isFriend = useSelector((state: RootState) =>
     friendsEnabled && peerUid ? selectIsFriend(state, peerUid) : false,
   );
-  const isBlocked = useSelector((state: RootState) =>
-    blockEnabled && peerUid ? selectIsBlocked(state, peerUid) : false,
-  );
   const incomingReq = useSelector((state: RootState) =>
     friendsEnabled && peerUid ? selectPendingIncomingRequestFrom(state, peerUid) : undefined,
   );
   const outgoingReq = useSelector((state: RootState) =>
     friendsEnabled && peerUid ? selectPendingOutgoingRequestTo(state, peerUid) : undefined,
   );
+  // A request in either direction blocks a new one, so the tile is shown but inert.
+  const pendingRequest = incomingReq ?? outgoingReq;
+  const showAddFriend = friendsEnabled && !isFriend;
+  const showMessage = friendsEnabled && dmEnabled && isFriend;
   const friendsLoaded = useSelector(selectFriendsLoaded);
   const requestHistoryLoaded = useSelector(selectRequestHistoryLoaded);
-  const blocksLoaded = useSelector(selectBlocksLoaded);
 
   // Lazily hydrate social state the first time the sheet is opened so the
-  // friend/block/request affordances reflect server truth even when the user
-  // opens a profile without having visited the Contacts tab.
+  // friend/request affordances reflect server truth even when the user opens a
+  // profile without having visited the Contacts tab.
   useEffect(() => {
     if (!sender) return;
     if (friendsEnabled) {
       if (!friendsLoaded) dispatch(fetchFriends());
       if (!requestHistoryLoaded) dispatch(fetchRequestHistory());
     }
-    if (blockEnabled && !blocksLoaded) dispatch(fetchBlocks());
-  }, [sender, friendsEnabled, blockEnabled, friendsLoaded, requestHistoryLoaded, blocksLoaded, dispatch]);
+  }, [sender, friendsEnabled, friendsLoaded, requestHistoryLoaded, dispatch]);
 
   const measure = useCallback(() => {
     const node = contentRef.current;
@@ -294,57 +285,19 @@ export function UserProfileModal({
     if (!displaySender) return;
     setAddFriendOpen(true);
   }, [displaySender]);
-  const { acceptRequest, rejectRequest } = useFriendRequestActions();
-
-  const handleUnfriend = useCallback(() => {
-    if (!displaySender) return;
-    const name = displaySender.name ?? `User ${displaySender.uid}`;
-    handleConfirmAction(
-      t`Remove Friend`,
-      t`Remove ${name} from your friends?`,
-      t`Removed friend`,
-      t`Remove`,
-      () => friendsApi.removeFriend(displaySender.uid),
-      true,
-    );
-  }, [displaySender, handleConfirmAction]);
-
-  const handleBlock = useCallback(() => {
-    if (!displaySender) return;
-    const name = displaySender.name ?? `User ${displaySender.uid}`;
-    handleConfirmAction(
-      t`Block User`,
-      t`Block ${name}? You won't be able to message each other.`,
-      t`User blocked`,
-      t`Block`,
-      async () => {
-        await blocksApi.blockUser(displaySender.uid);
-        dispatch(fetchBlocks());
-      },
-      true,
-    );
-  }, [displaySender, handleConfirmAction, dispatch]);
-
-  const handleUnblock = useCallback(() => {
-    if (!displaySender) return;
-    handleConfirmAction(t`Unblock User`, t`Unblock this user?`, t`User unblocked`, t`Unblock`, async () => {
-      await blocksApi.unblockUser(displaySender.uid);
-      dispatch(fetchBlocks());
-    });
-  }, [displaySender, handleConfirmAction, dispatch]);
 
   const handleMessage = useCallback(async () => {
     if (!displaySender) return;
     try {
-      const res = await dmsApi.createDm(displaySender.uid);
-      try {
-        const chatsRes = await getChats();
-        dispatch(setChatsList({ chats: chatsRes.data.chats || [] }));
-      } catch {
-        // Non-fatal: the conversation view will load its own metadata.
+      const chatsRes = await getChats();
+      const chats = chatsRes.data.chats || [];
+      dispatch(setChatsList({ chats }));
+      const dm = chats.find((chat) => chat.kind === 'dm' && chat.peer?.uid === displaySender.uid);
+      if (!dm) {
+        throw new Error(t`Conversation is not available`);
       }
       onDismiss();
-      history.push(`/chats/chat/${res.id}`);
+      history.push(`/chats/chat/${dm.id}`);
     } catch (err) {
       presentToast(err instanceof Error ? err.message : t`Failed to open conversation`, 2000);
     }
@@ -454,60 +407,22 @@ export function UserProfileModal({
                   ) : null}
                 </div>
               )}
-              {socialEnabled && !isOwn && displaySender && (
-                <div className={styles.buttonRow}>
-                  {friendsEnabled && dmEnabled && isFriend && (
-                    <IonButton fill="solid" color="primary" onClick={handleMessage} className={styles.splitButton}>
-                      <IonIcon slot="start" icon={chatbubbleEllipsesOutline} />
-                      {t`Message`}
-                    </IonButton>
-                  )}
-                  {friendsEnabled && isFriend && (
-                    <IonButton fill="outline" color="danger" onClick={handleUnfriend} className={styles.splitButton}>
-                      {t`Unfriend`}
-                    </IonButton>
-                  )}
-                  {friendsEnabled && !isFriend && outgoingReq && (
-                    <IonButton fill="outline" color="medium" disabled className={styles.singleButton}>
-                      {t`Request Pending`}
-                    </IonButton>
-                  )}
-                  {friendsEnabled && !isFriend && incomingReq && (
-                    <>
-                      <IonButton
-                        fill="solid"
-                        color="primary"
-                        onClick={() => void acceptRequest(incomingReq.id)}
-                        className={styles.splitButton}
-                      >
-                        {t`Accept`}
-                      </IonButton>
-                      <IonButton
-                        fill="outline"
-                        color="danger"
-                        onClick={() => void rejectRequest(incomingReq.id, incomingReq.from.uid)}
-                        className={styles.splitButton}
-                      >
-                        {t`Reject`}
-                      </IonButton>
-                    </>
-                  )}
-                  {friendsEnabled && !isFriend && !outgoingReq && !incomingReq && (
-                    <IonButton fill="solid" color="primary" onClick={handleAddFriend} className={styles.singleButton}>
-                      <IonIcon slot="start" icon={personAddOutline} />
+              {(showAddFriend || showMessage) && !isOwn && displaySender && (
+                <div className={styles.socialActions}>
+                  {showAddFriend && (
+                    <GroupSettingsActionButton
+                      icon={personAddOutline}
+                      disabled={pendingRequest != null}
+                      onClick={handleAddFriend}
+                    >
                       {t`Add Friend`}
-                    </IonButton>
+                    </GroupSettingsActionButton>
                   )}
-                  {blockEnabled &&
-                    (isBlocked ? (
-                      <IonButton fill="outline" color="medium" onClick={handleUnblock} className={styles.singleButton}>
-                        {t`Unblock`}
-                      </IonButton>
-                    ) : (
-                      <IonButton fill="outline" color="danger" onClick={handleBlock} className={styles.singleButton}>
-                        {t`Block`}
-                      </IonButton>
-                    ))}
+                  {showMessage && (
+                    <GroupSettingsActionButton icon={chatbubbleEllipsesOutline} onClick={() => void handleMessage()}>
+                      {t`Message`}
+                    </GroupSettingsActionButton>
+                  )}
                 </div>
               )}
             </div>

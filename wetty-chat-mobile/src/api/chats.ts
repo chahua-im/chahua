@@ -2,7 +2,8 @@ import type { AxiosResponse } from 'axios';
 import apiClient from './client';
 import type { MessagePreview } from './messages';
 import type { MemberSummary } from './users';
-import type { GroupKind } from './dms';
+
+export type GroupKind = 'group' | 'dm';
 
 export interface ChatListEntry {
   id: string;

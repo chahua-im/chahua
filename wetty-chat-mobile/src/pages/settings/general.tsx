@@ -101,7 +101,7 @@ export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSetti
           </IonItem>
           <IonItem>
             <IonToggle checked={showGroupsTab} onIonChange={(e) => dispatch(setShowGroupsTab(e.detail.checked))}>
-              <Trans>Show "Group Chats" Tab in Chats</Trans>
+              <Trans>Show "Groups" Tab in Chats</Trans>
             </IonToggle>
           </IonItem>
           {friendsEnabled && (

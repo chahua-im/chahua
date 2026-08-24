@@ -14,6 +14,7 @@ import InvitePreviewPage from '@/pages/invite-preview';
 import JoinChatPage from '@/pages/join-chat';
 import { ConversationPage } from '@/pages/conversation/conversation';
 import { GroupInfoPage, GroupSavedMessagesPage, GroupSettingsPage } from '@/pages/conversation/group-info';
+import { DmInfoPage } from '@/pages/conversation/dm-info';
 import { ChatMembersPage } from '@/pages/conversation/chat-members';
 import { ChatInvitesPage } from '@/pages/conversation/manage-invites';
 import SettingsPage from '@/pages/settings';
@@ -94,6 +95,7 @@ const MobileLayout: React.FC = () => {
         )}
         <Route path="/chats/chat/:id/group-info/settings" exact component={GroupSettingsPage} />
         <Route path="/chats/chat/:id/group-info" exact component={GroupInfoPage} />
+        <Route path="/chats/chat/:id/dm-info" exact component={DmInfoPage} />
         <Route path="/chats/chat/:id/invites" exact component={ChatInvitesPage} />
         <Route path="/chats/chat/:id/members" exact component={ChatMembersPage} />
         <Route path="/chats/chat/:id/stickers/:packId" exact component={StickerPackDetailPage} />

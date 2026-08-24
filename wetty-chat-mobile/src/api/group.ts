@@ -2,7 +2,7 @@ import type { AxiosResponse } from 'axios';
 import apiClient from './client';
 import type { UserGroupTagInfo } from './messages';
 import type { MemberSummary } from './users';
-import type { GroupKind } from './dms';
+import type { GroupKind } from './chats';
 
 export interface GroupInfoResponse {
   id: string;

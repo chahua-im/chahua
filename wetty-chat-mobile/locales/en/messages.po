@@ -149,8 +149,8 @@ msgstr "Back"
 msgid "Block"
 msgstr "Block"
 
-msgid "Block {name}? You won't be able to message each other."
-msgstr "Block {name}? You won't be able to message each other."
+msgid "Block {displayName}? You won't be able to message each other."
+msgstr "Block {displayName}? You won't be able to message each other."
 
 msgid "Block User"
 msgstr "Block User"
@@ -184,6 +184,9 @@ msgstr "Chat {chatId}"
 
 msgid "Chat Details"
 msgstr "Chat Details"
+
+msgid "Chat Info"
+msgstr "Chat Info"
 
 msgid "Chat name is required."
 msgstr "Chat name is required."
@@ -227,6 +230,9 @@ msgstr "Compressing"
 
 msgid "Continue"
 msgstr "Continue"
+
+msgid "Conversation is not available"
+msgstr "Conversation is not available"
 
 msgid "Copy"
 msgstr "Copy"
@@ -621,9 +627,6 @@ msgstr "General"
 msgid "Group"
 msgstr "Group"
 
-msgid "Group Chats"
-msgstr "Group Chats"
-
 msgid "Group details saved"
 msgstr "Group details saved"
 
@@ -641,6 +644,9 @@ msgstr "Group Name"
 
 msgid "Group Settings"
 msgstr "Group Settings"
+
+msgid "Groups"
+msgstr "Groups"
 
 msgid "Image"
 msgstr "Image"
@@ -1096,8 +1102,8 @@ msgstr "Remove {displayName} from {chatLabel}?"
 msgid "Remove {displayName} from this group?"
 msgstr "Remove {displayName} from this group?"
 
-msgid "Remove {name} from your friends?"
-msgstr "Remove {name} from your friends?"
+msgid "Remove {displayName} from your friends?"
+msgstr "Remove {displayName} from your friends?"
 
 msgid "Remove Friend"
 msgstr "Remove Friend"
@@ -1144,9 +1150,6 @@ msgstr "Reply"
 #. placeholder {0}: replyTo.username
 msgid "Replying to {0}"
 msgstr "Replying to {0}"
-
-msgid "Request Pending"
-msgstr "Request Pending"
 
 msgid "Requesters must answer your question. You review the answer before accepting."
 msgstr "Requesters must answer your question. You review the answer before accepting."
@@ -1280,8 +1283,8 @@ msgstr "Show \"All\" Tab in Chats"
 msgid "Show \"Friends\" Tab in Chats"
 msgstr "Show \"Friends\" Tab in Chats"
 
-msgid "Show \"Group Chats\" Tab in Chats"
-msgstr "Show \"Group Chats\" Tab in Chats"
+msgid "Show \"Groups\" Tab in Chats"
+msgstr "Show \"Groups\" Tab in Chats"
 
 msgid "Show \"Threads\" Tab in Chats"
 msgstr "Show \"Threads\" Tab in Chats"
@@ -1487,6 +1490,9 @@ msgstr "Uploading..."
 #. placeholder {0}: peer.uid
 msgid "User {0}"
 msgstr "User {0}"
+
+msgid "User {peerUid}"
+msgstr "User {peerUid}"
 
 msgid "User {uid}"
 msgstr "User {uid}"

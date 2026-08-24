@@ -11,6 +11,7 @@ import { ChatList } from '@/components/chat/lists/ChatList';
 import type { ChatListTab } from '@/components/chat/lists/ChatListSegment';
 import ConversationPane from '@/pages/conversation/conversation';
 import GroupInfoCore, { GroupSavedMessagesCore, GroupSettingsCore } from '@/pages/conversation/group-info';
+import DmInfoCore from '@/pages/conversation/dm-info';
 import ChatMembersCore from '@/pages/conversation/chat-members';
 import ChatInvitesCore from '@/pages/conversation/manage-invites';
 import CreateChatCore from '@/pages/create-chat';
@@ -41,6 +42,7 @@ interface DesktopRouteMatches {
   friendRequestsMatch: boolean;
   threadMatch: { id: string; threadId: string } | null;
   groupInfoMatch: { id: string } | null;
+  dmInfoMatch: { id: string } | null;
   groupInfoSavedMessagesMatch: { id: string } | null;
   groupInfoSettingsMatch: { id: string } | null;
   membersMatch: { id: string } | null;
@@ -72,6 +74,10 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
   });
   const groupInfoRaw = matchPath<{ id: string }>(pathname, {
     path: '/chats/chat/:id/group-info',
+    exact: true,
+  });
+  const dmInfoRaw = matchPath<{ id: string }>(pathname, {
+    path: '/chats/chat/:id/dm-info',
     exact: true,
   });
   const groupInfoSavedMessagesRaw = matchPath<{ id: string }>(pathname, {
@@ -144,6 +150,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
       groupInfoSavedMessagesRaw?.params.id ??
       groupInfoSettingsRaw?.params.id ??
       groupInfoRaw?.params.id ??
+      dmInfoRaw?.params.id ??
       membersRaw?.params.id ??
       invitesRaw?.params.id ??
       chatRaw?.params.id ??
@@ -152,6 +159,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     friendRequestsMatch: !!friendRequestsRaw,
     threadMatch: threadRaw?.params ?? null,
     groupInfoMatch: groupInfoRaw?.params ?? null,
+    dmInfoMatch: dmInfoRaw?.params ?? null,
     groupInfoSavedMessagesMatch: groupInfoSavedMessagesRaw?.params ?? null,
     groupInfoSettingsMatch: groupInfoSettingsRaw?.params ?? null,
     membersMatch: membersRaw?.params ?? null,
@@ -254,6 +262,7 @@ export function DesktopSplitLayout() {
     friendRequestsMatch,
     threadMatch,
     groupInfoMatch,
+    dmInfoMatch,
     groupInfoSavedMessagesMatch: routeGroupInfoSavedMessagesMatch,
     groupInfoSettingsMatch,
     membersMatch,
@@ -530,6 +539,11 @@ export function DesktopSplitLayout() {
               <GroupInfoCore chatId={chatId} backAction={backAction} />
             )
           }
+        </ChatModal>
+
+        {/* DM info modal */}
+        <ChatModal chatId={dmInfoMatch?.id ?? null} routePath="/chats/chat/:id/dm-info">
+          {(chatId, backAction) => <DmInfoCore chatId={chatId} backAction={backAction} />}
         </ChatModal>
 
         {/* Members modal */}

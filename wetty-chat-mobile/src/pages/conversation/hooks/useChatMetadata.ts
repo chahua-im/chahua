@@ -3,7 +3,7 @@ import { shallowEqual, useDispatch, useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import { getChatUnreadCount } from '@/api/chats';
 import { getGroupInfo, type GroupRole } from '@/api/group';
-import type { GroupKind } from '@/api/dms';
+import type { GroupKind } from '@/api/chats';
 import type { MemberSummary } from '@/api/users';
 import type { ChatMeta } from '@/store/chatsSlice';
 import {

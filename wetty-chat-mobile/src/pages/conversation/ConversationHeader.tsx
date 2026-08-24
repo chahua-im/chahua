@@ -16,7 +16,7 @@ interface ConversationHeaderProps {
   isDm: boolean;
   onOpenMembers: () => void;
   onOpenGroupInfo: () => void;
-  onOpenPeerProfile?: () => void;
+  onOpenDmInfo: () => void;
   onToggleThreadSubscription: () => void;
 }
 
@@ -31,7 +31,7 @@ export function ConversationHeader({
   isDm,
   onOpenMembers,
   onOpenGroupInfo,
-  onOpenPeerProfile,
+  onOpenDmInfo,
   onToggleThreadSubscription,
 }: ConversationHeaderProps) {
   const wsConnected = useSelector((state: RootState) => state.connection.wsConnected);
@@ -63,7 +63,7 @@ export function ConversationHeader({
               </IonButton>
             )
           ) : isDm ? (
-            <IonButton onClick={onOpenPeerProfile}>
+            <IonButton onClick={onOpenDmInfo}>
               <IonIcon slot="icon-only" icon={informationCircleOutline} />
             </IonButton>
           ) : (
