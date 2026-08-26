@@ -307,7 +307,7 @@ async fn get_chats(
             }
         })
         .collect();
-    let dm_peer_summaries = build_member_summary_map(conn, &state, &dm_peer_uids)?;
+    let dm_peer_summaries = build_member_summary_map(&state, &dm_peer_uids)?;
 
     let chats: Vec<ChatListItem> = items_to_process
         .into_iter()

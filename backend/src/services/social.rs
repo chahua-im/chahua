@@ -14,7 +14,7 @@ use crate::models::{
     NewGroupMembership, NewUserExtra,
 };
 use crate::schema::{blocks, friend_requests, friendships, group_membership, groups, user_extra};
-use crate::services::user;
+use crate::services::discuz::DiscuzProvider;
 use crate::utils::ids;
 use crate::AppState;
 
@@ -131,6 +131,7 @@ pub fn check_can_dm(
 /// transaction because ID generation is asynchronous.
 fn create_dm_for_friendship(
     conn: &mut PgConnection,
+    discuz: &DiscuzProvider,
     id: i64,
     user_a: i32,
     user_b: i32,
@@ -141,7 +142,7 @@ fn create_dm_for_friendship(
         .eq(GroupKind::Dm)
         .and(groups::dm_uid1.eq(u1))
         .and(groups::dm_uid2.eq(u2));
-    let profiles = user::lookup_user_profiles(conn, &[u1, u2])?;
+    let profiles = discuz.user_profiles(&[u1, u2])?;
     let username_a = profiles
         .get(&u1)
         .and_then(|profile| profile.username.as_deref())
@@ -434,7 +435,7 @@ pub async fn create_friend_request(
             .optional()?
             .ok_or(AppError::Conflict("Friend request is no longer pending"))?;
             insert_friendship(conn, from, to, from, now)?;
-            create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
+            create_dm_for_friendship(conn, &state.discuz, dm_group_id, from, to, now)?;
             Ok(updated)
         })?;
         return Ok(CreateRequestOutcome::AutoAccepted { request });
@@ -552,7 +553,14 @@ pub async fn resolve_friend_request(
                 request.from_uid,
                 now,
             )?;
-            create_dm_for_friendship(conn, dm_group_id, request.from_uid, request.to_uid, now)?;
+            create_dm_for_friendship(
+                conn,
+                &state.discuz,
+                dm_group_id,
+                request.from_uid,
+                request.to_uid,
+                now,
+            )?;
             return Ok(ResolveOutcome::Resolved(request));
         }
         if are_mutual_friends(conn, request.from_uid, request.to_uid)? {

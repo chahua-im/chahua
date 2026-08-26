@@ -2,7 +2,6 @@ use axum::{
     extract::{Json, Path, State},
     http::StatusCode,
 };
-use diesel::PgConnection;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,7 +25,6 @@ use crate::extractors::DbConn;
 use crate::handlers::users::build_member_summary_map;
 use crate::models::{FriendRequest, FriendRequestStatus};
 use crate::services::social::{self, CreateRequestOutcome, ResolveOutcome};
-use crate::services::user::lookup_user_profiles;
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
@@ -88,11 +86,10 @@ fn missing_user_summary(uid: i32) -> MemberSummary {
 }
 
 fn build_request_response(
-    conn: &mut PgConnection,
     state: &AppState,
     request: &FriendRequest,
 ) -> Result<FriendRequestResponse, AppError> {
-    let summaries = build_member_summary_map(conn, state, &[request.from_uid, request.to_uid])?;
+    let summaries = build_member_summary_map(state, &[request.from_uid, request.to_uid])?;
     Ok(FriendRequestResponse {
         id: request.id,
         from: summaries
@@ -112,7 +109,6 @@ fn build_request_response(
 }
 
 fn build_request_responses(
-    conn: &mut PgConnection,
     state: &AppState,
     requests: &[FriendRequest],
 ) -> Result<Vec<FriendRequestResponse>, AppError> {
@@ -121,7 +117,7 @@ fn build_request_responses(
         uids.push(request.from_uid);
         uids.push(request.to_uid);
     }
-    let summaries: HashMap<i32, MemberSummary> = build_member_summary_map(conn, state, &uids)?;
+    let summaries: HashMap<i32, MemberSummary> = build_member_summary_map(state, &uids)?;
     Ok(requests
         .iter()
         .map(|request| FriendRequestResponse {
@@ -158,7 +154,7 @@ async fn get_friends(
     let conn = &mut *conn;
     let friends = social::list_friends_with_since(conn, uid)?;
     let uids: Vec<i32> = friends.iter().map(|(uid, _)| *uid).collect();
-    let summaries = build_member_summary_map(conn, &state, &uids)?;
+    let summaries = build_member_summary_map(&state, &uids)?;
     let friends = friends
         .into_iter()
         .filter_map(|(uid, since)| {
@@ -219,7 +215,7 @@ async fn create_friend_request(
     validate_friend_request_message(body.message.as_deref())?;
     let conn = &mut *conn;
 
-    let target_profiles = lookup_user_profiles(conn, &[body.to_uid])?;
+    let target_profiles = state.discuz.user_profiles(&[body.to_uid])?;
     if !target_profiles.contains_key(&body.to_uid) {
         return Err(AppError::NotFound("User not found"));
     }
@@ -235,7 +231,7 @@ async fn create_friend_request(
                     from_uid: uid,
                 }),
             );
-            let response = build_request_response(conn, &state, &request)?;
+            let response = build_request_response(&state, &request)?;
             Ok((StatusCode::CREATED, Json(response)))
         }
         CreateRequestOutcome::AutoAccepted { request } => {
@@ -249,7 +245,7 @@ async fn create_friend_request(
                     by_uid: uid,
                 }),
             );
-            let response = build_request_response(conn, &state, &request)?;
+            let response = build_request_response(&state, &request)?;
             Ok((StatusCode::OK, Json(response)))
         }
         CreateRequestOutcome::AlreadyPending => {
@@ -301,7 +297,7 @@ async fn list_friend_request_history(
             }
         })
         .collect();
-    let requests = build_request_responses(conn, &state, &rows)?
+    let requests = build_request_responses(&state, &rows)?
         .into_iter()
         .zip(directions)
         .map(|(request, direction)| FriendRequestHistoryEntry { request, direction })
@@ -335,7 +331,7 @@ async fn accept_friend_request(
             by_uid: uid,
         }),
     );
-    let response = build_request_response(conn, &state, request)?;
+    let response = build_request_response(&state, request)?;
     Ok(Json(response))
 }
 
@@ -371,7 +367,7 @@ async fn reject_friend_request(
     if matches!(&outcome, ResolveOutcome::RejectedWhileFriends(_)) {
         return Err(AppError::Conflict("You are already friends with this user"));
     }
-    let response = build_request_response(conn, &state, request)?;
+    let response = build_request_response(&state, request)?;
     Ok(Json(response))
 }
 

@@ -185,7 +185,6 @@ fn lookup_member_summary(state: &AppState, uid: i32) -> Result<Option<MemberSumm
 }
 
 pub fn build_member_summary_map(
-    _conn: &mut PgConnection,
     state: &AppState,
     uids: &[i32],
 ) -> Result<HashMap<i32, MemberSummary>, AppError> {

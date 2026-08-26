@@ -204,7 +204,7 @@ pub(super) fn load_group_info(
             group.dm_uid1
         };
         if let Some(puid) = peer_uid {
-            let mut summaries = build_member_summary_map(conn, state, &[puid])?;
+            let mut summaries = build_member_summary_map(state, &[puid])?;
             summaries.remove(&puid)
         } else {
             None
