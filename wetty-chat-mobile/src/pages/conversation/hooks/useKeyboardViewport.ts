@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 const KEYBOARD_OPEN_HEIGHT_DIFF = 120;
 const KEYBOARD_CLOSED_HEIGHT_DIFF = 20;
@@ -11,6 +11,7 @@ export function useKeyboardViewport(isDesktop: boolean) {
   const [viewportHeight, setViewportHeight] = useState<number>(
     () => window.visualViewport?.height ?? window.innerHeight,
   );
+  const [viewportScrollTop, setViewportScrollTop] = useState(() => window.scrollY);
 
   useEffect(() => {
     if (isDesktop) return;
@@ -20,6 +21,7 @@ export function useKeyboardViewport(isDesktop: boolean) {
     const updateViewportMetrics = () => {
       const nextViewportHeight = getViewportHeight();
       setViewportHeight(nextViewportHeight);
+      setViewportScrollTop(window.scrollY);
       if (!composeFocused) {
         setBaselineViewportHeight((prev) => Math.max(prev, nextViewportHeight));
       }
@@ -48,14 +50,12 @@ export function useKeyboardViewport(isDesktop: boolean) {
     !isDesktop && composeFocused && baselineViewportHeight - viewportHeight > KEYBOARD_OPEN_HEIGHT_DIFF;
   const keyboardFullyClosed =
     !isDesktop && !composeFocused && baselineViewportHeight - viewportHeight < KEYBOARD_CLOSED_HEIGHT_DIFF;
-
-  const pageStyle = useMemo<CSSProperties | undefined>(() => {
-    if (!isKeyboardOpen) return undefined;
-    return {
-      height: `${viewportHeight}px`,
-      top: `${window.visualViewport?.offsetTop ?? 0}px`,
-    };
-  }, [isKeyboardOpen, viewportHeight]);
+  const pageStyle = isKeyboardOpen
+    ? {
+        height: `${viewportHeight}px`,
+        top: `${viewportScrollTop}px`,
+      }
+    : undefined;
 
   return {
     handleComposeFocusChange,

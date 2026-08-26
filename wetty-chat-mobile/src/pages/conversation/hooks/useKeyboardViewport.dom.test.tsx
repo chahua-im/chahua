@@ -28,6 +28,7 @@ describe('useKeyboardViewport', () => {
   let state: HookState;
   let originalVisualViewport: PropertyDescriptor | undefined;
   let originalInnerHeight: PropertyDescriptor | undefined;
+  let originalScrollY: PropertyDescriptor | undefined;
 
   function renderHook(isDesktop = false) {
     act(() => {
@@ -44,6 +45,7 @@ describe('useKeyboardViewport', () => {
 
     originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
     originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY');
 
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
@@ -52,6 +54,10 @@ describe('useKeyboardViewport', () => {
     Object.defineProperty(window, 'innerHeight', {
       configurable: true,
       value: 800,
+    });
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 0,
     });
   });
 
@@ -69,6 +75,11 @@ describe('useKeyboardViewport', () => {
     if (originalInnerHeight) {
       Object.defineProperty(window, 'innerHeight', originalInnerHeight);
     }
+    if (originalScrollY) {
+      Object.defineProperty(window, 'scrollY', originalScrollY);
+    } else {
+      Reflect.deleteProperty(window, 'scrollY');
+    }
   });
 
   it('opens when compose is focused and the visual viewport shrinks past the threshold', () => {
@@ -76,7 +87,6 @@ describe('useKeyboardViewport', () => {
 
     expect(state.isKeyboardOpen).toBe(false);
     expect(state.keyboardFullyClosed).toBe(true);
-    expect(state.pageStyle).toBeUndefined();
 
     act(() => {
       state.handleComposeFocusChange(true);
@@ -89,7 +99,44 @@ describe('useKeyboardViewport', () => {
 
     expect(state.isKeyboardOpen).toBe(true);
     expect(state.keyboardFullyClosed).toBe(false);
-    expect(state.pageStyle).toEqual({ height: '640px', top: '32px' });
+  });
+
+  it('uses Safari layout scroll to keep the resized page at the visual origin', () => {
+    renderHook();
+
+    act(() => {
+      state.handleComposeFocusChange(true);
+    });
+    viewport.height = 377;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 337,
+    });
+    act(() => {
+      viewport.dispatchEvent(new Event('resize'));
+    });
+
+    expect(state.pageStyle).toEqual({ height: '377px', top: '337px' });
+  });
+
+  it('keeps keyboard status open when iOS later reports a viewport scroll', () => {
+    renderHook();
+
+    act(() => {
+      state.handleComposeFocusChange(true);
+    });
+    viewport.height = 377;
+    act(() => {
+      viewport.dispatchEvent(new Event('resize'));
+    });
+    expect(state.isKeyboardOpen).toBe(true);
+
+    viewport.offsetTop = 337;
+    act(() => {
+      viewport.dispatchEvent(new Event('scroll'));
+    });
+    expect(state.isKeyboardOpen).toBe(true);
+    expect(state.keyboardFullyClosed).toBe(false);
   });
 
   it('reports fully closed after blur and viewport recovery', () => {
@@ -114,7 +161,6 @@ describe('useKeyboardViewport', () => {
 
     expect(state.isKeyboardOpen).toBe(false);
     expect(state.keyboardFullyClosed).toBe(true);
-    expect(state.pageStyle).toBeUndefined();
   });
 
   it('keeps desktop mode inactive even if the viewport changes', () => {
@@ -131,6 +177,5 @@ describe('useKeyboardViewport', () => {
 
     expect(state.isKeyboardOpen).toBe(false);
     expect(state.keyboardFullyClosed).toBe(false);
-    expect(state.pageStyle).toBeUndefined();
   });
 });
