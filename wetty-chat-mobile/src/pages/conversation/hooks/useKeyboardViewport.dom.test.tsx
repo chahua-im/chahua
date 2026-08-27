@@ -101,22 +101,27 @@ describe('useKeyboardViewport', () => {
     expect(state.keyboardFullyClosed).toBe(false);
   });
 
-  it('uses Safari layout scroll to keep the resized page at the visual origin', () => {
+  it('uses the delayed visual viewport offset for installed PWA page positioning', () => {
     renderHook();
 
     act(() => {
       state.handleComposeFocusChange(true);
     });
-    viewport.height = 377;
-    Object.defineProperty(window, 'scrollY', {
-      configurable: true,
-      value: 337,
-    });
+    viewport.height = 460;
     act(() => {
       viewport.dispatchEvent(new Event('resize'));
     });
+    expect(state.pageStyle).toEqual({ height: '460px', top: '0px' });
 
-    expect(state.pageStyle).toEqual({ height: '377px', top: '337px' });
+    viewport.offsetTop = 413;
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      value: 472,
+    });
+    act(() => {
+      viewport.dispatchEvent(new Event('scroll'));
+    });
+    expect(state.pageStyle).toEqual({ height: '460px', top: '413px' });
   });
 
   it('keeps keyboard status open when iOS later reports a viewport scroll', () => {

@@ -3,6 +3,13 @@ import { useCallback, useEffect, useState } from 'react';
 const KEYBOARD_OPEN_HEIGHT_DIFF = 120;
 const KEYBOARD_CLOSED_HEIGHT_DIFF = 20;
 
+function isStandalonePwa() {
+  return (
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}
+
 export function useKeyboardViewport(isDesktop: boolean) {
   const [composeFocused, setComposeFocused] = useState(false);
   const [baselineViewportHeight, setBaselineViewportHeight] = useState<number>(
@@ -11,17 +18,44 @@ export function useKeyboardViewport(isDesktop: boolean) {
   const [viewportHeight, setViewportHeight] = useState<number>(
     () => window.visualViewport?.height ?? window.innerHeight,
   );
-  const [viewportScrollTop, setViewportScrollTop] = useState(() => window.scrollY);
+  const [viewportOffsetTop, setViewportOffsetTop] = useState(() => window.visualViewport?.offsetTop ?? 0);
 
   useEffect(() => {
     if (isDesktop) return;
 
     const visualViewport = window.visualViewport;
     const getViewportHeight = () => visualViewport?.height ?? window.innerHeight;
-    const updateViewportMetrics = () => {
+    const updateViewportMetrics = (event: Event) => {
       const nextViewportHeight = getViewportHeight();
+      const nextOffsetTop = visualViewport?.offsetTop ?? 0;
+      console.debug('[keyboard:viewport]', {
+        event: event.type,
+        focused: composeFocused,
+        baselineViewportHeight,
+        viewportOffsetTop: nextOffsetTop,
+        viewportHeight: nextViewportHeight,
+        offsetTop: nextOffsetTop,
+        scrollY: window.scrollY,
+        innerHeight: window.innerHeight,
+        standalone: isStandalonePwa(),
+      });
       setViewportHeight(nextViewportHeight);
-      setViewportScrollTop(window.scrollY);
+      setViewportOffsetTop(nextOffsetTop);
+      window.requestAnimationFrame(() => {
+        const pageRect = document.querySelector<HTMLElement>('.conversation-page')?.getBoundingClientRect();
+        const footerRect = document.querySelector<HTMLElement>('.conversation-footer')?.getBoundingClientRect();
+        console.debug('[keyboard:layout]', {
+          viewportHeight: visualViewport?.height ?? window.innerHeight,
+          offsetTop: visualViewport?.offsetTop ?? 0,
+          scrollY: window.scrollY,
+          viewportOffsetTop: visualViewport?.offsetTop ?? 0,
+          pageTop: pageRect?.top,
+          pageHeight: pageRect?.height,
+          footerTop: footerRect?.top,
+          footerBottom: footerRect?.bottom,
+          standalone: isStandalonePwa(),
+        });
+      });
       if (!composeFocused) {
         setBaselineViewportHeight((prev) => Math.max(prev, nextViewportHeight));
       }
@@ -40,9 +74,16 @@ export function useKeyboardViewport(isDesktop: boolean) {
         visualViewport.removeEventListener('scroll', updateViewportMetrics);
       }
     };
-  }, [composeFocused, isDesktop]);
+  }, [baselineViewportHeight, composeFocused, isDesktop]);
 
   const handleComposeFocusChange = useCallback((focused: boolean) => {
+    console.debug('[keyboard:focus]', {
+      focused,
+      viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+      offsetTop: window.visualViewport?.offsetTop ?? 0,
+      scrollY: window.scrollY,
+      standalone: isStandalonePwa(),
+    });
     setComposeFocused(focused);
   }, []);
 
@@ -53,7 +94,7 @@ export function useKeyboardViewport(isDesktop: boolean) {
   const pageStyle = isKeyboardOpen
     ? {
         height: `${viewportHeight}px`,
-        top: `${viewportScrollTop}px`,
+        top: `${viewportOffsetTop}px`,
       }
     : undefined;
 
