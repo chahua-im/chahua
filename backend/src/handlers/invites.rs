@@ -290,7 +290,7 @@ fn preview_eligibility(
     responses(
         (status = 201, description = "Invite created", body = InviteResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_invite(
     CurrentUid(uid): CurrentUid,
@@ -319,7 +319,7 @@ async fn post_invite(
     responses(
         (status = 201, description = "Invite message sent", body = SendInviteMessageResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_send_invite_message(
     CurrentUid(uid): CurrentUid,
@@ -399,7 +399,7 @@ async fn post_send_invite_message(
     responses(
         (status = 200, description = "List of invites", body = ListInvitesResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_invites(
     CurrentUid(uid): CurrentUid,
@@ -442,7 +442,7 @@ async fn get_invites(
     responses(
         (status = 200, description = "Invite details", body = InviteResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_invite(
     CurrentUid(uid): CurrentUid,
@@ -465,7 +465,7 @@ async fn get_invite(
     responses(
         (status = 200, description = "Invite preview", body = InvitePreviewResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_invite_by_code(
     CurrentUid(uid): CurrentUid,
@@ -520,7 +520,7 @@ async fn get_invite_by_code(
     responses(
         (status = 200, description = "Invite updated", body = InviteResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn patch_invite(
     CurrentUid(uid): CurrentUid,
@@ -555,7 +555,7 @@ async fn patch_invite(
     responses(
         (status = 204, description = "Invite deleted")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn delete_invite(
     CurrentUid(uid): CurrentUid,
@@ -582,7 +582,7 @@ async fn delete_invite(
     responses(
         (status = 200, description = "Invite redeemed", body = RedeemInviteResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_redeem_invite(
     CurrentUid(uid): CurrentUid,

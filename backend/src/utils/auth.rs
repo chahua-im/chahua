@@ -9,28 +9,19 @@ use crate::services::auth_token::{AuthTokenError, VerifiedSession};
 use crate::services::service_tokens::AuthenticatedServiceToken;
 use crate::services::{authz, service_tokens, user};
 
-pub const X_USER_ID: &str = "x-user-id";
 pub const X_ON_BEHALF_OF: &str = "x-on-behalf-of";
 pub const X_CLIENT_ID: &str = "x-client-id";
 pub const X_APP_VERSION: &str = "x-app-version";
 
 #[derive(Clone, Copy, Debug)]
 pub struct CurrentUid(pub i32);
-
 #[derive(Clone, Debug)]
 pub struct ClientId(pub String);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AuthSource {
-    Jwt,
-    Legacy,
-}
 
 #[derive(Clone, Debug)]
 pub struct AuthContext {
     pub uid: i32,
-    pub client_id: Option<String>,
-    pub source: AuthSource,
+    pub client_id: String,
 }
 #[derive(Clone, Debug)]
 pub struct BearerSession(pub VerifiedSession);
@@ -168,19 +159,15 @@ pub fn extract_auth_context(
     headers: &HeaderMap,
     state: &crate::AppState,
 ) -> Result<AuthContext, (StatusCode, &'static str)> {
-    if let Some(token) = bearer_token(headers)? {
-        let session = state
-            .auth_token_service
-            .verify(token)
-            .map_err(AuthTokenError::into_rejection)?;
-        return Ok(AuthContext {
-            uid: session.uid,
-            client_id: Some(session.client_id),
-            source: AuthSource::Jwt,
-        });
-    }
-
-    extract_legacy_auth_context(headers, state)
+    let token = required_bearer_token(headers)?;
+    let session = state
+        .auth_token_service
+        .verify(token)
+        .map_err(AuthTokenError::into_rejection)?;
+    Ok(AuthContext {
+        uid: session.uid,
+        client_id: session.client_id,
+    })
 }
 
 /// What the `Authorization` header authenticated, before delegation is applied.
@@ -244,33 +231,6 @@ fn on_behalf_of_uid(headers: &HeaderMap) -> Result<Option<i32>, AppError> {
     Ok(Some(uid))
 }
 
-fn extract_legacy_auth_context(
-    headers: &HeaderMap,
-    state: &crate::AppState,
-) -> Result<AuthContext, (StatusCode, &'static str)> {
-    match state.config.auth.method {
-        crate::config::AuthMethod::UIDHeader => {
-            let value = headers
-                .get(X_USER_ID)
-                .and_then(|v| v.to_str().ok())
-                .ok_or((
-                    StatusCode::UNAUTHORIZED,
-                    "Missing or invalid X-User-Id header",
-                ))?;
-            let uid = value
-                .trim()
-                .parse::<i32>()
-                .map_err(|_| (StatusCode::UNAUTHORIZED, "X-User-Id must be a valid i32"))?;
-            Ok(AuthContext {
-                uid,
-                client_id: None,
-                source: AuthSource::Legacy,
-            })
-        }
-        crate::config::AuthMethod::JwtOnly => Err((StatusCode::UNAUTHORIZED, "Missing auth token")),
-    }
-}
-
 fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, (StatusCode, &'static str)> {
     let Some(value) = headers.get(AUTHORIZATION) else {
         return Ok(None);
@@ -291,6 +251,10 @@ fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, (StatusCode, &'stat
     Ok(Some(token))
 }
 
+fn required_bearer_token(headers: &HeaderMap) -> Result<&str, (StatusCode, &'static str)> {
+    bearer_token(headers)?.ok_or((StatusCode::UNAUTHORIZED, "Missing auth token"))
+}
+
 pub fn is_valid_client_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -299,40 +263,11 @@ pub fn is_valid_client_id(value: &str) -> bool {
             .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_'))
 }
 
-pub fn optional_client_id(
-    headers: &HeaderMap,
-) -> Result<Option<String>, (StatusCode, &'static str)> {
-    match headers.get(X_CLIENT_ID) {
-        None => Ok(None),
-        Some(value) => {
-            let value = value.to_str().map_err(|_| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "Missing or invalid X-Client-Id header",
-                )
-            })?;
-            let value = value.trim();
-            if !is_valid_client_id(value) {
-                return Err((StatusCode::BAD_REQUEST, "X-Client-Id is invalid"));
-            }
-            Ok(Some(value.to_string()))
-        }
-    }
-}
-
 pub fn resolve_client_id(
     headers: &HeaderMap,
     state: &crate::AppState,
-) -> Result<Option<String>, (StatusCode, &'static str)> {
-    let context = extract_auth_context(headers, state)?;
-    match context.client_id {
-        Some(client_id) => Ok(Some(client_id)),
-        None => optional_client_id(headers),
-    }
-}
-
-pub fn required_client_id(headers: &HeaderMap) -> Result<String, (StatusCode, &'static str)> {
-    optional_client_id(headers)?.ok_or((StatusCode::BAD_REQUEST, "Missing X-Client-Id header"))
+) -> Result<String, (StatusCode, &'static str)> {
+    Ok(extract_auth_context(headers, state)?.client_id)
 }
 
 impl FromRequestParts<crate::AppState> for BearerSession {
@@ -342,8 +277,7 @@ impl FromRequestParts<crate::AppState> for BearerSession {
         parts: &mut Parts,
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token = bearer_token(&parts.headers)?
-            .ok_or((StatusCode::UNAUTHORIZED, "Missing auth token"))?;
+        let token = required_bearer_token(&parts.headers)?;
         state
             .auth_token_service
             .verify(token)
@@ -384,9 +318,7 @@ impl FromRequestParts<crate::AppState> for ClientId {
         parts: &mut Parts,
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
-        resolve_client_id(&parts.headers, state)?
-            .ok_or((StatusCode::BAD_REQUEST, "Missing X-Client-Id header"))
-            .map(ClientId)
+        resolve_client_id(&parts.headers, state).map(ClientId)
     }
 }
 
@@ -415,25 +347,19 @@ mod tests {
     }
 
     #[test]
-    fn optional_client_id_validates_shape() {
-        let mut headers = HeaderMap::new();
-        headers.insert(X_CLIENT_ID, HeaderValue::from_static("bad value"));
-
-        let result = optional_client_id(&headers);
-
+    fn required_bearer_token_rejects_missing_authorization() {
         assert_eq!(
-            result,
-            Err((StatusCode::BAD_REQUEST, "X-Client-Id is invalid"))
+            required_bearer_token(&HeaderMap::new()),
+            Err((StatusCode::UNAUTHORIZED, "Missing auth token"))
         );
     }
 
     #[test]
-    fn apply_delegation_keeps_direct_user_identity() {
+    fn apply_delegation_keeps_direct_jwt_user_identity() {
         let principal = apply_delegation(
             Credential::User(AuthContext {
                 uid: 7,
-                client_id: None,
-                source: AuthSource::Legacy,
+                client_id: "client-7".to_string(),
             }),
             None,
         )
@@ -444,12 +370,11 @@ mod tests {
     }
 
     #[test]
-    fn apply_delegation_rejects_user_delegation() {
+    fn apply_delegation_rejects_jwt_user_delegation() {
         let result = apply_delegation(
             Credential::User(AuthContext {
                 uid: 7,
-                client_id: None,
-                source: AuthSource::Legacy,
+                client_id: "client-7".to_string(),
             }),
             Some(9),
         );

@@ -22,7 +22,7 @@ use crate::models::{
     NewClientRecord, NewUserExtra, UserExtra,
 };
 use crate::schema::{activity_daily_metrics, clients, push_subscriptions, user_extra};
-use crate::utils::auth::{extract_auth_context, optional_client_id, X_APP_VERSION};
+use crate::utils::auth::{extract_auth_context, X_APP_VERSION};
 
 const ACTIVITY_WRITE_THROTTLE: Duration = Duration::from_secs(5 * 60);
 const PURGE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -453,16 +453,11 @@ pub async fn track_client_activity(
     let mut resolved_client_id: Option<String> = None;
 
     if let Ok(auth) = extract_auth_context(request.headers(), &state) {
-        let client_id = auth
-            .client_id
-            .or_else(|| optional_client_id(request.headers()).ok().flatten());
-        if let Some(client_id) = client_id {
-            resolved_client_id = Some(client_id.clone());
-            if let Err((status, message)) =
-                state.client_tracking.record_activity(auth.uid, &client_id)
-            {
-                return (status, message).into_response();
-            }
+        let client_id = auth.client_id;
+        resolved_client_id = Some(client_id.clone());
+        if let Err((status, message)) = state.client_tracking.record_activity(auth.uid, &client_id)
+        {
+            return (status, message).into_response();
         }
     }
 

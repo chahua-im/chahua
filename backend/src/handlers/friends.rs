@@ -149,7 +149,7 @@ fn build_request_responses(
     path = "/",
     tag = "friends",
     responses((status = 200, description = "Current user's friends", body = ListFriendsResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
     params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn get_friends(
@@ -183,7 +183,7 @@ async fn get_friends(
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     ),
     responses((status = 204, description = "Friend removed"), (status = 404, description = "Not friends")),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn delete_friend(
     principal: Principal,
@@ -215,7 +215,7 @@ async fn delete_friend(
         (status = 200, description = "Reciprocal request auto-accepted", body = FriendRequestResponse),
         (status = 409, description = "Already pending or already friends")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
     params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn create_friend_request(
@@ -273,7 +273,7 @@ async fn create_friend_request(
     path = "/requests/pending/count",
     tag = "friends",
     responses((status = 200, description = "Number of pending incoming friend requests", body = PendingFriendRequestCountResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
     params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn count_pending_incoming_requests(
@@ -294,7 +294,7 @@ async fn count_pending_incoming_requests(
     path = "/requests",
     tag = "friends",
     responses((status = 200, description = "Friend request history in both directions, newest first", body = ListFriendRequestHistoryResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
     params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn list_friend_request_history(
@@ -332,7 +332,7 @@ async fn list_friend_request_history(
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     ),
     responses((status = 200, description = "Request accepted", body = FriendRequestResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn accept_friend_request(
     principal: Principal,
@@ -369,7 +369,7 @@ async fn accept_friend_request(
         (status = 200, description = "Request rejected", body = FriendRequestResponse),
         (status = 409, description = "Already friends; the request was dismissed")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn reject_friend_request(
     principal: Principal,
@@ -402,7 +402,7 @@ async fn reject_friend_request(
     path = "/me/settings",
     tag = "friends",
     responses((status = 200, description = "Current user's friend-acceptance settings", body = FriendSettingsResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_my_friend_settings(
     CurrentUid(uid): CurrentUid,
@@ -419,7 +419,7 @@ async fn get_my_friend_settings(
     tag = "friends",
     request_body = UpdateFriendSettingsBody,
     responses((status = 200, description = "Updated friend-acceptance settings", body = FriendSettingsResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn update_my_friend_settings(
     CurrentUid(uid): CurrentUid,
@@ -441,7 +441,7 @@ async fn update_my_friend_settings(
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     ),
     responses((status = 200, description = "What a requester needs to add this user as a friend", body = FriendAddInfoResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn get_user_friend_add_info(
     principal: Principal,

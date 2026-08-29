@@ -12,7 +12,7 @@ Wetty Chat is a chat application with:
 
 → **[docs/local-setup.md](docs/local-setup.md)**
 
-It covers installing Docker / Rust / Node on **macOS or Linux** (and verifying what you already have), running Postgres in Docker, configuring `backend/.env` with `AUTH_METHOD=UIDHeader`, seeding the first user + permissions, then starting the backend on the host and the frontend with Vite.
+It covers installing Docker / Rust / Node on **macOS or Linux** (and verifying what you already have), running Postgres in Docker, configuring `backend/.env`, seeding the first user + permissions, bootstrapping a local JWT through `/auth/dev-session`, then starting the backend on the host and the frontend with Vite.
 
 ### Quick reference (experienced)
 
@@ -25,8 +25,8 @@ docker compose up -d postgres
 # 2. Backend on the host
 cd backend
 cp .env.example .env
-# Set DATABASE_URL to the compose credentials, AUTH_METHOD=UIDHeader,
-# JWT_SIGNING_KEY_BASE64, VAPID_* keys, S3_BUCKET_NAME, AWS_REGION — see .env.example
+# Set DATABASE_URL to the compose credentials, JWT_SIGNING_KEY_BASE64,
+# VAPID_* keys, S3_BUCKET_NAME, AWS_REGION — see .env.example
 cargo run   # applies migrations automatically; API on :3000
 
 # 3. Seed uid 1 + admin policy (once per fresh DB) — see docs/local-setup.md §6
@@ -43,8 +43,8 @@ DATABASE_URL=postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat
 ```
 
 - Migrations run on backend startup.
-- Dev frontend sends `X-User-Id` (default `1`); requires `AUTH_METHOD=UIDHeader`.
-- Never use `UIDHeader` in production.
+- In Vite development, the PWA obtains a JWT from `POST /auth/dev-session` for its configured local uid. The request sends `X-Client-Id`; subsequent API requests use `Authorization: Bearer <token>`.
+- `POST /auth/dev-session` is enabled automatically by a debug backend build. For a release build used only in local development, set `ENABLE_DEBUG_AUTH=true`.
 - Attachments need real/local S3 (`docker compose up -d rustfs init-rustfs` + env from `.env.example`).
 
 ## Formatting and hooks

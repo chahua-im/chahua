@@ -140,7 +140,7 @@ pub(super) fn require_admin_role(
     responses(
         (status = OK, body = ListMembersResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_members(
     CurrentUid(uid): CurrentUid,
@@ -213,7 +213,7 @@ async fn get_members(
     responses(
         (status = CREATED, body = MemberResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn post_add_member(
     CurrentUid(uid): CurrentUid,
@@ -339,7 +339,7 @@ struct RemoveMemberQuery {
         (status = NO_CONTENT),
         (status = 400, description = "DM chats cannot be left"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_remove_member(
     CurrentUid(uid): CurrentUid,
@@ -476,7 +476,7 @@ async fn delete_remove_member(
     responses(
         (status = OK, body = MemberResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn patch_member(
     CurrentUid(requester_uid): CurrentUid,

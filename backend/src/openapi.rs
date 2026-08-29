@@ -3,7 +3,7 @@ use crate::dto::ws::{
     FriendshipRemovedPayload, PinUpdatePayload, PresenceUpdatePayload, ReactionUpdatePayload,
     ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload,
 };
-use utoipa::openapi::security::{ApiKey, ApiKeyValue, Http, HttpAuthScheme, SecurityScheme};
+use utoipa::openapi::security::{Http, HttpAuthScheme, SecurityScheme};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -37,10 +37,6 @@ struct SecurityAddon;
 impl utoipa::Modify for SecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         let components = openapi.components.get_or_insert_with(Default::default);
-        components.add_security_scheme(
-            "uid_header",
-            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("X-User-Id"))),
-        );
         components.add_security_scheme(
             "bearer_jwt",
             SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),

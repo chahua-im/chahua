@@ -152,7 +152,7 @@ fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize>
     responses(
         (status = 200, description = "List of messages", body = ListMessagesResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_messages(
     CurrentUid(uid): CurrentUid,
@@ -316,7 +316,7 @@ async fn get_messages(
         (status = 400, description = "Invalid search query"),
         (status = 503, description = "Message search unavailable"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn search_messages(
     CurrentUid(uid): CurrentUid,
@@ -499,7 +499,7 @@ fn record_search_candidate_drops(metrics: &MessageSearchMetrics, drops: SearchCa
     responses(
         (status = 200, description = "Single message", body = MessageResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_message(
     CurrentUid(uid): CurrentUid,
@@ -545,7 +545,7 @@ async fn get_message(
     ),
     request_body = CreateMessageBody,
     responses((status = 201, description = "Message created", body = MessageResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
 )]
 async fn post_message(
     principal: Principal,
@@ -633,7 +633,7 @@ async fn post_message(
     responses(
         (status = 201, description = "Thread message created", body = MessageResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 pub(super) async fn post_thread_message(
     CurrentUid(uid): CurrentUid,
@@ -814,7 +814,7 @@ pub(super) async fn post_thread_message(
     responses(
         (status = 200, description = "Updated message", body = MessageResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn patch_message(
     CurrentUid(uid): CurrentUid,
@@ -949,7 +949,7 @@ async fn patch_message(
     responses(
         (status = 204, description = "Message deleted"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_message(
     CurrentUid(uid): CurrentUid,

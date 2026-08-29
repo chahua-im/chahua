@@ -296,7 +296,7 @@ fn build_sticker_summaries(
     responses(
         (status = 201, description = "Sticker pack created", body = StickerPackDetailResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_pack(
     CurrentUid(uid): CurrentUid,
@@ -358,7 +358,7 @@ async fn post_pack(
     responses(
         (status = 200, description = "Sticker pack updated", body = StickerPackDetailResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn patch_pack(
     CurrentUid(uid): CurrentUid,
@@ -406,7 +406,7 @@ async fn patch_pack(
     responses(
         (status = 204, description = "Sticker pack deleted")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn delete_pack(
     CurrentUid(uid): CurrentUid,
@@ -433,7 +433,7 @@ async fn delete_pack(
     responses(
         (status = 200, description = "Sticker pack details", body = StickerPackDetailResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_pack(
     CurrentUid(uid): CurrentUid,
@@ -466,7 +466,7 @@ async fn get_pack(
     responses(
         (status = 200, description = "Subscribed sticker packs", body = StickerPackListResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_my_subscribed_packs(
     CurrentUid(uid): CurrentUid,
@@ -493,7 +493,7 @@ async fn get_my_subscribed_packs(
     responses(
         (status = 200, description = "Owned sticker packs", body = StickerPackListResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_my_owned_packs(
     CurrentUid(uid): CurrentUid,
@@ -522,7 +522,7 @@ async fn get_my_owned_packs(
     responses(
         (status = 204, description = "Subscribed to sticker pack")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn put_subscription(
     CurrentUid(uid): CurrentUid,
@@ -563,7 +563,7 @@ async fn put_subscription(
     responses(
         (status = 204, description = "Unsubscribed from sticker pack")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn delete_subscription(
     CurrentUid(uid): CurrentUid,
@@ -618,7 +618,7 @@ struct PostStickerMultipart {
     responses(
         (status = 201, description = "Sticker created", body = StickerSummary)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_pack_sticker(
     CurrentUid(uid): CurrentUid,
@@ -810,7 +810,7 @@ async fn post_pack_sticker(
     responses(
         (status = 204, description = "Sticker added to pack")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn put_pack_sticker(
     CurrentUid(uid): CurrentUid,
@@ -849,7 +849,7 @@ async fn put_pack_sticker(
     responses(
         (status = 204, description = "Sticker removed from pack")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn delete_pack_sticker(
     CurrentUid(uid): CurrentUid,
@@ -879,7 +879,7 @@ async fn delete_pack_sticker(
     responses(
         (status = 200, description = "Sticker details", body = StickerDetailResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_sticker(
     CurrentUid(uid): CurrentUid,
@@ -927,7 +927,7 @@ async fn get_sticker(
     responses(
         (status = 204, description = "Sticker favorited")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn put_favorite(
     CurrentUid(uid): CurrentUid,
@@ -964,7 +964,7 @@ async fn put_favorite(
     responses(
         (status = 204, description = "Sticker unfavorited")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn delete_favorite(
     CurrentUid(uid): CurrentUid,
@@ -990,7 +990,7 @@ async fn delete_favorite(
     responses(
         (status = 200, description = "Favorite stickers", body = FavoriteStickerListResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_my_favorites(
     CurrentUid(uid): CurrentUid,

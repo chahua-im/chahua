@@ -215,7 +215,7 @@ fn attachment_cursors(
     responses(
         (status = 200, description = "List of chat attachments. olderCursor fetches older pages via before; newerCursor fetches newer pages via after. A null cursor means no more currently known results in that direction.", body = ListChatAttachmentsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_chat_attachments(
     CurrentUid(uid): CurrentUid,

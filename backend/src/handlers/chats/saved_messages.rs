@@ -40,7 +40,7 @@ struct ChatIdPath {
     responses(
         (status = OK, body = ListSavedMessagesResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn list_chat_saved_messages(
     CurrentUid(uid): CurrentUid,
