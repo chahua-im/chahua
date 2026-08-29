@@ -4,6 +4,8 @@
 //! All functions take a `&mut PgConnection` (borrowed from `DbConn`); the few
 //! that need snowflake IDs are `async` and take `&AppState` for the generator.
 
+use std::collections::HashMap;
+
 use chrono::Utc;
 use diesel::prelude::*;
 
@@ -25,6 +27,153 @@ fn canonical_pair(a: i32, b: i32) -> (i32, i32) {
     } else {
         (b, a)
     }
+}
+
+/// Relationship facts for `uid` against many peers, keyed by peer uid.
+#[derive(Default)]
+pub struct PeerRelationship {
+    pub friends_since: Option<chrono::DateTime<Utc>>,
+    pub dm_chat_id: Option<i64>,
+    pub blocking: bool,
+    pub blocked_by: bool,
+    /// `(id, uid_is_sender, created_at)`.
+    pub pending_request: Option<(i64, bool, chrono::DateTime<Utc>)>,
+}
+
+/// Load relationship facts for `uid` against `peers`.
+///
+/// Pair queries are split into their canonical halves so every lookup uses an
+/// existing index's leading column.
+pub fn peer_relationships(
+    conn: &mut PgConnection,
+    uid: i32,
+    peers: &[i32],
+) -> QueryResult<HashMap<i32, PeerRelationship>> {
+    let greater: Vec<i32> = peers.iter().copied().filter(|peer| *peer > uid).collect();
+    let lesser: Vec<i32> = peers.iter().copied().filter(|peer| *peer < uid).collect();
+    let mut relationships = peers
+        .iter()
+        .copied()
+        .map(|peer| (peer, PeerRelationship::default()))
+        .collect::<HashMap<_, _>>();
+
+    if !greater.is_empty() {
+        for (peer, created_at) in friendships::table
+            .filter(
+                friendships::uid1
+                    .eq(uid)
+                    .and(friendships::uid2.eq_any(&greater)),
+            )
+            .select((friendships::uid2, friendships::created_at))
+            .load::<(i32, chrono::DateTime<Utc>)>(conn)?
+        {
+            relationships.entry(peer).or_default().friends_since = Some(created_at);
+        }
+
+        for (peer, chat_id) in groups::table
+            .filter(
+                groups::kind
+                    .eq(GroupKind::Dm)
+                    .and(groups::dm_uid1.eq(uid))
+                    .and(groups::dm_uid2.eq_any(&greater)),
+            )
+            .select((groups::dm_uid2, groups::id))
+            .load::<(Option<i32>, i64)>(conn)?
+        {
+            if let Some(peer) = peer {
+                relationships.entry(peer).or_default().dm_chat_id = Some(chat_id);
+            }
+        }
+    }
+
+    if !lesser.is_empty() {
+        for (peer, created_at) in friendships::table
+            .filter(
+                friendships::uid2
+                    .eq(uid)
+                    .and(friendships::uid1.eq_any(&lesser)),
+            )
+            .select((friendships::uid1, friendships::created_at))
+            .load::<(i32, chrono::DateTime<Utc>)>(conn)?
+        {
+            relationships.entry(peer).or_default().friends_since = Some(created_at);
+        }
+
+        for (peer, chat_id) in groups::table
+            .filter(
+                groups::kind
+                    .eq(GroupKind::Dm)
+                    .and(groups::dm_uid2.eq(uid))
+                    .and(groups::dm_uid1.eq_any(&lesser)),
+            )
+            .select((groups::dm_uid1, groups::id))
+            .load::<(Option<i32>, i64)>(conn)?
+        {
+            if let Some(peer) = peer {
+                relationships.entry(peer).or_default().dm_chat_id = Some(chat_id);
+            }
+        }
+    }
+
+    for peer in blocks::table
+        .filter(
+            blocks::blocker_uid
+                .eq(uid)
+                .and(blocks::blocked_uid.eq_any(peers)),
+        )
+        .select(blocks::blocked_uid)
+        .load::<i32>(conn)?
+    {
+        relationships.entry(peer).or_default().blocking = true;
+    }
+
+    for peer in blocks::table
+        .filter(
+            blocks::blocked_uid
+                .eq(uid)
+                .and(blocks::blocker_uid.eq_any(peers)),
+        )
+        .select(blocks::blocker_uid)
+        .load::<i32>(conn)?
+    {
+        relationships.entry(peer).or_default().blocked_by = true;
+    }
+
+    for (peer, id, created_at) in friend_requests::table
+        .filter(
+            friend_requests::status
+                .eq(FriendRequestStatus::Pending)
+                .and(friend_requests::from_uid.eq(uid))
+                .and(friend_requests::to_uid.eq_any(peers)),
+        )
+        .select((
+            friend_requests::to_uid,
+            friend_requests::id,
+            friend_requests::created_at,
+        ))
+        .load::<(i32, i64, chrono::DateTime<Utc>)>(conn)?
+    {
+        relationships.entry(peer).or_default().pending_request = Some((id, true, created_at));
+    }
+
+    for (peer, id, created_at) in friend_requests::table
+        .filter(
+            friend_requests::status
+                .eq(FriendRequestStatus::Pending)
+                .and(friend_requests::to_uid.eq(uid))
+                .and(friend_requests::from_uid.eq_any(peers)),
+        )
+        .select((
+            friend_requests::from_uid,
+            friend_requests::id,
+            friend_requests::created_at,
+        ))
+        .load::<(i32, i64, chrono::DateTime<Utc>)>(conn)?
+    {
+        relationships.entry(peer).or_default().pending_request = Some((id, false, created_at));
+    }
+
+    Ok(relationships)
 }
 
 pub fn are_mutual_friends(conn: &mut PgConnection, a: i32, b: i32) -> QueryResult<bool> {
