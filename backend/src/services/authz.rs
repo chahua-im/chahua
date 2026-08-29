@@ -18,6 +18,9 @@ pub enum Action {
     ChatCreate,
     MemberViewAll,
     InviteCreate,
+    OnBehalfOfSocialRead,
+    OnBehalfOfSocialWrite,
+    OnBehalfOfMessageSend,
     PermissionAll,
     ServiceTokenManage,
 }
@@ -28,6 +31,9 @@ impl Action {
             Self::ChatCreate => "chat.create",
             Self::MemberViewAll => "member.viewAll",
             Self::InviteCreate => "invite.create",
+            Self::OnBehalfOfSocialRead => "onBehalfOf.socialRead",
+            Self::OnBehalfOfSocialWrite => "onBehalfOf.socialWrite",
+            Self::OnBehalfOfMessageSend => "onBehalfOf.messageSend",
             Self::PermissionAll => "permission.all",
             Self::ServiceTokenManage => "serviceToken.manage",
         }

@@ -16,9 +16,9 @@ use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::models::{Group, GroupMembership};
 use crate::schema::{group_membership, groups};
-use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
+use crate::services::authz::Action as AuthzAction;
 use crate::services::invites as invite_service;
-use crate::utils::auth::{Principal, ServiceTokenPrincipal};
+use crate::utils::auth::Principal;
 use crate::AppState;
 
 #[utoipa::path(
@@ -38,9 +38,8 @@ async fn post_external_invite(
     mut conn: DbConn,
     Json(body): Json<ExternalCreateInviteRequest>,
 ) -> Result<(StatusCode, Json<ExternalCreateInviteResponse>), AppError> {
-    let service_token = require_service_token_principal(principal)?;
     let conn = &mut *conn;
-    require_invite_create_permission(conn, &state, service_token.id)?;
+    principal.require_service_action(conn, &state, AuthzAction::InviteCreate)?;
 
     let now = Utc::now();
     validate_request(&body, now)?;
@@ -95,39 +94,6 @@ async fn post_external_invite(
 
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new().routes(routes!(post_external_invite))
-}
-
-fn require_service_token_principal(
-    principal: Principal,
-) -> Result<ServiceTokenPrincipal, AppError> {
-    match principal {
-        Principal::ServiceToken(service_token) => Ok(service_token),
-        Principal::User(_) => Err(AppError::Forbidden("Service token required")),
-    }
-}
-
-fn require_invite_create_permission(
-    conn: &mut PgConnection,
-    state: &AppState,
-    service_token_id: i64,
-) -> Result<(), AppError> {
-    let can_create = state.authz_service.has_service_token_permission(
-        conn,
-        service_token_id,
-        AuthzAction::InviteCreate,
-        AuthzResource::Global,
-    )? || state.authz_service.has_service_token_permission(
-        conn,
-        service_token_id,
-        AuthzAction::PermissionAll,
-        AuthzResource::Global,
-    )?;
-
-    if can_create {
-        Ok(())
-    } else {
-        Err(AppError::Forbidden("Permission required"))
-    }
 }
 
 fn validate_request(
@@ -192,10 +158,9 @@ fn membership_to_response(membership: GroupMembership) -> ExternalInviteMembersh
 
 #[cfg(test)]
 mod tests {
-    use super::{require_service_token_principal, validate_request};
+    use super::validate_request;
     use crate::dto::external::invites::ExternalCreateInviteRequest;
     use crate::errors::AppError;
-    use crate::utils::auth::{AuthContext, AuthSource, Principal, ServiceTokenPrincipal};
     use chrono::{Duration, TimeZone, Utc};
 
     #[test]
@@ -223,25 +188,5 @@ mod tests {
         };
 
         assert!(validate_request(&body, now).is_ok());
-    }
-
-    #[test]
-    fn principal_must_be_service_token() {
-        let service =
-            require_service_token_principal(Principal::ServiceToken(ServiceTokenPrincipal {
-                id: 5,
-            }))
-            .unwrap();
-        assert_eq!(service.id, 5);
-
-        let user = Principal::User(AuthContext {
-            uid: 42,
-            client_id: None,
-            source: AuthSource::Legacy,
-        });
-        assert!(matches!(
-            require_service_token_principal(user),
-            Err(AppError::Forbidden("Service token required"))
-        ));
     }
 }
