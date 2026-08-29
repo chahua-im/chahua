@@ -32,7 +32,7 @@ struct BlockPath {
     path = "/",
     tag = "blocks",
     responses((status = 200, description = "Users blocked by the current user", body = ListBlocksResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
     params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn get_blocks(
@@ -63,7 +63,7 @@ async fn get_blocks(
     tag = "blocks",
     request_body = BlockRequestBody,
     responses((status = 204, description = "User blocked")),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
     params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn block_user(
@@ -87,7 +87,7 @@ async fn block_user(
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     ),
     responses((status = 204, description = "User unblocked"), (status = 404, description = "Not blocked")),
-    security(("uid_header" = []), ("bearer_jwt" = []), ("service_token_bearer" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn unblock_user(
     principal: Principal,

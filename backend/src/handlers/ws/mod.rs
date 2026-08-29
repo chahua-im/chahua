@@ -14,7 +14,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::dto::ws::{ServerWsMessage, TicketResponse};
 use crate::services::ws_registry;
-use crate::utils::auth::{ClientId, CurrentUid};
+use crate::utils::auth::BearerSession;
 use crate::AppState;
 use ws_registry::AppPresenceState;
 
@@ -25,16 +25,15 @@ use ws_registry::AppPresenceState;
     responses(
         (status = OK, body = TicketResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_ws_ticket(
-    CurrentUid(uid): CurrentUid,
-    ClientId(client_id): ClientId,
+    BearerSession(session): BearerSession,
     State(state): State<AppState>,
 ) -> Result<Json<TicketResponse>, (axum::http::StatusCode, &'static str)> {
     let ticket = state
         .auth_token_service
-        .issue_legacy_session(uid, &client_id, 0)
+        .issue_legacy_session(session.uid, &session.client_id, 0)
         .map_err(crate::services::auth_token::AuthTokenError::into_rejection)?;
 
     Ok(Json(TicketResponse { ticket }))

@@ -240,7 +240,7 @@ pub(super) fn load_group_info(
     responses(
         (status = CREATED, body = CreateChatResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn post_group(
     CurrentUid(uid): CurrentUid,
@@ -319,7 +319,7 @@ async fn post_group(
     responses(
         (status = OK, body = ListGroupsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_groups(
     CurrentUid(uid): CurrentUid,
@@ -429,7 +429,7 @@ async fn get_groups(
     responses(
         (status = OK, body = GroupInfoResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_group(
     CurrentUid(uid): CurrentUid,
@@ -456,7 +456,7 @@ async fn get_group(
     responses(
         (status = CREATED, body = AvatarUploadUrlResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn post_avatar_upload_url(
     CurrentUid(uid): CurrentUid,
@@ -533,7 +533,7 @@ async fn post_avatar_upload_url(
     responses(
         (status = OK, body = GroupInfoResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn patch_group(
     CurrentUid(uid): CurrentUid,
@@ -617,7 +617,7 @@ async fn patch_group(
     responses(
         (status = OK, body = MuteResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn put_mute(
     CurrentUid(uid): CurrentUid,
@@ -660,7 +660,7 @@ async fn put_mute(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_mute(
     CurrentUid(uid): CurrentUid,

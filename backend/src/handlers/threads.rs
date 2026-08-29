@@ -46,7 +46,7 @@ pub struct ListThreadsQuery {
     responses(
         (status = OK, body = ListThreadsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_threads(
     CurrentUid(uid): CurrentUid,
@@ -201,7 +201,7 @@ fn apply_thread_read(
     responses(
         (status = OK, body = MarkThreadReadResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn mark_thread_read(
     CurrentUid(uid): CurrentUid,
@@ -237,7 +237,7 @@ async fn mark_thread_read(
     responses(
         (status = OK, body = ThreadReadStateResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_thread_read_state(
     CurrentUid(uid): CurrentUid,
@@ -267,7 +267,7 @@ async fn get_thread_read_state(
     responses(
         (status = OK, body = UnreadThreadCountResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_unread_thread_count(
     CurrentUid(uid): CurrentUid,
@@ -305,7 +305,7 @@ pub struct ThreadSubscribePath {
     responses(
         (status = OK, body = MarkThreadReadResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn mark_thread_read_in_chat(
     CurrentUid(uid): CurrentUid,
@@ -341,7 +341,7 @@ async fn mark_thread_read_in_chat(
     responses(
         (status = OK, body = ThreadReadStateResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_thread_read_state_in_chat(
     CurrentUid(uid): CurrentUid,
@@ -377,7 +377,7 @@ async fn get_thread_read_state_in_chat(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn subscribe_thread(
     CurrentUid(uid): CurrentUid,
@@ -434,7 +434,7 @@ async fn subscribe_thread(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn unsubscribe_thread(
     CurrentUid(uid): CurrentUid,
@@ -481,7 +481,7 @@ pub struct ThreadSubscriptionStatusPath {
     responses(
         (status = OK, body = ThreadSubscriptionStatusResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_subscription_status(
     CurrentUid(uid): CurrentUid,
@@ -519,7 +519,7 @@ async fn get_subscription_status(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn archive_thread(
     CurrentUid(uid): CurrentUid,
@@ -559,7 +559,7 @@ async fn archive_thread(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn unarchive_thread(
     CurrentUid(uid): CurrentUid,

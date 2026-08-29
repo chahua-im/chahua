@@ -22,23 +22,6 @@ pub enum LogFormat {
     Json,
 }
 
-/// How user identity is established when no bearer token is present.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
-pub enum AuthMethod {
-    UIDHeader,
-    #[default]
-    JwtOnly,
-}
-
-impl AuthMethod {
-    fn from_env(raw: Option<String>) -> Self {
-        match raw.as_deref() {
-            Some("UIDHeader") => Self::UIDHeader,
-            _ => Self::JwtOnly,
-        }
-    }
-}
-
 /// Where the API and metrics servers bind, and which origins may call them.
 pub struct ServerConfig {
     pub app_addr: SocketAddr,
@@ -68,7 +51,6 @@ pub struct DiscuzAvatarConfig {
 
 /// Authentication and token-signing material.
 pub struct AuthConfig {
-    pub method: AuthMethod,
     /// Allows arbitrary UID impersonation. Always on in debug builds.
     pub debug_auth_enabled: bool,
     pub jwt_signing_key: Vec<u8>,
@@ -138,7 +120,6 @@ impl AppConfig {
             }),
             avatars: read_discuz_avatar_config().map(Arc::new),
             auth: AuthConfig {
-                method: AuthMethod::from_env(std::env::var("AUTH_METHOD").ok()),
                 debug_auth_enabled,
                 jwt_signing_key,
                 service_token_hash_key,
