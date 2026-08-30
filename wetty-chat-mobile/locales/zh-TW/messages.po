@@ -725,8 +725,8 @@ msgstr "加入此聊天即可開始閱讀與傳送訊息。"
 msgid "Joining…"
 msgstr "正在加入…"
 
-msgid "Jump to mention"
-msgstr "跳轉到提及"
+msgid "Jump to mention or reply"
+msgstr "跳轉到提及或回覆"
 
 msgid "Keep messages"
 msgstr "保留訊息"
@@ -1472,8 +1472,8 @@ msgstr "取消釘選訊息"
 msgid "Unread"
 msgstr "標記未讀"
 
-msgid "Unread mentions"
-msgstr "未讀提及"
+msgid "Unread mentions and replies"
+msgstr "未讀提及和回覆"
 
 msgid "Unsave"
 msgstr "取消收藏"

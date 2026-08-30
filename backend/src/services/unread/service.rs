@@ -1121,4 +1121,116 @@ mod tests {
             "transaction should roll back"
         );
     }
+
+    /// Reply rows (kind='reply') ride the same unread-mention pipeline as
+    /// @mentions: they count towards unread mentions, appear in the jump list
+    /// for both main and thread scope, and clear when the read cursor advances.
+    /// Requires a test database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn reply_kind_mention_rows_flow_through_unread_pipeline() {
+        use diesel::Connection;
+        use diesel::PgConnection;
+        use diesel::RunQueryDsl;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_565_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let thread_root_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let mention_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let reply_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let thread_reply_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let user: i32 = 4244;
+        let sender: i32 = 1719;
+        let service = UnreadService::new();
+
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'reply-mention-test')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(user)
+                .execute(conn)?;
+
+            for msg_id in [mention_msg, reply_msg, thread_reply_msg] {
+                diesel::sql_query(
+                    "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                     VALUES ($1, 'text', $2, $3, $4, NOW())",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Text, _>(format!("cg-{chat_id}-{msg_id}"))
+                .bind::<diesel::sql_types::Integer, _>(sender)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            }
+
+            // One explicit @mention row and two reply rows (main + thread scope).
+            diesel::sql_query(
+                "INSERT INTO message_mentions (message_id, mentioned_uid, chat_id, thread_root_id, created_at, kind) \
+                 VALUES ($1, $2, $3, NULL, NOW(), 'mention')",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(mention_msg)
+            .bind::<diesel::sql_types::Integer, _>(user)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .execute(conn)?;
+            diesel::sql_query(
+                "INSERT INTO message_mentions (message_id, mentioned_uid, chat_id, thread_root_id, created_at, kind) \
+                 VALUES ($1, $2, $3, NULL, NOW(), 'reply')",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(reply_msg)
+            .bind::<diesel::sql_types::Integer, _>(user)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .execute(conn)?;
+            diesel::sql_query(
+                "INSERT INTO message_mentions (message_id, mentioned_uid, chat_id, thread_root_id, created_at, kind) \
+                 VALUES ($1, $2, $3, $4, NOW(), 'reply')",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(thread_reply_msg)
+            .bind::<diesel::sql_types::Integer, _>(user)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .bind::<diesel::sql_types::BigInt, _>(thread_root_id)
+            .execute(conn)?;
+
+            // Reply rows count as unread mentions alongside the @mention.
+            let counts = service.count_user_chat_unread_mentions(conn, user)?;
+            assert_eq!(counts.get(&chat_id).copied(), Some(2));
+
+            // The jump list includes reply rows, newest-first, scope-respected.
+            let main_ids =
+                service.list_chat_unread_mentions(conn, user, chat_id, None, None, 100)?;
+            assert_eq!(main_ids, vec![reply_msg, mention_msg]);
+            let thread_ids = service.list_chat_unread_mentions(
+                conn, user, chat_id, None, Some(thread_root_id), 100,
+            )?;
+            assert_eq!(thread_ids, vec![thread_reply_msg]);
+
+            // Reading up to the reply message clears both rows.
+            diesel::sql_query(
+                "UPDATE group_membership SET last_read_message_id = $1 \
+                 WHERE chat_id = $2 AND uid = $3",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(reply_msg)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .bind::<diesel::sql_types::Integer, _>(user)
+            .execute(conn)?;
+            let counts_after = service.count_user_chat_unread_mentions(conn, user)?;
+            assert!(counts_after.get(&chat_id).copied().is_none());
+
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+
+        assert!(
+            matches!(result, Err(diesel::result::Error::RollbackTransaction)),
+            "transaction should roll back"
+        );
+    }
 }

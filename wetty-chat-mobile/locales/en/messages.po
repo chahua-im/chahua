@@ -725,8 +725,8 @@ msgstr "Join this chat to start reading and sending messages."
 msgid "Joining…"
 msgstr "Joining…"
 
-msgid "Jump to mention"
-msgstr "Jump to mention"
+msgid "Jump to mention or reply"
+msgstr "Jump to mention or reply"
 
 msgid "Keep messages"
 msgstr "Keep messages"
@@ -1472,8 +1472,8 @@ msgstr "Unpin Message"
 msgid "Unread"
 msgstr "Unread"
 
-msgid "Unread mentions"
-msgstr "Unread mentions"
+msgid "Unread mentions and replies"
+msgstr "Unread mentions and replies"
 
 msgid "Unsave"
 msgstr "Unsave"

@@ -27,7 +27,7 @@ import {
 } from '@/store/messageEvents';
 import { selectAllTimelineMessages } from '@/store/messages/selectors';
 import { getStoredJwtToken } from '@/utils/jwtToken';
-import { formatNotificationBody, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { formatNotificationBody, getNotificationPreviewLabels, type NotificationKind } from '@/utils/messagePreview';
 import { buildNotificationNavigationData } from '@/utils/notificationNavigation';
 import { isFeatureEnabled } from '@/features';
 
@@ -39,9 +39,12 @@ const RETRY_JITTER_RATIO = 0.2;
 
 export type WebSocketAppState = 'active' | 'inactive';
 
-/** Realtime `notification` event payload (mention is the only type emitted today). */
+/**
+ * Realtime `notification` event payload. Both kinds increment the same unread
+ * mention badges; a reply is a mention row with kind='reply' server-side.
+ */
 interface WsNotificationPayload {
-  notificationType: 'mention';
+  notificationType: 'mention' | 'reply';
   chatId: string;
   messageId: string;
   threadRootId?: string | null;
@@ -184,15 +187,21 @@ function showLocalNotification(message: MessageResponse): void {
 
   const chatName = chatEntry?.details?.name ?? 'New Message';
   const locale = selectEffectiveLocale(store.getState());
-  const isMention =
-    isFeatureEnabled('mentionNotifications') &&
-    currentUid != null &&
-    (message.mentions ?? []).some((m) => m.uid === currentUid);
+  // Mentions outrank replies when a message both mentions and replies to the
+  // current user (matches the backend's single kind='mention' row).
+  let kind: NotificationKind = 'message';
+  if (isFeatureEnabled('mentionNotifications') && currentUid != null) {
+    if ((message.mentions ?? []).some((m) => m.uid === currentUid)) {
+      kind = 'mention';
+    } else if (message.replyToMessage?.sender?.uid === currentUid) {
+      kind = 'reply';
+    }
+  }
   const body = formatNotificationBody(
     message.sender.name ?? 'Someone',
     message,
     getNotificationPreviewLabels(locale),
-    isMention,
+    kind,
   );
 
   const tag = `msg_${message.id}`;
@@ -533,7 +542,11 @@ async function connectWebSocket(): Promise<void> {
 
         if (message.type === 'notification' && message.payload != null) {
           const payload = message.payload as WsNotificationPayload;
-          if (payload.notificationType === 'mention' && payload.chatId && isFeatureEnabled('mentionNotifications')) {
+          if (
+            (payload.notificationType === 'mention' || payload.notificationType === 'reply') &&
+            payload.chatId &&
+            isFeatureEnabled('mentionNotifications')
+          ) {
             if (payload.threadRootId) {
               store.dispatch(
                 incrementThreadUnreadMentions({

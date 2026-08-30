@@ -546,7 +546,11 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
             {unreadMentionCount > 0 && (
               <span className="mention-fab__badge">{formatUnreadBadge(unreadMentionCount)}</span>
             )}
-            <IonFabButton size="small" onClick={() => void jumpToNextMention()} aria-label={t`Jump to mention`}>
+            <IonFabButton
+              size="small"
+              onClick={() => void jumpToNextMention()}
+              aria-label={t`Jump to mention or reply`}
+            >
               <IonIcon icon={atCircle} />
             </IonFabButton>
           </IonFab>

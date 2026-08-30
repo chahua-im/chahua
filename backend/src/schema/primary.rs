@@ -34,6 +34,10 @@ pub mod sql_types {
     pub struct MediaPurpose;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "mention_kind"))]
+    pub struct MentionKind;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "message_type"))]
     pub struct MessageType;
 
@@ -216,12 +220,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::MentionKind;
+
     message_mentions (message_id, mentioned_uid) {
         message_id -> Int8,
         mentioned_uid -> Int4,
         chat_id -> Int8,
         thread_root_id -> Nullable<Int8>,
         created_at -> Timestamptz,
+        kind -> MentionKind,
     }
 }
 

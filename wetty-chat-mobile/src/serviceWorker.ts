@@ -18,7 +18,7 @@ import {
 declare let self: ServiceWorkerGlobalScope;
 
 interface PushPayload {
-  type?: 'newMessage' | 'mention';
+  type?: 'newMessage' | 'mention' | 'reply';
   title?: string;
   body?: string;
   senderName?: string;
@@ -283,11 +283,19 @@ self.addEventListener('push', (event) => {
         if (payload.messagePreview) {
           try {
             const locale = await kvGet<string>('effective_locale');
+            // Mentions and replies share the mentionNotifications gate and get
+            // directed copy; everything else keeps the generic body.
+            const gatedType =
+              payload.type === 'mention' || payload.type === 'reply'
+                ? isFeatureEnabled('mentionNotifications')
+                  ? payload.type
+                  : 'message'
+                : 'message';
             body = formatNotificationBody(
               payload.senderName ?? 'Someone',
               payload.messagePreview,
               getNotificationPreviewLabels(locale),
-              payload.type === 'mention' && isFeatureEnabled('mentionNotifications'),
+              gatedType,
             );
           } catch (err) {
             console.error('Failed to localize push preview, using legacy body', err);

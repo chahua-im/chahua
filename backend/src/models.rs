@@ -135,6 +135,15 @@ pub enum MessageType {
     System,
 }
 
+/// Why a `message_mentions` row exists: an explicit @mention in the message
+/// body, or the message being a reply to one of the target's messages.
+#[derive(diesel_derive_enum::DbEnum, Debug, Clone, Copy, PartialEq, Eq)]
+#[ExistingTypePath = "crate::schema::sql_types::MentionKind"]
+pub enum MentionKind {
+    Mention,
+    Reply,
+}
+
 #[derive(
     diesel_derive_enum::DbEnum,
     Debug,
@@ -586,6 +595,7 @@ pub struct MessageMention {
     pub chat_id: i64,
     pub thread_root_id: Option<i64>,
     pub created_at: DateTime<Utc>,
+    pub kind: MentionKind,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]

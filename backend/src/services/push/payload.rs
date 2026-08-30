@@ -23,6 +23,7 @@ const APNS_BODY_LOC_KEY_ATTACHMENT: &str = "push.message.body.attachment";
 const APNS_BODY_LOC_KEY_ATTACHMENT_WITH_PREVIEW: &str = "push.message.body.attachment.with_preview";
 const APNS_BODY_LOC_KEY_DELETED: &str = "push.message.body.deleted";
 pub(super) const APNS_BODY_LOC_KEY_MENTION: &str = "push.mention.body";
+pub(super) const APNS_BODY_LOC_KEY_REPLY: &str = "push.reply.body";
 
 /// A push notification job enqueued when a new message is created.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -30,6 +31,19 @@ pub(super) const APNS_BODY_LOC_KEY_MENTION: &str = "push.mention.body";
 pub(super) enum PushPayloadType {
     NewMessage,
     Mention,
+    Reply,
+}
+
+/// Per-recipient payload kind. A mention outranks a reply when the same
+/// message both mentions and replies to the recipient.
+pub(super) fn payload_type_for(job: &PushJob, recipient_uid: i32) -> PushPayloadType {
+    if job.mentioned_uids.contains(&recipient_uid) {
+        PushPayloadType::Mention
+    } else if job.reply_target_uid == Some(recipient_uid) {
+        PushPayloadType::Reply
+    } else {
+        PushPayloadType::NewMessage
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -108,11 +122,7 @@ pub(super) fn build_push_payload(
 ) -> PushPayload {
     let is_mention = job.mentioned_uids.contains(&recipient_uid);
     PushPayload {
-        type_: if is_mention {
-            PushPayloadType::Mention
-        } else {
-            PushPayloadType::NewMessage
-        },
+        type_: payload_type_for(job, recipient_uid),
         title: job.chat_name.clone(),
         body: body_text.to_string(),
         sender_name: job.sender_username.clone(),
@@ -135,17 +145,22 @@ pub(super) fn build_apns_notification(
     let badge = unread_count.clamp(0, u32::MAX as i64) as u32;
     let preview = &job.message_preview;
     let is_mention = job.mentioned_uids.contains(&recipient_uid);
-    let payload_type = if is_mention {
-        PushPayloadType::Mention
-    } else {
-        PushPayloadType::NewMessage
-    };
+    let payload_type = payload_type_for(job, recipient_uid);
+    let is_reply = matches!(payload_type, PushPayloadType::Reply);
 
     let (body_loc_key, body_loc_args) = if is_mention {
         // Mentions only occur on text messages; surface a dedicated localized body.
         let text = preview.message.as_deref().unwrap_or("");
         (
             APNS_BODY_LOC_KEY_MENTION,
+            vec![job.sender_username.clone(), truncate_preview(text)],
+        )
+    } else if is_reply {
+        // Reply targets get a mention-style body: sender name + the reply's
+        // preview text (empty when the reply is a media-only message).
+        let text = preview.message.as_deref().unwrap_or("");
+        (
+            APNS_BODY_LOC_KEY_REPLY,
             vec![job.sender_username.clone(), truncate_preview(text)],
         )
     } else if preview.is_deleted {
@@ -242,6 +257,17 @@ pub(super) fn format_push_body(sender_username: &str, preview: Option<&str>) -> 
     match preview {
         Some(preview) => format!("{}: {}", sender_username, truncate_preview(preview)),
         None => format!("{} sent a message", sender_username),
+    }
+}
+
+pub(super) fn format_reply_push_body(sender_username: &str, preview: Option<&str>) -> String {
+    match preview {
+        Some(preview) => format!(
+            "{} replied to your message: {}",
+            sender_username,
+            truncate_preview(preview)
+        ),
+        None => format!("{} replied to your message", sender_username),
     }
 }
 
