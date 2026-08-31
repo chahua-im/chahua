@@ -18,6 +18,7 @@ pub struct ThreadListItem {
     pub last_reply_at: DateTime<Utc>,
     pub unread_count: i64,
     pub unread_mentions: i64,
+    pub unread_reactions: i64,
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
     pub last_read_message_id: Option<i64>,
@@ -40,6 +41,7 @@ pub struct MarkThreadReadResponse {
     pub last_read_message_id: Option<i64>,
     pub unread_count: i64,
     pub unread_mentions: i64,
+    pub unread_reactions: i64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

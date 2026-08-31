@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IonContent, IonFab, IonFabButton, IonIcon, IonPage, useIonAlert, useIonToast } from '@ionic/react';
 import { useHistory, useLocation, useParams } from 'react-router-dom';
-import { atCircle, chevronDown } from 'ionicons/icons';
+import { atCircle, chevronDown, heartOutline } from 'ionicons/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { getMessage, type MessageResponse, type User } from '@/api/messages';
 import { selectCurrentUser } from '@/store/userSlice';
@@ -36,6 +36,8 @@ import { type ChatMessageEditSession, useChatMessageSender } from './hooks/useCh
 import { useChatReadTracking } from './hooks/useChatReadTracking';
 import { useConversationTimeline } from './hooks/useConversationTimeline';
 import { useMentionJumper } from './hooks/useMentionJumper';
+import { useReactionJumper } from './hooks/useReactionJumper';
+import { UnreadJumpFab } from './UnreadJumpFab';
 import { useKeyboardViewport } from './hooks/useKeyboardViewport';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { useMessageOverlayActions } from './hooks/useMessageOverlayActions';
@@ -194,6 +196,19 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     jumpToMessage,
     showToast,
     enabled: jumpToMentionEnabled,
+  });
+
+  const jumpToReactionEnabled = useFeatureGate('jumpToReaction');
+  const {
+    canJump: canJumpToReaction,
+    unreadCount: unreadReactionCount,
+    jumpToNextReaction,
+  } = useReactionJumper({
+    chatId,
+    threadId,
+    jumpToMessage,
+    showToast,
+    enabled: jumpToReactionEnabled,
   });
 
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null);
@@ -487,6 +502,11 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
 
   const chatCtx = useMemo(() => ({ chatId, threadId, jumpToMessage }), [chatId, threadId, jumpToMessage]);
 
+  // The jump FABs stack bottom-up (scroll-to-bottom, mention, reaction); each FAB
+  // lifts by 56px per visible FAB below it so hidden ones never leave a gap.
+  const scrollToBottomFabsBelow = showScrollToBottomButton ? 1 : 0;
+  const mentionFabsBelow = canJumpToMention ? 1 : 0;
+
   return (
     <ChatContext.Provider value={chatCtx}>
       <div className="ion-page conversation-page" style={pageStyle}>
@@ -538,22 +558,24 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
             onScrollActivityChange={setMessageListScrolling}
             onTopDateCollidingChange={setFloatingDateColliding}
           />
-          <IonFab
-            vertical="bottom"
-            horizontal="end"
-            className={`mention-fab ${canJumpToMention ? '' : 'mention-fab--hidden'}`}
-          >
-            {unreadMentionCount > 0 && (
-              <span className="mention-fab__badge">{formatUnreadBadge(unreadMentionCount)}</span>
-            )}
-            <IonFabButton
-              size="small"
-              onClick={() => void jumpToNextMention()}
-              aria-label={t`Jump to mention or reply`}
-            >
-              <IonIcon icon={atCircle} />
-            </IonFabButton>
-          </IonFab>
+          <UnreadJumpFab
+            className="mention-fab"
+            icon={atCircle}
+            ariaLabel={t`Jump to mention or reply`}
+            unreadCount={unreadMentionCount}
+            onClick={() => void jumpToNextMention()}
+            visible={canJumpToMention}
+            lift={scrollToBottomFabsBelow}
+          />
+          <UnreadJumpFab
+            className="reaction-fab"
+            icon={heartOutline}
+            ariaLabel={t`Jump to reaction`}
+            unreadCount={unreadReactionCount}
+            onClick={() => void jumpToNextReaction()}
+            visible={canJumpToReaction}
+            lift={mentionFabsBelow + scrollToBottomFabsBelow}
+          />
           <IonFab
             vertical="bottom"
             horizontal="end"

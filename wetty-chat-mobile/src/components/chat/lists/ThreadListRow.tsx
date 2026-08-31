@@ -4,7 +4,7 @@ import { IonBadge, IonIcon, IonItem, IonItemOption, IonItemOptions, IonItemSlidi
 import { chatbubbles } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { isFeatureEnabled } from '@/features';
-import { MentionBadge } from './MentionBadge';
+import { MentionBadge, ReactionBadge } from './UnreadBadge';
 import { toMessagePreview, type MessagePreview } from '@/api/messages';
 import type { StoredThreadListItem } from '@/api/threads';
 import { OverlayAvatar } from '@/components/OverlayAvatar';
@@ -134,6 +134,7 @@ export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, e
         <div className={styles.chatsListTime}>{formatRelativeTime(thread.lastReplyAt, locale)}</div>
         <div className={styles.chatsListBadge}>
           {isFeatureEnabled('mentionNotifications') && thread.unreadMentions > 0 && <MentionBadge />}
+          {isFeatureEnabled('reactionNotifications') && (thread.unreadReactions ?? 0) > 0 && <ReactionBadge />}
           {thread.unreadCount > 0 && (
             <IonBadge color="primary" className={styles.unreadBadge}>
               {thread.unreadCount}

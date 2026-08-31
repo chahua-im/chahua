@@ -11,11 +11,9 @@ import {
   selectChatMeta,
   selectChatUnreadCount,
   selectIsChatMuted,
-  setChatLastReadMessageId,
   setChatMeta,
   setChatMutedUntil,
-  setChatUnreadCount,
-  setChatUnreadMentions,
+  setChatReadState,
 } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
 import store from '@/store';
@@ -106,9 +104,7 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
         if (currentReadComparableId != null) {
           if (responseComparableId == null || responseComparableId <= currentReadComparableId) return;
         }
-        dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: res.data.lastReadMessageId }));
-        dispatch(setChatUnreadCount({ chatId, unreadCount: res.data.unreadCount }));
-        dispatch(setChatUnreadMentions({ chatId, unreadMentions: res.data.unreadMentions ?? 0 }));
+        dispatch(setChatReadState({ chatId, ...res.data }));
       })
       .catch(() => {});
 

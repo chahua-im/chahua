@@ -177,6 +177,7 @@ fn apply_thread_read(
             last_read_message_id: None,
             unread_count: 0,
             unread_mentions: 0,
+            unread_reactions: 0,
         });
     }
 
@@ -192,11 +193,16 @@ fn apply_thread_read(
         read_state.last_read_message_id,
         Some(thread_root_id),
     )?;
+    // The reaction cursor was advanced by mark_thread_as_read, so this is
+    // normally 0; computed for consistency with the mention count.
+    let unread_reactions =
+        unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
 
     Ok(MarkThreadReadResponse {
         last_read_message_id: read_state.last_read_message_id,
         unread_count: read_state.unread_count,
         unread_mentions,
+        unread_reactions,
     })
 }
 

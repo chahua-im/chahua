@@ -72,6 +72,55 @@ struct UnreadMentionCountRow {
     mention_count: i64,
 }
 
+#[derive(diesel::QueryableByName)]
+struct UnreadReactionCountRow {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    chat_id: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    reaction_count: i64,
+}
+
+#[derive(diesel::QueryableByName)]
+struct ReactionTotalRow {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    reaction_count: i64,
+}
+
+/// Shared filter for the unread-reaction queries: reactions on the user's
+/// non-deleted, published messages in one chat, excluding self-reactions.
+/// `$1` = uid, `$2` = chat id.
+const UNREAD_REACTIONS_FILTER: &str = "FROM message_reactions mr
+    JOIN messages m ON m.id = mr.message_id
+    WHERE mr.message_author_uid = $1
+      AND mr.user_uid <> $1
+      AND m.chat_id = $2
+      AND m.deleted_at IS NULL
+      AND m.is_published = TRUE";
+
+/// Main-scope tail (reactions on top-level messages), cursor from the chat
+/// membership row.
+const UNREAD_REACTIONS_MAIN_TAIL: &str = "AND m.reply_root_id IS NULL
+    AND mr.created_at > COALESCE((
+        SELECT gm.last_reactions_read_at
+        FROM group_membership gm
+        WHERE gm.chat_id = $2 AND gm.uid = $1
+    ), '-infinity'::timestamptz)";
+
+/// Thread-scope tail (reactions on the user's messages in thread `$3`),
+/// cursor from the per-thread user state row.
+const UNREAD_REACTIONS_THREAD_TAIL: &str = "AND m.reply_root_id = $3
+    AND mr.created_at > COALESCE((
+        SELECT tus.last_reactions_read_at
+        FROM thread_user_states tus
+        WHERE tus.chat_id = $2 AND tus.thread_root_id = $3 AND tus.uid = $1
+    ), '-infinity'::timestamptz)";
+
+#[derive(diesel::QueryableByName)]
+struct UnreadReactionIdRow {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    message_id: i64,
+}
+
 impl UnreadService {
     pub fn new() -> Self {
         Self::default()
@@ -219,6 +268,112 @@ impl UnreadService {
         };
 
         Ok(ids)
+    }
+
+    /// Per-chat unread-reaction counts (main scope: reactions on the user's
+    /// top-level messages) for a user, aggregated per message.
+    ///
+    /// Unread reactions are derived from `message_reactions` (no per-row read
+    /// flag): a reaction is unread while `created_at > last_reactions_read_at`.
+    /// Self-reactions never count. Like mentions, this deliberately ignores
+    /// mute/archive; unlike mentions it is NOT folded into the global unread
+    /// message count — it only feeds list badges.
+    pub fn count_user_chat_unread_reactions(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+    ) -> Result<HashMap<i64, i64>, DieselError> {
+        let rows = sql_query(
+            "SELECT m.chat_id AS chat_id, COUNT(DISTINCT mr.message_id)::BIGINT AS reaction_count
+             FROM message_reactions mr
+             JOIN messages m ON m.id = mr.message_id
+             JOIN group_membership gm
+               ON gm.chat_id = m.chat_id AND gm.uid = $1
+             WHERE mr.message_author_uid = $1
+               AND mr.user_uid <> $1
+               AND m.deleted_at IS NULL
+               AND m.is_published = TRUE
+               AND m.reply_root_id IS NULL
+               AND mr.created_at > gm.last_reactions_read_at
+             GROUP BY m.chat_id",
+        )
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .load::<UnreadReactionCountRow>(conn)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.chat_id, r.reaction_count.min(MAX_UNREAD_COUNT)))
+            .collect())
+    }
+
+    /// Unread-reaction message count for a single chat, aggregated per message.
+    ///
+    /// `thread_root_id`: `None` counts reactions on the user's top-level
+    /// messages (cursor: `group_membership.last_reactions_read_at`);
+    /// `Some(id)` counts reactions on the user's messages in that thread
+    /// (cursor: `thread_user_states.last_reactions_read_at`). The read cursor
+    /// is read here so callers never handle the timestamp.
+    pub fn count_chat_unread_reactions(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+        chat_id: i64,
+        thread_root_id: Option<i64>,
+    ) -> Result<i64, DieselError> {
+        let sql = format!(
+            "SELECT COUNT(DISTINCT mr.message_id)::BIGINT AS reaction_count {UNREAD_REACTIONS_FILTER} {}",
+            match thread_root_id {
+                Some(_) => UNREAD_REACTIONS_THREAD_TAIL,
+                None => UNREAD_REACTIONS_MAIN_TAIL,
+            }
+        );
+        let row: ReactionTotalRow = match thread_root_id {
+            Some(thread_id) => sql_query(&sql)
+                .bind::<diesel::sql_types::Integer, _>(uid)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::BigInt, _>(thread_id)
+                .get_result(conn)?,
+            None => sql_query(&sql)
+                .bind::<diesel::sql_types::Integer, _>(uid)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .get_result(conn)?,
+        };
+        Ok(row.reaction_count.min(MAX_UNREAD_COUNT))
+    }
+
+    /// Unread-reaction message ids for a single chat, newest-first, one entry
+    /// per message regardless of how many new reactions it carries.
+    ///
+    /// Same derivation and scope rules as `count_chat_unread_reactions`. The
+    /// limit is interpolated instead of bound so both scope variants share one
+    /// placeholder layout (`limit` is a validated `i64` from `validate_limit`).
+    pub fn list_chat_unread_reactions(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+        chat_id: i64,
+        thread_root_id: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<i64>, DieselError> {
+        let sql = format!(
+            "SELECT DISTINCT mr.message_id AS message_id {UNREAD_REACTIONS_FILTER} {} \
+             ORDER BY mr.message_id DESC LIMIT {limit}",
+            match thread_root_id {
+                Some(_) => UNREAD_REACTIONS_THREAD_TAIL,
+                None => UNREAD_REACTIONS_MAIN_TAIL,
+            }
+        );
+        let rows: Vec<UnreadReactionIdRow> = match thread_root_id {
+            Some(thread_id) => sql_query(&sql)
+                .bind::<diesel::sql_types::Integer, _>(uid)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::BigInt, _>(thread_id)
+                .load(conn)?,
+            None => sql_query(&sql)
+                .bind::<diesel::sql_types::Integer, _>(uid)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .load(conn)?,
+        };
+        Ok(rows.into_iter().map(|r| r.message_id).collect())
     }
 
     pub fn observe_top_level_message(&self, chat_id: i64, message_id: i64, is_counted: bool) {

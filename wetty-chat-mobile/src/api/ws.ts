@@ -3,9 +3,15 @@ import { syncApp } from '@/api/sync';
 import type { MessageResponse, ReactionSummary } from '@/api/messages';
 import { setActiveConnections, setWsConnected } from '@/store/connectionSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
-import { incrementChatUnreadMentions, setChatArchived, setChatMutedUntil } from '@/store/chatsSlice';
+import {
+  incrementChatUnreadMentions,
+  incrementChatUnreadReactions,
+  setChatArchived,
+  setChatMutedUntil,
+} from '@/store/chatsSlice';
 import {
   incrementThreadUnreadMentions,
+  incrementThreadUnreadReactions,
   removeThread,
   setThreadSubscriptionStatus,
   updateThreadFromWs,
@@ -40,11 +46,12 @@ const RETRY_JITTER_RATIO = 0.2;
 export type WebSocketAppState = 'active' | 'inactive';
 
 /**
- * Realtime `notification` event payload. Both kinds increment the same unread
- * mention badges; a reply is a mention row with kind='reply' server-side.
+ * Realtime `notification` event payload. Mention/reply increment the unread
+ * mention badges (a reply is a mention row with kind='reply' server-side);
+ * reaction increments the unread-reaction badges.
  */
 interface WsNotificationPayload {
-  notificationType: 'mention' | 'reply';
+  notificationType: 'mention' | 'reply' | 'reaction';
   chatId: string;
   messageId: string;
   threadRootId?: string | null;
@@ -542,6 +549,21 @@ async function connectWebSocket(): Promise<void> {
 
         if (message.type === 'notification' && message.payload != null) {
           const payload = message.payload as WsNotificationPayload;
+          if (payload.notificationType === 'reaction') {
+            if (payload.chatId && isFeatureEnabled('reactionNotifications')) {
+              if (payload.threadRootId) {
+                store.dispatch(
+                  incrementThreadUnreadReactions({
+                    threadRootId: payload.threadRootId,
+                    messageId: payload.messageId,
+                  }),
+                );
+              } else {
+                store.dispatch(incrementChatUnreadReactions({ chatId: payload.chatId, messageId: payload.messageId }));
+              }
+            }
+            return;
+          }
           if (
             (payload.notificationType === 'mention' || payload.notificationType === 'reply') &&
             payload.chatId &&

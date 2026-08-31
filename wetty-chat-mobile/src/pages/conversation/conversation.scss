@@ -111,9 +111,12 @@
 .mention-fab {
   opacity: 1;
   overflow: visible;
-  // The scroll-to-bottom FAB sits at bottom:16px and is 48px tall; lift this one 56px so they stack.
-  transform: translateY(-56px);
-  transition: opacity 120ms ease-out;
+  // Lifted above the visible FABs below it via --fab-lift (56px per visible FAB,
+  // set from React; the scroll-to-bottom FAB sits at bottom:16px and is 48px tall).
+  transform: translateY(calc(-1 * var(--fab-lift, 0px)));
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms cubic-bezier(0.2, 0, 0, 1);
   margin-right: 8px;
 
   ion-fab-button {
@@ -137,6 +140,60 @@
 }
 
 .mention-fab__badge {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateX(-50%);
+  z-index: 2;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--ion-color-primary, #3880ff);
+  color: var(--ion-color-primary-contrast, #fff);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  text-align: center;
+}
+
+/* Jump-to-reaction FAB (stacked above the mention FAB) */
+.reaction-fab {
+  opacity: 1;
+  overflow: visible;
+  // Same stacking math as the mention FAB (--fab-lift per visible FAB below).
+  transform: translateY(calc(-1 * var(--fab-lift, 0px)));
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms cubic-bezier(0.2, 0, 0, 1);
+  margin-right: 8px;
+
+  ion-fab-button {
+    width: 48px;
+    height: 48px;
+    --background: var(--ion-background-color-step-100, #f4f5f8);
+    --background-activated: var(--ion-background-color-step-300, #d7d8da);
+    --background-hover: var(--ion-background-color-step-200, #e0e0e0);
+    --box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
+    --color: color-mix(in srgb, var(--ion-color-medium, #636469) 60%, var(--ion-text-color, #000) 40%);
+
+    &:active::part(native) {
+      transform: scale(0.94);
+    }
+  }
+
+  &--hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.reaction-fab__badge {
   position: absolute;
   top: -5px;
   left: 50%;

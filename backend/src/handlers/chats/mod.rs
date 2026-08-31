@@ -17,7 +17,7 @@ use crate::{
     dto::{
         chats::{
             ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse,
-            UnreadMentionIdsResponse,
+            UnreadMentionIdsResponse, UnreadReactionIdsResponse,
         },
         messages::MessageResponse,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
@@ -282,6 +282,9 @@ async fn get_chats(
     let mention_counts = state
         .unread_service
         .count_user_chat_unread_mentions(conn, uid)?;
+    let reaction_counts = state
+        .unread_service
+        .count_user_chat_unread_reactions(conn, uid)?;
 
     let message_responses =
         attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
@@ -326,6 +329,7 @@ async fn get_chats(
             )| {
                 let unread_count = unread_counts.get(&id).copied().unwrap_or(0);
                 let unread_mentions = mention_counts.get(&id).copied().unwrap_or(0);
+                let unread_reactions = reaction_counts.get(&id).copied().unwrap_or(0);
                 let mr = msg
                     .and_then(|m| message_response_map.remove(&m.id))
                     .map(message_response_preview);
@@ -348,6 +352,7 @@ async fn get_chats(
                     last_message_at,
                     unread_count,
                     unread_mentions,
+                    unread_reactions,
                     last_read_message_id,
                     last_message: mr,
                     muted_until,
@@ -412,11 +417,17 @@ async fn mark_as_read(
         read_state.last_read_message_id,
         None,
     )?;
+    // The reaction cursor was just advanced by mark_chat_as_read, so this is
+    // normally 0; computed for consistency with the mention count.
+    let unread_reactions = state
+        .unread_service
+        .count_chat_unread_reactions(conn, uid, chat_id, None)?;
 
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: read_state.last_read_message_id,
         unread_count: read_state.unread_count,
         unread_mentions,
+        unread_reactions,
     }))
 }
 
@@ -513,11 +524,17 @@ async fn mark_as_unread(
         state
             .unread_service
             .count_chat_unread_mentions(conn, uid, chat_id, new_read_id, None)?;
+    // Marking unread rewinds the message pointer only; the reaction cursor
+    // never moves backwards, so this reports the live (unchanged) count.
+    let unread_reactions = state
+        .unread_service
+        .count_chat_unread_reactions(conn, uid, chat_id, None)?;
 
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: new_read_id,
         unread_count,
         unread_mentions,
+        unread_reactions,
     }))
 }
 
@@ -561,11 +578,15 @@ async fn get_chat_unread_count(
         last_read_message_id,
         None,
     )?;
+    let unread_reactions = state
+        .unread_service
+        .count_chat_unread_reactions(conn, uid, chat_id, None)?;
 
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id,
         unread_count,
         unread_mentions,
+        unread_reactions,
     }))
 }
 
@@ -639,6 +660,50 @@ async fn get_chat_mentions(
     }))
 }
 
+/// GET /chats/{chat_id}/reactions - Message ids with unread reactions for the current user.
+///
+/// Returns main-scope reactions by default (reactions on the user's top-level
+/// messages); pass `threadId` for reactions on the user's messages in that
+/// thread. Ids are newest-first, one entry per message regardless of how many
+/// new reactions it carries (default 1000, hard cap 1000). A reaction is
+/// unread while `created_at > last_reactions_read_at` (cursor-derived; the
+/// cursor advances on mark-read).
+#[utoipa::path(
+    get,
+    path = "/reactions",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope reactions"),
+        ("max" = Option<i64>, Query, description = "Max ids to return (default 1000, capped at 1000)"),
+    ),
+    responses(
+        (status = 200, description = "Message ids with unread reactions, newest-first", body = UnreadReactionIdsResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn get_chat_reactions(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Query(q): Query<UnreadMentionsQuery>,
+) -> Result<Json<UnreadReactionIdsResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    let limit = validate_limit(q.max, crate::constants::MAX_UNREAD_COUNT);
+
+    let ids =
+        state
+            .unread_service
+            .list_chat_unread_reactions(conn, uid, chat_id, q.thread_id, limit)?;
+
+    Ok(Json(UnreadReactionIdsResponse {
+        message_ids: ids.into_iter().map(|id| id.to_string()).collect(),
+    }))
+}
+
 /// GET /chats/unread — Get total unread message and chat counts for the current user.
 #[utoipa::path(
     get,
@@ -660,6 +725,8 @@ async fn get_unread_count(
     let mention_counts = state
         .unread_service
         .count_user_chat_unread_mentions(conn, uid)?;
+    // Reaction badges are list-only by design and never join this global
+    // aggregation (see `count_user_chat_unread_reactions`).
     let unread_mentions = mention_counts.values().copied().fold(0i64, |acc, n| {
         acc.saturating_add(n)
             .min(crate::constants::MAX_UNREAD_COUNT)
@@ -795,6 +862,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(mark_as_unread))
                 .routes(utoipa_axum::routes!(get_chat_unread_count))
                 .routes(utoipa_axum::routes!(get_chat_mentions))
+                .routes(utoipa_axum::routes!(get_chat_reactions))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
                 .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())

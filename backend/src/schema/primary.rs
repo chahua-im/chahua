@@ -153,6 +153,7 @@ diesel::table! {
         join_reason -> GroupJoinReason,
         join_reason_extra -> Nullable<Jsonb>,
         archived -> Bool,
+        last_reactions_read_at -> Timestamptz,
     }
 }
 
@@ -240,6 +241,7 @@ diesel::table! {
         #[max_length = 32]
         emoji -> Varchar,
         created_at -> Timestamptz,
+        message_author_uid -> Int4,
     }
 }
 
@@ -431,6 +433,7 @@ diesel::table! {
         subscribed_at -> Timestamptz,
         archived -> Bool,
         subscribed -> Bool,
+        last_reactions_read_at -> Timestamptz,
     }
 }
 

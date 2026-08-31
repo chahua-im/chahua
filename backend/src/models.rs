@@ -585,6 +585,9 @@ pub struct MessageReaction {
     pub user_uid: i32,
     pub emoji: String,
     pub created_at: DateTime<Utc>,
+    /// Author of the reacted message, denormalized so unread-reaction queries
+    /// can filter "reactions on my messages" without scanning messages.
+    pub message_author_uid: i32,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]

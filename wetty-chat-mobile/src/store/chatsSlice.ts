@@ -8,7 +8,7 @@ import type { MemberSummary } from '@/api/users';
 import type { GroupRole } from '@/api/group';
 import { UNREAD_BADGE_COUNT_CAP } from '@/utils/unreadBadge';
 import { compareMessageOrder, isSameMessage } from './messageProjection';
-import { prependMentionId, type MentionIdCacheStatus } from './mentionIdCache';
+import { applyIncomingId, type MentionIdCacheStatus } from './mentionIdCache';
 
 export interface ChatMeta {
   name: string | null;
@@ -30,6 +30,9 @@ interface ChatListMeta {
   unreadMentions?: number;
   unreadMentionIds?: string[];
   unreadMentionIdsStatus?: MentionIdCacheStatus;
+  unreadReactions?: number;
+  unreadReactionIds?: string[];
+  unreadReactionIdsStatus?: MentionIdCacheStatus;
   lastReadMessageId?: string | null;
   lastMessage?: MessagePreview | null;
   inList?: boolean;
@@ -106,6 +109,9 @@ function getEffectiveListMeta(entry?: ChatStateEntry): ChatListMeta {
     unreadMentions: live?.unreadMentions ?? snapshot?.unreadMentions ?? 0,
     unreadMentionIds: live?.unreadMentionIds ?? snapshot?.unreadMentionIds,
     unreadMentionIdsStatus: live?.unreadMentionIdsStatus ?? snapshot?.unreadMentionIdsStatus ?? 'idle',
+    unreadReactions: live?.unreadReactions ?? snapshot?.unreadReactions ?? 0,
+    unreadReactionIds: live?.unreadReactionIds ?? snapshot?.unreadReactionIds,
+    unreadReactionIdsStatus: live?.unreadReactionIdsStatus ?? snapshot?.unreadReactionIdsStatus ?? 'idle',
     lastReadMessageId: live?.lastReadMessageId ?? snapshot?.lastReadMessageId ?? null,
     lastMessage: latest,
     lastMessageAt: latest?.createdAt ?? snapshot?.lastMessageAt ?? null,
@@ -113,10 +119,34 @@ function getEffectiveListMeta(entry?: ChatStateEntry): ChatListMeta {
   };
 }
 
+/**
+ * Drop a live unread-badge count (and its cached id list) when the server
+ * snapshot supersedes it: the list was computed against the superseded count,
+ * so the jumper must refetch against the authoritative snapshot instead of
+ * cycling ids that may already be read on another device (matches threadsSlice).
+ */
+function reconcileBadgeField(
+  live: ChatListMeta,
+  fields: {
+    count: 'unreadMentions' | 'unreadReactions';
+    ids: 'unreadMentionIds' | 'unreadReactionIds';
+    status: 'unreadMentionIdsStatus' | 'unreadReactionIdsStatus';
+  },
+  snapshotCount: number,
+  liveCount: number | undefined,
+): void {
+  if (liveCount == null || snapshotCount < UNREAD_BADGE_COUNT_CAP || liveCount <= snapshotCount) {
+    delete live[fields.count];
+    delete live[fields.ids];
+    live[fields.status] = 'idle';
+  }
+}
+
 function reconcileAuthoritativeListFields(
   entry: ChatStateEntry,
   snapshotUnreadCount: number,
   snapshotUnreadMentions: number,
+  snapshotUnreadReactions: number,
 ): void {
   if (!entry.liveProjection) return;
 
@@ -130,19 +160,18 @@ function reconcileAuthoritativeListFields(
     delete entry.liveProjection.unreadCount;
   }
 
-  const liveUnreadMentions = entry.liveProjection.unreadMentions;
-  if (
-    liveUnreadMentions == null ||
-    snapshotUnreadMentions < UNREAD_BADGE_COUNT_CAP ||
-    liveUnreadMentions <= snapshotUnreadMentions
-  ) {
-    delete entry.liveProjection.unreadMentions;
-    // The live mention id list was computed against the superseded count; drop it
-    // so the jumper refetches against the authoritative snapshot instead of
-    // cycling ids that may already be read on another device (matches threadsSlice).
-    delete entry.liveProjection.unreadMentionIds;
-    entry.liveProjection.unreadMentionIdsStatus = 'idle';
-  }
+  reconcileBadgeField(
+    entry.liveProjection,
+    { count: 'unreadMentions', ids: 'unreadMentionIds', status: 'unreadMentionIdsStatus' },
+    snapshotUnreadMentions,
+    entry.liveProjection.unreadMentions,
+  );
+  reconcileBadgeField(
+    entry.liveProjection,
+    { count: 'unreadReactions', ids: 'unreadReactionIds', status: 'unreadReactionIdsStatus' },
+    snapshotUnreadReactions,
+    entry.liveProjection.unreadReactions,
+  );
   delete entry.liveProjection.lastReadMessageId;
 }
 
@@ -201,12 +230,13 @@ const chatsSlice = createSlice({
           lastMessageAt: chat.lastMessageAt,
           unreadCount: chat.unreadCount,
           unreadMentions: chat.unreadMentions,
+          unreadReactions: chat.unreadReactions ?? 0,
           lastReadMessageId: chat.lastReadMessageId,
           inList: true,
           mutedUntil: chat.mutedUntil,
           archived: chat.archived ?? archived,
         };
-        reconcileAuthoritativeListFields(entry, chat.unreadCount, chat.unreadMentions);
+        reconcileAuthoritativeListFields(entry, chat.unreadCount, chat.unreadMentions, chat.unreadReactions ?? 0);
       }
       state.buckets[key] = {
         nextCursor: action.payload.nextCursor,
@@ -243,12 +273,13 @@ const chatsSlice = createSlice({
           lastMessageAt: chat.lastMessageAt,
           unreadCount: chat.unreadCount,
           unreadMentions: chat.unreadMentions,
+          unreadReactions: chat.unreadReactions ?? 0,
           lastReadMessageId: chat.lastReadMessageId,
           inList: true,
           mutedUntil: chat.mutedUntil,
           archived: chat.archived ?? archived,
         };
-        reconcileAuthoritativeListFields(entry, chat.unreadCount, chat.unreadMentions);
+        reconcileAuthoritativeListFields(entry, chat.unreadCount, chat.unreadMentions, chat.unreadReactions ?? 0);
       }
       state.buckets[key].nextCursor = action.payload.nextCursor;
       state.buckets[key].isLoaded = true;
@@ -350,24 +381,18 @@ const chatsSlice = createSlice({
     incrementChatUnreadMentions(state, action: PayloadAction<{ chatId: string; messageId?: string }>) {
       const entry = getChatEntry(state, action.payload.chatId);
       const current = getEffectiveListMeta(entry);
-      // If the id cache is loaded, prepend the new mention id (deduped, newest-first) so live
-      // mentions are jumpable without a refetch. Otherwise leave the cache invalid; the eager-fetch
-      // will include this mention since it is still unread.
-      const existingIds = current.unreadMentionIds ?? [];
-      const nextIds =
-        action.payload.messageId && current.unreadMentionIdsStatus === 'ready'
-          ? prependMentionId(current.unreadMentionIds, action.payload.messageId)
-          : existingIds;
+      const next = applyIncomingId(
+        { ids: current.unreadMentionIds, status: current.unreadMentionIdsStatus },
+        action.payload.messageId,
+      );
       const nextLive = {
         ...entry.liveProjection,
         unreadMentions: (current.unreadMentions ?? 0) + 1,
-        unreadMentionIds: nextIds,
+        unreadMentionIds: next.ids,
         inList: true,
       };
-      // A fetch was in flight when this mention arrived: its response predates the mention,
-      // so invalidate the cache — the resolution must not claim it is fresh.
-      if (current.unreadMentionIdsStatus === 'loading') {
-        nextLive.unreadMentionIdsStatus = 'idle';
+      if (next.status !== undefined) {
+        nextLive.unreadMentionIdsStatus = next.status;
       }
       entry.liveProjection = nextLive;
     },
@@ -396,6 +421,62 @@ const chatsSlice = createSlice({
       entry.liveProjection = {
         ...entry.liveProjection,
         unreadMentionIdsStatus: action.payload.status,
+        inList: true,
+      };
+    },
+    setChatUnreadReactions(state, action: PayloadAction<{ chatId: string; unreadReactions: number }>) {
+      const entry = getChatEntry(state, action.payload.chatId);
+      // Server count is authoritative; the cached id list may no longer match, so invalidate.
+      entry.liveProjection = {
+        ...entry.liveProjection,
+        unreadReactions: action.payload.unreadReactions,
+        unreadReactionIds: [],
+        unreadReactionIdsStatus: 'idle',
+        inList: true,
+      };
+    },
+    incrementChatUnreadReactions(state, action: PayloadAction<{ chatId: string; messageId?: string }>) {
+      const entry = getChatEntry(state, action.payload.chatId);
+      const current = getEffectiveListMeta(entry);
+      const next = applyIncomingId(
+        { ids: current.unreadReactionIds, status: current.unreadReactionIdsStatus },
+        action.payload.messageId,
+      );
+      const nextLive = {
+        ...entry.liveProjection,
+        unreadReactions: (current.unreadReactions ?? 0) + 1,
+        unreadReactionIds: next.ids,
+        inList: true,
+      };
+      if (next.status !== undefined) {
+        nextLive.unreadReactionIdsStatus = next.status;
+      }
+      entry.liveProjection = nextLive;
+    },
+    setChatUnreadReactionIds(state, action: PayloadAction<{ chatId: string; ids: string[] }>) {
+      const entry = getChatEntry(state, action.payload.chatId);
+      // Same mid-flight guard as mentions: only claim freshness when this
+      // response is still the acknowledged fetch.
+      if (entry.liveProjection?.unreadReactionIdsStatus !== 'loading') {
+        entry.liveProjection = {
+          ...entry.liveProjection,
+          unreadReactionIdsStatus: 'idle',
+          inList: true,
+        };
+        return;
+      }
+      entry.liveProjection = {
+        ...entry.liveProjection,
+        unreadReactionIds: action.payload.ids,
+        unreadReactionIdsStatus: 'ready',
+        inList: true,
+      };
+    },
+    setChatUnreadReactionIdsStatus(state, action: PayloadAction<{ chatId: string; status: MentionIdCacheStatus }>) {
+      const entry = getChatEntry(state, action.payload.chatId);
+      entry.liveProjection = {
+        ...entry.liveProjection,
+        unreadReactionIdsStatus: action.payload.status,
         inList: true,
       };
     },
@@ -434,14 +515,33 @@ const chatsSlice = createSlice({
       entry.liveProjection.lastMessage = toMessagePreview(message);
       entry.liveProjection.lastMessageAt = message.createdAt;
     },
-    markChatAsRead(state, action: PayloadAction<{ chatId: string; lastReadMessageId?: string | null }>) {
+    /**
+     * Apply an authoritative read-state response (or an optimistic reset):
+     * counts come from the payload (defaulting to 0), and the cached id lists
+     * are invalidated since they were computed against the superseded state.
+     * The reaction cursor only moves forward, so rewound read positions never
+     * resurrect reaction badges.
+     */
+    setChatReadState(
+      state,
+      action: PayloadAction<{
+        chatId: string;
+        lastReadMessageId?: string | null;
+        unreadCount?: number;
+        unreadMentions?: number;
+        unreadReactions?: number;
+      }>,
+    ) {
       const entry = getChatEntry(state, action.payload.chatId);
       entry.liveProjection = {
         ...entry.liveProjection,
-        unreadCount: 0,
-        unreadMentions: 0,
+        unreadCount: action.payload.unreadCount ?? 0,
+        unreadMentions: action.payload.unreadMentions ?? 0,
         unreadMentionIds: [],
         unreadMentionIdsStatus: 'idle',
+        unreadReactions: action.payload.unreadReactions ?? 0,
+        unreadReactionIds: [],
+        unreadReactionIdsStatus: 'idle',
         lastReadMessageId:
           action.payload.lastReadMessageId !== undefined
             ? action.payload.lastReadMessageId
@@ -476,8 +576,12 @@ export const {
   setChatUnreadMentionIds,
   setChatUnreadMentionIdsStatus,
   incrementChatUnreadMentions,
+  setChatUnreadReactions,
+  setChatUnreadReactionIds,
+  setChatUnreadReactionIdsStatus,
+  incrementChatUnreadReactions,
   projectChatMessagePatched,
-  markChatAsRead,
+  setChatReadState,
   setChatLastReadMessageId,
 } = chatsSlice.actions;
 
@@ -527,6 +631,20 @@ export function selectChatUnreadMentionIdsStatus(state: RootState, chatId: strin
   return getEffectiveListMeta(state.chats.byId[chatId]).unreadMentionIdsStatus ?? 'idle';
 }
 
+export function selectChatUnreadReactions(state: RootState, chatId: string): number {
+  const entry = state.chats.byId[chatId];
+  return getEffectiveListMeta(entry).unreadReactions ?? 0;
+}
+
+export function selectChatUnreadReactionIds(state: RootState, chatId: string): string[] {
+  const entry = state.chats.byId[chatId];
+  return getEffectiveListMeta(entry).unreadReactionIds ?? [];
+}
+
+export function selectChatUnreadReactionIdsStatus(state: RootState, chatId: string): MentionIdCacheStatus {
+  return getEffectiveListMeta(state.chats.byId[chatId]).unreadReactionIdsStatus ?? 'idle';
+}
+
 export function selectIsChatArchived(state: RootState, chatId: string): boolean {
   const entry = state.chats.byId[chatId];
   return getEffectiveListMeta(entry).archived ?? false;
@@ -561,6 +679,7 @@ function mapChatEntry(id: string, entry: ChatStateEntry): ChatListEntry {
     lastMessageAt: listMeta.lastMessageAt ?? null,
     unreadCount: listMeta.unreadCount ?? 0,
     unreadMentions: listMeta.unreadMentions ?? 0,
+    unreadReactions: listMeta.unreadReactions ?? 0,
     lastReadMessageId: listMeta.lastReadMessageId ?? null,
     lastMessage: listMeta.lastMessage ?? null,
     mutedUntil: resolveMutedUntil(entry?.listSnapshot, entry?.liveProjection),

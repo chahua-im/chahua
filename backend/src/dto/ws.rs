@@ -183,11 +183,12 @@ pub struct FriendshipRemovedPayload {
 pub enum NotificationType {
     Mention,
     Reply,
+    Reaction,
 }
 
-/// Directed notification to a specific user about a mention or a reply to one
-/// of their messages (and, later, reaction). Delivered only to the affected
-/// user via the realtime WebSocket.
+/// Directed notification to a specific user about a mention, a reply to one of
+/// their messages, or a reaction on one of their messages. Delivered only to
+/// the affected user via the realtime WebSocket.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationPayload {
@@ -321,6 +322,23 @@ mod tests {
         .expect("serialize reply notification event");
 
         assert_eq!(value["payload"]["notificationType"], json!("reply"));
+        assert_eq!(value["payload"]["threadRootId"], json!(null));
+        assert!(value["payload"].get("actorName").is_none());
+    }
+
+    #[test]
+    fn serializes_reaction_notification_type_as_reaction() {
+        let value = serde_json::to_value(ServerWsMessage::Notification(NotificationPayload {
+            notification_type: NotificationType::Reaction,
+            chat_id: 7,
+            message_id: 42,
+            thread_root_id: None,
+            actor_uid: 5,
+            actor_name: None,
+        }))
+        .expect("serialize reaction notification event");
+
+        assert_eq!(value["payload"]["notificationType"], json!("reaction"));
         assert_eq!(value["payload"]["threadRootId"], json!(null));
         assert!(value["payload"].get("actorName").is_none());
     }

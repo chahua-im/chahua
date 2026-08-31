@@ -500,6 +500,9 @@ msgstr "Failed to load more"
 msgid "Failed to load newer messages"
 msgstr "Failed to load newer messages"
 
+msgid "Failed to load reactions"
+msgstr "Failed to load reactions"
+
 msgid "Failed to load saved messages"
 msgstr "Failed to load saved messages"
 
@@ -727,6 +730,9 @@ msgstr "Joining…"
 
 msgid "Jump to mention or reply"
 msgstr "Jump to mention or reply"
+
+msgid "Jump to reaction"
+msgstr "Jump to reaction"
 
 msgid "Keep messages"
 msgstr "Keep messages"
@@ -1474,6 +1480,9 @@ msgstr "Unread"
 
 msgid "Unread mentions and replies"
 msgstr "Unread mentions and replies"
+
+msgid "Unread reactions"
+msgstr "Unread reactions"
 
 msgid "Unsave"
 msgstr "Unsave"

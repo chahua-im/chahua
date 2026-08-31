@@ -500,6 +500,9 @@ msgstr "加载更多失败"
 msgid "Failed to load newer messages"
 msgstr "加载新消息失败"
 
+msgid "Failed to load reactions"
+msgstr "加载 reaction 失败"
+
 msgid "Failed to load saved messages"
 msgstr "加载收藏消息失败"
 
@@ -727,6 +730,9 @@ msgstr "正在加入…"
 
 msgid "Jump to mention or reply"
 msgstr "跳转到提及或回复"
+
+msgid "Jump to reaction"
+msgstr "跳转到 reaction"
 
 msgid "Keep messages"
 msgstr "保留消息"
@@ -1474,6 +1480,9 @@ msgstr "标记未读"
 
 msgid "Unread mentions and replies"
 msgstr "未读提及和回复"
+
+msgid "Unread reactions"
+msgstr "未读 reaction"
 
 msgid "Unsave"
 msgstr "取消收藏"

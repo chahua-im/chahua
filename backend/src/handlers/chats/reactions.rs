@@ -12,7 +12,7 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         messages::{ReactionDetailGroup, ReactionDetailResponse, ReactionReactor, ReactionSummary},
-        ws::{ReactionUpdatePayload, ServerWsMessage},
+        ws::{NotificationPayload, NotificationType, ReactionUpdatePayload, ServerWsMessage},
     },
     errors::AppError,
     extractors::DbConn,
@@ -23,7 +23,7 @@ use crate::{
     AppState,
 };
 
-use crate::services::messages::load_usernames_by_uids;
+use crate::services::messages::{load_username_by_uid, load_usernames_by_uids};
 
 fn validate_emoji(input: &str) -> Result<String, AppError> {
     if input.is_empty() {
@@ -227,7 +227,7 @@ async fn put_reaction(
     check_membership(conn, chat_id, uid)?;
 
     // Verify message exists and belongs to this chat
-    let _message: Message = messages::table
+    let message: Message = messages::table
         .filter(messages::id.eq(message_id))
         .filter(messages::chat_id.eq(chat_id))
         .filter(messages::deleted_at.is_null())
@@ -237,12 +237,13 @@ async fn put_reaction(
         .ok_or(AppError::NotFound("Message not found"))?;
 
     // Insert reaction (ON CONFLICT DO NOTHING for idempotency)
-    diesel::insert_into(message_reactions::table)
+    let inserted = diesel::insert_into(message_reactions::table)
         .values(&MessageReaction {
             message_id,
             user_uid: uid,
             emoji,
             created_at: Utc::now(),
+            message_author_uid: message.sender_uid,
         })
         .on_conflict_do_nothing()
         .execute(conn)?;
@@ -253,6 +254,25 @@ async fn put_reaction(
         .execute(conn)?;
 
     broadcast_reaction_update(conn, &state, chat_id, message_id);
+
+    // Directed unread-reaction notification to the message author. Only on a
+    // genuinely new row (re-putting the same emoji is a no-op) and never for
+    // self-reactions; the unread count is derived from the same rows.
+    if inserted > 0 && message.sender_uid != uid {
+        let actor_name = load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
+        let payload = NotificationPayload {
+            notification_type: NotificationType::Reaction,
+            chat_id,
+            message_id,
+            thread_root_id: message.reply_root_id,
+            actor_uid: uid,
+            actor_name: Some(actor_name),
+        };
+        state.ws_registry.broadcast_to_uids(
+            &[message.sender_uid],
+            std::sync::Arc::new(ServerWsMessage::Notification(payload)),
+        );
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
