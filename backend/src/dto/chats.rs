@@ -15,6 +15,7 @@ pub struct ChatListItem {
     pub avatar: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub unread_count: i64,
+    pub unread_mentions: i64,
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
     pub last_read_message_id: Option<i64>,
@@ -42,6 +43,7 @@ pub struct MarkChatReadStateResponse {
     #[schema(value_type = Option<String>)]
     pub last_read_message_id: Option<i64>,
     pub unread_count: i64,
+    pub unread_mentions: i64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -51,4 +53,12 @@ pub struct UnreadCountResponse {
     pub archived_unread_count: i64,
     pub unread_chat_count: i64,
     pub archived_unread_chat_count: i64,
+    pub unread_mentions: i64,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadMentionIdsResponse {
+    /// Unread mention message ids, newest-first. Serialized as strings (JS-safe).
+    pub message_ids: Vec<String>,
 }

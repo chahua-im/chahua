@@ -15,7 +15,10 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::{
-        chats::{ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse},
+        chats::{
+            ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse,
+            UnreadMentionIdsResponse,
+        },
         messages::MessageResponse,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
     },
@@ -276,6 +279,9 @@ async fn get_chats(
     let unread_counts = state
         .unread_service
         .count_membership_unreads(conn, &memberships)?;
+    let mention_counts = state
+        .unread_service
+        .count_user_chat_unread_mentions(conn, uid)?;
 
     let message_responses =
         attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
@@ -319,6 +325,7 @@ async fn get_chats(
                 dm_uid2,
             )| {
                 let unread_count = unread_counts.get(&id).copied().unwrap_or(0);
+                let unread_mentions = mention_counts.get(&id).copied().unwrap_or(0);
                 let mr = msg
                     .and_then(|m| message_response_map.remove(&m.id))
                     .map(message_response_preview);
@@ -340,6 +347,7 @@ async fn get_chats(
                         .map(|storage_key| state.media.public_url(storage_key)),
                     last_message_at,
                     unread_count,
+                    unread_mentions,
                     last_read_message_id,
                     last_message: mr,
                     muted_until,
@@ -397,9 +405,18 @@ async fn mark_as_read(
         body.message_id,
     )?;
 
+    let unread_mentions = state.unread_service.count_chat_unread_mentions(
+        conn,
+        uid,
+        chat_id,
+        read_state.last_read_message_id,
+        None,
+    )?;
+
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: read_state.last_read_message_id,
         unread_count: read_state.unread_count,
+        unread_mentions,
     }))
 }
 
@@ -492,9 +509,15 @@ async fn mark_as_unread(
         (new_read_id, unread_count)
     };
 
+    let unread_mentions =
+        state
+            .unread_service
+            .count_chat_unread_mentions(conn, uid, chat_id, new_read_id, None)?;
+
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: new_read_id,
         unread_count,
+        unread_mentions,
     }))
 }
 
@@ -531,10 +554,88 @@ async fn get_chat_unread_count(
         state
             .unread_service
             .count_chat_unread(conn, chat_id, last_read_message_id)?;
+    let unread_mentions = state.unread_service.count_chat_unread_mentions(
+        conn,
+        uid,
+        chat_id,
+        last_read_message_id,
+        None,
+    )?;
 
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id,
         unread_count,
+        unread_mentions,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnreadMentionsQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    thread_id: Option<i64>,
+    #[serde(default)]
+    max: Option<i64>,
+}
+
+/// GET /chats/{chat_id}/mentions - Unread @mention message ids for the current user.
+///
+/// Returns main-scope mentions by default; pass `threadId` for thread-scope mentions.
+/// Ids are newest-first (default 1000, hard cap 1000). A mention is
+/// unread while `message_id > last_read_message_id` (cursor-derived; no per-mention flag).
+#[utoipa::path(
+    get,
+    path = "/mentions",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope mentions"),
+        ("max" = Option<i64>, Query, description = "Max ids to return (default 1000, capped at 1000)"),
+    ),
+    responses(
+        (status = 200, description = "Unread mention message ids, newest-first", body = UnreadMentionIdsResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn get_chat_mentions(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Query(q): Query<UnreadMentionsQuery>,
+) -> Result<Json<UnreadMentionIdsResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    let limit = validate_limit(q.max, crate::constants::MAX_UNREAD_COUNT);
+
+    let (last_read_message_id, thread_root_id) = match q.thread_id {
+        Some(thread_id) => {
+            let last_read = crate::services::threads::get_thread_last_read_message_id(
+                conn, chat_id, thread_id, uid,
+            )?;
+            (last_read, Some(thread_id))
+        }
+        None => {
+            let last_read = chat::get_chat_last_read_message_id(conn, chat_id, uid)?;
+            (last_read, None)
+        }
+    };
+
+    let ids = state.unread_service.list_chat_unread_mentions(
+        conn,
+        uid,
+        chat_id,
+        last_read_message_id,
+        thread_root_id,
+        limit,
+    )?;
+
+    Ok(Json(UnreadMentionIdsResponse {
+        message_ids: ids.into_iter().map(|id| id.to_string()).collect(),
     }))
 }
 
@@ -556,12 +657,20 @@ async fn get_unread_count(
     let conn = &mut *conn;
 
     let counts = state.unread_service.count_user_unread_summary(conn, uid)?;
+    let mention_counts = state
+        .unread_service
+        .count_user_chat_unread_mentions(conn, uid)?;
+    let unread_mentions = mention_counts.values().copied().fold(0i64, |acc, n| {
+        acc.saturating_add(n)
+            .min(crate::constants::MAX_UNREAD_COUNT)
+    });
 
     Ok(Json(UnreadCountResponse {
         unread_count: counts.unread_count,
         archived_unread_count: counts.archived_unread_count,
         unread_chat_count: counts.unread_chat_count,
         archived_unread_chat_count: counts.archived_unread_chat_count,
+        unread_mentions,
     }))
 }
 
@@ -685,6 +794,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(mark_as_read))
                 .routes(utoipa_axum::routes!(mark_as_unread))
                 .routes(utoipa_axum::routes!(get_chat_unread_count))
+                .routes(utoipa_axum::routes!(get_chat_mentions))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
                 .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())

@@ -216,6 +216,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    message_mentions (message_id, mentioned_uid) {
+        message_id -> Int8,
+        mentioned_uid -> Int4,
+        chat_id -> Int8,
+        thread_root_id -> Nullable<Int8>,
+        created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     message_reactions (message_id, user_uid, emoji) {
         message_id -> Int8,
         user_uid -> Int4,
@@ -460,6 +470,7 @@ diesel::table! {
 diesel::joinable!(attachments -> messages (message_id));
 diesel::joinable!(group_membership -> groups (chat_id));
 diesel::joinable!(groups -> media (avatar_image_id));
+diesel::joinable!(message_mentions -> messages (message_id));
 diesel::joinable!(message_reactions -> messages (message_id));
 diesel::joinable!(messages -> stickers (sticker_id));
 diesel::joinable!(pinned_messages -> groups (chat_id));
@@ -487,6 +498,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     groups,
     invites,
     media,
+    message_mentions,
     message_reactions,
     messages,
     pinned_messages,

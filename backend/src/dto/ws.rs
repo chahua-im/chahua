@@ -44,6 +44,7 @@ pub enum ServerWsMessage {
     FriendRequestReceived(FriendRequestReceivedPayload),
     FriendRequestResolved(FriendRequestResolvedPayload),
     FriendshipRemoved(FriendshipRemovedPayload),
+    Notification(NotificationPayload),
 }
 
 impl ServerWsMessage {
@@ -66,6 +67,7 @@ impl ServerWsMessage {
             Self::FriendRequestReceived(_) => "friendRequestReceived",
             Self::FriendRequestResolved(_) => "friendRequestResolved",
             Self::FriendshipRemoved(_) => "friendshipRemoved",
+            Self::Notification(_) => "notification",
         }
     }
 }
@@ -175,10 +177,38 @@ pub struct FriendshipRemovedPayload {
     pub actor_uid: i32,
 }
 
+/// Kind of directed notification delivered to a specific user.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationType {
+    Mention,
+}
+
+/// Directed notification to a specific user about a mention (and, later, reply/reaction).
+/// Delivered only to the affected user via the realtime WebSocket.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPayload {
+    pub notification_type: NotificationType,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub chat_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub message_id: i64,
+    #[serde(with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub thread_root_id: Option<i64>,
+    pub actor_uid: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_name: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        PinUpdatePayload, PresenceUpdatePayload, ServerWsMessage, ThreadMembershipChangedPayload,
+        NotificationPayload, NotificationType, PinUpdatePayload, PresenceUpdatePayload,
+        ServerWsMessage, ThreadMembershipChangedPayload,
     };
     use serde_json::json;
 
@@ -252,5 +282,27 @@ mod tests {
 
         assert_eq!(value["type"], json!("pinRemoved"));
         assert!(value["payload"].get("threadRootId").is_none());
+    }
+
+    #[test]
+    fn serializes_notification_event_as_camel_case() {
+        let value = serde_json::to_value(ServerWsMessage::Notification(NotificationPayload {
+            notification_type: NotificationType::Mention,
+            chat_id: 7,
+            message_id: 42,
+            thread_root_id: Some(99),
+            actor_uid: 5,
+            actor_name: Some("alice".to_string()),
+        }))
+        .expect("serialize notification event");
+
+        assert_eq!(value["type"], json!("notification"));
+        assert_eq!(value["payload"]["notificationType"], json!("mention"));
+        assert_eq!(value["payload"]["chatId"], json!("7"));
+        assert_eq!(value["payload"]["messageId"], json!("42"));
+        assert_eq!(value["payload"]["threadRootId"], json!("99"));
+        assert_eq!(value["payload"]["actorUid"], json!(5));
+        assert_eq!(value["payload"]["actorName"], json!("alice"));
+        assert!(value["payload"].get("chat_id").is_none());
     }
 }

@@ -3,8 +3,9 @@ import { syncApp } from '@/api/sync';
 import type { MessageResponse, ReactionSummary } from '@/api/messages';
 import { setActiveConnections, setWsConnected } from '@/store/connectionSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
-import { setChatArchived, setChatMutedUntil } from '@/store/chatsSlice';
+import { incrementChatUnreadMentions, setChatArchived, setChatMutedUntil } from '@/store/chatsSlice';
 import {
+  incrementThreadUnreadMentions,
   removeThread,
   setThreadSubscriptionStatus,
   updateThreadFromWs,
@@ -28,6 +29,7 @@ import { selectAllTimelineMessages } from '@/store/messages/selectors';
 import { getStoredJwtToken } from '@/utils/jwtToken';
 import { formatNotificationBody, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import { buildNotificationNavigationData } from '@/utils/notificationNavigation';
+import { isFeatureEnabled } from '@/features';
 
 const WS_PATH = __API_BASE__ + '/ws';
 const PING_INTERVAL_MS = 10_000;
@@ -36,6 +38,16 @@ const RETRY_BASE_DELAY_MS = 1_000;
 const RETRY_JITTER_RATIO = 0.2;
 
 export type WebSocketAppState = 'active' | 'inactive';
+
+/** Realtime `notification` event payload (mention is the only type emitted today). */
+interface WsNotificationPayload {
+  notificationType: 'mention';
+  chatId: string;
+  messageId: string;
+  threadRootId?: string | null;
+  actorUid: number;
+  actorName?: string | null;
+}
 
 interface ServerEnvelope {
   type?: string;
@@ -86,11 +98,15 @@ function resolveWebSocketUrl(path: string): string {
     return path;
   }
 
-  // Full URL — map http(s) → ws(s) directly
+  // Full URL - map http(s) -> ws(s) directly
   if (path.startsWith('http://') || path.startsWith('https://')) {
-    const url = new URL(path);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return url.toString();
+    try {
+      const url = new URL(path);
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      return url.toString();
+    } catch {
+      // Malformed URL - fall back to relative-path derivation below.
+    }
   }
 
   // Relative path — derive protocol from the current page
@@ -168,7 +184,16 @@ function showLocalNotification(message: MessageResponse): void {
 
   const chatName = chatEntry?.details?.name ?? 'New Message';
   const locale = selectEffectiveLocale(store.getState());
-  const body = formatNotificationBody(message.sender.name ?? 'Someone', message, getNotificationPreviewLabels(locale));
+  const isMention =
+    isFeatureEnabled('mentionNotifications') &&
+    currentUid != null &&
+    (message.mentions ?? []).some((m) => m.uid === currentUid);
+  const body = formatNotificationBody(
+    message.sender.name ?? 'Someone',
+    message,
+    getNotificationPreviewLabels(locale),
+    isMention,
+  );
 
   const tag = `msg_${message.id}`;
 
@@ -502,6 +527,23 @@ async function connectWebSocket(): Promise<void> {
           if (payload.chatId) {
             store.dispatch(setChatArchived({ chatId: payload.chatId, archived: payload.archived }));
             store.dispatch(setChatMutedUntil({ chatId: payload.chatId, mutedUntil: payload.mutedUntil ?? null }));
+          }
+          return;
+        }
+
+        if (message.type === 'notification' && message.payload != null) {
+          const payload = message.payload as WsNotificationPayload;
+          if (payload.notificationType === 'mention' && payload.chatId && isFeatureEnabled('mentionNotifications')) {
+            if (payload.threadRootId) {
+              store.dispatch(
+                incrementThreadUnreadMentions({
+                  threadRootId: payload.threadRootId,
+                  messageId: payload.messageId,
+                }),
+              );
+            } else {
+              store.dispatch(incrementChatUnreadMentions({ chatId: payload.chatId, messageId: payload.messageId }));
+            }
           }
           return;
         }

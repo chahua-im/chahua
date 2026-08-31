@@ -15,7 +15,7 @@ import type {
   ComposeUploadInput,
   EditingMessage,
 } from '@/components/chat/compose/MessageComposeBar';
-import { setChatLastReadMessageId, setChatUnreadCount } from '@/store/chatsSlice';
+import { setChatLastReadMessageId, setChatUnreadCount, setChatUnreadMentions } from '@/store/chatsSlice';
 import { messageAdded, messageConfirmed, messagePatched, messagesBulkDeleted } from '@/store/messageEvents';
 import { uploadProgressCleared, uploadProgressSet } from '@/store/uploadProgressSlice';
 import { setThreadReadState } from '@/store/threadsSlice';
@@ -115,6 +115,7 @@ export function useChatMessageSender({
               threadRootId: threadId,
               lastReadMessageId: res.data.lastReadMessageId,
               unreadCount: res.data.unreadCount,
+              unreadMentions: res.data.unreadMentions ?? 0,
             }),
           );
         });
@@ -122,9 +123,11 @@ export function useChatMessageSender({
       }
 
       dispatch(setChatUnreadCount({ chatId, unreadCount: 0 }));
+      dispatch(setChatUnreadMentions({ chatId, unreadMentions: 0 }));
       dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: confirmedMessageId }));
       void markMessagesAsRead(chatId, confirmedMessageId).then((res) => {
         dispatch(setChatUnreadCount({ chatId, unreadCount: res.data.unreadCount }));
+        dispatch(setChatUnreadMentions({ chatId, unreadMentions: res.data.unreadMentions ?? 0 }));
         dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: res.data.lastReadMessageId }));
       });
       void syncAppBadgeCount();

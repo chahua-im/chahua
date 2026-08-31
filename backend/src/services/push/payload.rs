@@ -22,12 +22,14 @@ pub(super) const APNS_BODY_LOC_KEY_INVITE: &str = "push.message.body.invite";
 const APNS_BODY_LOC_KEY_ATTACHMENT: &str = "push.message.body.attachment";
 const APNS_BODY_LOC_KEY_ATTACHMENT_WITH_PREVIEW: &str = "push.message.body.attachment.with_preview";
 const APNS_BODY_LOC_KEY_DELETED: &str = "push.message.body.deleted";
+pub(super) const APNS_BODY_LOC_KEY_MENTION: &str = "push.mention.body";
 
 /// A push notification job enqueued when a new message is created.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum PushPayloadType {
     NewMessage,
+    Mention,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -66,6 +68,8 @@ pub(super) struct PushPayload {
     pub(super) sender_name: String,
     pub(super) message_preview: PushMessagePreview,
     pub(super) unread_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) mentioned_uid: Option<i32>,
     pub(super) data: PushPayloadData,
 }
 
@@ -81,6 +85,8 @@ pub(super) struct ApnsCustomData {
     pub(super) sender_name: String,
     pub(super) message_preview: PushMessagePreview,
     pub(super) unread_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) mentioned_uid: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,14 +100,25 @@ pub(super) struct ApnsNotification {
     pub(super) custom_data: ApnsCustomData,
 }
 
-pub(super) fn build_push_payload(job: &PushJob, unread_count: i64, body_text: &str) -> PushPayload {
+pub(super) fn build_push_payload(
+    job: &PushJob,
+    unread_count: i64,
+    body_text: &str,
+    recipient_uid: i32,
+) -> PushPayload {
+    let is_mention = job.mentioned_uids.contains(&recipient_uid);
     PushPayload {
-        type_: PushPayloadType::NewMessage,
+        type_: if is_mention {
+            PushPayloadType::Mention
+        } else {
+            PushPayloadType::NewMessage
+        },
         title: job.chat_name.clone(),
         body: body_text.to_string(),
         sender_name: job.sender_username.clone(),
         message_preview: job.message_preview.clone(),
         unread_count,
+        mentioned_uid: is_mention.then_some(recipient_uid),
         data: PushPayloadData {
             chat_id: job.chat_id.to_string(),
             message_id: job.message_id.to_string(),
@@ -110,11 +127,28 @@ pub(super) fn build_push_payload(job: &PushJob, unread_count: i64, body_text: &s
     }
 }
 
-pub(super) fn build_apns_notification(job: &PushJob, unread_count: i64) -> ApnsNotification {
+pub(super) fn build_apns_notification(
+    job: &PushJob,
+    unread_count: i64,
+    recipient_uid: i32,
+) -> ApnsNotification {
     let badge = unread_count.clamp(0, u32::MAX as i64) as u32;
     let preview = &job.message_preview;
+    let is_mention = job.mentioned_uids.contains(&recipient_uid);
+    let payload_type = if is_mention {
+        PushPayloadType::Mention
+    } else {
+        PushPayloadType::NewMessage
+    };
 
-    let (body_loc_key, body_loc_args) = if preview.is_deleted {
+    let (body_loc_key, body_loc_args) = if is_mention {
+        // Mentions only occur on text messages; surface a dedicated localized body.
+        let text = preview.message.as_deref().unwrap_or("");
+        (
+            APNS_BODY_LOC_KEY_MENTION,
+            vec![job.sender_username.clone(), truncate_preview(text)],
+        )
+    } else if preview.is_deleted {
         (APNS_BODY_LOC_KEY_DELETED, vec![job.sender_username.clone()])
     } else {
         match preview.message_type {
@@ -179,13 +213,14 @@ pub(super) fn build_apns_notification(job: &PushJob, unread_count: i64) -> ApnsN
         badge,
         thread_id,
         custom_data: ApnsCustomData {
-            type_: PushPayloadType::NewMessage,
+            type_: payload_type,
             chat_id: job.chat_id.to_string(),
             message_id: job.message_id.to_string(),
             thread_root_id: job.thread_root_id.map(|id| id.to_string()),
             sender_name: job.sender_username.clone(),
             message_preview: job.message_preview.clone(),
             unread_count,
+            mentioned_uid: is_mention.then_some(recipient_uid),
         },
     }
 }

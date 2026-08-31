@@ -488,6 +488,9 @@ msgstr "加载邀请链接失败"
 msgid "Failed to load members"
 msgstr "加载成员列表失败"
 
+msgid "Failed to load mentions"
+msgstr "加载提及失败"
+
 msgid "Failed to load messages"
 msgstr "加载消息失败"
 
@@ -721,6 +724,9 @@ msgstr "加入此聊天即可开始阅读和发送消息。"
 
 msgid "Joining…"
 msgstr "正在加入…"
+
+msgid "Jump to mention"
+msgstr "跳转到提及"
 
 msgid "Keep messages"
 msgstr "保留消息"
@@ -1465,6 +1471,9 @@ msgstr "取消置顶消息"
 
 msgid "Unread"
 msgstr "标记未读"
+
+msgid "Unread mentions"
+msgstr "未读提及"
 
 msgid "Unsave"
 msgstr "取消收藏"

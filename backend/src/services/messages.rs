@@ -16,14 +16,15 @@ use crate::{
             StickerMediaResponse, ThreadInfo,
         },
         users::User,
-        ws::ServerWsMessage,
+        ws::{NotificationPayload, NotificationType, ServerWsMessage},
     },
     errors::AppError,
     models::{
-        Attachment, GroupKind, Media, Message, MessageType, NewMessage, Sticker, TranscodeStatus,
+        Attachment, GroupKind, Media, Message, MessageMention, MessageType, NewMessage, Sticker,
+        TranscodeStatus,
     },
     schema::{
-        attachments, group_membership, groups, media, message_reactions,
+        attachments, group_membership, groups, media, message_mentions, message_reactions,
         messages as messages_schema, stickers, user_favorite_stickers,
     },
     services::{
@@ -159,6 +160,7 @@ pub struct PendingSideEffects {
     pub ws_msg: std::sync::Arc<ServerWsMessage>,
     pub broadcast_uids: Vec<i32>,
     pub push_job: Option<PushJob>,
+    pub notifications: Vec<(i32, std::sync::Arc<ServerWsMessage>)>,
     pub unread_event: Option<TopLevelUnreadCacheEvent>,
 }
 
@@ -184,6 +186,21 @@ impl PendingSideEffects {
         if let Some(job) = self.push_job {
             state.push_service.enqueue(job);
         }
+        // The send path clones one payload Arc for every mentioned member; group
+        // adjacent equal payloads so each broadcast goes out in a single registry
+        // pass instead of one call per user.
+        let mut batched: Vec<(std::sync::Arc<ServerWsMessage>, Vec<i32>)> = Vec::new();
+        for (uid, msg) in self.notifications {
+            match batched.last_mut() {
+                Some((last_msg, last_uids)) if std::sync::Arc::ptr_eq(last_msg, &msg) => {
+                    last_uids.push(uid);
+                }
+                _ => batched.push((msg, vec![uid])),
+            }
+        }
+        for (msg, uids) in batched {
+            state.ws_registry.broadcast_to_uids(&uids, msg);
+        }
     }
 }
 
@@ -191,7 +208,7 @@ impl PendingSideEffects {
 // Shared helper functions
 // ---------------------------------------------------------------------------
 
-fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option<String>> {
+pub fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option<String>> {
     lookup_user_profiles(conn, &[uid])
         .map(|mut profiles| profiles.remove(&uid).and_then(|profile| profile.username))
 }
@@ -489,7 +506,6 @@ fn sticker_preview_text(emoji: Option<&str>) -> String {
 struct PushPreviewBundle {
     message_preview: PushMessagePreview,
     body_preview: Option<String>,
-    mentioned_uids: Vec<i32>,
 }
 
 /// Replace `@[uid:N]` tokens with `@username` for human-readable previews.
@@ -524,11 +540,6 @@ fn render_mentions_as_text(text: &str, mentions: &[MentionInfo]) -> String {
 }
 
 fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
-    let mentioned_uids = response
-        .message
-        .as_deref()
-        .map(extract_mention_uids)
-        .unwrap_or_default();
     let rendered_message = response
         .message
         .as_deref()
@@ -578,7 +589,6 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
             is_deleted,
         },
         body_preview,
-        mentioned_uids,
     }
 }
 
@@ -600,6 +610,21 @@ pub fn build_message_side_effects(
     let ws_msg = std::sync::Arc::new(ServerWsMessage::Message(response.clone()));
 
     let is_system_message = matches!(response.message_type, MessageType::System);
+    // Persisted mention rows and the push job's mention list must agree: both are
+    // member-filtered and exclude the sender. Derive the list once.
+    let mentioned_member_uids: Vec<i32> = if is_system_message {
+        Vec::new()
+    } else {
+        let member_set: std::collections::HashSet<i32> = member_uids.iter().copied().collect();
+        response
+            .message
+            .as_deref()
+            .map(extract_mention_uids)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|uid| *uid != sender_uid && member_set.contains(uid))
+            .collect()
+    };
     let push_job = if enqueue_push && !is_system_message {
         let sender_username =
             load_username_by_uid(conn, sender_uid)?.unwrap_or_else(|| "Someone".to_string());
@@ -618,7 +643,7 @@ pub fn build_message_side_effects(
             body_preview: push_preview.body_preview,
             message_id: response.id,
             thread_root_id: response.reply_root_id,
-            mentioned_uids: push_preview.mentioned_uids,
+            mentioned_uids: mentioned_member_uids.clone(),
             reply_target_uid: response
                 .reply_to_message
                 .as_ref()
@@ -628,10 +653,51 @@ pub fn build_message_side_effects(
         None
     };
 
+    // Persist @mentions and direct a `Notification` realtime event to each
+    // mentioned member.
+    let mut notifications: Vec<(i32, std::sync::Arc<ServerWsMessage>)> = Vec::new();
+    if !mentioned_member_uids.is_empty() {
+        let mention_rows: Vec<MessageMention> = mentioned_member_uids
+            .iter()
+            .map(|uid| MessageMention {
+                message_id: response.id,
+                mentioned_uid: *uid,
+                chat_id,
+                thread_root_id: response.reply_root_id,
+                created_at: response.created_at,
+            })
+            .collect();
+        diesel::insert_into(message_mentions::table)
+            .values(&mention_rows)
+            .on_conflict_do_nothing()
+            .execute(conn)?;
+
+        // Reuse the push job's username when available so the same send only
+        // looks the sender's name up once.
+        let actor_name = if let Some(job) = &push_job {
+            job.sender_username.clone()
+        } else {
+            load_username_by_uid(conn, sender_uid)?.unwrap_or_else(|| "Someone".to_string())
+        };
+        let payload = NotificationPayload {
+            notification_type: NotificationType::Mention,
+            chat_id,
+            message_id: response.id,
+            thread_root_id: response.reply_root_id,
+            actor_uid: sender_uid,
+            actor_name: Some(actor_name),
+        };
+        let notification = std::sync::Arc::new(ServerWsMessage::Notification(payload));
+        for uid in mentioned_member_uids {
+            notifications.push((uid, notification.clone()));
+        }
+    }
+
     Ok(PendingSideEffects {
         ws_msg,
         broadcast_uids: member_uids,
         push_job,
+        notifications,
         unread_event: response
             .reply_root_id
             .is_none()
@@ -641,6 +707,89 @@ pub fn build_message_side_effects(
                 countable: true,
             }),
     })
+}
+
+/// Sync `message_mentions` rows with an edited message body.
+///
+/// Removes rows for mention targets dropped by the edit and inserts rows for
+/// newly mentioned members (member-filtered, excluding the editor), mirroring
+/// `build_message_side_effects`. Newly mentioned members of a thread reply are
+/// auto-subscribed. Returns the uids of newly mentioned members so the caller
+/// can notify them post-commit. `message` must be the pre-edit row (the old
+/// body is diffed against `new_text`).
+pub fn sync_edited_message_mentions(
+    conn: &mut PgConnection,
+    message: &Message,
+    new_text: &str,
+    editor_uid: i32,
+    edited_at: DateTime<Utc>,
+) -> Result<Vec<i32>, AppError> {
+    let old_uids: std::collections::HashSet<i32> = message
+        .message
+        .as_deref()
+        .map(extract_mention_uids)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let new_uids: std::collections::HashSet<i32> =
+        extract_mention_uids(new_text).into_iter().collect();
+
+    let removed: Vec<i32> = old_uids.difference(&new_uids).copied().collect();
+    if !removed.is_empty() {
+        use crate::schema::message_mentions::dsl as mm_dsl;
+        diesel::delete(
+            mm_dsl::message_mentions
+                .filter(mm_dsl::message_id.eq(message.id))
+                .filter(mm_dsl::mentioned_uid.eq_any(&removed)),
+        )
+        .execute(conn)?;
+    }
+
+    let added: Vec<i32> = new_uids.difference(&old_uids).copied().collect();
+    if added.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let member_uids: Vec<i32> = group_membership::table
+        .filter(group_membership::chat_id.eq(message.chat_id))
+        .select(group_membership::uid)
+        .load(conn)?;
+    let member_set: std::collections::HashSet<i32> = member_uids.into_iter().collect();
+    let added_members: Vec<i32> = added
+        .into_iter()
+        .filter(|uid| *uid != editor_uid && member_set.contains(uid))
+        .collect();
+    if added_members.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mention_rows: Vec<MessageMention> = added_members
+        .iter()
+        .map(|uid| MessageMention {
+            message_id: message.id,
+            mentioned_uid: *uid,
+            chat_id: message.chat_id,
+            thread_root_id: message.reply_root_id,
+            created_at: edited_at,
+        })
+        .collect();
+    diesel::insert_into(message_mentions::table)
+        .values(&mention_rows)
+        .on_conflict_do_nothing()
+        .execute(conn)?;
+
+    if let Some(thread_root_id) = message.reply_root_id {
+        for uid in &added_members {
+            crate::services::threads::ensure_thread_subscription(
+                conn,
+                message.chat_id,
+                thread_root_id,
+                *uid,
+            )?;
+        }
+    }
+
+    Ok(added_members)
 }
 
 /// Maximum attachments a single message may carry.
@@ -1015,6 +1164,7 @@ pub async fn send_prepared_message(
                 ws_msg: std::sync::Arc::new(ServerWsMessage::Message(response.clone())),
                 broadcast_uids: Vec::new(),
                 push_job: None,
+                notifications: Vec::new(),
                 unread_event: prepared.reply_root_id.is_none().then_some(
                     TopLevelUnreadCacheEvent {
                         chat_id: prepared.chat_id,

@@ -13,7 +13,7 @@ use crate::schema::messages::dsl;
 use crate::{
     dto::{
         messages::{ListMessagesResponse, MessageResponse, SearchMessagesResponse},
-        ws::ServerWsMessage,
+        ws::{NotificationPayload, NotificationType, ServerWsMessage},
     },
     errors::AppError,
     extractors::DbConn,
@@ -34,8 +34,9 @@ use crate::{
 use super::{ChatIdPath, CreateMessageBody};
 use crate::services::authz::Action as AuthzAction;
 use crate::services::messages::{
-    attach_metadata, authorize_message_send, extract_mention_uids, parse_attachment_ids,
-    send_prepared_message, validate_message, PreparedMessageSend, SendMessageOutcome,
+    attach_metadata, authorize_message_send, extract_mention_uids, load_username_by_uid,
+    parse_attachment_ids, send_prepared_message, sync_edited_message_mentions, validate_message,
+    PreparedMessageSend, SendMessageOutcome,
 };
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -832,7 +833,7 @@ async fn patch_message(
 
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
     let now = Utc::now();
-    let updated_message: Message = conn.transaction::<_, AppError, _>(|conn| {
+    let (updated_message, added_mention_uids) = conn.transaction::<_, AppError, _>(|conn| {
         use crate::schema::attachments::dsl as a_dsl;
         let message: Message = messages::table
             .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
@@ -896,20 +897,30 @@ async fn patch_message(
                 return Err(AppError::BadRequest("Invalid attachment selection"));
             }
         }
-        diesel::update(messages::table.filter(dsl::id.eq(message_id)))
-            .set((
-                dsl::message.eq(&body.message),
-                dsl::has_attachments.eq(!attachment_ids.is_empty()),
-                dsl::updated_at.eq(Some(now)),
-            ))
-            .returning(Message::as_returning())
-            .get_result(conn)
-            .map_err(Into::into)
+        let updated_message: Message =
+            diesel::update(messages::table.filter(dsl::id.eq(message_id)))
+                .set((
+                    dsl::message.eq(&body.message),
+                    dsl::has_attachments.eq(!attachment_ids.is_empty()),
+                    dsl::updated_at.eq(Some(now)),
+                ))
+                .returning(Message::as_returning())
+                .get_result(conn)?;
+
+        // Keep @mention rows in step with the edited body: dropping a mention
+        // clears the stale unread entry, adding one inserts it (member-filtered,
+        // excluding the editor) and auto-subscribes thread replies.
+        let added_mention_uids =
+            sync_edited_message_mentions(conn, &message, &body.message, uid, now)?;
+
+        Ok((updated_message, added_mention_uids))
     })?;
 
     if let Some(search_service) = state.message_search.clone() {
         search_service.upsert_message_best_effort(updated_message.clone());
     }
+
+    let edited_thread_root_id = updated_message.reply_root_id;
 
     let response = attach_metadata(
         conn,
@@ -933,6 +944,25 @@ async fn patch_message(
     };
     let ws_msg = std::sync::Arc::new(ServerWsMessage::MessageUpdated(response.clone()));
     state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
+
+    // Notify members newly mentioned by the edit. The mention rows are synced
+    // inside the transaction above; this is the realtime counterpart, fired
+    // post-commit like the send path.
+    if !added_mention_uids.is_empty() {
+        let actor_name = load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
+        let payload = NotificationPayload {
+            notification_type: NotificationType::Mention,
+            chat_id,
+            message_id,
+            thread_root_id: edited_thread_root_id,
+            actor_uid: uid,
+            actor_name: Some(actor_name),
+        };
+        state.ws_registry.broadcast_to_uids(
+            &added_mention_uids,
+            std::sync::Arc::new(ServerWsMessage::Notification(payload)),
+        );
+    }
 
     Ok(Json(response))
 }
@@ -995,6 +1025,13 @@ async fn delete_message(
                 .set(dsl::deleted_at.eq(Some(now)))
                 .returning(Message::as_returning())
                 .get_result(conn)?;
+
+        // Clean up @mention rows for the deleted message.
+        {
+            use crate::schema::message_mentions::dsl as mm_dsl;
+            diesel::delete(mm_dsl::message_mentions.filter(mm_dsl::message_id.eq(message_id)))
+                .execute(conn)?;
+        }
 
         if let Some(reply_root_id) = deleted_message.reply_root_id {
             crate::services::threads::recalculate_thread_meta(conn, chat_id, reply_root_id)?;

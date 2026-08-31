@@ -324,9 +324,10 @@ async fn process_push_job(
             let service = service.clone();
 
             let unread = unread_counts.get(&sub.user_id).copied().unwrap_or(0);
-            let web_payload = serde_json::to_vec(&build_push_payload(job, unread, &body_text))
-                .unwrap_or_default();
-            let apns_notification = build_apns_notification(job, unread);
+            let web_payload =
+                serde_json::to_vec(&build_push_payload(job, unread, &body_text, sub.user_id))
+                    .unwrap_or_default();
+            let apns_notification = build_apns_notification(job, unread, sub.user_id);
 
             async move {
                 match service

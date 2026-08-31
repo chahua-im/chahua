@@ -5,6 +5,7 @@ import { registerRoute } from 'workbox-routing';
 import { CacheFirst } from 'workbox-strategies';
 import { getHighWaterMark, kvGet, setHighWaterMark } from './utils/db';
 import { formatNotificationBody, getNotificationPreviewLabels, type PreviewMessage } from './utils/messagePreview';
+import { isFeatureEnabled } from './features';
 import {
   buildNotificationNavigationData,
   buildNotificationLaunchUrl,
@@ -17,12 +18,13 @@ import {
 declare let self: ServiceWorkerGlobalScope;
 
 interface PushPayload {
-  type?: 'newMessage';
+  type?: 'newMessage' | 'mention';
   title?: string;
   body?: string;
   senderName?: string;
   messagePreview?: PreviewMessage;
   unreadCount?: number;
+  mentionedUid?: number;
   data?: NotificationNavigationData;
 }
 
@@ -285,6 +287,7 @@ self.addEventListener('push', (event) => {
               payload.senderName ?? 'Someone',
               payload.messagePreview,
               getNotificationPreviewLabels(locale),
+              payload.type === 'mention' && isFeatureEnabled('mentionNotifications'),
             );
           } catch (err) {
             console.error('Failed to localize push preview, using legacy body', err);

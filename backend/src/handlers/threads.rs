@@ -18,6 +18,7 @@ use crate::{
     models::Message,
     schema::messages,
     services::threads as thread_svc,
+    services::unread::UnreadService,
     utils::{auth::CurrentUid, pagination::validate_limit},
     AppState,
 };
@@ -163,6 +164,7 @@ fn authorize_thread_in_chat(
 /// Callers MUST have authorized `uid` for `chat_id` first.
 fn apply_thread_read(
     conn: &mut PgConnection,
+    unread_service: &UnreadService,
     chat_id: i64,
     thread_root_id: i64,
     uid: i32,
@@ -174,15 +176,27 @@ fn apply_thread_read(
         return Ok(MarkThreadReadResponse {
             last_read_message_id: None,
             unread_count: 0,
+            unread_mentions: 0,
         });
     }
 
     let _ = thread_svc::ensure_thread_user_state(conn, chat_id, thread_root_id, uid, false)?;
     let read_state = thread_svc::mark_thread_read(conn, chat_id, thread_root_id, uid, message_id)?;
+    // Thread-scope unread mentions left past the new read cursor, mirroring the
+    // per-chat mark-as-read response so clients can keep the badge accurate
+    // without a separate fetch.
+    let unread_mentions = unread_service.count_chat_unread_mentions(
+        conn,
+        uid,
+        chat_id,
+        read_state.last_read_message_id,
+        Some(thread_root_id),
+    )?;
 
     Ok(MarkThreadReadResponse {
         last_read_message_id: read_state.last_read_message_id,
         unread_count: read_state.unread_count,
+        unread_mentions,
     })
 }
 
@@ -205,6 +219,7 @@ fn apply_thread_read(
 )]
 async fn mark_thread_read(
     CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
     Path(ThreadRootIdPath { thread_root_id }): Path<ThreadRootIdPath>,
     mut conn: DbConn,
     Json(body): Json<MarkThreadReadBody>,
@@ -216,6 +231,7 @@ async fn mark_thread_read(
 
     Ok(Json(apply_thread_read(
         conn,
+        &state.unread_service,
         chat_id,
         thread_root_id,
         uid,
@@ -309,6 +325,7 @@ pub struct ThreadSubscribePath {
 )]
 async fn mark_thread_read_in_chat(
     CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
     Path(ThreadSubscribePath {
         chat_id,
         thread_root_id,
@@ -322,6 +339,7 @@ async fn mark_thread_read_in_chat(
 
     Ok(Json(apply_thread_read(
         conn,
+        &state.unread_service,
         chat_id,
         thread_root_id,
         uid,

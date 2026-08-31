@@ -251,25 +251,38 @@ fn process_bulk_delete(
 
         let now = Utc::now();
 
-        // Soft-delete the batch of messages
-        diesel::update(messages::table.filter(dsl::id.eq_any(&batch_ids)))
-            .set(dsl::deleted_at.eq(Some(now)))
-            .execute(conn)
-            .map_err(map_db)?;
+        // Atomic per batch: soft-delete, mention cleanup, and attachment
+        // soft-delete commit together — a crash between statements would leave
+        // mention rows (counted without checking deleted_at) or live attachments
+        // pointing at soft-deleted messages.
+        conn.transaction::<_, diesel::result::Error, _>(|conn| {
+            diesel::update(messages::table.filter(dsl::id.eq_any(&batch_ids)))
+                .set(dsl::deleted_at.eq(Some(now)))
+                .execute(conn)?;
+
+            {
+                use crate::schema::message_mentions::dsl as mm_dsl;
+                diesel::delete(
+                    mm_dsl::message_mentions.filter(mm_dsl::message_id.eq_any(&batch_ids)),
+                )
+                .execute(conn)?;
+            }
+
+            diesel::update(
+                attachments::table
+                    .filter(a_dsl::message_id.eq_any(&batch_ids))
+                    .filter(a_dsl::deleted_at.is_null()),
+            )
+            .set(a_dsl::deleted_at.eq(Some(now)))
+            .execute(conn)?;
+
+            Ok(())
+        })
+        .map_err(map_db)?;
 
         if let Some(search_service) = message_search {
             search_service.delete_message_ids_best_effort(batch_ids.clone());
         }
-
-        // Soft-delete attachments for these messages
-        diesel::update(
-            attachments::table
-                .filter(a_dsl::message_id.eq_any(&batch_ids))
-                .filter(a_dsl::deleted_at.is_null()),
-        )
-        .set(a_dsl::deleted_at.eq(Some(now)))
-        .execute(conn)
-        .map_err(map_db)?;
 
         // Broadcast MessagesBulkDeleted for this batch
         let ws_msg = Arc::new(ServerWsMessage::MessagesBulkDeleted(BulkDeletedPayload {

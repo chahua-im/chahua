@@ -578,6 +578,16 @@ pub struct MessageReaction {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = schema::message_mentions)]
+pub struct MessageMention {
+    pub message_id: i64,
+    pub mentioned_uid: i32,
+    pub chat_id: i64,
+    pub thread_root_id: Option<i64>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]
 #[diesel(table_name = schema::pinned_messages)]
 pub struct PinnedMessage {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IonContent, IonFab, IonFabButton, IonIcon, IonPage, useIonAlert, useIonToast } from '@ionic/react';
 import { useHistory, useLocation, useParams } from 'react-router-dom';
-import { chevronDown } from 'ionicons/icons';
+import { atCircle, chevronDown } from 'ionicons/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { getMessage, type MessageResponse, type User } from '@/api/messages';
 import { selectCurrentUser } from '@/store/userSlice';
@@ -35,6 +35,7 @@ import { useChatPins } from './hooks/useChatPins';
 import { type ChatMessageEditSession, useChatMessageSender } from './hooks/useChatMessageSender';
 import { useChatReadTracking } from './hooks/useChatReadTracking';
 import { useConversationTimeline } from './hooks/useConversationTimeline';
+import { useMentionJumper } from './hooks/useMentionJumper';
 import { useKeyboardViewport } from './hooks/useKeyboardViewport';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { useMessageOverlayActions } from './hooks/useMessageOverlayActions';
@@ -181,6 +182,19 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   } = useThreadSubscription({ chatId, threadId });
 
   const { pins, pinListOpen, openPinList, closePinList } = useChatPins({ chatId, threadId });
+
+  const jumpToMentionEnabled = useFeatureGate('jumpToMention');
+  const {
+    canJump: canJumpToMention,
+    unreadCount: unreadMentionCount,
+    jumpToNextMention,
+  } = useMentionJumper({
+    chatId,
+    threadId,
+    jumpToMessage,
+    showToast,
+    enabled: jumpToMentionEnabled,
+  });
 
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null);
   const [profileSender, setProfileSender] = useState<User | null>(null);
@@ -524,6 +538,18 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
             onScrollActivityChange={setMessageListScrolling}
             onTopDateCollidingChange={setFloatingDateColliding}
           />
+          <IonFab
+            vertical="bottom"
+            horizontal="end"
+            className={`mention-fab ${canJumpToMention ? '' : 'mention-fab--hidden'}`}
+          >
+            {unreadMentionCount > 0 && (
+              <span className="mention-fab__badge">{formatUnreadBadge(unreadMentionCount)}</span>
+            )}
+            <IonFabButton size="small" onClick={() => void jumpToNextMention()} aria-label={t`Jump to mention`}>
+              <IonIcon icon={atCircle} />
+            </IonFabButton>
+          </IonFab>
           <IonFab
             vertical="bottom"
             horizontal="end"

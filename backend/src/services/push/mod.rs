@@ -152,9 +152,9 @@ mod tests {
     };
     use super::payload::{
         build_apns_notification, build_push_payload, format_push_body, truncate_preview,
-        APNS_BODY_LOC_KEY_AUDIO, APNS_BODY_LOC_KEY_INVITE, APNS_BODY_LOC_KEY_NO_PREVIEW,
-        APNS_BODY_LOC_KEY_STICKER_EMOJI, APNS_BODY_LOC_KEY_WITH_PREVIEW, APNS_TITLE_LOC_KEY,
-        MESSAGE_PREVIEW_MAX,
+        PushPayloadType, APNS_BODY_LOC_KEY_AUDIO, APNS_BODY_LOC_KEY_INVITE,
+        APNS_BODY_LOC_KEY_MENTION, APNS_BODY_LOC_KEY_NO_PREVIEW, APNS_BODY_LOC_KEY_STICKER_EMOJI,
+        APNS_BODY_LOC_KEY_WITH_PREVIEW, APNS_TITLE_LOC_KEY, MESSAGE_PREVIEW_MAX,
     };
     use super::*;
     use crate::dto::messages::MessagePreviewAttachment;
@@ -214,7 +214,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let payload = build_push_payload(&job, 3, "alice: [Sticker] 🙂");
+        let payload = build_push_payload(&job, 3, "alice: [Sticker] 🙂", 42);
         assert_eq!(payload.sender_name, "alice");
         assert_eq!(payload.body, "alice: [Sticker] 🙂");
         assert_eq!(payload.message_preview.message_type, MessageType::Sticker);
@@ -239,6 +239,80 @@ mod tests {
     }
 
     #[test]
+    fn build_push_payload_marks_mention_for_mentioned_recipient() {
+        let job = PushJob {
+            chat_id: 10,
+            sender_uid: 7,
+            sender_username: "alice".to_string(),
+            chat_name: "General".to_string(),
+            message_preview: PushMessagePreview {
+                message: Some("hi @[uid:42]".to_string()),
+                message_type: MessageType::Text,
+                sticker: None,
+                attachments: Vec::new(),
+                is_deleted: false,
+            },
+            body_preview: Some("hi @you".to_string()),
+            message_id: 99,
+            thread_root_id: None,
+            mentioned_uids: vec![42],
+            reply_target_uid: None,
+        };
+
+        // Mentioned recipient -> typed as Mention with context.
+        let mentioned = build_push_payload(&job, 1, "alice: hi @you", 42);
+        assert_eq!(mentioned.type_, PushPayloadType::Mention);
+        assert_eq!(mentioned.mentioned_uid, Some(42));
+        let serialized = serde_json::to_value(&mentioned).expect("serialize");
+        assert_eq!(serialized["type"], "mention");
+        assert_eq!(serialized["mentionedUid"], 42);
+
+        // Non-mentioned recipient -> generic newMessage, no mention context.
+        let other = build_push_payload(&job, 1, "alice: hi @you", 99);
+        assert_eq!(other.type_, PushPayloadType::NewMessage);
+        assert_eq!(other.mentioned_uid, None);
+        let other_serialized = serde_json::to_value(&other).expect("serialize");
+        assert!(other_serialized.get("mentionedUid").is_none());
+    }
+
+    #[test]
+    fn build_apns_notification_uses_mention_loc_key_for_mentioned_recipient() {
+        let job = PushJob {
+            chat_id: 10,
+            sender_uid: 7,
+            sender_username: "alice".to_string(),
+            chat_name: "General".to_string(),
+            message_preview: PushMessagePreview {
+                message: Some("hello there".to_string()),
+                message_type: MessageType::Text,
+                sticker: None,
+                attachments: Vec::new(),
+                is_deleted: false,
+            },
+            body_preview: Some("hello there".to_string()),
+            message_id: 99,
+            thread_root_id: None,
+            mentioned_uids: vec![42],
+            reply_target_uid: None,
+        };
+
+        let n = build_apns_notification(&job, 1, 42);
+        assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_MENTION);
+        assert_eq!(
+            n.body_loc_args,
+            vec!["alice".to_string(), "hello there".to_string()]
+        );
+        assert_eq!(n.custom_data.type_, PushPayloadType::Mention);
+        assert_eq!(n.custom_data.mentioned_uid, Some(42));
+
+        // Non-mentioned recipient falls back to the standard text-with-preview key.
+        let other = build_apns_notification(&job, 1, 99);
+        assert_eq!(other.body_loc_key, APNS_BODY_LOC_KEY_WITH_PREVIEW);
+        assert_eq!(other.custom_data.type_, PushPayloadType::NewMessage);
+        assert_eq!(other.custom_data.mentioned_uid, None);
+    }
+
+    #[test]
     fn build_apns_notification_uses_localized_keys_and_custom_data() {
         let job = PushJob {
             chat_id: 10,
@@ -259,7 +333,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 7);
+        let n = build_apns_notification(&job, 7, 42);
         assert_eq!(n.title_loc_key, APNS_TITLE_LOC_KEY);
         assert_eq!(n.title_loc_args, vec!["General".to_string()]);
         assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_WITH_PREVIEW);
@@ -295,7 +369,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let payload = build_apns_notification(&job, 0);
+        let payload = build_apns_notification(&job, 0, 42);
         assert_eq!(payload.body_loc_key, APNS_BODY_LOC_KEY_NO_PREVIEW);
         assert_eq!(payload.body_loc_args, vec!["alice".to_string()]);
         assert_eq!(payload.badge, 0);
@@ -323,7 +397,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 2);
+        let n = build_apns_notification(&job, 2, 42);
         assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_AUDIO);
         assert_eq!(n.body_loc_args, vec!["bob".to_string()]);
     }
@@ -351,7 +425,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 0);
+        let n = build_apns_notification(&job, 0, 42);
         assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_STICKER_EMOJI);
         assert_eq!(n.body_loc_args, vec!["bob".to_string(), "🎉".to_string()]);
     }
@@ -379,7 +453,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 1);
+        let n = build_apns_notification(&job, 1, 42);
         assert_eq!(n.body_loc_key, "push.message.body.image");
         assert_eq!(n.body_loc_args, vec!["bob".to_string()]);
     }
@@ -407,7 +481,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 0);
+        let n = build_apns_notification(&job, 0, 42);
         assert_eq!(n.body_loc_key, "push.message.body.attachment.with_preview");
         assert_eq!(
             n.body_loc_args,
@@ -438,7 +512,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 0);
+        let n = build_apns_notification(&job, 0, 42);
         assert_eq!(n.body_loc_key, "push.message.body.video");
     }
 
@@ -465,7 +539,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 0);
+        let n = build_apns_notification(&job, 0, 42);
         assert_eq!(n.body_loc_key, "push.message.body.attachment");
         assert_eq!(n.body_loc_args, vec!["bob".to_string()]);
     }
@@ -491,7 +565,7 @@ mod tests {
             reply_target_uid: None,
         };
 
-        let n = build_apns_notification(&job, 0);
+        let n = build_apns_notification(&job, 0, 42);
         assert_eq!(n.body_loc_key, APNS_BODY_LOC_KEY_INVITE);
         assert_eq!(n.body_loc_args, vec!["bob".to_string()]);
     }

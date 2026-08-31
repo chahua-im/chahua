@@ -724,6 +724,35 @@ pub fn enrich_thread_list(
         .map(|r| (r.thread_root_id, r.unread_count))
         .collect();
 
+    // 0b. Batch query: unread @mention counts per thread (for the returned page)
+    #[derive(QueryableByName)]
+    struct UnreadMentionRow {
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        thread_root_id: i64,
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        mention_count: i64,
+    }
+    let mention_rows: Vec<UnreadMentionRow> = sql_query(
+        "SELECT mm.thread_root_id,
+                COUNT(*)::bigint AS mention_count
+         FROM message_mentions mm
+         JOIN thread_user_states tus
+           ON tus.chat_id = mm.chat_id
+          AND tus.thread_root_id = mm.thread_root_id
+          AND tus.uid = mm.mentioned_uid
+         WHERE mm.mentioned_uid = $1
+           AND mm.thread_root_id = ANY($2)
+           AND mm.message_id > COALESCE(tus.last_read_message_id, 0)
+         GROUP BY mm.thread_root_id",
+    )
+    .bind::<diesel::sql_types::Integer, _>(uid)
+    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
+    .load(conn)?;
+    let mention_map: HashMap<i64, i64> = mention_rows
+        .into_iter()
+        .map(|r| (r.thread_root_id, r.mention_count.min(MAX_UNREAD_COUNT)))
+        .collect();
+
     // 1. Batch query: distinct participants per thread (replies + root message author)
     let participant_rows: Vec<ParticipantRow> = sql_query(
         "SELECT DISTINCT reply_root_id, sender_uid FROM (
@@ -967,6 +996,7 @@ pub fn enrich_thread_list(
                 reply_count: row.reply_count,
                 last_reply_at: row.last_reply_at,
                 unread_count: unread_map.get(&row.thread_root_id).copied().unwrap_or(0),
+                unread_mentions: mention_map.get(&row.thread_root_id).copied().unwrap_or(0),
                 last_read_message_id: row.last_read_message_id,
                 subscribed_at: row.subscribed_at,
                 archived: row.archived,
