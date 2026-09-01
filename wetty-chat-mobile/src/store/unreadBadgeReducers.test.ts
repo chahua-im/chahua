@@ -17,7 +17,9 @@ import chatsReducer, {
 import threadsReducer, {
   incrementThreadUnreadMentions,
   incrementThreadUnreadReactions,
+  setThreadLastReadMessageId,
   setThreadReadState,
+  selectThreadLastReadMessageId,
   selectThreadUnreadMentions,
   selectThreadUnreadReactions,
   setThreadsList,
@@ -144,6 +146,22 @@ describe('threadsSlice unread reactions', () => {
     expect(selectThreadUnreadReactions(asRootState(chatsReducer(undefined, { type: '@@init' }), state), 't9')).toBe(0);
     expect(state.unreadReactionIdsByThread['t9']).toBeUndefined();
     expect(state.unreadReactionIdsStatusByThread['t9']).toBeUndefined();
+  });
+
+  it('records the read position without touching unread counts', () => {
+    let state = threadsReducer(
+      undefined,
+      setThreadsList({ threads: [{ ...thread, unreadCount: 7 }], nextCursor: null }),
+    );
+    state = threadsReducer(state, setThreadLastReadMessageId({ threadRootId: 't9', lastReadMessageId: '42' }));
+
+    expect(selectThreadLastReadMessageId(asRootState(chatsReducer(undefined, { type: '@@init' }), state), 't9')).toBe(
+      '42',
+    );
+    expect(
+      threadsReducer(state, setThreadLastReadMessageId({ threadRootId: 't9', lastReadMessageId: '42' })).items[0]
+        .unreadCount,
+    ).toBe(7);
   });
 });
 

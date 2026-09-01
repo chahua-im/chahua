@@ -225,6 +225,21 @@ const threadsSlice = createSlice({
       delete state.unreadReactionIdsByThread[tid];
       delete state.unreadReactionIdsStatusByThread[tid];
     },
+    /**
+     * Record just the read position (lastReadMessageId) without touching the
+     * unread counts — used when the read state is fetched for display purposes
+     * (opening a thread) and the counts in the payload are absent, unlike
+     * `setThreadReadState` where counts are authoritative.
+     */
+    setThreadLastReadMessageId(
+      state,
+      action: PayloadAction<{ threadRootId: string; lastReadMessageId: string | null }>,
+    ) {
+      const thread = state.items.find((t) => t.threadRootMessage.id === action.payload.threadRootId);
+      if (thread) {
+        thread.lastReadMessageId = action.payload.lastReadMessageId;
+      }
+    },
     setThreadUnreadReactionIds(state, action: PayloadAction<{ threadRootId: string; ids: string[] }>) {
       const tid = action.payload.threadRootId;
       // Same mid-flight guard as mentions.
@@ -308,6 +323,7 @@ export const {
   incrementThreadUnreadMentions,
   incrementThreadUnreadReactions,
   setThreadReadState,
+  setThreadLastReadMessageId,
   setThreadUnreadMentionIds,
   setThreadUnreadMentionIdsStatus,
   setThreadUnreadReactionIds,
@@ -371,7 +387,6 @@ export const selectThreadUnreadReactionIds = (state: RootState, threadRootId: st
 
 export const selectThreadUnreadReactionIdsStatus = (state: RootState, threadRootId: string): MentionIdCacheStatus =>
   state.threads.unreadReactionIdsStatusByThread[threadRootId] ?? 'idle';
-// Currently unused — kept for future thread detail UI that may need store-side read position.
 export const selectThreadLastReadMessageId = (state: RootState, threadId: string | undefined): string | null => {
   return selectThreadByRootId(state, threadId)?.lastReadMessageId ?? null;
 };

@@ -46,7 +46,9 @@ export interface UseChatMetadataResult {
   role: GroupRole | null;
   isAdmin: boolean;
   isMuted: boolean;
+  /** Chat-level read position; thread timelines keep theirs in threadsSlice. */
   lastReadMessageId: string | null;
+  /** Chat-level unread count; thread timelines keep theirs in threadsSlice. */
   unreadCount: number;
   metaLoading: boolean;
   kind: GroupKind | undefined;
@@ -120,7 +122,7 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
     isAdmin: role === 'admin',
     isMuted,
     lastReadMessageId,
-    unreadCount: threadId ? 0 : unreadCount,
+    unreadCount,
     metaLoading,
     kind,
     isDm,
