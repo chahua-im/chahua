@@ -14,6 +14,7 @@ import {
   IonToolbar,
   useIonToast,
 } from '@ionic/react';
+import axios from 'axios';
 import { bookmarkOutline, exitOutline, linkOutline, searchOutline, settingsOutline } from 'ionicons/icons';
 import { useHistory, useParams } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -22,6 +23,7 @@ import { Trans } from '@lingui/react/macro';
 import { leaveGroup, type GroupRole } from '@/api/group';
 import type { MessageResponse } from '@/api/messages';
 import { setChatInList } from '@/store/chatsSlice';
+import { selectChatMeta } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
 import { BackButton } from '@/components/BackButton';
 import { GroupProfile } from '@/components/chat/profiles/GroupProfile';
@@ -143,6 +145,7 @@ function GroupInfoSession({ chatId, backAction }: { chatId: string; backAction?:
   const [presentAlert, dismissAlert] = useIonAlert();
   const currentUserId = useSelector((state: RootState) => state.user.uid);
   const { archived, formState, loading, mutedUntil } = useGroupInfoMetadata(chatId);
+  const chatKind = useSelector((state: RootState) => selectChatMeta(state, chatId)?.kind);
   const [mode, setMode] = useState<GroupInfoMode>('info');
   const [leavingGroup, setLeavingGroup] = useState(false);
   const alertHistoryStateRef = useRef(false);
@@ -163,6 +166,16 @@ function GroupInfoSession({ chatId, backAction }: { chatId: string; backAction?:
 
   const handleLeaveGroup = () => {
     if (!currentUserId || leavingGroup) {
+      return;
+    }
+
+    // DMs cannot be left; the only way out is unfriending (backend also rejects with 400).
+    if (chatKind === 'dm') {
+      presentToast({
+        message: t`Direct messages can't be left. Remove the friend instead.`,
+        duration: 3000,
+        color: 'warning',
+      });
       return;
     }
 
@@ -201,8 +214,29 @@ function GroupInfoSession({ chatId, backAction }: { chatId: string; backAction?:
                 presentToast({ message: t`Left group`, duration: 2000 });
                 history.replace('/chats');
               })
-              .catch((err: Error) => {
-                presentToast({ message: err.message || t`Failed to leave group`, duration: 3000 });
+              .catch((err: unknown) => {
+                // Older cached meta may not know this chat is a DM; the backend rejects
+                // the leave with 400 "DM chats cannot be left".
+                const isDmRejection =
+                  axios.isAxiosError(err) &&
+                  err.response?.status === 400 &&
+                  err.response?.data === 'DM chats cannot be left';
+                let backendMessage: string | undefined;
+                if (axios.isAxiosError(err)) {
+                  backendMessage = (typeof err.response?.data === 'string' && err.response.data) || err.message;
+                } else if (err instanceof Error) {
+                  backendMessage = err.message;
+                }
+
+                if (isDmRejection) {
+                  presentToast({
+                    message: t`Direct messages can't be left. Remove the friend instead.`,
+                    duration: 3000,
+                    color: 'warning',
+                  });
+                  return;
+                }
+                presentToast({ message: backendMessage ?? t`Failed to leave group`, duration: 3000 });
               })
               .finally(() => setLeavingGroup(false));
           },

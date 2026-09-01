@@ -319,6 +319,9 @@ msgstr "描述"
 msgid "Destination Group"
 msgstr "目标群组"
 
+msgid "Direct messages can't be left. Remove the friend instead."
+msgstr "私聊无法退出，请通过删除好友的方式结束会话。"
+
 msgid "Discard"
 msgstr "放弃"
 
