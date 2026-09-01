@@ -15,8 +15,8 @@ use crate::dto::members::{ListMembersResponse, MemberResponse};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::handlers::groups::load_requester_group_role;
-use crate::models::{GroupJoinReason, GroupMembership, GroupRole, NewGroupMembership};
-use crate::schema::{self, group_membership};
+use crate::models::{GroupJoinReason, GroupKind, GroupMembership, GroupRole, NewGroupMembership};
+use crate::schema::{self, group_membership, groups};
 
 use crate::services::user::{
     lookup_user_profiles, parse_user_search_query, search_group_member_uids, UserSearchMode,
@@ -337,6 +337,7 @@ struct RemoveMemberQuery {
     ),
     responses(
         (status = NO_CONTENT),
+        (status = 400, description = "DM chats cannot be left"),
     ),
     security(("uid_header" = []), ("bearer_jwt" = [])),
 )]
@@ -358,6 +359,15 @@ async fn delete_remove_member(
         require_admin_role(conn, chat_id, uid)?;
     } else {
         check_membership(conn, chat_id, uid)?;
+    }
+
+    // DMs have no admin and no join path, so a removed member could never rejoin.
+    let kind: GroupKind = groups::table
+        .find(chat_id)
+        .select(groups::kind)
+        .first(conn)?;
+    if kind == GroupKind::Dm {
+        return Err(AppError::BadRequest("DM chats cannot be left"));
     }
 
     // Check if target is a member and whether deleting it would remove the final admin.

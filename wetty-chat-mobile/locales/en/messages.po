@@ -319,6 +319,9 @@ msgstr "Description"
 msgid "Destination Group"
 msgstr "Destination Group"
 
+msgid "Direct messages can't be left. Remove the friend instead."
+msgstr "Direct messages can't be left. Remove the friend instead."
+
 msgid "Discard"
 msgstr "Discard"
 
