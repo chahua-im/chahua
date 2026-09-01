@@ -97,16 +97,16 @@ describe('pickNextUnreadId', () => {
     expect(pickNextUnreadId(['30', '20', '10'], '10')).toBe('20');
   });
 
-  it('wraps to the oldest after viewing the newest', () => {
-    expect(pickNextUnreadId(['30', '20', '10'], '30')).toBe('10');
+  it('returns null after viewing the newest (single pass, no wrap)', () => {
+    expect(pickNextUnreadId(['30', '20', '10'], '30')).toBeNull();
   });
 
   it('falls back to the oldest when lastJumpedId is no longer in the list', () => {
     expect(pickNextUnreadId(['30', '20'], '99')).toBe('20');
   });
 
-  it('re-views the only mention when it is the sole id', () => {
-    expect(pickNextUnreadId(['30'], '30')).toBe('30');
+  it('returns null when the sole id has been viewed', () => {
+    expect(pickNextUnreadId(['30'], '30')).toBeNull();
   });
 });
 
@@ -191,7 +191,7 @@ describe('useMentionJumper', () => {
     expect(jumpToMessage).not.toHaveBeenCalled();
   });
 
-  it('jumps to the oldest mention on first tap, then cycles newer, then wraps', async () => {
+  it('jumps oldest-first through each mention once, then hides the fab', async () => {
     setChatState({ unreadMentions: 3, ids: ['30', '20', '10'], status: 'ready' });
     await renderHook();
 
@@ -210,10 +210,40 @@ describe('useMentionJumper', () => {
     });
     expect(jumpToMessage).toHaveBeenLastCalledWith('30');
 
+    // Pass exhausted: the fab hides and further taps do nothing.
+    expect(state.canJump).toBe(false);
     await act(async () => {
       await state.jumpToNextMention();
     });
-    expect(jumpToMessage).toHaveBeenLastCalledWith('10');
+    expect(jumpToMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('resumes the chronological pass when a newer id arrives after exhaustion', async () => {
+    setChatState({ unreadMentions: 2, ids: ['20', '10'], status: 'ready' });
+    await renderHook();
+
+    await act(async () => {
+      await state.jumpToNextMention();
+    });
+    await act(async () => {
+      await state.jumpToNextMention();
+    });
+    expect(state.canJump).toBe(false);
+
+    // A WS notification prepends a fresh mention to the ready cache; the pass
+    // resumes chronologically, so the next target is the new (newest) id.
+    setChatState({ unreadMentions: 3, ids: ['40', '20', '10'], status: 'ready' });
+    await act(async () => {
+      root.render(
+        <TestComponent chatId="chat-1" jumpToMessage={jumpToMessage} onRender={(nextState) => (state = nextState)} />,
+      );
+    });
+
+    expect(state.canJump).toBe(true);
+    await act(async () => {
+      await state.jumpToNextMention();
+    });
+    expect(jumpToMessage).toHaveBeenLastCalledWith('40');
   });
 
   it('does not jump when there are no unread mentions', async () => {
@@ -239,7 +269,7 @@ describe('useMentionJumper', () => {
     );
   });
 
-  it('cycles thread mentions oldest-first within the thread cache', async () => {
+  it('visits thread mentions oldest-first once within the thread cache, then hides', async () => {
     setThreadState({ unreadMentions: 2, ids: ['30', '20'], status: 'ready' });
     await renderHook(undefined, { threadId: 'thread-1' });
 
@@ -253,10 +283,11 @@ describe('useMentionJumper', () => {
     });
     expect(jumpToMessage).toHaveBeenLastCalledWith('30');
 
+    expect(state.canJump).toBe(false);
     await act(async () => {
       await state.jumpToNextMention();
     });
-    expect(jumpToMessage).toHaveBeenLastCalledWith('20');
+    expect(jumpToMessage).toHaveBeenCalledTimes(2);
   });
 
   it('shows a toast and invalidates the cache when the id fetch fails', async () => {

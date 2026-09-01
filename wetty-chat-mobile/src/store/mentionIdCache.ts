@@ -36,10 +36,11 @@ export function applyIncomingId(
  * Pick the next unread id to jump to. `ids` are newest-first (descending), so
  * the oldest id is the last element.
  *
- * Rule: visit ids in chronological order (oldest -> newest), wrapping to the
- * oldest when the newest is reached, or when `lastJumpedId` is no longer in
- * the list (e.g. after mark-read shrank it). Returns `null` when there are no
- * ids.
+ * Rule: visit ids in chronological order (oldest -> newest) in a single pass —
+ * returns `null` once the newest has been visited instead of wrapping (the FAB
+ * disappears at the end of the pass). When `lastJumpedId` is no longer in the
+ * list (e.g. after mark-read shrank it), the pass restarts from the oldest
+ * remaining id. Returns `null` when there are no ids.
  */
 export function pickNextUnreadId(ids: string[], lastJumpedId: string | null): string | null {
   if (ids.length === 0) return null;
@@ -48,6 +49,6 @@ export function pickNextUnreadId(ids: string[], lastJumpedId: string | null): st
   if (lastJumpedId === null) return oldest;
   const idx = ids.indexOf(lastJumpedId);
   if (idx === -1) return oldest;
-  // idx - 1 moves toward the newer end (front of the array); wrap to oldest past the newest.
-  return ids[idx - 1] ?? oldest;
+  // idx - 1 moves toward the newer end (front of the array); past the newest the pass is over.
+  return ids[idx - 1] ?? null;
 }
