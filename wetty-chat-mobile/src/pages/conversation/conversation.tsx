@@ -155,6 +155,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     chatId,
     storeChatId,
     threadId,
+    isDm,
     initialResumeMessageId,
     lastReadMessageId,
     scrollToBottomUnreadCount: unreadCount,
@@ -460,6 +461,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
           row={row}
           currentUserId={currentUser.uid}
           threadId={threadId}
+          isDm={isDm}
           onReply={setReplyingTo}
           onJumpToReply={jumpToMessage}
           onLongPress={onClickChatItem}
@@ -470,7 +472,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
         />
       );
     },
-    [currentUser.uid, threadId, chatId, history, jumpToMessage, onClickChatItem, handleReactionToggle],
+    [currentUser.uid, threadId, isDm, chatId, history, jumpToMessage, onClickChatItem, handleReactionToggle],
   );
 
   const chatCtx = useMemo(() => ({ chatId, threadId, jumpToMessage }), [chatId, threadId, jumpToMessage]);

@@ -3,6 +3,8 @@ import { t } from '@lingui/core/macro';
 import { closeCircle } from 'ionicons/icons';
 import { useSelector } from 'react-redux';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
+import { selectChatMeta } from '@/store/chatsSlice';
+import type { RootState } from '@/store';
 import { useChatContext } from '@/components/chat/messages/ChatContext';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
 import type { EditingMessage, ReplyTo } from './types';
@@ -17,6 +19,9 @@ interface ComposeContextBannerProps {
 
 export function ComposeContextBanner({ editing, replyTo, onCancelEdit, onCancelReply }: ComposeContextBannerProps) {
   const locale = useSelector(selectEffectiveLocale);
+  const chatId = useChatContext()?.chatId;
+  // DM reply banners show only the quoted content — the conversation is 1:1.
+  const isDm = useSelector((state: RootState) => selectChatMeta(state, String(chatId))?.kind === 'dm');
 
   const ctx = useChatContext();
 
@@ -45,7 +50,7 @@ export function ComposeContextBanner({ editing, replyTo, onCancelEdit, onCancelR
   return (
     <div className={styles.replyPreview}>
       <div className={`${styles.replyText} ${styles.replyPreviewTappable}`} onClick={handleJumpToReply}>
-        <span className={styles.replyUsername}>{t`Replying to ${replyTo.username}`}</span>
+        {!isDm && <span className={styles.replyUsername}>{t`Replying to ${replyTo.username}`}</span>}
         <span className={styles.replySnippet}>
           {formatMessagePreview(replyTo, getNotificationPreviewLabels(locale))}
         </span>

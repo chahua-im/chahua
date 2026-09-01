@@ -32,11 +32,14 @@ interface ChatMessageRowProps extends ChatMessageHandlers {
   row: ChatRow;
   currentUserId: number | string | null;
   threadId?: string;
+  /** DMs omit sender names/groups/genders from bubbles and reply quotes. */
+  isDm?: boolean;
 }
 export function ChatMessageRow({
   row,
   currentUserId,
   threadId,
+  isDm,
   onReply,
   onJumpToReply,
   onLongPress,
@@ -75,6 +78,7 @@ export function ChatMessageRow({
           useStickyAvatar={useStickyAvatar}
           showName={showName}
           threadId={threadId}
+          isDm={isDm}
           currentUserId={currentUserId}
           onReply={onReply}
           onJumpToReply={onJumpToReply}
@@ -98,6 +102,7 @@ interface MessageBubbleProps extends ChatMessageHandlers {
   isLastInGroup: boolean;
   showName: boolean;
   threadId?: string;
+  isDm?: boolean;
   currentUserId: number | string | null;
 }
 
@@ -109,6 +114,7 @@ function MessageBubble({
   isLastInGroup,
   showName,
   threadId,
+  isDm,
   currentUserId,
   onReply,
   onJumpToReply,
@@ -153,12 +159,14 @@ function MessageBubble({
     isConfirmed: !msg.id.startsWith('cg_'),
     uploadProgress,
     bubbleProps: { 'data-message-id': msg.id, 'data-bubble-row': '' } as BubblePropsOverride,
-    replyTo: replyToMessage
-      ? {
-          senderName: replyToMessage.sender.name ?? `User ${replyToMessage.sender.uid}`,
-          preview: replyToMessage,
-        }
-      : undefined,
+    replyTo:
+      replyToMessage && !replyToMessage.isDeleted
+        ? {
+            // DMs keep the quote but drop the sender name (empty string → no name row).
+            senderName: isDm ? '' : (replyToMessage.sender.name ?? `User ${replyToMessage.sender.uid}`),
+            preview: replyToMessage,
+          }
+        : undefined,
   } as const;
 
   if (isInviteMessage(msg)) {
