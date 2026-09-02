@@ -206,7 +206,7 @@ export function ChatList({
     },
     [dispatch, initialTab],
   );
-  const effectiveTab = activeTab === 'friends' && (archivedMode || !friendsEnabled) ? 'messages' : activeTab;
+  const effectiveTab = activeTab === 'friends' && !friendsEnabled ? 'messages' : activeTab;
   const chats = archivedMode ? archivedChats : activeChats;
   const threads = archivedMode ? archivedThreads : activeThreads;
   const groupChats = useMemo(() => chats.filter((c) => c.kind !== 'dm'), [chats]);
@@ -431,9 +431,14 @@ export function ChatList({
     [onThreadSelect],
   );
 
-  const archivedGroupsVisible = archivedChats.length > 0;
+  const archivedGroupChats = useMemo(() => archivedChats.filter((c) => c.kind !== 'dm'), [archivedChats]);
+  const archivedFriendChats = useMemo(() => archivedChats.filter((c) => c.kind === 'dm'), [archivedChats]);
+  const archivedGroupsVisible = archivedGroupChats.length > 0;
+  const archivedFriendsVisible = archivedFriendChats.length > 0;
+  const archivedGroupsUnread = archivedGroupChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
+  const archivedFriendsUnread = archivedFriendChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
   const archivedThreadsVisible = archivedThreads.length > 0;
-  const archivedMessagesVisible = archivedGroupsVisible || (showThreadsInMessages && archivedThreadsVisible);
+  const archivedMessagesVisible = archivedChats.length > 0 || (showThreadsInMessages && archivedThreadsVisible);
 
   const openArchived = useCallback(
     (tab: ChatListTab) => {
@@ -537,21 +542,19 @@ export function ChatList({
           {chat.unreadCount > 0 ? <Trans>Read</Trans> : <Trans>Unread</Trans>}
         </IonItemOption>
       </IonItemOptions>
-      {chat.kind !== 'dm' && (
-        <IonItemOptions side="end">
-          <IonItemOption
-            color={archivedMode ? 'success' : 'medium'}
-            expandable
-            onClick={(e) => {
-              const slidingItem = (e.target as HTMLElement).closest('ion-item-sliding');
-              void handleArchiveChat(chat, archivedMode, slidingItem as HTMLIonItemSlidingElement | null);
-            }}
-          >
-            <IonIcon slot="top" icon={archivedMode ? arrowUndoOutline : archiveOutline} />
-            {archivedMode ? <Trans>Unarchive</Trans> : <Trans>Archive</Trans>}
-          </IonItemOption>
-        </IonItemOptions>
-      )}
+      <IonItemOptions side="end">
+        <IonItemOption
+          color={archivedMode ? 'success' : 'medium'}
+          expandable
+          onClick={(e) => {
+            const slidingItem = (e.target as HTMLElement).closest('ion-item-sliding');
+            void handleArchiveChat(chat, archivedMode, slidingItem as HTMLIonItemSlidingElement | null);
+          }}
+        >
+          <IonIcon slot="top" icon={archivedMode ? arrowUndoOutline : archiveOutline} />
+          {archivedMode ? <Trans>Unarchive</Trans> : <Trans>Archive</Trans>}
+        </IonItemOption>
+      </IonItemOptions>
       <IonItem
         id={chat.id}
         button
@@ -689,14 +692,16 @@ export function ChatList({
 
     if (effectiveTab === 'friends') {
       const requestsEntry = !archivedMode ? renderFriendRequestsEntry() : null;
+      const archivedEntry = !archivedMode && archivedFriendsVisible ? renderArchivedEntry(archivedFriendsUnread) : null;
 
-      if (friendChats.length === 0 && !archivedMode) {
+      if (sortedChats.length === 0) {
         return (
           <IonList>
             {requestsEntry}
+            {archivedEntry}
             <IonItem lines="none">
               <IonLabel color="medium" className="ion-text-wrap">
-                <Trans>No friend chats yet</Trans>
+                {archivedMode ? <Trans>No archived chats</Trans> : <Trans>No friend chats yet</Trans>}
               </IonLabel>
             </IonItem>
           </IonList>
@@ -706,6 +711,7 @@ export function ChatList({
       return (
         <IonList>
           {requestsEntry}
+          {archivedEntry}
           {sortedChats.map(renderChatItem)}
         </IonList>
       );
@@ -724,7 +730,7 @@ export function ChatList({
 
       return (
         <IonList>
-          {!archivedMode && archivedGroupsVisible ? renderArchivedEntry(archivedUnreadChats) : null}
+          {!archivedMode && archivedGroupsVisible ? renderArchivedEntry(archivedGroupsUnread) : null}
           {sortedChats.map(renderChatItem)}
         </IonList>
       );
@@ -767,7 +773,7 @@ export function ChatList({
           (archivedMode ? archivedChatsWithUnread : chatsWithUnread) +
           (showThreadsInMessages ? (archivedMode ? archivedThreadsWithUnread : threadsWithUnread) : 0)
         }
-        groupsUnreadCount={archivedMode ? archivedChatsWithUnread : groupChatsWithUnread}
+        groupsUnreadCount={groupChatsWithUnread}
         friendsUnreadCount={friendChatsWithUnread}
         threadsUnreadCount={archivedMode ? archivedThreadsWithUnread : threadsWithUnread}
         archivedMode={archivedMode}

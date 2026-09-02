@@ -8,7 +8,7 @@ import { IonButton, IonButtons, IonHeader, IonIcon, IonModal, IonTitle, IonToolb
 import { addCircleOutline, arrowBack } from 'ionicons/icons';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ChatList } from '@/components/chat/lists/ChatList';
-import type { ChatListTab } from '@/components/chat/lists/ChatListSegment';
+import { type ChatListTab, normalizeChatListTab } from '@/components/chat/lists/ChatListSegment';
 import ConversationPane from '@/pages/conversation/conversation';
 import GroupInfoCore, { GroupSavedMessagesCore, GroupSettingsCore } from '@/pages/conversation/group-info';
 import DmInfoCore from '@/pages/conversation/dm-info';
@@ -276,12 +276,7 @@ export function DesktopSplitLayout() {
   const disabledGroupSavedMessagesChatId = savedMessagesEnabled ? null : routeGroupInfoSavedMessagesMatch?.id;
   const disabledSavedMessagesSettings = !savedMessagesEnabled && currentRoute.savedMessagesSettings;
   const globalSettingsOpen = currentRoute.globalSettings;
-  const initialArchivedTab: ChatListTab | null =
-    archivedMatch?.tab === 'threads' || archivedMatch?.tab === 'groups' || archivedMatch?.tab === 'messages'
-      ? archivedMatch.tab
-      : archivedMatch
-        ? 'messages'
-        : null;
+  const initialArchivedTab: ChatListTab | null = archivedMatch ? normalizeChatListTab(archivedMatch.tab) : null;
   const [archivedSidebarTab, setArchivedSidebarTab] = useState<ChatListTab | null>(initialArchivedTab);
   const [friendRequestsSidebarOpen, setFriendRequestsSidebarOpen] = useState(friendRequestsMatch && friendsEnabled);
   const archivedMode = archivedSidebarTab != null;
