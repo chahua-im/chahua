@@ -8,7 +8,7 @@ import { IonButton, IonButtons, IonHeader, IonIcon, IonModal, IonTitle, IonToolb
 import { addCircleOutline, arrowBack } from 'ionicons/icons';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ChatList } from '@/components/chat/lists/ChatList';
-import { type ChatListTab, normalizeChatListTab } from '@/components/chat/lists/ChatListSegment';
+import { normalizeChatListTab, type ChatListTab } from '@/components/chat/lists/chatListTabs';
 import ConversationPane from '@/pages/conversation/conversation';
 import GroupInfoCore, { GroupSavedMessagesCore, GroupSettingsCore } from '@/pages/conversation/group-info';
 import DmInfoCore from '@/pages/conversation/dm-info';

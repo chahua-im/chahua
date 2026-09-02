@@ -4,7 +4,7 @@ import { useHistory, useParams } from 'react-router-dom';
 import { ChatList } from '@/components/chat/lists/ChatList';
 import { TitleWithConnectionStatus } from '@/components/TitleWithConnectionStatus';
 import { BackButton } from '@/components/BackButton';
-import { normalizeChatListTab } from '@/components/chat/lists/ChatListSegment';
+import { normalizeChatListTab } from '@/components/chat/lists/chatListTabs';
 
 interface ArchivedPageParams {
   tab?: string;
