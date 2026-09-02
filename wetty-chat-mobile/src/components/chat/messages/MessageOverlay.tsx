@@ -202,26 +202,8 @@ export function MessageOverlay(props: MessageOverlayProps) {
 
     let top = currentSourceRect.top - bubbleOffsetTop;
 
-    // Check if there's enough space below for the actions
     const actionListEl = content.querySelector('[data-action-list]') as HTMLElement | null;
     const reactionBarEl = content.querySelector('[data-reaction-bar]') as HTMLElement | null;
-    if (actionListEl) {
-      const spaceBelow = offsetTop + vh - currentSourceRect.bottom;
-      // Required space: action list height + flex gap (8px) + minimum bottom padding
-      const requiredSpace = actionListEl.offsetHeight + 8 + 40;
-
-      // If space below is less than the required space, swap the layout
-      if (spaceBelow < requiredSpace) {
-        // We move the action list to the top and reaction bar to the bottom
-        actionListEl.style.order = '-1';
-        if (reactionBarEl) {
-          reactionBarEl.style.order = '1';
-        }
-        // Re-read bubbleOffsetTop since the layout just changed!
-        const newBubbleOffsetTop = bubbleEl ? bubbleEl.offsetTop : 0;
-        top = currentSourceRect.top - newBubbleOffsetTop;
-      }
-    }
 
     const currentContentHeight = content.offsetHeight;
     const currentContentWidth = content.offsetWidth;

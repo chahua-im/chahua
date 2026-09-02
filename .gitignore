@@ -26,3 +26,6 @@ superpowers
 *.log
 *.err
 .repo-ssh
+
+# Node
+node_modules/
