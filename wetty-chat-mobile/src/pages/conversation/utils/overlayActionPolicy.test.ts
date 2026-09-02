@@ -10,6 +10,7 @@ const baseInput: OverlayActionPolicyInput = {
   hasThreadInfo: false,
   isOwn: false,
   isAdmin: false,
+  isDm: false,
   isThreadView: false,
   savedMessagesEnabled: true,
   isPinned: false,
@@ -77,6 +78,18 @@ describe('overlay action policy', () => {
 
   it('does not offer pin inside thread view for non-admins', () => {
     expect(keys({ isThreadView: true, isAdmin: false })).not.toContain('pin');
+  });
+
+  it('offers pin to DM participants without admin role', () => {
+    expect(keys({ isDm: true })).toContain('pin');
+    expect(getOverlayActionPolicy({ ...baseInput, isDm: true, isPinned: true }).at(2)).toEqual({
+      key: 'pin',
+      pinState: 'pinned',
+    });
+  });
+
+  it('does not offer pin for non-admins in regular group chats', () => {
+    expect(keys({ isDm: false })).not.toContain('pin');
   });
 
   it('does not offer start thread when the message already has thread info', () => {

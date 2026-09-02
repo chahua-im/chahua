@@ -45,6 +45,7 @@ interface UseMessageOverlayActionsArgs {
   message: MessageResponse | null;
   currentUserId: number | null;
   isAdmin: boolean;
+  isDm: boolean;
   threadId?: string;
   pins: PinResponse[];
   savedMessagesEnabled: boolean;
@@ -61,6 +62,7 @@ export function useMessageOverlayActions({
   message,
   currentUserId,
   isAdmin,
+  isDm,
   threadId,
   pins,
   savedMessagesEnabled,
@@ -87,6 +89,7 @@ export function useMessageOverlayActions({
       hasThreadInfo: message.threadInfo != null,
       isOwn,
       isAdmin,
+      isDm,
       isThreadView: threadId != null,
       savedMessagesEnabled,
       isPinned: existingPin != null,
@@ -237,7 +240,9 @@ export function useMessageOverlayActions({
                   ? t`Would you like to unpin this message?`
                   : threadId
                     ? t`Pin this message in the thread?`
-                    : t`Pin this message in the group?`,
+                    : isDm
+                      ? t`Pin this message for both of you?`
+                      : t`Pin this message in the group?`,
                 buttons: [
                   { text: t`Cancel`, role: 'cancel' },
                   {
@@ -285,6 +290,7 @@ export function useMessageOverlayActions({
     currentUserId,
     dispatch,
     isAdmin,
+    isDm,
     message,
     onEdit,
     onOpenReactionDetails,

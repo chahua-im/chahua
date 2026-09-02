@@ -392,6 +392,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     message: overlayMessage?.message ?? null,
     currentUserId: currentUser.uid,
     isAdmin,
+    isDm,
     threadId,
     pins,
     savedMessagesEnabled,

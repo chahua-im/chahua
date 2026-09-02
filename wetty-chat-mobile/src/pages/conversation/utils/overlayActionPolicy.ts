@@ -21,6 +21,7 @@ export interface OverlayActionPolicyInput {
   hasThreadInfo: boolean;
   isOwn: boolean;
   isAdmin: boolean;
+  isDm: boolean;
   isThreadView: boolean;
   savedMessagesEnabled: boolean;
   isPinned: boolean;
@@ -47,7 +48,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 3. Pin
-  if (!input.isDeleted && input.isAdmin) {
+  if (!input.isDeleted && (input.isAdmin || input.isDm)) {
     actions.push({ key: 'pin', pinState: input.isPinned ? 'pinned' : 'unpinned' });
   }
 
