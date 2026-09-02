@@ -7,6 +7,20 @@
   position: absolute;
   top: -2px;
   right: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   box-shadow: 0 0 0 2px var(--avatar-overlay-ring-color, var(--ion-background-color, #fff));
+}
+
+.iconBadge {
+  background: var(--ion-color-primary);
+  color: var(--ion-color-primary-contrast);
+}
+
+/* Glyph fills 2/3 of the badge circle. */
+.secondaryIcon {
+  width: 66.6667%;
+  height: 66.6667%;
 }

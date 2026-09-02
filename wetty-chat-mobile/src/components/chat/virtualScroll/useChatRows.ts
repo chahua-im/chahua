@@ -23,6 +23,7 @@ export function useChatRows(
   messages: MessageResponse[],
   formatDateSeparator: (iso: string) => string,
   showAllAvatars: boolean,
+  showSenderNames = true,
 ): ChatRow[] {
   return useMemo(() => {
     const rows: ChatRow[] = [];
@@ -83,7 +84,9 @@ export function useChatRows(
         j += 1;
       }
 
-      const showName = msg.sender.uid !== prevSenderUid || hasDateSeparator;
+      // DMs never show sender names/groups/genders on bubbles; groups show them
+      // when the sender changes or a date separator intervenes.
+      const showName = showSenderNames && (msg.sender.uid !== prevSenderUid || hasDateSeparator);
       // When showAllAvatars is on, every message renders its own inline avatar
       // (current behavior), so the group-level sticky avatar is not used.
       const useStickyAvatar = !showAllAvatars;
@@ -104,5 +107,5 @@ export function useChatRows(
     }
 
     return rows;
-  }, [messages, formatDateSeparator, showAllAvatars]);
+  }, [messages, formatDateSeparator, showAllAvatars, showSenderNames]);
 }

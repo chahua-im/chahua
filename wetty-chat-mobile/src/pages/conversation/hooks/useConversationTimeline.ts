@@ -35,6 +35,8 @@ interface UseConversationTimelineArgs {
   chatId: string;
   storeChatId: string;
   threadId?: string;
+  /** DMs hide sender names/groups/genders on bubbles. */
+  isDm?: boolean;
   initialResumeMessageId: string | null;
   lastReadMessageId: string | null;
   scrollToBottomUnreadCount: number;
@@ -47,6 +49,7 @@ export function useConversationTimeline({
   chatId,
   storeChatId,
   threadId,
+  isDm = false,
   initialResumeMessageId,
   lastReadMessageId,
   scrollToBottomUnreadCount,
@@ -114,7 +117,7 @@ export function useConversationTimeline({
 
   const messageLookup = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const showAllAvatars = useSelector(selectShowAllAvatars);
-  const chatRows = useChatRows(messages, formatDateSeparator, showAllAvatars);
+  const chatRows = useChatRows(messages, formatDateSeparator, showAllAvatars, !isDm);
 
   useEffect(() => {
     if (messages.length > 0 || pendingLiveCount === 0) {

@@ -1,10 +1,13 @@
 import { t } from '@lingui/core/macro';
+import { useSelector } from 'react-redux';
 import { mentionToUser, type MessageResponse, type User } from '@/api/messages';
 import { MessageOverlay, type MessageOverlayAction } from '@/components/chat/messages/MessageOverlay';
 import { UserProfileModal } from '@/components/chat/profiles/UserProfileModal';
 import { ReactionDetailsModal } from '@/components/chat/reactions/ReactionDetailsModal';
 import { StickerPreviewModal } from '@/components/chat/compose/StickerPreviewModal';
 import { PinListModal } from '@/components/chat/pins/PinListModal';
+import { selectChatMeta } from '@/store/chatsSlice';
+import type { RootState } from '@/store';
 
 interface OverlayMessageState {
   message: MessageResponse;
@@ -59,6 +62,7 @@ export function ConversationOverlayHost({
   onCloseOverlay,
 }: ConversationOverlayHostProps) {
   const msg = overlayMessage?.message;
+  const isDm = useSelector((state: RootState) => selectChatMeta(state, chatId)?.kind === 'dm');
 
   return (
     <>
@@ -84,17 +88,22 @@ export function ConversationOverlayHost({
             const sharedOverlayProps = {
               senderName: msg.sender.name ?? `User ${msg.sender.uid}`,
               isSent: msg.sender.uid === currentUserId,
+              // The overlay preview always identifies the sender, even in DMs.
               showName: true,
+              replyTo:
+                msg.replyToMessage && !msg.replyToMessage.isDeleted
+                  ? {
+                      // DMs keep the quote but drop the sender name.
+                      senderName: isDm
+                        ? ''
+                        : (msg.replyToMessage.sender.name ?? `User ${msg.replyToMessage.sender.uid}`),
+                      preview: msg.replyToMessage,
+                    }
+                  : undefined,
               timestamp: msg.createdAt,
               edited: msg.isEdited,
               isConfirmed: !msg.id.startsWith('cg_'),
               messageId: msg.id,
-              replyTo: msg.replyToMessage
-                ? {
-                    senderName: msg.replyToMessage.sender.name ?? `User ${msg.replyToMessage.sender.uid}`,
-                    preview: msg.replyToMessage,
-                  }
-                : undefined,
               sourceRect: overlayMessage.sourceRect,
               interactionPos: overlayMessage.interactionPos,
               actions: overlayActions,

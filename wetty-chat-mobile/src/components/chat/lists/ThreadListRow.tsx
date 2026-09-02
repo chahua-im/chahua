@@ -1,10 +1,13 @@
 import { type ReactNode, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { IonBadge, IonIcon, IonItem, IonItemOption, IonItemOptions, IonItemSliding, IonLabel } from '@ionic/react';
+import { chatbubbles } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { toMessagePreview, type MessagePreview } from '@/api/messages';
 import type { StoredThreadListItem } from '@/api/threads';
 import { OverlayAvatar } from '@/components/OverlayAvatar';
+import { selectCurrentUser } from '@/store/userSlice';
+import { selectChatMeta } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
 import { selectLatestThreadReplyMessage } from '@/store/messages/selectors';
 import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
@@ -53,6 +56,9 @@ interface ThreadListRowProps {
 }
 
 export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, endAction }: ThreadListRowProps) {
+  const currentUid = useSelector(selectCurrentUser).uid;
+  const chatMeta = useSelector((state: RootState) => selectChatMeta(state, thread.chatId));
+  const isDm = chatMeta?.kind === 'dm';
   const rootMsg = thread.threadRootMessage;
   const rootPreview = formatMessagePreview(rootMsg, getNotificationPreviewLabels(locale));
 
@@ -67,7 +73,15 @@ export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, e
     return thread.cachedLastReply;
   }, [liveMessage, thread.cachedLastReply]);
 
+  // DM threads omit sender names in previews — the row's avatar/title already
+  // identify the conversation, and the participants are just the two parties.
   const lastReplyPreview = lastReply ? formatReplyPreview(lastReply, locale) : null;
+
+  // DM thread avatar: the peer as the primary avatar, with a message-bubble
+  // icon badge instead of the thread-starter avatar used for group threads.
+  const peer = isDm ? (chatMeta?.peer ?? thread.participants.find((p) => p.uid !== currentUid) ?? null) : null;
+  const peerAvatarUrl = peer?.avatarUrl ?? thread.chatAvatar ?? null;
+  const peerName = (peer ? ('username' in peer ? peer.username : peer?.name) : null) ?? thread.chatName ?? 'User';
 
   const content = (
     <IonItem
@@ -78,17 +92,26 @@ export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, e
     >
       {/* Rows 2-4: avatar + content */}
       <span slot="start">
-        <OverlayAvatar
-          primaryName={thread.chatName}
-          primaryAvatarUrl={thread.chatAvatar}
-          secondaryName={rootMsg.sender.name ?? null}
-          secondaryAvatarUrl={rootMsg.sender.avatarUrl ?? null}
-          size={48}
-        />
+        {isDm ? (
+          <OverlayAvatar
+            primaryName={peerName}
+            primaryAvatarUrl={peerAvatarUrl}
+            secondaryIcon={chatbubbles}
+            size={48}
+          />
+        ) : (
+          <OverlayAvatar
+            primaryName={thread.chatName}
+            primaryAvatarUrl={thread.chatAvatar}
+            secondaryName={rootMsg.sender.name ?? null}
+            secondaryAvatarUrl={rootMsg.sender.avatarUrl ?? null}
+            size={48}
+          />
+        )}
       </span>
       <IonLabel className={styles.bodyContent}>
         {/* Row 2: replied to */}
-        <div className={styles.repliedTo}>{rootPreview || rootMsg.sender.name}</div>
+        <div className={styles.repliedTo}>{rootPreview || (isDm ? null : rootMsg.sender.name)}</div>
         {/* Row 3: latest reply or draft */}
         {draftText !== undefined ? (
           <p className={styles.latestReply}>
@@ -99,7 +122,8 @@ export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, e
           lastReply &&
           lastReplyPreview && (
             <p className={styles.latestReply}>
-              <span className={styles.latestReplySender}>{lastReply.sender.name ?? 'User'}:</span> {lastReplyPreview}
+              {!isDm && <span className={styles.latestReplySender}>{lastReply.sender.name ?? 'User'}:</span>}{' '}
+              {lastReplyPreview}
             </p>
           )
         )}

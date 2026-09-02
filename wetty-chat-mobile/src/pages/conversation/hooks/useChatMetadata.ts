@@ -72,8 +72,12 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
   const metaLoading = !metaLoaded;
 
   useEffect(() => {
-    if (threadId || metaLoaded) return;
+    if (metaLoaded) return;
 
+    // Threads fetch too: deep links land directly on a thread without the chat
+    // list ever having populated `kind`/`peer`, and DM styling (bubbles, lists)
+    // depends on them. GET /group/:id is idempotent, so the extra fetch on
+    // thread views is safe.
     getGroupInfo(chatId)
       .then((res) => {
         const { id, mutedUntil, ...groupMeta } = res.data;
@@ -82,7 +86,7 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
         dispatch(setChatMutedUntil({ chatId, mutedUntil: mutedUntil ?? null }));
       })
       .catch(() => {});
-  }, [chatId, dispatch, metaLoaded, threadId]);
+  }, [chatId, dispatch, metaLoaded]);
 
   useEffect(() => {
     if (threadId) return;

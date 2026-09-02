@@ -113,11 +113,17 @@ function isChatMuted(chat: ChatListEntry): boolean {
   return new Date(chat.mutedUntil) > new Date();
 }
 
-function getMessagePreview(message: MessagePreview | null, locale: string): ReactNode {
+function getMessagePreview(message: MessagePreview | null, locale: string, showSender: boolean): ReactNode {
   if (!message) return t`No messages yet`;
 
-  const senderName = message.sender?.name || 'User';
   const previewText = formatMessagePreview(message, getNotificationPreviewLabels(locale));
+
+  // DM rows omit the sender name — the row title already names the peer.
+  if (!showSender) {
+    return previewText || t`New message`;
+  }
+
+  const senderName = message.sender?.name || 'User';
 
   return (
     <>
@@ -592,7 +598,7 @@ export function ChatList({
                 {truncatePreview(drafts[chat.id].text)}
               </>
             ) : (
-              getMessagePreview(chat.lastMessage, locale)
+              getMessagePreview(chat.lastMessage, locale, chat.kind !== 'dm')
             )}
           </p>
         </IonLabel>
