@@ -38,14 +38,10 @@ function TestComponent({
   threadId,
   lastFullyVisibleMessageId,
   lastReadMessageId,
-  atBottom = false,
-  initialResumeMessageId = null,
 }: {
   threadId?: string;
   lastFullyVisibleMessageId: string | null;
   lastReadMessageId: string | null;
-  atBottom?: boolean;
-  initialResumeMessageId?: string | null;
 }) {
   useChatReadTracking({
     chatId: 'chat-1',
@@ -53,8 +49,6 @@ function TestComponent({
     threadId,
     lastFullyVisibleMessageId,
     lastReadMessageId,
-    initialResumeMessageId,
-    atBottom,
   });
   return null;
 }
@@ -116,6 +110,34 @@ describe('useChatReadTracking', () => {
       }),
     );
     expect(syncAppBadgeCount).toHaveBeenCalled();
+  });
+
+  it('marks the main chat read when never read and opened at bottom (short chat)', async () => {
+    renderHook({ lastFullyVisibleMessageId: '20', lastReadMessageId: null });
+
+    await advanceReadCooldown();
+
+    expect(markMessagesAsRead).toHaveBeenCalledWith('chat-1', '20');
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'chats/setChatLastReadMessageId',
+        payload: { chatId: 'chat-1', lastReadMessageId: '20' },
+      }),
+    );
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'chats/setChatUnreadCount',
+        payload: { chatId: 'chat-1', unreadCount: 0 },
+      }),
+    );
+  });
+
+  it('does not mark main chat read when the target is not numeric and nothing was read yet', async () => {
+    renderHook({ lastFullyVisibleMessageId: 'cg_local', lastReadMessageId: null });
+
+    await advanceReadCooldown();
+
+    expect(markMessagesAsRead).not.toHaveBeenCalled();
   });
 
   it('does not mark main chat read when the target is already read or not numeric', async () => {

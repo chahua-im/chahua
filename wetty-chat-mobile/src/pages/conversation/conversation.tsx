@@ -134,7 +134,6 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     chatRows,
     bottomVisibleMessageDate,
     lastFullyVisibleMessageId,
-    atBottom,
     initialAnchor,
     scrollApiRef,
     floatingDateLabel,
@@ -169,8 +168,6 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     threadId,
     lastFullyVisibleMessageId,
     lastReadMessageId,
-    initialResumeMessageId,
-    atBottom,
     threadLastReadMessageIdRef,
   });
 
