@@ -1500,6 +1500,9 @@ msgstr "已拉黑用户"
 msgid "User ID"
 msgstr "用户 ID"
 
+msgid "User not found"
+msgstr "未找到用户"
+
 msgid "User unblocked"
 msgstr "已取消拉黑"
 

@@ -1500,6 +1500,9 @@ msgstr "已封鎖使用者"
 msgid "User ID"
 msgstr "使用者 ID"
 
+msgid "User not found"
+msgstr "找不到使用者"
+
 msgid "User unblocked"
 msgstr "已解除封鎖"
 
