@@ -39,6 +39,10 @@ export const FEATURES = {
     enabled: true,
     description: 'Shows invite preview and redeem modal on the install landing page.',
   },
+  profileDeepLink: {
+    enabled: true,
+    description: 'External /profile?uid= links open the target user profile in-app.',
+  },
   pendingInvitePwaModal: {
     enabled: false,
     description: 'Stores landing auth/invite state for PWA handoff and shows pending invites inside the installed app.',

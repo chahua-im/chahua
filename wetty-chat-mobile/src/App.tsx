@@ -5,9 +5,9 @@ import { useDispatch } from 'react-redux';
 import { useEffect, useRef } from 'react';
 import type { AppDispatch } from '@/store/index';
 import { fetchCurrentUser } from '@/store/userSlice';
-
 import './app.scss';
 import { t } from '@lingui/core/macro';
+import { isFeatureEnabled } from '@/features';
 import MobileLayout from './layouts/MobileLayout';
 import { AppUpdateProvider } from './hooks/AppUpdateProvider';
 import { useIsDesktop } from './hooks/platformHooks';
@@ -18,13 +18,18 @@ import { DesktopSplitLayout } from './layouts/DesktopSplitLayout';
 import OobePage from '@/pages/oobe';
 import LandingPage from './pages/landing';
 import PushOpenPage from '@/pages/push-open';
+import ProfileDeepLinkPage from '@/pages/profile';
+import { ProfileDeepLinkHost } from '@/components/social/ProfileDeepLinkHost';
+import { PendingInviteModalHost } from '@/components/invites/PendingInviteModalHost';
 import PermalinkPage from '@/pages/permalink';
 import { initWebSocket } from '@/api/ws';
 import { appHistory } from '@/utils/navigationHistory';
 import { useNotificationOpenHandler } from '@/hooks/useNotificationOpenHandler';
-import { PendingInviteModalHost } from '@/components/invites/PendingInviteModalHost';
+import { useQueryTokenAdoption } from '@/hooks/useQueryTokenAdoption';
 
 const OOBE_STORAGE_KEY = 'oobe';
+
+const PROFILE_DEEP_LINK_ENABLED = isFeatureEnabled('profileDeepLink');
 
 function hasCompletedOobe() {
   return localStorage.getItem(OOBE_STORAGE_KEY) !== null;
@@ -58,11 +63,17 @@ function useLayoutTransitionCleanup(isDesktop: boolean) {
   }, [isDesktop, history, location]);
 }
 
+function QueryTokenAdopter() {
+  useQueryTokenAdoption();
+  return null;
+}
+
 function AppRouter({ isDesktop }: { isDesktop: boolean }) {
   useLayoutTransitionCleanup(isDesktop);
   const isOobeRoute = useRouteMatch('/oobe');
   const isLandingRoute = useRouteMatch('/landing');
   const isPushOpenRoute = useRouteMatch('/push-open');
+  const isProfileRoute = useRouteMatch('/profile');
   const isPermalinkRoute = useRouteMatch<{ encoded: string }>('/m/:encoded');
 
   if (isLandingRoute?.isExact) {
@@ -71,6 +82,8 @@ function AppRouter({ isDesktop }: { isDesktop: boolean }) {
     return <OobePage />;
   } else if (isPushOpenRoute?.isExact) {
     return <PushOpenPage />;
+  } else if (PROFILE_DEEP_LINK_ENABLED && isProfileRoute?.isExact) {
+    return <ProfileDeepLinkPage />;
   } else if (isPermalinkRoute) {
     return <PermalinkPage encoded={isPermalinkRoute.params.encoded} />;
   } else if (!hasCompletedOobe()) {
@@ -81,6 +94,7 @@ function AppRouter({ isDesktop }: { isDesktop: boolean }) {
     <>
       {isDesktop ? <DesktopSplitLayout /> : <MobileLayout />}
       <PendingInviteModalHost />
+      {PROFILE_DEEP_LINK_ENABLED && <ProfileDeepLinkHost />}
     </>
   );
 }
@@ -120,6 +134,7 @@ function AppShell() {
       />
       <div className="app-router-shell">
         <IonReactRouter history={appHistory}>
+          <QueryTokenAdopter />
           <AppRouter isDesktop={isDesktop} />
         </IonReactRouter>
       </div>
