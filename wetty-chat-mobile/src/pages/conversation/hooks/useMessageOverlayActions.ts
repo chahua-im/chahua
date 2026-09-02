@@ -13,6 +13,7 @@ import {
   trashOutline,
 } from 'ionicons/icons';
 import { useDispatch } from 'react-redux';
+import { apiErrorMessage } from '@/api/errors';
 import { deleteMessage, type MessageResponse } from '@/api/messages';
 import type { PinResponse } from '@/api/pins';
 import { createPin, createThreadPin, deletePin, deleteThreadPin } from '@/api/pins';
@@ -33,11 +34,6 @@ interface AlertOptions {
   header: string;
   message: string;
   buttons: AlertButton[];
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) return error.message;
-  return fallback;
 }
 
 interface UseMessageOverlayActionsArgs {
@@ -150,8 +146,8 @@ export function useMessageOverlayActions({
                 .then(() => {
                   showToast(t`Sticker added to favorites`, 2000);
                 })
-                .catch((e: Error) => {
-                  showToast(e.message || t`Failed to add sticker to favorites`);
+                .catch((e: unknown) => {
+                  showToast(apiErrorMessage(e, t`Failed to add sticker to favorites`));
                 });
             },
           });
@@ -220,9 +216,9 @@ export function useMessageOverlayActions({
                     handler: () => {
                       const deletedOptimistic = { ...message, isDeleted: true };
                       dispatch(messagePatched({ chatId, messageId: message.id, message: deletedOptimistic }));
-                      deleteMessage(chatId, message.id).catch((e: any) => {
+                      deleteMessage(chatId, message.id).catch((e: unknown) => {
                         dispatch(messagePatched({ chatId, messageId: message.id, message }));
-                        showToast(e.message || t`Failed to delete message`);
+                        showToast(apiErrorMessage(e, t`Failed to delete message`));
                       });
                     },
                   },
@@ -257,14 +253,14 @@ export function useMessageOverlayActions({
                           ? deleteThreadPin(chatId, threadId, existingPin.id)
                           : deletePin(chatId, existingPin.id);
                         unpin.catch((e: unknown) => {
-                          showToast(errorMessage(e, t`Failed to unpin message`));
+                          showToast(apiErrorMessage(e, t`Failed to unpin message`));
                         });
                       } else {
                         const pin = threadId
                           ? createThreadPin(chatId, threadId, message.id)
                           : createPin(chatId, message.id);
                         pin.catch((e: unknown) => {
-                          showToast(errorMessage(e, t`Failed to pin message`));
+                          showToast(apiErrorMessage(e, t`Failed to pin message`));
                         });
                       }
                     },
