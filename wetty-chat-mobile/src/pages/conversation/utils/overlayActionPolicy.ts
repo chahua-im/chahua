@@ -70,7 +70,9 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 7. Copy-link
-  actions.push({ key: 'copy-link' });
+  if (!input.isDm) {
+    actions.push({ key: 'copy-link' });
+  }
 
   // 8. Delete
   if ((input.isOwn || input.isAdmin) && !input.isDeleted) {

@@ -88,6 +88,18 @@ describe('overlay action policy', () => {
     });
   });
 
+  it('omits copy-link in DM chats', () => {
+    expect(keys({ isDm: true })).not.toContain('copy-link');
+    expect(keys({ isDm: true, hasReactions: true })).toEqual([
+      'reply',
+      'thread',
+      'pin',
+      'copy',
+      'save',
+      'reaction-details',
+    ]);
+  });
+
   it('does not offer pin for non-admins in regular group chats', () => {
     expect(keys({ isDm: false })).not.toContain('pin');
   });
