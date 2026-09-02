@@ -25,9 +25,10 @@ use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::handlers::users::build_member_summary_map;
 use crate::models::{FriendRequest, FriendRequestStatus};
+use crate::services::authz::Action as AuthzAction;
 use crate::services::social::{self, CreateRequestOutcome, ResolveOutcome};
 use crate::services::user::lookup_user_profiles;
-use crate::utils::auth::CurrentUid;
+use crate::utils::auth::{CurrentUid, Principal};
 use crate::AppState;
 
 const MAX_FRIEND_REQUEST_MESSAGE_CHARS: usize = 200;
@@ -148,14 +149,16 @@ fn build_request_responses(
     path = "/",
     tag = "friends",
     responses((status = 200, description = "Current user's friends", body = ListFriendsResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
+    params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn get_friends(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
     mut conn: DbConn,
 ) -> Result<Json<ListFriendsResponse>, AppError> {
     let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
     let friends = social::list_friends_with_since(conn, uid)?;
     let uids: Vec<i32> = friends.iter().map(|(uid, _)| *uid).collect();
     let summaries = build_member_summary_map(conn, &state, &uids)?;
@@ -175,17 +178,21 @@ async fn get_friends(
     delete,
     path = "/{uid}",
     tag = "friends",
-    params(("uid" = i32, Path, description = "UID of the friend to remove")),
+    params(
+        ("uid" = i32, Path, description = "UID of the friend to remove"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
+    ),
     responses((status = 204, description = "Friend removed"), (status = 404, description = "Not friends")),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn delete_friend(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
     mut conn: DbConn,
     Path(FriendPath { uid: other }): Path<FriendPath>,
 ) -> Result<StatusCode, AppError> {
     let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
     let removed = social::remove_friendship(conn, uid, other)?;
     if !removed {
         return Err(AppError::NotFound("Friendship not found"));
@@ -208,16 +215,18 @@ async fn delete_friend(
         (status = 200, description = "Reciprocal request auto-accepted", body = FriendRequestResponse),
         (status = 409, description = "Already pending or already friends")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
+    params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn create_friend_request(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
     mut conn: DbConn,
     Json(body): Json<CreateFriendRequestBody>,
 ) -> Result<(StatusCode, Json<FriendRequestResponse>), AppError> {
-    validate_friend_request_message(body.message.as_deref())?;
     let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
+    validate_friend_request_message(body.message.as_deref())?;
 
     let target_profiles = lookup_user_profiles(conn, &[body.to_uid])?;
     if !target_profiles.contains_key(&body.to_uid) {
@@ -264,13 +273,16 @@ async fn create_friend_request(
     path = "/requests/pending/count",
     tag = "friends",
     responses((status = 200, description = "Number of pending incoming friend requests", body = PendingFriendRequestCountResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
+    params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn count_pending_incoming_requests(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
+    State(state): State<AppState>,
     mut conn: DbConn,
 ) -> Result<Json<PendingFriendRequestCountResponse>, AppError> {
     let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
     let pending_incoming_count = social::count_incoming_requests(conn, uid)?;
     Ok(Json(PendingFriendRequestCountResponse {
         pending_incoming_count,
@@ -282,14 +294,16 @@ async fn count_pending_incoming_requests(
     path = "/requests",
     tag = "friends",
     responses((status = 200, description = "Friend request history in both directions, newest first", body = ListFriendRequestHistoryResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
+    params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn list_friend_request_history(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
     mut conn: DbConn,
 ) -> Result<Json<ListFriendRequestHistoryResponse>, AppError> {
     let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
     let rows = social::list_friend_request_history(conn, uid)?;
     let directions: Vec<FriendRequestDirection> = rows
         .iter()
@@ -313,17 +327,21 @@ async fn list_friend_request_history(
     post,
     path = "/requests/{request_id}/accept",
     tag = "friends",
-    params(("request_id" = i64, Path, description = "Friend request ID")),
+    params(
+        ("request_id" = i64, Path, description = "Friend request ID"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
+    ),
     responses((status = 200, description = "Request accepted", body = FriendRequestResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn accept_friend_request(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
     mut conn: DbConn,
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
     let outcome = social::resolve_friend_request(conn, &state, uid, request_id, true).await?;
     let request = outcome.request();
     fire_ws(
@@ -343,20 +361,24 @@ async fn accept_friend_request(
     post,
     path = "/requests/{request_id}/reject",
     tag = "friends",
-    params(("request_id" = i64, Path, description = "Friend request ID")),
+    params(
+        ("request_id" = i64, Path, description = "Friend request ID"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
+    ),
     responses(
         (status = 200, description = "Request rejected", body = FriendRequestResponse),
         (status = 409, description = "Already friends; the request was dismissed")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn reject_friend_request(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
     mut conn: DbConn,
     Path(RequestIdPath { request_id }): Path<RequestIdPath>,
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
     let outcome = social::resolve_friend_request(conn, &state, uid, request_id, false).await?;
     let request = outcome.request();
     fire_ws(
@@ -380,7 +402,7 @@ async fn reject_friend_request(
     path = "/me/settings",
     tag = "friends",
     responses((status = 200, description = "Current user's friend-acceptance settings", body = FriendSettingsResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_my_friend_settings(
     CurrentUid(uid): CurrentUid,
@@ -397,7 +419,7 @@ async fn get_my_friend_settings(
     tag = "friends",
     request_body = UpdateFriendSettingsBody,
     responses((status = 200, description = "Updated friend-acceptance settings", body = FriendSettingsResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn update_my_friend_settings(
     CurrentUid(uid): CurrentUid,
@@ -414,16 +436,21 @@ async fn update_my_friend_settings(
     get,
     path = "/add-info/{uid}",
     tag = "friends",
-    params(("uid" = i32, Path, description = "Target user uid")),
+    params(
+        ("uid" = i32, Path, description = "Target user uid"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
+    ),
     responses((status = 200, description = "What a requester needs to add this user as a friend", body = FriendAddInfoResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
 )]
 async fn get_user_friend_add_info(
-    CurrentUid(_uid): CurrentUid,
+    principal: Principal,
+    State(state): State<AppState>,
     mut conn: DbConn,
     Path(FriendPath { uid }): Path<FriendPath>,
 ) -> Result<Json<FriendAddInfoResponse>, AppError> {
     let conn = &mut *conn;
+    let _uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
     let (mode, question) = social::get_friend_settings(conn, uid)?;
     Ok(Json(FriendAddInfoResponse { mode, question }))
 }

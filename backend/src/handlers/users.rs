@@ -1,6 +1,5 @@
 use axum::{
     extract::{Query, State},
-    http::HeaderMap,
     Json,
 };
 use serde::Deserialize;
@@ -17,7 +16,7 @@ use crate::models::{FriendAddVerificationMode, NewUserExtra, UserExtra};
 use crate::schema::{group_membership, sticker_packs, user_extra, user_sticker_pack_subscriptions};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
 use crate::services::user::{lookup_user_profiles, search_user_uids_by_prefix};
-use crate::utils::auth::{extract_auth_context, required_client_id, AuthSource, CurrentUid};
+use crate::utils::auth::{BearerSession, CurrentUid};
 use crate::AppState;
 use diesel::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -48,7 +47,7 @@ pub struct UpdateStickerPackOrderRequest {
     responses(
         (status = 200, description = "Order updated successfully")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn put_stickerpack_order(
     CurrentUid(uid): CurrentUid,
@@ -279,7 +278,7 @@ fn load_excluded_member_uids(
     responses(
         (status = 200, description = "Current user info", body = MeResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_me(
     CurrentUid(uid): CurrentUid,
@@ -333,7 +332,7 @@ async fn get_me(
     responses(
         (status = 200, description = "User search results", body = SearchUsersResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_user_search(
     CurrentUid(uid): CurrentUid,
@@ -392,30 +391,23 @@ async fn get_user_search(
     Ok(Json(SearchUsersResponse { members, excluded }))
 }
 
-/// Planned for deprecation: we are moving towards a model with we always
-/// authenticate with a JWT token.
 #[utoipa::path(
     get,
     path = "/auth-token",
     tag = "users",
     responses(
         (status = 200, description = "Auth token", body = AuthTokenResponse)
-    )
+    ),
+    security(("bearer_jwt" = []))
 )]
 async fn get_auth_token(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    BearerSession(session): BearerSession,
 ) -> Result<Json<AuthTokenResponse>, AppError> {
-    let auth = extract_auth_context(&headers, &state)?;
-    let client_id = match auth.client_id {
-        Some(client_id) => client_id,
-        None if auth.source == AuthSource::Legacy => required_client_id(&headers)?,
-        None => return Err(AppError::BadRequest("Missing X-Client-Id header")),
-    };
-
-    let token = state
-        .auth_token_service
-        .issue_legacy_session(auth.uid, &client_id, 0)?;
+    let token =
+        state
+            .auth_token_service
+            .issue_legacy_session(session.uid, &session.client_id, 0)?;
 
     Ok(Json(AuthTokenResponse { token }))
 }

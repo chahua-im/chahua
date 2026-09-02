@@ -17,7 +17,8 @@ import {
   setChatUnreadCount,
 } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
-import { hasLoadedThreadChatMeta } from '../utils/conversationUtils';
+import store from '@/store';
+import { hasLoadedThreadChatMeta, parseComparableMessageId } from '../utils/conversationUtils';
 
 interface UseChatMetadataArgs {
   chatId: string;
@@ -94,6 +95,16 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
     getChatUnreadCount(chatId)
       .then((res) => {
         if (canceled) return;
+        // A mark-read POST may have landed while this request was in flight; never
+        // let a stale GET response move read state backwards.
+        const currentReadId = selectChatLastReadMessageId(store.getState(), chatId);
+        const currentReadComparableId = currentReadId ? parseComparableMessageId(currentReadId) : null;
+        const responseComparableId = res.data.lastReadMessageId
+          ? parseComparableMessageId(res.data.lastReadMessageId)
+          : null;
+        if (currentReadComparableId != null) {
+          if (responseComparableId == null || responseComparableId <= currentReadComparableId) return;
+        }
         dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: res.data.lastReadMessageId }));
         dispatch(setChatUnreadCount({ chatId, unreadCount: res.data.unreadCount }));
       })

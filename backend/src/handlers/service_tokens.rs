@@ -41,7 +41,7 @@ struct ServiceTokenPath {
     responses(
         (status = 201, description = "Service token created", body = CreateServiceTokenResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_service_token(
     CurrentUid(uid): CurrentUid,
@@ -115,7 +115,7 @@ async fn post_service_token(
     responses(
         (status = 200, description = "Service tokens", body = ListServiceTokensResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_service_tokens(
     CurrentUid(uid): CurrentUid,
@@ -151,7 +151,7 @@ async fn get_service_tokens(
     responses(
         (status = 204, description = "Service token revoked")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn delete_service_token(
     CurrentUid(uid): CurrentUid,
@@ -191,7 +191,7 @@ async fn delete_service_token(
     responses(
         (status = 200, description = "Service token rotated", body = RotateServiceTokenResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_rotate_service_token(
     CurrentUid(uid): CurrentUid,

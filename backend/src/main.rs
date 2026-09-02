@@ -15,7 +15,7 @@ use tower_http::LatencyUnit;
 use tower_http::ServiceBuilderExt;
 use tracing::{debug_span, info, Level};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use utils::auth::{X_APP_VERSION, X_CLIENT_ID, X_USER_ID};
+use utils::auth::{X_APP_VERSION, X_CLIENT_ID};
 use utoipa::OpenApi;
 
 mod config;
@@ -238,7 +238,6 @@ async fn main() {
                     ORIGIN,
                     axum::http::header::HeaderName::from_static(X_APP_VERSION),
                     axum::http::header::HeaderName::from_static(X_CLIENT_ID),
-                    axum::http::header::HeaderName::from_static(X_USER_ID),
                 ]),
         )
     } else {

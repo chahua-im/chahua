@@ -24,11 +24,15 @@ use crate::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
         MessageSearchSort, SearchCandidateDropCounts,
     },
-    utils::{auth::CurrentUid, pagination::validate_limit},
+    utils::{
+        auth::{CurrentUid, Principal},
+        pagination::validate_limit,
+    },
     AppState, MAX_MESSAGES_LIMIT,
 };
 
 use super::{ChatIdPath, CreateMessageBody};
+use crate::services::authz::Action as AuthzAction;
 use crate::services::messages::{
     attach_metadata, authorize_message_send, extract_mention_uids, parse_attachment_ids,
     send_prepared_message, validate_message, PreparedMessageSend, SendMessageOutcome,
@@ -148,7 +152,7 @@ fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize>
     responses(
         (status = 200, description = "List of messages", body = ListMessagesResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_messages(
     CurrentUid(uid): CurrentUid,
@@ -312,7 +316,7 @@ async fn get_messages(
         (status = 400, description = "Invalid search query"),
         (status = 503, description = "Message search unavailable"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn search_messages(
     CurrentUid(uid): CurrentUid,
@@ -495,7 +499,7 @@ fn record_search_candidate_drops(metrics: &MessageSearchMetrics, drops: SearchCa
     responses(
         (status = 200, description = "Single message", body = MessageResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_message(
     CurrentUid(uid): CurrentUid,
@@ -537,22 +541,21 @@ async fn get_message(
     tag = "chats",
     params(
         ("chat_id" = i64, Path, description = "Chat ID"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"),
     ),
     request_body = CreateMessageBody,
-    responses(
-        (status = 201, description = "Message created", body = MessageResponse),
-    ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    responses((status = 201, description = "Message created", body = MessageResponse)),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
 )]
 async fn post_message(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
     Json(body): Json<CreateMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
-
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfMessageSend)?;
     authorize_message_send(conn, chat_id, None, uid)?;
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
@@ -630,7 +633,7 @@ async fn post_message(
     responses(
         (status = 201, description = "Thread message created", body = MessageResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 pub(super) async fn post_thread_message(
     CurrentUid(uid): CurrentUid,
@@ -811,7 +814,7 @@ pub(super) async fn post_thread_message(
     responses(
         (status = 200, description = "Updated message", body = MessageResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn patch_message(
     CurrentUid(uid): CurrentUid,
@@ -946,7 +949,7 @@ async fn patch_message(
     responses(
         (status = 204, description = "Message deleted"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_message(
     CurrentUid(uid): CurrentUid,

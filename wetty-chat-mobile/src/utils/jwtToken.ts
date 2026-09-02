@@ -1,6 +1,7 @@
 import Cookies from 'js-cookie';
-import { kvDelete, kvGet, kvSet } from './db';
+import { fromBase64Url } from './base64url';
 import { syncClientIdFromJwt } from './clientId';
+import { kvDelete, kvGet, kvSet } from './db';
 
 const JWT_TOKEN_COOKIE_KEY = 'jwt_token';
 const JWT_TOKEN_QUERY_PARAM = 'token';
@@ -18,6 +19,18 @@ function normalizeToken(value: string | null | undefined): string | null {
 export function getJwtTokenFromQuery(search: string): string | null {
   const searchParams = new URLSearchParams(search);
   return normalizeToken(searchParams.get(JWT_TOKEN_QUERY_PARAM));
+}
+
+/** Decode the `uid` claim without verification, to detect a session owner change. */
+export function getJwtUid(token: string): number | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(fromBase64Url(parts[1])) as { uid?: unknown };
+    return typeof payload.uid === 'number' && Number.isSafeInteger(payload.uid) ? payload.uid : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getJwtTokenFromCookie(): string | null {

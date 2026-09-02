@@ -21,7 +21,7 @@ vi.mock('js-cookie', () => ({
     },
   },
 }));
-import { captureJwtTokenFromUrl, clearJwtToken, commitJwtToken, loadStoredJwtToken } from './jwtToken';
+import { captureJwtTokenFromUrl, clearJwtToken, commitJwtToken, getJwtUid, loadStoredJwtToken } from './jwtToken';
 
 describe('JWT storage ownership', () => {
   beforeEach(() => {
@@ -122,6 +122,14 @@ describe('JWT storage ownership', () => {
     expect(window.history.replaceState).toHaveBeenCalled();
   });
 
+  it('reads only safe-integer uid claims', () => {
+    const tokenFor = (payload: unknown) => `header.${btoa(JSON.stringify(payload))}.signature`;
+
+    expect(getJwtUid(tokenFor({ uid: 7 }))).toBe(7);
+    expect(getJwtUid(tokenFor({ uid: 1.5 }))).toBeNull();
+    expect(getJwtUid(tokenFor({ uid: '7' }))).toBeNull();
+    expect(getJwtUid('malformed')).toBeNull();
+  });
   it('rejects empty commits', async () => {
     await expect(commitJwtToken('  ')).rejects.toThrow('empty JWT');
   });

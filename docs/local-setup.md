@@ -217,19 +217,9 @@ Edit `backend/.env`. At minimum set the values below.
 DATABASE_URL=postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat
 ```
 
-### 4.2 Local auth mode (required for easy frontend work)
+### 4.2 JWT signing key
 
-```bash
-AUTH_METHOD=UIDHeader
-```
-
-The value must be exactly `UIDHeader` (case-sensitive). In this mode the API trusts the `X-User-Id` request header when there is no JWT. The Vite **dev** client sends that header automatically (default uid `1`).
-
-> Never use `AUTH_METHOD=UIDHeader` in production.
-
-### 4.3 JWT signing key
-
-Even in UIDHeader mode the backend still requires a JWT key at startup:
+The backend requires a JWT key at startup:
 
 ```bash
 openssl rand -base64 32
@@ -240,6 +230,21 @@ Paste the output into:
 ```bash
 JWT_SIGNING_KEY_BASE64=<paste here>
 ```
+
+### 4.3 Local debug sessions
+
+`cargo run` builds the backend in debug mode, which enables `POST /auth/dev-session` for local development. It issues a JWT for a seeded user; it does not accept an identity header. If you intentionally run a release build locally, set `ENABLE_DEBUG_AUTH=true` to enable this endpoint.
+
+To obtain a token manually for the seeded user, send a valid `X-Client-Id` while creating the session:
+
+```bash
+curl -sS -X POST http://localhost:3000/auth/dev-session \
+  -H 'Content-Type: application/json' \
+  -H 'X-Client-Id: local-dev-client' \
+  -d '{"uid":1}'
+```
+
+The response is `{"token":"<jwt>"}`. Use that value as `Authorization: Bearer <jwt>` for API calls. The Vite development client performs this bootstrap automatically for its configured local uid.
 
 ### 4.4 Web Push (VAPID) keys
 
@@ -315,13 +320,11 @@ The first build downloads crates and can take several minutes. On success you sh
 
 Leave this terminal open. Open a second terminal for the next steps.
 
----
-
 ## 6. Create the initial user and permissions
 
-An empty database has **no users** and **no one assigned** the admin policy. Without these steps the app may “log in” as uid `1` but show username `Unknown`, and creating chats will fail authorization.
+An empty database has **no users** and **no one assigned** the admin policy. Create the seeded user before bootstrapping a local JWT or using the frontend; otherwise the user profile shows as `Unknown` and creating chats will fail authorization.
 
-Identity lives in Discuz-compatible tables (`discuz.common_member`). The frontend defaults to **uid `1`**.
+Identity lives in Discuz-compatible tables (`discuz.common_member`). The frontend defaults to **uid `1`** when it requests its development session.
 
 ### 6.1 Insert a development user
 
@@ -380,9 +383,8 @@ How the pieces connect:
 
 - Dev API calls go to `/_api/...` on the Vite origin.
 - Vite proxies `/_api` → `http://localhost:3000` (override with `API_PROXY_TARGET` in `.env` if needed).
-- In development the client sends `X-User-Id: 1` (unless you change `sessionStorage` key `uid`) and sets the Redux user to `"Development User"`.
-
-That matches `AUTH_METHOD=UIDHeader` on the backend.
+- In development, the client requests `POST /auth/dev-session` for its configured local uid and sends `X-Client-Id` with that bootstrap request.
+- The backend returns a JWT, which the client stores and sends as `Authorization: Bearer <token>` on API calls.
 
 ---
 
@@ -391,10 +393,16 @@ That matches `AUTH_METHOD=UIDHeader` on the backend.
 1. Backend terminal shows requests without panicking.
 2. Frontend loads without a blank error screen.
 3. You can open or create a conversation (needs the policy assignment from §6).
-4. Optional API check (should return JSON with `"username":"devuser"`, not `"Unknown"`):
+4. Optional API check: create a development session, copy its `token`, then use it as a bearer token:
 
 ```bash
-curl -s -H 'X-User-Id: 1' http://localhost:3000/users/me
+curl -sS -X POST http://localhost:3000/auth/dev-session \
+  -H 'Content-Type: application/json' \
+  -H 'X-Client-Id: local-dev-client' \
+  -d '{"uid":1}'
+
+curl -sS -H 'Authorization: Bearer <token from the previous response>' \
+  http://localhost:3000/users/me
 ```
 
 ---
@@ -419,12 +427,11 @@ Debug the backend like any local Rust binary: breakpoints in your IDE, `RUST_LOG
 | Symptom | Likely fix |
 |---------|------------|
 | `docker: command not found` (macOS) | Install/start **Docker Desktop**; reopen Terminal |
-| `Cannot connect to the Docker daemon` (macOS) | Open Docker Desktop and wait until it is fully running |
+| `POST /auth/dev-session` returns `404` | Run `cargo run` (debug builds enable it), or set `ENABLE_DEBUG_AUTH=true` only for a local release build |
 | `docker: permission denied` (Linux) | Re-login after `usermod -aG docker`, or use rootless Docker |
 | `connection refused` on 5432 | `docker compose up -d postgres`; check `docker compose ps` |
 | `password authentication failed` | `DATABASE_URL` must match compose user/password above |
 | Backend exits on missing env | Fill `JWT_SIGNING_KEY_BASE64`, VAPID keys, `S3_BUCKET_NAME`, `AWS_REGION` |
-| `AUTH_METHOD` ignored | Must be exactly `UIDHeader`; typos fall back to JWT-only |
 | Username shows `Unknown` | Missing `discuz.common_member` row for uid `1` |
 | Cannot create chat | Missing `policy_assignments` row for uid `1` → policy `1` |
 | Frontend cannot reach API | Backend not on `:3000`, or wrong `API_PROXY_TARGET` |

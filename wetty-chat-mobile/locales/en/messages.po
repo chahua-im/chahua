@@ -1500,6 +1500,9 @@ msgstr "User blocked"
 msgid "User ID"
 msgstr "User ID"
 
+msgid "User not found"
+msgstr "User not found"
+
 msgid "User unblocked"
 msgstr "User unblocked"
 

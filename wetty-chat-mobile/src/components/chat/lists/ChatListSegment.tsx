@@ -5,7 +5,7 @@ import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { selectPendingIncomingCount } from '@/store/socialSlice';
 import styles from './ChatListSegment.module.scss';
 
-export type ChatListTab = 'messages' | 'groups' | 'friends' | 'threads';
+import type { ChatListTab } from './chatListTabs';
 
 interface ChatListSegmentProps {
   value: ChatListTab;
@@ -31,9 +31,8 @@ function UnreadBadge({ count }: { count: number }) {
 
 /**
  * Second-level navigation over the chat list. The Friends tab requires the
- * friends feature gate and is unavailable in archived chat lists. Pending
- * friend requests surface as a badge on the active Friends tab (overriding
- * the unread count - the request needs attention first).
+ * friends feature gate. Pending friend requests surface as a badge on active
+ * Friends lists (overriding the unread count - the request needs attention first).
  */
 export function ChatListSegment({
   value,
@@ -69,11 +68,11 @@ export function ChatListSegment({
             <UnreadBadge count={groupsUnreadCount} />
           </IonLabel>
         </IonSegmentButton>
-        {friendsEnabled && !archivedMode && (
+        {friendsEnabled && (
           <IonSegmentButton value="friends">
             <IonLabel>
               <Trans>Friends</Trans>
-              {incomingRequestCount > 0 ? (
+              {!archivedMode && incomingRequestCount > 0 ? (
                 <IonBadge mode="ios" color="primary" className={styles.badge}>
                   {formatUnreadBadge(incomingRequestCount)}
                 </IonBadge>

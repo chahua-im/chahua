@@ -137,7 +137,7 @@ impl SubscribeBody {
     responses(
         (status = 201, description = "Subscribed")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_subscribe(
     CurrentUid(uid): CurrentUid,
@@ -298,7 +298,7 @@ pub struct UnsubscribeBody {
     responses(
         (status = 200, description = "Unsubscribed")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_unsubscribe(
     CurrentUid(uid): CurrentUid,
@@ -365,7 +365,7 @@ pub struct SubscriptionStatusQuery {
     responses(
         (status = 200, description = "Subscription status", body = SubscriptionStatusResponse)
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_subscription_status(
     CurrentUid(uid): CurrentUid,

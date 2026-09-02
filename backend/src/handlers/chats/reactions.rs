@@ -129,7 +129,7 @@ fn broadcast_reaction_update(
     responses(
         (status = 200, description = "Reaction details", body = ReactionDetailResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_reaction_details(
     CurrentUid(uid): CurrentUid,
@@ -214,7 +214,7 @@ async fn get_reaction_details(
     responses(
         (status = 204, description = "Reaction added"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn put_reaction(
     CurrentUid(uid): CurrentUid,
@@ -269,7 +269,7 @@ async fn put_reaction(
     responses(
         (status = 204, description = "Reaction removed"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_reaction(
     CurrentUid(uid): CurrentUid,

@@ -48,7 +48,7 @@ struct SavedMessageIdPath {
     responses(
         (status = OK, body = ListSavedMessagesResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn list_saved_messages(
     CurrentUid(uid): CurrentUid,
@@ -73,7 +73,7 @@ async fn list_saved_messages(
     responses(
         (status = OK, body = SavedMessageResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn put_saved_message(
     State(state): State<AppState>,
@@ -106,7 +106,7 @@ async fn put_saved_message(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_saved_message_by_original(
     CurrentUid(uid): CurrentUid,
@@ -130,7 +130,7 @@ async fn delete_saved_message_by_original(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_saved_message_by_id(
     CurrentUid(uid): CurrentUid,

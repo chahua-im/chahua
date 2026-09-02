@@ -76,7 +76,7 @@ pub async fn get_presigned_url(
         (status = 400, description = "Invalid attachment metadata"),
         (status = 413, description = "Attachment exceeds maximum file size")
     ),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn post_upload_url(
     CurrentUid(uid): CurrentUid,
@@ -151,7 +151,7 @@ async fn post_upload_url(
     path = "/config",
     tag = "attachments",
     responses((status = 200, body = AttachmentConfigResponse)),
-    security(("uid_header" = []), ("bearer_jwt" = []))
+    security(("bearer_jwt" = []))
 )]
 async fn get_config(
     CurrentUid(_uid): CurrentUid,

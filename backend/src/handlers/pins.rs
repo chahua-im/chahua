@@ -398,7 +398,7 @@ async fn send_pin_system_message(
     responses(
         (status = OK, body = ListPinsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn list_pins(
     State(state): State<AppState>,
@@ -422,7 +422,7 @@ async fn list_pins(
     responses(
         (status = CREATED, body = PinResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn create_pin(
     State(state): State<AppState>,
@@ -455,7 +455,7 @@ async fn create_pin(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_pin(
     State(state): State<AppState>,
@@ -479,7 +479,7 @@ async fn delete_pin(
     responses(
         (status = OK, body = ListPinsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn list_thread_pins(
     State(state): State<AppState>,
@@ -513,7 +513,7 @@ async fn list_thread_pins(
     responses(
         (status = CREATED, body = PinResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn create_thread_pin(
     State(state): State<AppState>,
@@ -549,7 +549,7 @@ async fn create_thread_pin(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn delete_thread_pin(
     State(state): State<AppState>,

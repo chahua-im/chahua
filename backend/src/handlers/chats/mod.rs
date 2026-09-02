@@ -103,7 +103,7 @@ pub struct ListChatsQuery {
     responses(
         (status = 200, description = "List of chats", body = ListChatsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_chats(
     CurrentUid(uid): CurrentUid,
@@ -376,7 +376,7 @@ pub struct MarkAsReadBody {
     responses(
         (status = 200, description = "Updated read state", body = MarkChatReadStateResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn mark_as_read(
     CurrentUid(uid): CurrentUid,
@@ -427,7 +427,7 @@ pub struct MarkAsUnreadBody {
     responses(
         (status = 200, description = "Updated read state", body = MarkChatReadStateResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn mark_as_unread(
     CurrentUid(uid): CurrentUid,
@@ -509,7 +509,7 @@ async fn mark_as_unread(
     responses(
         (status = 200, description = "Capped chat unread count", body = MarkChatReadStateResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_chat_unread_count(
     CurrentUid(uid): CurrentUid,
@@ -546,7 +546,7 @@ async fn get_chat_unread_count(
     responses(
         (status = 200, description = "Total unread count", body = UnreadCountResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_unread_count(
     CurrentUid(uid): CurrentUid,
@@ -575,9 +575,8 @@ async fn get_unread_count(
     ),
     responses(
         (status = NO_CONTENT),
-        (status = 400, description = "DM chats cannot be archived"),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn archive_chat(
     CurrentUid(uid): CurrentUid,
@@ -588,14 +587,6 @@ async fn archive_chat(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
-
-    let kind: GroupKind = groups::table
-        .find(chat_id)
-        .select(groups::kind)
-        .first(conn)?;
-    if kind == GroupKind::Dm {
-        return Err(AppError::BadRequest("DM chats cannot be archived"));
-    }
 
     diesel::update(
         group_membership::table.filter(
@@ -635,7 +626,7 @@ async fn archive_chat(
     responses(
         (status = NO_CONTENT),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn unarchive_chat(
     CurrentUid(uid): CurrentUid,
