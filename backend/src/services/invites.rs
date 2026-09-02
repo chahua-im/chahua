@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::dto::invites::InviteResponse;
 use crate::errors::AppError;
-use crate::models::{Invite, InviteType, NewInvite};
-use crate::schema::invites;
+use crate::models::{GroupKind, Invite, InviteType, NewInvite};
+use crate::schema::{groups, invites};
 use crate::utils::ids;
 use crate::utils::ids::IdGen;
 
@@ -123,6 +123,17 @@ pub async fn create_invite(
     id_gen: &IdGen,
     input: NewInviteInput,
 ) -> Result<Invite, AppError> {
+    // Single choke point covering the user-facing endpoints and the
+    // service-token external endpoint: no invite may ever target a DM, so
+    // redeeming can never add a third member to one.
+    let kind: GroupKind = groups::table
+        .filter(groups::id.eq(input.chat_id))
+        .select(groups::kind)
+        .first(conn)?;
+    if kind == GroupKind::Dm {
+        return Err(AppError::BadRequest("DM chats cannot have invites"));
+    }
+
     let id = ids::next_id(id_gen).await.map_err(|e| {
         tracing::error!("next_id for invite: {:?}", e);
         AppError::Internal("ID generation failed")

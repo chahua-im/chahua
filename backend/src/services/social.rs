@@ -257,8 +257,7 @@ impl From<DmSendAuthorizationError> for AppError {
 
 /// Gate member-initiated writes (pins, edits, deletions, reactions) for a chat:
 /// regular groups are unaffected; a dead DM (friendship ended or blocked either
-/// way) is rejected. Membership is the caller's responsibility. Callers that
-/// already know the chat is a DM and its peer can use [`require_dm_writable`].
+/// way) is rejected. Membership is the caller's responsibility.
 pub fn require_chat_writable(
     conn: &mut PgConnection,
     chat_id: i64,
@@ -283,8 +282,16 @@ pub fn require_chat_writable(
 /// history readable but accepts no further member-initiated writes: pins,
 /// edits, deletions, and reactions, in addition to the message sends already
 /// blocked by `check_can_dm`. System messages still go through.
-pub fn require_dm_writable(conn: &mut PgConnection, uid: i32, peer: i32) -> Result<(), AppError> {
-    if !are_mutual_friends(conn, uid, peer)? || is_blocked_either_direction(conn, uid, peer)? {
+///
+/// The two causes return distinct messages so users can tell a block apart
+/// from an ended friendship.
+fn require_dm_writable(conn: &mut PgConnection, uid: i32, peer: i32) -> Result<(), AppError> {
+    if is_blocked_either_direction(conn, uid, peer)? {
+        return Err(AppError::Forbidden(
+            "This chat is read-only because a block is in place",
+        ));
+    }
+    if !are_mutual_friends(conn, uid, peer)? {
         return Err(AppError::Forbidden(
             "This chat is read-only because the friendship has ended",
         ));
