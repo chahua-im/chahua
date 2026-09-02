@@ -505,6 +505,9 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
                 fill="solid"
                 color="primary"
                 className={`${styles.sendBtn}${!canSend ? ` ${styles.disabled}` : ''}`}
+                // Keep focus on the textarea so the virtual keyboard stays open
+                // after sending (mousedown would otherwise move focus to the button).
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSend}
                 aria-label={t`Send message`}
                 disabled={!canSend}
