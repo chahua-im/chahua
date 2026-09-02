@@ -20,9 +20,7 @@ interface ReplyPreviewProps {
 export function ReplyPreview({ replyTo, isSent, interactive, onReplyTap }: ReplyPreviewProps) {
   const locale = useSelector(selectEffectiveLocale);
   const isDarkMode = useIsDarkMode();
-  // When the sender name is withheld (DMs), the preview is a plain uncolored strip.
-  const hasName = replyTo.senderName.trim() !== '';
-  const color = !hasName || isSent ? undefined : colorForUser(replyTo.senderName, isDarkMode);
+  const color = isSent ? undefined : colorForUser(replyTo.senderName, isDarkMode);
 
   return (
     <div
@@ -37,11 +35,9 @@ export function ReplyPreview({ replyTo, isSent, interactive, onReplyTap }: Reply
           : undefined
       }
     >
-      {hasName && (
-        <div className={styles.replyPreviewName} style={color ? { color } : undefined}>
-          {replyTo.senderName}
-        </div>
-      )}
+      <div className={styles.replyPreviewName} style={color ? { color } : undefined}>
+        {replyTo.senderName}
+      </div>
       <div className={styles.replyPreviewText}>
         {formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
       </div>
