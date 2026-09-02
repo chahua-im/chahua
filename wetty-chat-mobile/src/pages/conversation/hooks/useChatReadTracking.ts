@@ -16,8 +16,6 @@ interface UseChatReadTrackingArgs {
   threadId?: string;
   lastFullyVisibleMessageId: string | null;
   lastReadMessageId: string | null;
-  initialResumeMessageId: string | null;
-  atBottom: boolean;
   threadLastReadMessageIdRef?: RefObject<string | null>;
 }
 
@@ -27,8 +25,6 @@ export function useChatReadTracking({
   threadId,
   lastFullyVisibleMessageId,
   lastReadMessageId,
-  initialResumeMessageId,
-  atBottom,
   threadLastReadMessageIdRef: providedThreadLastReadMessageIdRef,
 }: UseChatReadTrackingArgs) {
   const dispatch = useDispatch();
@@ -122,7 +118,6 @@ export function useChatReadTracking({
 
   useEffect(() => {
     if (threadId || !chatId) return;
-    if (initialResumeMessageId == null && lastReadMessageId == null && atBottom) return;
 
     if (readRequestTimerRef.current) {
       clearTimeout(readRequestTimerRef.current);
@@ -158,15 +153,7 @@ export function useChatReadTracking({
         readRequestTimerRef.current = null;
       }
     };
-  }, [
-    atBottom,
-    chatId,
-    flushPendingReadTarget,
-    initialResumeMessageId,
-    lastFullyVisibleMessageId,
-    lastReadMessageId,
-    threadId,
-  ]);
+  }, [chatId, flushPendingReadTarget, lastFullyVisibleMessageId, lastReadMessageId, threadId]);
 
   useEffect(() => {
     if (!threadId || !chatId) return;
