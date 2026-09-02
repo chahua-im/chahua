@@ -7,6 +7,18 @@ import styles from './ChatListSegment.module.scss';
 
 export type ChatListTab = 'messages' | 'groups' | 'friends' | 'threads';
 
+export function normalizeChatListTab(tab?: string): ChatListTab {
+  switch (tab) {
+    case 'threads':
+    case 'groups':
+    case 'messages':
+    case 'friends':
+      return tab;
+    default:
+      return 'messages';
+  }
+}
+
 interface ChatListSegmentProps {
   value: ChatListTab;
   onChange: (tab: ChatListTab) => void;
@@ -31,9 +43,8 @@ function UnreadBadge({ count }: { count: number }) {
 
 /**
  * Second-level navigation over the chat list. The Friends tab requires the
- * friends feature gate and is unavailable in archived chat lists. Pending
- * friend requests surface as a badge on the active Friends tab (overriding
- * the unread count - the request needs attention first).
+ * friends feature gate. Pending friend requests surface as a badge on active
+ * Friends lists (overriding the unread count - the request needs attention first).
  */
 export function ChatListSegment({
   value,
@@ -69,11 +80,11 @@ export function ChatListSegment({
             <UnreadBadge count={groupsUnreadCount} />
           </IonLabel>
         </IonSegmentButton>
-        {friendsEnabled && !archivedMode && (
+        {friendsEnabled && (
           <IonSegmentButton value="friends">
             <IonLabel>
               <Trans>Friends</Trans>
-              {incomingRequestCount > 0 ? (
+              {!archivedMode && incomingRequestCount > 0 ? (
                 <IonBadge mode="ios" color="primary" className={styles.badge}>
                   {formatUnreadBadge(incomingRequestCount)}
                 </IonBadge>
