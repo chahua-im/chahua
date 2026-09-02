@@ -1710,6 +1710,8 @@ export function ChatVirtualScroll({
     }
   }, [
     rowKeys,
+    keyToIndex,
+    rows,
     rowKeys.length,
     renderTick,
     cancelBatch,
