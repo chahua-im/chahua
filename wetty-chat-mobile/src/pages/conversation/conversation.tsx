@@ -2,18 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IonContent, IonFab, IonFabButton, IonIcon, IonPage, useIonAlert, useIonToast } from '@ionic/react';
 import { useHistory, useLocation, useParams } from 'react-router-dom';
 import { chevronDown } from 'ionicons/icons';
-import { useSelector, useDispatch } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { getMessage, type MessageResponse, type User } from '@/api/messages';
 import { selectCurrentUser } from '@/store/userSlice';
-import type { AppDispatch, RootState } from '@/store';
-import {
-  fetchBlocks,
-  fetchFriends,
-  selectBlocksLoaded,
-  selectFriendsLoaded,
-  selectIsBlocked,
-  selectIsFriend,
-} from '@/store/socialSlice';
 import { ChatVirtualScroll } from '@/components/chat/virtualScroll/ChatVirtualScroll';
 import type { ChatRow } from '@/components/chat/virtualScroll/types';
 import { type MessageComposeBarHandle } from '@/components/chat/compose/MessageComposeBar';
@@ -31,6 +22,7 @@ import { ConversationFooter } from './ConversationFooter';
 import { ConversationHeader } from './ConversationHeader';
 import { ConversationOverlayHost } from './ConversationOverlayHost';
 import { useChatMetadata } from './hooks/useChatMetadata';
+import { useDeadDm } from '@/hooks/useDeadDm';
 import { useChatPins } from './hooks/useChatPins';
 import { type ChatMessageEditSession, useChatMessageSender } from './hooks/useChatMessageSender';
 import { useChatReadTracking } from './hooks/useChatReadTracking';
@@ -58,9 +50,6 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
 
   // Feature Gates
   const savedMessagesEnabled = useFeatureGate('savedMessages');
-  const friendsEnabled = useFeatureGate('friends');
-  const blockEnabled = useFeatureGate('userBlock');
-  const dispatch = useDispatch<AppDispatch>();
 
   // Global states
   const locale = useSelector(selectEffectiveLocale);
@@ -76,27 +65,11 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   const { name, isAdmin, isMuted, lastReadMessageId, unreadCount, isDm, peer } = useChatMetadata({ chatId, threadId });
   const chatName = threadId ? t`Thread` : (name ?? t`Loading...`);
 
-  // DM compose is read-only when the peer is no longer a friend or has been
-  // blocked (Chahua-side). Lazily hydrate the social lists so the affordance
-  // reflects server truth even when entering a DM without visiting Contacts.
-  const peerUid = peer?.uid ?? 0;
-  const isFriend = useSelector((state: RootState) =>
-    friendsEnabled && peerUid > 0 ? selectIsFriend(state, peerUid) : false,
-  );
-  const isBlocked = useSelector((state: RootState) =>
-    blockEnabled && peerUid > 0 ? selectIsBlocked(state, peerUid) : false,
-  );
-  const friendsLoaded = useSelector(selectFriendsLoaded);
-  const blocksLoaded = useSelector(selectBlocksLoaded);
-
-  useEffect(() => {
-    if (!isDm || !peer) return;
-    if (friendsEnabled && !friendsLoaded) dispatch(fetchFriends());
-    if (blockEnabled && !blocksLoaded) dispatch(fetchBlocks());
-  }, [isDm, peer, friendsEnabled, blockEnabled, friendsLoaded, blocksLoaded, dispatch]);
-
-  const dmComposeDisabled = isDm && !!peer && ((blockEnabled && isBlocked) || (friendsEnabled && !isFriend));
-  const composeDisabledReason = isBlocked
+  // DM is read-only (compose, pins, reactions, edits) when the peer is no
+  // longer a friend or has been blocked; the hook lazily hydrates the social
+  // lists so the affordance reflects server truth even on a cold DM entry.
+  const { deadDm, blockedCause } = useDeadDm({ isDm, peerUid: peer?.uid });
+  const composeDisabledReason = blockedCause
     ? t`You blocked this user. Unblock to send messages.`
     : t`You are no longer friends with this user.`;
   const formatDateSeparatorForLocale = useCallback(
@@ -294,7 +267,11 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     }
   }, [replyingTo, editingSession]);
 
-  const { quickReactionEmojis, handleReactionToggle } = useMessageReactions({ chatId, showToast });
+  const { quickReactionEmojis, handleReactionToggle } = useMessageReactions({
+    chatId,
+    showToast,
+    disabled: deadDm,
+  });
 
   // Strip the #msg= hash after it has been captured into initialResumeMessageId
   // so it doesn't linger in the URL bar or get re-consumed on re-render.
@@ -393,6 +370,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     currentUserId: currentUser.uid,
     isAdmin,
     isDm,
+    deadDm,
     threadId,
     pins,
     savedMessagesEnabled,
@@ -566,8 +544,8 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
           editing={editingSession ?? undefined}
           onCancelEdit={() => setEditingSession(null)}
           onRequestEditLastMessage={requestEditLastOwnMessage}
-          composeDisabled={dmComposeDisabled}
-          composeDisabledReason={dmComposeDisabled ? composeDisabledReason : undefined}
+          composeDisabled={deadDm}
+          composeDisabledReason={deadDm ? composeDisabledReason : undefined}
         />
         <ConversationOverlayHost
           chatId={chatId}

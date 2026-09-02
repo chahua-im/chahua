@@ -46,6 +46,7 @@ interface UseMessageOverlayActionsArgs {
   currentUserId: number | null;
   isAdmin: boolean;
   isDm: boolean;
+  deadDm: boolean;
   threadId?: string;
   pins: PinResponse[];
   savedMessagesEnabled: boolean;
@@ -63,6 +64,7 @@ export function useMessageOverlayActions({
   currentUserId,
   isAdmin,
   isDm,
+  deadDm,
   threadId,
   pins,
   savedMessagesEnabled,
@@ -90,6 +92,7 @@ export function useMessageOverlayActions({
       isOwn,
       isAdmin,
       isDm,
+      deadDm,
       isThreadView: threadId != null,
       savedMessagesEnabled,
       isPinned: existingPin != null,
@@ -291,6 +294,7 @@ export function useMessageOverlayActions({
     dispatch,
     isAdmin,
     isDm,
+    deadDm,
     message,
     onEdit,
     onOpenReactionDetails,

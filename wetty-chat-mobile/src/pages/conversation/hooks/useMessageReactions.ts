@@ -10,9 +10,11 @@ import { addRecentReaction, selectPinnedReactions, selectRecentReactions } from 
 interface UseMessageReactionsArgs {
   chatId: string;
   showToast: (text: string, duration?: number) => void;
+  /** When true (e.g. dead DM), reaction toggling is a no-op. */
+  disabled?: boolean;
 }
 
-export function useMessageReactions({ chatId, showToast }: UseMessageReactionsArgs) {
+export function useMessageReactions({ chatId, showToast, disabled = false }: UseMessageReactionsArgs) {
   const dispatch = useDispatch();
   const pinnedReactions = useSelector((state: RootState) => selectPinnedReactions(state));
   const recentReactions = useSelector((state: RootState) => selectRecentReactions(state));
@@ -26,6 +28,7 @@ export function useMessageReactions({ chatId, showToast }: UseMessageReactionsAr
 
   const handleReactionToggle = useCallback(
     (message: MessageResponse, emoji: string, currentlyReacted: boolean) => {
+      if (disabled) return;
       const existing = message.reactions ?? [];
       let optimistic: typeof existing;
 
@@ -57,7 +60,7 @@ export function useMessageReactions({ chatId, showToast }: UseMessageReactionsAr
 
       dispatch(reactionsUpdated({ chatId, messageId: message.id, reactions: optimistic }));
     },
-    [chatId, dispatch, showToast],
+    [chatId, dispatch, disabled, showToast],
   );
 
   return {

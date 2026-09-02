@@ -11,6 +11,7 @@ const baseInput: OverlayActionPolicyInput = {
   isOwn: false,
   isAdmin: false,
   isDm: false,
+  deadDm: false,
   isThreadView: false,
   savedMessagesEnabled: true,
   isPinned: false,
@@ -97,6 +98,26 @@ describe('overlay action policy', () => {
       'copy',
       'save',
       'reaction-details',
+    ]);
+  });
+
+  it('reduces dead DM actions to read-only affordances', () => {
+    expect(keys({ isDm: true, deadDm: true, isOwn: true, hasReactions: true })).toEqual([
+      'copy',
+      'save',
+      'reaction-details',
+    ]);
+  });
+
+  it('keeps group chat actions unaffected by deadDm', () => {
+    expect(keys({ isAdmin: true, deadDm: true })).toEqual([
+      'reply',
+      'thread',
+      'pin',
+      'copy',
+      'save',
+      'copy-link',
+      'delete',
     ]);
   });
 

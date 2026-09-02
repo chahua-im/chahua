@@ -24,6 +24,7 @@ use crate::{
 };
 
 use crate::services::messages::load_usernames_by_uids;
+use crate::services::social;
 
 fn validate_emoji(input: &str) -> Result<String, AppError> {
     if input.is_empty() {
@@ -225,6 +226,7 @@ async fn put_reaction(
     let conn = &mut *conn;
     let emoji = validate_emoji(&emoji)?;
     check_membership(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid)?;
 
     // Verify message exists and belongs to this chat
     let _message: Message = messages::table
@@ -280,6 +282,7 @@ async fn delete_reaction(
     let conn = &mut *conn;
     let emoji = validate_emoji(&emoji)?;
     check_membership(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid)?;
 
     // Verify message exists and is not deleted (no reaction removal on deleted messages)
     let _message: Message = messages::table

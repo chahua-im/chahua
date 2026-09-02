@@ -37,6 +37,7 @@ use crate::services::messages::{
     attach_metadata, authorize_message_send, extract_mention_uids, parse_attachment_ids,
     send_prepared_message, validate_message, PreparedMessageSend, SendMessageOutcome,
 };
+use crate::services::social;
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesQuery {
@@ -829,6 +830,7 @@ async fn patch_message(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid)?;
 
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
     let now = Utc::now();
@@ -963,6 +965,7 @@ async fn delete_message(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid)?;
 
     // Verify message exists and belongs to the user
     let message: Message = messages::table
