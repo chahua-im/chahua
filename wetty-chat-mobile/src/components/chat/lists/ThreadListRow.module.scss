@@ -159,6 +159,7 @@
 .chatsListBadge {
   display: flex;
   flex-direction: column;
-  flex-grow: 1;
+  align-items: flex-end;
+  min-height: 15px;
   font-size: 12px;
 }
