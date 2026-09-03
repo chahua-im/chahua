@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { t } from '@lingui/core/macro';
 import { useDispatch, useSelector } from 'react-redux';
 import { deleteReaction, putReaction, type MessageResponse } from '@/api/messages';
+import { apiErrorMessage } from '@/api/errors';
 import { MAX_PINNED_REACTIONS, MAX_REACTIONS_PER_USER_PER_MESSAGE } from '@/constants/emojiAndStickers';
 import type { RootState } from '@/store';
 import { reactionsUpdated } from '@/store/messageEvents';
@@ -10,9 +11,11 @@ import { addRecentReaction, selectPinnedReactions, selectRecentReactions } from 
 interface UseMessageReactionsArgs {
   chatId: string;
   showToast: (text: string, duration?: number) => void;
+  /** When true (e.g. dead DM), reaction toggling is a no-op. */
+  disabled?: boolean;
 }
 
-export function useMessageReactions({ chatId, showToast }: UseMessageReactionsArgs) {
+export function useMessageReactions({ chatId, showToast, disabled = false }: UseMessageReactionsArgs) {
   const dispatch = useDispatch();
   const pinnedReactions = useSelector((state: RootState) => selectPinnedReactions(state));
   const recentReactions = useSelector((state: RootState) => selectRecentReactions(state));
@@ -26,6 +29,7 @@ export function useMessageReactions({ chatId, showToast }: UseMessageReactionsAr
 
   const handleReactionToggle = useCallback(
     (message: MessageResponse, emoji: string, currentlyReacted: boolean) => {
+      if (disabled) return;
       const existing = message.reactions ?? [];
       let optimistic: typeof existing;
 
@@ -35,7 +39,10 @@ export function useMessageReactions({ chatId, showToast }: UseMessageReactionsAr
             reaction.emoji === emoji ? { ...reaction, count: reaction.count - 1, reactedByMe: false } : reaction,
           )
           .filter((reaction) => reaction.count > 0);
-        deleteReaction(chatId, message.id, emoji).catch(() => {});
+        deleteReaction(chatId, message.id, emoji).catch((err: unknown) => {
+          dispatch(reactionsUpdated({ chatId, messageId: message.id, reactions: existing }));
+          showToast(apiErrorMessage(err, t`Failed to remove reaction`), 2000);
+        });
       } else {
         const myReactionsCount = existing.filter((reaction) => reaction.reactedByMe).length;
         if (myReactionsCount >= MAX_REACTIONS_PER_USER_PER_MESSAGE) {
@@ -52,12 +59,15 @@ export function useMessageReactions({ chatId, showToast }: UseMessageReactionsAr
           optimistic = [...existing, { emoji, count: 1, reactedByMe: true }];
         }
         dispatch(addRecentReaction(emoji));
-        putReaction(chatId, message.id, emoji).catch(() => {});
+        putReaction(chatId, message.id, emoji).catch((err: unknown) => {
+          dispatch(reactionsUpdated({ chatId, messageId: message.id, reactions: existing }));
+          showToast(apiErrorMessage(err, t`Failed to react to message`), 2000);
+        });
       }
 
       dispatch(reactionsUpdated({ chatId, messageId: message.id, reactions: optimistic }));
     },
-    [chatId, dispatch, showToast],
+    [chatId, dispatch, disabled, showToast],
   );
 
   return {

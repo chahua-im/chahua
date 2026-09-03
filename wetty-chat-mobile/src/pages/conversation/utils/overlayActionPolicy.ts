@@ -21,6 +21,9 @@ export interface OverlayActionPolicyInput {
   hasThreadInfo: boolean;
   isOwn: boolean;
   isAdmin: boolean;
+  isDm: boolean;
+  /** Dead DM (friendship ended/blocked): history is readable but no member writes. */
+  deadDm: boolean;
   isThreadView: boolean;
   savedMessagesEnabled: boolean;
   isPinned: boolean;
@@ -36,18 +39,23 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   const audioMessage = input.messageType === 'audio';
   const stickerMessage = input.messageType === 'sticker';
   const isDeletableAction = !input.isDeleted && !input.isOptimistic;
+  // A dead DM only offers read-only affordances (copy, details). Only DMs
+  // can be dead, so the flag is ignored for regular groups.
+  const canWrite = !(input.isDm && input.deadDm);
   const actions: OverlayActionPolicyItem[] = [];
 
   // 1. Reply
-  actions.push({ key: 'reply' });
+  if (canWrite) {
+    actions.push({ key: 'reply' });
+  }
 
   // 2. Thread
-  if (input.messageType === 'text' && !input.isThreadView && !input.hasThreadInfo && !input.isDeleted) {
+  if (canWrite && input.messageType === 'text' && !input.isThreadView && !input.hasThreadInfo && !input.isDeleted) {
     actions.push({ key: 'thread' });
   }
 
   // 3. Pin
-  if (!input.isDeleted && input.isAdmin) {
+  if (canWrite && !input.isDeleted && (input.isAdmin || input.isDm)) {
     actions.push({ key: 'pin', pinState: input.isPinned ? 'pinned' : 'unpinned' });
   }
 
@@ -57,7 +65,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 5. Edit
-  if (input.isOwn && !input.isDeleted && !audioMessage && !stickerMessage && input.messageType !== 'file') {
+  if (canWrite && input.isOwn && !input.isDeleted && !audioMessage && !stickerMessage && input.messageType !== 'file') {
     actions.push({ key: 'edit' });
   }
 
@@ -69,10 +77,12 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 7. Copy-link
-  actions.push({ key: 'copy-link' });
+  if (!input.isDm) {
+    actions.push({ key: 'copy-link' });
+  }
 
   // 8. Delete
-  if ((input.isOwn || input.isAdmin) && !input.isDeleted) {
+  if (canWrite && (input.isOwn || input.isAdmin) && !input.isDeleted) {
     actions.push({ key: 'delete' });
   }
 

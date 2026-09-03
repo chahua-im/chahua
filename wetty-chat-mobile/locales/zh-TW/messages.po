@@ -518,6 +518,9 @@ msgstr "開啟連結失敗"
 msgid "Failed to pin message"
 msgstr "釘選訊息失敗"
 
+msgid "Failed to react to message"
+msgstr "新增回應失敗"
+
 msgid "Failed to refresh chats"
 msgstr "重新整理聊天失敗"
 
@@ -526,6 +529,9 @@ msgstr "拒絕請求失敗"
 
 msgid "Failed to remove member"
 msgstr "移除成員失敗"
+
+msgid "Failed to remove reaction"
+msgstr "移除回應失敗"
 
 msgid "Failed to remove sticker"
 msgstr "移除貼紙失敗"
@@ -985,6 +991,9 @@ msgstr "釘選"
 
 msgid "Pin Message"
 msgstr "釘選訊息"
+
+msgid "Pin this message for both of you?"
+msgstr "確定要為你們雙方釘選此訊息嗎？"
 
 msgid "Pin this message in the group?"
 msgstr "確定要釘選此訊息嗎？"
