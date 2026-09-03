@@ -182,15 +182,20 @@ const threadsSlice = createSlice({
       }
     },
     incrementThreadUnreadReactions(state, action: PayloadAction<{ threadRootId: string; messageId?: string }>) {
-      const thread = state.items.find((t) => t.threadRootMessage.id === action.payload.threadRootId);
-      if (thread) {
-        thread.unreadReactions = (thread.unreadReactions ?? 0) + 1;
-      }
       const tid = action.payload.threadRootId;
       const next = applyIncomingId(
         { ids: state.unreadReactionIdsByThread[tid], status: state.unreadReactionIdsStatusByThread[tid] },
         action.payload.messageId,
       );
+      // One message counts as one unread unit however many reactions it gains
+      // (server counts DISTINCT messages); setThreadReadState reconciles when the cache isn't ready.
+      if (next.alreadyPresent) {
+        return;
+      }
+      const thread = state.items.find((t) => t.threadRootMessage.id === tid);
+      if (thread) {
+        thread.unreadReactions = (thread.unreadReactions ?? 0) + 1;
+      }
       state.unreadReactionIdsByThread[tid] = next.ids;
       if (next.status !== undefined) {
         state.unreadReactionIdsStatusByThread[tid] = next.status;
