@@ -73,6 +73,7 @@ import { buildResumeHash } from '@/types/conversationNavigation';
 import { CHAT_LIST_REFRESH_MIN_DURATION_MS } from '@/constants/chatTiming';
 import { ChatListSegment } from '@/components/chat/lists/ChatListSegment';
 import type { ChatListTab } from '@/components/chat/lists/chatListTabs';
+import { hasUnreadTabBadge, isChatMuted } from '@/components/chat/lists/chatListBadges';
 import { ThreadListRow } from '@/components/chat/lists/ThreadListRow';
 import { compareMessageOrder, isOptimisticMessageId } from '@/store/messageProjection';
 import type { ChatTimelineState } from '@/store/messages/types';
@@ -106,11 +107,6 @@ function formatLastActivity(isoString: string | null, locale: string): string {
   }
 
   return Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
-}
-
-function isChatMuted(chat: ChatListEntry): boolean {
-  if (!chat.mutedUntil) return false;
-  return new Date(chat.mutedUntil) > new Date();
 }
 
 function getMessagePreview(message: MessagePreview | null, locale: string, showSender: boolean): ReactNode {
@@ -218,8 +214,14 @@ export function ChatList({
   const threads = archivedMode ? archivedThreads : activeThreads;
   const groupChats = useMemo(() => chats.filter((c) => c.kind !== 'dm'), [chats]);
   const friendChats = useMemo(() => chats.filter((c) => c.kind === 'dm'), [chats]);
-  const groupChatsWithUnread = groupChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
-  const friendChatsWithUnread = friendChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
+  // Muted chats keep their grey inline badge but don't light up the blue
+  // category tab badge; archived lists keep counting muted unreads.
+  const countsTowardTabBadge = useCallback(
+    (chat: ChatListEntry) => hasUnreadTabBadge(chat, { includeMuted: archivedMode }),
+    [archivedMode],
+  );
+  const groupChatsWithUnread = groupChats.filter(countsTowardTabBadge).length;
+  const friendChatsWithUnread = friendChats.filter(countsTowardTabBadge).length;
 
   const updateAppBadge = useCallback(async () => {
     if (!archivedMode) {
