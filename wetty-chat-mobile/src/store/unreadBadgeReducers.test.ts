@@ -100,6 +100,22 @@ describe('chatsSlice unread reactions', () => {
     expect(state.byId['c1'].liveProjection?.unreadReactionIdsStatus).toBe('idle');
   });
 
+  it('aggregates per message: another reaction on an already-tracked message keeps the count', () => {
+    let state = chatsReducer(undefined, setChatsList({ chats: [chatEntry({ unreadReactions: 1 })], nextCursor: null }));
+    state = chatsReducer(state, setChatUnreadReactionIdsStatus({ chatId: 'c1', status: 'loading' }));
+    state = chatsReducer(state, setChatUnreadReactionIds({ chatId: 'c1', ids: ['30'] }));
+
+    // Second (or Nth) reaction on the same message — the server counts DISTINCT messages.
+    state = chatsReducer(state, incrementChatUnreadReactions({ chatId: 'c1', messageId: '30' }));
+    expect(selectChatUnreadReactions(unreadState(state), 'c1')).toBe(1);
+    expect(state.byId['c1'].liveProjection?.unreadReactionIds).toEqual(['30']);
+
+    // A different message still bumps.
+    state = chatsReducer(state, incrementChatUnreadReactions({ chatId: 'c1', messageId: '40' }));
+    expect(selectChatUnreadReactions(unreadState(state), 'c1')).toBe(2);
+    expect(state.byId['c1'].liveProjection?.unreadReactionIds).toEqual(['40', '30']);
+  });
+
   it('marks chat read: counts and caches reset to zero', () => {
     let state = chatsReducer(undefined, setChatsList({ chats: [chatEntry({ unreadReactions: 3 })], nextCursor: null }));
     state = chatsReducer(state, setChatReadState({ chatId: 'c1', lastReadMessageId: '40' }));
@@ -134,6 +150,17 @@ describe('threadsSlice unread reactions', () => {
 
     expect(selectThreadUnreadReactions(asRootState(chatsReducer(undefined, { type: '@@init' }), state), 't9')).toBe(2);
     expect(state.unreadReactionIdsByThread['t9']).toEqual(['40']);
+  });
+
+  it('aggregates per message: another reaction on an already-tracked message keeps the count', () => {
+    let state = threadsWith({
+      unreadReactionIdsStatusByThread: { t9: 'ready' },
+      unreadReactionIdsByThread: { t9: ['30'] },
+    });
+    state = threadsReducer(state, incrementThreadUnreadReactions({ threadRootId: 't9', messageId: '30' }));
+
+    expect(selectThreadUnreadReactions(asRootState(chatsReducer(undefined, { type: '@@init' }), state), 't9')).toBe(1);
+    expect(state.unreadReactionIdsByThread['t9']).toEqual(['30']);
   });
 
   it('marks thread read: count and id cache reset', () => {

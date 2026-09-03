@@ -442,6 +442,11 @@ const chatsSlice = createSlice({
         { ids: current.unreadReactionIds, status: current.unreadReactionIdsStatus },
         action.payload.messageId,
       );
+      // One message counts as one unread unit however many reactions it gains
+      // (server counts DISTINCT messages); snapshots reconcile when the cache isn't ready.
+      if (next.alreadyPresent) {
+        return;
+      }
       const nextLive = {
         ...entry.liveProjection,
         unreadReactions: (current.unreadReactions ?? 0) + 1,
