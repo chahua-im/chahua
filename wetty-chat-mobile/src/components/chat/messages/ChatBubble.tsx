@@ -150,6 +150,7 @@ export function ChatBubble(props: ChatBubbleProps) {
 
     if (onLongPress) {
       longPressTimer.current = setTimeout(() => {
+        longPressTimer.current = null;
         if (bubbleRef.current) {
           onLongPress(bubbleRef.current.getBoundingClientRect(), {
             x: startX.current,
@@ -207,6 +208,13 @@ export function ChatBubble(props: ChatBubbleProps) {
     setOffset(0);
   }
 
+  function onTouchCancel() {
+    clearLongPress();
+    if (!swiping.current) return;
+    setAnimating(true);
+    setOffset(0);
+  }
+
   function handleContextMenu(e: React.MouseEvent) {
     if (onLongPress && bubbleRef.current) {
       e.preventDefault();
@@ -216,6 +224,16 @@ export function ChatBubble(props: ChatBubbleProps) {
       });
     }
   }
+
+  // A pending long-press timer must not fire after the bubble is gone.
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
+  }, []);
 
   const progress = Math.min(offset / SWIPE_THRESHOLD, 1);
   // Fill only starts after 50% of the threshold — maps progress [0.5,1] → [0,1]
@@ -289,6 +307,7 @@ export function ChatBubble(props: ChatBubbleProps) {
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
+          onTouchCancel={onTouchCancel}
           onContextMenu={handleContextMenu}
           onTransitionEnd={() => setAnimating(false)}
         >

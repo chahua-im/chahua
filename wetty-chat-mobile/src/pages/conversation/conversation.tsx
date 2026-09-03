@@ -36,6 +36,7 @@ import { type ChatMessageEditSession, useChatMessageSender } from './hooks/useCh
 import { useChatReadTracking } from './hooks/useChatReadTracking';
 import { useConversationTimeline } from './hooks/useConversationTimeline';
 import { useKeyboardViewport } from './hooks/useKeyboardViewport';
+import { useMessageOverlayCoordinator } from './hooks/useMessageOverlayCoordinator';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { useMessageOverlayActions } from './hooks/useMessageOverlayActions';
 import { useMessageReactions } from './hooks/useMessageReactions';
@@ -189,20 +190,15 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   const [editingSession, setEditingSession] = useState<ChatMessageEditSession | null>(null);
   const { handleComposeFocusChange, isKeyboardOpen, keyboardFullyClosed, pageStyle } = useKeyboardViewport(isDesktop);
 
-  const [overlayMessage, setOverlayMessage] = useState<{
-    message: MessageResponse;
-    sourceRect: DOMRect;
-    interactionPos?: { x: number; y: number };
-  } | null>(null);
+  const dismissKeyboard = useCallback(() => {
+    composeBarRef.current?.blurInput();
+  }, []);
 
-  // When a long-press happens while the keyboard is open we defer showing the
-  // overlay until the keyboard has fully closed, while preserving the press-time
-  // rect so the menu stays anchored to the originally pressed message.
-  const deferredOverlayRef = useRef<{
-    message: MessageResponse;
-    sourceRect: DOMRect;
-    interactionPos?: { x: number; y: number };
-  } | null>(null);
+  const { overlayMessage, requestOverlay, closeOverlay } = useMessageOverlayCoordinator({
+    isKeyboardOpen,
+    keyboardFullyClosed,
+    dismissKeyboard,
+  });
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -220,14 +216,6 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
       });
     };
   }, [chatId, storeChatId, threadId, location.state]);
-
-  // When the keyboard finishes closing after a deferred long-press, show the overlay.
-  useEffect(() => {
-    if (!keyboardFullyClosed || !deferredOverlayRef.current) return;
-    const { message, sourceRect, interactionPos } = deferredOverlayRef.current;
-    deferredOverlayRef.current = null;
-    setOverlayMessage({ message, sourceRect, interactionPos });
-  }, [keyboardFullyClosed]);
 
   // Auto-redirect from thread view when the root message and all replies are deleted.
   // When a deleted root loses its last reply, threadInfo is cleared → the message is
@@ -362,18 +350,9 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
 
   const onClickChatItem = useCallback(
     (msg: MessageResponse, sourceRect: DOMRect, interactionPos?: { x: number; y: number }) => {
-      if (isKeyboardOpen) {
-        // Defer: dismiss keyboard now, then show the overlay after close while
-        // preserving the original press-time source rect.
-        deferredOverlayRef.current = { message: msg, sourceRect, interactionPos };
-        composeBarRef.current?.blurInput();
-        return;
-      }
-
-      deferredOverlayRef.current = null;
-      setOverlayMessage({ message: msg, sourceRect, interactionPos });
+      requestOverlay({ message: msg, sourceRect, interactionPos });
     },
-    [isKeyboardOpen],
+    [requestOverlay],
   );
 
   const handleSelectThread = useCallback(
@@ -445,11 +424,6 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     },
     [chatId, messageLookup],
   );
-
-  const handleCloseOverlay = useCallback(() => {
-    deferredOverlayRef.current = null;
-    setOverlayMessage(null);
-  }, []);
 
   const renderRow = useCallback(
     (row: ChatRow) => {
@@ -588,7 +562,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
           overlayActions={overlayActions}
           quickReactionEmojis={quickReactionEmojis}
           onReactionToggle={handleReactionToggle}
-          onCloseOverlay={handleCloseOverlay}
+          onCloseOverlay={closeOverlay}
         />
       </div>
     </ChatContext.Provider>
