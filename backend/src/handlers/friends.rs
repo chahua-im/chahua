@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
 };
 use diesel::PgConnection;
@@ -33,6 +33,11 @@ use crate::AppState;
 
 const MAX_FRIEND_REQUEST_MESSAGE_CHARS: usize = 200;
 const MAX_FRIEND_VERIFICATION_QUESTION_CHARS: usize = 100;
+
+#[derive(Deserialize)]
+struct ListFriendRequestsQuery {
+    status: Option<FriendRequestStatus>,
+}
 
 fn validate_friend_request_message(message: Option<&str>) -> Result<(), AppError> {
     if message.is_some_and(|value| value.chars().count() > MAX_FRIEND_REQUEST_MESSAGE_CHARS) {
@@ -336,16 +341,20 @@ async fn count_pending_incoming_requests(
     tag = "friends",
     responses((status = 200, description = "Friend request history in both directions, newest first", body = ListFriendRequestHistoryResponse)),
     security(("bearer_jwt" = []), ("service_token_bearer" = [])),
-    params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
+    params(
+        ("status" = Option<FriendRequestStatus>, Query, description = "Filter by request status"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
+    )
 )]
 async fn list_friend_request_history(
     principal: Principal,
     State(state): State<AppState>,
     mut conn: DbConn,
+    Query(query): Query<ListFriendRequestsQuery>,
 ) -> Result<Json<ListFriendRequestHistoryResponse>, AppError> {
     let conn = &mut *conn;
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
-    let rows = social::list_friend_request_history(conn, uid)?;
+    let rows = social::list_friend_request_history(conn, uid, query.status)?;
     let directions: Vec<FriendRequestDirection> = rows
         .iter()
         .map(|row| {
@@ -515,9 +524,11 @@ pub fn router() -> OpenApiRouter<AppState> {
 mod tests {
     use super::{
         validate_friend_request_message, validate_friend_verification_question,
-        MAX_FRIEND_REQUEST_MESSAGE_CHARS, MAX_FRIEND_VERIFICATION_QUESTION_CHARS,
+        ListFriendRequestsQuery, MAX_FRIEND_REQUEST_MESSAGE_CHARS,
+        MAX_FRIEND_VERIFICATION_QUESTION_CHARS,
     };
     use crate::errors::AppError;
+    use crate::models::FriendRequestStatus;
 
     fn assert_character_limit(
         validator: fn(Option<&str>) -> Result<(), AppError>,
@@ -548,5 +559,13 @@ mod tests {
             MAX_FRIEND_VERIFICATION_QUESTION_CHARS,
             "Friend verification question must not exceed 100 characters",
         );
+    }
+
+    #[test]
+    fn friend_request_status_query_deserializes() {
+        let query: ListFriendRequestsQuery =
+            serde_json::from_value(serde_json::json!({ "status": "pending" })).unwrap();
+
+        assert_eq!(query.status, Some(FriendRequestStatus::Pending));
     }
 }

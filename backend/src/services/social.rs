@@ -711,13 +711,19 @@ pub async fn resolve_friend_request(
     })
 }
 
-/// List all friend request history directed at `uid`, newest first.
+/// List incoming friend requests, optionally filtered by status, newest first.
 pub fn list_incoming_request_history(
     conn: &mut PgConnection,
     uid: i32,
+    status: Option<FriendRequestStatus>,
 ) -> QueryResult<Vec<FriendRequest>> {
-    friend_requests::table
+    let mut query = friend_requests::table
         .filter(friend_requests::to_uid.eq(uid))
+        .into_boxed();
+    if let Some(status) = status {
+        query = query.filter(friend_requests::status.eq(status));
+    }
+    query
         .order((
             friend_requests::created_at.desc(),
             friend_requests::id.desc(),
@@ -726,13 +732,19 @@ pub fn list_incoming_request_history(
         .load::<FriendRequest>(conn)
 }
 
-/// List all friend request history sent by `uid`, newest first.
+/// List outgoing friend requests, optionally filtered by status, newest first.
 pub fn list_outgoing_request_history(
     conn: &mut PgConnection,
     uid: i32,
+    status: Option<FriendRequestStatus>,
 ) -> QueryResult<Vec<FriendRequest>> {
-    friend_requests::table
+    let mut query = friend_requests::table
         .filter(friend_requests::from_uid.eq(uid))
+        .into_boxed();
+    if let Some(status) = status {
+        query = query.filter(friend_requests::status.eq(status));
+    }
+    query
         .order((
             friend_requests::created_at.desc(),
             friend_requests::id.desc(),
@@ -752,13 +764,14 @@ fn merge_request_history(
     merged
 }
 
-/// All friend request history involving `uid` in either direction, newest first.
+/// Friend requests involving `uid`, optionally filtered by status, newest first.
 pub fn list_friend_request_history(
     conn: &mut PgConnection,
     uid: i32,
+    status: Option<FriendRequestStatus>,
 ) -> QueryResult<Vec<FriendRequest>> {
-    let incoming = list_incoming_request_history(conn, uid)?;
-    let outgoing = list_outgoing_request_history(conn, uid)?;
+    let incoming = list_incoming_request_history(conn, uid, status)?;
+    let outgoing = list_outgoing_request_history(conn, uid, status)?;
     Ok(merge_request_history(incoming, outgoing))
 }
 

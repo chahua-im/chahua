@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { configureStore } from '@reduxjs/toolkit';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BlockResponse } from '@/api/blocks';
-import type { FriendRequestHistoryEntry, FriendResponse } from '@/api/friends';
-import reducer, { blockAdded, fetchFriends, fetchPendingIncomingCount, fetchRequestHistory } from './socialSlice';
+import { friendsApi, type FriendRequestHistoryEntry, type FriendResponse } from '@/api/friends';
+import type { RootState } from './index';
+import reducer, { blockAdded, fetchFriends, fetchPendingRequests, selectPendingIncomingCount } from './socialSlice';
 
 const user = { uid: 2, username: 'Bob', gender: 0 };
 const friend: FriendResponse = { user, since: '2026-08-18T00:00:00Z' };
@@ -24,15 +26,7 @@ const outgoingRequest: FriendRequestHistoryEntry = {
   decidedAt: null,
   direction: 'outgoing',
 };
-const resolvedIncomingRequest: FriendRequestHistoryEntry = {
-  id: 'resolved-incoming-request',
-  from: { uid: 4, username: 'Dan', gender: 0 },
-  to: { uid: 1, username: 'Alice', gender: 0 },
-  status: 'accepted',
-  createdAt: '2026-08-18T00:00:00Z',
-  decidedAt: '2026-08-18T01:00:00Z',
-  direction: 'incoming',
-};
+afterEach(() => vi.restoreAllMocks());
 
 describe('socialSlice blocking', () => {
   it('preserves an existing friendship when a block is added', () => {
@@ -45,22 +39,17 @@ describe('socialSlice blocking', () => {
   });
 });
 
-describe('socialSlice request hydration', () => {
-  it('stores request history and derives the pending incoming badge count', () => {
-    let state = reducer(
-      undefined,
-      fetchRequestHistory.fulfilled(
-        [incomingRequest, outgoingRequest, resolvedIncomingRequest],
-        'history-request',
-        undefined,
-      ),
-    );
+describe('socialSlice pending requests', () => {
+  it('loads pending requests and derives the incoming badge count', async () => {
+    const listRequests = vi
+      .spyOn(friendsApi, 'listRequestHistory')
+      .mockResolvedValueOnce([incomingRequest, outgoingRequest]);
+    const store = configureStore({ reducer: { social: reducer } });
 
-    expect(state.requestHistoryLoaded).toBe(true);
-    expect(state.pendingIncomingCount).toBe(1);
+    await store.dispatch(fetchPendingRequests());
 
-    state = reducer(state, fetchPendingIncomingCount.fulfilled(7, 'pending-count-request', undefined));
-
-    expect(state.pendingIncomingCount).toBe(7);
+    expect(listRequests).toHaveBeenCalledWith('pending');
+    expect(store.getState().social.pendingRequests).toEqual([incomingRequest, outgoingRequest]);
+    expect(selectPendingIncomingCount(store.getState() as RootState)).toBe(1);
   });
 });

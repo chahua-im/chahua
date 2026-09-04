@@ -4,6 +4,7 @@ import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
+import type { FriendRequestHistoryEntry } from '@/api/friends';
 import socialReducer from '@/store/socialSlice';
 import { ChatListSegment } from './ChatListSegment';
 
@@ -26,15 +27,22 @@ function renderSegment({
   archivedMode: boolean;
   pendingIncomingCount: number;
 }) {
+  const pendingRequests: FriendRequestHistoryEntry[] = Array.from({ length: pendingIncomingCount }, (_, index) => ({
+    id: String(index),
+    from: { uid: index + 2, username: `User ${index + 2}`, gender: 0 },
+    to: { uid: 1, username: 'Alice', gender: 0 },
+    status: 'pending',
+    createdAt: '2026-08-18T00:00:00Z',
+    decidedAt: null,
+    direction: 'incoming',
+  }));
   const store = configureStore({
     reducer: { social: socialReducer },
     preloadedState: {
       social: {
         friends: [],
         friendsLoaded: false,
-        requestHistory: [],
-        requestHistoryLoaded: false,
-        pendingIncomingCount,
+        pendingRequests,
         blocks: [],
         blocksLoaded: false,
       },
