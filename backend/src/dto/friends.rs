@@ -14,6 +14,26 @@ pub struct FriendResponse {
     pub since: DateTime<Utc>,
 }
 
+/// The current user's relationship with one profile user.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendRelationshipResponse {
+    pub peer_uid: i32,
+    pub is_friend: bool,
+    /// The canonical DM group ID, when one exists for this relationship.
+    #[serde(with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub dm_chat_id: Option<i64>,
+    /// The current user has blocked `peerUid`.
+    pub blocking: bool,
+    /// `peerUid` has blocked the current user.
+    pub blocked_by: bool,
+    /// The server-authoritative decision for whether the current user can send this peer a DM.
+    pub can_dm: bool,
+    /// The current user has an unresolved request to `peerUid`.
+    pub has_pending_outgoing_request: bool,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListFriendsResponse {

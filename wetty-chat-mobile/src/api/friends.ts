@@ -21,6 +21,17 @@ export interface ListFriendsResponse {
   friends: FriendResponse[];
 }
 
+/** The authenticated user's current relationship with one profile user. */
+export interface FriendRelationshipResponse {
+  peerUid: number;
+  isFriend: boolean;
+  dmChatId: string | null;
+  blocking: boolean;
+  blockedBy: boolean;
+  canDm: boolean;
+  hasPendingOutgoingRequest: boolean;
+}
+
 export interface FriendRequestResponse {
   id: string;
   from: MemberSummary;
@@ -68,6 +79,11 @@ export const friendsApi = {
   listFriends: async (): Promise<FriendResponse[]> => {
     const res = await apiClient.get<ListFriendsResponse>('/friends');
     return res.data.friends;
+  },
+
+  getRelationship: async (uid: number): Promise<FriendRelationshipResponse> => {
+    const res = await apiClient.get<FriendRelationshipResponse>(`/friends/${uid}`);
+    return res.data;
   },
 
   removeFriend: async (uid: number): Promise<void> => {

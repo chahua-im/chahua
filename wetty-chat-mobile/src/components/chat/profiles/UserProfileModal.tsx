@@ -6,20 +6,11 @@ import type { User } from '@/api/messages';
 import { useIsDarkMode, useIsDesktop } from '@/hooks/platformHooks';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { UserAvatar } from '@/components/UserAvatar';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { useHistory } from 'react-router-dom';
-import type { AppDispatch, RootState } from '@/store';
-import { getChats } from '@/api/chats';
-import { selectChatName, setChatsList } from '@/store/chatsSlice';
-import {
-  fetchFriends,
-  fetchRequestHistory,
-  selectFriendsLoaded,
-  selectIsFriend,
-  selectPendingIncomingRequestFrom,
-  selectPendingOutgoingRequestTo,
-  selectRequestHistoryLoaded,
-} from '@/store/socialSlice';
+import type { RootState } from '@/store';
+import { friendsApi, type FriendRelationshipResponse } from '@/api/friends';
+import { selectChatName } from '@/store/chatsSlice';
 import { AddFriendSheet } from '@/components/social/AddFriendSheet';
 import { getMembers, removeMember, updateMemberRole, type MemberResponse } from '@/api/group';
 import { GroupSettingsActionButton } from '@/components/chat/settings/GroupSettingsActionButton';
@@ -44,7 +35,6 @@ export function UserProfileModal({
 }: UserProfileModalProps) {
   const isDesktop = useIsDesktop();
   const isDarkMode = useIsDarkMode();
-  const dispatch = useDispatch<AppDispatch>();
   const history = useHistory();
   const friendsEnabled = useFeatureGate('friends');
   const dmEnabled = useFeatureGate('directMessages');
@@ -56,6 +46,8 @@ export function UserProfileModal({
   const [memberLoading, setMemberLoading] = useState(false);
   const [initialBreakpoint, setInitialBreakpoint] = useState<number | null>(null);
   const [addFriendOpen, setAddFriendOpen] = useState(false);
+  const [relationship, setRelationship] = useState<FriendRelationshipResponse | null>(null);
+  const [relationshipVersion, setRelationshipVersion] = useState(0);
 
   const isAnimatingRef = useRef(false);
 
@@ -78,32 +70,37 @@ export function UserProfileModal({
   const currentUserId = useSelector((state: RootState) => state.user.uid);
   const isOwn = displaySender?.uid === currentUserId;
   const peerUid = displaySender?.uid ?? 0;
-  const isFriend = useSelector((state: RootState) =>
-    friendsEnabled && peerUid ? selectIsFriend(state, peerUid) : false,
-  );
-  const incomingReq = useSelector((state: RootState) =>
-    friendsEnabled && peerUid ? selectPendingIncomingRequestFrom(state, peerUid) : undefined,
-  );
-  const outgoingReq = useSelector((state: RootState) =>
-    friendsEnabled && peerUid ? selectPendingOutgoingRequestTo(state, peerUid) : undefined,
-  );
-  // A request in either direction blocks a new one, so the tile is shown but inert.
-  const pendingRequest = incomingReq ?? outgoingReq;
-  const showAddFriend = friendsEnabled && !isFriend;
-  const showMessage = friendsEnabled && dmEnabled && isFriend;
-  const friendsLoaded = useSelector(selectFriendsLoaded);
-  const requestHistoryLoaded = useSelector(selectRequestHistoryLoaded);
+  const showAddFriend =
+    friendsEnabled &&
+    relationship != null &&
+    !relationship.isFriend &&
+    !relationship.blocking &&
+    !relationship.blockedBy;
+  const showMessage = friendsEnabled && dmEnabled && relationship?.canDm === true && relationship.dmChatId != null;
 
-  // Lazily hydrate social state the first time the sheet is opened so the
-  // friend/request affordances reflect server truth even when the user opens a
-  // profile without having visited the Contacts tab.
+  // Profile actions depend on an authoritative, single-peer relationship
+  // lookup—not on whether a paginated chat or friend list contains this user.
   useEffect(() => {
-    if (!sender) return;
-    if (friendsEnabled) {
-      if (!friendsLoaded) dispatch(fetchFriends());
-      if (!requestHistoryLoaded) dispatch(fetchRequestHistory());
+    if (!sender || !friendsEnabled || sender.uid === currentUserId) {
+      setRelationship(null);
+      return;
     }
-  }, [sender, friendsEnabled, friendsLoaded, requestHistoryLoaded, dispatch]);
+
+    let cancelled = false;
+    setRelationship(null);
+    friendsApi
+      .getRelationship(sender.uid)
+      .then((nextRelationship) => {
+        if (!cancelled) setRelationship(nextRelationship);
+      })
+      .catch(() => {
+        if (!cancelled) setRelationship(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sender, friendsEnabled, currentUserId, relationshipVersion]);
 
   const measure = useCallback(() => {
     const node = contentRef.current;
@@ -286,22 +283,12 @@ export function UserProfileModal({
     setAddFriendOpen(true);
   }, [displaySender]);
 
-  const handleMessage = useCallback(async () => {
-    if (!displaySender) return;
-    try {
-      const chatsRes = await getChats();
-      const chats = chatsRes.data.chats || [];
-      dispatch(setChatsList({ chats }));
-      const dm = chats.find((chat) => chat.kind === 'dm' && chat.peer?.uid === displaySender.uid);
-      if (!dm) {
-        throw new Error(t`Conversation is not available`);
-      }
-      onDismiss();
-      history.push(`/chats/chat/${dm.id}`);
-    } catch (err) {
-      presentToast(err instanceof Error ? err.message : t`Failed to open conversation`, 2000);
-    }
-  }, [displaySender, dispatch, onDismiss, history, presentToast]);
+  const handleMessage = useCallback(() => {
+    const dmChatId = relationship?.dmChatId;
+    if (!dmChatId) return;
+    onDismiss();
+    history.push(`/chats/chat/${dmChatId}`);
+  }, [relationship, onDismiss, history]);
 
   return (
     <>
@@ -412,8 +399,8 @@ export function UserProfileModal({
                   {showAddFriend && (
                     <GroupSettingsActionButton
                       icon={personAddOutline}
-                      disabled={pendingRequest != null}
                       onClick={handleAddFriend}
+                      disabled={relationship?.hasPendingOutgoingRequest === true}
                     >
                       {t`Add Friend`}
                     </GroupSettingsActionButton>
@@ -434,7 +421,7 @@ export function UserProfileModal({
         targetName={displayName}
         isOpen={addFriendOpen}
         onDismiss={() => setAddFriendOpen(false)}
-        onSent={() => dispatch(fetchRequestHistory())}
+        onSent={() => setRelationshipVersion((version) => version + 1)}
       />
     </>
   );
