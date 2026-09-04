@@ -22,6 +22,7 @@ use crate::services::client_tracking::ClientTrackingService;
 use crate::services::media::MediaStore;
 use crate::services::message_search::MessageSearchService;
 use crate::services::push::PushService;
+use crate::services::token_generation::TokenGenerationService;
 use crate::services::unread::UnreadService;
 use crate::services::ws_registry::ConnectionRegistry;
 use crate::utils::ids::IdGen;
@@ -45,6 +46,7 @@ pub struct AppInner {
     pub background_service: Arc<BackgroundService>,
     pub message_search: Option<Arc<MessageSearchService>>,
     pub auth_token_service: Arc<AuthTokenService>,
+    pub token_generation: Arc<TokenGenerationService>,
 }
 
 #[derive(Clone)]

@@ -427,6 +427,7 @@ diesel::table! {
         sticker_pack_order -> Jsonb,
         verification_mode -> FriendAddVerificationMode,
         verification_question -> Nullable<Text>,
+        token_gen -> Int4,
     }
 }
 

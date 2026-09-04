@@ -404,10 +404,11 @@ async fn get_auth_token(
     State(state): State<AppState>,
     BearerSession(session): BearerSession,
 ) -> Result<Json<AuthTokenResponse>, AppError> {
-    let token =
-        state
-            .auth_token_service
-            .issue_legacy_session(session.uid, &session.client_id, 0)?;
+    let token = state.auth_token_service.issue_legacy_session(
+        session.uid,
+        &session.client_id,
+        session.generation,
+    )?;
 
     Ok(Json(AuthTokenResponse { token }))
 }

@@ -23,6 +23,8 @@ pub enum Action {
     OnBehalfOfMessageSend,
     PermissionAll,
     ServiceTokenManage,
+    SessionRead,
+    SessionRevoke,
 }
 
 impl Action {
@@ -36,6 +38,8 @@ impl Action {
             Self::OnBehalfOfMessageSend => "onBehalfOf.messageSend",
             Self::PermissionAll => "permission.all",
             Self::ServiceTokenManage => "serviceToken.manage",
+            Self::SessionRead => "session.read",
+            Self::SessionRevoke => "session.revoke",
         }
     }
 }

@@ -153,12 +153,17 @@ impl AuthTokenService {
         })
     }
 
-    pub fn issue_session(&self, uid: i32, client_id: &str) -> Result<String, AuthTokenError> {
+    pub fn issue_session(
+        &self,
+        uid: i32,
+        client_id: &str,
+        generation: i32,
+    ) -> Result<String, AuthTokenError> {
         let claims = SessionClaimsV2Ref {
             ver: JWT_VERSION_V2,
             uid,
             cid: client_id,
-            gen: 0,
+            gen: generation,
             iat: unix_timestamp(),
         };
         let mut header = Header::new(Algorithm::HS256);
@@ -239,16 +244,16 @@ mod tests {
     }
 
     #[test]
-    fn v2_session_round_trip_uses_generation_zero() {
+    fn v2_session_round_trip_preserves_generation() {
         let service = AuthTokenService::new(TEST_KEY);
-        let token = service.issue_session(99, "client-abc").unwrap();
+        let token = service.issue_session(99, "client-abc", 3).unwrap();
 
         assert_eq!(
             service.verify(&token).unwrap(),
             VerifiedSession {
                 uid: 99,
                 client_id: "client-abc".to_string(),
-                generation: 0,
+                generation: 3,
                 version: TokenVersion::V2,
             }
         );
@@ -258,7 +263,7 @@ mod tests {
     fn rejects_token_signed_with_wrong_key() {
         let issuer = AuthTokenService::new(TEST_KEY);
         let verifier = AuthTokenService::new(WRONG_KEY);
-        let token = issuer.issue_session(42, "client_123").unwrap();
+        let token = issuer.issue_session(42, "client_123", 0).unwrap();
 
         assert_eq!(verifier.verify(&token), Err(AuthTokenError::InvalidToken));
     }

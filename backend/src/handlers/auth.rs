@@ -24,9 +24,11 @@ async fn post_refresh(
     BearerSession(session): BearerSession,
     State(state): State<AppState>,
 ) -> Result<Json<AuthTokenResponse>, AppError> {
-    let token = state
-        .auth_token_service
-        .issue_session(session.uid, &session.client_id)?;
+    let token = state.auth_token_service.issue_session(
+        session.uid,
+        &session.client_id,
+        session.generation,
+    )?;
 
     Ok(Json(AuthTokenResponse { token }))
 }
@@ -55,9 +57,12 @@ async fn post_dev_session(
     }
 
     let client_id = dev_session_client_id(&headers)?;
+    let generation = state
+        .token_generation
+        .required_for(&state.db, request.uid)?;
     let token = state
         .auth_token_service
-        .issue_session(request.uid, &client_id)?;
+        .issue_session(request.uid, &client_id, generation)?;
 
     Ok(Json(AuthTokenResponse { token }))
 }
