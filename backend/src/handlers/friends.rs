@@ -11,8 +11,8 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::friends::{
-    FriendAddInfoResponse, FriendRequestDirection, FriendRequestHistoryEntry,
-    FriendRequestResponse, FriendResponse, FriendSettingsResponse,
+    FriendAddInfoResponse, FriendRelationshipResponse, FriendRequestDirection,
+    FriendRequestHistoryEntry, FriendRequestResponse, FriendResponse, FriendSettingsResponse,
     ListFriendRequestHistoryResponse, ListFriendsResponse, PendingFriendRequestCountResponse,
     UpdateFriendSettingsBody,
 };
@@ -174,6 +174,47 @@ async fn get_friends(
     Ok(Json(ListFriendsResponse { friends }))
 }
 
+/// GET /friends/:uid — The current user's relationship with one profile user.
+#[utoipa::path(
+    get,
+    path = "/{uid}",
+    tag = "friends",
+    params(
+        ("uid" = i32, Path, description = "Profile user UID"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
+    ),
+    responses((status = 200, description = "Relationship with the profile user", body = FriendRelationshipResponse)),
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
+)]
+async fn get_friend_relationship(
+    principal: Principal,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
+) -> Result<Json<FriendRelationshipResponse>, AppError> {
+    let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
+    if peer_uid <= 0 || peer_uid == uid {
+        return Err(AppError::BadRequest("Peer UID is invalid"));
+    }
+
+    let relationship = social::peer_relationships(conn, uid, &[peer_uid])?
+        .remove(&peer_uid)
+        .expect("peer_relationships includes every requested peer");
+    let is_friend = relationship.friends_since.is_some();
+    let has_pending_outgoing_request = relationship
+        .pending_request
+        .is_some_and(|(_, uid_is_sender, _)| uid_is_sender);
+    Ok(Json(FriendRelationshipResponse {
+        peer_uid,
+        is_friend,
+        dm_chat_id: relationship.dm_chat_id,
+        blocking: relationship.blocking,
+        blocked_by: relationship.blocked_by,
+        can_dm: is_friend && !relationship.blocking && !relationship.blocked_by,
+        has_pending_outgoing_request,
+    }))
+}
 #[utoipa::path(
     delete,
     path = "/{uid}",
@@ -458,6 +499,7 @@ async fn get_user_friend_add_info(
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(get_friends))
+        .routes(routes!(get_friend_relationship))
         .routes(routes!(delete_friend))
         .routes(routes!(create_friend_request))
         .routes(routes!(count_pending_incoming_requests))
