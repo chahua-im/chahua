@@ -13,7 +13,7 @@ import '@ionic/react/css/text-alignment.css';
 import '@ionic/react/css/text-transformation.css';
 import '@ionic/react/css/flex-utils.css';
 import '@ionic/react/css/display.css';
-import '@ionic/react/css/palettes/dark.system.css';
+import '@ionic/react/css/palettes/dark.class.css';
 
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
@@ -30,6 +30,8 @@ import {
 import { hydrateStickerPreferences } from '@/store/stickerPreferencesSlice';
 import { installBootstrapRecoveryHandlers } from '@/bootstrapRecovery';
 import { bootstrapAuth } from '@/authBootstrap';
+import { isFeatureEnabled } from '@/features';
+import { applyColorMode, getSystemDarkMode, resolveDarkMode } from '@/utils/colorMode';
 import App from './App';
 import AuthBootstrapGate from '@/components/bootstrap/AuthBootstrapGate';
 import { setupIonicReact } from '@ionic/react';
@@ -54,6 +56,8 @@ async function bootstrap() {
     ]);
 
   const settings = hydrateSettings(savedSettings);
+  const systemDarkMode = getSystemDarkMode();
+  applyColorMode(isFeatureEnabled('colorMode') ? resolveDarkMode(settings.colorMode, systemDarkMode) : systemDarkMode);
 
   if (hasLegacyChatListSettings(savedSettings)) {
     await kvSet('settings', serializeSettings(settings));

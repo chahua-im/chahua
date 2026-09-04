@@ -3,6 +3,7 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 import { createSlice, current } from '@reduxjs/toolkit';
 import type { RootState } from './index';
 import { kvSet } from '@/utils/db';
+import { isColorMode, type ColorMode } from '@/utils/colorMode';
 
 export const supportedLocales = ['en', 'zh-CN', 'zh-TW'];
 export const defaultLocale = 'en';
@@ -30,6 +31,7 @@ export function detectLocale(): string {
 
 export interface SettingsState {
   locale: string | null;
+  colorMode: ColorMode;
   messageFontSize: ChatFontSizeOption;
   showThreadsInMessages: boolean;
   showAllAvatars: boolean;
@@ -66,6 +68,7 @@ function normalizePinnedReactions(reactions: string[]): string[] {
 export function serializeSettings(state: SettingsState) {
   return {
     locale: state.locale,
+    colorMode: state.colorMode,
     messageFontSize: state.messageFontSize,
     showThreadsInMessages: state.showThreadsInMessages,
     showAllAvatars: state.showAllAvatars,
@@ -89,6 +92,7 @@ export function getChatFontSizeStyle(messageFontSize: ChatFontSizeOption): strin
 
 const defaultSettings: SettingsState = {
   locale: null,
+  colorMode: 'system',
   messageFontSize: defaultChatFontSize,
   showThreadsInMessages: true,
   showAllAvatars: false,
@@ -107,6 +111,7 @@ export function hydrateSettings(saved: StoredSettings | null | undefined): Setti
   return {
     ...defaultSettings,
     ...persistedSettings,
+    colorMode: isColorMode(saved?.colorMode) ? saved.colorMode : defaultSettings.colorMode,
     messageFontSize: isChatFontSizeOption(saved?.messageFontSize) ? saved.messageFontSize : defaultChatFontSize,
     pinnedReactions: normalizePinnedReactions(saved?.pinnedReactions ?? defaultSettings.pinnedReactions),
     recentReactions: saved?.recentReactions ?? defaultSettings.recentReactions,
@@ -123,6 +128,10 @@ const settingsSlice = createSlice({
       state.locale = action.payload;
       persistSettings(state);
       persistEffectiveLocale(state.locale);
+    },
+    setColorMode(state, action: PayloadAction<ColorMode>) {
+      state.colorMode = action.payload;
+      persistSettings(state);
     },
     setMessageFontSize(state, action: PayloadAction<ChatFontSizeOption>) {
       state.messageFontSize = action.payload;
@@ -155,6 +164,7 @@ const settingsSlice = createSlice({
 
 export const {
   setLocale,
+  setColorMode,
   setMessageFontSize,
   setShowThreadsInMessages,
   setChatListTab,
@@ -163,6 +173,7 @@ export const {
   addRecentReaction,
 } = settingsSlice.actions;
 export const selectLocale = (state: RootState) => state.settings.locale;
+export const selectColorMode = (state: RootState) => state.settings.colorMode;
 export const selectEffectiveLocale = (state: RootState) => state.settings.locale ?? detectLocale();
 export const selectMessageFontSize = (state: RootState) => state.settings.messageFontSize;
 export const selectShowThreadsInMessages = (state: RootState) => state.settings.showThreadsInMessages;

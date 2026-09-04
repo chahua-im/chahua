@@ -6,7 +6,7 @@
     var(--ion-background-color, #ffffff) 100%
   );
 
-  @media (prefers-color-scheme: dark) {
+  :global(html.ion-palette-dark) & {
     --background: var(--ion-background-color, #000);
   }
 }
@@ -18,7 +18,7 @@
   border-radius: 28px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.12);
 
-  @media (prefers-color-scheme: dark) {
+  :global(html.ion-palette-dark) & {
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.4);
   }
   border: 1px solid var(--ion-border-color, rgba(0, 0, 0, 0.12));

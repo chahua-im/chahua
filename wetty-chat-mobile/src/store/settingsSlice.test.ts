@@ -13,13 +13,14 @@ describe('settings migration', () => {
     expect(hasLegacyChatListSettings(saved)).toBe(true);
 
     const hydrated = hydrateSettings(saved);
-    expect(hydrated).toMatchObject({ showThreadsInMessages: true, chatListTab: 'messages' });
+    expect(hydrated).toMatchObject({ colorMode: 'system', showThreadsInMessages: true, chatListTab: 'messages' });
     expect(hydrated).not.toHaveProperty('showAllTab');
     expect(hydrated).not.toHaveProperty('showGroupsTab');
     expect(hydrated).not.toHaveProperty('showFriendsTab');
     expect(hydrated).not.toHaveProperty('showThreadsTab');
     expect(serializeSettings(hydrated)).toEqual({
       locale: null,
+      colorMode: 'system',
       messageFontSize: 'medium',
       showThreadsInMessages: true,
       showAllAvatars: false,

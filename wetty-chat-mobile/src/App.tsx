@@ -2,7 +2,7 @@ import { IonApp, IonToast } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 import { Redirect, useHistory, useLocation, useRouteMatch } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppDispatch } from '@/store/index';
 import { fetchCurrentUser } from '@/store/userSlice';
 import './app.scss';
@@ -10,7 +10,7 @@ import { t } from '@lingui/core/macro';
 import { isFeatureEnabled } from '@/features';
 import MobileLayout from './layouts/MobileLayout';
 import { AppUpdateProvider } from './hooks/AppUpdateProvider';
-import { useIsDesktop } from './hooks/platformHooks';
+import { useIsDarkMode, useIsDesktop } from './hooks/platformHooks';
 import { useAppLifecycle } from './hooks/useAppLifecycle';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { usePushNotificationBootstrap } from './hooks/usePushNotifications';
@@ -26,6 +26,7 @@ import { initWebSocket } from '@/api/ws';
 import { appHistory } from '@/utils/navigationHistory';
 import { useNotificationOpenHandler } from '@/hooks/useNotificationOpenHandler';
 import { useQueryTokenAdoption } from '@/hooks/useQueryTokenAdoption';
+import { applyColorMode } from '@/utils/colorMode';
 
 const OOBE_STORAGE_KEY = 'oobe';
 
@@ -102,6 +103,7 @@ function AppRouter({ isDesktop }: { isDesktop: boolean }) {
 function AppShell() {
   const dispatch = useDispatch<AppDispatch>();
   const isDesktop = useIsDesktop();
+  const isDarkMode = useIsDarkMode();
   useAppLifecycle();
   usePushNotificationBootstrap();
   useNotificationOpenHandler();
@@ -111,6 +113,10 @@ function AppShell() {
     initWebSocket();
     dispatch(fetchCurrentUser());
   }, [dispatch]);
+
+  useLayoutEffect(() => {
+    applyColorMode(isDarkMode);
+  }, [isDarkMode]);
 
   return (
     <IonApp>

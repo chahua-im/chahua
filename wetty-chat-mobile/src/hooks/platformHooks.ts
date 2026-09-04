@@ -1,5 +1,9 @@
 import { isPlatform } from '@ionic/react';
 import { useEffect, useState } from 'react';
+import { useSelector } from 'react-redux';
+import { isFeatureEnabled } from '@/features';
+import { selectColorMode } from '@/store/settingsSlice';
+import { resolveDarkMode } from '@/utils/colorMode';
 
 const DESKTOP_QUERY = '(min-width: 900px)';
 const HOVER_FINE_POINTER_QUERY = '(any-hover: hover) and (any-pointer: fine)';
@@ -19,7 +23,7 @@ export function useIsDesktop(): boolean {
 
 const DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 
-export function useIsDarkMode(): boolean {
+function useSystemDarkMode(): boolean {
   const [isDarkMode, setIsDarkMode] = useState(() => window.matchMedia(DARK_MODE_QUERY).matches);
 
   useEffect(() => {
@@ -30,6 +34,13 @@ export function useIsDarkMode(): boolean {
   }, []);
 
   return isDarkMode;
+}
+
+export function useIsDarkMode(): boolean {
+  const systemDarkMode = useSystemDarkMode();
+  const colorMode = useSelector(selectColorMode);
+
+  return isFeatureEnabled('colorMode') ? resolveDarkMode(colorMode, systemDarkMode) : systemDarkMode;
 }
 
 export function useIsPWA(): boolean {

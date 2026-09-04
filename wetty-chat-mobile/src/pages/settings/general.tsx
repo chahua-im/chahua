@@ -22,6 +22,7 @@ import { BackButton } from '@/components/BackButton';
 import { ChatBubble } from '@/components/chat/messages/ChatBubble';
 import {
   chatFontSizeOptions,
+  selectColorMode,
   selectLocale,
   selectMessageFontSize,
   selectShowAllAvatars,
@@ -30,12 +31,15 @@ import {
   setShowAllAvatars,
   setShowThreadsInMessages,
 } from '@/store/settingsSlice';
+import { FeatureGate } from '@/components/FeatureGate';
 import type { BackAction } from '@/types/back-action';
+import type { ColorMode } from '@/utils/colorMode';
 import styles from './GeneralSettings.module.scss';
 
 interface GeneralSettingsCoreProps {
   backAction?: BackAction;
   onOpenLanguage?: () => void;
+  onOpenColorMode?: () => void;
 }
 
 const localeLabels: Record<string, string> = {
@@ -44,10 +48,22 @@ const localeLabels: Record<string, string> = {
   'zh-TW': '繁體中文',
 };
 
-export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSettingsCoreProps) {
+function getColorModeLabel(colorMode: ColorMode): string {
+  switch (colorMode) {
+    case 'light':
+      return t`Light`;
+    case 'dark':
+      return t`Dark`;
+    case 'system':
+      return t`Follow System`;
+  }
+}
+
+export function GeneralSettingsCore({ backAction, onOpenLanguage, onOpenColorMode }: GeneralSettingsCoreProps) {
   const dispatch = useDispatch();
   const history = useHistory();
   const locale = useSelector(selectLocale);
+  const colorMode = useSelector(selectColorMode);
   const messageFontSize = useSelector(selectMessageFontSize);
   const showThreadsInMessages = useSelector(selectShowThreadsInMessages);
   const showAllAvatars = useSelector(selectShowAllAvatars);
@@ -59,6 +75,14 @@ export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSetti
       return;
     }
     history.push('/settings/language');
+  };
+
+  const handleOpenColorMode = () => {
+    if (onOpenColorMode) {
+      onOpenColorMode();
+      return;
+    }
+    history.push('/settings/color-mode');
   };
 
   return (
@@ -83,6 +107,16 @@ export function GeneralSettingsCore({ backAction, onOpenLanguage }: GeneralSetti
               {locale ? (localeLabels[locale] ?? locale) : t`Auto`}
             </IonLabel>
           </IonItem>
+          <FeatureGate feature="colorMode">
+            <IonItem button detail={true} onClick={handleOpenColorMode}>
+              <IonLabel>
+                <Trans>Appearance</Trans>
+              </IonLabel>
+              <IonLabel slot="end" color="medium">
+                {getColorModeLabel(colorMode)}
+              </IonLabel>
+            </IonItem>
+          </FeatureGate>
           <IonItem>
             <IonToggle
               checked={showThreadsInMessages}
