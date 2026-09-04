@@ -1,13 +1,13 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { AddFriendModalHost } from '@/components/social/AddFriendModalHost';
 import { matchPath, useHistory, useLocation } from 'react-router-dom';
-import { useSelector } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { Trans } from '@lingui/react/macro';
 import { IonButton, IonButtons, IonHeader, IonIcon, IonModal, IonTitle, IonToolbar } from '@ionic/react';
 import { addCircleOutline, arrowBack } from 'ionicons/icons';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ChatList } from '@/components/chat/lists/ChatList';
-import { normalizeChatListTab, type ChatListTab } from '@/components/chat/lists/chatListTabs';
+import { CHAT_LIST_TABS, type ChatListTab } from '@/components/chat/lists/chatListTabs';
 import ConversationPane from '@/pages/conversation/conversation';
 import GroupInfoCore, { GroupSavedMessagesCore, GroupSettingsCore } from '@/pages/conversation/group-info';
 import DmInfoCore from '@/pages/conversation/dm-info';
@@ -32,14 +32,16 @@ import { useHasGlobalPermission } from '@/hooks/useHasGlobalPermission';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { isFeatureEnabled } from '@/features';
-import type { RootState } from '@/store';
+import type { AppDispatch, RootState } from '@/store';
+import { setChatListTab } from '@/store/settingsSlice';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 type DesktopRouteState = ConversationRouteState;
 
 interface DesktopRouteMatches {
   activeChatId: string | undefined;
-  archivedMatch: { tab?: string } | null;
+  chatListTab: ChatListTab | null;
+  archivedChatListTab: ChatListTab | null;
   threadMatch: { id: string; threadId: string } | null;
   groupInfoMatch: { id: string } | null;
   dmInfoMatch: { id: string } | null;
@@ -61,12 +63,10 @@ interface DesktopRouteMatches {
 }
 
 function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
+  const chatListTab = CHAT_LIST_TABS.find((tab) => pathname === `/chats/${tab}`) ?? null;
+  const archivedChatListTab = CHAT_LIST_TABS.find((tab) => pathname === `/chats/${tab}/archived`) ?? null;
   const threadRaw = matchPath<{ id: string; threadId: string }>(pathname, {
     path: '/chats/chat/:id/thread/:threadId',
-    exact: true,
-  });
-  const archivedRaw = matchPath<{ tab?: string }>(pathname, {
-    path: '/chats/archived/:tab?',
     exact: true,
   });
   const groupInfoRaw = matchPath<{ id: string }>(pathname, {
@@ -159,7 +159,8 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
       invitesRaw?.params.id ??
       chatRaw?.params.id ??
       undefined,
-    archivedMatch: archivedRaw?.params ?? null,
+    chatListTab,
+    archivedChatListTab,
     threadMatch: threadRaw?.params ?? null,
     groupInfoMatch: groupInfoRaw?.params ?? null,
     dmInfoMatch: dmInfoRaw?.params ?? null,
@@ -223,6 +224,7 @@ function ChatModal({
 }
 
 export function DesktopSplitLayout() {
+  const dispatch = useDispatch<AppDispatch>();
   const history = useHistory();
   const location = useLocation<DesktopRouteState | undefined>();
   const canCreateChat = useHasGlobalPermission('chat.create');
@@ -262,7 +264,8 @@ export function DesktopSplitLayout() {
   const baseRoute = currentRoute.globalSettings ? getDesktopRouteMatches(backgroundPath) : currentRoute;
   const {
     activeChatId,
-    archivedMatch,
+    chatListTab,
+    archivedChatListTab,
     threadMatch,
     groupInfoMatch,
     dmInfoMatch,
@@ -279,7 +282,7 @@ export function DesktopSplitLayout() {
   const disabledGroupSavedMessagesChatId = savedMessagesEnabled ? null : routeGroupInfoSavedMessagesMatch?.id;
   const disabledSavedMessagesSettings = !savedMessagesEnabled && currentRoute.savedMessagesSettings;
   const globalSettingsOpen = currentRoute.globalSettings;
-  const initialArchivedTab: ChatListTab | null = archivedMatch ? normalizeChatListTab(archivedMatch.tab) : null;
+  const initialArchivedTab = archivedChatListTab === 'friends' && !friendsEnabled ? null : archivedChatListTab;
   const [archivedSidebarTab, setArchivedSidebarTab] = useState<ChatListTab | null>(initialArchivedTab);
   const archivedMode = archivedSidebarTab != null;
   const archivedTab = archivedSidebarTab ?? 'messages';
@@ -306,10 +309,13 @@ export function DesktopSplitLayout() {
   }, [backgroundPath, disabledGroupSavedMessagesChatId, disabledSavedMessagesSettings, history]);
 
   useEffect(() => {
-    if (archivedMatch) {
+    if (chatListTab && (chatListTab !== 'friends' || friendsEnabled)) {
+      dispatch(setChatListTab(chatListTab));
+    }
+    if (chatListTab || archivedChatListTab) {
       history.replace('/chats');
     }
-  }, [archivedMatch, history]);
+  }, [archivedChatListTab, chatListTab, dispatch, friendsEnabled, history]);
 
   const handleChatSelect = useCallback(
     (chatId: string, resumeHash?: string) => {
@@ -463,7 +469,7 @@ export function DesktopSplitLayout() {
           activeChatId={activeChatId}
           activeThreadId={threadMatch?.threadId}
           archivedMode={archivedMode}
-          initialTab={archivedTab}
+          initialTab={archivedMode ? archivedTab : undefined}
           onOpenArchived={setArchivedSidebarTab}
           onChatSelect={handleChatSelect}
           onThreadSelect={handleThreadSelect}

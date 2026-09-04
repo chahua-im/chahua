@@ -1,13 +1,3 @@
-export type ChatListTab = 'messages' | 'groups' | 'friends' | 'threads';
+export const CHAT_LIST_TABS = ['messages', 'groups', 'friends', 'threads'] as const;
 
-export function normalizeChatListTab(tab?: string): ChatListTab {
-  switch (tab) {
-    case 'threads':
-    case 'groups':
-    case 'messages':
-    case 'friends':
-      return tab;
-    default:
-      return 'messages';
-  }
-}
+export type ChatListTab = (typeof CHAT_LIST_TABS)[number];

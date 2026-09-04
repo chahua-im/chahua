@@ -192,14 +192,13 @@ export function ChatList({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { text: string; savedAt: number }>>({});
-  // The main list's tab lives in redux so outside actors (friend-request
-  // toast) can switch it; archived views keep a local tab seeded from the route.
-  const [archivedTab, setArchivedTab] = useState<ChatListTab>(initialTab ?? 'messages');
-  const activeTab = initialTab != null ? archivedTab : globalTab;
+  // /chats uses the persisted tab; direct and archived routes use a local tab.
+  const [localTab, setLocalTab] = useState<ChatListTab>(initialTab ?? 'messages');
+  const activeTab = initialTab != null ? localTab : globalTab;
   const setActiveTab = useCallback(
     (tab: ChatListTab) => {
       if (initialTab != null) {
-        setArchivedTab(tab);
+        setLocalTab(tab);
       } else {
         dispatch(setChatListTab(tab));
       }
@@ -452,7 +451,7 @@ export function ChatList({
         onOpenArchived(tab);
         return;
       }
-      history.push(`/chats/archived/${tab}`);
+      history.push(`/chats/${tab}/archived`);
     },
     [history, onOpenArchived],
   );

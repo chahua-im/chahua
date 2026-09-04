@@ -7,7 +7,6 @@ import { Redirect, Route, useLocation, matchPath } from 'react-router-dom';
 
 import ChatsPage from '@/pages/chats';
 import ArchivedPage from '@/pages/archived';
-import ThreadsPage from '@/pages/threads';
 import { CreateChatPage } from '@/pages/create-chat';
 import InvitePreviewPage from '@/pages/invite-preview';
 import JoinChatPage from '@/pages/join-chat';
@@ -29,14 +28,16 @@ import ComponentDemoPage from '@/pages/component-demo';
 
 import { safariSafeRouteAnimation } from '@/utils/navigationHistory';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
-import { featureGatedList, whenFeature } from '@/features';
+import { featureGatedList, isFeatureEnabled, whenFeature } from '@/features';
 import { selectChatsWithUnreadCount } from '@/store/chatsSlice';
 import { selectThreadsWithUnreadCount } from '@/store/threadsSlice';
+import { CHAT_LIST_TABS } from '@/components/chat/lists/chatListTabs';
 import styles from './MobileLayout.module.scss';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
 
-const TAB_ROOT_PATHS = ['/', '/chats', '/settings', '/demo'];
+const CHAT_ROUTE_TABS = CHAT_LIST_TABS.filter((tab) => tab !== 'friends' || isFeatureEnabled('friends'));
+const TAB_ROOT_PATHS = ['/', '/chats', ...CHAT_ROUTE_TABS.map((tab) => `/chats/${tab}`), '/settings', '/demo'];
 
 const MobileLayout: React.FC = () => {
   const location = useLocation();
@@ -81,8 +82,17 @@ const MobileLayout: React.FC = () => {
     <IonTabs className={`${isTabRoot ? '' : styles.tabBarHidden}`}>
       <IonRouterOutlet animation={safariSafeRouteAnimation}>
         <Route path="/chats" exact component={ChatsPage} />
-        <Route path="/chats/archived/:tab?" exact component={ArchivedPage} />
-        <Route path="/chats/threads" exact component={ThreadsPage} />
+        {CHAT_ROUTE_TABS.map((tab) => (
+          <Route key={tab} path={`/chats/${tab}`} exact render={() => <ChatsPage initialTab={tab} />} />
+        ))}
+        {CHAT_ROUTE_TABS.map((tab) => (
+          <Route
+            key={`${tab}-archived`}
+            path={`/chats/${tab}/archived`}
+            exact
+            render={() => <ArchivedPage initialTab={tab} />}
+          />
+        ))}
         <Route path="/chats/new" exact component={CreateChatPage} />
         <Route path="/chats/join" exact component={JoinChatPage} />
         <Route path="/chats/join/:inviteCode" exact component={InvitePreviewPage} />

@@ -9,8 +9,9 @@ import { useHasGlobalPermission } from '@/hooks/useHasGlobalPermission';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { AddFriendModalHost } from '@/components/social/AddFriendModalHost';
 import { TitleWithConnectionStatus } from '@/components/TitleWithConnectionStatus';
+import type { ChatListTab } from '@/components/chat/lists/chatListTabs';
 
-export default function Chats() {
+export default function Chats({ initialTab }: { initialTab?: ChatListTab }) {
   const canCreateChat = useHasGlobalPermission('chat.create');
   const friendsEnabled = useFeatureGate('friends');
   const [addFriendOpen, setAddFriendOpen] = useState(false);
@@ -54,6 +55,7 @@ export default function Chats() {
         </IonToolbar>
       </IonHeader>
       <ChatList
+        initialTab={initialTab}
         onChatSelect={(chatId, resumeHash) => history.push({ pathname: `/chats/chat/${chatId}`, hash: resumeHash })}
         onThreadSelect={(chatId, threadRootId, resumeHash) =>
           history.push({ pathname: `/chats/chat/${chatId}/thread/${threadRootId}`, hash: resumeHash })
