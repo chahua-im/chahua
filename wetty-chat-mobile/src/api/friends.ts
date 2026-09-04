@@ -56,10 +56,6 @@ export interface ListFriendRequestHistoryResponse {
   requests: FriendRequestHistoryEntry[];
 }
 
-export interface PendingIncomingRequestCountResponse {
-  pendingIncomingCount: number;
-}
-
 export interface FriendSettingsResponse {
   mode: FriendAddVerificationMode;
   question: string | null;
@@ -99,15 +95,10 @@ export const friendsApi = {
     return res.data;
   },
 
-  /** Complete friend-request history in server-defined order. */
-  listRequestHistory: async (): Promise<FriendRequestHistoryEntry[]> => {
-    const res = await apiClient.get<ListFriendRequestHistoryResponse>('/friends/requests');
+  /** Friend-request history in server-defined order, optionally filtered by status. */
+  listRequestHistory: async (status?: FriendRequestStatus): Promise<FriendRequestHistoryEntry[]> => {
+    const res = await apiClient.get<ListFriendRequestHistoryResponse>('/friends/requests', { params: { status } });
     return res.data.requests;
-  },
-
-  getPendingIncomingCount: async (): Promise<number> => {
-    const res = await apiClient.get<PendingIncomingRequestCountResponse>('/friends/requests/pending/count');
-    return res.data.pendingIncomingCount;
   },
 
   acceptRequest: async (requestId: string): Promise<FriendRequestResponse> => {

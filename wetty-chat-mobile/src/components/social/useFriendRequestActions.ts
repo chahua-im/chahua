@@ -4,7 +4,7 @@ import axios from 'axios';
 import { useDispatch } from 'react-redux';
 import { friendsApi } from '@/api/friends';
 import type { AppDispatch } from '@/store';
-import { fetchFriends, fetchRequestHistory } from '@/store/socialSlice';
+import { fetchFriends, fetchPendingRequests } from '@/store/socialSlice';
 
 export function useFriendRequestActions(): {
   acceptRequest: (requestId: string) => Promise<void>;
@@ -18,7 +18,7 @@ export function useFriendRequestActions(): {
     try {
       await friendsApi.acceptRequest(requestId);
       dispatch(fetchFriends());
-      dispatch(fetchRequestHistory());
+      dispatch(fetchPendingRequests());
     } catch (err) {
       presentToast(err instanceof Error ? err.message : t`Failed to accept request`, 2000);
     }
@@ -36,13 +36,13 @@ export function useFriendRequestActions(): {
           handler: async () => {
             try {
               await friendsApi.rejectRequest(requestId);
-              dispatch(fetchRequestHistory());
+              dispatch(fetchPendingRequests());
             } catch (err) {
               // A 409 means the server already dismissed the request; refresh both sources
               // so the history is current, then explain which conflict happened.
               const [friends] = await Promise.all([
                 dispatch(fetchFriends()).unwrap(),
-                dispatch(fetchRequestHistory()).unwrap(),
+                dispatch(fetchPendingRequests()).unwrap(),
               ]);
               const status = axios.isAxiosError(err) ? err.response?.status : undefined;
               if (status === 409) {

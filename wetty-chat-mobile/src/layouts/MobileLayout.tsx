@@ -7,7 +7,6 @@ import { Redirect, Route, useLocation, matchPath } from 'react-router-dom';
 
 import ChatsPage from '@/pages/chats';
 import ArchivedPage from '@/pages/archived';
-import FriendRequestsPage from '@/pages/friend-requests';
 import ThreadsPage from '@/pages/threads';
 import { CreateChatPage } from '@/pages/create-chat';
 import InvitePreviewPage from '@/pages/invite-preview';
@@ -83,7 +82,6 @@ const MobileLayout: React.FC = () => {
       <IonRouterOutlet animation={safariSafeRouteAnimation}>
         <Route path="/chats" exact component={ChatsPage} />
         <Route path="/chats/archived/:tab?" exact component={ArchivedPage} />
-        {whenFeature('friends', <Route path="/chats/friend-requests" exact component={FriendRequestsPage} />)}
         <Route path="/chats/threads" exact component={ThreadsPage} />
         <Route path="/chats/new" exact component={CreateChatPage} />
         <Route path="/chats/join" exact component={JoinChatPage} />
