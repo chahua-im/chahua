@@ -7,6 +7,10 @@ export const FEATURES = {
     enabled: false,
     description: 'Shows internal developer settings.',
   },
+  colorMode: {
+    enabled: true,
+    description: 'Lets users choose a light, dark, or system color mode.',
+  },
   chatMemberAdd: {
     enabled: false,
     description: 'Allows adding members from the group members page.',

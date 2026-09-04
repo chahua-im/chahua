@@ -4,6 +4,7 @@ import EmojiPicker, { EmojiStyle, Theme, type EmojiClickData } from 'emoji-picke
 import { happyOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { extractEmojiSequences, isEmojiSequence } from '@/utils/emojiSequences';
+import { useIsDarkMode } from '@/hooks/platformHooks';
 import styles from './EmojiInput.module.scss';
 
 interface EmojiInputProps {
@@ -29,6 +30,7 @@ export function EmojiInput({
   maxEmojiCount = 4,
   hideCounter = false,
 }: EmojiInputProps) {
+  const isDarkMode = useIsDarkMode();
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [triggerEvent, setTriggerEvent] = useState<Event | undefined>();
   const [popoverSide, setPopoverSide] = useState<'top' | 'bottom'>('bottom');
@@ -143,7 +145,7 @@ export function EmojiInput({
         <div className={styles.pickerCard}>
           <EmojiPicker
             onEmojiClick={handleEmojiClick}
-            theme={Theme.AUTO}
+            theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
             emojiStyle={EmojiStyle.NATIVE}
             lazyLoadEmojis
             searchPlaceholder={t`Search emoji`}

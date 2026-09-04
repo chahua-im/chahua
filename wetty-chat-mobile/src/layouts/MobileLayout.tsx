@@ -21,6 +21,7 @@ import SettingsPage from '@/pages/settings';
 import SavedMessagesPage from '@/pages/saved-messages';
 import GeneralSettingsPage from '@/pages/settings/general';
 import LanguagePage from '@/pages/settings/language';
+import ColorModePage from '@/pages/settings/color-mode';
 import StickerSettingsPage from '@/pages/settings/stickers';
 import StickerPackDetailPage from '@/pages/settings/sticker-pack-detail';
 import FriendVerificationPage from '@/pages/settings/friend-verification';
@@ -102,6 +103,7 @@ const MobileLayout: React.FC = () => {
         <Route path="/demo" exact component={ComponentDemoPage} />
         <Route path="/settings/general" exact component={GeneralSettingsPage} />
         <Route path="/settings/language" exact component={LanguagePage} />
+        {whenFeature('colorMode', <Route path="/settings/color-mode" exact component={ColorModePage} />)}
         {whenFeature('savedMessages', <Route path="/settings/saved-messages" exact component={SavedMessagesPage} />)}
         {whenFeature(
           'friends',

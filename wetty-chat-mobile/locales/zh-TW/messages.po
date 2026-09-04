@@ -103,6 +103,9 @@ msgstr "任何人都可以向你發送好友請求。無需驗證訊息，你只
 msgid "Anyone with this invite link can use it until it expires or is revoked."
 msgstr "任何持有此邀請連結的人都可以在連結到期或被撤銷前使用它。"
 
+msgid "Appearance"
+msgstr "外觀"
+
 msgid "Archive"
 msgstr "封存"
 
@@ -269,6 +272,9 @@ msgstr "建立新的表情包"
 
 msgid "Creating…"
 msgstr "建立中…"
+
+msgid "Dark"
+msgstr "深色"
 
 msgid "Decline all friend requests"
 msgstr "拒絕所有好友請求"
@@ -606,6 +612,9 @@ msgstr "檔案過大。允許的最大大小為 {0}。"
 msgid "File is too large. Maximum sticker size is 10 MB."
 msgstr "檔案過大。貼圖檔案大小上限為 10 MB。"
 
+msgid "Follow System"
+msgstr "跟隨系統"
+
 msgid "Forever"
 msgstr "永久"
 
@@ -730,6 +739,9 @@ msgstr "正在退出..."
 
 msgid "Left group"
 msgstr "已退出群組"
+
+msgid "Light"
+msgstr "淺色"
 
 msgid "Link"
 msgstr "連結"

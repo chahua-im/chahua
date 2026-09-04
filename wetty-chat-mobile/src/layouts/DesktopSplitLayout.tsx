@@ -21,6 +21,7 @@ import { SettingsCore } from '@/pages/settings';
 import { SavedMessagesCore } from '@/pages/saved-messages';
 import { GeneralSettingsCore } from '@/pages/settings/general';
 import { LanguagePageCore } from '@/pages/settings/language';
+import { ColorModePageCore } from '@/pages/settings/color-mode';
 import { StickerSettingsCore } from '@/pages/settings/stickers';
 import { StickerPackDetailCore } from '@/pages/settings/sticker-pack-detail';
 import { FriendVerificationCore } from '@/pages/settings/friend-verification';
@@ -31,6 +32,7 @@ import { HeaderActionMenu, type HeaderActionMenuItem } from '@/components/Header
 import { useHasGlobalPermission } from '@/hooks/useHasGlobalPermission';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
+import { isFeatureEnabled } from '@/features';
 import type { RootState } from '@/store';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
@@ -55,6 +57,7 @@ interface DesktopRouteMatches {
   savedMessagesSettings: boolean;
   friendVerificationSettings: boolean;
   languageSettings: boolean;
+  colorModeSettings: boolean;
   stickerSettings: boolean;
   stickerPackSettings: { packId: string } | null;
 }
@@ -116,6 +119,12 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     path: '/settings/language',
     exact: true,
   });
+  const colorModeSettings =
+    isFeatureEnabled('colorMode') &&
+    !!matchPath(pathname, {
+      path: '/settings/color-mode',
+      exact: true,
+    });
   const generalSettings = !!matchPath(pathname, {
     path: '/settings/general',
     exact: true,
@@ -142,6 +151,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     savedMessagesSettings ||
     friendVerificationSettings ||
     languageSettings ||
+    colorModeSettings ||
     stickerSettings;
 
   return {
@@ -172,6 +182,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
     savedMessagesSettings,
     friendVerificationSettings,
     languageSettings,
+    colorModeSettings,
     stickerSettings,
     stickerPackSettings: stickerPackRaw?.params ?? null,
   };
@@ -365,6 +376,13 @@ export function DesktopSplitLayout() {
   const openLanguageSettings = useCallback(() => {
     history.push({
       pathname: '/settings/language',
+      state: { backgroundPath },
+    });
+  }, [backgroundPath, history]);
+
+  const openColorModeSettings = useCallback(() => {
+    history.push({
+      pathname: '/settings/color-mode',
       state: { backgroundPath },
     });
   }, [backgroundPath, history]);
@@ -568,6 +586,17 @@ export function DesktopSplitLayout() {
                   }),
               }}
             />
+          ) : currentRoute.colorModeSettings ? (
+            <ColorModePageCore
+              backAction={{
+                type: 'callback',
+                onBack: () =>
+                  history.push({
+                    pathname: '/settings/general',
+                    state: { backgroundPath },
+                  }),
+              }}
+            />
           ) : currentRoute.stickerPackSettings ? (
             <StickerPackDetailCore
               packId={currentRoute.stickerPackSettings.packId}
@@ -632,6 +661,7 @@ export function DesktopSplitLayout() {
                   }),
               }}
               onOpenLanguage={openLanguageSettings}
+              onOpenColorMode={openColorModeSettings}
             />
           ) : (
             <SettingsCore

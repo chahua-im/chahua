@@ -12,6 +12,7 @@ import styles from './MessageOverlay.module.scss';
 import { MAX_DISTINCT_REACTIONS_PER_MESSAGE } from '@/constants/emojiAndStickers';
 import { getOverlayPortalTarget } from '@/utils/dom';
 import { t } from '@lingui/core/macro';
+import { useIsDarkMode } from '@/hooks/platformHooks';
 
 export interface MessageOverlayAction {
   key: string;
@@ -95,6 +96,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
   const isInvite = props.messageType === 'invite';
   const contentRef = useRef<HTMLDivElement>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const isDarkMode = useIsDarkMode();
   const [presentToast] = useIonToast();
 
   const [actionListPage, setActionListPage] = useState(0);
@@ -544,7 +546,7 @@ export function MessageOverlay(props: MessageOverlayProps) {
         >
           <EmojiPicker
             onEmojiClick={handleEmojiClick}
-            theme={Theme.AUTO}
+            theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
             emojiStyle={EmojiStyle.NATIVE}
             lazyLoadEmojis
             previewConfig={{ showPreview: false }}

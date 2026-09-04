@@ -103,6 +103,9 @@ msgstr "Anyone can send you a friend request. No verification message is needed;
 msgid "Anyone with this invite link can use it until it expires or is revoked."
 msgstr "Anyone with this invite link can use it until it expires or is revoked."
 
+msgid "Appearance"
+msgstr "Appearance"
+
 msgid "Archive"
 msgstr "Archive"
 
@@ -269,6 +272,9 @@ msgstr "Create new sticker pack"
 
 msgid "Creating…"
 msgstr "Creating…"
+
+msgid "Dark"
+msgstr "Dark"
 
 msgid "Decline all friend requests"
 msgstr "Decline all friend requests"
@@ -606,6 +612,9 @@ msgstr "File is too large. Maximum size is {0}."
 msgid "File is too large. Maximum sticker size is 10 MB."
 msgstr "File is too large. Maximum sticker size is 10 MB."
 
+msgid "Follow System"
+msgstr "Follow System"
+
 msgid "Forever"
 msgstr "Forever"
 
@@ -730,6 +739,9 @@ msgstr "Leaving..."
 
 msgid "Left group"
 msgstr "Left group"
+
+msgid "Light"
+msgstr "Light"
 
 msgid "Link"
 msgstr "Link"
