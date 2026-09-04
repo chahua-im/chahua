@@ -76,6 +76,8 @@ export function ChatAdminSettings({
             </IonLabel>
             <IonSelect
               value={visibility}
+              interface="action-sheet"
+              cancelText={t`Cancel`}
               onIonChange={(event) => onVisibilityChange(event.detail.value as 'public' | 'private')}
             >
               <IonSelectOption value="public">
