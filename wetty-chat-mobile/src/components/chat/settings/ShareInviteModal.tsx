@@ -13,7 +13,7 @@ import {
   useIonActionSheet,
   useIonToast,
 } from '@ionic/react';
-import { close, copyOutline, linkOutline, sendOutline } from 'ionicons/icons';
+import { checkmark, close, copyOutline, linkOutline, sendOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { useDispatch } from 'react-redux';
@@ -314,9 +314,11 @@ function ShareInviteModalSession({ chatId, onDismiss }: Omit<ShareInviteModalPro
 
   const handleOpenExpirySelector = () => {
     presentActionSheet({
+      header: t`Expires`,
       buttons: [
         ...getExpiryOptions().map((option) => ({
           text: option.label,
+          icon: option.value === expiryOption ? checkmark : undefined,
           handler: () => changeExpiryOption(option.value),
         })),
         {
