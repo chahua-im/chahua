@@ -782,6 +782,7 @@ pub struct UserExtra {
     pub sticker_pack_order: serde_json::Value,
     pub verification_mode: FriendAddVerificationMode,
     pub verification_question: Option<String>,
+    pub token_gen: i32,
 }
 
 #[derive(Debug, Clone, Insertable)]

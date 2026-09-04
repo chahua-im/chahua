@@ -33,7 +33,7 @@ async fn get_ws_ticket(
 ) -> Result<Json<TicketResponse>, (axum::http::StatusCode, &'static str)> {
     let ticket = state
         .auth_token_service
-        .issue_legacy_session(session.uid, &session.client_id, 0)
+        .issue_legacy_session(session.uid, &session.client_id, session.generation)
         .map_err(crate::services::auth_token::AuthTokenError::into_rejection)?;
 
     Ok(Json(TicketResponse { ticket }))
@@ -95,7 +95,7 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
         Ok(Some(Ok(Message::Text(text)))) => {
             if let Ok(parsed) = serde_json::from_str::<WsAuthMessage>(&text) {
                 if parsed.type_ == "auth" {
-                    match state.auth_token_service.verify(&parsed.ticket) {
+                    match crate::utils::auth::verify_session(&parsed.ticket, &state) {
                         Ok(session) => session.uid,
                         Err(e) => {
                             debug!("ws auth rejected (invalid ticket): {:?}", e);

@@ -15,6 +15,7 @@ pub mod saved_messages;
 pub mod service_tokens;
 pub mod social;
 pub mod threads;
+pub mod token_generation;
 pub mod unread;
 pub mod user;
 pub mod ws_registry;

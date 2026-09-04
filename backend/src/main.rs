@@ -144,6 +144,7 @@ async fn main() {
         auth_token_service: Arc::new(services::auth_token::AuthTokenService::new(
             &config.auth.jwt_signing_key,
         )),
+        token_generation: services::token_generation::TokenGenerationService::start(),
         config: config.clone(),
     });
 

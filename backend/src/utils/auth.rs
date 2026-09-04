@@ -148,6 +148,32 @@ impl fmt::Display for CurrentUid {
     }
 }
 
+/// Verify a session JWT: signature and claims, then the user's required token
+/// generation. Strict equality — a token minted before a revocation is rejected.
+///
+/// A failed generation lookup is a 503, not a 401: an outage must not look like
+/// a revoked session to clients.
+pub fn verify_session(
+    token: &str,
+    state: &crate::AppState,
+) -> Result<VerifiedSession, (StatusCode, &'static str)> {
+    let session = state
+        .auth_token_service
+        .verify(token)
+        .map_err(AuthTokenError::into_rejection)?;
+    let required = state
+        .token_generation
+        .required_for(&state.db, session.uid)
+        .map_err(|err| {
+            tracing::error!("token generation lookup failed: {:?}", err);
+            (StatusCode::SERVICE_UNAVAILABLE, "Auth lookup unavailable")
+        })?;
+    if session.generation != required {
+        return Err((StatusCode::UNAUTHORIZED, "Session revoked"));
+    }
+    Ok(session)
+}
+
 pub fn extract_current_uid(
     headers: &HeaderMap,
     state: &crate::AppState,
@@ -160,10 +186,7 @@ pub fn extract_auth_context(
     state: &crate::AppState,
 ) -> Result<AuthContext, (StatusCode, &'static str)> {
     let token = required_bearer_token(headers)?;
-    let session = state
-        .auth_token_service
-        .verify(token)
-        .map_err(AuthTokenError::into_rejection)?;
+    let session = verify_session(token, state)?;
     Ok(AuthContext {
         uid: session.uid,
         client_id: session.client_id,
@@ -278,11 +301,7 @@ impl FromRequestParts<crate::AppState> for BearerSession {
         state: &crate::AppState,
     ) -> Result<Self, Self::Rejection> {
         let token = required_bearer_token(&parts.headers)?;
-        state
-            .auth_token_service
-            .verify(token)
-            .map(BearerSession)
-            .map_err(AuthTokenError::into_rejection)
+        verify_session(token, state).map(BearerSession)
     }
 }
 
