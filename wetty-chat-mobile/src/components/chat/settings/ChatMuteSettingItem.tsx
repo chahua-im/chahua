@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
-import { useIonActionSheet, useIonAlert, useIonToast } from '@ionic/react';
+import { IonButton, IonIcon, useIonActionSheet, useIonAlert, useIonToast } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
-import { notifications, notificationsOff } from 'ionicons/icons';
+import { notifications, notificationsOff, notificationsOffOutline } from 'ionicons/icons';
 import { useDispatch, useSelector } from 'react-redux';
 import { muteChat, unmuteChat } from '@/api/group';
 import { setChatArchived, setChatMutedUntil } from '@/store/chatsSlice';
@@ -13,6 +13,7 @@ interface ChatMuteSettingItemProps {
   chatId: string;
   mutedUntil: string | null | undefined;
   archived?: boolean;
+  presentation?: 'settings' | 'toolbar';
 }
 
 function isChatMuted(mutedUntil: string | null | undefined): boolean {
@@ -61,7 +62,12 @@ function getMutedUntilLabel(locale: string, mutedUntil: string): ReactNode {
   );
 }
 
-export function ChatMuteSettingItem({ chatId, mutedUntil, archived = false }: ChatMuteSettingItemProps) {
+export function ChatMuteSettingItem({
+  chatId,
+  mutedUntil,
+  archived = false,
+  presentation = 'settings',
+}: ChatMuteSettingItemProps) {
   const dispatch = useDispatch();
   const locale = useSelector(selectEffectiveLocale);
   const [presentToast] = useIonToast();
@@ -143,6 +149,14 @@ export function ChatMuteSettingItem({ chatId, mutedUntil, archived = false }: Ch
       ],
     });
   };
+
+  if (presentation === 'toolbar') {
+    return (
+      <IonButton onClick={muted ? handleUnmute : showMuteActionSheet} color={muted ? 'medium' : undefined}>
+        <IonIcon slot="icon-only" icon={muted ? notificationsOffOutline : notifications} />
+      </IonButton>
+    );
+  }
 
   if (muted && mutedUntil) {
     return (

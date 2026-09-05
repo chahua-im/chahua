@@ -5,6 +5,7 @@ import { chevronDown } from 'ionicons/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { getMessage, type MessageResponse, type User } from '@/api/messages';
 import { selectCurrentUser } from '@/store/userSlice';
+import { selectChatMutedUntil, selectIsChatArchived } from '@/store/chatsSlice';
 import type { AppDispatch, RootState } from '@/store';
 import {
   fetchBlocks,
@@ -66,6 +67,8 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   const locale = useSelector(selectEffectiveLocale);
   const currentUser = useSelector(selectCurrentUser);
   const storeChatId = threadId ? `${chatId}_thread_${threadId}` : chatId;
+  const mutedUntil = useSelector((state: RootState) => selectChatMutedUntil(state, chatId));
+  const chatArchived = useSelector((state: RootState) => selectIsChatArchived(state, chatId));
 
   // Parsed from #msg=, read only, parsed once on mount
   const [initialResumeMessageId] = useState(() => parseResumeHash(location.hash));
@@ -478,8 +481,11 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
       <div className="ion-page conversation-page" style={pageStyle}>
         <ConversationHeader
           backAction={backAction}
+          chatId={chatId}
           chatName={chatName}
           isMuted={isMuted}
+          mutedUntil={mutedUntil}
+          chatArchived={chatArchived}
           threadId={threadId}
           threadSubscribed={threadSubscribed}
           threadArchived={threadArchived}

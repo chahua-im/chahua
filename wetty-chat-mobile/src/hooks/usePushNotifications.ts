@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { t } from '@lingui/core/macro';
 import apiClient from '@/api/client';
 import { base64UrlToUint8Array, toBase64Url } from '@/utils/base64url';
 
@@ -11,6 +12,24 @@ export type PushNotificationErrorCode =
   | 'backend_subscribe_failed';
 
 export type PushNotificationResult = { ok: true } | { ok: false; code: PushNotificationErrorCode; message: string };
+
+export function getPushNotificationErrorMessage(code: PushNotificationErrorCode) {
+  switch (code) {
+    case 'unsupported_browser':
+      return t`Push notifications are not supported on this device`;
+    case 'permission_denied':
+      return t`Notification permission was not granted`;
+    case 'service_worker_unavailable':
+      return t`Push notifications are not available right now`;
+    case 'backend_subscribe_failed':
+      return t`Push notifications could not be enabled on the server`;
+    case 'unsubscribe_failed':
+      return t`Failed to turn off push notifications`;
+    case 'subscribe_failed':
+    default:
+      return t`Failed to turn on push notifications`;
+  }
+}
 
 function success(): PushNotificationResult {
   return { ok: true };
@@ -213,7 +232,7 @@ export function usePushNotifications() {
   const [permission, setPermission] = useState<NotificationPermission>(getCurrentPermission);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isCheckingSubscription, setIsCheckingSubscription] = useState(false);
+  const [isCheckingSubscription, setIsCheckingSubscription] = useState(true);
 
   const refreshSubscriptionState = useCallback(
     async ({ repairIfMissing = true }: { repairIfMissing?: boolean } = {}) => {

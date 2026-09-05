@@ -91,9 +91,6 @@ msgstr "All"
 msgid "Allow anyone to add me"
 msgstr "Allow anyone to add me"
 
-msgid "Allowed"
-msgstr "Allowed"
-
 msgid "Already in this chat"
 msgstr "Already in this chat"
 
@@ -121,9 +118,6 @@ msgstr "Are you sure you want to delete this message?"
 
 msgid "Are you sure you want to leave this group?"
 msgstr "Are you sure you want to leave this group?"
-
-msgid "Ask first"
-msgstr "Ask first"
 
 msgid "Attachment"
 msgstr "Attachment"
@@ -157,9 +151,6 @@ msgstr "Block {displayName}? You won't be able to message each other."
 
 msgid "Block User"
 msgstr "Block User"
-
-msgid "Blocked"
-msgstr "Blocked"
 
 msgid "Cancel"
 msgstr "Cancel"
@@ -203,9 +194,6 @@ msgstr "Check for Update"
 #. js-lingui-explicit-id
 msgid "auth.bootstrap.transient.description"
 msgstr "Check your connection and try again."
-
-msgid "Checking..."
-msgstr "Checking..."
 
 msgid "Choose a destination group"
 msgstr "Choose a destination group"
@@ -376,6 +364,12 @@ msgstr "Emoji"
 
 msgid "Emojis & Stickers"
 msgstr "Emojis & Stickers"
+
+msgid "Enable"
+msgstr "Enable"
+
+msgid "Enable message notifications"
+msgstr "Enable message notifications"
 
 msgid "Enter a user UID"
 msgstr "Enter a user UID"
@@ -806,6 +800,9 @@ msgstr "Message cannot be empty"
 msgid "Message not found"
 msgstr "Message not found"
 
+msgid "Message notifications"
+msgstr "Message notifications"
+
 msgid "Message saved"
 msgstr "Message saved"
 
@@ -923,9 +920,6 @@ msgstr "No videos yet"
 msgid "Not now"
 msgstr "Not now"
 
-msgid "Not subscribed"
-msgstr "Not subscribed"
-
 msgid "Notification permission was not granted"
 msgstr "Notification permission was not granted"
 
@@ -989,9 +983,6 @@ msgstr "Paste code"
 msgid "Pending approval"
 msgstr "Pending approval"
 
-msgid "Permission"
-msgstr "Permission"
-
 msgid "Pin"
 msgstr "Pin"
 
@@ -1050,9 +1041,6 @@ msgstr "Promote to Admin"
 
 msgid "Public"
 msgstr "Public"
-
-msgid "Push Notifications"
-msgstr "Push Notifications"
 
 msgid "Push notifications are not available right now"
 msgstr "Push notifications are not available right now"
@@ -1304,9 +1292,6 @@ msgstr "Show Avatars Next to All Messages"
 msgid "Small"
 msgstr "Small"
 
-msgid "Status"
-msgstr "Status"
-
 msgid "Stay"
 msgstr "Stay"
 
@@ -1333,9 +1318,6 @@ msgstr "Stickers must be an image or a WebM video."
 
 msgid "Subscribe"
 msgstr "Subscribe"
-
-msgid "Subscribed"
-msgstr "Subscribed"
 
 msgid "Tap a sticker to remove it from this pack."
 msgstr "Tap a sticker to remove it from this pack."
@@ -1407,12 +1389,6 @@ msgstr "Today"
 
 msgid "Try Again"
 msgstr "Try Again"
-
-msgid "Turn Off Push Notifications"
-msgstr "Turn Off Push Notifications"
-
-msgid "Turn On Push Notifications"
-msgstr "Turn On Push Notifications"
 
 #. placeholder {0}: member.uid
 msgid "UID {0}"
@@ -1570,6 +1546,9 @@ msgstr "You are no longer friends with this user."
 
 msgid "You blocked this user. Unblock to send messages."
 msgstr "You blocked this user. Unblock to send messages."
+
+msgid "You can change this later in Settings."
+msgstr "You can change this later in Settings."
 
 msgid "You can only add up to {MAX_REACTIONS_PER_USER_PER_MESSAGE} reactions"
 msgstr "You can only add up to {MAX_REACTIONS_PER_USER_PER_MESSAGE} reactions"

@@ -15,7 +15,6 @@ import { useAppLifecycle } from './hooks/useAppLifecycle';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { usePushNotificationBootstrap } from './hooks/usePushNotifications';
 import { DesktopSplitLayout } from './layouts/DesktopSplitLayout';
-import OobePage from '@/pages/oobe';
 import LandingPage from './pages/landing';
 import PushOpenPage from '@/pages/push-open';
 import ProfileDeepLinkPage from '@/pages/profile';
@@ -27,14 +26,9 @@ import { appHistory } from '@/utils/navigationHistory';
 import { useNotificationOpenHandler } from '@/hooks/useNotificationOpenHandler';
 import { useQueryTokenAdoption } from '@/hooks/useQueryTokenAdoption';
 import { applyColorMode } from '@/utils/colorMode';
-
-const OOBE_STORAGE_KEY = 'oobe';
+import { NotificationOptInPrompt } from '@/components/NotificationOptInPrompt';
 
 const PROFILE_DEEP_LINK_ENABLED = isFeatureEnabled('profileDeepLink');
-
-function hasCompletedOobe() {
-  return localStorage.getItem(OOBE_STORAGE_KEY) !== null;
-}
 
 /**
  * Strip desktop-only route state (backgroundPath) when switching from desktop
@@ -76,24 +70,24 @@ function AppRouter({ isDesktop }: { isDesktop: boolean }) {
   const isPushOpenRoute = useRouteMatch('/push-open');
   const isProfileRoute = useRouteMatch('/profile');
   const isPermalinkRoute = useRouteMatch<{ encoded: string }>('/m/:encoded');
+  const isChatsHome = useRouteMatch({ path: '/chats', exact: true });
 
   if (isLandingRoute?.isExact) {
     return <LandingPage />;
   } else if (isOobeRoute?.isExact) {
-    return <OobePage />;
+    return <Redirect to="/chats" />;
   } else if (isPushOpenRoute?.isExact) {
     return <PushOpenPage />;
   } else if (PROFILE_DEEP_LINK_ENABLED && isProfileRoute?.isExact) {
     return <ProfileDeepLinkPage />;
   } else if (isPermalinkRoute) {
     return <PermalinkPage encoded={isPermalinkRoute.params.encoded} />;
-  } else if (!hasCompletedOobe()) {
-    return <Redirect to="/oobe" />;
   }
 
   return (
     <>
       {isDesktop ? <DesktopSplitLayout /> : <MobileLayout />}
+      {isChatsHome && <NotificationOptInPrompt />}
       <PendingInviteModalHost />
       {PROFILE_DEEP_LINK_ENABLED && <ProfileDeepLinkHost />}
     </>

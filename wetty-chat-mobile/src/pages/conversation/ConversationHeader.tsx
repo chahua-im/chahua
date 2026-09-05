@@ -1,14 +1,25 @@
 import { IonButton, IonButtons, IonHeader, IonIcon, IonProgressBar, IonTitle, IonToolbar } from '@ionic/react';
-import { informationCircleOutline, notifications, notificationsOffOutline, people } from 'ionicons/icons';
+import {
+  archive,
+  archiveOutline,
+  informationCircleOutline,
+  notificationsOffOutline,
+  people,
+  starOutline,
+} from 'ionicons/icons';
 import { useSelector } from 'react-redux';
 import { BackButton } from '@/components/BackButton';
+import { ChatMuteSettingItem } from '@/components/chat/settings/ChatMuteSettingItem';
 import type { RootState } from '@/store/index';
 import type { BackAction } from '@/types/back-action';
 
 interface ConversationHeaderProps {
   backAction?: BackAction;
+  chatId: string;
   chatName: string;
   isMuted: boolean;
+  mutedUntil: string | null;
+  chatArchived: boolean;
   threadId?: string;
   threadSubscribed: boolean | null;
   threadArchived: boolean;
@@ -22,8 +33,11 @@ interface ConversationHeaderProps {
 
 export function ConversationHeader({
   backAction,
+  chatId,
   chatName,
   isMuted,
+  mutedUntil,
+  chatArchived,
   threadId,
   threadSubscribed,
   threadArchived,
@@ -58,22 +72,32 @@ export function ConversationHeader({
               >
                 <IonIcon
                   slot="icon-only"
-                  icon={threadSubscribed && !threadArchived ? notifications : notificationsOffOutline}
+                  icon={!threadSubscribed ? starOutline : threadArchived ? archive : archiveOutline}
                 />
               </IonButton>
             )
-          ) : isDm ? (
-            <IonButton onClick={onOpenDmInfo}>
-              <IonIcon slot="icon-only" icon={informationCircleOutline} />
-            </IonButton>
           ) : (
             <>
-              <IonButton onClick={onOpenMembers}>
-                <IonIcon slot="icon-only" icon={people} />
-              </IonButton>
-              <IonButton onClick={onOpenGroupInfo}>
-                <IonIcon slot="icon-only" icon={informationCircleOutline} />
-              </IonButton>
+              <ChatMuteSettingItem
+                chatId={chatId}
+                mutedUntil={mutedUntil}
+                archived={chatArchived}
+                presentation="toolbar"
+              />
+              {isDm ? (
+                <IonButton onClick={onOpenDmInfo}>
+                  <IonIcon slot="icon-only" icon={informationCircleOutline} />
+                </IonButton>
+              ) : (
+                <>
+                  <IonButton onClick={onOpenMembers}>
+                    <IonIcon slot="icon-only" icon={people} />
+                  </IonButton>
+                  <IonButton onClick={onOpenGroupInfo}>
+                    <IonIcon slot="icon-only" icon={informationCircleOutline} />
+                  </IonButton>
+                </>
+              )}
             </>
           )}
         </IonButtons>

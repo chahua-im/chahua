@@ -91,9 +91,6 @@ msgstr "全部"
 msgid "Allow anyone to add me"
 msgstr "允许任何人添加我"
 
-msgid "Allowed"
-msgstr "已允许"
-
 msgid "Already in this chat"
 msgstr "已在此聊天中"
 
@@ -121,9 +118,6 @@ msgstr "确定要撤回这条消息吗？"
 
 msgid "Are you sure you want to leave this group?"
 msgstr "确定要退出这个群组吗？"
-
-msgid "Ask first"
-msgstr "先询问"
 
 msgid "Attachment"
 msgstr "附件"
@@ -157,9 +151,6 @@ msgstr "拉黑 {displayName}？你们将无法互相发送消息。"
 
 msgid "Block User"
 msgstr "拉黑用户"
-
-msgid "Blocked"
-msgstr "已阻止"
 
 msgid "Cancel"
 msgstr "取消"
@@ -203,9 +194,6 @@ msgstr "检查更新"
 #. js-lingui-explicit-id
 msgid "auth.bootstrap.transient.description"
 msgstr "请检查网络连接后重试。"
-
-msgid "Checking..."
-msgstr "检查中..."
 
 msgid "Choose a destination group"
 msgstr "选择目标群组"
@@ -376,6 +364,12 @@ msgstr "表情"
 
 msgid "Emojis & Stickers"
 msgstr "表情和贴纸"
+
+msgid "Enable"
+msgstr "开启"
+
+msgid "Enable message notifications"
+msgstr "开启消息通知"
 
 msgid "Enter a user UID"
 msgstr "输入用户 UID"
@@ -806,6 +800,9 @@ msgstr "消息不能为空"
 msgid "Message not found"
 msgstr "未找到消息"
 
+msgid "Message notifications"
+msgstr "消息通知"
+
 msgid "Message saved"
 msgstr "消息已收藏"
 
@@ -923,9 +920,6 @@ msgstr "暂无视频"
 msgid "Not now"
 msgstr "暂不"
 
-msgid "Not subscribed"
-msgstr "未订阅"
-
 msgid "Notification permission was not granted"
 msgstr "通知权限未授予"
 
@@ -989,9 +983,6 @@ msgstr "粘贴邀请码"
 msgid "Pending approval"
 msgstr "等待对方同意"
 
-msgid "Permission"
-msgstr "权限"
-
 msgid "Pin"
 msgstr "置顶"
 
@@ -1050,9 +1041,6 @@ msgstr "升级为管理员"
 
 msgid "Public"
 msgstr "公开"
-
-msgid "Push Notifications"
-msgstr "推送通知"
 
 msgid "Push notifications are not available right now"
 msgstr "当前无法使用推送通知"
@@ -1304,9 +1292,6 @@ msgstr "在所有消息旁显示头像"
 msgid "Small"
 msgstr "小"
 
-msgid "Status"
-msgstr "状态"
-
 msgid "Stay"
 msgstr "留在此页"
 
@@ -1333,9 +1318,6 @@ msgstr "贴纸必须是图片或 WebM 视频。"
 
 msgid "Subscribe"
 msgstr "订阅"
-
-msgid "Subscribed"
-msgstr "已订阅"
 
 msgid "Tap a sticker to remove it from this pack."
 msgstr "点击贴纸即可将其从这个贴纸包中移除。"
@@ -1407,12 +1389,6 @@ msgstr "今天"
 
 msgid "Try Again"
 msgstr "重试"
-
-msgid "Turn Off Push Notifications"
-msgstr "关闭推送通知"
-
-msgid "Turn On Push Notifications"
-msgstr "开启推送通知"
 
 #. placeholder {0}: member.uid
 msgid "UID {0}"
@@ -1570,6 +1546,9 @@ msgstr "你已不是对方好友。"
 
 msgid "You blocked this user. Unblock to send messages."
 msgstr "你已拉黑对方，取消拉黑后才能发送消息。"
+
+msgid "You can change this later in Settings."
+msgstr "以后可以在设置中进行修改。"
 
 msgid "You can only add up to {MAX_REACTIONS_PER_USER_PER_MESSAGE} reactions"
 msgstr "您最多只能添加 {MAX_REACTIONS_PER_USER_PER_MESSAGE} 个表态"

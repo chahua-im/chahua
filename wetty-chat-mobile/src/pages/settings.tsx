@@ -9,9 +9,9 @@ import {
   IonLabel,
   IonList,
   IonListHeader,
-  IonNote,
   IonPage,
   IonTitle,
+  IonToggle,
   IonToolbar,
   useIonToast,
 } from '@ionic/react';
@@ -25,18 +25,9 @@ import { CheckForUpdateItem } from '@/components/settings/CheckForUpdateItem';
 import { AppVersionItem } from '@/components/settings/AppVersionItem';
 import { SettingsProfileHero } from '@/components/settings/SettingsProfileHero';
 
-import { type PushNotificationErrorCode, usePushNotifications } from '@/hooks/usePushNotifications';
+import { getPushNotificationErrorMessage, usePushNotifications } from '@/hooks/usePushNotifications';
 import { t } from '@lingui/core/macro';
-import {
-  bookmarkOutline,
-  codeWorking,
-  cog,
-  happyOutline,
-  logIn,
-  logOut,
-  notifications,
-  shieldCheckmarkOutline,
-} from 'ionicons/icons';
+import { bookmarkOutline, codeWorking, cog, happyOutline, shieldCheckmarkOutline } from 'ionicons/icons';
 import { BackButton } from '@/components/BackButton';
 import type { BackAction } from '@/types/back-action';
 
@@ -46,35 +37,6 @@ interface SettingsCoreProps {
   onOpenSavedMessages?: () => void;
   onOpenStickers?: () => void;
   onOpenFriendVerification?: () => void;
-}
-
-function getPermissionLabel(permission: NotificationPermission) {
-  switch (permission) {
-    case 'granted':
-      return t`Allowed`;
-    case 'denied':
-      return t`Blocked`;
-    default:
-      return t`Ask first`;
-  }
-}
-
-function getPushErrorMessage(code: PushNotificationErrorCode) {
-  switch (code) {
-    case 'unsupported_browser':
-      return t`Push notifications are not supported on this device`;
-    case 'permission_denied':
-      return t`Notification permission was not granted`;
-    case 'service_worker_unavailable':
-      return t`Push notifications are not available right now`;
-    case 'backend_subscribe_failed':
-      return t`Push notifications could not be enabled on the server`;
-    case 'unsubscribe_failed':
-      return t`Failed to turn off push notifications`;
-    case 'subscribe_failed':
-    default:
-      return t`Failed to turn on push notifications`;
-  }
 }
 
 export function SettingsCore({
@@ -95,7 +57,7 @@ export function SettingsCore({
   const [uidInput, setUidInput] = useState(() => String(getCurrentUserId()));
   const [presentToast] = useIonToast();
   const history = useHistory();
-  const { permission, isSubscribed, loading, isCheckingSubscription, subscribeToPush, unsubscribeFromPush } =
+  const { isSubscribed, loading, isCheckingSubscription, subscribeToPush, unsubscribeFromPush } =
     usePushNotifications();
 
   const handleSave = () => {
@@ -140,24 +102,18 @@ export function SettingsCore({
     history.push('/settings/friend-verification');
   };
 
-  const handleSubscribeToPush = async () => {
-    const result = await subscribeToPush();
+  const handlePushToggle = async (enabled: boolean) => {
+    const result = enabled ? await subscribeToPush() : await unsubscribeFromPush();
     if (result.ok) {
-      presentToast({ message: t`Push notifications enabled`, duration: 2000, position: 'bottom' });
+      presentToast({
+        message: enabled ? t`Push notifications enabled` : t`Push notifications turned off`,
+        duration: 2000,
+        position: 'bottom',
+      });
       return;
     }
 
-    presentToast({ message: getPushErrorMessage(result.code), duration: 3000, position: 'bottom' });
-  };
-
-  const handleUnsubscribeFromPush = async () => {
-    const result = await unsubscribeFromPush();
-    if (result.ok) {
-      presentToast({ message: t`Push notifications turned off`, duration: 2000, position: 'bottom' });
-      return;
-    }
-
-    presentToast({ message: getPushErrorMessage(result.code), duration: 3000, position: 'bottom' });
+    presentToast({ message: getPushNotificationErrorMessage(result.code), duration: 3000, position: 'bottom' });
   };
 
   return (
@@ -234,56 +190,18 @@ export function SettingsCore({
           </IonList>
         </FeatureGate>
 
-        <IonListHeader>
-          <IonLabel>
-            <Trans>Push Notifications</Trans>
-          </IonLabel>
-        </IonListHeader>
         <IonList inset={true}>
-          <IonItem>
-            <IonIcon aria-hidden="true" icon={notifications} slot="start" color="tertiary" />
+          <IonItem lines="none">
             <IonLabel>
-              <Trans>Status</Trans>
+              <Trans>Message notifications</Trans>
             </IonLabel>
-            <IonNote slot="end" color="medium">
-              {isCheckingSubscription ? t`Checking...` : isSubscribed ? t`Subscribed` : t`Not subscribed`}
-            </IonNote>
+            <IonToggle
+              slot="end"
+              checked={isSubscribed}
+              disabled={loading || isCheckingSubscription}
+              onIonChange={(event) => void handlePushToggle(event.detail.checked)}
+            />
           </IonItem>
-          {permission !== 'granted' && (
-            <IonItem>
-              <IonLabel>
-                <Trans>Permission</Trans>
-              </IonLabel>
-              <IonNote slot="end" color="medium">
-                {getPermissionLabel(permission)}
-              </IonNote>
-            </IonItem>
-          )}
-          {!isSubscribed ? (
-            <IonItem
-              button
-              detail={false}
-              onClick={handleSubscribeToPush}
-              disabled={loading || isCheckingSubscription || isSubscribed}
-            >
-              <IonIcon aria-hidden="true" icon={logIn} slot="start" color="primary" />
-              <IonLabel color="primary">
-                <Trans>Turn On Push Notifications</Trans>
-              </IonLabel>
-            </IonItem>
-          ) : (
-            <IonItem
-              button
-              detail={false}
-              onClick={handleUnsubscribeFromPush}
-              disabled={loading || isCheckingSubscription || !isSubscribed}
-            >
-              <IonIcon aria-hidden="true" icon={logOut} slot="start" color="danger" />
-              <IonLabel color="danger">
-                <Trans>Turn Off Push Notifications</Trans>
-              </IonLabel>
-            </IonItem>
-          )}
         </IonList>
 
         <IonListHeader>
