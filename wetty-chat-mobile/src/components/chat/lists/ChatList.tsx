@@ -21,6 +21,7 @@ import {
   folderOpenOutline,
   mailUnreadOutline,
   notificationsOffOutline,
+  personAddOutline,
 } from 'ionicons/icons';
 import { useHistory } from 'react-router-dom';
 import { Trans } from '@lingui/react/macro';
@@ -71,7 +72,7 @@ import { loadDraft } from '@/hooks/useChatDraft';
 import { buildResumeHash } from '@/types/conversationNavigation';
 import { CHAT_LIST_REFRESH_MIN_DURATION_MS } from '@/constants/chatTiming';
 import { ChatListSegment } from '@/components/chat/lists/ChatListSegment';
-import type { ChatListTab } from '@/components/chat/lists/chatListTabs';
+import { ARCHIVED_FRIEND_REQUESTS_PATH, type ChatListTab } from '@/components/chat/lists/chatListTabs';
 import { hasUnreadTabBadge, isChatMuted } from '@/components/chat/lists/chatListBadges';
 import { ThreadListRow } from '@/components/chat/lists/ThreadListRow';
 import { compareMessageOrder, isOptimisticMessageId } from '@/store/messageProjection';
@@ -484,6 +485,29 @@ export function ChatList({
     </IonItem>
   );
 
+  const renderFriendRequestsEntry = () => (
+    <IonItem
+      button
+      detail={false}
+      className={styles.chatListItem}
+      onClick={() => history.push(ARCHIVED_FRIEND_REQUESTS_PATH)}
+    >
+      <span slot="start" className={styles.threadsRowIcon}>
+        <IonIcon icon={personAddOutline} />
+      </span>
+      <IonLabel className={styles.chatsListLabel}>
+        <h3 className={styles.chatsListTitle}>
+          <span className={styles.chatsListTitleText}>
+            <Trans>Friend Requests</Trans>
+          </span>
+        </h3>
+        <p className={styles.chatsListPreview}>
+          <Trans>View archived friend requests</Trans>
+        </p>
+      </IonLabel>
+    </IonItem>
+  );
+
   const renderChatItem = (chat: ChatListEntry) => (
     <IonItemSliding key={chat.id}>
       <IonItemOptions
@@ -659,6 +683,7 @@ export function ChatList({
       return (
         <IonList>
           {!archivedMode && <PendingFriendRequests />}
+          {!archivedMode && renderFriendRequestsEntry()}
           {archivedEntry}
           {sortedChats.length === 0 ? (
             <IonItem lines="none">

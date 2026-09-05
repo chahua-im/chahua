@@ -646,7 +646,7 @@ pub struct NewSavedMessage {
 
 #[cfg(test)]
 mod tests {
-    use super::{MessageType, TranscodeStatus};
+    use super::{FriendRequestStatus, MessageType, TranscodeStatus};
 
     #[test]
     fn message_type_serializes_as_snake_case() {
@@ -680,6 +680,13 @@ mod tests {
         let json =
             serde_json::to_string(&TranscodeStatus::Pending).expect("serialize transcode status");
         assert_eq!(json, "\"pending\"");
+    }
+
+    #[test]
+    fn friend_request_status_serializes_archived_variant() {
+        let json = serde_json::to_string(&FriendRequestStatus::Archived)
+            .expect("serialize friend request status");
+        assert_eq!(json, "\"archived\"");
     }
 }
 
@@ -895,6 +902,8 @@ pub struct NewPushSubscription {
 #[serde(rename_all = "snake_case")]
 pub enum FriendRequestStatus {
     Pending,
+    /// An unresolved request archived by its recipient.
+    Archived,
     Accepted,
     Rejected,
 }

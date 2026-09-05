@@ -43,6 +43,7 @@ function renderSegment({
         friends: [],
         friendsLoaded: false,
         pendingRequests,
+        archivedRequests: [],
         blocks: [],
         blocksLoaded: false,
       },

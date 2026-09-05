@@ -36,7 +36,7 @@ const MAX_FRIEND_VERIFICATION_QUESTION_CHARS: usize = 100;
 
 #[derive(Deserialize)]
 struct ListFriendRequestsQuery {
-    status: Option<FriendRequestStatus>,
+    archived: Option<bool>,
 }
 
 fn validate_friend_request_message(message: Option<&str>) -> Result<(), AppError> {
@@ -329,7 +329,7 @@ async fn count_pending_incoming_requests(
 ) -> Result<Json<PendingFriendRequestCountResponse>, AppError> {
     let conn = &mut *conn;
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
-    let pending_incoming_count = social::count_incoming_requests(conn, uid)?;
+    let pending_incoming_count = social::count_pending_incoming_requests(conn, uid)?;
     Ok(Json(PendingFriendRequestCountResponse {
         pending_incoming_count,
     }))
@@ -339,10 +339,10 @@ async fn count_pending_incoming_requests(
     get,
     path = "/requests",
     tag = "friends",
-    responses((status = 200, description = "Friend request history in both directions, newest first", body = ListFriendRequestHistoryResponse)),
+    responses((status = 200, description = "Friend requests in the selected archive view, newest first", body = ListFriendRequestHistoryResponse)),
     security(("bearer_jwt" = []), ("service_token_bearer" = [])),
     params(
-        ("status" = Option<FriendRequestStatus>, Query, description = "Filter by request status"),
+        ("archived" = Option<bool>, Query, description = "False returns active incoming requests; true returns outgoing and archived or resolved incoming requests; omit for all"),
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     )
 )]
@@ -354,7 +354,7 @@ async fn list_friend_request_history(
 ) -> Result<Json<ListFriendRequestHistoryResponse>, AppError> {
     let conn = &mut *conn;
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
-    let rows = social::list_friend_request_history(conn, uid, query.status)?;
+    let rows = social::list_friend_request_history(conn, uid, query.archived)?;
     let directions: Vec<FriendRequestDirection> = rows
         .iter()
         .map(|row| {
@@ -448,6 +448,29 @@ async fn reject_friend_request(
 }
 
 #[utoipa::path(
+    put,
+    path = "/requests/{request_id}/archive",
+    tag = "friends",
+    params(
+        ("request_id" = i64, Path, description = "Friend request ID"),
+        ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
+    ),
+    responses((status = 204, description = "Request archived")),
+    security(("bearer_jwt" = []), ("service_token_bearer" = []))
+)]
+async fn archive_friend_request(
+    principal: Principal,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Path(RequestIdPath { request_id }): Path<RequestIdPath>,
+) -> Result<StatusCode, AppError> {
+    let conn = &mut *conn;
+    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
+    social::archive_friend_request(conn, uid, request_id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
     get,
     path = "/me/settings",
     tag = "friends",
@@ -515,6 +538,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_friend_request_history))
         .routes(routes!(accept_friend_request))
         .routes(routes!(reject_friend_request))
+        .routes(routes!(archive_friend_request))
         .routes(routes!(get_my_friend_settings))
         .routes(routes!(update_my_friend_settings))
         .routes(routes!(get_user_friend_add_info))
@@ -528,7 +552,6 @@ mod tests {
         MAX_FRIEND_VERIFICATION_QUESTION_CHARS,
     };
     use crate::errors::AppError;
-    use crate::models::FriendRequestStatus;
 
     fn assert_character_limit(
         validator: fn(Option<&str>) -> Result<(), AppError>,
@@ -562,10 +585,10 @@ mod tests {
     }
 
     #[test]
-    fn friend_request_status_query_deserializes() {
+    fn friend_request_archive_query_deserializes() {
         let query: ListFriendRequestsQuery =
-            serde_json::from_value(serde_json::json!({ "status": "pending" })).unwrap();
+            serde_json::from_value(serde_json::json!({ "archived": true })).unwrap();
 
-        assert_eq!(query.status, Some(FriendRequestStatus::Pending));
+        assert_eq!(query.archived, Some(true));
     }
 }

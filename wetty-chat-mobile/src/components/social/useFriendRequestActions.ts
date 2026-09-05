@@ -4,11 +4,12 @@ import axios from 'axios';
 import { useDispatch } from 'react-redux';
 import { friendsApi } from '@/api/friends';
 import type { AppDispatch } from '@/store';
-import { fetchFriends, fetchPendingRequests } from '@/store/socialSlice';
+import { fetchArchivedRequests, fetchFriends, fetchPendingRequests } from '@/store/socialSlice';
 
 export function useFriendRequestActions(): {
   acceptRequest: (requestId: string) => Promise<void>;
   rejectRequest: (requestId: string, fromUid: number) => Promise<void>;
+  archiveRequest: (requestId: string) => Promise<void>;
 } {
   const dispatch = useDispatch<AppDispatch>();
   const [presentToast] = useIonToast();
@@ -19,6 +20,7 @@ export function useFriendRequestActions(): {
       await friendsApi.acceptRequest(requestId);
       dispatch(fetchFriends());
       dispatch(fetchPendingRequests());
+      dispatch(fetchArchivedRequests());
     } catch (err) {
       presentToast(err instanceof Error ? err.message : t`Failed to accept request`, 2000);
     }
@@ -37,12 +39,14 @@ export function useFriendRequestActions(): {
             try {
               await friendsApi.rejectRequest(requestId);
               dispatch(fetchPendingRequests());
+              dispatch(fetchArchivedRequests());
             } catch (err) {
-              // A 409 means the server already dismissed the request; refresh both sources
+              // A 409 means the server already dismissed the request; refresh the lists
               // so the history is current, then explain which conflict happened.
               const [friends] = await Promise.all([
                 dispatch(fetchFriends()).unwrap(),
                 dispatch(fetchPendingRequests()).unwrap(),
+                dispatch(fetchArchivedRequests()).unwrap(),
               ]);
               const status = axios.isAxiosError(err) ? err.response?.status : undefined;
               if (status === 409) {
@@ -62,5 +66,14 @@ export function useFriendRequestActions(): {
     });
   }
 
-  return { acceptRequest, rejectRequest };
+  async function archiveRequest(requestId: string): Promise<void> {
+    try {
+      await friendsApi.archiveRequest(requestId);
+      dispatch(fetchPendingRequests());
+    } catch (err) {
+      presentToast(err instanceof Error ? err.message : t`Failed to archive request`, 2000);
+    }
+  }
+
+  return { acceptRequest, rejectRequest, archiveRequest };
 }

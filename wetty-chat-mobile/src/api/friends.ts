@@ -1,7 +1,7 @@
 import apiClient from './client';
 import type { MemberSummary } from './users';
 
-export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected';
+export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'archived';
 
 /**
  * How a user gates incoming friend requests.
@@ -95,9 +95,9 @@ export const friendsApi = {
     return res.data;
   },
 
-  /** Friend-request history in server-defined order, optionally filtered by status. */
-  listRequestHistory: async (status?: FriendRequestStatus): Promise<FriendRequestHistoryEntry[]> => {
-    const res = await apiClient.get<ListFriendRequestHistoryResponse>('/friends/requests', { params: { status } });
+  /** Friend-request history in server-defined order, optionally filtered by archive view. */
+  listRequestHistory: async (archived?: boolean): Promise<FriendRequestHistoryEntry[]> => {
+    const res = await apiClient.get<ListFriendRequestHistoryResponse>('/friends/requests', { params: { archived } });
     return res.data.requests;
   },
 
@@ -109,6 +109,10 @@ export const friendsApi = {
   rejectRequest: async (requestId: string): Promise<FriendRequestResponse> => {
     const res = await apiClient.post<FriendRequestResponse>(`/friends/requests/${requestId}/reject`);
     return res.data;
+  },
+
+  archiveRequest: async (requestId: string): Promise<void> => {
+    await apiClient.put(`/friends/requests/${requestId}/archive`);
   },
 
   getMySettings: async (): Promise<FriendSettingsResponse> => {

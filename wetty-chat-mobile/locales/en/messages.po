@@ -437,6 +437,9 @@ msgstr "Failed to add sticker"
 msgid "Failed to add sticker to favorites"
 msgstr "Failed to add sticker to favorites"
 
+msgid "Failed to archive request"
+msgstr "Failed to archive request"
+
 msgid "Failed to copy invite code"
 msgstr "Failed to copy invite code"
 
@@ -856,6 +859,9 @@ msgstr "No archived chats"
 
 msgid "No archived conversations"
 msgstr "No archived conversations"
+
+msgid "No archived friend requests"
+msgstr "No archived friend requests"
 
 msgid "No archived threads"
 msgstr "No archived threads"
@@ -1526,6 +1532,9 @@ msgstr "View all pinned messages"
 
 msgid "View archived chats and threads"
 msgstr "View archived chats and threads"
+
+msgid "View archived friend requests"
+msgstr "View archived friend requests"
 
 #. placeholder {0}: index + 1
 msgid "View image {0}"
