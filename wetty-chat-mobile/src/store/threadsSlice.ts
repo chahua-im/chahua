@@ -19,6 +19,8 @@ function toStoredThread(item: ThreadListItem): StoredThreadListItem {
 interface ThreadListBucketState {
   nextCursor: string | null;
   isLoaded: boolean;
+  isLoading: boolean;
+  pageDepth: number;
 }
 
 interface ThreadsState {
@@ -31,8 +33,8 @@ interface ThreadsState {
 const initialState: ThreadsState = {
   items: [],
   buckets: {
-    active: { nextCursor: null, isLoaded: false },
-    archived: { nextCursor: null, isLoaded: false },
+    active: { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 },
+    archived: { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 },
   },
   subscriptionByThreadId: {},
   archivedByThreadId: {},
@@ -48,18 +50,34 @@ const threadsSlice = createSlice({
   reducers: {
     setThreadsList(
       state,
-      action: PayloadAction<{ threads: ThreadListItem[]; nextCursor: string | null; archived?: boolean }>,
+      action: PayloadAction<{
+        threads: ThreadListItem[];
+        nextCursor: string | null;
+        archived?: boolean;
+        pageDepth?: number;
+      }>,
     ) {
       const archived = action.payload.archived ?? false;
       const key = bucketKey(archived);
-      const nextItems = action.payload.threads.map(toStoredThread);
+      const seenIds = new Set<string>();
+      const nextItems: StoredThreadListItem[] = [];
+      for (const thread of action.payload.threads) {
+        const threadRootId = thread.threadRootMessage.id;
+        if (seenIds.has(threadRootId)) continue;
+        seenIds.add(threadRootId);
+        nextItems.push(toStoredThread(thread));
+      }
 
-      // `setThreadsList` is used for full snapshot refreshes, so the target bucket
-      // must be replaced wholesale to avoid keeping stale entries that moved buckets
-      // or disappeared while this client missed realtime updates.
+      // Full refreshes replace the target bucket so memberships that moved or disappeared
+      // while realtime updates were unavailable do not survive the authoritative snapshot.
       state.items = state.items.filter((thread) => thread.archived !== archived);
       state.items.push(...nextItems);
-      state.buckets[key] = { nextCursor: action.payload.nextCursor, isLoaded: true };
+      state.buckets[key] = {
+        nextCursor: action.payload.nextCursor,
+        isLoaded: true,
+        isLoading: state.buckets[key].isLoading,
+        pageDepth: action.payload.pageDepth ?? 1,
+      };
       for (const thread of action.payload.threads) {
         state.subscriptionByThreadId[thread.threadRootMessage.id] = true;
         state.archivedByThreadId[thread.threadRootMessage.id] = thread.archived;
@@ -71,17 +89,25 @@ const threadsSlice = createSlice({
     ) {
       const archived = action.payload.archived ?? false;
       const key = bucketKey(archived);
-      const existingIds = new Set(state.items.map((t) => t.threadRootMessage.id));
-      const newThreads = action.payload.threads
-        .filter((t) => !existingIds.has(t.threadRootMessage.id))
-        .map(toStoredThread);
+      const existingIds = new Set(state.items.map((thread) => thread.threadRootMessage.id));
+      const newThreads: StoredThreadListItem[] = [];
+      for (const thread of action.payload.threads) {
+        const threadRootId = thread.threadRootMessage.id;
+        if (existingIds.has(threadRootId)) continue;
+        existingIds.add(threadRootId);
+        newThreads.push(toStoredThread(thread));
+      }
       state.items.push(...newThreads);
       state.buckets[key].nextCursor = action.payload.nextCursor;
       state.buckets[key].isLoaded = true;
+      state.buckets[key].pageDepth += 1;
       for (const thread of action.payload.threads) {
         state.subscriptionByThreadId[thread.threadRootMessage.id] = true;
         state.archivedByThreadId[thread.threadRootMessage.id] = thread.archived;
       }
+    },
+    setThreadsListLoading(state, action: PayloadAction<{ archived?: boolean; isLoading: boolean }>) {
+      state.buckets[bucketKey(action.payload.archived ?? false)].isLoading = action.payload.isLoading;
     },
     updateThreadFromWs(state, action: PayloadAction<ThreadUpdatePayload>) {
       const { threadRootId, lastReplyAt, replyCount } = action.payload;
@@ -167,8 +193,8 @@ const threadsSlice = createSlice({
     },
     clearThreads(state) {
       state.items = [];
-      state.buckets.active = { nextCursor: null, isLoaded: false };
-      state.buckets.archived = { nextCursor: null, isLoaded: false };
+      state.buckets.active = { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 };
+      state.buckets.archived = { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 };
       state.subscriptionByThreadId = {};
       state.archivedByThreadId = {};
     },
@@ -178,6 +204,7 @@ const threadsSlice = createSlice({
 export const {
   setThreadsList,
   appendThreads,
+  setThreadsListLoading,
   updateThreadFromWs,
   updateThreadCachedLastReply,
   patchThreadCachedLastReply,
@@ -197,6 +224,8 @@ export const selectThreadsLoaded = (state: RootState, archived = false) =>
   state.threads.buckets[bucketKey(archived)].isLoaded;
 export const selectThreadsNextCursor = (state: RootState, archived = false) =>
   state.threads.buckets[bucketKey(archived)].nextCursor;
+export const selectThreadsLoading = (state: RootState, archived = false) =>
+  state.threads.buckets[bucketKey(archived)].isLoading;
 export const selectTotalUnreadThreadCount = createSelector([selectThreads], (threads) =>
   threads.filter((t) => !t.archived).reduce((sum, t) => sum + (t.unreadCount ?? 0), 0),
 );

@@ -21,7 +21,7 @@ export interface ChatListEntry {
   peer?: MemberSummary | null;
 }
 
-interface ListChatsResponse {
+export interface ListChatsResponse {
   chats: ChatListEntry[];
   nextCursor: string | null;
 }

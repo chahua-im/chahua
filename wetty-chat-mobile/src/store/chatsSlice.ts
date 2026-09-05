@@ -39,12 +39,24 @@ interface ChatStateEntry {
   liveProjection?: ChatListMeta;
 }
 
+export interface ChatListBucketState {
+  nextCursor: string | null;
+  isLoaded: boolean;
+  isLoading: boolean;
+  pageDepth: number;
+}
+
 export interface ChatsState {
   byId: Record<string, ChatStateEntry>;
+  buckets: Record<'active' | 'archived', ChatListBucketState>;
 }
 
 const initialState: ChatsState = {
   byId: {},
+  buckets: {
+    active: { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 },
+    archived: { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 },
+  },
 };
 
 function getChatEntry(state: ChatsState, chatId: string): ChatStateEntry {
@@ -123,14 +135,22 @@ const chatsSlice = createSlice({
         entry.details = { ...entry.details, ...meta };
       }
     },
-    setChatsList(state, action: PayloadAction<{ chats: ChatListEntry[]; archived?: boolean }>) {
+    setChatsList(
+      state,
+      action: PayloadAction<{
+        chats: ChatListEntry[];
+        nextCursor: string | null;
+        archived?: boolean;
+        pageDepth?: number;
+      }>,
+    ) {
       const archived = action.payload.archived ?? false;
+      const key = archived ? 'archived' : 'active';
       const nextIds = new Set(action.payload.chats.map((chat) => chat.id));
 
       for (const [chatId, entry] of Object.entries(state.byId)) {
         const snapshotArchived = entry.listSnapshot?.archived ?? false;
-        if (snapshotArchived !== archived) continue;
-        if (nextIds.has(chatId)) continue;
+        if (snapshotArchived !== archived || nextIds.has(chatId)) continue;
 
         entry.listSnapshot = {
           ...entry.listSnapshot,
@@ -139,7 +159,10 @@ const chatsSlice = createSlice({
         };
       }
 
+      const seenIds = new Set<string>();
       for (const chat of action.payload.chats) {
+        if (seenIds.has(chat.id)) continue;
+        seenIds.add(chat.id);
         const entry = getChatEntry(state, chat.id);
         entry.details = {
           ...entry.details,
@@ -159,6 +182,53 @@ const chatsSlice = createSlice({
         };
         reconcileAuthoritativeListFields(entry, chat.unreadCount);
       }
+      state.buckets[key] = {
+        nextCursor: action.payload.nextCursor,
+        isLoaded: true,
+        isLoading: state.buckets[key].isLoading,
+        pageDepth: action.payload.pageDepth ?? 1,
+      };
+    },
+    appendChatsList(
+      state,
+      action: PayloadAction<{ chats: ChatListEntry[]; nextCursor: string | null; archived?: boolean }>,
+    ) {
+      const archived = action.payload.archived ?? false;
+      const key = archived ? 'archived' : 'active';
+      const existingIds = new Set(
+        Object.entries(state.byId)
+          .filter(([, entry]) => entry.listSnapshot?.inList && entry.listSnapshot.archived === archived)
+          .map(([chatId]) => chatId),
+      );
+
+      for (const chat of action.payload.chats) {
+        if (existingIds.has(chat.id)) continue;
+        existingIds.add(chat.id);
+        const entry = getChatEntry(state, chat.id);
+        entry.details = {
+          ...entry.details,
+          name: chat.name ?? entry.details.name,
+          avatar: chat.avatar ?? entry.details.avatar ?? null,
+          kind: chat.kind ?? entry.details.kind,
+          peer: chat.peer ?? entry.details.peer ?? null,
+        };
+        entry.listSnapshot = {
+          lastMessage: chat.lastMessage,
+          lastMessageAt: chat.lastMessageAt,
+          unreadCount: chat.unreadCount,
+          lastReadMessageId: chat.lastReadMessageId,
+          inList: true,
+          mutedUntil: chat.mutedUntil,
+          archived: chat.archived ?? archived,
+        };
+        reconcileAuthoritativeListFields(entry, chat.unreadCount);
+      }
+      state.buckets[key].nextCursor = action.payload.nextCursor;
+      state.buckets[key].isLoaded = true;
+      state.buckets[key].pageDepth += 1;
+    },
+    setChatsListLoading(state, action: PayloadAction<{ archived?: boolean; isLoading: boolean }>) {
+      state.buckets[action.payload.archived ? 'archived' : 'active'].isLoading = action.payload.isLoading;
     },
     setChatMutedUntil(state, action: PayloadAction<{ chatId: string; mutedUntil: string | null }>) {
       const entry = getChatEntry(state, action.payload.chatId);
@@ -300,6 +370,8 @@ export const {
   setChatMeta,
   setChatsMeta,
   setChatsList,
+  appendChatsList,
+  setChatsListLoading,
   setChatMutedUntil,
   setChatInList,
   setChatArchived,
@@ -327,6 +399,11 @@ export function selectChatMutedUntil(state: RootState, chatId: string): string |
   const entry = state.chats.byId[chatId];
   return resolveMutedUntil(entry?.listSnapshot, entry?.liveProjection);
 }
+
+export const selectChatsNextCursor = (state: RootState, archived = false) =>
+  state.chats.buckets[archived ? 'archived' : 'active'].nextCursor;
+export const selectChatsLoading = (state: RootState, archived = false) =>
+  state.chats.buckets[archived ? 'archived' : 'active'].isLoading;
 
 export function selectChatLastReadMessageId(state: RootState, chatId: string): string | null {
   const entry = state.chats.byId[chatId];

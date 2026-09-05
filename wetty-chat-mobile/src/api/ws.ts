@@ -7,15 +7,15 @@ import { setChatArchived, setChatMutedUntil } from '@/store/chatsSlice';
 import {
   removeThread,
   setThreadSubscriptionStatus,
-  setThreadsList,
   updateThreadFromWs,
   type ThreadUpdatePayload,
 } from '@/store/threadsSlice';
+import { refreshThreadList } from '@/store/listPagination';
 import { addPin, removePin } from '@/store/pinsSlice';
 import { replaceStickerPackOrderFromWs } from '@/store/stickerPreferencesSlice';
 import { fetchArchivedRequests, fetchFriends, fetchPendingRequests } from '@/store/socialSlice';
 import type { PinResponse } from '@/api/pins';
-import { getThreadSubscriptionStatus, getThreads } from '@/api/threads';
+import { getThreadSubscriptionStatus } from '@/api/threads';
 import store from '@/store/index';
 import {
   messageAdded,
@@ -259,10 +259,8 @@ function handleWsMessage(payload: unknown): void {
 }
 
 function refreshThreadsList(): void {
-  getThreads()
-    .then((res) => {
-      store.dispatch(setThreadsList({ threads: res.data.threads, nextCursor: res.data.nextCursor, archived: false }));
-    })
+  void store
+    .dispatch(refreshThreadList(false))
     .catch((err) => console.error('Failed to refresh threads list from websocket event', err));
 }
 

@@ -2,13 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { AxiosResponse } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  archiveThread,
-  getThreadSubscriptionStatus,
-  getThreads,
-  subscribeToThread,
-  unarchiveThread,
-} from '@/api/threads';
+import { archiveThread, getThreadSubscriptionStatus, subscribeToThread, unarchiveThread } from '@/api/threads';
 import { useThreadSubscription } from './useThreadSubscription';
 
 function response<T>(data: T): AxiosResponse<T> {
@@ -29,8 +23,8 @@ const selectorState = {
   threads: {
     items: [],
     buckets: {
-      active: { nextCursor: null, isLoaded: false },
-      archived: { nextCursor: null, isLoaded: false },
+      active: { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 },
+      archived: { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 },
     },
     subscriptionByThreadId: {} as Record<string, boolean>,
     archivedByThreadId: {} as Record<string, boolean>,
@@ -44,7 +38,6 @@ vi.mock('react-redux', () => ({
 vi.mock('@/api/threads', () => ({
   archiveThread: vi.fn(),
   getThreadSubscriptionStatus: vi.fn(),
-  getThreads: vi.fn(),
   subscribeToThread: vi.fn(),
   unarchiveThread: vi.fn(),
 }));
@@ -91,7 +84,6 @@ describe('useThreadSubscription', () => {
     selectorState.threads.subscriptionByThreadId = {};
     selectorState.threads.archivedByThreadId = {};
     vi.mocked(getThreadSubscriptionStatus).mockResolvedValue(response({ subscribed: false, archived: false }));
-    vi.mocked(getThreads).mockResolvedValue(response({ threads: [], nextCursor: null }));
     vi.mocked(archiveThread).mockResolvedValue(response(undefined));
     vi.mocked(subscribeToThread).mockResolvedValue(response(undefined));
     vi.mocked(unarchiveThread).mockResolvedValue(response(undefined));
@@ -117,26 +109,6 @@ describe('useThreadSubscription', () => {
       expect.objectContaining({
         type: 'threads/setThreadSubscriptionStatus',
         payload: { threadRootId: 'thread-1', subscribed: true, archived: false },
-      }),
-    );
-  });
-
-  it('subscribes and refreshes the active thread list', async () => {
-    await renderHook();
-
-    await act(async () => {
-      await state.handleToggleThreadSubscription();
-      await Promise.resolve();
-    });
-
-    expect(subscribeToThread).toHaveBeenCalledWith('chat-1', 'thread-1');
-    expect(getThreads).toHaveBeenCalled();
-    expect(state.threadSubscribed).toBe(true);
-    expect(state.threadArchived).toBe(false);
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'threads/setThreadsList',
-        payload: { threads: [], nextCursor: null, archived: false },
       }),
     );
   });

@@ -19,12 +19,14 @@ import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { useDispatch } from 'react-redux';
 import { Redirect, useHistory } from 'react-router-dom';
-import { createChat, getChats } from '@/api/chats';
+import { createChat } from '@/api/chats';
 import { BackButton } from '@/components/BackButton';
 import { PermissionGate } from '@/components/permissions/PermissionGate';
 import { InsetContent } from '@/components/shared/InsetContent';
 import { useIsDesktop } from '@/hooks/platformHooks';
-import { setChatInList, setChatMeta, setChatsList } from '@/store/chatsSlice';
+import type { AppDispatch } from '@/store';
+import { setChatInList, setChatMeta } from '@/store/chatsSlice';
+import { refreshChatList } from '@/store/listPagination';
 import type { BackAction } from '@/types/back-action';
 import styles from './create-chat.module.scss';
 
@@ -33,7 +35,7 @@ interface CreateChatCoreProps {
 }
 
 export default function CreateChatCore({ backAction }: CreateChatCoreProps) {
-  const dispatch = useDispatch();
+  const dispatch = useDispatch<AppDispatch>();
   const history = useHistory();
   const isDesktop = useIsDesktop();
   const [presentAlert] = useIonAlert();
@@ -69,8 +71,7 @@ export default function CreateChatCore({ backAction }: CreateChatCoreProps) {
       dispatch(setChatInList({ chatId: createdChat.id, inList: true }));
 
       try {
-        const chatsResponse = await getChats();
-        dispatch(setChatsList({ chats: chatsResponse.data.chats || [] }));
+        await dispatch(refreshChatList(false));
       } catch (refreshError) {
         console.warn('Failed to refresh chats after creation', refreshError);
       }
