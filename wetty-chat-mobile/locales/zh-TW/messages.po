@@ -437,6 +437,9 @@ msgstr "新增表情失敗"
 msgid "Failed to add sticker to favorites"
 msgstr "添加貼紙到收藏失敗"
 
+msgid "Failed to archive request"
+msgstr "封存好友請求失敗"
+
 msgid "Failed to copy invite code"
 msgstr "複製邀請碼失敗"
 
@@ -856,6 +859,9 @@ msgstr "沒有已封存聊天"
 
 msgid "No archived conversations"
 msgstr "沒有已封存對話"
+
+msgid "No archived friend requests"
+msgstr "沒有已封存的好友請求"
 
 msgid "No archived threads"
 msgstr "沒有已封存話題"
@@ -1526,6 +1532,9 @@ msgstr "查看所有已釘選的訊息"
 
 msgid "View archived chats and threads"
 msgstr "查看已封存聊天和話題"
+
+msgid "View archived friend requests"
+msgstr "查看已封存的好友請求"
 
 #. placeholder {0}: index + 1
 msgid "View image {0}"

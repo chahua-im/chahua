@@ -5,7 +5,7 @@ import { configureStore } from '@reduxjs/toolkit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FriendRequestHistoryEntry } from '@/api/friends';
 import socialReducer from '@/store/socialSlice';
-import { PendingFriendRequests } from './PendingFriendRequests';
+import { FriendRequestRow, PendingFriendRequests } from './PendingFriendRequests';
 
 const fixtures: FriendRequestHistoryEntry[] = [
   {
@@ -18,15 +18,6 @@ const fixtures: FriendRequestHistoryEntry[] = [
     message: 'hi there',
     direction: 'incoming' as const,
   },
-  {
-    id: 'outgoing-pending',
-    from: { uid: 1, username: 'Alice', gender: 0 },
-    to: { uid: 3, username: 'Cara', gender: 0 },
-    status: 'pending' as const,
-    createdAt: '2026-08-17T00:00:00Z',
-    decidedAt: null,
-    direction: 'outgoing' as const,
-  },
 ];
 
 vi.mock('@lingui/core/macro', () => ({
@@ -36,9 +27,12 @@ vi.mock('@lingui/core/macro', () => ({
       : strings.reduce((message, part, index) => `${message}${part}${values[index] ?? ''}`, ''),
 }));
 vi.mock('@ionic/react', () => ({
-  IonButton: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
-    <button onClick={onClick}>{children}</button>
+  IonButton: ({ children, onClick, 'aria-label': label }: React.ComponentProps<'button'>) => (
+    <button onClick={onClick} aria-label={label}>
+      {children}
+    </button>
   ),
+  IonIcon: () => null,
   IonItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
     <div onClick={onClick}>{children}</div>
   ),
@@ -48,7 +42,7 @@ vi.mock('@ionic/react', () => ({
 vi.mock('@/components/chat/profiles/UserProfileModal', () => ({ UserProfileModal: () => null }));
 vi.mock('@/components/UserAvatar', () => ({ UserAvatar: () => null }));
 vi.mock('@/components/social/useFriendRequestActions', () => ({
-  useFriendRequestActions: () => ({ acceptRequest: vi.fn(), rejectRequest: vi.fn() }),
+  useFriendRequestActions: () => ({ acceptRequest: vi.fn(), rejectRequest: vi.fn(), archiveRequest: vi.fn() }),
 }));
 let container: HTMLDivElement;
 let root: Root;
@@ -61,6 +55,7 @@ function renderRequests(requests: FriendRequestHistoryEntry[]) {
         friends: [],
         friendsLoaded: false,
         pendingRequests: requests,
+        archivedRequests: [],
         blocks: [],
         blocksLoaded: false,
       },
@@ -92,20 +87,32 @@ afterEach(() => {
 });
 
 describe('PendingFriendRequests', () => {
-  it('renders incoming actions and outgoing status in server order', () => {
+  it('renders actions for unarchived requests', () => {
     renderRequests(fixtures);
 
     expect(container.textContent).toContain('Bob');
     expect(container.textContent).toContain('hi there');
-    expect(container.textContent).toContain('Cara');
-    expect(container.textContent).toContain('Pending approval');
-    expect(container.querySelectorAll('button')).toHaveLength(2);
-    expect(container.textContent?.indexOf('Bob')).toBeLessThan(container.textContent?.indexOf('Cara') ?? Infinity);
+    expect(Array.from(container.querySelectorAll('button'), (button) => button.getAttribute('aria-label'))).toEqual([
+      'Accept',
+      'Reject',
+      'Archive',
+    ]);
   });
 
   it('renders nothing when there are no pending requests', () => {
     renderRequests([]);
 
     expect(container.textContent).toBe('');
+  });
+
+  it('renders archived unresolved requests as pending without actions', () => {
+    act(() => {
+      root.render(
+        <FriendRequestRow request={{ ...fixtures[0], status: 'archived' }} onOpenProfile={() => undefined} />,
+      );
+    });
+
+    expect(container.textContent).toContain('Pending approval');
+    expect(container.querySelector('button')).toBeNull();
   });
 });

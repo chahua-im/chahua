@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BlockResponse } from '@/api/blocks';
 import { friendsApi, type FriendRequestHistoryEntry, type FriendResponse } from '@/api/friends';
 import type { RootState } from './index';
-import reducer, { blockAdded, fetchFriends, fetchPendingRequests, selectPendingIncomingCount } from './socialSlice';
+import reducer, {
+  blockAdded,
+  fetchArchivedRequests,
+  fetchFriends,
+  fetchPendingRequests,
+  selectPendingIncomingCount,
+} from './socialSlice';
 
 const user = { uid: 2, username: 'Bob', gender: 0 };
 const friend: FriendResponse = { user, since: '2026-08-18T00:00:00Z' };
@@ -21,7 +27,7 @@ const outgoingRequest: FriendRequestHistoryEntry = {
   id: 'outgoing-request',
   from: { uid: 1, username: 'Alice', gender: 0 },
   to: { uid: 3, username: 'Cara', gender: 0 },
-  status: 'pending',
+  status: 'archived',
   createdAt: '2026-08-18T01:00:00Z',
   decidedAt: null,
   direction: 'outgoing',
@@ -41,15 +47,23 @@ describe('socialSlice blocking', () => {
 
 describe('socialSlice pending requests', () => {
   it('loads pending requests and derives the incoming badge count', async () => {
-    const listRequests = vi
-      .spyOn(friendsApi, 'listRequestHistory')
-      .mockResolvedValueOnce([incomingRequest, outgoingRequest]);
+    const listRequests = vi.spyOn(friendsApi, 'listRequestHistory').mockResolvedValueOnce([incomingRequest]);
     const store = configureStore({ reducer: { social: reducer } });
 
     await store.dispatch(fetchPendingRequests());
 
-    expect(listRequests).toHaveBeenCalledWith('pending');
-    expect(store.getState().social.pendingRequests).toEqual([incomingRequest, outgoingRequest]);
+    expect(listRequests).toHaveBeenCalledWith(false);
+    expect(store.getState().social.pendingRequests).toEqual([incomingRequest]);
     expect(selectPendingIncomingCount(store.getState() as RootState)).toBe(1);
+  });
+
+  it('loads archived requests', async () => {
+    const listRequests = vi.spyOn(friendsApi, 'listRequestHistory').mockResolvedValueOnce([outgoingRequest]);
+    const store = configureStore({ reducer: { social: reducer } });
+
+    await store.dispatch(fetchArchivedRequests());
+
+    expect(listRequests).toHaveBeenCalledWith(true);
+    expect(store.getState().social.archivedRequests).toEqual([outgoingRequest]);
   });
 });

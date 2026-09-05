@@ -7,6 +7,7 @@ import { Redirect, Route, useLocation, matchPath } from 'react-router-dom';
 
 import ChatsPage from '@/pages/chats';
 import ArchivedPage from '@/pages/archived';
+import ArchivedFriendRequestsPage from '@/pages/archived-friend-requests';
 import { CreateChatPage } from '@/pages/create-chat';
 import InvitePreviewPage from '@/pages/invite-preview';
 import JoinChatPage from '@/pages/join-chat';
@@ -31,7 +32,7 @@ import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { featureGatedList, isFeatureEnabled, whenFeature } from '@/features';
 import { selectChatsWithUnreadCount } from '@/store/chatsSlice';
 import { selectThreadsWithUnreadCount } from '@/store/threadsSlice';
-import { CHAT_LIST_TABS } from '@/components/chat/lists/chatListTabs';
+import { ARCHIVED_FRIEND_REQUESTS_PATH, CHAT_LIST_TABS } from '@/components/chat/lists/chatListTabs';
 import styles from './MobileLayout.module.scss';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useEscNavigation } from '@/hooks/useEscNavigation';
@@ -85,6 +86,10 @@ const MobileLayout: React.FC = () => {
         {CHAT_ROUTE_TABS.map((tab) => (
           <Route key={tab} path={`/chats/${tab}`} exact render={() => <ChatsPage initialTab={tab} />} />
         ))}
+        {whenFeature(
+          'friends',
+          <Route path={ARCHIVED_FRIEND_REQUESTS_PATH} exact component={ArchivedFriendRequestsPage} />,
+        )}
         {CHAT_ROUTE_TABS.map((tab) => (
           <Route
             key={`${tab}-archived`}

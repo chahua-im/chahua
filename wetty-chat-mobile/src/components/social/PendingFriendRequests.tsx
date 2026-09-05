@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
-import { IonButton, IonItem, IonLabel, IonNote } from '@ionic/react';
+import { IonButton, IonIcon, IonItem, IonLabel, IonNote } from '@ionic/react';
+import { archiveOutline, checkmarkOutline, closeOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
 import { useSelector } from 'react-redux';
-import type { FriendRequestHistoryEntry } from '@/api/friends';
+import type { FriendRequestHistoryEntry, FriendRequestStatus } from '@/api/friends';
 import type { User } from '@/api/messages';
 import type { MemberSummary } from '@/api/users';
 import { UserAvatar } from '@/components/UserAvatar';
@@ -12,16 +13,30 @@ import { memberSummaryToUser } from '@/utils/userConvert';
 import { useFriendRequestActions } from './useFriendRequestActions';
 import styles from './PendingFriendRequests.module.scss';
 
-function FriendRequestRow({
+function requestStatusLabel(status: FriendRequestStatus): string {
+  switch (status) {
+    case 'pending':
+    case 'archived':
+      return t`Pending approval`;
+    case 'accepted':
+      return t`Accepted`;
+    case 'rejected':
+      return t`Rejected`;
+  }
+}
+
+export function FriendRequestRow({
   request,
   onOpenProfile,
-  onAccept,
-  onReject,
+  actions,
 }: {
   request: FriendRequestHistoryEntry;
   onOpenProfile: (member: MemberSummary) => void;
-  onAccept: (request: FriendRequestHistoryEntry) => void;
-  onReject: (request: FriendRequestHistoryEntry) => void;
+  actions?: {
+    onAccept: () => void;
+    onReject: () => void;
+    onArchive?: () => void;
+  };
 }) {
   const incoming = request.direction === 'incoming';
   const peer = incoming ? request.from : request.to;
@@ -44,18 +59,44 @@ function FriendRequestRow({
         </h3>
         <p className={styles.chatsListPreview}>{preview}</p>
       </IonLabel>
-      {incoming ? (
+      {actions ? (
         <div slot="end" className={styles.requestActions} onClick={(event) => event.stopPropagation()}>
-          <IonButton size="small" fill="solid" color="primary" onClick={() => onAccept(request)}>
-            {t`Accept`}
+          <IonButton
+            size="small"
+            fill="clear"
+            color="primary"
+            aria-label={t`Accept`}
+            title={t`Accept`}
+            onClick={actions.onAccept}
+          >
+            <IonIcon slot="icon-only" icon={checkmarkOutline} aria-hidden="true" />
           </IonButton>
-          <IonButton size="small" fill="outline" color="danger" onClick={() => onReject(request)}>
-            {t`Reject`}
+          <IonButton
+            size="small"
+            fill="clear"
+            color="danger"
+            aria-label={t`Reject`}
+            title={t`Reject`}
+            onClick={actions.onReject}
+          >
+            <IonIcon slot="icon-only" icon={closeOutline} aria-hidden="true" />
           </IonButton>
+          {actions.onArchive && (
+            <IonButton
+              size="small"
+              fill="clear"
+              color="medium"
+              aria-label={t`Archive`}
+              title={t`Archive`}
+              onClick={actions.onArchive}
+            >
+              <IonIcon slot="icon-only" icon={archiveOutline} aria-hidden="true" />
+            </IonButton>
+          )}
         </div>
       ) : (
         <IonNote slot="end" color="medium" className={styles.statusNote}>
-          {t`Pending approval`}
+          {requestStatusLabel(request.status)}
         </IonNote>
       )}
     </IonItem>
@@ -64,7 +105,7 @@ function FriendRequestRow({
 
 export function PendingFriendRequests() {
   const requests = useSelector(selectPendingRequests);
-  const { acceptRequest, rejectRequest } = useFriendRequestActions();
+  const { acceptRequest, rejectRequest, archiveRequest } = useFriendRequestActions();
   const [profileUser, setProfileUser] = useState<User | null>(null);
 
   const openProfile = useCallback((member: MemberSummary) => {
@@ -78,8 +119,11 @@ export function PendingFriendRequests() {
           key={request.id}
           request={request}
           onOpenProfile={openProfile}
-          onAccept={(entry) => void acceptRequest(entry.id)}
-          onReject={(entry) => void rejectRequest(entry.id, entry.from.uid)}
+          actions={{
+            onAccept: () => void acceptRequest(request.id),
+            onReject: () => void rejectRequest(request.id, request.from.uid),
+            onArchive: () => void archiveRequest(request.id),
+          }}
         />
       ))}
       <UserProfileModal sender={profileUser} onDismiss={() => setProfileUser(null)} />

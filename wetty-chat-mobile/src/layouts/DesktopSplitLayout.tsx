@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { AddFriendModalHost } from '@/components/social/AddFriendModalHost';
+import { ArchivedFriendRequests } from '@/components/social/ArchivedFriendRequests';
 import { matchPath, useHistory, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { Trans } from '@lingui/react/macro';
@@ -7,7 +8,7 @@ import { IonButton, IonButtons, IonHeader, IonIcon, IonModal, IonTitle, IonToolb
 import { addCircleOutline, arrowBack } from 'ionicons/icons';
 import { UserAvatar } from '@/components/UserAvatar';
 import { ChatList } from '@/components/chat/lists/ChatList';
-import { CHAT_LIST_TABS, type ChatListTab } from '@/components/chat/lists/chatListTabs';
+import { ARCHIVED_FRIEND_REQUESTS_PATH, CHAT_LIST_TABS, type ChatListTab } from '@/components/chat/lists/chatListTabs';
 import ConversationPane from '@/pages/conversation/conversation';
 import GroupInfoCore, { GroupSavedMessagesCore, GroupSettingsCore } from '@/pages/conversation/group-info';
 import DmInfoCore from '@/pages/conversation/dm-info';
@@ -42,6 +43,7 @@ interface DesktopRouteMatches {
   activeChatId: string | undefined;
   chatListTab: ChatListTab | null;
   archivedChatListTab: ChatListTab | null;
+  archivedFriendRequests: boolean;
   threadMatch: { id: string; threadId: string } | null;
   groupInfoMatch: { id: string } | null;
   dmInfoMatch: { id: string } | null;
@@ -65,6 +67,7 @@ interface DesktopRouteMatches {
 function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
   const chatListTab = CHAT_LIST_TABS.find((tab) => pathname === `/chats/${tab}`) ?? null;
   const archivedChatListTab = CHAT_LIST_TABS.find((tab) => pathname === `/chats/${tab}/archived`) ?? null;
+  const archivedFriendRequests = pathname === ARCHIVED_FRIEND_REQUESTS_PATH;
   const threadRaw = matchPath<{ id: string; threadId: string }>(pathname, {
     path: '/chats/chat/:id/thread/:threadId',
     exact: true,
@@ -161,6 +164,7 @@ function getDesktopRouteMatches(pathname: string): DesktopRouteMatches {
       undefined,
     chatListTab,
     archivedChatListTab,
+    archivedFriendRequests,
     threadMatch: threadRaw?.params ?? null,
     groupInfoMatch: groupInfoRaw?.params ?? null,
     dmInfoMatch: dmInfoRaw?.params ?? null,
@@ -266,6 +270,7 @@ export function DesktopSplitLayout() {
     activeChatId,
     chatListTab,
     archivedChatListTab,
+    archivedFriendRequests,
     threadMatch,
     groupInfoMatch,
     dmInfoMatch,
@@ -284,6 +289,7 @@ export function DesktopSplitLayout() {
   const globalSettingsOpen = currentRoute.globalSettings;
   const initialArchivedTab = archivedChatListTab === 'friends' && !friendsEnabled ? null : archivedChatListTab;
   const [archivedSidebarTab, setArchivedSidebarTab] = useState<ChatListTab | null>(initialArchivedTab);
+  const archivedRequestsOpen = archivedFriendRequests && friendsEnabled;
   const archivedMode = archivedSidebarTab != null;
   const archivedTab = archivedSidebarTab ?? 'messages';
   const groupInfoModalChatId =
@@ -312,10 +318,12 @@ export function DesktopSplitLayout() {
     if (chatListTab && (chatListTab !== 'friends' || friendsEnabled)) {
       dispatch(setChatListTab(chatListTab));
     }
-    if (chatListTab || archivedChatListTab) {
+    if (archivedFriendRequests && !friendsEnabled) {
+      history.replace('/chats');
+    } else if (chatListTab || archivedChatListTab) {
       history.replace('/chats');
     }
-  }, [archivedChatListTab, chatListTab, dispatch, friendsEnabled, history]);
+  }, [archivedChatListTab, archivedFriendRequests, chatListTab, dispatch, friendsEnabled, history]);
 
   const handleChatSelect = useCallback(
     (chatId: string, resumeHash?: string) => {
@@ -442,8 +450,11 @@ export function DesktopSplitLayout() {
         <IonHeader>
           <IonToolbar>
             <IonButtons slot="start">
-              {archivedMode ? (
-                <IonButton onClick={() => setArchivedSidebarTab(null)} aria-label="Back to chats">
+              {archivedRequestsOpen || archivedMode ? (
+                <IonButton
+                  onClick={() => (archivedRequestsOpen ? history.push('/chats/friends') : setArchivedSidebarTab(null))}
+                  aria-label="Back to chats"
+                >
                   <IonIcon slot="icon-only" icon={arrowBack} />
                 </IonButton>
               ) : (
@@ -458,22 +469,34 @@ export function DesktopSplitLayout() {
                 </IonButton>
               )}
             </IonButtons>
-            <IonTitle>{archivedMode ? <Trans>Archived</Trans> : <Trans>Chats</Trans>}</IonTitle>
+            <IonTitle>
+              {archivedRequestsOpen ? (
+                <Trans>Friend Requests</Trans>
+              ) : archivedMode ? (
+                <Trans>Archived</Trans>
+              ) : (
+                <Trans>Chats</Trans>
+              )}
+            </IonTitle>
             <IonButtons slot="end">
               <HeaderActionMenu icon={addCircleOutline} actions={headerActions} />
             </IonButtons>
           </IonToolbar>
         </IonHeader>
-        <ChatList
-          key={archivedMode ? `archived-${archivedTab}` : 'active'}
-          activeChatId={activeChatId}
-          activeThreadId={threadMatch?.threadId}
-          archivedMode={archivedMode}
-          initialTab={archivedMode ? archivedTab : undefined}
-          onOpenArchived={setArchivedSidebarTab}
-          onChatSelect={handleChatSelect}
-          onThreadSelect={handleThreadSelect}
-        />
+        {archivedRequestsOpen ? (
+          <ArchivedFriendRequests />
+        ) : (
+          <ChatList
+            key={archivedMode ? `archived-${archivedTab}` : 'active'}
+            activeChatId={activeChatId}
+            activeThreadId={threadMatch?.threadId}
+            archivedMode={archivedMode}
+            initialTab={archivedMode ? archivedTab : undefined}
+            onOpenArchived={setArchivedSidebarTab}
+            onChatSelect={handleChatSelect}
+            onThreadSelect={handleThreadSelect}
+          />
+        )}
       </div>
       <div className={styles.desktopSplitRight}>
         {/* Base layer: always render ConversationPane when a chat is selected */}

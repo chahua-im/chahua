@@ -13,7 +13,7 @@ import {
 } from '@/store/threadsSlice';
 import { addPin, removePin } from '@/store/pinsSlice';
 import { replaceStickerPackOrderFromWs } from '@/store/stickerPreferencesSlice';
-import { fetchFriends, fetchPendingRequests } from '@/store/socialSlice';
+import { fetchArchivedRequests, fetchFriends, fetchPendingRequests } from '@/store/socialSlice';
 import type { PinResponse } from '@/api/pins';
 import { getThreadSubscriptionStatus, getThreads } from '@/api/threads';
 import store from '@/store/index';
@@ -528,6 +528,7 @@ async function connectWebSocket(): Promise<void> {
             byUid: number;
           };
           store.dispatch(fetchPendingRequests());
+          store.dispatch(fetchArchivedRequests());
           if (payload.status === 'accepted') {
             store.dispatch(fetchFriends());
           }

@@ -20,6 +20,9 @@ use crate::services::user;
 use crate::utils::ids;
 use crate::AppState;
 
+const UNRESOLVED_FRIEND_REQUEST_STATUSES: [FriendRequestStatus; 2] =
+    [FriendRequestStatus::Pending, FriendRequestStatus::Archived];
+
 /// Return the pair as `(min, max)` so each relationship is stored once.
 fn canonical_pair(a: i32, b: i32) -> (i32, i32) {
     if a < b {
@@ -142,7 +145,7 @@ pub fn peer_relationships(
     for (peer, id, created_at) in friend_requests::table
         .filter(
             friend_requests::status
-                .eq(FriendRequestStatus::Pending)
+                .eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)
                 .and(friend_requests::from_uid.eq(uid))
                 .and(friend_requests::to_uid.eq_any(peers)),
         )
@@ -159,7 +162,7 @@ pub fn peer_relationships(
     for (peer, id, created_at) in friend_requests::table
         .filter(
             friend_requests::status
-                .eq(FriendRequestStatus::Pending)
+                .eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)
                 .and(friend_requests::to_uid.eq(uid))
                 .and(friend_requests::from_uid.eq_any(peers)),
         )
@@ -198,8 +201,8 @@ pub fn is_blocked_either_direction(conn: &mut PgConnection, a: i32, b: i32) -> Q
     Ok(count > 0)
 }
 
-/// A pending friend request between the pair, in either direction.
-pub fn find_pending_request_between(
+/// An unresolved friend request between the pair, in either direction.
+fn find_unresolved_request_between(
     conn: &mut PgConnection,
     a: i32,
     b: i32,
@@ -208,7 +211,7 @@ pub fn find_pending_request_between(
     friend_requests::table
         .filter(
             friend_requests::status
-                .eq(FriendRequestStatus::Pending)
+                .eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)
                 .and(
                     friend_requests::from_uid
                         .eq(u1)
@@ -557,7 +560,7 @@ pub async fn create_friend_request(
     if are_mutual_friends(conn, from, to)? {
         return Ok(CreateRequestOutcome::AlreadyFriends);
     }
-    if let Some(existing) = find_pending_request_between(conn, from, to)? {
+    if let Some(existing) = find_unresolved_request_between(conn, from, to)? {
         if existing.from_uid == from {
             return Ok(CreateRequestOutcome::AlreadyPending);
         }
@@ -572,7 +575,7 @@ pub async fn create_friend_request(
                     .filter(friend_requests::id.eq(existing.id))
                     .filter(friend_requests::from_uid.eq(to))
                     .filter(friend_requests::to_uid.eq(from))
-                    .filter(friend_requests::status.eq(FriendRequestStatus::Pending)),
+                    .filter(friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)),
             )
             .set((
                 friend_requests::status.eq(FriendRequestStatus::Accepted),
@@ -668,7 +671,7 @@ pub async fn resolve_friend_request(
             friend_requests::table
                 .filter(friend_requests::id.eq(request_id))
                 .filter(friend_requests::to_uid.eq(resolver_uid))
-                .filter(friend_requests::status.eq(FriendRequestStatus::Pending)),
+                .filter(friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)),
         )
         .set((
             friend_requests::status.eq(new_status),
@@ -711,17 +714,42 @@ pub async fn resolve_friend_request(
     })
 }
 
-/// List incoming friend requests, optionally filtered by status, newest first.
-pub fn list_incoming_request_history(
+pub fn archive_friend_request(
     conn: &mut PgConnection,
     uid: i32,
-    status: Option<FriendRequestStatus>,
+    request_id: i64,
+) -> Result<(), AppError> {
+    let affected = diesel::update(
+        friend_requests::table
+            .filter(friend_requests::id.eq(request_id))
+            .filter(friend_requests::to_uid.eq(uid))
+            .filter(friend_requests::status.eq(FriendRequestStatus::Pending)),
+    )
+    .set(friend_requests::status.eq(FriendRequestStatus::Archived))
+    .execute(conn)?;
+    if affected == 0 {
+        return Err(AppError::NotFound("Pending friend request not found"));
+    }
+    Ok(())
+}
+
+/// List incoming friend requests, optionally filtered by archive state, newest first.
+fn list_incoming_request_history(
+    conn: &mut PgConnection,
+    uid: i32,
+    archived: Option<bool>,
 ) -> QueryResult<Vec<FriendRequest>> {
     let mut query = friend_requests::table
         .filter(friend_requests::to_uid.eq(uid))
         .into_boxed();
-    if let Some(status) = status {
-        query = query.filter(friend_requests::status.eq(status));
+    match archived {
+        Some(false) => {
+            query = query.filter(friend_requests::status.eq(FriendRequestStatus::Pending));
+        }
+        Some(true) => {
+            query = query.filter(friend_requests::status.ne(FriendRequestStatus::Pending));
+        }
+        None => {}
     }
     query
         .order((
@@ -732,19 +760,17 @@ pub fn list_incoming_request_history(
         .load::<FriendRequest>(conn)
 }
 
-/// List outgoing friend requests, optionally filtered by status, newest first.
-pub fn list_outgoing_request_history(
+/// List outgoing requests, all of which belong to the sender's archived view.
+fn list_outgoing_request_history(
     conn: &mut PgConnection,
     uid: i32,
-    status: Option<FriendRequestStatus>,
+    archived: Option<bool>,
 ) -> QueryResult<Vec<FriendRequest>> {
-    let mut query = friend_requests::table
-        .filter(friend_requests::from_uid.eq(uid))
-        .into_boxed();
-    if let Some(status) = status {
-        query = query.filter(friend_requests::status.eq(status));
+    if archived == Some(false) {
+        return Ok(Vec::new());
     }
-    query
+    friend_requests::table
+        .filter(friend_requests::from_uid.eq(uid))
         .order((
             friend_requests::created_at.desc(),
             friend_requests::id.desc(),
@@ -764,19 +790,19 @@ fn merge_request_history(
     merged
 }
 
-/// Friend requests involving `uid`, optionally filtered by status, newest first.
+/// Friend requests involving `uid`, optionally filtered by archive state, newest first.
 pub fn list_friend_request_history(
     conn: &mut PgConnection,
     uid: i32,
-    status: Option<FriendRequestStatus>,
+    archived: Option<bool>,
 ) -> QueryResult<Vec<FriendRequest>> {
-    let incoming = list_incoming_request_history(conn, uid, status)?;
-    let outgoing = list_outgoing_request_history(conn, uid, status)?;
+    let incoming = list_incoming_request_history(conn, uid, archived)?;
+    let outgoing = list_outgoing_request_history(conn, uid, archived)?;
     Ok(merge_request_history(incoming, outgoing))
 }
 
 /// Number of pending friend requests directed at `uid`; drives the request badge.
-pub fn count_incoming_requests(conn: &mut PgConnection, uid: i32) -> QueryResult<i64> {
+pub fn count_pending_incoming_requests(conn: &mut PgConnection, uid: i32) -> QueryResult<i64> {
     friend_requests::table
         .filter(
             friend_requests::to_uid

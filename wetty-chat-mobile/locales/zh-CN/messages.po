@@ -437,6 +437,9 @@ msgstr "添加表情失败"
 msgid "Failed to add sticker to favorites"
 msgstr "添加贴纸到收藏失败"
 
+msgid "Failed to archive request"
+msgstr "归档好友请求失败"
+
 msgid "Failed to copy invite code"
 msgstr "复制邀请码失败"
 
@@ -856,6 +859,9 @@ msgstr "没有已归档聊天"
 
 msgid "No archived conversations"
 msgstr "没有已归档会话"
+
+msgid "No archived friend requests"
+msgstr "没有已归档的好友请求"
 
 msgid "No archived threads"
 msgstr "没有已归档话题"
@@ -1526,6 +1532,9 @@ msgstr "查看全部置顶消息"
 
 msgid "View archived chats and threads"
 msgstr "查看已归档聊天和话题"
+
+msgid "View archived friend requests"
+msgstr "查看已归档的好友请求"
 
 #. placeholder {0}: index + 1
 msgid "View image {0}"
