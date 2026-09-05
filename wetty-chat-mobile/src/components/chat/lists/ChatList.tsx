@@ -713,9 +713,9 @@ export function ChatList({
 
       return (
         <IonList>
-          {!archivedMode && <PendingFriendRequests />}
           {!archivedMode && renderFriendRequestsEntry()}
           {archivedEntry}
+          {!archivedMode && <PendingFriendRequests />}
           {sortedChats.length === 0 && !hasMoreChats ? (
             <IonItem lines="none">
               <IonLabel color="medium" className="ion-text-wrap">
