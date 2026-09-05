@@ -16,14 +16,15 @@ use crate::{
             StickerMediaResponse, ThreadInfo,
         },
         users::User,
-        ws::ServerWsMessage,
+        ws::{NotificationPayload, NotificationType, ServerWsMessage},
     },
     errors::AppError,
     models::{
-        Attachment, GroupKind, Media, Message, MessageType, NewMessage, Sticker, TranscodeStatus,
+        Attachment, GroupKind, Media, MentionKind, Message, MessageMention, MessageType,
+        NewMessage, Sticker, TranscodeStatus,
     },
     schema::{
-        attachments, group_membership, groups, media, message_reactions,
+        attachments, group_membership, groups, media, message_mentions, message_reactions,
         messages as messages_schema, stickers, user_favorite_stickers,
     },
     services::{
@@ -159,6 +160,7 @@ pub struct PendingSideEffects {
     pub ws_msg: std::sync::Arc<ServerWsMessage>,
     pub broadcast_uids: Vec<i32>,
     pub push_job: Option<PushJob>,
+    pub notifications: Vec<(i32, std::sync::Arc<ServerWsMessage>)>,
     pub unread_event: Option<TopLevelUnreadCacheEvent>,
 }
 
@@ -184,6 +186,21 @@ impl PendingSideEffects {
         if let Some(job) = self.push_job {
             state.push_service.enqueue(job);
         }
+        // The send path clones one payload Arc for every mentioned member; group
+        // adjacent equal payloads so each broadcast goes out in a single registry
+        // pass instead of one call per user.
+        let mut batched: Vec<(std::sync::Arc<ServerWsMessage>, Vec<i32>)> = Vec::new();
+        for (uid, msg) in self.notifications {
+            match batched.last_mut() {
+                Some((last_msg, last_uids)) if std::sync::Arc::ptr_eq(last_msg, &msg) => {
+                    last_uids.push(uid);
+                }
+                _ => batched.push((msg, vec![uid])),
+            }
+        }
+        for (msg, uids) in batched {
+            state.ws_registry.broadcast_to_uids(&uids, msg);
+        }
     }
 }
 
@@ -191,7 +208,7 @@ impl PendingSideEffects {
 // Shared helper functions
 // ---------------------------------------------------------------------------
 
-fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option<String>> {
+pub fn load_username_by_uid(conn: &mut PgConnection, uid: i32) -> QueryResult<Option<String>> {
     lookup_user_profiles(conn, &[uid])
         .map(|mut profiles| profiles.remove(&uid).and_then(|profile| profile.username))
 }
@@ -489,7 +506,6 @@ fn sticker_preview_text(emoji: Option<&str>) -> String {
 struct PushPreviewBundle {
     message_preview: PushMessagePreview,
     body_preview: Option<String>,
-    mentioned_uids: Vec<i32>,
 }
 
 /// Replace `@[uid:N]` tokens with `@username` for human-readable previews.
@@ -524,11 +540,6 @@ fn render_mentions_as_text(text: &str, mentions: &[MentionInfo]) -> String {
 }
 
 fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
-    let mentioned_uids = response
-        .message
-        .as_deref()
-        .map(extract_mention_uids)
-        .unwrap_or_default();
     let rendered_message = response
         .message
         .as_deref()
@@ -578,7 +589,6 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
             is_deleted,
         },
         body_preview,
-        mentioned_uids,
     }
 }
 
@@ -600,6 +610,34 @@ pub fn build_message_side_effects(
     let ws_msg = std::sync::Arc::new(ServerWsMessage::Message(response.clone()));
 
     let is_system_message = matches!(response.message_type, MessageType::System);
+    let member_set: std::collections::HashSet<i32> = member_uids.iter().copied().collect();
+    // Persisted mention rows and the push job's mention list must agree: both are
+    // member-filtered and exclude the sender. Derive the list once.
+    let mentioned_member_uids: Vec<i32> = if is_system_message {
+        Vec::new()
+    } else {
+        response
+            .message
+            .as_deref()
+            .map(extract_mention_uids)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|uid| *uid != sender_uid && member_set.contains(uid))
+            .collect()
+    };
+    // A reply to someone's message rides the mention pipeline as a kind='reply'
+    // row. Apply the same filters as mentions (member, not the sender); replying
+    // to a system message notifies no one.
+    let reply_target_uid: Option<i32> = if is_system_message {
+        None
+    } else {
+        response
+            .reply_to_message
+            .as_ref()
+            .filter(|target| !matches!(target.message_type, MessageType::System))
+            .map(|target| target.sender.uid)
+            .filter(|uid| *uid != sender_uid && member_set.contains(uid))
+    };
     let push_job = if enqueue_push && !is_system_message {
         let sender_username =
             load_username_by_uid(conn, sender_uid)?.unwrap_or_else(|| "Someone".to_string());
@@ -618,20 +656,91 @@ pub fn build_message_side_effects(
             body_preview: push_preview.body_preview,
             message_id: response.id,
             thread_root_id: response.reply_root_id,
-            mentioned_uids: push_preview.mentioned_uids,
-            reply_target_uid: response
-                .reply_to_message
-                .as_ref()
-                .map(|message| message.sender.uid),
+            mentioned_uids: mentioned_member_uids.clone(),
+            reply_target_uid,
         })
     } else {
         None
     };
 
+    // Persist @mentions and direct a `Notification` realtime event to each
+    // mentioned member. A reply to someone's message is persisted as a
+    // kind='reply' row and notified the same way; when a message both mentions
+    // and replies to the same person, only the mention row/event is produced.
+    let reply_notification_uid =
+        reply_target_uid.filter(|uid| !mentioned_member_uids.contains(uid));
+    let mut mention_rows: Vec<MessageMention> = mentioned_member_uids
+        .iter()
+        .map(|uid| MessageMention {
+            message_id: response.id,
+            mentioned_uid: *uid,
+            chat_id,
+            thread_root_id: response.reply_root_id,
+            created_at: response.created_at,
+            kind: MentionKind::Mention,
+        })
+        .collect();
+    if let Some(uid) = reply_notification_uid {
+        mention_rows.push(MessageMention {
+            message_id: response.id,
+            mentioned_uid: uid,
+            chat_id,
+            thread_root_id: response.reply_root_id,
+            created_at: response.created_at,
+            kind: MentionKind::Reply,
+        });
+    }
+    if !mention_rows.is_empty() {
+        diesel::insert_into(message_mentions::table)
+            .values(&mention_rows)
+            .on_conflict_do_nothing()
+            .execute(conn)?;
+    }
+
+    let mut notifications: Vec<(i32, std::sync::Arc<ServerWsMessage>)> = Vec::new();
+    if !mentioned_member_uids.is_empty() || reply_notification_uid.is_some() {
+        // Reuse the push job's username when available so the same send only
+        // looks the sender's name up once.
+        let actor_name = if let Some(job) = &push_job {
+            job.sender_username.clone()
+        } else {
+            load_username_by_uid(conn, sender_uid)?.unwrap_or_else(|| "Someone".to_string())
+        };
+        if !mentioned_member_uids.is_empty() {
+            let payload = NotificationPayload {
+                notification_type: NotificationType::Mention,
+                chat_id,
+                message_id: response.id,
+                thread_root_id: response.reply_root_id,
+                actor_uid: sender_uid,
+                actor_name: Some(actor_name.clone()),
+            };
+            let notification = std::sync::Arc::new(ServerWsMessage::Notification(payload));
+            for uid in &mentioned_member_uids {
+                notifications.push((*uid, notification.clone()));
+            }
+        }
+        if let Some(uid) = reply_notification_uid {
+            let payload = NotificationPayload {
+                notification_type: NotificationType::Reply,
+                chat_id,
+                message_id: response.id,
+                thread_root_id: response.reply_root_id,
+                actor_uid: sender_uid,
+                actor_name: Some(actor_name),
+            };
+            notifications.push((
+                uid,
+                std::sync::Arc::new(ServerWsMessage::Notification(payload)),
+            ));
+        }
+    }
+
     Ok(PendingSideEffects {
         ws_msg,
         broadcast_uids: member_uids,
         push_job,
+        notifications,
         unread_event: response
             .reply_root_id
             .is_none()
@@ -641,6 +750,124 @@ pub fn build_message_side_effects(
                 countable: true,
             }),
     })
+}
+
+/// Sync `message_mentions` rows with an edited message body.
+///
+/// Removes rows for mention targets dropped by the edit and inserts rows for
+/// newly mentioned members (member-filtered, excluding the editor), mirroring
+/// `build_message_side_effects`. Newly mentioned members of a thread reply are
+/// auto-subscribed. Returns the uids of newly mentioned members so the caller
+/// can notify them post-commit. `message` must be the pre-edit row (the old
+/// body is diffed against `new_text`).
+///
+/// Reply rows (kind='reply') are never deleted by this diff: dropping an
+/// @mention on the message's reply target downgrades their row back to
+/// 'reply', and adding an @mention over an existing reply row upgrades it to
+/// 'mention'.
+pub fn sync_edited_message_mentions(
+    conn: &mut PgConnection,
+    message: &Message,
+    new_text: &str,
+    editor_uid: i32,
+    edited_at: DateTime<Utc>,
+) -> Result<Vec<i32>, AppError> {
+    let old_uids: std::collections::HashSet<i32> = message
+        .message
+        .as_deref()
+        .map(extract_mention_uids)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let new_uids: std::collections::HashSet<i32> =
+        extract_mention_uids(new_text).into_iter().collect();
+
+    let removed: Vec<i32> = old_uids.difference(&new_uids).copied().collect();
+    if !removed.is_empty() {
+        use crate::schema::message_mentions::dsl as mm_dsl;
+        let reply_target_uid: Option<i32> = match message.reply_to_id {
+            Some(reply_to_id) => messages_schema::table
+                .filter(messages_schema::id.eq(reply_to_id))
+                .select(messages_schema::sender_uid)
+                .first::<i32>(conn)
+                .optional()?,
+            None => None,
+        };
+        let (keep_reply, drop_mentions): (Vec<i32>, Vec<i32>) = removed
+            .into_iter()
+            .partition(|uid| Some(*uid) == reply_target_uid);
+        if !keep_reply.is_empty() {
+            diesel::update(
+                mm_dsl::message_mentions
+                    .filter(mm_dsl::message_id.eq(message.id))
+                    .filter(mm_dsl::mentioned_uid.eq_any(&keep_reply)),
+            )
+            .set(mm_dsl::kind.eq(MentionKind::Reply))
+            .execute(conn)?;
+        }
+        if !drop_mentions.is_empty() {
+            diesel::delete(
+                mm_dsl::message_mentions
+                    .filter(mm_dsl::message_id.eq(message.id))
+                    .filter(mm_dsl::mentioned_uid.eq_any(&drop_mentions)),
+            )
+            .execute(conn)?;
+        }
+    }
+
+    let added: Vec<i32> = new_uids.difference(&old_uids).copied().collect();
+    if added.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let member_uids: Vec<i32> = group_membership::table
+        .filter(group_membership::chat_id.eq(message.chat_id))
+        .select(group_membership::uid)
+        .load(conn)?;
+    let member_set: std::collections::HashSet<i32> = member_uids.into_iter().collect();
+    let added_members: Vec<i32> = added
+        .into_iter()
+        .filter(|uid| *uid != editor_uid && member_set.contains(uid))
+        .collect();
+    if added_members.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mention_rows: Vec<MessageMention> = added_members
+        .iter()
+        .map(|uid| MessageMention {
+            message_id: message.id,
+            mentioned_uid: *uid,
+            chat_id: message.chat_id,
+            thread_root_id: message.reply_root_id,
+            created_at: edited_at,
+            kind: MentionKind::Mention,
+        })
+        .collect();
+    diesel::insert_into(message_mentions::table)
+        .values(&mention_rows)
+        // A row can already exist when the message replies to the newly
+        // mentioned member (kind='reply'); the explicit @mention wins.
+        .on_conflict((
+            message_mentions::message_id,
+            message_mentions::mentioned_uid,
+        ))
+        .do_update()
+        .set(message_mentions::kind.eq(MentionKind::Mention))
+        .execute(conn)?;
+
+    if let Some(thread_root_id) = message.reply_root_id {
+        for uid in &added_members {
+            crate::services::threads::ensure_thread_subscription(
+                conn,
+                message.chat_id,
+                thread_root_id,
+                *uid,
+            )?;
+        }
+    }
+
+    Ok(added_members)
 }
 
 /// Maximum attachments a single message may carry.
@@ -1015,6 +1242,7 @@ pub async fn send_prepared_message(
                 ws_msg: std::sync::Arc::new(ServerWsMessage::Message(response.clone())),
                 broadcast_uids: Vec::new(),
                 push_job: None,
+                notifications: Vec::new(),
                 unread_event: prepared.reply_root_id.is_none().then_some(
                     TopLevelUnreadCacheEvent {
                         chat_id: prepared.chat_id,
@@ -2073,5 +2301,121 @@ mod tests {
             )),
             StatusCode::FORBIDDEN
         );
+    }
+
+    /// Edit-sync is kind-aware: dropping an @mention on the message's reply
+    /// target downgrades their row to kind='reply' instead of deleting it, an
+    /// unrelated dropped mention is still deleted, and adding an @mention over
+    /// an existing reply row upgrades it to kind='mention'. Requires a test
+    /// database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn sync_edited_message_mentions_preserves_reply_rows() {
+        use crate::models::MentionKind;
+        use crate::schema::message_mentions;
+        use crate::schema::messages as messages_schema;
+        use diesel::prelude::*;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = diesel::PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_576_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let target_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let reply_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let editor: i32 = 4245;
+        let target_author: i32 = 4246;
+        let other_mentioned: i32 = 4247;
+
+        let result = conn.transaction::<(), AppError, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'edit-sync-test')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            for uid in [editor, target_author, other_mentioned] {
+                diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                    .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                    .bind::<diesel::sql_types::Integer, _>(uid)
+                    .execute(conn)?;
+            }
+            // The reply target's author is `target_author`.
+            diesel::sql_query(
+                "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                 VALUES ($1, 'text', $2, $3, $4, NOW())",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(target_msg)
+            .bind::<diesel::sql_types::Text, _>(format!("cg-{chat_id}-{target_msg}"))
+            .bind::<diesel::sql_types::Integer, _>(target_author)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .execute(conn)?;
+            diesel::sql_query(
+                "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, reply_to_id, message, created_at) \
+                 VALUES ($1, 'text', $2, $3, $4, $5, $6, NOW())",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(reply_msg)
+            .bind::<diesel::sql_types::Text, _>(format!("cg-{chat_id}-{reply_msg}"))
+            .bind::<diesel::sql_types::Integer, _>(editor)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .bind::<diesel::sql_types::BigInt, _>(target_msg)
+            .bind::<diesel::sql_types::Text, _>(
+                format!("hello @[uid:{target_author}] @[uid:{other_mentioned}]"),
+            )
+            .execute(conn)?;
+            for uid in [target_author, other_mentioned] {
+                diesel::sql_query(
+                    "INSERT INTO message_mentions (message_id, mentioned_uid, chat_id, thread_root_id, created_at, kind) \
+                     VALUES ($1, $2, $3, NULL, NOW(), 'mention')",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(reply_msg)
+                .bind::<diesel::sql_types::Integer, _>(uid)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            }
+
+            let mut message: Message = messages_schema::table
+                .filter(messages_schema::id.eq(reply_msg))
+                .first(conn)?;
+
+            // Edit 1: drop both @mentions. The reply target keeps a downgraded
+            // row; the unrelated mention is deleted.
+            crate::services::messages::sync_edited_message_mentions(
+                conn,
+                &message,
+                "hello there",
+                editor,
+                Utc::now(),
+            )?;
+            let kinds: Vec<MentionKind> = message_mentions::table
+                .filter(message_mentions::message_id.eq(reply_msg))
+                .select(message_mentions::kind)
+                .load(conn)?;
+            assert_eq!(kinds, vec![MentionKind::Reply]);
+
+            // Edit 2: re-add the reply target as an @mention. The reply row is
+            // upgraded to kind='mention' (mention wins).
+            message.message = Some("hello there".to_string());
+            let added = crate::services::messages::sync_edited_message_mentions(
+                conn,
+                &message,
+                "hello there @[uid:4246]",
+                editor,
+                Utc::now(),
+            )?;
+            assert_eq!(added, vec![target_author]);
+            let kinds: Vec<MentionKind> = message_mentions::table
+                .filter(message_mentions::message_id.eq(reply_msg))
+                .select(message_mentions::kind)
+                .load(conn)?;
+            assert_eq!(kinds, vec![MentionKind::Mention]);
+
+            Err(AppError::Internal("rollback"))
+        });
+
+        assert!(result.is_err(), "transaction should roll back");
     }
 }

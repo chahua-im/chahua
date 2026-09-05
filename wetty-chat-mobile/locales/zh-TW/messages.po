@@ -488,6 +488,9 @@ msgstr "載入邀請連結失敗"
 msgid "Failed to load members"
 msgstr "載入成員列表失敗"
 
+msgid "Failed to load mentions"
+msgstr "載入提及失敗"
+
 msgid "Failed to load messages"
 msgstr "載入訊息失敗"
 
@@ -496,6 +499,9 @@ msgstr "載入更多失敗"
 
 msgid "Failed to load newer messages"
 msgstr "載入新訊息失敗"
+
+msgid "Failed to load reactions"
+msgstr "載入 reaction 失敗"
 
 msgid "Failed to load saved messages"
 msgstr "載入收藏訊息失敗"
@@ -721,6 +727,12 @@ msgstr "加入此聊天即可開始閱讀與傳送訊息。"
 
 msgid "Joining…"
 msgstr "正在加入…"
+
+msgid "Jump to mention or reply"
+msgstr "跳轉到提及或回覆"
+
+msgid "Jump to reaction"
+msgstr "跳轉到 reaction"
 
 msgid "Keep messages"
 msgstr "保留訊息"
@@ -1465,6 +1477,12 @@ msgstr "取消釘選訊息"
 
 msgid "Unread"
 msgstr "標記未讀"
+
+msgid "Unread mentions and replies"
+msgstr "未讀提及和回覆"
+
+msgid "Unread reactions"
+msgstr "未讀 reaction"
 
 msgid "Unsave"
 msgstr "取消收藏"

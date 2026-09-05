@@ -23,6 +23,9 @@ pub struct PushRecipientContext {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushDecision {
     Send,
+    /// One-off push to a directly addressed recipient (mentioned, or the
+    /// target of a reply) who is not otherwise eligible — e.g. thread without
+    /// an active subscription. Treated like [`PushDecision::Send`] downstream.
     SendOneOffMention,
     Skip(PushSkipReason),
 }
@@ -66,14 +69,14 @@ pub fn should_send_push(recipient: &PushRecipientContext, now: DateTime<Utc>) ->
         }
         ThreadPushState::ActiveSubscription => PushDecision::Send,
         ThreadPushState::ArchivedSubscription => {
-            if recipient.is_mentioned {
+            if recipient.is_mentioned || recipient.is_reply_target {
                 PushDecision::SendOneOffMention
             } else {
                 PushDecision::Skip(PushSkipReason::ThreadArchived)
             }
         }
         ThreadPushState::NoSubscription => {
-            if recipient.is_mentioned {
+            if recipient.is_mentioned || recipient.is_reply_target {
                 PushDecision::SendOneOffMention
             } else {
                 PushDecision::Skip(PushSkipReason::NoThreadSubscription)
@@ -207,6 +210,26 @@ mod tests {
     fn no_thread_subscription_mention_gets_one_off_push() {
         let (now, mut recipient) = base(ThreadPushState::NoSubscription);
         recipient.is_mentioned = true;
+        assert_eq!(
+            should_send_push(&recipient, now),
+            PushDecision::SendOneOffMention
+        );
+    }
+
+    #[test]
+    fn archived_thread_subscription_reply_target_gets_one_off_push() {
+        let (now, mut recipient) = base(ThreadPushState::ArchivedSubscription);
+        recipient.is_reply_target = true;
+        assert_eq!(
+            should_send_push(&recipient, now),
+            PushDecision::SendOneOffMention
+        );
+    }
+
+    #[test]
+    fn no_thread_subscription_reply_target_gets_one_off_push() {
+        let (now, mut recipient) = base(ThreadPushState::NoSubscription);
+        recipient.is_reply_target = true;
         assert_eq!(
             should_send_push(&recipient, now),
             PushDecision::SendOneOffMention

@@ -3,6 +3,7 @@ import { createSelector, createSlice } from '@reduxjs/toolkit';
 import type { RootState } from './index';
 import type { MessagePreview } from '@/api/messages';
 import type { StoredThreadListItem, ThreadListItem } from '@/api/threads';
+import { applyIncomingId, type MentionIdCacheStatus } from './mentionIdCache';
 
 export interface ThreadUpdatePayload {
   threadRootId: string;
@@ -28,6 +29,10 @@ interface ThreadsState {
   buckets: Record<'active' | 'archived', ThreadListBucketState>;
   subscriptionByThreadId: Record<string, boolean>;
   archivedByThreadId: Record<string, boolean>;
+  unreadMentionIdsByThread: Record<string, string[]>;
+  unreadMentionIdsStatusByThread: Record<string, MentionIdCacheStatus>;
+  unreadReactionIdsByThread: Record<string, string[]>;
+  unreadReactionIdsStatusByThread: Record<string, MentionIdCacheStatus>;
 }
 
 const initialState: ThreadsState = {
@@ -38,6 +43,10 @@ const initialState: ThreadsState = {
   },
   subscriptionByThreadId: {},
   archivedByThreadId: {},
+  unreadMentionIdsByThread: {},
+  unreadMentionIdsStatusByThread: {},
+  unreadReactionIdsByThread: {},
+  unreadReactionIdsStatusByThread: {},
 };
 
 function bucketKey(archived: boolean): 'active' | 'archived' {
@@ -67,6 +76,12 @@ const threadsSlice = createSlice({
         seenIds.add(threadRootId);
         nextItems.push(toStoredThread(thread));
       }
+
+      // Full snapshot refresh: server mention counts are authoritative, so drop cached id lists.
+      state.unreadMentionIdsByThread = {};
+      state.unreadMentionIdsStatusByThread = {};
+      state.unreadReactionIdsByThread = {};
+      state.unreadReactionIdsStatusByThread = {};
 
       // Full refreshes replace the target bucket so memberships that moved or disappeared
       // while realtime updates were unavailable do not survive the authoritative snapshot.
@@ -151,21 +166,118 @@ const threadsSlice = createSlice({
         thread.unreadCount = (thread.unreadCount ?? 0) + 1;
       }
     },
-    markThreadRead(state, action: PayloadAction<{ threadRootId: string }>) {
+    incrementThreadUnreadMentions(state, action: PayloadAction<{ threadRootId: string; messageId?: string }>) {
       const thread = state.items.find((t) => t.threadRootMessage.id === action.payload.threadRootId);
       if (thread) {
-        thread.unreadCount = 0;
+        thread.unreadMentions = (thread.unreadMentions ?? 0) + 1;
+      }
+      const tid = action.payload.threadRootId;
+      const next = applyIncomingId(
+        { ids: state.unreadMentionIdsByThread[tid], status: state.unreadMentionIdsStatusByThread[tid] },
+        action.payload.messageId,
+      );
+      state.unreadMentionIdsByThread[tid] = next.ids;
+      if (next.status !== undefined) {
+        state.unreadMentionIdsStatusByThread[tid] = next.status;
       }
     },
+    incrementThreadUnreadReactions(state, action: PayloadAction<{ threadRootId: string; messageId?: string }>) {
+      const tid = action.payload.threadRootId;
+      const next = applyIncomingId(
+        { ids: state.unreadReactionIdsByThread[tid], status: state.unreadReactionIdsStatusByThread[tid] },
+        action.payload.messageId,
+      );
+      // One message counts as one unread unit however many reactions it gains
+      // (server counts DISTINCT messages); setThreadReadState reconciles when the cache isn't ready.
+      if (next.alreadyPresent) {
+        return;
+      }
+      const thread = state.items.find((t) => t.threadRootMessage.id === tid);
+      if (thread) {
+        thread.unreadReactions = (thread.unreadReactions ?? 0) + 1;
+      }
+      state.unreadReactionIdsByThread[tid] = next.ids;
+      if (next.status !== undefined) {
+        state.unreadReactionIdsStatusByThread[tid] = next.status;
+      }
+    },
+    /**
+     * Apply an authoritative thread read-state response (or an optimistic
+     * reset): counts come from the payload (defaulting to 0), and the cached
+     * id lists are invalidated since they were computed against the
+     * superseded state.
+     */
     setThreadReadState(
       state,
-      action: PayloadAction<{ threadRootId: string; lastReadMessageId: string | null; unreadCount: number }>,
+      action: PayloadAction<{
+        threadRootId: string;
+        lastReadMessageId?: string | null;
+        unreadCount?: number;
+        unreadMentions?: number;
+        unreadReactions?: number;
+      }>,
+    ) {
+      const thread = state.items.find((t) => t.threadRootMessage.id === action.payload.threadRootId);
+      if (thread) {
+        thread.lastReadMessageId = action.payload.lastReadMessageId ?? thread.lastReadMessageId;
+        thread.unreadCount = action.payload.unreadCount ?? 0;
+        thread.unreadMentions = action.payload.unreadMentions ?? 0;
+        thread.unreadReactions = action.payload.unreadReactions ?? 0;
+      }
+      const tid = action.payload.threadRootId;
+      delete state.unreadMentionIdsByThread[tid];
+      delete state.unreadMentionIdsStatusByThread[tid];
+      delete state.unreadReactionIdsByThread[tid];
+      delete state.unreadReactionIdsStatusByThread[tid];
+    },
+    /**
+     * Record just the read position (lastReadMessageId) without touching the
+     * unread counts — used when the read state is fetched for display purposes
+     * (opening a thread) and the counts in the payload are absent, unlike
+     * `setThreadReadState` where counts are authoritative.
+     */
+    setThreadLastReadMessageId(
+      state,
+      action: PayloadAction<{ threadRootId: string; lastReadMessageId: string | null }>,
     ) {
       const thread = state.items.find((t) => t.threadRootMessage.id === action.payload.threadRootId);
       if (thread) {
         thread.lastReadMessageId = action.payload.lastReadMessageId;
-        thread.unreadCount = action.payload.unreadCount;
       }
+    },
+    setThreadUnreadReactionIds(state, action: PayloadAction<{ threadRootId: string; ids: string[] }>) {
+      const tid = action.payload.threadRootId;
+      // Same mid-flight guard as mentions.
+      if (state.unreadReactionIdsStatusByThread[tid] !== 'loading') {
+        state.unreadReactionIdsStatusByThread[tid] = 'idle';
+        return;
+      }
+      state.unreadReactionIdsByThread[tid] = action.payload.ids;
+      state.unreadReactionIdsStatusByThread[tid] = 'ready';
+    },
+    setThreadUnreadReactionIdsStatus(
+      state,
+      action: PayloadAction<{ threadRootId: string; status: MentionIdCacheStatus }>,
+    ) {
+      state.unreadReactionIdsStatusByThread[action.payload.threadRootId] = action.payload.status;
+    },
+    setThreadUnreadMentionIds(state, action: PayloadAction<{ threadRootId: string; ids: string[] }>) {
+      const tid = action.payload.threadRootId;
+      // Only claim the cache is fresh if this response is still the acknowledged fetch: a
+      // mention that arrived mid-flight resets the status to 'idle', and caching the
+      // pre-mention list as 'ready' would strand that mention until the next invalidation.
+      if (state.unreadMentionIdsStatusByThread[tid] !== 'loading') {
+        state.unreadMentionIdsStatusByThread[tid] = 'idle';
+        return;
+      }
+      state.unreadMentionIdsByThread[tid] = action.payload.ids;
+      state.unreadMentionIdsStatusByThread[tid] = 'ready';
+    },
+    setThreadUnreadMentionIdsStatus(
+      state,
+      action: PayloadAction<{ threadRootId: string; status: MentionIdCacheStatus }>,
+    ) {
+      state.unreadMentionIdsStatusByThread[action.payload.threadRootId] = action.payload.status;
     },
     setThreadSubscriptionStatus(
       state,
@@ -197,6 +309,10 @@ const threadsSlice = createSlice({
       state.buckets.archived = { nextCursor: null, isLoaded: false, isLoading: false, pageDepth: 0 };
       state.subscriptionByThreadId = {};
       state.archivedByThreadId = {};
+      state.unreadMentionIdsByThread = {};
+      state.unreadMentionIdsStatusByThread = {};
+      state.unreadReactionIdsByThread = {};
+      state.unreadReactionIdsStatusByThread = {};
     },
   },
 });
@@ -209,8 +325,14 @@ export const {
   updateThreadCachedLastReply,
   patchThreadCachedLastReply,
   incrementThreadUnread,
-  markThreadRead,
+  incrementThreadUnreadMentions,
+  incrementThreadUnreadReactions,
   setThreadReadState,
+  setThreadLastReadMessageId,
+  setThreadUnreadMentionIds,
+  setThreadUnreadMentionIdsStatus,
+  setThreadUnreadReactionIds,
+  setThreadUnreadReactionIdsStatus,
   setThreadSubscriptionStatus,
   removeThread,
   patchThreadRootMessage,
@@ -251,7 +373,25 @@ const selectThreadByRootId = (state: RootState, threadId: string | undefined): S
 export const selectThreadUnreadCount = (state: RootState, threadRootId: string): number => {
   return selectThreadByRootId(state, threadRootId)?.unreadCount ?? 0;
 };
-// Currently unused — kept for future thread detail UI that may need store-side read position.
+export const selectThreadUnreadMentions = (state: RootState, threadRootId: string): number => {
+  return selectThreadByRootId(state, threadRootId)?.unreadMentions ?? 0;
+};
+
+export const selectThreadUnreadReactions = (state: RootState, threadRootId: string): number => {
+  return selectThreadByRootId(state, threadRootId)?.unreadReactions ?? 0;
+};
+
+export const selectThreadUnreadMentionIds = (state: RootState, threadRootId: string): string[] =>
+  state.threads.unreadMentionIdsByThread[threadRootId] ?? [];
+
+export const selectThreadUnreadMentionIdsStatus = (state: RootState, threadRootId: string): MentionIdCacheStatus =>
+  state.threads.unreadMentionIdsStatusByThread[threadRootId] ?? 'idle';
+
+export const selectThreadUnreadReactionIds = (state: RootState, threadRootId: string): string[] =>
+  state.threads.unreadReactionIdsByThread[threadRootId] ?? [];
+
+export const selectThreadUnreadReactionIdsStatus = (state: RootState, threadRootId: string): MentionIdCacheStatus =>
+  state.threads.unreadReactionIdsStatusByThread[threadRootId] ?? 'idle';
 export const selectThreadLastReadMessageId = (state: RootState, threadId: string | undefined): string | null => {
   return selectThreadByRootId(state, threadId)?.lastReadMessageId ?? null;
 };

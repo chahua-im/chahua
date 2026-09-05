@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IonContent, IonFab, IonFabButton, IonIcon, IonPage, useIonAlert, useIonToast } from '@ionic/react';
 import { useHistory, useLocation, useParams } from 'react-router-dom';
-import { chevronDown } from 'ionicons/icons';
+import { atCircle, chevronDown, heartOutline } from 'ionicons/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { getMessage, type MessageResponse, type User } from '@/api/messages';
 import { selectCurrentUser } from '@/store/userSlice';
+import { selectThreadLastReadMessageId, selectThreadUnreadCount } from '@/store/threadsSlice';
 import type { AppDispatch, RootState } from '@/store';
 import {
   fetchBlocks,
@@ -35,6 +36,9 @@ import { useChatPins } from './hooks/useChatPins';
 import { type ChatMessageEditSession, useChatMessageSender } from './hooks/useChatMessageSender';
 import { useChatReadTracking } from './hooks/useChatReadTracking';
 import { useConversationTimeline } from './hooks/useConversationTimeline';
+import { useMentionJumper } from './hooks/useMentionJumper';
+import { useReactionJumper } from './hooks/useReactionJumper';
+import { UnreadJumpFab } from './UnreadJumpFab';
 import { useKeyboardViewport } from './hooks/useKeyboardViewport';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { useMessageOverlayActions } from './hooks/useMessageOverlayActions';
@@ -73,7 +77,26 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     initialResumeMessageId ? `${storeChatId}:${initialResumeMessageId}` : null,
   );
 
-  const { name, isAdmin, isMuted, lastReadMessageId, unreadCount, isDm, peer } = useChatMetadata({ chatId, threadId });
+  const {
+    name,
+    isAdmin,
+    isMuted,
+    lastReadMessageId: chatLastReadMessageId,
+    unreadCount,
+    isDm,
+    peer,
+  } = useChatMetadata({ chatId, threadId });
+  // Thread unread and read position live in threadsSlice (same source the chat/thread
+  // list badges read); the chat-level values from useChatMetadata are always 0/null
+  // for threads.
+  const threadUnreadCount = useSelector((state: RootState) =>
+    threadId ? selectThreadUnreadCount(state, threadId) : 0,
+  );
+  const threadLastReadMessageId = useSelector((state: RootState) =>
+    threadId ? selectThreadLastReadMessageId(state, threadId) : null,
+  );
+  const scrollToBottomUnreadCount = threadId ? threadUnreadCount : unreadCount;
+  const lastReadMessageId = threadId ? threadLastReadMessageId : chatLastReadMessageId;
   const chatName = threadId ? t`Thread` : (name ?? t`Loading...`);
 
   // DM compose is read-only when the peer is no longer a friend or has been
@@ -126,6 +149,8 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   );
 
   const composeBarRef = useRef<MessageComposeBarHandle | null>(null);
+  // Filled once by getThreadReadState on open, read synchronously for the
+  // initial anchor. The live read position lives in threadsSlice.
   const threadLastReadMessageIdRef = useRef<string | null>(null);
 
   const {
@@ -157,7 +182,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     isDm,
     initialResumeMessageId,
     lastReadMessageId,
-    scrollToBottomUnreadCount: unreadCount,
+    scrollToBottomUnreadCount,
     threadLastReadMessageIdRef,
     formatDateSeparator: formatDateSeparatorForLocale,
     showToast,
@@ -181,6 +206,32 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   } = useThreadSubscription({ chatId, threadId });
 
   const { pins, pinListOpen, openPinList, closePinList } = useChatPins({ chatId, threadId });
+
+  const jumpToMentionEnabled = useFeatureGate('jumpToMention');
+  const {
+    canJump: canJumpToMention,
+    unreadCount: unreadMentionCount,
+    jumpToNextMention,
+  } = useMentionJumper({
+    chatId,
+    threadId,
+    jumpToMessage,
+    showToast,
+    enabled: jumpToMentionEnabled,
+  });
+
+  const jumpToReactionEnabled = useFeatureGate('jumpToReaction');
+  const {
+    canJump: canJumpToReaction,
+    unreadCount: unreadReactionCount,
+    jumpToNextReaction,
+  } = useReactionJumper({
+    chatId,
+    threadId,
+    jumpToMessage,
+    showToast,
+    enabled: jumpToReactionEnabled,
+  });
 
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null);
   const [profileSender, setProfileSender] = useState<User | null>(null);
@@ -473,6 +524,11 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
 
   const chatCtx = useMemo(() => ({ chatId, threadId, jumpToMessage }), [chatId, threadId, jumpToMessage]);
 
+  // The jump FABs stack bottom-up (scroll-to-bottom, mention, reaction); each FAB
+  // lifts by 56px per visible FAB below it so hidden ones never leave a gap.
+  const scrollToBottomFabsBelow = showScrollToBottomButton ? 1 : 0;
+  const mentionFabsBelow = canJumpToMention ? 1 : 0;
+
   return (
     <ChatContext.Provider value={chatCtx}>
       <div className="ion-page conversation-page" style={pageStyle}>
@@ -523,6 +579,24 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
             onFirstVisibleMessageChange={handleFirstVisibleMessageChange}
             onScrollActivityChange={setMessageListScrolling}
             onTopDateCollidingChange={setFloatingDateColliding}
+          />
+          <UnreadJumpFab
+            className="mention-fab"
+            icon={atCircle}
+            ariaLabel={t`Jump to mention or reply`}
+            unreadCount={unreadMentionCount}
+            onClick={() => void jumpToNextMention()}
+            visible={canJumpToMention}
+            lift={scrollToBottomFabsBelow}
+          />
+          <UnreadJumpFab
+            className="reaction-fab"
+            icon={heartOutline}
+            ariaLabel={t`Jump to reaction`}
+            unreadCount={unreadReactionCount}
+            onClick={() => void jumpToNextReaction()}
+            visible={canJumpToReaction}
+            lift={mentionFabsBelow + scrollToBottomFabsBelow}
           />
           <IonFab
             vertical="bottom"

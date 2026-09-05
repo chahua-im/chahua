@@ -15,7 +15,7 @@ import type {
   ComposeUploadInput,
   EditingMessage,
 } from '@/components/chat/compose/MessageComposeBar';
-import { setChatLastReadMessageId, setChatUnreadCount } from '@/store/chatsSlice';
+import { setChatReadState } from '@/store/chatsSlice';
 import { messageAdded, messageConfirmed, messagePatched, messagesBulkDeleted } from '@/store/messageEvents';
 import { uploadProgressCleared, uploadProgressSet } from '@/store/uploadProgressSlice';
 import { setThreadReadState } from '@/store/threadsSlice';
@@ -110,22 +110,15 @@ export function useChatMessageSender({
     (confirmedMessageId: string) => {
       if (threadId) {
         void apiMarkThreadAsRead(chatId, threadId, confirmedMessageId).then((res) => {
-          dispatch(
-            setThreadReadState({
-              threadRootId: threadId,
-              lastReadMessageId: res.data.lastReadMessageId,
-              unreadCount: res.data.unreadCount,
-            }),
-          );
+          dispatch(setThreadReadState({ threadRootId: threadId, ...res.data }));
         });
         return;
       }
 
-      dispatch(setChatUnreadCount({ chatId, unreadCount: 0 }));
-      dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: confirmedMessageId }));
+      // Optimistic reset while the authoritative response is in flight.
+      dispatch(setChatReadState({ chatId, lastReadMessageId: confirmedMessageId }));
       void markMessagesAsRead(chatId, confirmedMessageId).then((res) => {
-        dispatch(setChatUnreadCount({ chatId, unreadCount: res.data.unreadCount }));
-        dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: res.data.lastReadMessageId }));
+        dispatch(setChatReadState({ chatId, ...res.data }));
       });
       void syncAppBadgeCount();
     },

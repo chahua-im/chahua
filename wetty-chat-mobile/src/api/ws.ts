@@ -3,8 +3,15 @@ import { syncApp } from '@/api/sync';
 import type { MessageResponse, ReactionSummary } from '@/api/messages';
 import { setActiveConnections, setWsConnected } from '@/store/connectionSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
-import { setChatArchived, setChatMutedUntil } from '@/store/chatsSlice';
 import {
+  incrementChatUnreadMentions,
+  incrementChatUnreadReactions,
+  setChatArchived,
+  setChatMutedUntil,
+} from '@/store/chatsSlice';
+import {
+  incrementThreadUnreadMentions,
+  incrementThreadUnreadReactions,
   removeThread,
   setThreadSubscriptionStatus,
   updateThreadFromWs,
@@ -26,8 +33,9 @@ import {
 } from '@/store/messageEvents';
 import { selectAllTimelineMessages } from '@/store/messages/selectors';
 import { getStoredJwtToken } from '@/utils/jwtToken';
-import { formatNotificationBody, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { formatNotificationBody, getNotificationPreviewLabels, type NotificationKind } from '@/utils/messagePreview';
 import { buildNotificationNavigationData } from '@/utils/notificationNavigation';
+import { isFeatureEnabled } from '@/features';
 
 const WS_PATH = __API_BASE__ + '/ws';
 const PING_INTERVAL_MS = 10_000;
@@ -36,6 +44,20 @@ const RETRY_BASE_DELAY_MS = 1_000;
 const RETRY_JITTER_RATIO = 0.2;
 
 export type WebSocketAppState = 'active' | 'inactive';
+
+/**
+ * Realtime `notification` event payload. Mention/reply increment the unread
+ * mention badges (a reply is a mention row with kind='reply' server-side);
+ * reaction increments the unread-reaction badges.
+ */
+interface WsNotificationPayload {
+  notificationType: 'mention' | 'reply' | 'reaction';
+  chatId: string;
+  messageId: string;
+  threadRootId?: string | null;
+  actorUid: number;
+  actorName?: string | null;
+}
 
 interface ServerEnvelope {
   type?: string;
@@ -86,11 +108,15 @@ function resolveWebSocketUrl(path: string): string {
     return path;
   }
 
-  // Full URL — map http(s) → ws(s) directly
+  // Full URL - map http(s) -> ws(s) directly
   if (path.startsWith('http://') || path.startsWith('https://')) {
-    const url = new URL(path);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return url.toString();
+    try {
+      const url = new URL(path);
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      return url.toString();
+    } catch {
+      // Malformed URL - fall back to relative-path derivation below.
+    }
   }
 
   // Relative path — derive protocol from the current page
@@ -168,7 +194,22 @@ function showLocalNotification(message: MessageResponse): void {
 
   const chatName = chatEntry?.details?.name ?? 'New Message';
   const locale = selectEffectiveLocale(store.getState());
-  const body = formatNotificationBody(message.sender.name ?? 'Someone', message, getNotificationPreviewLabels(locale));
+  // Mentions outrank replies when a message both mentions and replies to the
+  // current user (matches the backend's single kind='mention' row).
+  let kind: NotificationKind = 'message';
+  if (isFeatureEnabled('mentionNotifications') && currentUid != null) {
+    if ((message.mentions ?? []).some((m) => m.uid === currentUid)) {
+      kind = 'mention';
+    } else if (message.replyToMessage?.sender?.uid === currentUid) {
+      kind = 'reply';
+    }
+  }
+  const body = formatNotificationBody(
+    message.sender.name ?? 'Someone',
+    message,
+    getNotificationPreviewLabels(locale),
+    kind,
+  );
 
   const tag = `msg_${message.id}`;
 
@@ -502,6 +543,42 @@ async function connectWebSocket(): Promise<void> {
           if (payload.chatId) {
             store.dispatch(setChatArchived({ chatId: payload.chatId, archived: payload.archived }));
             store.dispatch(setChatMutedUntil({ chatId: payload.chatId, mutedUntil: payload.mutedUntil ?? null }));
+          }
+          return;
+        }
+
+        if (message.type === 'notification' && message.payload != null) {
+          const payload = message.payload as WsNotificationPayload;
+          if (payload.notificationType === 'reaction') {
+            if (payload.chatId && isFeatureEnabled('reactionNotifications')) {
+              if (payload.threadRootId) {
+                store.dispatch(
+                  incrementThreadUnreadReactions({
+                    threadRootId: payload.threadRootId,
+                    messageId: payload.messageId,
+                  }),
+                );
+              } else {
+                store.dispatch(incrementChatUnreadReactions({ chatId: payload.chatId, messageId: payload.messageId }));
+              }
+            }
+            return;
+          }
+          if (
+            (payload.notificationType === 'mention' || payload.notificationType === 'reply') &&
+            payload.chatId &&
+            isFeatureEnabled('mentionNotifications')
+          ) {
+            if (payload.threadRootId) {
+              store.dispatch(
+                incrementThreadUnreadMentions({
+                  threadRootId: payload.threadRootId,
+                  messageId: payload.messageId,
+                }),
+              );
+            } else {
+              store.dispatch(incrementChatUnreadMentions({ chatId: payload.chatId, messageId: payload.messageId }));
+            }
           }
           return;
         }

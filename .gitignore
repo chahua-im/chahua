@@ -9,8 +9,6 @@
 *.sln
 *.sw?
 .cursor
-.pi/
-context.md
 .env
 
 # Where I keep my runspace for testing / docker compose

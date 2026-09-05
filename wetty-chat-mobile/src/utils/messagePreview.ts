@@ -36,7 +36,12 @@ export interface PreviewLabels {
 
 export interface NotificationPreviewLabels extends PreviewLabels {
   sentMessage: string;
+  mentionedYou: string;
+  repliedToYou: string;
 }
+
+/** Which directed-notification copy a notification body should use. */
+export type NotificationKind = 'mention' | 'reply' | 'message';
 
 const PREVIEW_LABELS_BY_LOCALE: Record<string, NotificationPreviewLabels> = {
   en: {
@@ -48,6 +53,8 @@ const PREVIEW_LABELS_BY_LOCALE: Record<string, NotificationPreviewLabels> = {
     video: '[Video]',
     voiceMessage: '[Voice message]',
     sentMessage: 'sent a message',
+    mentionedYou: 'mentioned you',
+    repliedToYou: 'replied to you',
   },
   'zh-CN': {
     attachment: '[附件]',
@@ -58,6 +65,8 @@ const PREVIEW_LABELS_BY_LOCALE: Record<string, NotificationPreviewLabels> = {
     video: '[视频]',
     voiceMessage: '[语音消息]',
     sentMessage: '发送了一条消息',
+    mentionedYou: '提到了你',
+    repliedToYou: '回复了你',
   },
   'zh-TW': {
     attachment: '[附件]',
@@ -68,6 +77,8 @@ const PREVIEW_LABELS_BY_LOCALE: Record<string, NotificationPreviewLabels> = {
     video: '[影片]',
     voiceMessage: '[語音訊息]',
     sentMessage: '傳送了一則訊息',
+    mentionedYou: '提到了你',
+    repliedToYou: '回覆了你',
   },
 };
 
@@ -179,8 +190,19 @@ export function formatNotificationBody(
   senderName: string,
   preview: PreviewMessage | null | undefined,
   labels: NotificationPreviewLabels,
+  kind: NotificationKind = 'message',
 ): string {
   const previewText = preview ? formatMessagePreview(preview, labels) : '';
+  if (kind === 'mention') {
+    return previewText
+      ? `${senderName} ${labels.mentionedYou}: ${truncatePreview(previewText)}`
+      : `${senderName} ${labels.mentionedYou}`;
+  }
+  if (kind === 'reply') {
+    return previewText
+      ? `${senderName} ${labels.repliedToYou}: ${truncatePreview(previewText)}`
+      : `${senderName} ${labels.repliedToYou}`;
+  }
   if (previewText) {
     return `${senderName}: ${truncatePreview(previewText)}`;
   }

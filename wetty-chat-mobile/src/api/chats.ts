@@ -11,6 +11,9 @@ export interface ChatListEntry {
   avatar: string | null;
   lastMessageAt: string | null;
   unreadCount: number;
+  unreadMentions: number;
+  /** Absent on payloads from backends that predate reaction badges; treat as 0. */
+  unreadReactions?: number;
   lastReadMessageId?: string | null;
   lastMessage: MessagePreview | null;
   mutedUntil: string | null;
@@ -35,6 +38,9 @@ interface CreateChatResponse {
 export interface ChatUnreadCountResponse {
   lastReadMessageId: string | null;
   unreadCount: number;
+  unreadMentions: number;
+  /** Absent on older payloads; treat as 0. */
+  unreadReactions?: number;
 }
 
 export function getChats(
@@ -51,12 +57,40 @@ export function createChat(body: { name?: string } = {}): Promise<AxiosResponse<
   return apiClient.post('/group', body);
 }
 
-export function getUnreadCount(): Promise<AxiosResponse<{ unreadCount: number; archivedUnreadCount: number }>> {
+export function getUnreadCount(): Promise<
+  AxiosResponse<{ unreadCount: number; archivedUnreadCount: number; unreadMentions: number }>
+> {
   return apiClient.get('/chats/unread');
 }
 
 export function getChatUnreadCount(chatId: string | number): Promise<AxiosResponse<ChatUnreadCountResponse>> {
   return apiClient.get(`/chats/${chatId}/unread`);
+}
+
+export interface UnreadMentionIdsResponse {
+  messageIds: string[];
+}
+
+export function getUnreadMentionIds(
+  chatId: string | number,
+  // Matches the backend `MAX_UNREAD_COUNT` hard cap so the jump window covers the
+  // full (capped) unread-mention set.
+  { threadId, max = 1000 }: { threadId?: string | number; max?: number } = {},
+): Promise<AxiosResponse<UnreadMentionIdsResponse>> {
+  return apiClient.get(`/chats/${chatId}/mentions`, { params: { threadId, max } });
+}
+
+export interface UnreadReactionIdsResponse {
+  messageIds: string[];
+}
+
+export function getUnreadReactionIds(
+  chatId: string | number,
+  // Matches the backend `MAX_UNREAD_COUNT` hard cap so the jump window covers the
+  // full (capped) unread-reaction set.
+  { threadId, max = 1000 }: { threadId?: string | number; max?: number } = {},
+): Promise<AxiosResponse<UnreadReactionIdsResponse>> {
+  return apiClient.get(`/chats/${chatId}/reactions`, { params: { threadId, max } });
 }
 
 export function archiveChat(chatId: string | number): Promise<AxiosResponse<void>> {
