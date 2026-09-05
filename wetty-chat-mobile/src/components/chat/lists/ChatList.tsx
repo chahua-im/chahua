@@ -1,6 +1,7 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IonBadge,
+  IonButton,
   IonContent,
   IonIcon,
   IonItem,
@@ -11,6 +12,7 @@ import {
   IonList,
   IonRefresher,
   IonRefresherContent,
+  IonSpinner,
   type RefresherEventDetail,
 } from '@ionic/react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -26,31 +28,33 @@ import {
 import { useHistory } from 'react-router-dom';
 import { Trans } from '@lingui/react/macro';
 import { t } from '@lingui/core/macro';
-import { type ChatListEntry, archiveChat, getChats, unarchiveChat } from '@/api/chats';
-import { archiveThread, getThreads, unarchiveThread } from '@/api/threads';
+import { type ChatListEntry, archiveChat, unarchiveChat } from '@/api/chats';
+import { archiveThread, unarchiveThread } from '@/api/threads';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import {
   selectAllChats,
   selectArchivedChats,
   selectArchivedChatsWithUnreadCount,
+  selectChatsLoading,
+  selectChatsNextCursor,
   selectChatsWithUnreadCount,
   selectTotalArchivedUnreadChatCount,
   selectTotalUnreadChatCount,
   setChatArchived,
   setChatLastReadMessageId,
   setChatMutedUntil,
-  setChatsList,
   setChatUnreadCount,
 } from '@/store/chatsSlice';
 import {
   selectActiveThreads,
   selectArchivedThreadsWithUnreadCount,
   selectArchivedThreads,
+  selectThreadsLoading,
+  selectThreadsNextCursor,
   selectThreadsWithUnreadCount,
   selectTotalArchivedUnreadThreadCount,
   selectTotalUnreadThreadCount,
   setThreadSubscriptionStatus,
-  setThreadsList,
 } from '@/store/threadsSlice';
 import {
   selectEffectiveLocale,
@@ -60,6 +64,7 @@ import {
 } from '@/store/settingsSlice';
 import { useFeatureGate } from '@/hooks/useFeatureGate';
 import { fetchPendingRequests } from '@/store/socialSlice';
+import { loadMoreChatList, loadMoreThreadList, refreshChatList, refreshThreadList } from '@/store/listPagination';
 import { markChatAsUnread, markMessagesAsRead, type MessagePreview, type MessageResponse } from '@/api/messages';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { getChatDisplayName } from '@/utils/chatDisplay';
@@ -190,14 +195,22 @@ export function ChatList({
   const friendsEnabled = useFeatureGate('friends');
   const globalTab = useSelector(selectChatListTab);
   const messageChats = useSelector((state: RootState) => state.messages.chats);
+  const chatsNextCursor = useSelector((state: RootState) => selectChatsNextCursor(state, archivedMode));
+  const archivedChatsNextCursor = useSelector((state: RootState) => selectChatsNextCursor(state, true));
+  const threadsNextCursor = useSelector((state: RootState) => selectThreadsNextCursor(state, archivedMode));
+  const archivedThreadsNextCursor = useSelector((state: RootState) => selectThreadsNextCursor(state, true));
+  const chatsLoading = useSelector((state: RootState) => selectChatsLoading(state, archivedMode));
+  const threadsLoading = useSelector((state: RootState) => selectThreadsLoading(state, archivedMode));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { text: string; savedAt: number }>>({});
+  const [loadMoreFailure, setLoadMoreFailure] = useState<{ key: string; message: string } | null>(null);
   // /chats uses the persisted tab; direct and archived routes use a local tab.
   const [localTab, setLocalTab] = useState<ChatListTab>(initialTab ?? 'messages');
   const activeTab = initialTab != null ? localTab : globalTab;
   const setActiveTab = useCallback(
     (tab: ChatListTab) => {
+      setLoadMoreFailure(null);
       if (initialTab != null) {
         setLocalTab(tab);
       } else {
@@ -207,6 +220,9 @@ export function ChatList({
     [dispatch, initialTab],
   );
   const effectiveTab = activeTab === 'friends' && !friendsEnabled ? 'messages' : activeTab;
+  const paginationKey = `${archivedMode}:${effectiveTab}:${showThreadsInMessages}`;
+  const loadMoreError = loadMoreFailure?.key === paginationKey ? loadMoreFailure.message : null;
+  const paginationKeyRef = useRef(paginationKey);
   const chats = archivedMode ? archivedChats : activeChats;
   const threads = archivedMode ? archivedThreads : activeThreads;
   const groupChats = useMemo(() => chats.filter((c) => c.kind !== 'dm'), [chats]);
@@ -226,32 +242,17 @@ export function ChatList({
     }
   }, [archivedMode]);
 
-  const loadLists = useCallback(async () => {
-    const [activeChatRes, activeThreadRes, archivedChatRes, archivedThreadRes] = await Promise.all([
-      getChats({ archived: false }),
-      getThreads({ archived: false }),
-      getChats({ archived: true }),
-      getThreads({ archived: true }),
-      dispatch(fetchPendingRequests()).unwrap(),
-    ]);
-
-    dispatch(setChatsList({ chats: activeChatRes.data.chats || [], archived: false }));
-    dispatch(
-      setThreadsList({
-        threads: activeThreadRes.data.threads,
-        nextCursor: activeThreadRes.data.nextCursor,
-        archived: false,
-      }),
-    );
-    dispatch(setChatsList({ chats: archivedChatRes.data.chats || [], archived: true }));
-    dispatch(
-      setThreadsList({
-        threads: archivedThreadRes.data.threads,
-        nextCursor: archivedThreadRes.data.nextCursor,
-        archived: true,
-      }),
-    );
-  }, [dispatch]);
+  const loadLists = useCallback(
+    () =>
+      Promise.all([
+        dispatch(refreshChatList(false)),
+        dispatch(refreshThreadList(false)),
+        dispatch(refreshChatList(true)),
+        dispatch(refreshThreadList(true)),
+        dispatch(fetchPendingRequests()).unwrap(),
+      ]).then(() => {}),
+    [dispatch],
+  );
 
   useEffect(() => {
     loadLists()
@@ -268,6 +269,10 @@ export function ChatList({
   useEffect(() => {
     void updateAppBadge();
   }, [unreadChats, unreadThreads, updateAppBadge]);
+
+  useEffect(() => {
+    paginationKeyRef.current = paginationKey;
+  }, [paginationKey]);
 
   useEffect(() => {
     const unsubscribe = onDraftChange((draftKey) => {
@@ -386,6 +391,31 @@ export function ChatList({
 
     void updateAppBadge();
   };
+  const loadsChats = effectiveTab !== 'threads';
+  const loadsThreads = effectiveTab === 'threads' || (effectiveTab === 'messages' && showThreadsInMessages);
+  const hasMoreChats = chatsNextCursor !== null;
+  const hasMoreThreads = threadsNextCursor !== null;
+  const hasMoreRelevant = (loadsChats && hasMoreChats) || (loadsThreads && hasMoreThreads);
+  const loadingMore = (loadsChats && chatsLoading) || (loadsThreads && threadsLoading);
+
+  const handleLoadMore = useCallback(async () => {
+    const requestKey = paginationKey;
+    setLoadMoreFailure(null);
+
+    try {
+      await Promise.all([
+        ...(loadsChats && hasMoreChats ? [dispatch(loadMoreChatList(archivedMode))] : []),
+        ...(loadsThreads && hasMoreThreads ? [dispatch(loadMoreThreadList(archivedMode))] : []),
+      ]);
+    } catch (err) {
+      if (paginationKeyRef.current === requestKey) {
+        setLoadMoreFailure({
+          key: requestKey,
+          message: err instanceof Error ? err.message || t`Failed to load chats` : t`Failed to load chats`,
+        });
+      }
+    }
+  }, [archivedMode, dispatch, hasMoreChats, hasMoreThreads, loadsChats, loadsThreads, paginationKey, paginationKeyRef]);
 
   const mergedItems = useMemo((): MergedItem[] => {
     const items: MergedItem[] = [];
@@ -439,12 +469,13 @@ export function ChatList({
 
   const archivedGroupChats = useMemo(() => archivedChats.filter((c) => c.kind !== 'dm'), [archivedChats]);
   const archivedFriendChats = useMemo(() => archivedChats.filter((c) => c.kind === 'dm'), [archivedChats]);
-  const archivedGroupsVisible = archivedGroupChats.length > 0;
-  const archivedFriendsVisible = archivedFriendChats.length > 0;
+  const archivedGroupsVisible = archivedGroupChats.length > 0 || archivedChatsNextCursor !== null;
+  const archivedFriendsVisible = archivedFriendChats.length > 0 || archivedChatsNextCursor !== null;
   const archivedGroupsUnread = archivedGroupChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
   const archivedFriendsUnread = archivedFriendChats.filter((c) => (c.unreadCount ?? 0) > 0).length;
-  const archivedThreadsVisible = archivedThreads.length > 0;
-  const archivedMessagesVisible = archivedChats.length > 0 || (showThreadsInMessages && archivedThreadsVisible);
+  const archivedThreadsVisible = archivedThreads.length > 0 || archivedThreadsNextCursor !== null;
+  const archivedMessagesVisible =
+    archivedChats.length > 0 || archivedChatsNextCursor !== null || (showThreadsInMessages && archivedThreadsVisible);
 
   const openArchived = useCallback(
     (tab: ChatListTab) => {
@@ -651,7 +682,7 @@ export function ChatList({
         return (
           <IonList>
             {renderArchivedEntry(archivedUnreadThreads)}
-            {threads.length === 0 ? (
+            {threads.length === 0 && !hasMoreThreads ? (
               <IonItem>
                 <IonLabel>
                   <Trans>No threads yet</Trans>
@@ -664,7 +695,7 @@ export function ChatList({
         );
       }
 
-      if (threads.length === 0) {
+      if (threads.length === 0 && !hasMoreThreads) {
         return (
           <IonList>
             <IonItem>
@@ -685,7 +716,7 @@ export function ChatList({
           {!archivedMode && <PendingFriendRequests />}
           {!archivedMode && renderFriendRequestsEntry()}
           {archivedEntry}
-          {sortedChats.length === 0 ? (
+          {sortedChats.length === 0 && !hasMoreChats ? (
             <IonItem lines="none">
               <IonLabel color="medium" className="ion-text-wrap">
                 {archivedMode ? <Trans>No archived chats</Trans> : <Trans>No friend chats yet</Trans>}
@@ -699,7 +730,7 @@ export function ChatList({
     }
 
     if (effectiveTab === 'groups') {
-      if (groupChats.length === 0 && (!archivedGroupsVisible || archivedMode)) {
+      if (groupChats.length === 0 && !hasMoreChats && (!archivedGroupsVisible || archivedMode)) {
         return (
           <IonList>
             <IonItem>
@@ -717,7 +748,8 @@ export function ChatList({
       );
     }
 
-    const showEmptyMessages = mergedItems.length === 0 && (!archivedMessagesVisible || archivedMode);
+    const showEmptyMessages =
+      mergedItems.length === 0 && !hasMoreRelevant && (!archivedMessagesVisible || archivedMode);
 
     return (
       <IonList>
@@ -741,6 +773,23 @@ export function ChatList({
     );
   };
 
+  const renderLoadMore = () => {
+    if (error || loading || !hasMoreRelevant) return null;
+
+    return (
+      <div className={styles.loadMore}>
+        {loadMoreError ? (
+          <p className={styles.loadMoreError} role="alert">
+            {loadMoreError}
+          </p>
+        ) : null}
+        <IonButton expand="block" fill="clear" disabled={loadingMore} onClick={handleLoadMore}>
+          {loadingMore ? <IonSpinner name="crescent" /> : <Trans>Load More</Trans>}
+        </IonButton>
+      </div>
+    );
+  };
+
   return (
     <IonContent fullscreen>
       <IonRefresher slot="fixed" onIonRefresh={handleRefresh}>
@@ -760,6 +809,7 @@ export function ChatList({
         friendsEnabled={friendsEnabled}
       />
       {renderContent()}
+      {renderLoadMore()}
     </IonContent>
   );
 }

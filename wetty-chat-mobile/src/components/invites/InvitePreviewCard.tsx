@@ -4,12 +4,12 @@ import { IonButton, IonSpinner } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { Trans } from '@lingui/react/macro';
 import { useDispatch } from 'react-redux';
-import { getChats } from '@/api/chats';
 import { type GroupInfoResponse } from '@/api/group';
 import { redeemInvite } from '@/api/invites';
 import { UserAvatar } from '@/components/UserAvatar';
 import type { AppDispatch } from '@/store';
-import { setChatMeta, setChatsList } from '@/store/chatsSlice';
+import { setChatMeta } from '@/store/chatsSlice';
+import { refreshChatList } from '@/store/listPagination';
 import { useInvitePreview } from './useInvitePreview';
 import styles from './InvitePreviewCard.module.scss';
 
@@ -89,8 +89,7 @@ function useInviteChatResolver(onResolved: InvitePreviewCardProps['onResolved'])
     dispatch(setChatMeta({ chatId: id, meta }));
 
     try {
-      const chatsResponse = await getChats();
-      dispatch(setChatsList({ chats: chatsResponse.data.chats ?? [] }));
+      await dispatch(refreshChatList(false));
     } catch {
       // The conversation can still load lazily after navigation.
     }

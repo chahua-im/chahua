@@ -2,20 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { useIonAlert } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { useDispatch, useSelector } from 'react-redux';
-import {
-  archiveThread,
-  getThreadSubscriptionStatus,
-  getThreads,
-  subscribeToThread,
-  unarchiveThread,
-} from '@/api/threads';
-import type { RootState } from '@/store';
+import { archiveThread, getThreadSubscriptionStatus, subscribeToThread, unarchiveThread } from '@/api/threads';
+import type { AppDispatch, RootState } from '@/store';
 import {
   selectThreadArchivedStatus,
   selectThreadSubscriptionStatus,
   setThreadSubscriptionStatus,
-  setThreadsList,
 } from '@/store/threadsSlice';
+import { refreshThreadList } from '@/store/listPagination';
 
 interface UseThreadSubscriptionArgs {
   chatId: string;
@@ -23,7 +17,7 @@ interface UseThreadSubscriptionArgs {
 }
 
 export function useThreadSubscription({ chatId, threadId }: UseThreadSubscriptionArgs) {
-  const dispatch = useDispatch();
+  const dispatch = useDispatch<AppDispatch>();
   const [presentAlert] = useIonAlert();
   const [threadSubscribed, setThreadSubscribed] = useState<boolean | null>(null);
   const [threadArchived, setThreadArchived] = useState(false);
@@ -109,11 +103,7 @@ export function useThreadSubscription({ chatId, threadId }: UseThreadSubscriptio
         setThreadSubscribed(true);
         setThreadArchived(false);
         dispatch(setThreadSubscriptionStatus({ threadRootId: threadId, subscribed: true, archived: false }));
-        getThreads()
-          .then((res) =>
-            dispatch(setThreadsList({ threads: res.data.threads, nextCursor: res.data.nextCursor, archived: false })),
-          )
-          .catch(() => {});
+        void dispatch(refreshThreadList(false)).catch(() => {});
       }
     } catch (err) {
       console.error('Failed to toggle thread archive state', err);

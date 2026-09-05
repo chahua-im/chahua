@@ -1,10 +1,8 @@
-import { type ChatListEntry, getChats } from '@/api/chats';
 import { getMessages } from '@/api/messages';
-import { getThreads } from '@/api/threads';
-import { setChatsList } from '@/store/chatsSlice';
+import { selectAllChats } from '@/store/chatsSlice';
+import { refreshChatList, refreshThreadList } from '@/store/listPagination';
 import { insertAfterAnchor } from '@/store/messages/slice';
 import { selectLatestServerMessage } from '@/store/messages/selectors';
-import { setThreadsList } from '@/store/threadsSlice';
 import store from '@/store/index';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { APP_SYNC_DEBOUNCE_MS } from '@/constants/chatTiming';
@@ -31,38 +29,20 @@ export async function syncApp() {
 
     isSyncing = true;
     try {
-      // 1. Sync chat/thread snapshots for both active and archived buckets, then refresh the app badge.
-      const [activeChatsRes, archivedChatsRes, activeThreadsRes, archivedThreadsRes] = await Promise.all([
-        getChats({ archived: false }),
-        getChats({ archived: true }),
-        getThreads({ archived: false }),
-        getThreads({ archived: true }),
+      // 1. Refresh every independent list bucket at its currently loaded depth, then refresh the app badge.
+      await Promise.all([
+        store.dispatch(refreshChatList(false)),
+        store.dispatch(refreshChatList(true)),
+        store.dispatch(refreshThreadList(false)),
+        store.dispatch(refreshThreadList(true)),
       ]);
-
-      const chats = activeChatsRes.data.chats || [];
-      store.dispatch(setChatsList({ chats, archived: false }));
-      store.dispatch(setChatsList({ chats: archivedChatsRes.data.chats || [], archived: true }));
-
-      store.dispatch(
-        setThreadsList({
-          threads: activeThreadsRes.data.threads,
-          nextCursor: activeThreadsRes.data.nextCursor,
-          archived: false,
-        }),
-      );
-      store.dispatch(
-        setThreadsList({
-          threads: archivedThreadsRes.data.threads,
-          nextCursor: archivedThreadsRes.data.nextCursor,
-          archived: true,
-        }),
-      );
 
       await syncAppBadgeCount();
 
       // 2. Sync loaded latest message timelines
       const state = store.getState();
       const activeChats = state.messages.chats;
+      const chats = selectAllChats(state);
 
       for (const [storeChatId, chatState] of Object.entries(activeChats)) {
         if (!chatState.hasReachedLatest) continue;
@@ -79,8 +59,7 @@ export async function syncApp() {
           apiChatId = parts[0];
           threadId = parts[1];
         } else {
-          // For main chats, optimize: only fetch if chatsList indicates a newer message
-          const chatListItem = chats.find((c: ChatListEntry) => c.id === apiChatId);
+          const chatListItem = chats.find((chat) => chat.id === apiChatId);
           if (chatListItem && chatListItem.lastMessage) {
             const serverId = BigInt(chatListItem.lastMessage.id);
             const localId = BigInt(lastMsg.id);
