@@ -89,6 +89,6 @@ export async function readPages<T, Cursor>(
     const page = await read(cursor);
     items.push(...page.items);
     cursor = page.cursor;
-  } while (cursor !== undefined && items.length < count && isCurrent());
+  } while (cursor != null && items.length < count && isCurrent());
   return { items, cursor };
 }

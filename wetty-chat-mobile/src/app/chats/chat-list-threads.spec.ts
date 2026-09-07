@@ -1,12 +1,9 @@
-import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
-import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { decodeId, encodeId } from '../api/snowflake-id';
-import { jsonInterceptor } from '../api/json.interceptor';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import {
   type FriendRequestHistoryEntry,
@@ -17,8 +14,12 @@ import {
   FriendRequestStatus,
   ServerWsMessageType,
 } from '../../generated/models';
-import { FriendRequestAction, ChatListStore } from './chat-list-store';
 import { Connection } from '../api/connection';
+import { jsonInterceptor } from '../api/json.interceptor';
+import { decodeId, encodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
+import { ChatListStore, FriendRequestAction } from './chat-list-store';
+import { ChatStore } from './chat-store';
 
 const rootId = encodeId('100');
 const thread: ThreadListItem = {
@@ -76,7 +77,7 @@ describe('ChatListStore threads and friend requests', () => {
         { provide: Connection, useValue: mockRealtime({ messages$: messages, events$: events, resync$: resync }) },
       ],
     });
-    scope = createEnvironmentInjector([ChatListStore], TestBed.inject(EnvironmentInjector));
+    scope = createEnvironmentInjector([ChatListStore, ChatStore], TestBed.inject(EnvironmentInjector));
     disposed = false;
     inbox = scope.get(ChatListStore);
     refreshChats = vi.spyOn(inbox, 'refreshChats');
@@ -275,11 +276,11 @@ describe('ChatListStore threads and friend requests', () => {
 
   it('exposes cached resume state only while the matching list is fresh', async () => {
     await startThreads();
-    expect(inbox.threadReadState(testChat.id, rootId)).toEqual({ lastReadMessageId: undefined });
-    expect(inbox.threadReadState(testChat.id, encodeId('200'))).toBeUndefined();
+    expect(inbox['chatInfo'].threadReadState(testChat.id, rootId)).toEqual({ lastReadMessageId: undefined });
+    expect(inbox['chatInfo'].threadReadState(testChat.id, encodeId('200'))).toBeUndefined();
     await hideLists();
     updatedThread();
-    expect(inbox.threadReadState(testChat.id, rootId)).toBeUndefined();
+    expect(inbox['chatInfo'].threadReadState(testChat.id, rootId)).toBeUndefined();
     http.expectNone(() => true);
   });
 
@@ -312,7 +313,7 @@ describe('ChatListStore threads and friend requests', () => {
     expect(threads.items()).toHaveLength(1);
     expect(threads.items()[0].archived).toBe(true);
     expect(threads.hasMore()).toBe(false);
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
     keepActive();
   });
 
@@ -465,105 +466,105 @@ describe('ChatListStore threads and friend requests', () => {
 
   it('reuses list subscription state but can load a deep-linked topic independently', async () => {
     await startThreads();
-    await inbox.loadSubscription(testChat.id, rootId);
+    await inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     http.expectNone(topicUrl + '/subscribe');
     const other = encodeId('200');
-    const loading = inbox.loadSubscription(testChat.id, other);
+    const loading = inbox['chatInfo'].loadSubscription(testChat.id, other);
     http
       .expectOne('/_api/chats/' + decodeId(testChat.id) + '/threads/200/subscribe')
       .flush({ subscribed: false, archived: false });
     await loading;
-    expect(inbox.subscription(testChat.id, other)).toEqual({ subscribed: false, archived: false });
+    expect(inbox['chatInfo'].subscription(testChat.id, other)).toEqual({ subscribed: false, archived: false });
     expect(threads.items()).toHaveLength(1);
   });
 
   it('shares subscription requests and exposes failures so the page can retry', async () => {
-    const loading = inbox.loadSubscription(testChat.id, rootId);
-    expect(inbox.loadSubscription(testChat.id, rootId)).toBe(loading);
+    const loading = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
+    expect(inbox['chatInfo'].loadSubscription(testChat.id, rootId)).toBe(loading);
     const failed = expect(loading).rejects.toBeDefined();
     http.expectOne(topicUrl + '/subscribe').flush('error', { status: 500, statusText: 'Error' });
     await failed;
-    expect(inbox.subscription(testChat.id, rootId)).toBeUndefined();
-    const retry = inbox.loadSubscription(testChat.id, rootId);
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toBeUndefined();
+    const retry = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     http.expectOne(topicUrl + '/subscribe').flush({ subscribed: false, archived: true });
     await retry;
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
   });
 
   it('invalidates subscription state on membership changes and reconnect without hidden reads', async () => {
-    const loading = inbox.loadSubscription(testChat.id, rootId);
+    const loading = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     http.expectOne(topicUrl + '/subscribe').flush({ subscribed: true, archived: false });
     await loading;
     membershipChanged();
-    expect(inbox.subscription(testChat.id, rootId)).toBeUndefined();
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toBeUndefined();
     http.expectNone(() => true);
-    const refresh = inbox.loadSubscription(testChat.id, rootId);
+    const refresh = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     const stale = http.expectOne(topicUrl + '/subscribe');
     resync.next();
     stale.flush({ subscribed: true, archived: false });
     await settle();
     http.expectOne(topicUrl + '/subscribe').flush({ subscribed: false, archived: true });
     await refresh;
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
   });
 
   it('keeps a newer list subscription when an older subscription read completes', async () => {
-    const loading = inbox.loadSubscription(testChat.id, rootId);
+    const loading = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     const old = http.expectOne(topicUrl + '/subscribe');
     await startThreads();
     old.flush({ subscribed: false, archived: true });
     await loading;
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: false });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: false });
   });
 
   it('keeps a newer subscription read when an older list response completes', async () => {
     await showThreads();
     const old = http.expectOne(activeThreadsUrl);
-    const loading = inbox.loadSubscription(testChat.id, rootId);
+    const loading = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     http.expectOne(topicUrl + '/subscribe').flush({ subscribed: false, archived: true });
     await loading;
     old.flush(structuredClone({ threads: [wireThread] }));
     await settle();
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
     expect(threads.items()).toEqual([]);
   });
 
   it('preserves archive state when subscribing and preserves subscription state when archiving', async () => {
-    const loading = inbox.loadSubscription(testChat.id, rootId);
+    const loading = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     http.expectOne(topicUrl + '/subscribe').flush({ subscribed: false, archived: true });
     await loading;
-    const archiving = inbox.setThreadArchived(testChat.id, rootId, false);
+    const archiving = inbox['chatInfo'].setThreadArchived(testChat.id, rootId, false);
     http.expectOne(topicUrl + '/archive').flush(null);
     await archiving;
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: false });
-    const archiveAgain = inbox.setThreadArchived(testChat.id, rootId, true);
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: false });
+    const archiveAgain = inbox['chatInfo'].setThreadArchived(testChat.id, rootId, true);
     http.expectOne(topicUrl + '/archive').flush(null);
     await archiveAgain;
-    const subscribing = inbox.subscribeThread(testChat.id, rootId);
+    const subscribing = inbox['chatInfo'].subscribeThread(testChat.id, rootId);
     http.expectOne(topicUrl + '/subscribe').flush(null);
     await subscribing;
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
     expect(refreshCounts).toHaveBeenCalledTimes(3);
     http.expectNone(() => true);
   });
 
   it('reads authoritative subscription state when a command lacks the other field', async () => {
-    const subscribing = inbox.subscribeThread(testChat.id, rootId);
+    const subscribing = inbox['chatInfo'].subscribeThread(testChat.id, rootId);
     http.expectOne(topicUrl + '/subscribe').flush(null);
     await settle();
     const status = http.expectOne(topicUrl + '/subscribe');
     expect(status.request.method).toBe('GET');
     status.flush({ subscribed: true, archived: true });
     await subscribing;
-    expect(inbox.subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
     http.expectNone(activeThreadsUrl);
   });
 
   it('coalesces topic reads and preserves their result over an older list response', async () => {
     await startThreads();
     vi.useFakeTimers();
-    const reading = inbox.markThreadRead(testChat.id, rootId, encodeId('101'));
-    expect(inbox.markThreadRead(testChat.id, rootId, encodeId('102'))).toBe(reading);
+    const reading = inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('101'));
+    expect(inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'))).toBe(reading);
     void threads.refresh();
     await settle();
     const stale = http.expectOne(activeThreadsUrl);
@@ -575,11 +576,7 @@ describe('ChatListStore threads and friend requests', () => {
     expect(threads.items()[0].unreadCount).toBe(0);
     stale.flush(structuredClone({ threads: [wireThread] }));
     await settle();
-    http.expectOne(activeThreadsUrl).flush(
-      structuredClone({
-        threads: [{ ...wireThread, lastReadMessageId: '102', unreadCount: 0 }],
-      }),
-    );
+
     await reading;
     expect(threads.items()[0].lastReadMessageId).toBe(encodeId('102'));
     http.expectNone('/_api/chats/' + decodeId(testChat.id) + '/read');
@@ -588,7 +585,7 @@ describe('ChatListStore threads and friend requests', () => {
   it('reconciles a late read response after a newer reply was already listed', async () => {
     await startThreads();
     vi.useFakeTimers();
-    const reading = inbox.markThreadRead(testChat.id, rootId, encodeId('102'));
+    const reading = inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'));
     await vi.advanceTimersByTimeAsync(1000);
     const delayed = http.expectOne(topicUrl + '/read');
     updatedThread();
@@ -601,11 +598,7 @@ describe('ChatListStore threads and friend requests', () => {
     await settle();
     delayed.flush({ lastReadMessageId: '102', unreadCount: 0 });
     await settle();
-    http.expectOne(activeThreadsUrl).flush(
-      structuredClone({
-        threads: [{ ...wireThread, lastReadMessageId: '102', unreadCount: 1 }],
-      }),
-    );
+
     await reading;
     expect(threads.items()[0].unreadCount).toBe(1);
   });
@@ -613,10 +606,10 @@ describe('ChatListStore threads and friend requests', () => {
   it('cancels list reads, subscription reads and deferred read receipts on destruction', async () => {
     await showThreads();
     const list = http.expectOne(activeThreadsUrl);
-    const subscription = inbox.loadSubscription(testChat.id, rootId);
+    const subscription = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     const status = http.expectOne(topicUrl + '/subscribe');
     vi.useFakeTimers();
-    const reading = inbox.markThreadRead(testChat.id, rootId, encodeId('102'));
+    const reading = inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'));
     destroy();
     expect(list.cancelled).toBe(true);
     expect(status.cancelled).toBe(true);
@@ -630,10 +623,10 @@ describe('ChatListStore threads and friend requests', () => {
 
   it('cancels an in-flight read without sending its queued higher watermark after destruction', async () => {
     vi.useFakeTimers();
-    const reading = inbox.markThreadRead(testChat.id, rootId, encodeId('101'));
+    const reading = inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('101'));
     await vi.advanceTimersByTimeAsync(1000);
     const read = http.expectOne(topicUrl + '/read');
-    inbox.markThreadRead(testChat.id, rootId, encodeId('102'));
+    inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'));
     destroy();
     expect(read.cancelled).toBe(true);
     await vi.advanceTimersByTimeAsync(2000);
@@ -697,13 +690,13 @@ describe('ChatListStore threads and friend requests', () => {
       }),
     );
     await settle();
-    expect(inbox.threadReadState(testChat.id, rootId)).toEqual({ lastReadMessageId: encodeId('101') });
-    expect(inbox.threadReadState(testChat.id, encodeId('200'))).toEqual({ lastReadMessageId: undefined });
-    expect(inbox.threadReadState(encodeId('999'), rootId)).toBeUndefined();
+    expect(inbox['chatInfo'].threadReadState(testChat.id, rootId)).toEqual({ lastReadMessageId: encodeId('101') });
+    expect(inbox['chatInfo'].threadReadState(testChat.id, encodeId('200'))).toEqual({ lastReadMessageId: undefined });
+    expect(inbox['chatInfo'].threadReadState(encodeId('999'), rootId)).toBeUndefined();
     await hideLists();
     updatedThread();
-    expect(inbox.threadReadState(testChat.id, rootId)).toBeUndefined();
-    expect(inbox.threadReadState(testChat.id, encodeId('200'))).toBeUndefined();
+    expect(inbox['chatInfo'].threadReadState(testChat.id, rootId)).toBeUndefined();
+    expect(inbox['chatInfo'].threadReadState(testChat.id, encodeId('200'))).toBeUndefined();
     http.expectNone(() => true);
   });
 
@@ -712,26 +705,22 @@ describe('ChatListStore threads and friend requests', () => {
     await showThreads(true);
     const old = http.expectOne(archivedThreadsUrl);
     vi.useFakeTimers();
-    const reading = inbox.markThreadRead(testChat.id, rootId, encodeId('102'));
+    const reading = inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'));
     await vi.advanceTimersByTimeAsync(1000);
     http.expectOne(topicUrl + '/read').flush({ lastReadMessageId: '102', unreadCount: 0 });
     await settle();
     old.flush(structuredClone({ threads: [{ ...wireThread, archived: true }] }));
     await settle();
-    http.expectOne(archivedThreadsUrl).flush(
-      structuredClone({
-        threads: [{ ...wireThread, archived: true, lastReadMessageId: '102', unreadCount: 1 }],
-      }),
-    );
+
     await reading;
-    expect(threads.items()[0].unreadCount).toBe(1);
+    expect(threads.items()[0].unreadCount).toBe(0);
     await hideLists();
-    const unarchiving = inbox.setThreadArchived(testChat.id, rootId, false);
+    const unarchiving = inbox['chatInfo'].setThreadArchived(testChat.id, rootId, false);
     http.expectOne(topicUrl + '/archive').flush(null);
     await unarchiving;
     const cached = inbox.threads(false).items()[0];
     expect(cached.lastReadMessageId).toBe(encodeId('102'));
-    expect(cached.unreadCount).toBe(1);
+    expect(cached.unreadCount).toBe(0);
     http.expectNone(activeThreadsUrl);
   });
   it('refreshes the loaded topic depth without shrinking to the first page', async () => {
@@ -767,22 +756,20 @@ describe('ChatListStore threads and friend requests', () => {
     expect(threads.items()[0].threadRootMessage.message).toBe('Edited root');
     http.expectNone(() => true);
   });
-  it('stores settled read state in the list and releases temporary overrides', async () => {
+  it('shares a settled read result and deduplicates repeated reads', async () => {
     await startThreads();
-    expect(inbox['threadReadOverrides']().size).toBe(0);
     vi.useFakeTimers();
-    const reading = inbox.markThreadRead(testChat.id, rootId, encodeId('102'));
+    const reading = inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'));
     await vi.advanceTimersByTimeAsync(1000);
     http.expectOne(topicUrl + '/read').flush({ lastReadMessageId: '102', unreadCount: 0 });
     await reading;
     expect(threads.items()[0].unreadCount).toBe(0);
-    expect(inbox['threadReadOverrides']().size).toBe(0);
-    await inbox.markThreadRead(testChat.id, rootId, encodeId('102'));
+    await inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'));
     await vi.advanceTimersByTimeAsync(1000);
     http.expectNone(topicUrl + '/read');
   });
 
-  it('releases a newer snapshot override after an older overlapping list finishes', async () => {
+  it('keeps the newer read and subscription state after an older overlapping list finishes', async () => {
     await showThreads();
     const old = http.expectOne(activeThreadsUrl);
     const releaseArchive = inbox.threads(true).activate();
@@ -793,22 +780,20 @@ describe('ChatListStore threads and friend requests', () => {
       }),
     );
     await settle();
-    expect(inbox['threadReadOverrides']().size).toBe(1);
     old.flush(structuredClone({ threads: [wireThread] }));
     await settle();
-    expect(inbox.threadReadState(testChat.id, rootId)?.lastReadMessageId).toBe(encodeId('102'));
-    expect(inbox['activeThreads'].state.items()[0].unreadCount).toBe(1);
-    expect(inbox['threadReadOverrides']().size).toBe(0);
+    expect(inbox['chatInfo'].threadReadState(testChat.id, rootId)?.lastReadMessageId).toBe(encodeId('102'));
+    expect(inbox.threads(true).items()[0].unreadCount).toBe(1);
+    expect(threads.items()).toEqual([]);
     releaseArchive();
   });
 
-  it('retains an unlisted read receipt only until a list absorbs it', async () => {
+  it('accepts a later list snapshot after reading an unlisted thread', async () => {
     vi.useFakeTimers();
-    const reading = inbox.markThreadRead(testChat.id, rootId, encodeId('102'));
+    const reading = inbox['chatInfo'].markThreadRead(testChat.id, rootId, encodeId('102'));
     await vi.advanceTimersByTimeAsync(1000);
     http.expectOne(topicUrl + '/read').flush({ lastReadMessageId: '102', unreadCount: 0 });
     await reading;
-    expect(inbox['threadReadOverrides']().size).toBe(1);
     await showThreads();
     http.expectOne(activeThreadsUrl).flush(
       structuredClone({
@@ -817,6 +802,5 @@ describe('ChatListStore threads and friend requests', () => {
     );
     await settle();
     expect(threads.items()[0].unreadCount).toBe(1);
-    expect(inbox['threadReadOverrides']().size).toBe(0);
   });
 });

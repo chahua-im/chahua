@@ -8,8 +8,8 @@
       @if (failed().has(item.id)) {
         <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
       } @else if (item.kind === MediaKind.Image) {
-        <a [href]="item.url" target="_blank" rel="noopener" [attr.aria-label]="'查看' + item.fileName">
-          <img [src]="item.url" loading="lazy" decoding="async" [alt]="item.fileName" (error)="fail(item.id)" />
+        <a [href]="item.url" target="_blank" rel="noopener">
+          <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id)" />
         </a>
       } @else {
         <video
@@ -20,7 +20,6 @@
           [muted]="item.sticker"
           playsinline
           preload="metadata"
-          [attr.aria-label]="item.fileName"
           (error)="fail(item.id)"></video>
       }
       @if (last && overlayTime()) {
@@ -34,15 +33,15 @@
       @if (failed().has(item.id)) {
         <a class="media-error" [href]="item.url" target="_blank" rel="noopener">无法播放，打开语音文件</a>
       } @else {
-        <audio [src]="item.url" controls preload="none" aria-label="语音消息" (error)="fail(item.id)"></audio>
+        <audio [src]="item.url" controls preload="none" (error)="fail(item.id)"></audio>
       }
     </div>
   } @else {
     <a class="file" [href]="item.url" [attr.download]="item.fileName" target="_blank" rel="noopener">
-      <ion-icon [icon]="fileIcon" aria-hidden="true"></ion-icon>
+      <ion-icon [icon]="fileIcon"></ion-icon>
       <span class="file-info">
         <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
-        @if (item.size !== undefined) {
+        @if (item.size != null) {
           <small>
             @if (item.size < 1024) {
               {{ item.size }} B
@@ -54,7 +53,7 @@
           </small>
         }
       </span>
-      <ion-icon [icon]="downloadIcon" aria-label="下载"></ion-icon>
+      <ion-icon [icon]="downloadIcon"></ion-icon>
     </a>
   }
 }

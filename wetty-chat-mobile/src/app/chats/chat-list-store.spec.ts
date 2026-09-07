@@ -1,15 +1,15 @@
-import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
-import { decodeId, encodeId } from '../api/snowflake-id';
-import { jsonInterceptor } from '../api/json.interceptor';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { Connection } from '../api/connection';
-import { type MessageResponse, GroupKind, ServerWsMessageType } from '../../generated/models';
-import { TestBed } from '@angular/core/testing';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { ChatListStore, ChatListError, type ChatQuery } from './chat-list-store';
+import { GroupKind, ServerWsMessageType, type MessageResponse } from '../../generated/models';
+import { Connection } from '../api/connection';
+import { jsonInterceptor } from '../api/json.interceptor';
+import { decodeId, encodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
+import { ChatListError, ChatListStore, type ChatQuery } from './chat-list-store';
 import { ChatStore } from './chat-store';
 
 describe('ChatListStore', () => {
@@ -72,7 +72,7 @@ describe('ChatListStore', () => {
     await settle();
     TestBed.tick();
     expect(query.items()[0].archived).toBe(true);
-    const restoring = data.setArchived(testChat.id, false);
+    const restoring = data['chatInfo'].setArchived(testChat.id, false);
     const action = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/archive`);
     expect(action.request.method).toBe('DELETE');
     action.flush(null);
@@ -88,7 +88,7 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     TestBed.tick();
-    const archiving = data.setArchived(testChat.id, true);
+    const archiving = data['chatInfo'].setArchived(testChat.id, true);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/archive`).flush(null);
     await archiving;
     TestBed.tick();
@@ -191,7 +191,6 @@ describe('ChatListStore', () => {
       .flush(structuredClone({ chats: [{ ...wireChat, lastMessage: { ...wireMessage, message: edited.message } }] }));
     await settle();
     expect(query.items()[0].lastMessage?.message).toBe(edited.message);
-    expect(data['previews']().size).toBe(0);
   });
 
   it('withdraws a live preview immediately and retires it after the authoritative tombstone arrives', async () => {
@@ -214,7 +213,6 @@ describe('ChatListStore', () => {
       }),
     );
     await settle();
-    expect(data['previews']().size).toBe(0);
     expect(query.items()[0]).toMatchObject({ lastMessage: { isDeleted: true }, unreadCount: 3 });
     incoming.next(testMessage);
     expect(query.items()[0].lastMessage?.isDeleted).toBe(true);
@@ -222,12 +220,11 @@ describe('ChatListStore', () => {
     await settle();
   });
 
-  it('coalesces bulk withdrawals and reloads retained unread state without subtracting locally', async () => {
+  it('coalesces bulk withdrawals and takes unread state from the refreshed list', async () => {
     http
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastMessage: wireMessage, unreadCount: 7 }] }));
     await settle();
-    const leave = data.retainReadState(testChat.id);
     const change = {
       type: ServerWsMessageType.messagesBulkDeleted as const,
       payload: { chatId: testChat.id, messageIds: [testMessage.id, encodeId('100')] },
@@ -244,10 +241,9 @@ describe('ChatListStore', () => {
       .flush(
         structuredClone({ chats: [{ ...wireChat, lastMessage: { ...wireMessage, isDeleted: true }, unreadCount: 4 }] }),
       );
-    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 4 });
+    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     await settle();
     expect(query.items()[0].unreadCount).toBe(4);
-    leave();
   });
 
   it('ignores topic edits and reactions, and refreshes hidden changed chats only on return', async () => {
@@ -270,7 +266,6 @@ describe('ChatListStore', () => {
     expect(query.items()[0].lastMessage?.isDeleted).toBe(true);
     await settle();
     http.expectNone(() => true);
-    expect(data['previews']().size).toBe(0);
     releaseQuery = query.activate();
     http
       .expectOne('/_api/chats?limit=50')
@@ -286,9 +281,9 @@ describe('ChatListStore', () => {
     query.refresh();
     const oldList = http.expectOne('/_api/chats?limit=50');
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, encodeId('9007199254741000'));
-    const newer = data.markRead(testChat.id, testMessage.id);
-    data.markRead(testChat.id, encodeId('9007199254741001'));
+    const reading = data['chatInfo'].markRead(testChat.id, encodeId('9007199254741000'));
+    const newer = data['chatInfo'].markRead(testChat.id, testMessage.id);
+    data['chatInfo'].markRead(testChat.id, encodeId('9007199254741001'));
     await vi.advanceTimersByTimeAsync(1000);
     const request = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
     expect(request.request.body).toEqual({ messageId: wireMessage.id });
@@ -298,7 +293,7 @@ describe('ChatListStore', () => {
     await settle();
     expect(query.items()[0].lastReadMessageId).toBe(testMessage.id);
     expect(query.items()[0].unreadCount).toBe(1);
-    await data.markRead(testChat.id, encodeId('9007199254741000'));
+    await data['chatInfo'].markRead(testChat.id, encodeId('9007199254741000'));
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
   });
 
@@ -307,11 +302,11 @@ describe('ChatListStore', () => {
     await settle();
     TestBed.tick();
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, testMessage.id);
+    const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     const first = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
-    data.markRead(testChat.id, encodeId('9007199254741010'));
-    data.markRead(testChat.id, encodeId('9007199254741009'));
+    data['chatInfo'].markRead(testChat.id, encodeId('9007199254741010'));
+    data['chatInfo'].markRead(testChat.id, encodeId('9007199254741009'));
     await vi.advanceTimersByTimeAsync(1000);
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
     first.flush({ lastReadMessageId: wireMessage.id, unreadCount: 4 });
@@ -327,7 +322,7 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     TestBed.tick();
-    const refreshing = data['refreshUnread'](testChat.id);
+    const refreshing = data['chatInfo']['refreshUnread'](testChat.id);
     const stale = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
     incoming.next(testMessage);
     stale.flush({ lastReadMessageId: '9007199254741000', unreadCount: 0 });
@@ -345,7 +340,7 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     TestBed.tick();
-    const initialRead = data['refreshUnread'](testChat.id);
+    const initialRead = data['chatInfo']['refreshUnread'](testChat.id);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: wireChat.unreadCount });
     await initialRead;
     // A concurrent list fetch can discover our send before either send-response delivery path.
@@ -369,10 +364,10 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     TestBed.tick();
-    const refreshing = data['refreshUnread'](testChat.id);
+    const refreshing = data['chatInfo']['refreshUnread'](testChat.id);
     const oldUnread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, testMessage.id);
+    const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush({
       lastReadMessageId: wireMessage.id,
@@ -396,7 +391,7 @@ describe('ChatListStore', () => {
     await settle();
     TestBed.tick();
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, testMessage.id);
+    const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     const read = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
     incoming.next({ ...testMessage, id: encodeId('9007199254741010') });
@@ -435,12 +430,12 @@ describe('ChatListStore', () => {
     await settle();
     TestBed.tick();
     vi.useFakeTimers();
-    const failed = expect(data.markRead(testChat.id, testMessage.id)).rejects.toBeDefined();
+    const failed = expect(data['chatInfo'].markRead(testChat.id, testMessage.id)).rejects.toBeDefined();
     await vi.advanceTimersByTimeAsync(1000);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush('failed', { status: 500, statusText: 'Error' });
     await failed;
     expect(query.items()[0].lastReadMessageId).toBeUndefined();
-    const retry = data.markRead(testChat.id, testMessage.id);
+    const retry = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     http
       .expectOne(`/_api/chats/${decodeId(testChat.id)}/read`)
@@ -454,21 +449,21 @@ describe('ChatListStore', () => {
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '200', unreadCount: 1 }] }));
     await settle();
     vi.useFakeTimers();
-    const oldRead = data.markRead(testChat.id, encodeId('201'));
-    const unread = data.markUnread(testChat.id);
-    expect(data.markUnread(testChat.id)).toBe(unread);
+    const oldRead = data['chatInfo'].markRead(testChat.id, encodeId('201'));
+    const unread = data['chatInfo'].markUnread(testChat.id);
+    expect(data['chatInfo'].markUnread(testChat.id)).toBe(unread);
     const request = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toBeNull();
-    await data.markRead(testChat.id, encodeId('202'));
+    await data['chatInfo'].markRead(testChat.id, encodeId('202'));
     request.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await unread;
     await vi.advanceTimersByTimeAsync(500);
-    const nextRead = data.markRead(testChat.id, encodeId('202'));
+    const nextRead = data['chatInfo'].markRead(testChat.id, encodeId('202'));
     await vi.advanceTimersByTimeAsync(500);
     await oldRead;
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
-    expect(data.markRead(testChat.id, encodeId('203'))).toBe(nextRead);
+    expect(data['chatInfo'].markRead(testChat.id, encodeId('203'))).toBe(nextRead);
     await vi.advanceTimersByTimeAsync(500);
     const next = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
     expect(next.request.body).toEqual({ messageId: '203' });
@@ -482,12 +477,12 @@ describe('ChatListStore', () => {
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '200', unreadCount: 1 }] }));
     await settle();
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, encodeId('201'));
+    const reading = data['chatInfo'].markRead(testChat.id, encodeId('201'));
     await vi.advanceTimersByTimeAsync(1000);
     const read = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
-    data.markRead(testChat.id, encodeId('205'));
-    const unread = data.markUnread(testChat.id);
-    await data.markRead(testChat.id, encodeId('206'));
+    data['chatInfo'].markRead(testChat.id, encodeId('205'));
+    const unread = data['chatInfo'].markUnread(testChat.id);
+    await data['chatInfo'].markRead(testChat.id, encodeId('206'));
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     read.flush({ lastReadMessageId: '201', unreadCount: 0 });
     await reading;
@@ -506,9 +501,9 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     vi.useFakeTimers();
-    const reading = expect(data.markRead(testChat.id, encodeId('201'))).rejects.toBeDefined();
+    const reading = expect(data['chatInfo'].markRead(testChat.id, encodeId('201'))).rejects.toBeDefined();
     await vi.advanceTimersByTimeAsync(1000);
-    const unread = data.markUnread(testChat.id);
+    const unread = data['chatInfo'].markUnread(testChat.id);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush('failed', { status: 500, statusText: 'Error' });
     await reading;
     await settle();
@@ -522,9 +517,9 @@ describe('ChatListStore', () => {
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '201', unreadCount: 0 }] }));
     await settle();
-    const refreshing = data['refreshUnread'](testChat.id);
+    const refreshing = data['chatInfo']['refreshUnread'](testChat.id);
     const stale = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    const unread = data.markUnread(testChat.id);
+    const unread = data['chatInfo'].markUnread(testChat.id);
     http
       .expectOne(
         (request) => request.url === `/_api/chats/${decodeId(testChat.id)}/unread` && request.method === 'POST',
@@ -547,7 +542,7 @@ describe('ChatListStore', () => {
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '201', unreadCount: 0 }] }));
     await settle();
-    const unread = data.markUnread(testChat.id);
+    const unread = data['chatInfo'].markUnread(testChat.id);
     const delayed = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
     incoming.next(testMessage);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 2 });
@@ -564,11 +559,11 @@ describe('ChatListStore', () => {
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '201', unreadCount: 0 }] }));
     await settle();
-    const failed = expect(data.markUnread(testChat.id)).rejects.toBeDefined();
+    const failed = expect(data['chatInfo'].markUnread(testChat.id)).rejects.toBeDefined();
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush('failed', { status: 500, statusText: 'Error' });
     await failed;
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('201'));
-    const retry = data.markUnread(testChat.id);
+    const retry = data['chatInfo'].markUnread(testChat.id);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 1 });
     await retry;
     expect(query.items()[0].lastReadMessageId).toBe(encodeId('200'));
@@ -578,7 +573,7 @@ describe('ChatListStore', () => {
     const chat = { ...wireChat, kind: GroupKind.dm, mutedUntil: null };
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [chat] }));
     await settle();
-    const muting = data.setMuted(testChat.id, true);
+    const muting = data['chatInfo'].setMuted(testChat.id, true);
     const request = http.expectOne(`/_api/group/${decodeId(testChat.id)}/mute`);
     expect(request.request.method).toBe('PUT');
     expect(request.request.body).toEqual({});
@@ -594,7 +589,7 @@ describe('ChatListStore', () => {
     TestBed.tick();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [chat] }));
     await settle();
-    expect(query.items()[0].mutedUntil).toBeUndefined();
+    expect(query.items()[0].mutedUntil).toBeNull();
   });
 
   it('unmutes and unarchives an archived conversation', async () => {
@@ -608,7 +603,7 @@ describe('ChatListStore', () => {
       }),
     );
     await settle();
-    const unmuting = data.setMuted(testChat.id, false);
+    const unmuting = data['chatInfo'].setMuted(testChat.id, false);
     const request = http.expectOne(`/_api/group/${decodeId(testChat.id)}/mute`);
     expect(request.request.method).toBe('DELETE');
     request.flush(null);
@@ -621,38 +616,37 @@ describe('ChatListStore', () => {
     TestBed.tick();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...wireChat, mutedUntil: null }] }));
     await settle();
-    expect(query.items()[0]).toMatchObject({ mutedUntil: undefined, archived: false });
+    expect(query.items()[0]).toMatchObject({ mutedUntil: null, archived: false });
   });
 
   it('leaves mute metadata unchanged when the command fails', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...wireChat, mutedUntil: null }] }));
     await settle();
-    const failed = expect(data.setMuted(testChat.id, true)).rejects.toBeDefined();
+    const failed = expect(data['chatInfo'].setMuted(testChat.id, true)).rejects.toBeDefined();
     http.expectOne(`/_api/group/${decodeId(testChat.id)}/mute`).flush('failed', { status: 500, statusText: 'Error' });
     await failed;
-    expect(query.items()[0].mutedUntil).toBeUndefined();
+    expect(query.items()[0].mutedUntil).toBeNull();
   });
 
   it('joins an existing read-state GET without invalidating it and fetches a missing deep link', async () => {
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     await settle();
-    const first = data.getReadState(testChat.id);
-    expect(data.getReadState(testChat.id)).toBe(first);
+    const first = data['chatInfo'].getReadState(testChat.id);
+    expect(data['chatInfo'].getReadState(testChat.id)).toBe(first);
     const initial = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
     initial.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await first;
-    expect(data['readOperations'].size).toBe(0);
-    expect(data['readStates']().size).toBe(0);
+    expect(data['chatInfo']['readOperations'].size).toBe(0);
     resync.next();
     TestBed.tick();
-    const joined = data.getReadState(testChat.id);
+    const joined = data['chatInfo'].getReadState(testChat.id);
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 2 });
     expect(await joined).toEqual({ lastReadMessageId: encodeId('200'), unreadCount: 2 });
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
   });
 
-  it('retires read and preview overrides when a later list snapshot takes ownership', async () => {
+  it('accepts a later list snapshot for read and preview state', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
@@ -660,10 +654,8 @@ describe('ChatListStore', () => {
       .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
       .flush({ lastReadMessageId: wireMessage.id, unreadCount: 0 });
     await settle();
-    expect(data['readOperations'].size).toBe(0);
-    expect(data['readStates']().size).toBe(0);
-    expect(data.cachedReadState(testChat.id)?.unreadCount).toBe(0);
-    expect(data['previews']().size).toBe(1);
+    expect(data['chatInfo']['readOperations'].size).toBe(0);
+    expect(data['chatInfo'].cachedReadState(testChat.id)?.unreadCount).toBe(0);
     data.refreshChats();
     TestBed.tick();
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
@@ -675,38 +667,30 @@ describe('ChatListStore', () => {
     );
     await settle();
     expect(query.items()[0]).toMatchObject({ lastReadMessageId: encodeId('200'), unreadCount: 2 });
-    expect(data['readStates']().size).toBe(0);
-    expect(data['previews']().size).toBe(0);
   });
 
-  it('retains read deduplication and reconnects for an open deep link until its last consumer leaves', async () => {
+  it('deduplicates reads for deep links and reloads their state on demand after reconnect', async () => {
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     await settle();
-    const leaveFirst = data.retainReadState(testChat.id);
-    const leaveSecond = data.retainReadState(testChat.id);
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, testMessage.id);
+    const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     http
       .expectOne(`/_api/chats/${decodeId(testChat.id)}/read`)
       .flush({ lastReadMessageId: wireMessage.id, unreadCount: 0 });
     await reading;
-    await data.markRead(testChat.id, testMessage.id);
+    await data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
-    leaveFirst();
-    expect(data['readStates']().size).toBe(1);
     resync.next();
     TestBed.tick();
-    const joined = data.getReadState(testChat.id);
+    const joined = data['chatInfo'].getReadState(testChat.id);
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     http
       .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
       .flush({ lastReadMessageId: wireMessage.id, unreadCount: 1 });
     await joined;
-    expect(data['readOperations'].size).toBe(0);
-    leaveSecond();
-    expect(data['readStates']().size).toBe(0);
+    expect(data['chatInfo']['readOperations'].size).toBe(0);
     resync.next();
     TestBed.tick();
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
@@ -714,14 +698,14 @@ describe('ChatListStore', () => {
     await settle();
   });
 
-  it('keeps a new read over an older list response and retires it on the next reload', async () => {
+  it('keeps a new read over an older list response and accepts the next reload', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     data.refreshChats();
     TestBed.tick();
     const oldList = http.expectOne('/_api/chats?limit=50');
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, testMessage.id);
+    const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     http
       .expectOne(`/_api/chats/${decodeId(testChat.id)}/read`)
@@ -737,18 +721,14 @@ describe('ChatListStore', () => {
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: wireMessage.id, unreadCount: 1 }] }));
     await settle();
     expect(query.items()[0].unreadCount).toBe(1);
-    expect(data['readStates']().size).toBe(0);
   });
 
   it('keeps an open conversation read pointer when a fresh list later switches to another query', async () => {
     const chat = { ...wireChat, lastReadMessageId: wireMessage.id, unreadCount: 0 };
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [chat] }));
     await settle();
-    const leave = data.retainReadState(testChat.id);
     query.refresh();
-    http
-      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
-      .flush({ lastReadMessageId: wireMessage.id, unreadCount: 0 });
+    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     TestBed.tick();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [chat] }));
     await settle();
@@ -757,15 +737,13 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
     await settle();
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, testMessage.id);
+    const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
     await reading;
-    leave();
-    expect(data['readStates']().size).toBe(0);
   });
 
-  it('releases overrides when their chat leaves the current query without refreshing historical ids', async () => {
+  it('keeps historical chats without refreshing their reads in the background', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
@@ -775,9 +753,7 @@ describe('ChatListStore', () => {
     TestBed.tick();
     http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
     await settle();
-    expect(data['readStates']().size).toBe(0);
-    expect(data['previews']().size).toBe(0);
-    expect(data['readOperations'].size).toBe(0);
+    expect(data['chatInfo']['readOperations'].size).toBe(0);
     resync.next();
     TestBed.tick();
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
@@ -788,7 +764,7 @@ describe('ChatListStore', () => {
   it('cancels a pending read delay and the list request when the service is destroyed', async () => {
     const list = http.expectOne('/_api/chats?limit=50');
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, testMessage.id);
+    const reading = data['chatInfo'].markRead(testChat.id, testMessage.id);
     TestBed.resetTestingModule();
     expect(list.cancelled).toBe(true);
     await reading;
@@ -796,20 +772,20 @@ describe('ChatListStore', () => {
     incoming.next(testMessage);
     resync.next();
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
-    expect(data['readOperations'].size).toBe(0);
+    expect(data['chatInfo']['readOperations'].size).toBe(0);
   });
 
   it('cancels unread HTTP reconciliation on destruction and does not start its queued retry', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
-    const refreshing = expect(data.getReadState(testChat.id)).rejects.toBeDefined();
+    const refreshing = expect(data['chatInfo'].getReadState(testChat.id)).rejects.toBeDefined();
     const unread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
     incoming.next(testMessage);
     TestBed.resetTestingModule();
     expect(unread.cancelled).toBe(true);
     await refreshing;
     await settle();
-    expect(data['readOperations'].size).toBe(0);
+    expect(data['chatInfo']['readOperations'].size).toBe(0);
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
   });
 
@@ -881,7 +857,7 @@ describe('ChatListStore', () => {
     expect(new Set(query.items().map((chat) => chat.id))).toEqual(
       new Set([testChat.id, otherId, encodeId('9007199254740997')]),
     );
-    expect(data.cachedReadState(otherId)?.lastReadMessageId).toBe(testMessage.id);
+    expect(data['chatInfo'].cachedReadState(otherId)?.lastReadMessageId).toBe(testMessage.id);
     expect(query.hasMore()).toBe(false);
   });
 
@@ -889,16 +865,16 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     incoming.next(testMessage);
-    const failed = expect(data.getReadState(testChat.id)).rejects.toBeDefined();
+    const failed = expect(data['chatInfo'].getReadState(testChat.id)).rejects.toBeDefined();
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush('failed', { status: 500, statusText: 'Error' });
     await failed;
     await settle();
-    expect(data.cachedReadState(testChat.id)).toBeUndefined();
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     expect(query.error()).toBe(ChatListError.Unread);
     query.refresh();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...wireChat, unreadCount: 4 }] }));
     await settle();
-    expect(data.cachedReadState(testChat.id)?.unreadCount).toBe(4);
+    expect(data['chatInfo'].cachedReadState(testChat.id)?.unreadCount).toBe(4);
   });
 
   it('serves a fresh by-id read snapshot across queries and falls back after hidden invalidation', async () => {
@@ -910,9 +886,12 @@ describe('ChatListStore', () => {
     selectQuery(true);
     http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
     await settle();
-    expect(data.cachedReadState(testChat.id)).toEqual({ lastReadMessageId: encodeId('200'), unreadCount: 3 });
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toEqual({
+      lastReadMessageId: encodeId('200'),
+      unreadCount: 3,
+    });
     data.refreshChats();
-    expect(data.cachedReadState(testChat.id)).toBeUndefined();
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     http.expectNone('/_api/chats?limit=50');
     http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
     await settle();
@@ -922,7 +901,10 @@ describe('ChatListStore', () => {
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '199', unreadCount: 4 }] }));
     await settle();
-    expect(data.cachedReadState(testChat.id)).toEqual({ lastReadMessageId: encodeId('199'), unreadCount: 4 });
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toEqual({
+      lastReadMessageId: encodeId('199'),
+      unreadCount: 4,
+    });
   });
 
   it('keeps hidden queries dirty without background list work and reloads them on activation', async () => {
@@ -933,7 +915,7 @@ describe('ChatListStore', () => {
     resync.next();
     http.expectNone('/_api/chats?limit=50');
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    expect(data.cachedReadState(testChat.id)).toBeUndefined();
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     expect(query.items()).toHaveLength(1);
     query.activate();
     http
@@ -954,7 +936,7 @@ describe('ChatListStore', () => {
     expect(query.error()).toBe(ChatListError.Load);
     expect(query.items()).toEqual([testChat]);
     expect(query.hasMore()).toBe(false);
-    expect(data.cachedReadState(testChat.id)).toBeUndefined();
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     await query.loadMore();
     http.expectNone('/_api/chats?limit=50&after=9007199254740993');
   });
@@ -977,7 +959,7 @@ describe('ChatListStore', () => {
     expect(query.hasMore()).toBe(true);
   });
 
-  it('does not resurrect an old unread count from another query after retiring a read override', async () => {
+  it('shares the latest unread count when switching to a cached query', async () => {
     http
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '200', unreadCount: 3 }] }));
@@ -991,7 +973,7 @@ describe('ChatListStore', () => {
     archived.refresh();
     const old = http.expectOne('/_api/chats?limit=50&archived=true');
     vi.useFakeTimers();
-    const reading = data.markRead(testChat.id, encodeId('205'));
+    const reading = data['chatInfo'].markRead(testChat.id, encodeId('205'));
     await vi.advanceTimersByTimeAsync(1000);
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`).flush({ lastReadMessageId: '205', unreadCount: 0 });
     await reading;
@@ -1003,9 +985,11 @@ describe('ChatListStore', () => {
     old.flush(structuredClone({ chats: [{ ...wireChat, archived: true, lastReadMessageId: '200', unreadCount: 3 }] }));
     await settle();
     expect(query.items()[0].unreadCount).toBe(0);
-    expect(archived.items()[0]).toMatchObject({ lastReadMessageId: encodeId('205'), unreadCount: 0 });
-    expect(data.cachedReadState(testChat.id)).toEqual({ lastReadMessageId: encodeId('205'), unreadCount: 0 });
-    expect(data['readStates']().size).toBe(0);
+    expect(archived.items()).toEqual([]);
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toEqual({
+      lastReadMessageId: encodeId('205'),
+      unreadCount: 0,
+    });
   });
   it('refreshes the loaded conversation depth and keeps the final paging cursor', async () => {
     http.expectOne('/_api/chats?limit=50').flush({ chats: [structuredClone(wireChat)], nextCursor: wireChat.id });

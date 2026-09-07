@@ -11,9 +11,7 @@
     [routerLinkActiveOptions]="{ exact: true }"
     #active="routerLinkActive"
     [color]="active.isActive ? 'primary' : undefined"
-    ariaCurrentWhenActive="page"
     [detail]="false"
-    [attr.aria-busy]="!!pendingAction()"
     (click)="active.isActive && selected.emit()">
     @if (actionsAlwaysVisible() && startActions().length) {
       <ion-buttons slot="start">
@@ -22,12 +20,12 @@
           [ngTemplateOutletContext]="{ $implicit: 'start' }"></ng-container>
       </ion-buttons>
     }
-    <span slot="start" class="avatar-stack" aria-hidden="true">
+    <span slot="start" class="avatar-stack">
       <ion-avatar [class.placeholder]="!entry().avatar" [class.icon-avatar]="!!entry().icon">
         @if (entry().icon; as icon) {
           <ion-icon [icon]="icon"></ion-icon>
         } @else if (entry().avatar; as src) {
-          <img [src]="src" width="48" height="48" decoding="async" alt="" />
+          <img [src]="src" width="48" height="48" decoding="async" />
         } @else {
           {{ entry().avatarName?.slice(0, 1) ?? entry().title?.slice(0, 1) }}
         }
@@ -40,7 +38,7 @@
           @if (entry().badgeIcon; as icon) {
             <ion-icon [icon]="icon"></ion-icon>
           } @else if (entry().badgeAvatar; as src) {
-            <img [src]="src" width="26" height="26" decoding="async" alt="" />
+            <img [src]="src" width="26" height="26" decoding="async" />
           } @else {
             {{ entry().badgeName?.slice(0, 1) }}
           }
@@ -67,7 +65,7 @@
           <span>{{ entry().time | chatDate }}</span>
         }
         @if (entry().unreadCount; as count) {
-          <ion-badge [color]="active.isActive ? 'light' : 'primary'" [attr.aria-label]="count + ' 条未读消息'">
+          <ion-badge [color]="active.isActive ? 'light' : 'primary'">
             {{ count >= 1000 ? '999+' : count }}
           </ion-badge>
         }
@@ -81,7 +79,7 @@
       </ion-buttons>
     }
     @if (pendingAction() && !actionsAlwaysVisible()) {
-      <ion-spinner slot="end" role="status" aria-label="正在处理操作"></ion-spinner>
+      <ion-spinner slot="end"></ion-spinner>
     }
     <ng-content select="[slot=end]"></ng-content>
   </ion-item>
@@ -92,7 +90,7 @@
   }
 </ion-item-sliding>
 @if (error()) {
-  <ion-item lines="none"><ion-label color="danger" role="alert">操作失败，请重试。</ion-label></ion-item>
+  <ion-item lines="none"><ion-label color="danger">操作失败，请重试。</ion-label></ion-item>
 }
 
 <ng-template #swipeOptions let-side>
@@ -101,7 +99,7 @@
       [color]="action.color ?? 'primary'"
       [disabled]="!!pendingAction()"
       (click)="perform(action, $event)">
-      <ion-icon slot="top" [icon]="action.icon" aria-hidden="true"></ion-icon>
+      <ion-icon slot="top" [icon]="action.icon"></ion-icon>
       {{ action.label }}
     </ion-item-option>
   }
@@ -112,13 +110,12 @@
       size="small"
       [color]="action.color ?? 'primary'"
       [disabled]="!!pendingAction()"
-      [attr.aria-label]="action.label"
       [title]="action.label"
       (click)="perform(action, $event)">
-      <span class="action-content" [attr.aria-busy]="pendingAction()?.label === action.label">
-        <ion-icon class="action-label" [icon]="action.icon" aria-hidden="true"></ion-icon>
+      <span class="action-content" [class.busy]="pendingAction()?.label === action.label">
+        <ion-icon class="action-label" [icon]="action.icon"></ion-icon>
         @if (pendingAction()?.label === action.label) {
-          <ion-spinner role="status" aria-label="正在处理操作"></ion-spinner>
+          <ion-spinner></ion-spinner>
         }
       </span>
     </ion-button>

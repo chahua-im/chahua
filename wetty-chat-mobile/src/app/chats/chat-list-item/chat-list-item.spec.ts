@@ -1,11 +1,11 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
 import { By } from '@angular/platform-browser';
+import { provideRouter } from '@angular/router';
 import { IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
 import { vi } from 'vitest';
 
-import { ChatListItem } from './chat-list-item';
 import { archiveOutline } from 'ionicons/icons';
+import { ChatListItem } from './chat-list-item';
 
 describe('ChatListItem', () => {
   let component: ChatListItem;
@@ -47,7 +47,7 @@ describe('ChatListItem', () => {
     expect(fixture.nativeElement.querySelector('ion-item').getAttribute('href')).toBe('/chats/messages/archived');
     expect(fixture.nativeElement.querySelector('ion-label h3').textContent.trim()).toBe('已归档');
     expect(fixture.nativeElement.querySelector('ion-label p').textContent).toContain('查看已归档的对话');
-    expect(fixture.nativeElement.querySelector('ion-badge').getAttribute('aria-label')).toBe('37 条未读消息');
+    expect(fixture.nativeElement.querySelector('ion-badge').textContent.trim()).toBe('37');
     expect(fixture.nativeElement.querySelector('ion-avatar.icon-avatar ion-icon')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('ion-button')).toBeNull();
     expect(fixture.nativeElement.querySelector('ion-item-options')).toBeNull();
@@ -133,6 +133,6 @@ describe('ChatListItem', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(buttons.every((button) => !button.componentInstance.disabled)).toBe(true);
-    expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-label[color="danger"]')).not.toBeNull();
   });
 });

@@ -1,19 +1,18 @@
-import { decodeId, encodeId, type SnowflakeID } from './snowflake-id';
 import { jsonSchemas, type JsonCodec } from '../../generated/json-codecs';
+import { decodeId, encodeId, type SnowflakeID } from './snowflake-id';
 
-/** Normalize freshly parsed API data, preserving keys that explicitly clear cached fields. */
-export function normalizeJson(value: unknown, codec?: JsonCodec): unknown {
+/** Encode Snowflake IDs in freshly parsed API data; all other values remain unchanged. */
+export function encodeJsonIds(value: unknown, codec?: JsonCodec): unknown {
   return convertJson(value, codec, false);
 }
 
-/** Copy request data while restoring wire IDs and preserving explicit null clears. */
-export function serializeJson(value: unknown, codec: JsonCodec): unknown {
+/** Copy request data while restoring wire IDs; null and undefined remain unchanged. */
+export function decodeJsonIds(value: unknown, codec?: JsonCodec): unknown {
   return convertJson(value, codec, true);
 }
 
 function convertJson(value: unknown, codec: JsonCodec | undefined, outbound: boolean): unknown {
-  if (value === null) return outbound ? null : undefined;
-  if (value === undefined || codec === 0) return value;
+  if (value == null || !codec) return value;
   if (codec === 1) {
     // HTTP retries and cached responses may pass through the boundary more than once.
     return outbound
@@ -35,9 +34,9 @@ function convertJson(value: unknown, codec: JsonCodec | undefined, outbound: boo
   }
 
   const object: Record<string, unknown> = outbound ? { ...value } : (value as Record<string, unknown>);
-  const fields = codec as Record<string, JsonCodec> | undefined;
-  for (const key of Object.keys(fields ?? object)) {
-    if (Object.hasOwn(object, key)) object[key] = convertJson(object[key], fields?.[key], outbound);
+  const fields = codec as Record<string, JsonCodec>;
+  for (const key of Object.keys(fields)) {
+    if (Object.hasOwn(object, key)) object[key] = convertJson(object[key], fields[key], outbound);
   }
   return object;
 }

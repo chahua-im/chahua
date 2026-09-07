@@ -1,4 +1,3 @@
-import { mockRealtime } from '../api/testing';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
@@ -6,11 +5,11 @@ import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { GroupKind, GroupRole, type ServerWsMessage } from '../../generated/models';
-import { jsonInterceptor } from '../api/json.interceptor';
-import { testChat, wireChat } from '../api/testing';
-import { ChatStore } from './chat-store';
 import { Connection } from '../api/connection';
+import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, wireChat } from '../api/testing';
+import { ChatStore } from './chat-store';
 
 describe('ChatStore', () => {
   let store: ChatStore;

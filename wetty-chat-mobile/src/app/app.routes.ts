@@ -1,7 +1,10 @@
 import { inject } from '@angular/core';
 import { RedirectCommand, Router, type CanMatchFn, type Routes } from '@angular/router';
+import { ChatListPage } from './chats/chat-list-page/chat-list.page';
 import { isListTab, ListTab } from './chats/list-tabs';
-import { ConversationCollectionKind } from './conversations/conversation-collection-kind';
+import { ConversationPage } from './conversations/conversation/conversation.page';
+import { PinnedMessagesPage } from './conversations/pinned-messages/pinned-messages.page';
+import { SavedMessagesPage } from './conversations/saved-messages/saved-messages.page';
 
 const matchListTab: CanMatchFn = (_route, segments) => isListTab(segments[1].path);
 
@@ -19,50 +22,44 @@ export const routes: Routes = [
   },
   {
     path: 'chats/saved',
-    data: { collection: ConversationCollectionKind.Saved },
-    loadComponent: () =>
-      import('./conversations/conversation-collection/conversation-collection.page').then((m) => m.ConversationCollectionPage),
+    component: SavedMessagesPage,
   },
   {
     path: 'chats/chat/:id/thread/:threadId/pins',
-    data: { collection: ConversationCollectionKind.Pins },
-    loadComponent: () =>
-      import('./conversations/conversation-collection/conversation-collection.page').then((m) => m.ConversationCollectionPage),
+    component: PinnedMessagesPage,
   },
   {
     path: 'chats/chat/:id/pins',
-    data: { collection: ConversationCollectionKind.Pins },
-    loadComponent: () =>
-      import('./conversations/conversation-collection/conversation-collection.page').then((m) => m.ConversationCollectionPage),
+    component: PinnedMessagesPage,
   },
   {
     path: 'chats',
     data: { tab: ListTab.Messages },
-    loadComponent: () => import('./chats/chat-list-page/chat-list.page').then((m) => m.ChatListPage),
+    component: ChatListPage,
   },
   {
     path: 'chats/chat/:id',
-    loadComponent: () => import('./conversations/conversation/conversation.page').then((m) => m.ConversationPage),
+    component: ConversationPage,
   },
   {
     path: 'chats/chat/:id/thread/:threadId',
-    loadComponent: () => import('./conversations/conversation/conversation.page').then((m) => m.ConversationPage),
+    component: ConversationPage,
   },
   {
     path: 'chats/friends/archived-requests',
     data: { tab: ListTab.Friends, requestHistory: true },
-    loadComponent: () => import('./chats/chat-list-page/chat-list.page').then((m) => m.ChatListPage),
+    component: ChatListPage,
   },
   {
     path: 'chats/:tab/archived',
     data: { archived: true },
     canMatch: [matchListTab],
-    loadComponent: () => import('./chats/chat-list-page/chat-list.page').then((m) => m.ChatListPage),
+    component: ChatListPage,
   },
   {
     path: 'chats/:tab',
     canMatch: [matchListTab],
-    loadComponent: () => import('./chats/chat-list-page/chat-list.page').then((m) => m.ChatListPage),
+    component: ChatListPage,
   },
   { path: '', redirectTo: 'chats', pathMatch: 'full' },
   { path: '**', redirectTo: 'chats' },

@@ -1,7 +1,7 @@
+import { MessageType } from '../../generated/models';
 import { encodeId } from '../api/snowflake-id';
 import { testMessage } from '../api/testing';
 import { messageRows } from './message-rows';
-import { MessageType } from '../../generated/models';
 
 describe('messageRows', () => {
   it('handles empty and single-message ranges', () => {

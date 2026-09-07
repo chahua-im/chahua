@@ -1,36 +1,35 @@
-import { DraftStore } from '../draft-store';
-import { Message } from '../../messages/message/message';
-import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
-import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { jsonInterceptor } from '../../api/json.interceptor';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter, Router, RouterLink } from '@angular/router';
 import { By } from '@angular/platform-browser';
-import { vi } from 'vitest';
+import { provideRouter, Router, RouterLink } from '@angular/router';
+import { IonContent, IonTextarea, IonModal } from '@ionic/angular';
 import { of, Subject } from 'rxjs';
+import { vi } from 'vitest';
+import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { PinsService } from '../../../generated/endpoints/pins/pins.service';
-import { IonContent, IonTextarea } from '@ionic/angular';
 import {
+  GroupRole,
+  ServerWsMessageType,
   type MessageResponse,
   type ServerWsMessage,
   type ThreadSubscriptionStatusResponse,
-  GroupRole,
-  ServerWsMessageType,
 } from '../../../generated/models';
 import { Connection } from '../../api/connection';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { ConversationNavigation, ConversationTargetKind } from '../conversation-navigation';
-import { ChatListStore } from '../../chats/chat-list-store';
-import { ChatStore } from '../../chats/chat-store';
-import { Preferences } from '../../settings/preferences';
-import { MessageAction } from '../../messages/message-menu/message-menu';
+import { jsonInterceptor } from '../../api/json.interceptor';
+import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
 import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
+import { ChatStore } from '../../chats/chat-store';
+import { ConversationNavigation, ConversationTargetKind } from '../conversation-navigation';
+import { ConversationError, PageDirection } from '../conversation-store';
+import { DraftStore } from '../draft-store';
+import { MessageAction } from '../../messages/message-menu/message-menu';
+import { MessageNotice } from '../../messages/message-notice';
+import { Message } from '../../messages/message/message';
 import { ConversationPage, ThreadError } from './conversation.page';
-import { MessageNotice } from '../message-notice';
-import { PageDirection, ConversationError } from '../conversation-store';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -58,6 +57,7 @@ describe('ConversationPage', () => {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => storage.set(key, value),
     });
+    vi.spyOn(IonModal.prototype, 'isOpen', 'set').mockImplementation(() => {});
     avatars.set(false);
     incoming = new Subject<MessageResponse>();
     events = new Subject<ServerWsMessage>();
@@ -75,24 +75,6 @@ describe('ConversationPage', () => {
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
-        {
-          provide: ChatListStore,
-          useValue: {
-            threadReadState: vi.fn().mockReturnValue(undefined),
-            subscription: (_chatId: SnowflakeID, rootId: SnowflakeID) => subscriptions().get(rootId),
-            loadSubscription: vi.fn().mockResolvedValue(undefined),
-            markThreadRead: vi.fn().mockResolvedValue(undefined),
-            setThreadArchived: vi.fn().mockResolvedValue(undefined),
-            subscribeThread: vi.fn().mockResolvedValue(undefined),
-            cachedReadState: vi
-              .fn()
-              .mockReturnValue({ lastReadMessageId: testChat.lastReadMessageId, unreadCount: testChat.unreadCount }),
-            refreshChats: vi.fn(),
-            markRead: vi.fn().mockResolvedValue(undefined),
-            retainReadState: vi.fn(() => vi.fn()),
-            getReadState: vi.fn().mockResolvedValue({ unreadCount: 0 }),
-          },
-        },
       ],
     }).compileComponents();
     vi.spyOn(TestBed.inject(PinsService), 'listPins').mockImplementation((() =>
@@ -100,6 +82,20 @@ describe('ConversationPage', () => {
     vi.spyOn(TestBed.inject(PinsService), 'listThreadPins').mockImplementation((() =>
       of({ pins: [] })) as unknown as PinsService['listThreadPins']);
     vi.spyOn(TestBed.inject(Router), 'isActive').mockReturnValue(true);
+    Object.assign(TestBed.inject(ChatStore), {
+      threadReadState: vi.fn().mockReturnValue(undefined),
+      subscription: (_chatId: SnowflakeID, rootId: SnowflakeID) => subscriptions().get(rootId),
+      loadSubscription: vi.fn().mockResolvedValue(undefined),
+      markThreadRead: vi.fn().mockResolvedValue(undefined),
+      setThreadArchived: vi.fn().mockResolvedValue(undefined),
+      subscribeThread: vi.fn().mockResolvedValue(undefined),
+      cachedReadState: vi
+        .fn()
+        .mockReturnValue({ lastReadMessageId: testChat.lastReadMessageId, unreadCount: testChat.unreadCount }),
+      refreshChats: vi.fn(),
+      markRead: vi.fn().mockResolvedValue(undefined),
+      getReadState: vi.fn().mockResolvedValue({ unreadCount: 0 }),
+    });
     TestBed.inject(ChatStore).remember([testChat]);
     fixture = TestBed.createComponent(ConversationPage);
     component = fixture.componentInstance;
@@ -110,6 +106,7 @@ describe('ConversationPage', () => {
       .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
       .flush({ messages: [{ ...wireMessage }], olderCursor: wireMessage.id });
     await fixture.whenStable();
+    fixture.detectChanges();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -120,7 +117,7 @@ describe('ConversationPage', () => {
   async function enterThread(rootId = '100', read: { lastReadMessageId?: string } = { lastReadMessageId: '101' }) {
     fixture.componentRef.setInput('threadId', rootId);
     fixture.detectChanges();
-    expect(TestBed.inject(ChatListStore).loadSubscription).toHaveBeenCalledWith(testChat.id, encodeId(rootId));
+    expect(TestBed.inject(ChatStore).loadSubscription).toHaveBeenCalledWith(testChat.id, encodeId(rootId));
     subscriptions.update((statuses) => new Map(statuses).set(encodeId(rootId), { subscribed: false, archived: false }));
     http.expectOne(`/_api/chats/${wireChat.id}/threads/${rootId}/read-state`).flush({ ...read });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -391,7 +388,7 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('ion-alert').isOpen).toBe(true);
     http.expectNone((request) => request.method === 'DELETE');
     await component['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'cancel' } }));
-    expect(component['conversation'].pins()).toHaveLength(1);
+    expect(component['pins']().items()).toHaveLength(1);
     select();
     await component['menu']()!['choose'](MessageAction.Pin);
     const removing = component['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
@@ -573,7 +570,7 @@ describe('ConversationPage', () => {
     expect(component['replyTo']()).toBeUndefined();
   });
   it('resumes around the frozen read boundary and a second chat click requests the latest directly', async () => {
-    const data = TestBed.inject(ChatListStore);
+    const data = TestBed.inject(ChatStore);
     const read = vi.mocked(data.cachedReadState);
     component.ionViewDidLeave();
     read.mockReturnValue({ lastReadMessageId: encodeId('100'), unreadCount: 90 });
@@ -605,7 +602,7 @@ describe('ConversationPage', () => {
     { height: 1200, expectedTop: 700 },
   ])('positions the unread divider within the scroll range ($height px)', async ({ height, expectedTop }) => {
     component.ionViewDidLeave();
-    vi.mocked(TestBed.inject(ChatListStore).cachedReadState).mockReturnValue({
+    vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue({
       lastReadMessageId: encodeId('100'),
       unreadCount: 1,
     });
@@ -628,7 +625,7 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     expect(scroll.scrollTop).toBe(expectedTop);
     expect(fixture.nativeElement.querySelector('.unread-separator').textContent).toContain('未读消息');
-    vi.mocked(TestBed.inject(ChatListStore).cachedReadState).mockReturnValue({
+    vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue({
       lastReadMessageId: encodeId('101'),
       unreadCount: 0,
     });
@@ -638,7 +635,7 @@ describe('ConversationPage', () => {
   });
 
   it('marks only a visible message bottom and stops tracking hidden or departed pages', async () => {
-    const markRead = TestBed.inject(ChatListStore).markRead;
+    const markRead = TestBed.inject(ChatStore).markRead;
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
     const opening = component['conversation'].open(encodeId('101'));
@@ -667,7 +664,7 @@ describe('ConversationPage', () => {
   });
 
   it('refreshes metadata and reports the visible read position through the unified resync event', async () => {
-    const data = TestBed.inject(ChatListStore);
+    const data = TestBed.inject(ChatStore);
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
     fixture.detectChanges();
@@ -692,7 +689,7 @@ describe('ConversationPage', () => {
 
   it('refreshes deep-linked topic subscription state on resync without reloading the topic list', async () => {
     await enterThread();
-    const loadSubscription = TestBed.inject(ChatListStore).loadSubscription;
+    const loadSubscription = TestBed.inject(ChatStore).loadSubscription;
     vi.mocked(loadSubscription).mockClear();
     resync.next();
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=102&threadId=100`).flush({ messages: [] });
@@ -701,7 +698,7 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     expect(component['subscription']()).toEqual({ subscribed: true, archived: false });
     expect(loadSubscription).toHaveBeenCalledWith(testChat.id, encodeId('100'));
-    expect(TestBed.inject(ChatListStore).getReadState).not.toHaveBeenCalled();
+    expect(TestBed.inject(ChatStore).getReadState).not.toHaveBeenCalled();
   });
 
   it('retries a failed page without reloading the resume position', async () => {
@@ -761,7 +758,7 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('');
     expect(component['entryReadId']()).toBe(encodeId('99'));
     expect(component['firstUnreadId']()).toBe(encodeId('101'));
-    expect(TestBed.inject(ChatListStore).getReadState).not.toHaveBeenCalled();
+    expect(TestBed.inject(ChatStore).getReadState).not.toHaveBeenCalled();
   });
 
   it('receives and marks only the active topic without advancing the main chat read position', async () => {
@@ -784,12 +781,12 @@ describe('ConversationPage', () => {
     );
     component.ionViewDidEnter();
     await component['trackScroll']();
-    expect(TestBed.inject(ChatListStore).markThreadRead).toHaveBeenLastCalledWith(
+    expect(TestBed.inject(ChatStore).markThreadRead).toHaveBeenLastCalledWith(
       testChat.id,
       encodeId('100'),
       encodeId('105'),
     );
-    expect(TestBed.inject(ChatListStore).markRead).not.toHaveBeenCalled();
+    expect(TestBed.inject(ChatStore).markRead).not.toHaveBeenCalled();
     const open = vi.spyOn(component['conversation'], 'open');
     TestBed.inject(ConversationNavigation).goTo(testChat.id, { type: ConversationTargetKind.Latest });
     expect(open).not.toHaveBeenCalled();
@@ -798,7 +795,7 @@ describe('ConversationPage', () => {
   });
 
   it('fetches the topic read boundary once its cached list snapshot is stale', async () => {
-    const readState = vi.mocked(TestBed.inject(ChatListStore).threadReadState);
+    const readState = vi.mocked(TestBed.inject(ChatStore).threadReadState);
     readState.mockReturnValue({ lastReadMessageId: encodeId('100') });
     fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
@@ -847,7 +844,7 @@ describe('ConversationPage', () => {
 
   it('uses the inbox subscription as the only state for following, archiving and restoring a topic', async () => {
     await enterThread();
-    const inbox = TestBed.inject(ChatListStore);
+    const inbox = TestBed.inject(ChatStore);
     await component['updateThread']();
     expect(inbox.subscribeThread).toHaveBeenCalledWith(testChat.id, encodeId('100'));
     expect(component['subscription']()).toEqual({ subscribed: false, archived: false });
@@ -884,7 +881,7 @@ describe('ConversationPage', () => {
   it('keeps live chat metadata independent of filtered chat and thread lists', async () => {
     const chatInfo = TestBed.inject(ChatStore);
     chatInfo.remember([{ ...testChat, name: '话题所属群' }]);
-    vi.mocked(TestBed.inject(ChatListStore).cachedReadState).mockReturnValue(undefined);
+    vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue(undefined);
     await enterThread();
     expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('话题 · 话题所属群');
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: true }));
@@ -898,7 +895,7 @@ describe('ConversationPage', () => {
 
   it('loads a missing canonical subscription after the owner invalidates it', async () => {
     await enterThread();
-    const loadSubscription = TestBed.inject(ChatListStore).loadSubscription;
+    const loadSubscription = TestBed.inject(ChatStore).loadSubscription;
     vi.mocked(loadSubscription).mockClear();
     subscriptions.set(new Map());
     await fixture.whenStable();
@@ -907,21 +904,13 @@ describe('ConversationPage', () => {
     expect(component['subscription']()).toBeUndefined();
   });
 
-  it('retains main-chat read state only while the page owns that conversation', async () => {
-    const retain = vi.mocked(TestBed.inject(ChatListStore).retainReadState);
-    const firstRelease = retain.mock.results[0].value;
-    expect(retain).toHaveBeenCalledWith(testChat.id);
+  it('keeps shared chat state when leaving while releasing the page message window', async () => {
+    const sharedPins = component['pins']();
     component.ionViewDidLeave();
-    expect(firstRelease).toHaveBeenCalledOnce();
+    expect(component['conversation'].items()).toEqual([]);
+    expect(TestBed.inject(ChatStore).get(testChat.id)?.name).toBe(testChat.name);
     await reenter();
-    expect(retain).toHaveBeenCalledTimes(2);
-    const secondRelease = retain.mock.results[1].value;
-    await enterThread();
-    expect(secondRelease).toHaveBeenCalledOnce();
-    expect(retain).toHaveBeenCalledTimes(2);
-    fixture.destroy();
-    expect(firstRelease).toHaveBeenCalledOnce();
-    expect(secondRelease).toHaveBeenCalledOnce();
+    expect(component['pins']()).toBe(sharedPins);
   });
 
   it.each(['success', 'failure'])('isolates an earlier send %s after reentering the same chat', async (result) => {
@@ -952,7 +941,7 @@ describe('ConversationPage', () => {
   it('does not report a subscription failure from an earlier visit to the same topic', async () => {
     await enterThread();
     const pending = deferred<void>();
-    vi.mocked(TestBed.inject(ChatListStore).loadSubscription).mockReturnValueOnce(pending.promise);
+    vi.mocked(TestBed.inject(ChatStore).loadSubscription).mockReturnValueOnce(pending.promise);
     const loading = component['loadSubscription']();
     component.ionViewDidLeave();
     await reenter();
@@ -965,7 +954,7 @@ describe('ConversationPage', () => {
     await enterThread();
     const oldAction = deferred<void>();
     const newAction = deferred<void>();
-    vi.mocked(TestBed.inject(ChatListStore).subscribeThread)
+    vi.mocked(TestBed.inject(ChatStore).subscribeThread)
       .mockReturnValueOnce(oldAction.promise)
       .mockReturnValueOnce(newAction.promise);
     const oldUpdating = component['updateThread']();
@@ -1122,6 +1111,7 @@ describe('ConversationPage', () => {
       last: true,
     });
     events.next({ type: ServerWsMessageType.messageUpdated, payload: { ...testMessage, message: '编辑后的消息' } });
+    fixture.detectChanges();
     expect(component['menu']()!['message']()?.message).toBe('编辑后的消息');
     expect(component['menu']()!['selection']()).not.toHaveProperty('message');
   });

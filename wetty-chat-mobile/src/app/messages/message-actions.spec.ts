@@ -1,17 +1,17 @@
-import { ConversationStore } from './conversation-store';
-import { mockRealtime } from '../api/testing';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { ServerWsMessageType } from '../../generated/models';
 import type { PinResponse, ServerWsMessage } from '../../generated/models';
-import { jsonInterceptor } from '../api/json.interceptor';
-import { testChat, testMessage, testUser, wireMessage } from '../api/testing';
+import { ServerWsMessageType } from '../../generated/models';
 import { Connection } from '../api/connection';
+import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../api/testing';
+import type { ChatPins } from '../chats/chat-pins';
+import { ChatStore } from '../chats/chat-store';
 import { MessageActions } from './message-actions';
 
 const chatUrl = `/_api/chats/${decodeId(testChat.id)}`;
@@ -28,7 +28,7 @@ const wirePin = { ...pin, id: decodeId(pin.id), chatId: decodeId(pin.chatId), me
 describe('MessageActions', () => {
   let actions: MessageActions;
 
-  let conversation: ConversationStore;
+  let conversation: ChatPins;
 
   let http: HttpTestingController;
 
@@ -49,11 +49,10 @@ describe('MessageActions', () => {
         { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
       ],
     });
-    scope = createEnvironmentInjector([ConversationStore, MessageActions], TestBed.inject(EnvironmentInjector));
+    scope = createEnvironmentInjector([ChatStore, MessageActions], TestBed.inject(EnvironmentInjector));
     actions = scope.get(MessageActions);
-    conversation = scope.get(ConversationStore);
+    conversation = scope.get(ChatStore).pins(testChat.id);
     http = TestBed.inject(HttpTestingController);
-    conversation.reset(testChat.id);
   });
 
   afterEach(() => {
@@ -62,7 +61,7 @@ describe('MessageActions', () => {
   });
 
   async function loadPins(pins: (typeof wirePin)[] = []) {
-    const loading = conversation.ensurePins();
+    const loading = conversation.ensure();
     http.expectOne(`${chatUrl}/pins`).flush({ pins: structuredClone(pins) });
     await loading;
   }
@@ -79,7 +78,7 @@ describe('MessageActions', () => {
     expect(recall.request.method).toBe('DELETE');
     recall.flush(null);
     await recalled;
-    expect(conversation.pinFor(testMessage.id)?.message).toMatchObject({
+    expect(conversation.get(testMessage.id)?.message).toMatchObject({
       isDeleted: true,
       attachments: [],
       reactions: [],
@@ -91,14 +90,14 @@ describe('MessageActions', () => {
     async (emoji) => {
       await loadPins([wirePin]);
       const adding = actions.toggleReaction(testMessage, emoji);
-      expect(conversation.pinFor(testMessage.id)?.message.reactions).toEqual([{ emoji, count: 1, reactedByMe: true }]);
+      expect(conversation.get(testMessage.id)?.message.reactions).toEqual([{ emoji, count: 1, reactedByMe: true }]);
       const put = http.expectOne(`${messageUrl}/reactions/${encodeURIComponent(emoji)}`);
       expect(put.request.method).toBe('PUT');
       put.flush(null);
       await adding;
 
-      const removing = actions.toggleReaction(conversation.pinFor(testMessage.id)!.message, emoji);
-      expect(conversation.pinFor(testMessage.id)?.message.reactions).toEqual([]);
+      const removing = actions.toggleReaction(conversation.get(testMessage.id)!.message, emoji);
+      expect(conversation.get(testMessage.id)?.message.reactions).toEqual([]);
       const deletion = http.expectOne(`${messageUrl}/reactions/${encodeURIComponent(emoji)}`);
       expect(deletion.request.method).toBe('DELETE');
       deletion.flush(null);
@@ -115,15 +114,13 @@ describe('MessageActions', () => {
       type: ServerWsMessageType.reactionUpdated,
       payload: { chatId: testChat.id, messageId: testMessage.id, reactions: [{ emoji: '👍', count: 4 }] },
     });
-    expect(conversation.pinFor(testMessage.id)?.message.reactions).toEqual([
-      { emoji: '👍', count: 4, reactedByMe: true },
-    ]);
+    expect(conversation.get(testMessage.id)?.message.reactions).toEqual([{ emoji: '👍', count: 4, reactedByMe: true }]);
     mutation.flush(null);
     await adding;
-    expect(conversation.pinFor(testMessage.id)?.message.reactions[0].count).toBe(4);
+    expect(conversation.get(testMessage.id)?.message.reactions[0].count).toBe(4);
 
-    const removing = actions.toggleReaction(conversation.pinFor(testMessage.id)!.message, '👍');
-    expect(conversation.pinFor(testMessage.id)?.message.reactions[0]).toMatchObject({
+    const removing = actions.toggleReaction(conversation.get(testMessage.id)!.message, '👍');
+    expect(conversation.get(testMessage.id)?.message.reactions[0]).toMatchObject({
       count: 3,
       reactedByMe: false,
     });
@@ -133,7 +130,7 @@ describe('MessageActions', () => {
       type: ServerWsMessageType.reactionUpdated,
       payload: { chatId: testChat.id, messageId: testMessage.id, reactions: [{ emoji: '👍', count: 5 }] },
     });
-    expect(conversation.pinFor(testMessage.id)?.message.reactions[0]).toMatchObject({
+    expect(conversation.get(testMessage.id)?.message.reactions[0]).toMatchObject({
       count: 5,
       reactedByMe: false,
     });

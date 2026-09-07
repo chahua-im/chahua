@@ -1,7 +1,7 @@
 import { HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { SessionStore } from '../session/session-store';
 import { CHAHUA_BASE_URL } from '../../generated/endpoints/chahua.base-url';
+import { SessionStore } from '../session/session-store';
 
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const baseUrl = inject(CHAHUA_BASE_URL);

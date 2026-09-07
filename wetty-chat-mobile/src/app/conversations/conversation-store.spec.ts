@@ -1,14 +1,13 @@
-import { mockRealtime } from '../api/testing';
-import { Connection } from '../api/connection';
-import { encodeId } from '../api/snowflake-id';
-import { jsonInterceptor } from '../api/json.interceptor';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { testChat, testMessage, wireChat, wireMessage } from '../api/testing';
 import { ServerWsMessageType } from '../../generated/models';
-import { ConversationStore, PageDirection, ConversationError } from './conversation-store';
+import { Connection } from '../api/connection';
+import { jsonInterceptor } from '../api/json.interceptor';
+import { encodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
+import { ConversationError, ConversationStore, PageDirection } from './conversation-store';
 
 const root = `/_api/chats/${wireChat.id}/messages`;
 const message = (id: string) => ({ ...testMessage, id: encodeId(id) });
@@ -46,7 +45,7 @@ describe('ConversationStore', () => {
     expect(timeline.page()).toEqual({
       messages: [message('100')],
       olderCursor: encodeId('100'),
-      newerCursor: undefined,
+      newerCursor: null,
     });
     const older = timeline.load(PageDirection.Older);
     http.expectOne(`${root}?max=50&before=100`).flush({
@@ -58,8 +57,8 @@ describe('ConversationStore', () => {
     await older;
     expect(timeline.page()).toEqual({
       messages: [message('99'), message('100')],
-      olderCursor: undefined,
-      newerCursor: undefined,
+      olderCursor: null,
+      newerCursor: null,
     });
   });
 
@@ -135,8 +134,8 @@ describe('ConversationStore', () => {
       encodeId('101'),
       encodeId('102'),
     ]);
-    expect(timeline.page()?.olderCursor).toBeUndefined();
-    expect(timeline.page()?.newerCursor).toBeUndefined();
+    expect(timeline.page()?.olderCursor).toBeNull();
+    expect(timeline.page()?.newerCursor).toBeNull();
     expect(timeline.atLatest()).toBe(true);
     expect(timeline.canLoad(PageDirection.Older)).toBe(false);
     expect(timeline.canLoad(PageDirection.Newer)).toBe(false);
@@ -250,7 +249,7 @@ describe('ConversationStore', () => {
     const newer = timeline.load(PageDirection.Newer);
     http.expectOne(`${root}?max=50&after=100`).flush({ messages: [wire('101')], newerCursor: null });
     await newer;
-    expect(timeline.page()?.newerCursor).toBeUndefined();
+    expect(timeline.page()?.newerCursor).toBeNull();
   });
 
   it('scopes every topic page and reconnect request with the backend camelCase parameter', async () => {

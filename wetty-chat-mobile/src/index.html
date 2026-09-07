@@ -64,19 +64,13 @@
           opacity: 0;
         }
       }
-      @media (prefers-reduced-motion: reduce) {
-        .startup-spinner svg {
-          animation: none;
-          opacity: 0.6;
-        }
-      }
     </style>
   </head>
 
   <body>
     <app-root>
-      <div class="startup-loading" role="status" aria-label="正在加载茶话">
-        <span class="startup-spinner" aria-hidden="true">
+      <div class="startup-loading">
+        <span class="startup-spinner">
           <svg viewBox="0 0 64 64" style="transform: rotate(180deg); --spoke: 0">
             <line transform="translate(32,32)" y1="14" y2="26" />
           </svg>
