@@ -1,6 +1,7 @@
 .galleryContainer {
+  position: relative;
   overflow: hidden;
-  background-color: var(--bubble-bg);
+  background-color: transparent;
 }
 
 .moreOverlay {
