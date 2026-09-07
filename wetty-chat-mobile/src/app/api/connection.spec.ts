@@ -1,11 +1,11 @@
-import { encodeId } from './snowflake-id';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { testChat, testMessage, testUser, wireChat, wireMessage } from './testing';
-import { Connection } from './connection';
 import { SessionStore } from '../session/session-store';
+import { Connection } from './connection';
+import { encodeId } from './snowflake-id';
+import { testChat, testMessage, testUser, wireChat, wireMessage } from './testing';
 
 class TestSocket {
   static readonly OPEN = 1;
@@ -75,7 +75,7 @@ describe('Connection', () => {
       ...testMessage,
       id: encodeId('9007199254741004'),
       replyRootId: testMessage.id,
-      sticker: undefined,
+      sticker: null,
     });
     expect(Object.hasOwn(message.mock.calls[1][0], 'sticker')).toBe(true);
     socket.receive({ type: 'messagesBulkDeleted', payload: { chatId: wireChat.id, messageIds: [wireMessage.id] } });
@@ -89,7 +89,7 @@ describe('Connection', () => {
     });
     expect(events).toHaveBeenLastCalledWith({
       type: 'chatArchiveStateChanged',
-      payload: { chatId: testChat.id, archived: false, mutedUntil: undefined },
+      payload: { chatId: testChat.id, archived: false, mutedUntil: null },
     });
     expect(resync).toHaveBeenCalledOnce();
     vi.advanceTimersByTime(10000);

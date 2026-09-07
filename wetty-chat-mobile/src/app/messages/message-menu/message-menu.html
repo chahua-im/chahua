@@ -1,26 +1,19 @@
-<ion-modal
-  class="message-menu-modal"
-  aria-label="消息操作"
-  [animated]="false"
-  [isOpen]="!!message()"
-  (didDismiss)="selection.set(undefined)">
+<ion-modal class="message-menu-modal" [animated]="false" [isOpen]="!!message()" (didDismiss)="selection.set(undefined)">
   <ng-template>
     @if (selection(); as selection) {
       @if (message(); as message) {
         <div class="menu-surface" (click)="dismissBackdrop($event)">
           @if (choosingEmoji()) {
             <div class="emoji-panel">
-              <button #pickerBack type="button" class="picker-back" (click)="choosingEmoji.set(false)">
-                返回消息操作
-              </button>
+              <button type="button" class="picker-back" (click)="choosingEmoji.set(false)">返回消息操作</button>
               @defer {
                 <app-emoji-picker (chosen)="reactTo(message, $event)"></app-emoji-picker>
               } @loading (after 100ms) {
-                <div class="loading-status" role="status" aria-label="正在加载表情">
-                  <ion-spinner aria-hidden="true"></ion-spinner>
+                <div class="loading-status">
+                  <ion-spinner></ion-spinner>
                 </div>
               } @error {
-                <p role="alert">表情加载失败，请关闭后重试。</p>
+                <p>表情加载失败，请关闭后重试。</p>
               }
             </div>
           } @else {
@@ -32,19 +25,15 @@
               [style.top.px]="position().top"
               [style.width.px]="position().width">
               @if (canReact()) {
-                <div #reactionBar class="reactions panel" role="group" aria-label="表态表情">
+                <div #reactionBar class="reactions panel">
                   @for (emoji of emojis(['👍', '❤️', '😂', '😮', '😢']); track emoji) {
-                    <button
-                      type="button"
-                      [attr.aria-label]="'表态 ' + emoji"
-                      [attr.aria-pressed]="selected(emoji)"
-                      (click)="reactTo(message, emoji)">
+                    <button type="button" [class.selected]="selected(emoji)" (click)="reactTo(message, emoji)">
                       {{ emoji }}
                     </button>
                   }
                   @if (message.reactions.length < 50) {
-                    <button type="button" aria-label="更多表态表情" (click)="choosingEmoji.set(true)">
-                      <ion-icon [icon]="icons.addOutline" aria-hidden="true"></ion-icon>
+                    <button type="button" (click)="choosingEmoji.set(true)">
+                      <ion-icon [icon]="icons.addOutline"></ion-icon>
                     </button>
                   }
                 </div>
@@ -62,44 +51,44 @@
                   [canOpenThread]="!threadId()"
                   [preview]="true"></app-message>
               </div>
-              <div #actions class="actions panel" role="group" aria-label="消息操作">
+              <div #actions class="actions panel">
                 <button type="button" [disabled]="!canReply()" (click)="choose(Action.Reply)">
-                  <ion-icon [icon]="icons.arrowUndoOutline" aria-hidden="true"></ion-icon>
+                  <ion-icon [icon]="icons.arrowUndoOutline"></ion-icon>
                   <span>回复</span>
                 </button>
                 @if (canThread()) {
                   <button type="button" (click)="choose(Action.Thread)">
-                    <ion-icon [icon]="icons.chatbubblesOutline" aria-hidden="true"></ion-icon>
+                    <ion-icon [icon]="icons.chatbubblesOutline"></ion-icon>
                     <span>话题</span>
                   </button>
                 }
                 @if (admin() && (pinned() || (!message.isDeleted && message.messageType !== MessageType.sticker))) {
-                  <button type="button" [disabled]="conversation.pinsLoading() || busy()" (click)="choose(Action.Pin)">
-                    <ion-icon [icon]="icons.pinOutline" aria-hidden="true"></ion-icon>
+                  <button type="button" [disabled]="pins().loading() || busy()" (click)="choose(Action.Pin)">
+                    <ion-icon [icon]="icons.pinOutline"></ion-icon>
                     <span>{{ pinned() ? '取消置顶' : '置顶' }}</span>
                   </button>
                 }
                 @if (canCopy()) {
                   <button type="button" (click)="choose(Action.Copy)">
-                    <ion-icon [icon]="icons.copyOutline" aria-hidden="true"></ion-icon>
+                    <ion-icon [icon]="icons.copyOutline"></ion-icon>
                     <span>复制</span>
                   </button>
                 }
                 @if (canSave()) {
                   <button type="button" (click)="choose(Action.Save)">
-                    <ion-icon [icon]="icons.bookmarkOutline" aria-hidden="true"></ion-icon>
+                    <ion-icon [icon]="icons.bookmarkOutline"></ion-icon>
                     <span>收藏</span>
                   </button>
                 }
                 @if (message.messageType !== MessageType.invite) {
                   <button type="button" (click)="choose(Action.Link)">
-                    <ion-icon [icon]="icons.linkOutline" aria-hidden="true"></ion-icon>
+                    <ion-icon [icon]="icons.linkOutline"></ion-icon>
                     <span>链接</span>
                   </button>
                 }
                 @if (canRecall()) {
                   <button type="button" (click)="choose(Action.Recall)">
-                    <ion-icon [icon]="icons.trashOutline" aria-hidden="true"></ion-icon>
+                    <ion-icon [icon]="icons.trashOutline"></ion-icon>
                     <span>撤回</span>
                   </button>
                 }

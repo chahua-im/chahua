@@ -1,6 +1,6 @@
 <ion-header>
   <ion-toolbar>
-    <ion-title role="heading" aria-level="1">设置</ion-title>
+    <ion-title>设置</ion-title>
     <ion-buttons slot="end"><ion-button (click)="close()">完成</ion-button></ion-buttons>
   </ion-toolbar>
 </ion-header>
@@ -8,28 +8,28 @@
   @if (session.user(); as user) {
     <div class="profile ion-text-center ion-padding">
       @if (user.avatarUrl; as avatar) {
-        <ion-avatar><img [src]="avatar" width="88" height="88" alt="" /></ion-avatar>
+        <ion-avatar><img [src]="avatar" width="88" height="88" /></ion-avatar>
       } @else {
-        <ion-icon class="profile-placeholder" [icon]="personIcon" color="medium" aria-hidden="true"></ion-icon>
+        <ion-icon class="profile-placeholder" [icon]="personIcon" color="medium"></ion-icon>
       }
       <h2>{{ user.username }}</h2>
     </div>
   }
   <ion-list [inset]="true">
     <ion-item [button]="true" [detail]="true" (click)="nav.push(generalPage)">
-      <ion-icon slot="start" [icon]="generalIcon" color="primary" aria-hidden="true"></ion-icon>
+      <ion-icon slot="start" [icon]="generalIcon" color="primary"></ion-icon>
       <ion-label>通用</ion-label>
     </ion-item>
     <ion-item [button]="true" [detail]="true" (click)="openSaved()">
-      <ion-icon slot="start" [icon]="bookmarkIcon" color="primary" aria-hidden="true"></ion-icon>
+      <ion-icon slot="start" [icon]="bookmarkIcon" color="primary"></ion-icon>
       <ion-label>收藏</ion-label>
     </ion-item>
     <ion-item [button]="true" [detail]="true" (click)="nav.push(verificationPage)">
-      <ion-icon slot="start" [icon]="verificationIcon" color="primary" aria-hidden="true"></ion-icon>
+      <ion-icon slot="start" [icon]="verificationIcon" color="primary"></ion-icon>
       <ion-label>好友验证</ion-label>
     </ion-item>
     <ion-item lines="none">
-      <ion-icon slot="start" [icon]="notificationIcon" color="primary" aria-hidden="true"></ion-icon>
+      <ion-icon slot="start" [icon]="notificationIcon" color="primary"></ion-icon>
       @if (!notifications.supported || notifications.error() === PushError.ServiceWorkerUnavailable) {
         <ion-label>消息通知</ion-label>
         <ion-note slot="end" color="medium">不支持</ion-note>
@@ -41,10 +41,10 @@
           消息通知
         </ion-toggle>
         @if (notifications.busy()) {
-          <ion-spinner slot="end" role="status" aria-label="正在更新通知状态"></ion-spinner>
+          <ion-spinner slot="end"></ion-spinner>
         }
         @if (notifications.error(); as error) {
-          <ion-note slot="end" color="danger" role="status">
+          <ion-note slot="end" color="danger">
             @switch (error) {
               @case (PushError.PermissionDenied) {
                 通知权限已被拒绝
@@ -55,13 +55,8 @@
             }
           </ion-note>
           @if (error === PushError.RefreshFailed) {
-            <ion-button
-              slot="end"
-              fill="clear"
-              aria-label="重试通知状态"
-              [disabled]="notifications.busy()"
-              (click)="notifications.refresh()">
-              <ion-icon slot="icon-only" [icon]="updateIcon" aria-hidden="true"></ion-icon>
+            <ion-button slot="end" fill="clear" [disabled]="notifications.busy()" (click)="notifications.refresh()">
+              <ion-icon slot="icon-only" [icon]="updateIcon"></ion-icon>
             </ion-button>
           }
         }
@@ -76,15 +71,15 @@
       lines="none"
       (click)="checkUpdates()">
       @if (updates.checking()) {
-        <ion-spinner slot="start" role="status" aria-label="正在检查更新"></ion-spinner>
+        <ion-spinner slot="start"></ion-spinner>
       } @else {
-        <ion-icon slot="start" [icon]="updateIcon" color="primary" aria-hidden="true"></ion-icon>
+        <ion-icon slot="start" [icon]="updateIcon" color="primary"></ion-icon>
       }
       <ion-label>检查更新</ion-label>
       @if (updates.available()) {
         <ion-button slot="end" fill="clear" (click)="$event.stopPropagation(); updates.reload()">立即更新</ion-button>
       } @else {
-        <ion-note slot="end" color="medium" role="status">
+        <ion-note slot="end" color="medium">
           @switch (updateResult()) {
             @case (UpdateResult.Current) {
               已是最新版本

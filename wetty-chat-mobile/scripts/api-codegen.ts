@@ -167,19 +167,16 @@ export function transformApiSchema<T>(document: T): T {
     }
   }
 
-  const nullableRefs = new Set<string>();
-  function describe(schema: Schema | undefined, optional = false): JsonCodec | undefined {
+  function describe(schema: Schema | undefined): JsonCodec | undefined {
     if (!schema) return undefined;
     if (ids.has(schema)) return 1;
-    const nullable = optional && isNullable(schema);
     const clean = withoutNull(schema);
     if (clean.$ref) {
       const name = clean.$ref.split('/').at(-1)!;
-      if (nullable) nullableRefs.add(name);
       return name;
     }
     const variants = clean.oneOf ?? clean.anyOf;
-    if (variants?.length === 1) return describe(variants[0]) ?? (nullable ? 0 : undefined);
+    if (variants?.length === 1) return describe(variants[0]);
     if (variants?.length) throw new Error('Unexpected non-null schema union in JSON codec');
     const fields: Record<string, JsonCodec> = {};
     for (const branch of clean.allOf ?? []) {
@@ -187,7 +184,7 @@ export function transformApiSchema<T>(document: T): T {
       if (descriptor && typeof descriptor === 'object' && !Array.isArray(descriptor)) Object.assign(fields, descriptor);
     }
     for (const [key, property] of Object.entries(clean.properties ?? {})) {
-      const descriptor = describe(property, !clean.required?.includes(key));
+      const descriptor = describe(property);
       if (descriptor !== undefined) fields[key] = descriptor;
     }
     if (Object.keys(fields).length) return fields;
@@ -195,7 +192,7 @@ export function transformApiSchema<T>(document: T): T {
       const item = describe(clean.items);
       if (item !== undefined) return [item];
     }
-    return nullable ? 0 : undefined;
+    return undefined;
   }
 
   const described = Object.fromEntries(
@@ -203,7 +200,6 @@ export function transformApiSchema<T>(document: T): T {
       .filter(([name]) => name !== 'ServerWsMessage')
       .map(([name, schema]) => [name, describe(schema)]),
   );
-  for (const name of nullableRefs) described[name] ??= 0;
   const needed = new Set<string>();
   function needsCodec(codec: JsonCodec | undefined): boolean {
     if (codec === undefined) return false;
@@ -248,12 +244,12 @@ export function transformApiSchema<T>(document: T): T {
       const operation = item[method];
       if (!operation) continue;
       const requestSchema = jsonSchema(operation.requestBody);
-      const body = requestSchema ? (compact(describe(requestSchema)) ?? 0) : undefined;
+      const body = compact(describe(requestSchema));
       const success = Object.entries(operation.responses ?? {}).find(
         ([status, content]) => /^2\d\d$/.test(status) && jsonSchema(content),
       )?.[1];
       const responseSchema = jsonSchema(success);
-      const response = responseSchema ? (compact(describe(responseSchema)) ?? 0) : undefined;
+      const response = compact(describe(responseSchema));
       const query = Object.fromEntries(
         [...(item.parameters ?? []), ...(operation.parameters ?? [])]
           .filter((parameter) => parameter.in === 'query' && parameter.schema && ids.has(parameter.schema))
@@ -320,7 +316,10 @@ export async function finishApiGeneration(): Promise<void> {
   if (!source.includes('export type SnowflakeID = number;')) throw new Error('Generated SnowflakeID alias changed');
   writeFileSync(
     alias,
-    source.replace('export type SnowflakeID = number;', "export type { SnowflakeID } from '../../app/api/snowflake-id';"),
+    source.replace(
+      'export type SnowflakeID = number;',
+      "export type { SnowflakeID } from '../../app/api/snowflake-id';",
+    ),
   );
   const metadataFile = `${generatedRoot}/json-codecs.ts`;
   writeFileSync(

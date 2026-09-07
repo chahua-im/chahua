@@ -1,13 +1,13 @@
-import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
-import type { SnowflakeID } from './snowflake-id';
 import { effect, inject, Service } from '@angular/core';
 import { filter, map, Subject } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../generated/endpoints/chahua.base-url';
-import { ServerWsMessageType } from '../../generated/models';
-import type { MessageResponse, ServerWsMessage } from '../../generated/models';
-import { SessionStore } from '../session/session-store';
-import { normalizeJson } from './normalize-json';
 import { wsPayloadCodecs } from '../../generated/json-codecs';
+import type { MessageResponse, ServerWsMessage } from '../../generated/models';
+import { ServerWsMessageType } from '../../generated/models';
+import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
+import { SessionStore } from '../session/session-store';
+import { encodeJsonIds } from './json-ids';
+import type { SnowflakeID } from './snowflake-id';
 
 const enum WsControl {
   Auth = 'auth',
@@ -90,7 +90,7 @@ export class Connection {
           let message: ServerWsMessage | { type: WsControl.Pong };
           try {
             const parsed = JSON.parse(event.data);
-            message = normalizeJson(parsed, { payload: wsPayloadCodecs[parsed?.type] }) as typeof message;
+            message = encodeJsonIds(parsed, { payload: wsPayloadCodecs[parsed?.type] }) as typeof message;
           } catch {
             return;
           }

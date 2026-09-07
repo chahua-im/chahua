@@ -2,37 +2,32 @@
   <ion-toolbar>
     @if (list().archived || list().requestHistory) {
       <ion-buttons slot="start">
-        <ion-button [routerLink]="['/chats', list().tab]" routerDirection="back" aria-label="返回会话列表">
-          <ion-icon slot="icon-only" [icon]="backIcon" aria-hidden="true"></ion-icon>
+        <ion-button [routerLink]="['/chats', list().tab]" routerDirection="back">
+          <ion-icon slot="icon-only" [icon]="backIcon"></ion-icon>
         </ion-button>
       </ion-buttons>
-      <ion-title role="heading" aria-level="1">{{ list().requestHistory ? '好友请求' : '已归档' }}</ion-title>
+      <ion-title>{{ list().requestHistory ? '好友请求' : '已归档' }}</ion-title>
     } @else {
       <ion-buttons slot="start">
-        <ion-button aria-label="设置" (click)="openSettings()">
-          <ion-avatar aria-hidden="true" [class.placeholder]="!session.user()?.avatarUrl">
+        <ion-button (click)="openSettings()">
+          <ion-avatar [class.placeholder]="!session.user()?.avatarUrl">
             @if (session.user()?.avatarUrl; as src) {
-              <img [src]="src" width="26" height="26" decoding="async" alt="" />
+              <img [src]="src" width="26" height="26" decoding="async" />
             } @else {
               {{ session.user()?.username?.slice(0, 1) }}
             }
           </ion-avatar>
         </ion-button>
       </ion-buttons>
-      <ion-segment
-        mode="ios"
-        [value]="list().tab"
-        (ionChange)="selectTab($event)"
-        [swipeGesture]="false"
-        aria-label="会话分类">
+      <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)" [swipeGesture]="false">
         <ion-segment-button [value]="ListTab.Messages"><ion-label>消息</ion-label></ion-segment-button>
         <ion-segment-button [value]="ListTab.Groups"><ion-label>群组</ion-label></ion-segment-button>
         <ion-segment-button [value]="ListTab.Friends"><ion-label>好友</ion-label></ion-segment-button>
         <ion-segment-button [value]="ListTab.Threads"><ion-label>话题</ion-label></ion-segment-button>
       </ion-segment>
       <ion-buttons slot="end">
-        <ion-button aria-label="添加" (click)="addMenu.present($event)">
-          <ion-icon slot="icon-only" [icon]="addIcon" aria-hidden="true"></ion-icon>
+        <ion-button (click)="addMenu.present($event)">
+          <ion-icon slot="icon-only" [icon]="addIcon"></ion-icon>
         </ion-button>
       </ion-buttons>
     }
@@ -43,7 +38,7 @@
     slot="fixed"
     [disabled]="chatQuery().loadingMore() || threads().loadingMore()"
     (ionRefresh)="refreshing.set(true); refresh()">
-    <ion-refresher-content aria-label="正在刷新会话"></ion-refresher-content>
+    <ion-refresher-content></ion-refresher-content>
   </ion-refresher>
   @if (!list().archived && !list().requestHistory) {
     <ion-list>
@@ -66,7 +61,7 @@
       }
       @if (countError()) {
         <ion-item lines="none">
-          <ion-label color="danger" role="alert">归档信息加载失败，请重试。</ion-label>
+          <ion-label color="danger">归档信息加载失败，请重试。</ion-label>
           <ion-button slot="end" (click)="refreshCounts()">重试</ion-button>
         </ion-item>
       }
@@ -74,10 +69,10 @@
   }
   @if (ready()) {
     @if (showRequests() && (requestRows().length || friendRequests().error())) {
-      <ion-list [attr.aria-label]="list().requestHistory ? '好友请求记录' : '好友请求'">
+      <ion-list class="friend-requests">
         @if (friendRequests().error()) {
           <ion-item lines="none">
-            <ion-label color="danger" role="alert">好友请求加载失败，请刷新重试。</ion-label>
+            <ion-label color="danger">好友请求加载失败，请刷新重试。</ion-label>
             <ion-button slot="end" fill="clear" (click)="friendRequests().refresh()">重试</ion-button>
           </ion-item>
         }
@@ -123,7 +118,7 @@
       </ion-list>
     }
     @if (!list().requestHistory && (rows().length || !loading())) {
-      <ion-list aria-label="会话">
+      <ion-list class="conversations">
         @for (row of rows(); track row.key) {
           @switch (row.kind) {
             @case (ListRowKind.Thread) {
@@ -209,14 +204,14 @@
         }
         @if (showThreads() && threads().error()) {
           <ion-item lines="none">
-            <ion-label color="danger" role="alert">话题加载失败，请刷新重试。</ion-label>
+            <ion-label color="danger">话题加载失败，请刷新重试。</ion-label>
             <ion-button slot="end" (click)="refresh()">重试</ion-button>
           </ion-item>
         }
         @if (showChats()) {
           @if (chatQuery().error(); as error) {
             <ion-item lines="none">
-              <ion-label color="danger" role="alert">
+              <ion-label color="danger">
                 @switch (error) {
                   @case (ChatListError.Load) {
                     会话加载失败，请刷新重试。
@@ -240,18 +235,18 @@
     }
   }
   @if ((!ready() || loading()) && !refreshing()) {
-    <div class="loading-status" role="status" aria-label="正在加载会话">
-      <ion-spinner aria-hidden="true"></ion-spinner>
+    <div class="loading-status">
+      <ion-spinner></ion-spinner>
     </div>
   }
   <ion-infinite-scroll
     threshold="100px"
     [disabled]="!ready() || !hasMore() || loading()"
     (ionInfinite)="loadMore($event)">
-    <ion-infinite-scroll-content aria-label="正在加载更多会话"></ion-infinite-scroll-content>
+    <ion-infinite-scroll-content></ion-infinite-scroll-content>
   </ion-infinite-scroll>
 </ion-content>
-<ion-popover #addMenu role="dialog" aria-label="添加" [dismissOnSelect]="true">
+<ion-popover #addMenu [dismissOnSelect]="true">
   <ng-template>
     <ion-list>
       <ion-item [button]="true" [disabled]="true">

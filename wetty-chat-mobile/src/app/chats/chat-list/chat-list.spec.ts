@@ -1,13 +1,10 @@
-import { DraftStore } from '../../conversations/draft-store';
-import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { routes } from '../../app.routes';
 import { IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
-import { vi } from 'vitest';
 import { chatbubbles } from 'ionicons/icons';
+import { vi } from 'vitest';
 import {
   FriendRequestDirection,
   FriendRequestStatus,
@@ -17,15 +14,18 @@ import {
   type FriendRequestHistoryEntry,
   type ThreadListItem as ThreadData,
 } from '../../../generated/models';
+import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../../api/testing';
-import { ChatListItem } from '../chat-list-item/chat-list-item';
-import { ListTab } from '../list-tabs';
-import { ChatListStore, type ChatListError, FriendRequestAction } from '../chat-list-store';
-import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
-import { ChatList } from './chat-list';
-import { ChatStore, type ChatInfo } from '../chat-store';
+import { routes } from '../../app.routes';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
+import { ChatListItem } from '../chat-list-item/chat-list-item';
+import { ChatListStore, FriendRequestAction, type ChatListError } from '../chat-list-store';
+import { ChatStore, type ChatInfo } from '../chat-store';
+import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
+import { DraftStore } from '../../conversations/draft-store';
+import { listSelection, ListTab } from '../list-tabs';
+import { ChatList } from './chat-list';
 
 const incoming: FriendRequestHistoryEntry = {
   id: encodeId('1'),
@@ -133,6 +133,12 @@ describe('ChatList', () => {
     },
   };
 
+  async function selectRoute(url: string) {
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl(url);
+    const selection = listSelection(router.routerState.snapshot.root);
+    if (selection) fixture.componentRef.setInput('selection', selection);
+  }
   beforeEach(async () => {
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -170,12 +176,21 @@ describe('ChatList', () => {
         provideRouter(routes),
         { provide: ChatListStore, useValue: { ...data, ...inbox, archivedUnread: counts } },
         { provide: ConversationNavigation, useValue: navigation },
-        { provide: ChatStore, useValue: metadata },
+        {
+          provide: ChatStore,
+          useValue: {
+            ...metadata,
+            ...data,
+            markThreadRead: inbox.markThreadRead,
+            setThreadArchived: inbox.setThreadArchived,
+          },
+        },
         { provide: SessionStore, useValue: session },
         { provide: Preferences, useValue: preferences },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(ChatList);
+    fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: false, requestHistory: false });
     fixture.detectChanges();
     await fixture.whenStable();
   });
@@ -213,14 +228,14 @@ describe('ChatList', () => {
 
   it('derives list selection from routes and keeps it locally while a conversation is open', async () => {
     const router = TestBed.inject(Router);
-    await router.navigateByUrl('/chats/groups/archived');
+    await selectRoute('/chats/groups/archived');
     await fixture.whenStable();
     expect(fixture.componentInstance['list']()).toEqual({ tab: ListTab.Groups, archived: true, requestHistory: false });
     expect(data.chats).toHaveBeenLastCalledWith(true);
-    await router.navigateByUrl('/chats/chat/9007199254740993');
+    await selectRoute('/chats/chat/9007199254740993');
     await fixture.whenStable();
     expect(fixture.componentInstance['list']()).toEqual({ tab: ListTab.Groups, archived: true, requestHistory: false });
-    await router.navigateByUrl('/chats/friends/archived-requests');
+    await selectRoute('/chats/friends/archived-requests');
     await fixture.whenStable();
     expect(history.activate).toHaveBeenCalledOnce();
     expect(fixture.componentInstance['list']()).toEqual({
@@ -228,7 +243,7 @@ describe('ChatList', () => {
       archived: false,
       requestHistory: true,
     });
-    await router.navigateByUrl('/chats/groups');
+    await selectRoute('/chats/groups');
     await fixture.whenStable();
     expect(counts.chats.activate).toHaveBeenCalledTimes(2);
     const releaseHistory = history.activate.mock.results[0].value;
@@ -250,11 +265,11 @@ describe('ChatList', () => {
     chats.items.set([testChat, dm]);
     counts.chats.value.set(268);
     const router = TestBed.inject(Router);
-    await router.navigateByUrl('/chats/groups');
+    await selectRoute('/chats/groups');
     await fixture.whenStable();
     expect(fixture.componentInstance['conversationRows']().map((row) => row.chat.id)).toEqual([testChat.id]);
     expect(fixture.componentInstance['archivedUnreadCount']()).toBe(268);
-    await router.navigateByUrl('/chats/friends');
+    await selectRoute('/chats/friends');
     await fixture.whenStable();
     expect(fixture.componentInstance['conversationRows']().map((row) => row.chat.id)).toEqual([dm.id]);
     expect(fixture.componentInstance['archivedUnreadCount']()).toBe(268);
@@ -305,7 +320,7 @@ describe('ChatList', () => {
     await fixture.whenStable();
     expect(release).toHaveBeenCalledOnce();
     expect(fixture.nativeElement.textContent).not.toContain('话题开头');
-    await TestBed.inject(Router).navigateByUrl('/chats/threads');
+    await selectRoute('/chats/threads');
     await fixture.whenStable();
     expect(fixture.nativeElement.textContent).toContain('话题开头');
   });
@@ -329,7 +344,7 @@ describe('ChatList', () => {
     chats.items.set([{ ...testChat, kind: GroupKind.dm }]);
     history.loading.set(true);
     counts.chats.loading.set(true);
-    fixture.componentInstance['list'].update((list) => ({ ...list, tab: ListTab.Friends }));
+    fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), tab: ListTab.Friends });
     await fixture.whenStable();
     const entries = fixture.debugElement.queryAll(By.directive(ChatListItem));
     expect(entries.map((item) => (item.componentInstance as ChatListItem).entry().title)).toContain('已归档');
@@ -338,7 +353,7 @@ describe('ChatList', () => {
     expect(history.activate).not.toHaveBeenCalled();
     fixture.componentInstance['refresh']();
     expect(history.refresh).not.toHaveBeenCalled();
-    await TestBed.inject(Router).navigateByUrl('/chats/friends/archived-requests');
+    await selectRoute('/chats/friends/archived-requests');
     await fixture.whenStable();
     expect(history.activate).toHaveBeenCalledOnce();
   });
@@ -350,12 +365,12 @@ describe('ChatList', () => {
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('ion-content ion-item')).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('已归档');
-    expect(fixture.nativeElement.querySelector('[role="status"][aria-label="正在加载会话"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.loading-status')).not.toBeNull();
   });
 
   it('shows the archive entry in every category and the request entry only in friends', async () => {
     for (const tab of [ListTab.Messages, ListTab.Groups, ListTab.Friends, ListTab.Threads]) {
-      fixture.componentInstance['list'].update((list) => ({ ...list, tab }));
+      fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), tab });
       await fixture.whenStable();
       const titles = fixture.debugElement
         .queryAll(By.directive(ChatListItem))
@@ -370,13 +385,13 @@ describe('ChatList', () => {
     fixture.debugElement.query(By.css('ion-refresher')).triggerEventHandler('ionRefresh');
     await fixture.whenStable();
     expect(fixture.componentInstance['refreshing']()).toBe(true);
-    expect(fixture.nativeElement.querySelector('[role="status"][aria-label="正在加载会话"]')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.loading-status')).toBeNull();
     chats.loading.set(false);
     await fixture.whenStable();
     expect(fixture.componentInstance['refreshing']()).toBe(false);
     chats.loading.set(true);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('[role="status"][aria-label="正在加载会话"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.loading-status')).not.toBeNull();
   });
 
   it('reveals a shared time range and pages only the source with the newer boundary', async () => {
@@ -421,7 +436,7 @@ describe('ChatList', () => {
       threads.items.set([thread]);
       chats.loadedThrough.set(Infinity);
       threads.loadedThrough.set(Infinity);
-      fixture.componentInstance['list'].update((list) => ({ ...list, tab }));
+      fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), tab });
       for (const enabled of [false, true]) {
         preferences.showThreadsInMessages.set(enabled);
         await fixture.whenStable();
@@ -520,7 +535,7 @@ describe('ChatList', () => {
     });
 
     function requestList() {
-      return fixture.debugElement.query(By.css('ion-list[aria-label^="好友请求"]'));
+      return fixture.debugElement.query(By.css('ion-list.friend-requests'));
     }
 
     function button(label: string) {
@@ -528,10 +543,8 @@ describe('ChatList', () => {
         .queryAll(By.directive(IonButton))
         .find(
           (item) =>
-            item.nativeElement.shadowRoot
-              ?.querySelector('[aria-label]')
-              ?.getAttribute('aria-label')
-              ?.startsWith(label + '来自') || item.nativeElement.textContent.trim() === label,
+            item.nativeElement.getAttribute('title')?.startsWith(label) ||
+            item.nativeElement.textContent.trim() === label,
         )!;
     }
 
@@ -561,7 +574,7 @@ describe('ChatList', () => {
         { ...incoming, id: encodeId('3'), status: FriendRequestStatus.accepted },
         { ...incoming, id: encodeId('4'), status: FriendRequestStatus.rejected },
       ]);
-      fixture.componentInstance['list'].update((list) => ({ ...list, requestHistory: true }));
+      fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), requestHistory: true });
       fixture.detectChanges();
       await fixture.whenStable();
       expect(requestList().nativeElement.textContent).toContain('小王');
@@ -572,8 +585,8 @@ describe('ChatList', () => {
       expect(requestList().nativeElement.textContent).toContain('已拒绝');
       const rows = requestList().queryAll(By.directive(ChatListItem));
       expect(rows).toHaveLength(4);
-      expect(fixture.nativeElement.querySelectorAll('ion-list[aria-label^="好友请求"]')).toHaveLength(1);
-      expect(fixture.nativeElement.querySelector('ion-list[aria-label="会话"]')).toBeNull();
+      expect(fixture.nativeElement.querySelectorAll('ion-list.friend-requests')).toHaveLength(1);
+      expect(fixture.nativeElement.querySelector('ion-list.conversations')).toBeNull();
       for (const row of rows) {
         expect(row.nativeElement.querySelector('ion-item').getAttribute('href')).toBeNull();
         expect(row.nativeElement.querySelectorAll('ion-label h3')).toHaveLength(1);
@@ -584,7 +597,7 @@ describe('ChatList', () => {
       expect(
         requestList()
           .queryAll(By.directive(IonButton))
-          .map((item) => item.nativeElement.shadowRoot?.querySelector('[aria-label]')?.getAttribute('aria-label')),
+          .map((item) => item.nativeElement.getAttribute('title')),
       ).toEqual(['接受来自 小李 的好友请求', '拒绝来自 小李 的好友请求']);
       button('接受').triggerEventHandler('click', new Event('click'));
       await fixture.whenStable();
@@ -605,14 +618,14 @@ describe('ChatList', () => {
       await expect
         .poll(() => {
           fixture.detectChanges();
-          return fixture.nativeElement.querySelector('[role="alert"]')?.textContent;
+          return fixture.nativeElement.querySelector('ion-label[color="danger"]')?.textContent;
         })
         .toContain('操作失败');
       expect((button('接受').componentInstance as IonButton).disabled).toBe(false);
       button('接受').triggerEventHandler('click', new Event('click'));
       await fixture.whenStable();
       expect(inbox.decideRequest).toHaveBeenCalledTimes(2);
-      expect(fixture.nativeElement.querySelector('[role="alert"]')).toBeNull();
+      expect(fixture.nativeElement.querySelector('ion-label[color="danger"]')).toBeNull();
     });
 
     it('keeps empty request lists silent and allows retry after loading fails', async () => {
@@ -622,14 +635,14 @@ describe('ChatList', () => {
       requests.error.set(true);
       fixture.detectChanges();
       await expect
-        .poll(() => fixture.nativeElement.querySelector('[role="alert"]')?.textContent)
+        .poll(() => fixture.nativeElement.querySelector('ion-label[color="danger"]')?.textContent)
         .toContain('好友请求加载失败');
       button('重试').triggerEventHandler('click', new Event('click'));
       expect(requests.refresh).toHaveBeenCalledOnce();
       requests.error.set(false);
       fixture.detectChanges();
       await expect.poll(() => requestList()).toBeNull();
-      fixture.componentInstance['list'].update((list) => ({ ...list, requestHistory: true }));
+      fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), requestHistory: true });
       fixture.detectChanges();
       expect(requestList()).toBeNull();
     });
@@ -637,7 +650,7 @@ describe('ChatList', () => {
 
   describe('topic rows', () => {
     beforeEach(async () => {
-      fixture.componentInstance['list'].update((list) => ({ ...list, tab: ListTab.Threads }));
+      fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), tab: ListTab.Threads });
       threads.items.set([thread]);
       fixture.detectChanges();
       await fixture.whenStable();
@@ -663,7 +676,7 @@ describe('ChatList', () => {
       await fixture.whenStable();
       expect(metadata.ensure).toHaveBeenCalledExactlyOnceWith(testChat.id);
       metadata.ensure.mockClear();
-      fixture.componentInstance['list'].update((list) => ({ ...list, tab: ListTab.Messages }));
+      fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), tab: ListTab.Messages });
       threads.items.set([]);
       fixture.detectChanges();
       await fixture.whenStable();
@@ -769,7 +782,7 @@ describe('ChatList', () => {
       inbox.setThreadArchived.mockRejectedValue(new Error('unavailable'));
       await shared['perform'](shared.endActions()![0], new Event('click'));
       await fixture.whenStable();
-      expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain('操作失败');
+      expect(fixture.nativeElement.querySelector('ion-label[color="danger"]').textContent).toContain('操作失败');
     });
   });
 });

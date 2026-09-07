@@ -13,8 +13,8 @@ import {
   IonItemSliding,
   IonLabel,
   IonRouterLink,
-  IonText,
   IonSpinner,
+  IonText,
 } from '@ionic/angular';
 import { ChatDatePipe } from '../chat-date.pipe';
 

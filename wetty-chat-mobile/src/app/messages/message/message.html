@@ -3,15 +3,15 @@
 } @else {
   <div class="chat-row" [class.sent]="own()" [class.last]="showAvatar()" [class.preview]="preview()">
     @if (!preview() && showAvatar()) {
-      <ion-avatar class="avatar" aria-hidden="true" [class.placeholder]="!message().sender.avatarUrl">
+      <ion-avatar class="avatar" [class.placeholder]="!message().sender.avatarUrl">
         @if (message().sender.avatarUrl; as src) {
-          <img [src]="src" width="36" height="36" decoding="async" alt="" />
+          <img [src]="src" width="36" height="36" decoding="async" />
         } @else {
           {{ name().slice(0, 2).toUpperCase() }}
         }
       </ion-avatar>
     } @else if (!preview()) {
-      <span class="avatar-spacer" aria-hidden="true"></span>
+      <span class="avatar-spacer"></span>
     }
     <div class="message-stack">
       <div
@@ -19,13 +19,8 @@
         [class]="isSticker() ? 'sticker-content' : 'bubble'"
         [class.media-only]="mediaOverlay()"
         [class.has-thread]="!!threadInfo()"
-        [attr.tabindex]="preview() || !interactive() ? null : 0"
         [attr.inert]="preview() ? '' : null"
-        role="group"
-        aria-label="消息"
-        [attr.aria-haspopup]="!preview() && interactive() ? 'menu' : null"
         (contextmenu)="showMenu($event, bubble)"
-        (keydown)="menuKey($event, bubble)"
         (pointerdown)="startPress($event, bubble)"
         (pointermove)="movePress($event)"
         (pointerup)="cancelPress()"
@@ -37,16 +32,15 @@
           <button
             type="button"
             class="reply-preview action-content"
-            aria-label="跳转到引用消息"
             [disabled]="jumpDisabled()"
-            [attr.aria-busy]="jumpingTo() === quote.id"
+            [class.busy]="jumpingTo() === quote.id"
             (click)="jump.emit(quote.id)">
             <div class="action-label">
               <div class="reply-name">{{ quoteName() }}</div>
               <div class="reply-text"><app-message-preview [message]="quote"></app-message-preview></div>
             </div>
             @if (jumpingTo() === quote.id) {
-              <ion-spinner role="status" aria-label="正在定位引用消息"></ion-spinner>
+              <ion-spinner></ion-spinner>
             }
           </button>
         }
@@ -72,8 +66,6 @@
           @if (hasReactions()) {
             <div class="message-footer">
               <app-message-reactions
-                role="group"
-                aria-label="消息表态"
                 [reactions]="message().reactions ?? []"
                 [own]="own()"
                 [preview]="preview()"
@@ -93,8 +85,6 @@
       </div>
       @if (mediaOverlay() && hasReactions()) {
         <app-message-reactions
-          role="group"
-          aria-label="消息表态"
           [reactions]="message().reactions ?? []"
           [own]="own()"
           [preview]="preview()"
@@ -103,13 +93,8 @@
       }
     </div>
     @if (interactive() && !preview() && !message().isDeleted) {
-      <button
-        type="button"
-        class="reply-button"
-        aria-label="回复消息"
-        [disabled]="!canReply()"
-        (click)="reply.emit(message())">
-        <ion-icon [icon]="replyIcon" aria-hidden="true"></ion-icon>
+      <button type="button" class="reply-button" [disabled]="!canReply()" (click)="reply.emit(message())">
+        <ion-icon [icon]="replyIcon"></ion-icon>
       </button>
     }
   </div>

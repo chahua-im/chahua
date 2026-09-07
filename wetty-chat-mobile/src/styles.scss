@@ -77,7 +77,7 @@ ion-modal.message-menu-modal::part(backdrop) {
   min-height: 28px;
   min-width: 28px;
 
-  &[aria-busy='true'] > .action-label {
+  &.busy > .action-label {
     visibility: hidden;
   }
   > ion-spinner {

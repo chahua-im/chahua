@@ -3,14 +3,14 @@ import { Component, computed, DestroyRef, ElementRef, inject, input, output } fr
 import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
 import { arrowUndoOutline } from 'ionicons/icons';
 import { MessageType, type MessageResponse } from '../../../generated/models';
+import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { mediaOverlay } from '../media-overlay';
 import { MessageAttachments, type MessageAttachmentSource } from '../message-attachments/message-attachments';
 import { MessageAuthor } from '../message-author/message-author';
-import { mediaOverlay } from '../media-overlay';
 import { MessagePreview } from '../message-preview/message-preview';
 import { MessageReactions } from '../message-reactions/message-reactions';
 import { MessageThread } from '../message-thread/message-thread';
 import { userColors } from '../user-colors';
-import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 
 export type MessageContent = MessageAttachmentSource &
   Pick<MessageResponse, 'id' | 'sender' | 'message'> &
@@ -117,13 +117,6 @@ export class Message<T extends MessageContent = MessageResponse> {
     event.preventDefault();
     this.cancelPress();
     if (!this.longPressed) this.emitMenu(element);
-  }
-
-  protected menuKey(event: KeyboardEvent, element: HTMLElement) {
-    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-      this.longPressed = false;
-      this.showMenu(event, element);
-    }
   }
 
   protected startPress(event: PointerEvent, element: HTMLElement) {

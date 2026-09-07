@@ -1,6 +1,6 @@
-import type { SnowflakeID } from '../api/snowflake-id';
 import { Service } from '@angular/core';
 import { Subject } from 'rxjs';
+import type { SnowflakeID } from '../api/snowflake-id';
 
 export enum ConversationTargetKind {
   Resume,

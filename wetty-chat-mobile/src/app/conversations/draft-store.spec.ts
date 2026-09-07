@@ -1,8 +1,8 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { DraftStore } from './draft-store';
-import { SessionStore } from '../session/session-store';
 import { encodeId } from '../api/snowflake-id';
+import { SessionStore } from '../session/session-store';
+import { DraftStore } from './draft-store';
 
 const chat = encodeId('9007199254741000');
 const thread = encodeId('9007199254741001');

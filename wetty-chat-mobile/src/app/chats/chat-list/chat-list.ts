@@ -1,9 +1,5 @@
-import { DraftStore } from '../../conversations/draft-store';
-import { decodeId } from '../../api/snowflake-id';
-import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { filter, map } from 'rxjs';
 import { Component, computed, effect, inject, input, linkedSignal, signal, untracked, viewChild } from '@angular/core';
+import { Router, RouterLink } from '@angular/router';
 import {
   IonAvatar,
   IonButton,
@@ -11,32 +7,32 @@ import {
   IonContent,
   IonHeader,
   IonIcon,
+  IonInfiniteScroll,
+  IonInfiniteScrollContent,
   IonItem,
   IonLabel,
   IonList,
   IonNote,
+  IonPopover,
   IonRefresher,
   IonRefresherContent,
-  IonInfiniteScroll,
-  IonInfiniteScrollContent,
-  IonPopover,
+  IonRouterLink,
   IonSegment,
   IonSegmentButton,
   IonSpinner,
-  IonToolbar,
   IonText,
   IonTitle,
-  IonRouterLink,
-  type SegmentCustomEvent,
+  IonToolbar,
   type InfiniteScrollCustomEvent,
+  type SegmentCustomEvent,
 } from '@ionic/angular';
 import {
   addCircleOutline,
-  arrowBack,
   archiveOutline,
+  arrowBack,
+  chatbubbles,
   checkmarkDoneOutline,
   checkmarkOutline,
-  chatbubbles,
   closeOutline,
   mailUnreadOutline,
   notificationsOffOutline,
@@ -44,14 +40,16 @@ import {
   personAddOutline,
 } from 'ionicons/icons';
 import { FriendRequestDirection, FriendRequestStatus, GroupKind, MessageType } from '../../../generated/models';
-import { ChatListItem, type ChatListEntry } from '../chat-list-item/chat-list-item';
-import { ChatListStore, FriendRequestAction, ChatListError } from '../chat-list-store';
-import { ChatStore } from '../chat-store';
+import { decodeId } from '../../api/snowflake-id';
 import { SessionStore } from '../../session/session-store';
-import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
-import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { isListTab, ListTab } from '../list-tabs';
 import { Preferences } from '../../settings/preferences';
+import { ChatListItem, type ChatListEntry } from '../chat-list-item/chat-list-item';
+import { ChatListError, ChatListStore, FriendRequestAction } from '../chat-list-store';
+import { ChatStore } from '../chat-store';
+import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
+import { DraftStore } from '../../conversations/draft-store';
+import { ListTab, type ListSelection } from '../list-tabs';
+import { MessagePreview } from '../../messages/message-preview/message-preview';
 
 enum ListRowKind {
   Chat,
@@ -103,26 +101,8 @@ export class ChatList {
   private readonly preferences = inject(Preferences);
   private readonly metadata = inject(ChatStore);
   private readonly router = inject(Router);
-  private readonly activatedRoute = inject(ActivatedRoute);
-  private readonly route = toSignal(
-    this.router.events.pipe(
-      filter((event) => event instanceof NavigationEnd),
-      map(() => this.activatedRoute.snapshot),
-    ),
-    { initialValue: this.activatedRoute.snapshot },
-  );
-  protected readonly list = linkedSignal({
-    source: this.route,
-    computation: (root, previous): { tab: ListTab; archived: boolean; requestHistory: boolean } => {
-      let route = root;
-      while (route.firstChild) route = route.firstChild;
-      const tab = route.params['tab'] ?? route.data['tab'];
-      // A conversation route leaves this component's last list selection in place.
-      return isListTab(tab)
-        ? { tab, archived: route.data['archived'] === true, requestHistory: route.data['requestHistory'] === true }
-        : (previous?.value ?? { tab: ListTab.Messages, archived: false, requestHistory: false });
-    },
-  });
+  readonly selection = input.required<ListSelection>();
+  protected readonly list = this.selection;
   protected readonly chatQuery = computed(() => this.lists.chats(this.list().archived));
   protected readonly friendRequests = computed(() => this.lists.friendRequests(this.list().requestHistory));
   protected readonly threads = computed(() => this.lists.threads(this.list().archived));
@@ -172,10 +152,10 @@ export class ChatList {
           unreadCount: chat.unreadCount,
         } satisfies ChatListEntry,
         toggleRead: last
-          ? () => (chat.unreadCount > 0 ? this.lists.markRead(chat.id, last.id) : this.lists.markUnread(chat.id))
+          ? () => (chat.unreadCount > 0 ? this.metadata.markRead(chat.id, last.id) : this.metadata.markUnread(chat.id))
           : undefined,
-        toggleMuted: () => this.lists.setMuted(chat.id, !muted),
-        toggleArchived: () => this.lists.setArchived(chat.id, !chat.archived),
+        toggleMuted: () => this.metadata.setMuted(chat.id, !muted),
+        toggleArchived: () => this.metadata.setArchived(chat.id, !chat.archived),
       };
     }),
   );
@@ -217,8 +197,8 @@ export class ChatList {
             unreadCount: thread.unreadCount,
             link: ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(root.id)],
           } satisfies ChatListEntry,
-          markRead: () => this.lists.markThreadRead(thread.chatId, root.id, last?.id ?? root.id),
-          toggleArchived: () => this.lists.setThreadArchived(thread.chatId, root.id, !thread.archived),
+          markRead: () => this.metadata.markThreadRead(thread.chatId, root.id, last?.id ?? root.id),
+          toggleArchived: () => this.metadata.setThreadArchived(thread.chatId, root.id, !thread.archived),
         };
       }),
   );

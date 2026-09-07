@@ -1,8 +1,7 @@
-import { merge, Subject, filter, map } from 'rxjs';
-import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
-import { ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
-import { GroupKind, MessageType } from '../../generated/models';
+import { filter, map, merge, Subject } from 'rxjs';
 import type { ChatListItem, MeResponse, MessageResponse } from '../../generated/models';
+import { GroupKind, MessageType, ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
+import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
 import { decodeId, encodeId } from './snowflake-id';
 
 export const testUser: MeResponse = { uid: 1, username: '测试用户', gender: 0, permissions: [], stickerPackOrder: [] };

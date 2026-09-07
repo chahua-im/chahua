@@ -45,12 +45,8 @@ button {
   cursor: pointer;
 }
 button:hover,
-button[aria-pressed='true'] {
+button.selected {
   background: var(--ion-color-light);
-}
-button:focus-visible {
-  outline: 2px solid var(--ion-color-primary);
-  outline-offset: -2px;
 }
 button:disabled {
   opacity: 0.5;

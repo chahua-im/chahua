@@ -3,27 +3,24 @@
     <ion-buttons slot="start" class="ion-hide-md-up">
       <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
     </ion-buttons>
-    <ion-title role="heading" aria-level="1">
+    <ion-title>
       {{ (threadId() ? '话题 · ' : '') + (chatTitle().name ?? (chatTitle().isDm ? '私聊' : '会话')) }}
     </ion-title>
     @if (threadBusy() && !subscription()) {
-      <ion-spinner slot="end" role="status" aria-label="正在加载话题状态"></ion-spinner>
+      <ion-spinner slot="end"></ion-spinner>
     }
     @if (menu()?.busy()) {
-      <ion-spinner slot="end" role="status" aria-label="正在处理消息操作"></ion-spinner>
+      <ion-spinner slot="end"></ion-spinner>
     }
     @if (threadId() && subscription(); as status) {
       <ion-buttons slot="end">
-        <ion-button
-          [attr.aria-label]="!status.subscribed ? '关注话题' : status.archived ? '恢复话题' : '归档话题'"
-          [disabled]="threadBusy()"
-          (click)="updateThread()">
-          <span class="action-content" [attr.aria-busy]="threadBusy()">
+        <ion-button [disabled]="threadBusy()" (click)="updateThread()">
+          <span class="action-content" [class.busy]="threadBusy()">
             <span class="action-label">
               {{ !status.subscribed ? '关注话题' : status.archived ? '恢复话题' : '归档话题' }}
             </span>
             @if (threadBusy()) {
-              <ion-spinner role="status" aria-label="正在更新话题"></ion-spinner>
+              <ion-spinner></ion-spinner>
             }
           </span>
         </ion-button>
@@ -32,15 +29,9 @@
   </ion-toolbar>
   @if (selectedPin(); as pin) {
     <ion-toolbar class="pinned-bar">
-      <button
-        type="button"
-        class="pinned-preview"
-        aria-label="定位置顶消息"
-        [disabled]="!!pendingNavigation()"
-        [attr.aria-busy]="jumpingTo() === pin.message.id"
-        (click)="locatePin()">
+      <button type="button" class="pinned-preview" [disabled]="!!pendingNavigation()" (click)="locatePin()">
         @if (jumpingTo() === pin.message.id) {
-          <ion-spinner class="pin-loading" role="status" aria-label="正在定位消息"></ion-spinner>
+          <ion-spinner class="pin-loading"></ion-spinner>
         }
         <span class="pinned-title">
           置顶消息
@@ -51,15 +42,15 @@
         <app-message-preview [message]="pin.message"></app-message-preview>
       </button>
       <ion-buttons slot="end">
-        <ion-button [routerLink]="pinsHref()" aria-label="查看全部置顶消息">
-          <ion-icon slot="icon-only" [icon]="listIcon" aria-hidden="true"></ion-icon>
+        <ion-button [routerLink]="pinsHref()">
+          <ion-icon slot="icon-only" [icon]="listIcon"></ion-icon>
         </ion-button>
       </ion-buttons>
     </ion-toolbar>
   } @else if (pinsFailed()) {
     <ion-toolbar>
-      @if (conversation.pinsLoading()) {
-        <ion-spinner role="status" aria-label="正在加载置顶消息"></ion-spinner>
+      @if (pins().loading()) {
+        <ion-spinner></ion-spinner>
       } @else {
         <ion-button fill="clear" (click)="loadPins()">置顶消息加载失败，重试</ion-button>
       }
@@ -77,7 +68,7 @@
   <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
   <div>
     @if (threadError()) {
-      <div role="alert" class="ion-text-center">
+      <div class="ion-text-center">
         <p>
           @if (threadError() === ThreadError.Load) {
             话题状态加载失败，请重试。
@@ -94,17 +85,13 @@
           <button
             type="button"
             class="pagination-control"
-            aria-label="加载历史消息"
-            [attr.aria-busy]="conversation.pagingDirection() === PageDirection.Older"
             [disabled]="!conversation.canLoad(PageDirection.Older)"
             (click)="loadPage(PageDirection.Older)">
-            <ion-spinner
-              aria-hidden="true"
-              [paused]="conversation.pagingDirection() !== PageDirection.Older"></ion-spinner>
+            <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Older"></ion-spinner>
           </button>
         </div>
       }
-      <div class="message-list" role="log" aria-label="聊天消息">
+      <div class="message-list">
         @for (row of rows(); track row.message.id) {
           @if (row.dateBreak) {
             <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
@@ -136,23 +123,19 @@
           <button
             type="button"
             class="pagination-control"
-            aria-label="加载后续消息"
-            [attr.aria-busy]="conversation.pagingDirection() === PageDirection.Newer"
             [disabled]="!conversation.canLoad(PageDirection.Newer)"
             (click)="loadPage(PageDirection.Newer)">
-            <ion-spinner
-              aria-hidden="true"
-              [paused]="conversation.pagingDirection() !== PageDirection.Newer"></ion-spinner>
+            <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Newer"></ion-spinner>
           </button>
         </div>
       }
     } @else if (conversation.loading()) {
-      <div class="loading-status" role="status" aria-label="正在加载消息">
-        <ion-spinner aria-hidden="true"></ion-spinner>
+      <div class="loading-status">
+        <ion-spinner></ion-spinner>
       </div>
     }
     @if (conversation.error()) {
-      <div role="alert" class="ion-text-center">
+      <div class="ion-text-center">
         <p>
           @switch (conversation.error()) {
             @case (ConversationError.Missing) {
@@ -179,13 +162,12 @@
       [style.visibility]="atBottom() && !page.newerCursor ? 'hidden' : 'visible'">
       <ion-fab-button
         size="small"
-        aria-label="回到最新消息"
         [disabled]="!!pendingNavigation()"
         (click)="goTo({ type: ConversationTargetKind.Latest })">
         @if (pendingNavigation()?.type === ConversationTargetKind.Latest) {
-          <ion-spinner role="status" aria-label="正在加载最新消息"></ion-spinner>
+          <ion-spinner></ion-spinner>
         } @else {
-          <ion-icon [icon]="downIcon" aria-hidden="true"></ion-icon>
+          <ion-icon [icon]="downIcon"></ion-icon>
         }
       </ion-fab-button>
     </ion-fab>
@@ -200,24 +182,23 @@
         </p>
         <p><app-message-preview [message]="message"></app-message-preview></p>
       </ion-label>
-      <ion-button slot="end" fill="clear" aria-label="取消回复" [disabled]="sending()" (click)="cancelReply()">
-        <ion-icon slot="icon-only" [icon]="closeIcon" aria-hidden="true"></ion-icon>
+      <ion-button slot="end" fill="clear" [disabled]="sending()" (click)="cancelReply()">
+        <ion-icon slot="icon-only" [icon]="closeIcon"></ion-icon>
       </ion-button>
     </ion-item>
   } @else if (savedReplyId()) {
     <ion-item class="reply-context" lines="none">
       <ion-label color="primary">回复消息</ion-label>
-      <ion-button slot="end" fill="clear" aria-label="取消回复" [disabled]="sending()" (click)="cancelReply()">
-        <ion-icon slot="icon-only" [icon]="closeIcon" aria-hidden="true"></ion-icon>
+      <ion-button slot="end" fill="clear" [disabled]="sending()" (click)="cancelReply()">
+        <ion-icon slot="icon-only" [icon]="closeIcon"></ion-icon>
       </ion-button>
     </ion-item>
   }
   @if (sendError()) {
-    <p role="alert" class="ion-padding-horizontal">发送失败，请重试。</p>
+    <p class="ion-padding-horizontal">发送失败，请重试。</p>
   }
   <ion-toolbar>
     <ion-textarea
-      aria-label="消息内容"
       placeholder="输入消息"
       [autoGrow]="true"
       [rows]="1"
@@ -226,15 +207,15 @@
       (ionInput)="updateDraft($event.detail.value ?? '')"></ion-textarea>
     <ion-buttons slot="end">
       <ion-button
-        aria-label="发送消息"
         [disabled]="sending() || conversation.loading() || !conversation.page() || !draft().trim()"
         (click)="sendMessage()">
-        <ion-icon slot="icon-only" [icon]="sendIcon" aria-hidden="true"></ion-icon>
+        <ion-icon slot="icon-only" [icon]="sendIcon"></ion-icon>
       </ion-button>
     </ion-buttons>
   </ion-toolbar>
 </ion-footer>
 <app-message-menu
+  [messages]="conversation.items()"
   [chatId]="id()"
   [threadId]="threadId()"
   [canReply]="!sending()"

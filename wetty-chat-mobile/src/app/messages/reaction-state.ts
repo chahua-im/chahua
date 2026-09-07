@@ -3,7 +3,7 @@ import type { MessageResponse, ReactionSummary } from '../../generated/models';
 export function preserveReactionOwnership(current: ReactionSummary[], incoming: ReactionSummary[]) {
   return incoming.map((reaction) => {
     const previous = current.find((item) => item.emoji === reaction.emoji);
-    return reaction.reactedByMe === undefined && previous?.reactedByMe !== undefined
+    return reaction.reactedByMe == null && previous?.reactedByMe != null
       ? { ...reaction, reactedByMe: previous.reactedByMe }
       : reaction;
   });
