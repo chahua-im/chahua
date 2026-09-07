@@ -15,7 +15,7 @@ export function MentionBadge({ muted = false }: MentionBadgeProps) {
       mode="ios"
       color={muted ? 'medium' : 'primary'}
       className={styles.mentionBadge}
-      aria-label={t`Unread mentions`}
+      aria-label={t`Unread mentions and replies`}
     >
       <IonIcon icon={at} />
     </IonBadge>
