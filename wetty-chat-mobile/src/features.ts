@@ -63,6 +63,15 @@ export const FEATURES = {
     enabled: true,
     description: 'Blocklist (Chahua-side 「拉黑」) affecting DM and friend relationships only.',
   },
+  mentionNotifications: {
+    enabled: true,
+    description:
+      'Shows unread-mention (@) badges in the chat and thread lists and surfaces mention push notifications.',
+  },
+  jumpToMention: {
+    enabled: true,
+    description: 'Shows a jump-to-mention FAB in the conversation that cycles through unread mentions (oldest-first).',
+  },
 } as const;
 
 export type Feature = keyof typeof FEATURES;

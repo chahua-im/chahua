@@ -488,6 +488,9 @@ msgstr "Failed to load invite links"
 msgid "Failed to load members"
 msgstr "Failed to load members"
 
+msgid "Failed to load mentions"
+msgstr "Failed to load mentions"
+
 msgid "Failed to load messages"
 msgstr "Failed to load messages"
 
@@ -727,6 +730,9 @@ msgstr "Join this chat to start reading and sending messages."
 
 msgid "Joining…"
 msgstr "Joining…"
+
+msgid "Jump to mention"
+msgstr "Jump to mention"
 
 msgid "Keep messages"
 msgstr "Keep messages"
@@ -1474,6 +1480,9 @@ msgstr "Unpin Message"
 
 msgid "Unread"
 msgstr "Unread"
+
+msgid "Unread mentions"
+msgstr "Unread mentions"
 
 msgid "Unsave"
 msgstr "Unsave"

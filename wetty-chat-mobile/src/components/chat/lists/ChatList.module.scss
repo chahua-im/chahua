@@ -26,8 +26,9 @@
 
 .chatsListBadge {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
   min-height: 19px;
   font-size: 12px;
 }

@@ -15,6 +15,7 @@ import {
   setChatMeta,
   setChatMutedUntil,
   setChatUnreadCount,
+  setChatUnreadMentions,
 } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
 import store from '@/store';
@@ -107,6 +108,7 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
         }
         dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: res.data.lastReadMessageId }));
         dispatch(setChatUnreadCount({ chatId, unreadCount: res.data.unreadCount }));
+        dispatch(setChatUnreadMentions({ chatId, unreadMentions: res.data.unreadMentions ?? 0 }));
       })
       .catch(() => {});
 

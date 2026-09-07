@@ -28,6 +28,8 @@ import {
 import { useHistory } from 'react-router-dom';
 import { Trans } from '@lingui/react/macro';
 import { t } from '@lingui/core/macro';
+import { isFeatureEnabled } from '@/features';
+import { MentionBadge } from './MentionBadge';
 import { type ChatListEntry, archiveChat, unarchiveChat } from '@/api/chats';
 import { archiveThread, unarchiveThread } from '@/api/threads';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
@@ -44,6 +46,7 @@ import {
   setChatLastReadMessageId,
   setChatMutedUntil,
   setChatUnreadCount,
+  setChatUnreadMentions,
 } from '@/store/chatsSlice';
 import {
   selectActiveThreads,
@@ -305,6 +308,7 @@ export function ChatList({
         const res = await markMessagesAsRead(chat.id, targetMessageId);
         dispatch(setChatLastReadMessageId({ chatId: chat.id, lastReadMessageId: res.data.lastReadMessageId }));
         dispatch(setChatUnreadCount({ chatId: chat.id, unreadCount: res.data.unreadCount }));
+        dispatch(setChatUnreadMentions({ chatId: chat.id, unreadMentions: res.data.unreadMentions ?? 0 }));
         await updateAppBadge();
       } catch (err) {
         console.error('Failed to mark as read', err);
@@ -319,6 +323,7 @@ export function ChatList({
       const res = await markChatAsUnread(chat.id);
       dispatch(setChatLastReadMessageId({ chatId: chat.id, lastReadMessageId: res.data.lastReadMessageId }));
       dispatch(setChatUnreadCount({ chatId: chat.id, unreadCount: res.data.unreadCount }));
+      dispatch(setChatUnreadMentions({ chatId: chat.id, unreadMentions: res.data.unreadMentions ?? 0 }));
       await updateAppBadge();
     } catch (err) {
       console.error('Failed to mark as unread', err);
@@ -616,6 +621,9 @@ export function ChatList({
         <div slot="end" className={styles.chatsListEndSlot}>
           <div className={styles.chatsListTime}>{formatLastActivity(chat.lastMessageAt, locale)}</div>
           <div className={styles.chatsListBadge}>
+            {isFeatureEnabled('mentionNotifications') && chat.unreadMentions > 0 && (
+              <MentionBadge muted={isChatMuted(chat)} />
+            )}
             {chat.unreadCount > 0 && (
               <IonBadge mode="ios" color={isChatMuted(chat) ? 'medium' : 'primary'}>
                 {formatUnreadBadge(chat.unreadCount)}

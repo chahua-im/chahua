@@ -2,6 +2,7 @@ import type { AxiosResponse } from 'axios';
 import apiClient from './client';
 import type { MessagePreview } from './messages';
 import type { MemberSummary } from './users';
+import { UNREAD_ID_FETCH_MAX } from '@/utils/unreadBadge';
 
 export type GroupKind = 'group' | 'dm';
 
@@ -11,6 +12,7 @@ export interface ChatListEntry {
   avatar: string | null;
   lastMessageAt: string | null;
   unreadCount: number;
+  unreadMentions: number;
   lastReadMessageId?: string | null;
   lastMessage: MessagePreview | null;
   mutedUntil: string | null;
@@ -35,6 +37,7 @@ interface CreateChatResponse {
 export interface ChatUnreadCountResponse {
   lastReadMessageId: string | null;
   unreadCount: number;
+  unreadMentions: number;
 }
 
 export function getChats(
@@ -51,12 +54,25 @@ export function createChat(body: { name?: string } = {}): Promise<AxiosResponse<
   return apiClient.post('/group', body);
 }
 
-export function getUnreadCount(): Promise<AxiosResponse<{ unreadCount: number; archivedUnreadCount: number }>> {
+export function getUnreadCount(): Promise<
+  AxiosResponse<{ unreadCount: number; archivedUnreadCount: number; unreadMentions: number }>
+> {
   return apiClient.get('/chats/unread');
 }
 
 export function getChatUnreadCount(chatId: string | number): Promise<AxiosResponse<ChatUnreadCountResponse>> {
   return apiClient.get(`/chats/${chatId}/unread`);
+}
+
+export interface UnreadMentionIdsResponse {
+  messageIds: string[];
+}
+
+export function getUnreadMentionIds(
+  chatId: string | number,
+  { threadId, max = UNREAD_ID_FETCH_MAX }: { threadId?: string | number; max?: number } = {},
+): Promise<AxiosResponse<UnreadMentionIdsResponse>> {
+  return apiClient.get(`/chats/${chatId}/mentions`, { params: { threadId, max } });
 }
 
 export function archiveChat(chatId: string | number): Promise<AxiosResponse<void>> {
