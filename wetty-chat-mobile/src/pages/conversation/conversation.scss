@@ -107,13 +107,17 @@
   text-align: center;
 }
 
-/* Jump-to-mention FAB (stacked above the scroll-to-bottom FAB) */
-.mention-fab {
+/* Jump FABs (mention, reaction) shared styling. Each FAB is lifted above the
+   visible FABs below it via --fab-lift (56px per visible FAB, set from React;
+   the scroll-to-bottom FAB sits at bottom:16px and is 48px tall). The FABs
+   stack bottom-up: scroll-to-bottom, mention, reaction. */
+.jump-fab {
   opacity: 1;
   overflow: visible;
-  // The scroll-to-bottom FAB sits at bottom:16px and is 48px tall; lift this one 56px so they stack.
-  transform: translateY(-56px);
-  transition: opacity 120ms ease-out;
+  transform: translateY(calc(-1 * var(--fab-lift, 0px)));
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms cubic-bezier(0.2, 0, 0, 1);
   margin-right: 8px;
 
   ion-fab-button {
@@ -136,7 +140,7 @@
   }
 }
 
-.mention-fab__badge {
+.jump-fab__badge {
   position: absolute;
   top: -5px;
   left: 50%;

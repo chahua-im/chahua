@@ -40,6 +40,7 @@ import {
   capRange,
   clamp,
   classifyKeyMutation,
+  computeAlignedScrollTarget,
   detectAlternatingJitter,
   hasMeaningfulScrollDelta,
   normalizeRange,
@@ -556,33 +557,6 @@ export function ChatVirtualScroll({
     container.scrollTop = target;
   }, []);
 
-  // Map a row's top offset through the requested alignment to a clamped, rounded scrollTop.
-  // Shared by the group-row and per-message scroll primitives — the alignment/clamp math is
-  // the drift-prone part and must stay identical between them.
-  const computeAlignedScrollTarget = useCallback(
-    (
-      container: HTMLElement,
-      offsetTop: number,
-      offsetHeight: number,
-      align: 'top' | 'bottom' | 'custom',
-      offsetRatio: number,
-    ): number => {
-      const maxScroll = container.scrollHeight - container.clientHeight;
-      let rawTarget: number;
-      if (align === 'bottom') {
-        rawTarget = offsetTop + offsetHeight - container.clientHeight;
-      } else if (align === 'custom') {
-        // Position row at offsetRatio (0=top, 0.5=center, 1=bottom) from top of viewport
-        const ratio = Math.max(0, Math.min(1, offsetRatio));
-        rawTarget = offsetTop - container.clientHeight * ratio;
-      } else {
-        rawTarget = offsetTop;
-      }
-      return roundScrollValue(Math.max(0, Math.min(rawTarget, maxScroll)));
-    },
-    [],
-  );
-
   const scrollToKeyInternal = useCallback(
     (
       key: string,
@@ -603,7 +577,14 @@ export function ChatVirtualScroll({
         return false;
       }
 
-      const target = computeAlignedScrollTarget(container, row.offsetTop, row.offsetHeight, align, offsetRatio);
+      const target = computeAlignedScrollTarget(
+        container.clientHeight,
+        container.scrollHeight,
+        row.offsetTop,
+        row.offsetHeight,
+        align,
+        offsetRatio,
+      );
       if (behavior === 'auto' && !hasMeaningfulScrollDelta(container.scrollTop, target)) {
         return true;
       }
@@ -618,7 +599,7 @@ export function ChatVirtualScroll({
       container.scrollTo({ top: target, behavior });
       return true;
     },
-    [computeAlignedScrollTarget],
+    [],
   );
 
   // Scroll to a specific message element (not its sender-group) so tall groups don't leave the
@@ -641,7 +622,14 @@ export function ChatVirtualScroll({
       // Absolute scrollTop that places the message row's top edge at the viewport top.
       const offsetTop = elRect.top - containerRect.top + container.scrollTop;
       const offsetHeight = elRect.height;
-      const target = computeAlignedScrollTarget(container, offsetTop, offsetHeight, align, offsetRatio);
+      const target = computeAlignedScrollTarget(
+        container.clientHeight,
+        container.scrollHeight,
+        offsetTop,
+        offsetHeight,
+        align,
+        offsetRatio,
+      );
       logVirtualScroll('scroll-to-message-element-execute', {
         messageId,
         behavior,
@@ -656,7 +644,7 @@ export function ChatVirtualScroll({
       container.scrollTo({ top: target, behavior });
       return true;
     },
-    [computeAlignedScrollTarget],
+    [],
   );
 
   const triggerJumpTargetHighlight = useCallback((key?: string, messageId?: string) => {

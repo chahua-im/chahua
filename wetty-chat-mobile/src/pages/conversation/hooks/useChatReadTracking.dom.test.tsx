@@ -103,14 +103,8 @@ describe('useChatReadTracking', () => {
     expect(markMessagesAsRead).toHaveBeenCalledWith('chat-1', '20');
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'chats/setChatLastReadMessageId',
-        payload: { chatId: 'chat-1', lastReadMessageId: '20' },
-      }),
-    );
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'chats/setChatUnreadCount',
-        payload: { chatId: 'chat-1', unreadCount: 0 },
+        type: 'chats/setChatReadState',
+        payload: { chatId: 'chat-1', lastReadMessageId: '20', unreadCount: 0, unreadMentions: 0 },
       }),
     );
     expect(syncAppBadgeCount).toHaveBeenCalled();
@@ -124,14 +118,8 @@ describe('useChatReadTracking', () => {
     expect(markMessagesAsRead).toHaveBeenCalledWith('chat-1', '20');
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'chats/setChatLastReadMessageId',
-        payload: { chatId: 'chat-1', lastReadMessageId: '20' },
-      }),
-    );
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'chats/setChatUnreadCount',
-        payload: { chatId: 'chat-1', unreadCount: 0 },
+        type: 'chats/setChatReadState',
+        payload: { chatId: 'chat-1', lastReadMessageId: '20', unreadCount: 0, unreadMentions: 0 },
       }),
     );
   });
@@ -177,6 +165,7 @@ describe('useChatReadTracking', () => {
           lastReadMessageId: '20',
           unreadCount: 0,
           unreadMentions: 0,
+          unreadReactions: 0,
         },
       }),
     );

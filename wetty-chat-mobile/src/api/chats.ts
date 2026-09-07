@@ -13,6 +13,8 @@ export interface ChatListEntry {
   lastMessageAt: string | null;
   unreadCount: number;
   unreadMentions: number;
+  /** Absent on payloads from backends that predate reaction badges; treat as 0. */
+  unreadReactions?: number;
   lastReadMessageId?: string | null;
   lastMessage: MessagePreview | null;
   mutedUntil: string | null;
@@ -38,6 +40,8 @@ export interface ChatUnreadCountResponse {
   lastReadMessageId: string | null;
   unreadCount: number;
   unreadMentions: number;
+  /** Absent on older payloads; treat as 0. */
+  unreadReactions?: number;
 }
 
 export function getChats(
@@ -73,6 +77,17 @@ export function getUnreadMentionIds(
   { threadId, max = UNREAD_ID_FETCH_MAX }: { threadId?: string | number; max?: number } = {},
 ): Promise<AxiosResponse<UnreadMentionIdsResponse>> {
   return apiClient.get(`/chats/${chatId}/mentions`, { params: { threadId, max } });
+}
+
+export interface UnreadReactionIdsResponse {
+  messageIds: string[];
+}
+
+export function getUnreadReactionIds(
+  chatId: string | number,
+  { threadId, max = UNREAD_ID_FETCH_MAX }: { threadId?: string | number; max?: number } = {},
+): Promise<AxiosResponse<UnreadReactionIdsResponse>> {
+  return apiClient.get(`/chats/${chatId}/reactions`, { params: { threadId, max } });
 }
 
 export function archiveChat(chatId: string | number): Promise<AxiosResponse<void>> {

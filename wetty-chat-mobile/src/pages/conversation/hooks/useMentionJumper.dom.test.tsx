@@ -3,7 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { AxiosResponse } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getUnreadMentionIds } from '@/api/chats';
-import { pickNextMention, useMentionJumper } from './useMentionJumper';
+import { pickNextUnreadId } from '@/store/mentionIdCache';
+import { useMentionJumper } from './useMentionJumper';
 
 function response<T>(data: T): AxiosResponse<T> {
   return { data } as AxiosResponse<T>;
@@ -11,6 +12,10 @@ function response<T>(data: T): AxiosResponse<T> {
 
 vi.mock('@/api/chats', () => ({
   getUnreadMentionIds: vi.fn(),
+}));
+
+vi.mock('@lingui/core/macro', () => ({
+  t: (strings: TemplateStringsArray | string) => (typeof strings === 'string' ? strings : strings.join('')),
 }));
 
 const dispatch = vi.fn();
@@ -36,20 +41,27 @@ interface HookState {
   jumpToNextMention: () => Promise<void>;
 }
 
+interface RenderOptions {
+  threadId?: string;
+  showToast?: (message: string) => void;
+}
+
 function TestComponent({
   chatId,
   threadId,
   jumpToMessage,
   enabled,
+  showToast,
   onRender,
 }: {
   chatId: string;
   threadId?: string;
   jumpToMessage: (id: string) => void;
   enabled?: boolean;
+  showToast?: (message: string) => void;
   onRender: (state: HookState) => void;
 }) {
-  const state = useMentionJumper({ chatId, threadId, jumpToMessage, enabled });
+  const state = useMentionJumper({ chatId, threadId, jumpToMessage, showToast, enabled });
   onRender(state);
   return null;
 }
@@ -66,29 +78,35 @@ function setChatState(over: { unreadMentions?: number; ids?: string[]; status?: 
   };
 }
 
-describe('pickNextMention', () => {
+function setThreadState(over: { unreadMentions?: number; ids?: string[]; status?: string }) {
+  selectorState.threads.items = [{ threadRootMessage: { id: 'thread-1' }, unreadMentions: over.unreadMentions ?? 0 }];
+  selectorState.threads.unreadMentionIdsByThread = over.ids ? { 'thread-1': over.ids } : {};
+  selectorState.threads.unreadMentionIdsStatusByThread = { 'thread-1': over.status ?? 'idle' };
+}
+
+describe('pickNextUnreadId', () => {
   it('returns null for an empty list', () => {
-    expect(pickNextMention([], null)).toBeNull();
+    expect(pickNextUnreadId([], null)).toBeNull();
   });
 
   it('returns the oldest when nothing has been viewed', () => {
-    expect(pickNextMention(['30', '20', '10'], null)).toBe('10');
+    expect(pickNextUnreadId(['30', '20', '10'], null)).toBe('10');
   });
 
   it('advances to the next-newer after viewing the oldest', () => {
-    expect(pickNextMention(['30', '20', '10'], '10')).toBe('20');
+    expect(pickNextUnreadId(['30', '20', '10'], '10')).toBe('20');
   });
 
   it('wraps to the oldest after viewing the newest', () => {
-    expect(pickNextMention(['30', '20', '10'], '30')).toBe('10');
+    expect(pickNextUnreadId(['30', '20', '10'], '30')).toBe('10');
   });
 
   it('falls back to the oldest when lastJumpedId is no longer in the list', () => {
-    expect(pickNextMention(['30', '20'], '99')).toBe('20');
+    expect(pickNextUnreadId(['30', '20'], '99')).toBe('20');
   });
 
   it('re-views the only mention when it is the sole id', () => {
-    expect(pickNextMention(['30'], '30')).toBe('30');
+    expect(pickNextUnreadId(['30'], '30')).toBe('30');
   });
 });
 
@@ -98,13 +116,15 @@ describe('useMentionJumper', () => {
   let state: HookState;
   const jumpToMessage = vi.fn();
 
-  async function renderHook(enabled?: boolean) {
+  async function renderHook(enabled?: boolean, options?: RenderOptions) {
     await act(async () => {
       root.render(
         <TestComponent
           chatId="chat-1"
+          threadId={options?.threadId}
           jumpToMessage={jumpToMessage}
           enabled={enabled}
+          showToast={options?.showToast}
           onRender={(nextState) => (state = nextState)}
         />,
       );
@@ -125,6 +145,8 @@ describe('useMentionJumper', () => {
     vi.mocked(getUnreadMentionIds).mockResolvedValue(response({ messageIds: ['30', '20', '10'] }));
     dispatch.mockReset();
     setChatState({ unreadMentions: 0, ids: [], status: 'idle' });
+    setThreadState({ unreadMentions: 0, ids: [], status: 'idle' });
+    selectorState.threads.items = [];
   });
 
   afterEach(() => {
@@ -201,6 +223,58 @@ describe('useMentionJumper', () => {
     await act(async () => {
       await state.jumpToNextMention();
     });
+    expect(jumpToMessage).not.toHaveBeenCalled();
+  });
+
+  it('fetches thread-scope mention ids when a threadId is passed', async () => {
+    setThreadState({ unreadMentions: 2, status: 'idle' });
+    await renderHook(undefined, { threadId: 'thread-1' });
+
+    expect(getUnreadMentionIds).toHaveBeenCalledWith('chat-1', { threadId: 'thread-1' });
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'threads/setThreadUnreadMentionIds',
+        payload: { threadRootId: 'thread-1', ids: ['30', '20', '10'] },
+      }),
+    );
+  });
+
+  it('cycles thread mentions oldest-first within the thread cache', async () => {
+    setThreadState({ unreadMentions: 2, ids: ['30', '20'], status: 'ready' });
+    await renderHook(undefined, { threadId: 'thread-1' });
+
+    await act(async () => {
+      await state.jumpToNextMention();
+    });
+    expect(jumpToMessage).toHaveBeenLastCalledWith('20');
+
+    await act(async () => {
+      await state.jumpToNextMention();
+    });
+    expect(jumpToMessage).toHaveBeenLastCalledWith('30');
+
+    await act(async () => {
+      await state.jumpToNextMention();
+    });
+    expect(jumpToMessage).toHaveBeenLastCalledWith('20');
+  });
+
+  it('shows a toast and invalidates the cache when the id fetch fails', async () => {
+    setChatState({ unreadMentions: 3, status: 'idle' });
+    const showToast = vi.fn();
+    vi.mocked(getUnreadMentionIds).mockRejectedValue(new Error('offline'));
+    await renderHook(undefined, { showToast });
+
+    await act(async () => {
+      await state.jumpToNextMention();
+    });
+    expect(showToast).toHaveBeenCalledWith('Failed to load mentions');
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'chats/setChatUnreadMentionIdsStatus',
+        payload: { chatId: 'chat-1', status: 'idle' },
+      }),
+    );
     expect(jumpToMessage).not.toHaveBeenCalled();
   });
 });

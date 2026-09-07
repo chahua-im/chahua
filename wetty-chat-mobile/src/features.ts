@@ -72,6 +72,15 @@ export const FEATURES = {
     enabled: true,
     description: 'Shows a jump-to-mention FAB in the conversation that cycles through unread mentions (oldest-first).',
   },
+  reactionNotifications: {
+    enabled: true,
+    description: 'Shows unread-reaction badges in the chat and thread lists for reactions on my messages.',
+  },
+  jumpToReaction: {
+    enabled: true,
+    description:
+      'Shows a jump-to-reaction FAB in the conversation that cycles through messages with new reactions (oldest-first).',
+  },
 } as const;
 
 export type Feature = keyof typeof FEATURES;
