@@ -1,0 +1,7 @@
+{
+  "name": "chahua-pwa",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular"
+}

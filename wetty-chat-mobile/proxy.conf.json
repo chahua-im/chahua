@@ -1,0 +1,7 @@
+{
+  "/_api/**": {
+    "target": "https://chahui.app",
+    "changeOrigin": true,
+    "ws": true
+  }
+}

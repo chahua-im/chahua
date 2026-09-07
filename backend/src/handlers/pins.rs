@@ -409,7 +409,7 @@ async fn send_pin_system_message(
     path = "/",
     tag = "pins",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     responses(
         (status = OK, body = ListPinsResponse),
@@ -432,7 +432,7 @@ async fn list_pins(
     path = "/",
     tag = "pins",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     request_body = CreatePinBody,
     responses(
@@ -465,8 +465,8 @@ async fn create_pin(
     path = "/{pin_id}",
     tag = "pins",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("pin_id" = i64, Path, description = "Pin ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("pin_id" = String, Path, description = "Pin ID"),
     ),
     responses(
         (status = NO_CONTENT),
@@ -489,8 +489,8 @@ async fn delete_pin(
     path = "/",
     tag = "pins",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = OK, body = ListPinsResponse),
@@ -522,8 +522,8 @@ async fn list_thread_pins(
     path = "/",
     tag = "pins",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     request_body = CreatePinBody,
     responses(
@@ -558,9 +558,9 @@ async fn create_thread_pin(
     path = "/{pin_id}",
     tag = "pins",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
-        ("pin_id" = i64, Path, description = "Pin ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
+        ("pin_id" = String, Path, description = "Pin ID"),
     ),
     responses(
         (status = NO_CONTENT),

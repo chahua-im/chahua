@@ -1,45 +1,65 @@
-# Wetty Chat Mobile (Frontend)
+固定界面文案和静态展示配置写在 HTML 模板中；TypeScript 保存数据、状态和操作。业务判别值使用枚举，优先由 Orval 根据 OpenAPI 生成；普通枚举即可。数值编码的 Snowflake ID 使用 SnowflakeID 品牌类型，与普通 number 区分。
 
-This is a Progressive Web Application (PWA) that supports desktop, mobile platforms
-It uses Ionic Framework v8 and React with Redux as store management and axios as API client
+充分利用最新版 Angular 和 Ionic 自带的功能，尽可能少写自定义 css，使用最新版 Angular 的代码风格和命名习惯。
+你所知的 Angular 和 Ionic 习惯很可能是过时的，要联网确认 Angular 22 和 Ionic 9 的最佳实践。
+代码尽可能简洁，现代，不要乱写防御性代码，防御性条件判断必须确认存在真实可达路径。
+颜色尽可能使用预设的主题色而不是写字面值。
 
-## UI Design
+You are an expert in TypeScript, Angular, and scalable web application development. You write functional, maintainable, performant, and accessible code following Angular and TypeScript best practices.
 
-This application should have more or less a native iOS application feel.
-For forms / list / input design try to follow iOS native settings app.
-Use Ionic Components when applicable, only when native ionic component can't fit our need then design custom styling
+## TypeScript Best Practices
 
-## Style Customization
+- Use strict type checking
+- Prefer type inference when the type is obvious
+- Avoid the `any` type; use `unknown` when type is uncertain
 
-- Use a scss module when possible
-- Avoid using inline styles unless it needs to be computed on the fly
+## Angular Best Practices
 
-## Localization
+- Always use standalone components over NgModules
+- Must NOT set `standalone: true` inside Angular decorators. It's the default in Angular v20+.
+- Do NOT set `changeDetection: ChangeDetectionStrategy.OnPush` explicitly. `OnPush` is the default in Angular v22+.
+- Use signals for state management
+- Implement lazy loading for feature routes
+- Do NOT use the `@HostBinding` and `@HostListener` decorators. Put host bindings inside the `host` object of the `@Component` or `@Directive` decorator instead
+- Use `NgOptimizedImage` for all static images.
+  - `NgOptimizedImage` does not work for inline base64 images.
 
-- This project uses `lingui` for localization (i18n) support.
-- When writing UI code that include user visible text, we should use `t` or `Trans` when ever applicable.
+## Accessibility Requirements
 
-## Structuring
+- It MUST pass all AXE checks.
+- It MUST follow all WCAG AA minimums, including focus management, color contrast, and ARIA attributes.
 
-- Use clean structure, create a component to abstract reusable / complex component
-- Do not create huge monolitic page components that becomes a maintance nightmare
-- Use Ionic component when it fits, avoid reinventing the wheel and keep style consistent
+### Components
 
-## Architecture Notes
+- Keep components small and focused on a single responsibility
+- Use `input()` and `output()` functions instead of decorators
+- Use `model()` for two-way bound properties with `[(prop)]` syntax instead of pairing `input()` with `output()`
+- Use `computed()` for derived state
+- Use `linkedSignal()` for state derived from multiple reactive sources that must stay synchronized
+- Prefer inline templates for small components
+- Prefer Signal Forms (`@angular/forms/signals`) for new forms. They are stable in Angular v22+ and provide signal-based state, type-safe field access, and schema-based validation
+- When not using Signal Forms, prefer Reactive forms instead of Template-driven ones
+- Do NOT use `ngClass`, use `class` bindings instead
+- Do NOT use `ngStyle`, use `style` bindings instead
+- When using external templates/styles, use paths relative to the component TS file.
 
-- Routing uses `react-router` / `react-router-dom` **v5** (via Ionic's `IonReactRouter`). Do not use v6+ APIs (`useNavigate`, `Routes`, etc.); use v5 idioms (`useHistory`, `Route` with `component`/`render`).
-- Real-time updates come through a singleton WebSocket in `src/api/ws.ts` (ticket auth, reconnect, app-lifecycle handling), wired into Redux via `connectionSlice` and message event listeners.
-- Layout branches on `useIsDesktop` between `MobileLayout` and `DesktopSplitLayout` in `src/App.tsx` — desktop renders many flows as modals over a split view, so new pages usually need both branches handled.
+## State Management
 
-## Feature Gating
+- Use signals for local component state
+- Use `computed()` for derived state
+- Keep state transformations pure and predictable
+- Do NOT use `mutate` on signals, use `update` or `set` instead
 
-- New user-visible features should have an explicit flag in `src/features.ts`.
-- Gate every frontend entry point for the feature, including buttons, menu items, message actions, routes, and desktop modal branches.
-- Prefer default-enabled gates for completed features and default-disabled gates for staged rollout or internal-only features.
-- The `__FEATURE_GATES_ENABLED__` build-time flag (set per Vite config: `vite.config.{dev,staging,prod}.ts`) can force all gates on; `src/features.ts` consumes it.
+## Templates
 
-## Lint & Tests
+- Keep templates simple and avoid complex logic
+- Use native control flow (`@if`, `@for`, `@switch`) instead of `*ngIf`, `*ngFor`, `*ngSwitch`
+- Use the async pipe to handle observables
+- Do not assume globals like (`new Date()`) are available.
 
-After making changes, run `npm run verify` and ensure it passes.
-`npm run verify` runs `npm run lint`, `npm run typecheck`, and the full Vitest suite (`npm run test:run`) — test failures block verify.
-The test setup uses Vitest with two projects: `unit` (node) and `dom` (happy-dom, `*.dom.test.tsx`). Use `npm run test:unit` / `npm run test:dom` for a faster targeted run.
+## Services
+
+- Design services around a single responsibility
+- Use the `providedIn: 'root'` option for singleton services
+- Prefer the `@Service` decorator over `@Injectable({providedIn: 'root'})` for new singleton services (Angular v22+)
+- Use the `inject()` function instead of constructor injection

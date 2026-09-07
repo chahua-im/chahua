@@ -1,0 +1,38 @@
+@if (!loading() && !session.user() && error() === undefined) {
+  <h1>418 I'm a teapot</h1>
+} @else {
+  <ion-app>
+    @if (session.user()) {
+      <ion-split-pane when="md" contentId="main" (ionSplitPaneVisible)="splitPaneVisible.set($event.detail.visible)">
+        <ion-menu contentId="main" [swipeGesture]="false" aria-label="会话列表">
+          <app-chat-list [active]="splitPaneVisible()"></app-chat-list>
+        </ion-menu>
+        <!-- Browser history owns the edge swipe; a second gesture would overlap Safari's transition. -->
+        <ion-router-outlet
+          #outlet
+          id="main"
+          [animated]="!splitPaneVisible()"
+          [swipeGesture]="false"
+          (stackWillChange)="prepareTransition(outlet)"></ion-router-outlet>
+      </ion-split-pane>
+      <app-settings-modal />
+    } @else {
+      <ion-content class="ion-text-center" [class.ion-padding]="!loading()">
+        @if (loading()) {
+          <div class="loading-status" role="status" aria-label="正在登录">
+            <ion-spinner aria-hidden="true"></ion-spinner>
+          </div>
+        } @else if (error() !== undefined) {
+          <p role="alert">
+            @if (error() === expired) {
+              授权已失效，请重新打开授权链接。
+            } @else {
+              暂时无法登录，请重试。
+            }
+          </p>
+          <ion-button (click)="initialize()">重试</ion-button>
+        }
+      </ion-content>
+    }
+  </ion-app>
+}

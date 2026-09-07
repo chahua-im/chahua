@@ -1,0 +1,32 @@
+ion-content {
+  --background: var(--ion-color-light);
+}
+
+.collection-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+ion-button:not([color]),
+ion-back-button {
+  --color: var(--ion-color-primary-shade);
+}
+
+@media (prefers-color-scheme: dark) {
+  ion-button:not([color]),
+  ion-back-button {
+    --color: color-mix(in srgb, var(--ion-color-primary-tint) 85%, var(--ion-text-color));
+  }
+
+  ion-button[color='danger']::part(native) {
+    color: var(--ion-color-danger-tint);
+  }
+}
+
+.saved-source {
+  margin: 8px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ion-color-medium);
+}

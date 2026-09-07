@@ -1,0 +1,101 @@
+.menu-surface {
+  display: block;
+  height: 100%;
+  position: relative;
+  padding: var(--ion-safe-area-top, 0px) var(--ion-safe-area-right, 0px) var(--ion-safe-area-bottom, 0px)
+    var(--ion-safe-area-left, 0px);
+}
+.menu-stack {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.own {
+  align-items: flex-end;
+}
+.panel,
+.emoji-panel {
+  background: var(--ion-background-color, #fff);
+  color: var(--ion-text-color);
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(var(--ion-color-dark-rgb), 0.12);
+}
+
+.picker-back {
+  min-height: 44px;
+  padding: 8px 16px;
+  color: var(--ion-color-primary-shade);
+}
+.panel {
+  width: 276px;
+  max-width: 100%;
+  padding: 6px;
+}
+.reactions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+button {
+  background: transparent;
+  color: inherit;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:hover,
+button[aria-pressed='true'] {
+  background: var(--ion-color-light);
+}
+button:focus-visible {
+  outline: 2px solid var(--ion-color-primary);
+  outline-offset: -2px;
+}
+button:disabled {
+  opacity: 0.5;
+}
+.reactions button {
+  width: 44px;
+  height: 44px;
+  font-size: 28px;
+  padding: 0;
+}
+.reactions ion-icon {
+  color: var(--ion-color-medium-shade);
+  font-size: 26px;
+  vertical-align: middle;
+}
+.actions {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+.actions button {
+  height: 63px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0;
+}
+.actions ion-icon {
+  font-size: 23px;
+}
+.actions span {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.preview {
+  max-width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.emoji-panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(350px, calc(100% - 24px));
+  overflow: hidden;
+}

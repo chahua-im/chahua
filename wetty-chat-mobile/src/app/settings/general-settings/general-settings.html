@@ -1,0 +1,34 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-nav-link routerDirection="back">
+        <ion-button aria-label="返回设置">
+          <ion-icon slot="start" [icon]="backIcon" aria-hidden="true"></ion-icon>
+          返回
+        </ion-button>
+      </ion-nav-link>
+    </ion-buttons>
+    <ion-title role="heading" aria-level="1">通用</ion-title>
+    <ion-buttons slot="end"><ion-button (click)="modal.dismiss()">完成</ion-button></ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content color="light">
+  <ion-list [inset]="true">
+    <ion-item>
+      <ion-icon slot="start" [icon]="threadsIcon" color="primary" aria-hidden="true"></ion-icon>
+      <ion-toggle
+        [checked]="preferences.showThreadsInMessages()"
+        (ionChange)="preferences.setShowThreadsInMessages($event.detail.checked)">
+        <span class="ion-text-wrap">在“消息”标签页中显示话题</span>
+      </ion-toggle>
+    </ion-item>
+    <ion-item lines="none">
+      <ion-icon slot="start" [icon]="avatarsIcon" color="primary" aria-hidden="true"></ion-icon>
+      <ion-toggle
+        [checked]="preferences.showAllAvatars()"
+        (ionChange)="preferences.setShowAllAvatars($event.detail.checked)">
+        <span class="ion-text-wrap">在所有消息旁显示头像</span>
+      </ion-toggle>
+    </ion-item>
+  </ion-list>
+</ion-content>
