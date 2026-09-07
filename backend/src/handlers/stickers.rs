@@ -353,7 +353,7 @@ async fn post_pack(
     tag = "stickers",
     request_body = UpdateStickerPackBody,
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
         (status = 200, description = "Sticker pack updated", body = StickerPackDetailResponse)
@@ -401,7 +401,7 @@ async fn patch_pack(
     path = "/packs/{pack_id}",
     tag = "stickers",
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
         (status = 204, description = "Sticker pack deleted")
@@ -428,7 +428,7 @@ async fn delete_pack(
     path = "/packs/{pack_id}",
     tag = "stickers",
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
         (status = 200, description = "Sticker pack details", body = StickerPackDetailResponse)
@@ -517,7 +517,7 @@ async fn get_my_owned_packs(
     path = "/packs/{pack_id}/subscription",
     tag = "stickers",
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
         (status = 204, description = "Subscribed to sticker pack")
@@ -558,7 +558,7 @@ async fn put_subscription(
     path = "/packs/{pack_id}/subscription",
     tag = "stickers",
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
         (status = 204, description = "Unsubscribed from sticker pack")
@@ -612,7 +612,7 @@ struct PostStickerMultipart {
     path = "/packs/{pack_id}/stickers",
     tag = "stickers",
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     request_body(content = PostStickerMultipart, content_type = "multipart/form-data"),
     responses(
@@ -804,8 +804,8 @@ async fn post_pack_sticker(
     path = "/packs/{pack_id}/stickers/{sticker_id}",
     tag = "stickers",
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID"),
-        ("sticker_id" = i64, Path, description = "Sticker ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID"),
+        ("sticker_id" = String, Path, description = "Sticker ID")
     ),
     responses(
         (status = 204, description = "Sticker added to pack")
@@ -843,8 +843,8 @@ async fn put_pack_sticker(
     path = "/packs/{pack_id}/stickers/{sticker_id}",
     tag = "stickers",
     params(
-        ("pack_id" = i64, Path, description = "Sticker pack ID"),
-        ("sticker_id" = i64, Path, description = "Sticker ID")
+        ("pack_id" = String, Path, description = "Sticker pack ID"),
+        ("sticker_id" = String, Path, description = "Sticker ID")
     ),
     responses(
         (status = 204, description = "Sticker removed from pack")
@@ -874,7 +874,7 @@ async fn delete_pack_sticker(
     path = "/{sticker_id}",
     tag = "stickers",
     params(
-        ("sticker_id" = i64, Path, description = "Sticker ID")
+        ("sticker_id" = String, Path, description = "Sticker ID")
     ),
     responses(
         (status = 200, description = "Sticker details", body = StickerDetailResponse)
@@ -922,7 +922,7 @@ async fn get_sticker(
     path = "/{sticker_id}/favorite",
     tag = "stickers",
     params(
-        ("sticker_id" = i64, Path, description = "Sticker ID")
+        ("sticker_id" = String, Path, description = "Sticker ID")
     ),
     responses(
         (status = 204, description = "Sticker favorited")
@@ -959,7 +959,7 @@ async fn put_favorite(
     path = "/{sticker_id}/favorite",
     tag = "stickers",
     params(
-        ("sticker_id" = i64, Path, description = "Sticker ID")
+        ("sticker_id" = String, Path, description = "Sticker ID")
     ),
     responses(
         (status = 204, description = "Sticker unfavorited")

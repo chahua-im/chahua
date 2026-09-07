@@ -34,7 +34,7 @@ struct ChatIdPath {
     path = "/",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ListSavedMessagesQuery,
     ),
     responses(

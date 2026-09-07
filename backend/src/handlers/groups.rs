@@ -50,14 +50,14 @@ pub(super) struct ChatIdPath {
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-enum GroupSearchMode {
+pub(crate) enum GroupSearchMode {
     Autocomplete,
     Submitted,
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-enum GroupSelectorScope {
+pub(crate) enum GroupSelectorScope {
     Manageable,
     Joined,
     Public,
@@ -424,7 +424,7 @@ async fn get_groups(
     path = "/{chat_id}",
     tag = "groups",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     responses(
         (status = OK, body = GroupInfoResponse),
@@ -450,7 +450,7 @@ async fn get_group(
     path = "/{chat_id}/avatar/upload-url",
     tag = "groups",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     request_body = AvatarUploadUrlRequest,
     responses(
@@ -527,7 +527,7 @@ async fn post_avatar_upload_url(
     path = "/{chat_id}",
     tag = "groups",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     request_body = UpdateChatBody,
     responses(
@@ -611,7 +611,7 @@ async fn patch_group(
     path = "/{chat_id}/mute",
     tag = "groups",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     request_body = MuteBody,
     responses(
@@ -655,7 +655,7 @@ async fn put_mute(
     path = "/{chat_id}/mute",
     tag = "groups",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     responses(
         (status = NO_CONTENT),

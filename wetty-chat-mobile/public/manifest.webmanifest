@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "茶话",
+  "short_name": "茶话",
+  "lang": "zh-CN",
+  "start_url": "/chats",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#f7f7f7",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "icons/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

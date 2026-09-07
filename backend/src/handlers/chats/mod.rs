@@ -370,7 +370,7 @@ pub struct MarkAsReadBody {
     path = "/read",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     request_body = MarkAsReadBody,
     responses(
@@ -421,7 +421,7 @@ pub struct MarkAsUnreadBody {
     path = "/unread",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     request_body(content = Option<MarkAsUnreadBody>),
     responses(
@@ -504,7 +504,7 @@ async fn mark_as_unread(
     path = "/unread",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     responses(
         (status = 200, description = "Capped chat unread count", body = MarkChatReadStateResponse),
@@ -571,7 +571,7 @@ async fn get_unread_count(
     path = "/archive",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     responses(
         (status = NO_CONTENT),
@@ -621,7 +621,7 @@ async fn archive_chat(
     path = "/archive",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     responses(
         (status = NO_CONTENT),

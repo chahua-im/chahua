@@ -131,7 +131,7 @@ pub(super) fn require_admin_role(
     path = "/",
     tag = "members",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ("limit" = Option<i64>, Query, description = "Page size limit"),
         ("after" = Option<i32>, Query, description = "Cursor for pagination"),
         ("q" = Option<String>, Query, description = "Search query"),
@@ -207,7 +207,7 @@ async fn get_members(
     path = "/",
     tag = "members",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
     ),
     request_body = AddMemberBody,
     responses(
@@ -331,7 +331,7 @@ struct RemoveMemberQuery {
     path = "/{uid}",
     tag = "members",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ("uid" = i32, Path, description = "User ID of the member"),
         RemoveMemberQuery,
     ),
@@ -469,7 +469,7 @@ async fn delete_remove_member(
     path = "/{uid}",
     tag = "members",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ("uid" = i32, Path, description = "User ID of the member"),
     ),
     request_body = UpdateMemberBody,
