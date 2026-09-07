@@ -5,13 +5,7 @@
       <span class="count">{{ reaction.count }}</span>
     </span>
   } @else {
-    <button
-      type="button"
-      class="reaction"
-      [class.reacted]="reaction.reactedByMe"
-      [attr.aria-pressed]="!!reaction.reactedByMe"
-      [attr.aria-label]="(reaction.reactedByMe ? '取消表态 ' : '添加表态 ') + reaction.emoji"
-      (click)="react.emit(reaction.emoji)">
+    <button type="button" class="reaction" [class.reacted]="reaction.reactedByMe" (click)="react.emit(reaction.emoji)">
       <span class="emoji">{{ reaction.emoji }}</span>
       <span class="count">{{ reaction.count }}</span>
     </button>

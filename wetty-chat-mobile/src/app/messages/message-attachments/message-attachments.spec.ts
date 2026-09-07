@@ -1,7 +1,7 @@
-import { encodeId } from '../../api/snowflake-id';
 import { TestBed } from '@angular/core/testing';
-import { MessageType } from '../../../generated/models';
 import type { AttachmentResponse, MessageResponse } from '../../../generated/models';
+import { MessageType } from '../../../generated/models';
+import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
 import { MessageAttachments } from './message-attachments';
 

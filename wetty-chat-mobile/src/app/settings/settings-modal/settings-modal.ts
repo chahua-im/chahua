@@ -11,7 +11,7 @@ import { Settings, SettingsDismissRole } from '../settings/settings';
   selector: 'app-settings-modal',
   imports: [IonModal, IonNav],
   template: `
-    <ion-modal aria-label="设置" [isOpen]="open()" (didDismiss)="dismissed($event.detail)">
+    <ion-modal [isOpen]="open()" (didDismiss)="dismissed($event.detail)">
       <ng-template><ion-nav [root]="settingsPage"></ion-nav></ng-template>
     </ion-modal>
   `,

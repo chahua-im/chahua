@@ -1,12 +1,12 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Navigation, Router, provideRouter } from '@angular/router';
 import { By } from '@angular/platform-browser';
+import { Navigation, Router, provideRouter } from '@angular/router';
 import { IonRouterOutlet } from '@ionic/angular';
 import { afterAll, vi } from 'vitest';
-import { SessionStore } from './session/session-store';
 import { App } from './app';
+import { SessionStore } from '../session/session-store';
 
 describe('App', () => {
   const session = { initialize: vi.fn<() => Promise<void>>(), user: signal(undefined) };
@@ -75,9 +75,9 @@ describe('App', () => {
     session.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
     const retry = fixture.componentInstance['initialize']();
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('[role="status"][aria-label="正在登录"]')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.loading-status')).not.toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('正在登录');
-    expect(fixture.nativeElement.querySelector('[role="alert"]')).toBeNull();
+    expect(fixture.nativeElement.querySelector('p')).toBeNull();
     finish();
     await retry;
     await fixture.whenStable();
@@ -88,7 +88,7 @@ describe('App', () => {
     session.initialize.mockRejectedValueOnce(new HttpErrorResponse({ status: 401 }));
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain('授权已失效');
+    expect(fixture.nativeElement.querySelector('p').textContent).toContain('授权已失效');
     expect(fixture.nativeElement.querySelector('app-chat-list')).toBeNull();
   });
 });

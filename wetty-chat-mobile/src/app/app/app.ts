@@ -1,6 +1,7 @@
-import { Component, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Router } from '@angular/router';
+import { Component, inject, linkedSignal, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router } from '@angular/router';
 import {
   IonApp,
   IonButton,
@@ -11,9 +12,11 @@ import {
   IonSplitPane,
   iosTransitionAnimation,
 } from '@ionic/angular';
-import { SettingsModal } from './settings/settings-modal/settings-modal';
-import { ChatList } from './chats/chat-list/chat-list';
-import { SessionStore } from './session/session-store';
+import { filter, map } from 'rxjs';
+import { ChatList } from '../chats/chat-list/chat-list';
+import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
+import { SessionStore } from '../session/session-store';
+import { SettingsModal } from '../settings/settings-modal/settings-modal';
 
 enum StartupError {
   Expired,
@@ -25,20 +28,22 @@ enum StartupError {
   templateUrl: './app.html',
   styleUrl: './app.scss',
   host: { '(window:popstate)': 'browserTransition.set($event.hasUAVisualTransition)' },
-  imports: [
-    IonApp,
-    IonButton,
-    IonContent,
-    IonMenu,
-    IonRouterOutlet,
-    IonSpinner,
-    IonSplitPane,
-    ChatList,
-    SettingsModal,
-  ],
+  imports: [IonApp, IonButton, IonContent, IonMenu, IonRouterOutlet, IonSpinner, IonSplitPane, ChatList, SettingsModal],
 })
 export class App {
   private readonly router = inject(Router);
+  private readonly routeSelection = toSignal(
+    this.router.events.pipe(
+      filter((event) => event instanceof NavigationEnd),
+      map(() => listSelection(this.router.routerState.snapshot.root)),
+    ),
+    { initialValue: listSelection(this.router.routerState.snapshot.root) },
+  );
+  protected readonly sidebarSelection = linkedSignal({
+    source: this.routeSelection,
+    computation: (selection, previous): ListSelection =>
+      selection ?? previous?.value ?? { tab: ListTab.Messages, archived: false, requestHistory: false },
+  });
   protected readonly browserTransition = signal(false);
   protected readonly session = inject(SessionStore);
   protected readonly expired = StartupError.Expired;

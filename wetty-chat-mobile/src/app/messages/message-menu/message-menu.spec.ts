@@ -1,17 +1,16 @@
-import { By } from '@angular/platform-browser';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
 import { IonModal } from '@ionic/angular';
 import { vi } from 'vitest';
 import { GroupRole, MessageType } from '../../../generated/models';
-import { testChat, testMessage, testUser } from '../../api/testing';
 import { encodeId } from '../../api/snowflake-id';
-import { ChatStore } from '../../chats/chat-store';
-import { ConversationStore } from '../../conversations/conversation-store';
-import { MessageActions } from '../../conversations/message-actions';
-import { MessageNotice } from '../../conversations/message-notice';
+import { testChat, testMessage, testUser } from '../../api/testing';
 import { SessionStore } from '../../session/session-store';
+import { ChatStore } from '../../chats/chat-store';
+import { MessageActions } from '../message-actions';
+import { MessageNotice } from '../message-notice';
 import { Message } from '../message/message';
 import { MessageAction, MessageMenu } from './message-menu';
 
@@ -19,14 +18,18 @@ describe('MessageMenu', () => {
   let fixture: ComponentFixture<MessageMenu>;
   let menu: MessageMenu;
   const messages = signal([testMessage]);
+  function setMessages(value: (typeof testMessage)[]) {
+    messages.set(value);
+    if (fixture && !fixture.componentRef.hostView.destroyed) fixture.componentRef.setInput('messages', value);
+  }
   const admin = signal(false);
   const pinned = signal(false);
   const conversation = {
     items: messages,
-    pinsLoading: signal(false),
-    pinFor: () => (pinned() ? { message: messages()[0] } : undefined),
-    ensurePins: vi.fn().mockResolvedValue(undefined),
-    setPinned: vi.fn().mockResolvedValue(undefined),
+    loading: signal(false),
+    get: () => (pinned() ? { message: messages()[0] } : undefined),
+    ensure: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn().mockResolvedValue(undefined),
   };
   const actions = {
     save: vi.fn().mockResolvedValue(undefined),
@@ -46,7 +49,7 @@ describe('MessageMenu', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    messages.set([testMessage]);
+    setMessages([testMessage]);
     admin.set(false);
     pinned.set(false);
     vi.stubGlobal(
@@ -63,10 +66,10 @@ describe('MessageMenu', () => {
       imports: [MessageMenu],
       providers: [
         provideRouter([]),
-        { provide: ConversationStore, useValue: conversation },
         {
           provide: ChatStore,
           useValue: {
+            pins: () => conversation,
             get: () => ({ myRole: admin() ? GroupRole.admin : GroupRole.member }),
             ensureDetails: vi.fn().mockResolvedValue(undefined),
           },
@@ -81,6 +84,7 @@ describe('MessageMenu', () => {
     fixture = TestBed.createComponent(MessageMenu);
     menu = fixture.componentInstance;
     fixture.componentRef.setInput('chatId', testChat.id);
+    fixture.componentRef.setInput('messages', messages());
     fixture.detectChanges();
     menu.open(selection());
     // Ionic mounts this template when the native overlay presents.
@@ -111,24 +115,24 @@ describe('MessageMenu', () => {
     fixture.detectChanges();
     expect(labels()).not.toContain('话题');
     admin.set(true);
-    messages.set([{ ...testMessage, messageType: MessageType.sticker }]);
+    setMessages([{ ...testMessage, messageType: MessageType.sticker }]);
     fixture.detectChanges();
     expect(labels()).toEqual(['回复', '链接', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions')).toBeNull();
-    messages.set([{ ...testMessage, messageType: MessageType.invite }]);
+    setMessages([{ ...testMessage, messageType: MessageType.invite }]);
     fixture.detectChanges();
     expect(labels()).toEqual(['回复', '置顶', '撤回']);
-    messages.set([{ ...testMessage, isDeleted: true }]);
+    setMessages([{ ...testMessage, isDeleted: true }]);
     fixture.detectChanges();
     expect(labels()).toEqual(['回复', '链接']);
   });
 
   it('toggles the selected reaction and delegates replying to its page', async () => {
-    messages.set([{ ...testMessage, reactions: [{ emoji: '👍', count: 1, reactedByMe: true }] }]);
+    setMessages([{ ...testMessage, reactions: [{ emoji: '👍', count: 1, reactedByMe: true }] }]);
     fixture.detectChanges();
     const reply = vi.fn();
     menu.reply.subscribe(reply);
-    const selected = fixture.nativeElement.querySelector('.reactions button[aria-pressed="true"]');
+    const selected = fixture.nativeElement.querySelector('.reactions button.selected');
     expect(selected.textContent.trim()).toBe('👍');
     selected.click();
     expect(actions.toggleReaction).toHaveBeenCalledWith(messages()[0], '👍');
@@ -139,7 +143,7 @@ describe('MessageMenu', () => {
   });
 
   it('allows an admin to remove a deleted pin but never offers it to members', () => {
-    messages.set([{ ...testMessage, isDeleted: true }]);
+    setMessages([{ ...testMessage, isDeleted: true }]);
     pinned.set(true);
     fixture.detectChanges();
     expect(labels()).not.toContain('取消置顶');
@@ -174,10 +178,10 @@ describe('MessageMenu', () => {
   it('runs only the confirmed pin action and retains its intended state', async () => {
     admin.set(true);
     await menu['choose'](MessageAction.Pin);
-    expect(conversation.setPinned).not.toHaveBeenCalled();
+    expect(conversation.set).not.toHaveBeenCalled();
     pinned.set(true);
     await menu['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
-    expect(conversation.setPinned).toHaveBeenCalledWith(testMessage, true);
+    expect(conversation.set).toHaveBeenCalledWith(testMessage, true);
     expect(menu['notice']()).toBe(MessageNotice.Pinned);
   });
 

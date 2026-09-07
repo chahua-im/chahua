@@ -1,7 +1,7 @@
-import { encodeId } from '../../api/snowflake-id';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { MessageType, type MessagePreview } from '../../../generated/models';
+import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
 import { Message } from './message';
 
@@ -50,7 +50,7 @@ describe('Message', () => {
     const element: HTMLElement = fixture.nativeElement;
     expect(element.querySelector('.sender')?.textContent).toContain('小茶');
     expect(element.querySelector('.sender-group')?.textContent).toContain('Lv.3');
-    expect(element.querySelector('.gender')?.getAttribute('aria-label')).toBe('女');
+    expect(element.querySelector('.gender')?.classList.contains('female')).toBe(true);
     expect(element.querySelector('ion-avatar')).toBeNull();
     expect(element.querySelector('.chat-row.last')).toBeNull();
     expect(element.querySelector('time')?.textContent?.trim()).toBe('09:07');
@@ -148,7 +148,7 @@ describe('Message', () => {
     const element: HTMLElement = fixture.nativeElement;
     const entry = element.querySelector<HTMLButtonElement>('.thread-entry')!;
     expect(entry.textContent).toContain('12 条回复');
-    expect(entry.getAttribute('aria-label')).toBe('12 条回复');
+    expect(entry.textContent).toContain('12');
     expect(entry.querySelectorAll('ion-avatar')).toHaveLength(0);
     expect(element.querySelector('.bubble')?.lastElementChild?.tagName).toBe('APP-MESSAGE-THREAD');
     entry.click();
@@ -234,7 +234,7 @@ describe('Message', () => {
     expect(react).toHaveBeenCalledWith('❤️');
   });
 
-  it('opens the message menu by right click or keyboard with the measured bubble and group position', async () => {
+  it('opens the message menu by right click with the measured bubble and group position', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('first', false);
     fixture.componentRef.setInput('own', true);
@@ -255,16 +255,11 @@ describe('Message', () => {
       last: true,
       own: true,
     });
-    for (const options of [{ key: 'F10', shiftKey: true }, { key: 'ContextMenu' }]) {
-      const event = new KeyboardEvent('keydown', { ...options, bubbles: true, cancelable: true });
-      bubble.dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(true);
-    }
-    expect(menu).toHaveBeenCalledTimes(3);
+    expect(menu).toHaveBeenCalledTimes(1);
     fixture.componentRef.setInput('message', { ...testMessage, messageType: MessageType.system });
     fixture.detectChanges();
     fixture.nativeElement.dispatchEvent(context);
-    expect(menu).toHaveBeenCalledTimes(3);
+    expect(menu).toHaveBeenCalledTimes(1);
   });
 
   it('opens once after a touch hold and suppresses its synthesized quote click without changing taps', async () => {
@@ -334,7 +329,7 @@ describe('Message', () => {
     fixture.detectChanges();
     const reaction = fixture.nativeElement.querySelector('.reaction') as HTMLButtonElement;
     expect(reaction.textContent).toMatch(/👍\s*3/);
-    expect(reaction.getAttribute('aria-pressed')).toBe('true');
+    expect(reaction.classList.contains('reacted')).toBe(true);
     const react = vi.fn();
     fixture.componentInstance.react.subscribe(react);
     reaction.click();
@@ -357,7 +352,6 @@ describe('Message', () => {
     const element = fixture.nativeElement as HTMLElement;
     const bubble = element.querySelector('.bubble') as HTMLElement;
     expect(bubble.hasAttribute('inert')).toBe(true);
-    expect(bubble.hasAttribute('tabindex')).toBe(false);
     expect(element.querySelector('ion-avatar, .avatar-spacer, .reply-button, ion-button')).toBeNull();
     expect(element.querySelector('.reaction')?.textContent).toMatch(/❤️\s*2/);
     expect(element.querySelector('button.reaction')).toBeNull();

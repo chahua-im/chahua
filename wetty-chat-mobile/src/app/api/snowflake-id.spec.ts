@@ -1,6 +1,6 @@
 import { expectTypeOf } from 'vitest';
-import { decodeId, encodeId, type SnowflakeID } from './snowflake-id';
 import { mergeMessages } from '../messages/message-merge';
+import { decodeId, encodeId, type SnowflakeID } from './snowflake-id';
 import { testMessage } from './testing';
 
 describe('Snowflake IDs', () => {
