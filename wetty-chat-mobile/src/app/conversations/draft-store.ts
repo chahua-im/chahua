@@ -1,6 +1,6 @@
 import { computed, inject, linkedSignal, Service } from '@angular/core';
-import { SessionStore } from '../session/session-store';
 import { decodeId, type SnowflakeID } from '../api/snowflake-id';
+import { SessionStore } from '../session/session-store';
 
 export interface Draft {
   text: string;

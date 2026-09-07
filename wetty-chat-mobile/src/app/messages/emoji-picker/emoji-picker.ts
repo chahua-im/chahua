@@ -1,6 +1,6 @@
 import { Component, CUSTOM_ELEMENTS_SCHEMA, output } from '@angular/core';
-import type { EmojiClickEvent } from 'emoji-picker-element/shared';
 import 'emoji-picker-element';
+import type { EmojiClickEvent } from 'emoji-picker-element/shared';
 
 @Component({
   selector: 'app-emoji-picker',
@@ -17,7 +17,6 @@ import 'emoji-picker-element';
       --input-border-color: var(--ion-color-medium);
       --input-placeholder-color: var(--ion-color-medium-shade);
       --indicator-color: var(--ion-color-primary);
-      --outline-color: var(--ion-color-primary);
     }
   `,
 })

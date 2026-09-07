@@ -1,20 +1,61 @@
-import { vi } from 'vitest';
-import { provideRouter } from '@angular/router';
-import { ChatListStore } from '../chat-list-store';
-import { ChatStore } from '../chat-store';
-import { SessionStore } from '../../session/session-store';
-import { Preferences } from '../../settings/preferences';
 import { Component, input, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter, withComponentInputBinding } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
+import { routes } from '../../app.routes';
+import { ListTab } from '../list-tabs';
+import { vi } from 'vitest';
+import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
+import { ChatListStore } from '../chat-list-store';
 import { ChatList } from '../chat-list/chat-list';
+import { ChatStore } from '../chat-store';
 import { ChatListPage } from './chat-list.page';
+
+beforeEach(() => vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false })));
+afterEach(() => vi.unstubAllGlobals());
 
 @Component({ selector: 'app-chat-list', template: '' })
 class ListStub {
   readonly active = input(true);
+  readonly selection = input();
 }
 
 describe('ChatListPage', () => {
+  it('passes route selection to the list with false defaults for missing flags', async () => {
+    await TestBed.configureTestingModule({
+      imports: [ChatListPage],
+      providers: [provideRouter(routes, withComponentInputBinding())],
+    })
+      .overrideComponent(ChatListPage, { remove: { imports: [ChatList] }, add: { imports: [ListStub] } })
+      .compileComponents();
+    const harness = await RouterTestingHarness.create();
+    for (const [url, selection] of [
+      ['/chats', { tab: ListTab.Messages, archived: false, requestHistory: false }],
+      ['/chats/groups/archived', { tab: ListTab.Groups, archived: true, requestHistory: false }],
+      ['/chats/friends/archived-requests', { tab: ListTab.Friends, archived: false, requestHistory: true }],
+    ] as const) {
+      const page = await harness.navigateByUrl(url, ChatListPage);
+      expect(page['selection']()).toEqual(selection);
+    }
+  });
+  it('creates the mobile list only while the viewport is narrow', async () => {
+    const media = Object.assign(new EventTarget(), { matches: true });
+    vi.stubGlobal('matchMedia', () => media);
+    await TestBed.configureTestingModule({ imports: [ChatListPage] })
+      .overrideComponent(ChatListPage, { remove: { imports: [ChatList] }, add: { imports: [ListStub] } })
+      .compileComponents();
+    const fixture = TestBed.createComponent(ChatListPage);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('app-chat-list')).toBeNull();
+    media.dispatchEvent(Object.assign(new Event('change'), { matches: false }));
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('app-chat-list')).not.toBeNull();
+    media.dispatchEvent(Object.assign(new Event('change'), { matches: true }));
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('app-chat-list')).toBeNull();
+  });
+
   it('places the mobile list alongside the desktop conversation placeholder', async () => {
     await TestBed.configureTestingModule({ imports: [ChatListPage] })
       .overrideComponent(ChatListPage, { remove: { imports: [ChatList] }, add: { imports: [ListStub] } })
@@ -22,7 +63,7 @@ describe('ChatListPage', () => {
     const fixture = TestBed.createComponent(ChatListPage);
     await fixture.whenStable();
     const element: HTMLElement = fixture.nativeElement;
-    expect(element.querySelector('app-chat-list')?.classList.contains('ion-hide-md-up')).toBe(true);
+    expect(element.querySelector('app-chat-list')).not.toBeNull();
     expect(element.querySelector(':scope > ion-content, :scope > ion-header')).toBeNull();
     expect(element.querySelector('ion-content')?.parentElement?.classList.contains('ion-hide-md-down')).toBe(true);
     expect(element.textContent).toContain('从左侧选择一个会话');

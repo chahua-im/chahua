@@ -1,11 +1,8 @@
-import { DraftStore } from '../draft-store';
-import { scrollActivity } from '../scroll-activity';
-import { Preferences } from '../../settings/preferences';
 import { DatePipe, DOCUMENT } from '@angular/common';
 import {
   afterRenderEffect,
-  Component,
   ChangeDetectorRef,
+  Component,
   computed,
   DestroyRef,
   effect,
@@ -18,8 +15,8 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router, RouterLink } from '@angular/router';
 import {
   IonBackButton,
   IonButton,
@@ -33,14 +30,15 @@ import {
   IonItem,
   IonLabel,
   IonSpinner,
-  IonTextarea,
   IonText,
+  IonTextarea,
   IonTitle,
   IonToolbar,
 } from '@ionic/angular';
 import { arrowDown, closeCircle, listOutline, send } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
+import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
 import {
   GroupKind,
   MessageType,
@@ -48,18 +46,19 @@ import {
   type CreateMessageBody,
   type MessageResponse,
 } from '../../../generated/models';
-import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
-import { Message } from '../../messages/message/message';
+import { Connection } from '../../api/connection';
+import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
+import { ChatStore } from '../../chats/chat-store';
+import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
+import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
+import { DraftStore } from '../draft-store';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
-import { ChatListStore } from '../../chats/chat-list-store';
-import { ChatStore } from '../../chats/chat-store';
-import { Connection } from '../../api/connection';
-import { SessionStore } from '../../session/session-store';
-import { ConversationStore, PageDirection, ConversationError } from '../conversation-store';
 import { messageRows } from '../message-rows';
-import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { Message } from '../../messages/message/message';
+import { scrollActivity } from '../scroll-activity';
 
 function queryMessageId(id: string | undefined) {
   return id && /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n ? encodeId(id) : undefined;
@@ -117,7 +116,6 @@ export class ConversationPage {
   protected readonly ConversationTargetKind = ConversationTargetKind;
   protected readonly ConversationError = ConversationError;
   protected readonly ThreadError = ThreadError;
-  private readonly lists = inject(ChatListStore);
   protected readonly session = inject(SessionStore);
   protected readonly preferences = inject(Preferences);
   protected readonly conversation = inject(ConversationStore);
@@ -161,7 +159,7 @@ export class ConversationPage {
   protected readonly backHref = computed(() => (this.threadId() ? `/chats/chat/${decodeId(this.id())}` : '/chats'));
   protected readonly subscription = computed(() => {
     const threadId = this.threadId();
-    return threadId ? this.lists.subscription(this.id(), threadId) : undefined;
+    return threadId ? this.chatInfo.subscription(this.id(), threadId) : undefined;
   });
   protected readonly threadBusy = linkedSignal({ source: this.entryKey, computation: () => false });
   protected readonly threadError = linkedSignal({
@@ -174,7 +172,6 @@ export class ConversationPage {
   private entered = false;
   private navigationVersion = 0;
   private subscriptionVersion = 0;
-  private releaseReadState?: () => void;
   private retryAction = () => {};
   private readonly position = signal<ScrollPosition | undefined>(undefined);
   private readonly entryReadId = signal<SnowflakeID | undefined>(undefined);
@@ -198,9 +195,10 @@ export class ConversationPage {
   protected readonly closeIcon = closeCircle;
   protected readonly downIcon = arrowDown;
   protected readonly listIcon = listOutline;
+  protected readonly pins = computed(() => this.chatInfo.pins(this.id(), this.threadId()));
   protected readonly visiblePins = computed(() =>
-    this.conversation
-      .pins()
+    this.pins()
+      .items()
       .filter((pin) => !pin.message.isDeleted)
       .sort((a, b) => b.message.id - a.message.id),
   );
@@ -218,7 +216,7 @@ export class ConversationPage {
   protected async loadPins() {
     const entry = this.entryKey();
     try {
-      await this.conversation.ensurePins();
+      await this.pins().ensure();
       if (this.isCurrent(entry)) this.pinsFailed.set(false);
     } catch {
       if (this.isCurrent(entry)) this.pinsFailed.set(true);
@@ -259,7 +257,7 @@ export class ConversationPage {
     });
     effect(() => {
       const { threadId } = this.entryKey();
-      if (this.active() && threadId && this.subscription() === undefined) untracked(() => void this.loadSubscription());
+      if (this.active() && threadId && !this.subscription()) untracked(() => void this.loadSubscription());
     });
     this.realtime.messages$.pipe(takeUntilDestroyed()).subscribe((message) => {
       if (!this.isCurrent() || !this.conversation.accepts(message)) return;
@@ -303,8 +301,6 @@ export class ConversationPage {
   private activate(id: SnowflakeID, threadId?: SnowflakeID) {
     this.scrolling.reset();
     this.entryVersion.update((version) => version + 1);
-    this.releaseReadState?.();
-    this.releaseReadState = threadId ? undefined : this.lists.retainReadState(id);
     this.active.set(true);
     const draft = this.drafts.get(id, threadId);
     this.draft.set(draft?.text ?? '');
@@ -354,8 +350,6 @@ export class ConversationPage {
     this.entryVersion.update((version) => version + 1);
     this.entered = false;
     this.navigationVersion++;
-    this.releaseReadState?.();
-    this.releaseReadState = undefined;
     this.position.set(undefined);
     this.conversation.reset();
     this.menu()?.reset();
@@ -385,14 +379,14 @@ export class ConversationPage {
         const { chatId, threadId } = entry;
         if (threadId) {
           const read =
-            this.lists.threadReadState(chatId, threadId) ??
+            this.chatInfo.threadReadState(chatId, threadId) ??
             (await firstValueFrom(
               this.threadsApi.getThreadReadStateInChat(chatId, threadId).pipe(takeUntilDestroyed(this.destroyRef)),
             ).catch(() => undefined));
           around = read?.lastReadMessageId ?? threadId;
         } else {
           const read =
-            this.lists.cachedReadState(chatId) ?? (await this.lists.getReadState(chatId).catch(() => undefined));
+            this.chatInfo.cachedReadState(chatId) ?? (await this.chatInfo.getReadState(chatId).catch(() => undefined));
           around = read?.unreadCount ? read.lastReadMessageId : undefined;
         }
         if (entry !== this.entryKey() || version !== this.navigationVersion) return;
@@ -491,7 +485,9 @@ export class ConversationPage {
     if (element && messageId && element.getBoundingClientRect().bottom > viewport.top) {
       const threadId = this.threadId();
       void (
-        threadId ? this.lists.markThreadRead(this.id(), threadId, messageId) : this.lists.markRead(this.id(), messageId)
+        threadId
+          ? this.chatInfo.markThreadRead(this.id(), threadId, messageId)
+          : this.chatInfo.markRead(this.id(), messageId)
       ).catch(() => {});
     }
   }
@@ -605,7 +601,7 @@ export class ConversationPage {
   private async refreshConversationMetadata() {
     await Promise.all([
       this.chatInfo.ensure(this.id()),
-      this.threadId() ? this.loadSubscription() : this.lists.getReadState(this.id()),
+      this.threadId() ? this.loadSubscription() : this.chatInfo.getReadState(this.id()),
     ]);
   }
 
@@ -617,7 +613,7 @@ export class ConversationPage {
     this.threadBusy.set(true);
     this.threadError.set(undefined);
     try {
-      await this.lists.loadSubscription(this.id(), threadId);
+      await this.chatInfo.loadSubscription(this.id(), threadId);
     } catch {
       if (this.isCurrent(entry) && version === this.subscriptionVersion) this.threadError.set(ThreadError.Load);
     } finally {
@@ -634,8 +630,8 @@ export class ConversationPage {
     this.threadBusy.set(true);
     this.threadError.set(undefined);
     try {
-      if (status.subscribed) await this.lists.setThreadArchived(this.id(), threadId, !status.archived);
-      else await this.lists.subscribeThread(this.id(), threadId);
+      if (status.subscribed) await this.chatInfo.setThreadArchived(this.id(), threadId, !status.archived);
+      else await this.chatInfo.subscribeThread(this.id(), threadId);
     } catch {
       if (this.isCurrent(entry)) this.threadError.set(ThreadError.Update);
     } finally {

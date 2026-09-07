@@ -1,4 +1,3 @@
-import { mockRealtime } from '../../api/testing';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
@@ -8,16 +7,15 @@ import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
-import { jsonInterceptor } from '../../api/json.interceptor';
-import { testUser, wireChat, wireMessage } from '../../api/testing';
 import { Connection } from '../../api/connection';
-import { Preferences } from '../../settings/preferences';
-import { SessionStore } from '../../session/session-store';
+import { jsonInterceptor } from '../../api/json.interceptor';
 import { encodeId } from '../../api/snowflake-id';
-import { ConversationCollectionKind } from '../conversation-collection-kind';
-import { ConversationCollectionPage } from './conversation-collection.page';
+import { mockRealtime, testUser, wireChat, wireMessage } from '../../api/testing';
+import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
 import { MessageAction } from '../../messages/message-menu/message-menu';
-import { MessageNotice } from '../message-notice';
+import { MessageNotice } from '../../messages/message-notice';
+import { PinnedMessagesPage } from './pinned-messages.page';
 
 const savedSnapshot = () => ({
   id: '500',
@@ -36,14 +34,14 @@ const savedSnapshot = () => ({
   mentions: [],
 });
 
-describe('ConversationCollectionPage', () => {
-  let fixture: ComponentFixture<ConversationCollectionPage>;
-  let page: ConversationCollectionPage;
+describe('PinnedMessagesPage', () => {
+  let fixture: ComponentFixture<PinnedMessagesPage>;
+  let page: PinnedMessagesPage;
   let http: HttpTestingController;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [ConversationCollectionPage],
+      imports: [PinnedMessagesPage],
       providers: [
         provideRouter([]),
         provideHttpClient(withInterceptors([jsonInterceptor])),
@@ -54,7 +52,7 @@ describe('ConversationCollectionPage', () => {
         { provide: Connection, useValue: mockRealtime({ events$: new Subject(), resync$: new Subject() }) },
       ],
     }).compileComponents();
-    fixture = TestBed.createComponent(ConversationCollectionPage);
+    fixture = TestBed.createComponent(PinnedMessagesPage);
     page = fixture.componentInstance;
     http = TestBed.inject(HttpTestingController);
   });
@@ -65,7 +63,6 @@ describe('ConversationCollectionPage', () => {
   });
 
   async function pins(role = GroupRole.admin, thread = false) {
-    fixture.componentRef.setInput('collection', ConversationCollectionKind.Pins);
     fixture.componentRef.setInput('id', wireChat.id);
     if (thread) fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
@@ -84,15 +81,7 @@ describe('ConversationCollectionPage', () => {
     });
     await fixture.whenStable();
     fixture.detectChanges();
-    return page['conversation'].pins()[0];
-  }
-
-  async function saved() {
-    fixture.componentRef.setInput('collection', ConversationCollectionKind.Saved);
-    fixture.detectChanges();
-    http.expectOne('/_api/saved-messages?limit=50').flush({ savedMessages: [savedSnapshot()], nextCursor: '499' });
-    await fixture.whenStable();
-    fixture.detectChanges();
+    return page['pins']().items()[0];
   }
 
   function select(message: MessageResponse) {
@@ -135,14 +124,14 @@ describe('ConversationCollectionPage', () => {
     expect(fixture.nativeElement.querySelector('ion-alert').isOpen).toBe(true);
     http.expectNone((request) => request.method === 'DELETE');
     await page['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'cancel' } }));
-    expect(page['conversation'].pins()).toHaveLength(1);
+    expect(page['pins']().items()).toHaveLength(1);
     select(pin.message);
     await page['menu']()!['choose'](MessageAction.Pin);
     const removing = page['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
     http.expectOne(`/_api/chats/${wireChat.id}/threads/100/pins/200`).flush(null);
     await removing;
-    expect(page['conversation'].pins()).toEqual([]);
+    expect(page['pins']().items()).toEqual([]);
   });
 
   it('does not offer or execute unpin for a regular member', async () => {
@@ -191,59 +180,5 @@ describe('ConversationCollectionPage', () => {
     select(pin.message);
     await page['menu']()!['choose'](MessageAction.Thread);
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'thread', wireMessage.id]);
-  });
-
-  it('paginates immutable saved snapshots and locates the original topic message', async () => {
-    await saved();
-    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('收藏');
-    expect(fixture.nativeElement.textContent).toContain('保存时的群名');
-    expect(fixture.nativeElement.textContent).toContain('保存时的作者');
-    expect(fixture.nativeElement.querySelector('app-message')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('.reply-button, [aria-haspopup]')).toBeNull();
-    expect(fixture.nativeElement.querySelector('ion-textarea')).toBeNull();
-    expect(page['saved']()[0]).not.toHaveProperty('clientGeneratedId');
-    const loading = page['load'](true);
-    http
-      .expectOne('/_api/saved-messages?limit=50&before=499')
-      .flush({ savedMessages: [savedSnapshot(), { ...savedSnapshot(), id: '499' }] });
-    await loading;
-    expect(page['saved']().map((item) => item.id)).toEqual([encodeId('500'), encodeId('499')]);
-    expect(page['nextCursor']()).toBeUndefined();
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    page['locateSaved'](page['saved']()[0]);
-    expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], {
-      queryParams: { message: wireMessage.id },
-    });
-    page['locateSaved']({ ...page['saved']()[0], canLocateContext: false });
-    expect(navigate).toHaveBeenCalledOnce();
-  });
-
-  it('removes a saved entry by snapshot ID rather than original message ID', async () => {
-    await saved();
-    const removing = page['removeSaved'](page['saved']()[0]);
-    http.expectOne('/_api/saved-messages/by-id/500').flush(null);
-    await removing;
-    expect(page['saved']()).toEqual([]);
-  });
-
-  it('ignores an old saved page after leaving and reentering the virtual conversation', async () => {
-    fixture.componentRef.setInput('collection', ConversationCollectionKind.Saved);
-    fixture.detectChanges();
-    const old = http.expectOne('/_api/saved-messages?limit=50');
-    page.ionViewDidLeave();
-    page.ionViewDidEnter();
-    http.expectOne('/_api/saved-messages?limit=50').flush({ savedMessages: [{ ...savedSnapshot(), id: '501' }] });
-    expect(old.cancelled).toBe(true);
-    await fixture.whenStable();
-    expect(page['saved']().map((item) => item.id)).toEqual([encodeId('501')]);
-    expect(page['nextCursor']()).toBeUndefined();
-  });
-
-  it('cancels collection HTTP when the page is destroyed', async () => {
-    fixture.componentRef.setInput('collection', ConversationCollectionKind.Saved);
-    fixture.detectChanges();
-    const request = http.expectOne('/_api/saved-messages?limit=50');
-    fixture.destroy();
-    expect(request.cancelled).toBe(true);
   });
 });

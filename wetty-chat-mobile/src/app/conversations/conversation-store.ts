@@ -1,22 +1,20 @@
 import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, map, Subject, takeUntil, type Observable } from 'rxjs';
+import { firstValueFrom, map, Subject, takeUntil } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import {
+  ServerWsMessageType,
   type GetMessagesParams,
   type ListMessagesResponse,
   type MessageResponse,
   type ReactionSummary,
   type ThreadUpdatePayload,
-  ServerWsMessageType,
-  type PinResponse,
 } from '../../generated/models';
-import { mergeMessages } from '../messages/message-merge';
-import { type MessageChange } from '../messages/message-change';
-import { type SnowflakeID } from '../api/snowflake-id';
-import { preserveReactionOwnership } from './reaction-state';
-import { PinsService } from '../../generated/endpoints/pins/pins.service';
 import { Connection } from '../api/connection';
+import { type SnowflakeID } from '../api/snowflake-id';
+import { type MessageChange } from '../messages/message-change';
+import { mergeMessages } from '../messages/message-merge';
+import { preserveReactionOwnership } from '../messages/reaction-state';
 export enum PageDirection {
   Older,
   Newer,
@@ -49,36 +47,14 @@ export class ConversationStore {
   readonly paging = computed(() => this.pageDirection() !== undefined);
   readonly error = this.currentError.asReadonly();
   readonly atLatest = computed(() => !!this.page() && !this.page()?.newerCursor && !this.loading());
-  private readonly pinsApi = inject(PinsService);
   private readonly realtime = inject(Connection);
   private context?: ConversationContext;
-  private readonly cancelPins = new Subject<void>();
-  private pinsFresh = false;
-  private pinRevision = 0;
-  private readonly pinItems = signal<PinResponse[]>([]);
-  private readonly pendingPins = signal<Promise<void> | undefined>(undefined);
-  readonly pins = this.pinItems.asReadonly();
-  readonly pinsLoading = computed(() => this.pendingPins() !== undefined);
 
   constructor() {
     this.destroyRef.onDestroy(() => this.reset());
     this.realtime.changes$.pipe(takeUntilDestroyed()).subscribe((event) => this.applyMessageChange(event));
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event.type === ServerWsMessageType.threadUpdate) this.updateThread(event.payload);
-      if (
-        event.type !== ServerWsMessageType.pinAdded &&
-        event.type !== ServerWsMessageType.pinRemoved &&
-        event.type !== ServerWsMessageType.threadPinAdded &&
-        event.type !== ServerWsMessageType.threadPinRemoved
-      )
-        return;
-      const { chatId, threadRootId, pinId, pin } = event.payload;
-      if (chatId !== this.context?.chatId || threadRootId !== this.context.threadId) return;
-      this.applyPin(pinId, pin);
-    });
-    this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
-      this.pinsFresh = false;
-      this.pinRevision++;
     });
   }
 
@@ -89,13 +65,7 @@ export class ConversationStore {
   }
 
   reset(chatId?: SnowflakeID, threadId?: SnowflakeID) {
-    this.context = chatId === undefined ? undefined : { chatId, threadId };
-    this.pinsFresh = false;
-    this.pinRevision++;
-    this.cancelPins.next();
-    this.pinItems.set([]);
-    this.pendingPins.set(undefined);
-
+    this.context = chatId ? { chatId, threadId } : undefined;
     this.version++;
     this.cancel.next();
     this.latestSeenId = undefined;
@@ -194,7 +164,6 @@ export class ConversationStore {
   }
 
   private applyMessageChange(event: MessageChange) {
-    this.updatePinnedMessages(event);
     switch (event.type) {
       case ServerWsMessageType.messageUpdated:
         this.update(event.payload);
@@ -303,140 +272,5 @@ export class ConversationStore {
     return !page.newerCursor && lastId && (this.needsResync || (this.latestSeenId && this.latestSeenId > lastId))
       ? { ...page, newerCursor: lastId }
       : page;
-  }
-
-  pinFor(messageId: SnowflakeID) {
-    return this.pins().find((pin) => pin.message.id === messageId);
-  }
-
-  ensurePins(): Promise<void> {
-    const context = this.context;
-    if (!context) return Promise.resolve();
-    if (this.pinsFresh) return Promise.resolve();
-    const pendingPins = this.pendingPins();
-    if (pendingPins) return pendingPins;
-    const request = this.loadPins(context).finally(() => {
-      if (this.pendingPins() === request) this.pendingPins.set(undefined);
-    });
-    this.pendingPins.set(request);
-    return request;
-  }
-
-  private async loadPins(context: ConversationContext) {
-    try {
-      while (context === this.context && !this.destroyRef.destroyed) {
-        const revision = this.pinRevision;
-        const { pins } = await this.response(
-          (context.threadId
-            ? this.pinsApi.listThreadPins(context.chatId, context.threadId)
-            : this.pinsApi.listPins(context.chatId)
-          ).pipe(takeUntil(this.cancelPins)),
-        );
-        if (context !== this.context) return;
-        if (revision !== this.pinRevision) continue;
-        this.pinItems.set(pins);
-        this.pinsFresh = true;
-        return;
-      }
-    } catch (error: unknown) {
-      if (context !== this.context) return;
-      throw error;
-    }
-  }
-
-  private applyPin(id: SnowflakeID, pin?: PinResponse) {
-    this.pinRevision++;
-    this.pinItems.update((pins) => {
-      const remaining = pins.filter((existing) => existing.id !== id);
-      return pin ? [pin, ...remaining] : remaining;
-    });
-  }
-
-  private updatePinnedMessages(event: MessageChange) {
-    if (event.payload.chatId !== this.context?.chatId) return;
-    this.pinRevision++;
-    this.pinItems.update((pins) =>
-      pins.map((pin) => {
-        const message = pin.message;
-        switch (event.type) {
-          case ServerWsMessageType.messageUpdated:
-          case ServerWsMessageType.messageDeleted:
-            return message.id === event.payload.id
-              ? {
-                  ...pin,
-                  message: {
-                    ...event.payload,
-                    isDeleted: event.type === ServerWsMessageType.messageDeleted || event.payload.isDeleted,
-                    reactions: preserveReactionOwnership(message.reactions, event.payload.reactions),
-                  },
-                }
-              : pin;
-          case ServerWsMessageType.messagesBulkDeleted:
-            return event.payload.messageIds.includes(message.id)
-              ? { ...pin, message: { ...message, isDeleted: true } }
-              : pin;
-          case ServerWsMessageType.reactionUpdated:
-            return message.id === event.payload.messageId
-              ? {
-                  ...pin,
-                  message: {
-                    ...message,
-                    reactions: preserveReactionOwnership(message.reactions, event.payload.reactions),
-                  },
-                }
-              : pin;
-        }
-        return pin;
-      }),
-    );
-  }
-
-  private response<T>(request: Observable<T>) {
-    return firstValueFrom(request.pipe(takeUntilDestroyed(this.destroyRef)));
-  }
-
-  async setPinned(message: MessageResponse, pinned: boolean) {
-    const context = this.context;
-    if (!context) return;
-    await this.ensurePins();
-    if (context !== this.context) return;
-    const existing = this.pinFor(message.id);
-    if (pinned === !!existing) return;
-    if (existing) {
-      await this.response(
-        context.threadId
-          ? this.pinsApi.deleteThreadPin(context.chatId, context.threadId, existing.id)
-          : this.pinsApi.deletePin(context.chatId, existing.id),
-      );
-      if (context === this.context)
-        this.realtime.acceptPin({
-          type: context.threadId ? ServerWsMessageType.threadPinRemoved : ServerWsMessageType.pinRemoved,
-          payload: {
-            chatId: context.chatId,
-            threadRootId: context.threadId,
-            messageId: message.id,
-            pinId: existing.id,
-          },
-        });
-      return;
-    }
-
-    const revision = this.pinRevision;
-    const pin = await this.response(
-      context.threadId
-        ? this.pinsApi.createThreadPin(context.chatId, context.threadId, { messageId: message.id })
-        : this.pinsApi.createPin(context.chatId, { messageId: message.id }),
-    );
-    if (context !== this.context) return;
-    if (revision === this.pinRevision)
-      this.realtime.acceptPin({
-        type: context.threadId ? ServerWsMessageType.threadPinAdded : ServerWsMessageType.pinAdded,
-        payload: { chatId: context.chatId, threadRootId: context.threadId, messageId: message.id, pinId: pin.id, pin },
-      });
-    else if (!this.pins().some((current) => current.id === pin.id)) {
-      // A removal can arrive before the create response; do not restore that older pin.
-      this.pinsFresh = false;
-      await this.ensurePins().catch(() => {});
-    }
   }
 }

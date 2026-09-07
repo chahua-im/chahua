@@ -3,7 +3,7 @@ import { inject } from '@angular/core';
 import { map } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../generated/endpoints/chahua.base-url';
 import { jsonOperations } from '../../generated/json-codecs';
-import { normalizeJson, serializeJson } from './normalize-json';
+import { decodeJsonIds, encodeJsonIds } from './json-ids';
 import { decodeId, type SnowflakeID } from './snowflake-id';
 
 const operations = jsonOperations.map((operation) => ({
@@ -24,12 +24,12 @@ export const jsonInterceptor: HttpInterceptorFn = (request, next) => {
       for (const value of values) params = params.append(key, decodeId(Number(value) as SnowflakeID));
     }
   }
-  const body = operation?.body === undefined ? request.body : serializeJson(request.body, operation.body);
+  const body = decodeJsonIds(request.body, operation?.body);
 
   return next(request.clone({ params, body })).pipe(
     map((event) =>
-      event instanceof HttpResponse && request.responseType === 'json' && event.body !== null
-        ? event.clone({ body: normalizeJson(event.body, operation?.response) })
+      event instanceof HttpResponse && request.responseType === 'json'
+        ? event.clone({ body: encodeJsonIds(event.body, operation?.response) })
         : event,
     ),
   );

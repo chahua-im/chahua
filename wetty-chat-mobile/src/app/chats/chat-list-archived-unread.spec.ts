@@ -1,4 +1,3 @@
-import { mockRealtime } from '../api/testing';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
@@ -6,11 +5,12 @@ import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { ServerWsMessageType, type MessageResponse, type ServerWsMessage } from '../../generated/models';
-import { jsonInterceptor } from '../api/json.interceptor';
-import { testChat, testMessage, wireChat } from '../api/testing';
-import { ChatListStore } from './chat-list-store';
 import { Connection } from '../api/connection';
+import { jsonInterceptor } from '../api/json.interceptor';
 import { encodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, wireChat } from '../api/testing';
+import { ChatListStore } from './chat-list-store';
+import { ChatStore } from './chat-store';
 
 describe('ChatListStore archived unread', () => {
   let counts: ChatListStore['archivedUnread'];
@@ -32,7 +32,7 @@ describe('ChatListStore archived unread', () => {
         { provide: Connection, useValue: mockRealtime({ messages$: messages, events$: events, resync$: resync }) },
       ],
     });
-    scope = createEnvironmentInjector([ChatListStore], TestBed.inject(EnvironmentInjector));
+    scope = createEnvironmentInjector([ChatListStore, ChatStore], TestBed.inject(EnvironmentInjector));
     counts = scope.get(ChatListStore).archivedUnread;
     http = TestBed.inject(HttpTestingController);
   });
@@ -324,7 +324,7 @@ describe('ChatListStore archived unread', () => {
     await settle();
     await settle();
 
-    const archivingChat = lists.setArchived(testChat.id, true);
+    const archivingChat = lists['chatInfo'].setArchived(testChat.id, true);
     http.expectOne(`/_api/chats/${wireChat.id}/archive`).flush(null);
     await archivingChat;
     await settle();
@@ -334,7 +334,7 @@ describe('ChatListStore archived unread', () => {
     expect(counts.chats.value()).toBe(3);
 
     const rootId = encodeId('100');
-    const archivingThread = lists.setThreadArchived(testChat.id, rootId, true);
+    const archivingThread = lists['chatInfo'].setThreadArchived(testChat.id, rootId, true);
     http.expectOne(`/_api/chats/${wireChat.id}/threads/100/archive`).flush(null);
     await settle();
     http.expectOne(`/_api/chats/${wireChat.id}/threads/100/subscribe`).flush({ subscribed: true, archived: true });
@@ -343,6 +343,6 @@ describe('ChatListStore archived unread', () => {
     await archivingThread;
     await settle();
     expect(counts.threads.value()).toBe(4);
-    expect(lists.subscription(testChat.id, rootId)?.archived).toBe(true);
+    expect(lists['chatInfo'].subscription(testChat.id, rootId)?.archived).toBe(true);
   });
 });

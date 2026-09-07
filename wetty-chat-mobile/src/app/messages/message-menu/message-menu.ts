@@ -1,3 +1,4 @@
+import { DOCUMENT } from '@angular/common';
 import {
   afterRenderEffect,
   Component,
@@ -10,7 +11,6 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { DOCUMENT } from '@angular/common';
 import { Router } from '@angular/router';
 import { IonAlert, IonIcon, IonModal, IonSpinner, IonToast } from '@ionic/angular';
 import {
@@ -24,15 +24,14 @@ import {
   trashOutline,
 } from 'ionicons/icons';
 import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
-import { EmojiPicker } from '../emoji-picker/emoji-picker';
-import { Message, type MessageMenuSelection } from '../message/message';
-import { ChatStore } from '../../chats/chat-store';
-import { ConversationStore } from '../../conversations/conversation-store';
-import { MessageActions } from '../../conversations/message-actions';
-import { MessageNotice } from '../../conversations/message-notice';
-import { exceedsReactionLimit } from '../../conversations/reaction-state';
-import { SessionStore } from '../../session/session-store';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { SessionStore } from '../../session/session-store';
+import { ChatStore } from '../../chats/chat-store';
+import { EmojiPicker } from '../emoji-picker/emoji-picker';
+import { MessageActions } from '../message-actions';
+import { MessageNotice } from '../message-notice';
+import { Message, type MessageMenuSelection } from '../message/message';
+import { exceedsReactionLimit } from '../reaction-state';
 
 export enum MessageAction {
   Reply,
@@ -58,7 +57,8 @@ export class MessageMenu {
   readonly showAllAvatars = input(false);
   readonly reply = output<MessageResponse>();
   readonly openThread = output<SnowflakeID>();
-  protected readonly conversation = inject(ConversationStore);
+  readonly messages = input.required<readonly MessageResponse[]>();
+  protected readonly pins = computed(() => this.chatInfo.pins(this.chatId(), this.threadId()));
   private readonly chatInfo = inject(ChatStore);
   private readonly session = inject(SessionStore);
   private readonly messageActions = inject(MessageActions);
@@ -71,14 +71,12 @@ export class MessageMenu {
   protected readonly selection = signal<MessageMenuSelection | undefined>(undefined);
   protected readonly message = computed(() => {
     const id = this.selection()?.messageId;
-    return (
-      this.conversation.items().find((message) => message.id === id) ?? (id && this.conversation.pinFor(id)?.message)
-    );
+    return this.messages().find((message) => message.id === id);
   });
   protected readonly admin = computed(() => this.chatInfo.get(this.chatId())?.myRole === GroupRole.admin);
   protected readonly pinned = computed(() => {
     const message = this.message();
-    return !!message && !!this.conversation.pinFor(message.id);
+    return !!message && !!this.pins().get(message.id);
   });
   protected readonly recent = signal<readonly string[]>([]);
   protected readonly notice = signal<MessageNotice | undefined>(undefined);
@@ -108,7 +106,6 @@ export class MessageMenu {
   private readonly stack = viewChild<ElementRef<HTMLElement>>('stack');
   private readonly reactionBar = viewChild<ElementRef<HTMLElement>>('reactionBar');
   private readonly actions = viewChild<ElementRef<HTMLElement>>('actions');
-  private readonly pickerBack = viewChild<ElementRef<HTMLButtonElement>>('pickerBack');
   protected readonly canReact = computed(() => {
     const message = this.message();
     return (
@@ -150,10 +147,6 @@ export class MessageMenu {
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.reset());
-    afterRenderEffect(() => {
-      const button = this.pickerBack()?.nativeElement ?? this.stack()?.nativeElement.querySelector('button');
-      button?.focus({ preventScroll: true });
-    });
     afterRenderEffect((onCleanup) => {
       const stack = this.stack()?.nativeElement;
       if (!stack) return;
@@ -214,11 +207,10 @@ export class MessageMenu {
     if (this.busy() || this.selection()) return;
     const focused = this.document.activeElement;
     if (focused instanceof HTMLElement) focused.blur();
-    selection.element.focus({ preventScroll: true });
     this.choosingEmoji.set(false);
     this.selection.set(selection);
     const version = this.version;
-    void Promise.all([this.chatInfo.ensureDetails(this.chatId()), this.conversation.ensurePins()]).catch(() => {
+    void Promise.all([this.chatInfo.ensureDetails(this.chatId()), this.pins().ensure()]).catch(() => {
       if (version === this.version) this.notice.set(MessageNotice.MetadataFailed);
     });
   }
@@ -285,7 +277,7 @@ export class MessageMenu {
       await this.perform(() => this.messageActions.recall(pending.message), MessageNotice.Recalled);
     } else if (pending.action === MessageAction.Pin && this.admin()) {
       await this.perform(
-        () => this.conversation.setPinned(pending.message, !pending.pinned),
+        () => this.pins().set(pending.message, !pending.pinned),
         pending.pinned ? MessageNotice.Unpinned : MessageNotice.Pinned,
       );
     }

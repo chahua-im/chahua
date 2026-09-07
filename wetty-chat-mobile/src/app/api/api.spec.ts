@@ -1,25 +1,25 @@
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { TestBed } from '@angular/core/testing';
 import { ApplicationRef, signal, type Signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { expectTypeOf } from 'vitest';
 
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { getMessagesResource } from '../../generated/endpoints/chats/chats.resource';
+import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { GroupsService } from '../../generated/endpoints/groups/groups.service';
 import { InvitesService } from '../../generated/endpoints/invites/invites.service';
 import type {
+  ListThreadsResponse,
   MessageResponse,
   ServiceTokenResponse,
   ThreadListItem,
-  ListThreadsResponse,
   UserGroupTagInfo,
 } from '../../generated/models';
+import { decodeJsonIds, encodeJsonIds } from './json-ids';
 import { jsonInterceptor } from './json.interceptor';
-import { normalizeJson, serializeJson } from './normalize-json';
-import { testChat, testMessage, wireChat, wireMessage } from './testing';
 import { encodeId, type SnowflakeID } from './snowflake-id';
+import { testChat, testMessage, wireChat, wireMessage } from './testing';
 
 describe('Generated API client', () => {
   beforeEach(() => {
@@ -47,7 +47,7 @@ describe('Generated API client', () => {
     http.verify();
   });
 
-  it('normalizes nested response fields and preserves explicit cache clears for both clients', async () => {
+  it('preserves null in nested response fields and preserves explicit cache clears for both clients', async () => {
     const body = () => ({
       messages: [{ ...wireMessage, message: null, sticker: null, replyToMessage: null }],
       olderCursor: null,
@@ -58,9 +58,9 @@ describe('Generated API client', () => {
     TestBed.inject(ChatsService).getMessages(testChat.id).subscribe(receive);
     http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush(body());
     const value = receive.mock.calls[0][0];
-    expect(value.olderCursor).toBeUndefined();
+    expect(value.olderCursor).toBeNull();
     expect(Object.hasOwn(value, 'olderCursor')).toBe(true);
-    expect(value.messages[0].sticker).toBeUndefined();
+    expect(value.messages[0].sticker).toBeNull();
     expect(Object.hasOwn(value.messages[0], 'sticker')).toBe(true);
     expect(value.messages[0].id).toBe(testMessage.id);
     expect(value.messages[0].chatId).toBe(testChat.id);
@@ -125,21 +125,21 @@ describe('Generated API client', () => {
       sender: { uid: 7, userGroup: { groupId: 3, name: null } },
       sticker: { id: '9223372036854775807', media: { id: '9007199254740993' } },
     };
-    const normalized = normalizeJson(message, 'MessageResponse') as MessageResponse;
-    expect(normalized.id).toBe(testMessage.id);
-    expect(normalized.sticker?.id).toBe(encodeId('9223372036854775807'));
-    expect(normalized.sticker?.media.id).toBe(testChat.id);
-    expect(normalized.sender.uid).toBe(7);
-    expect(normalized.sender.userGroup?.groupId).toBe(3);
-    expect(normalized.sender.userGroup?.name).toBeUndefined();
-    expect(normalized.clientGeneratedId).toBe('9223372036854775807');
-    expect(normalizeJson(normalized, 'MessageResponse')).toEqual(normalized);
-    expect((serializeJson(normalized, 'MessageResponse') as { id: string }).id).toBe(wireMessage.id);
-    expect(normalizeJson({ nextCursor: '2026-09-06T12:00:00Z', threads: [] }, 'ListThreadsResponse')).toEqual({
+    const encoded = encodeJsonIds(message, 'MessageResponse') as MessageResponse;
+    expect(encoded.id).toBe(testMessage.id);
+    expect(encoded.sticker?.id).toBe(encodeId('9223372036854775807'));
+    expect(encoded.sticker?.media.id).toBe(testChat.id);
+    expect(encoded.sender.uid).toBe(7);
+    expect(encoded.sender.userGroup?.groupId).toBe(3);
+    expect(encoded.sender.userGroup?.name).toBeNull();
+    expect(encoded.clientGeneratedId).toBe('9223372036854775807');
+    expect(encodeJsonIds(encoded, 'MessageResponse')).toEqual(encoded);
+    expect((decodeJsonIds(encoded, 'MessageResponse') as { id: string }).id).toBe(wireMessage.id);
+    expect(encodeJsonIds({ nextCursor: '2026-09-06T12:00:00Z', threads: [] }, 'ListThreadsResponse')).toEqual({
       nextCursor: '2026-09-06T12:00:00Z',
       threads: [],
     });
-    expect(normalizeJson({ id: 42 }, 'ServiceTokenResponse')).toEqual({ id: 42 });
+    expect(encodeJsonIds({ id: 42 }, 'ServiceTokenResponse')).toEqual({ id: 42 });
   });
 
   it('keeps encoded IDs distinct in generated DTOs, service arguments, and resource signals', () => {
@@ -152,11 +152,11 @@ describe('Generated API client', () => {
     expectTypeOf<ListThreadsResponse['nextCursor']>().toEqualTypeOf<string | undefined>();
   });
 
-  it('preserves array positions, false, zero, and empty strings and is safe to normalize twice', () => {
+  it('preserves array positions, false, zero, and empty strings and is safe to encode twice', () => {
     const value = { entries: [null, { value: null }], enabled: false, count: 0, text: '' };
-    normalizeJson(value);
-    expect(value).toEqual({ entries: [undefined, { value: undefined }], enabled: false, count: 0, text: '' });
+    encodeJsonIds(value);
+    expect(value).toEqual({ entries: [null, { value: null }], enabled: false, count: 0, text: '' });
     expect(Object.hasOwn(value.entries, 0)).toBe(true);
-    expect(normalizeJson(value)).toEqual(value);
+    expect(encodeJsonIds(value)).toEqual(value);
   });
 });

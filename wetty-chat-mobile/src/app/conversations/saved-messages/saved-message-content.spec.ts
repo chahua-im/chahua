@@ -55,7 +55,7 @@ describe('savedMessageContent rendered by Message', () => {
     expect(download.href).toBe('https://example.com/saved-file.pdf');
     expect(download.download).toBe('记录.pdf');
     expect(download.textContent).toContain('2.0 KB');
-    expect(element.querySelector('.reply-button, [aria-haspopup]')).toBeNull();
+    expect(element.querySelector('.reply-button')).toBeNull();
     const menu = vi.fn();
     fixture.componentInstance.menu.subscribe(menu);
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });

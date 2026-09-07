@@ -47,12 +47,12 @@ describe('App routes', () => {
 
   it('matches saved and scoped pin collections before the generic list routes', async () => {
     await router.navigateByUrl('/chats/saved');
-    expect(router.routerState.snapshot.root.firstChild?.data['collection']).toBe('saved');
+    expect(router.routerState.snapshot.root.firstChild?.component?.name).toContain('SavedMessagesPage');
     await router.navigateByUrl('/chats/chat/9007199254740993/pins');
-    expect(router.routerState.snapshot.root.firstChild?.data['collection']).toBe('pins');
+    expect(router.routerState.snapshot.root.firstChild?.component?.name).toContain('PinnedMessagesPage');
     expect(router.routerState.snapshot.root.firstChild?.params['id']).toBe('9007199254740993');
     await router.navigateByUrl('/chats/chat/9007199254740993/thread/100/pins');
-    expect(router.routerState.snapshot.root.firstChild?.data['collection']).toBe('pins');
+    expect(router.routerState.snapshot.root.firstChild?.component?.name).toContain('PinnedMessagesPage');
     expect(router.routerState.snapshot.root.firstChild?.params['threadId']).toBe('100');
   });
 });

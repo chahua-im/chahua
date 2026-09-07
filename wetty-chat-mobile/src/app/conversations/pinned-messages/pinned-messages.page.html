@@ -1,0 +1,53 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start"><ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button></ion-buttons>
+    <ion-title>置顶消息</ion-title>
+    @if (menu()?.busy()) {
+      <ion-spinner slot="end"></ion-spinner>
+    }
+  </ion-toolbar>
+</ion-header>
+<ion-content>
+  <div class="message-list">
+    @for (row of rows(); track row.message.id) {
+      @if (row.dateBreak) {
+        <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
+      }
+      <app-message
+        [showAllAvatars]="preferences.showAllAvatars()"
+        [message]="row.message"
+        [own]="row.message.sender.uid === session.user()?.uid"
+        [first]="row.first"
+        [last]="row.last"
+        [canReply]="!menu()?.busy()"
+        [canOpenThread]="!threadId()"
+        (reply)="replyTo($event)"
+        (menu)="menu()?.open($event)"
+        (react)="menu()?.reactTo(row.message, $event)"
+        (jump)="locateMessage(row.message, $event)"
+        (openThread)="openThread(row.message.chatId, $event)"></app-message>
+    } @empty {
+      @if (!loading() && !failed()) {
+        <p class="ion-text-center">暂无置顶消息</p>
+      }
+    }
+  </div>
+  @if (loading()) {
+    <div class="loading-status">
+      <ion-spinner></ion-spinner>
+    </div>
+  }
+  @if (failed()) {
+    <div class="ion-text-center">
+      <p>消息加载失败，请重试。</p>
+      <ion-button fill="clear" (click)="load()">重试</ion-button>
+    </div>
+  }
+</ion-content>
+<app-message-menu
+  [messages]="messages()"
+  [chatId]="id()"
+  [threadId]="threadId()"
+  [showAllAvatars]="preferences.showAllAvatars()"
+  (reply)="replyTo($event)"
+  (openThread)="openThread(id(), $event)"></app-message-menu>
