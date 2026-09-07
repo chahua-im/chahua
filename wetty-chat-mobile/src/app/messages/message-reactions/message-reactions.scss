@@ -1,0 +1,51 @@
+:host {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 6px;
+}
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ion-color-primary) 10%, var(--ion-background-color, #fff));
+  color: var(--ion-color-primary-shade);
+  cursor: pointer;
+  line-height: 1;
+}
+.emoji {
+  font-size: 18.5px;
+  margin: 0.5px 0 0.5px 6px;
+}
+.count {
+  padding-right: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.reacted {
+  background: var(--ion-color-primary-shade);
+  color: var(--ion-color-primary-contrast);
+}
+.reaction:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+:host(.own:not(.external)) .reaction {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+}
+:host(.own:not(.external)) .reacted {
+  border-color: currentColor;
+}
+:host(.external) .reaction:not(.reacted) {
+  background: var(--ion-background-color, #fff);
+}
+@media (prefers-color-scheme: dark) {
+  .reaction:not(.reacted) {
+    color: var(--ion-color-primary-tint);
+  }
+}

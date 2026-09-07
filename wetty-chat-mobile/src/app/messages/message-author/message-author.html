@@ -1,0 +1,14 @@
+<span class="sender-name">{{ sender().name ?? sender().uid }}</span>
+@if (sender().userGroup; as group) {
+  <span
+    class="sender-group"
+    [style.--group-light]="group.chatGroupColor"
+    [style.--group-dark]="group.chatGroupColorDark">
+    {{ group.name }}
+  </span>
+}
+<ion-icon
+  [icon]="sender().gender === 2 ? icons.femaleOutline : icons.maleOutline"
+  class="gender"
+  [class.female]="sender().gender === 2"
+  [attr.aria-label]="sender().gender === 2 ? '女' : '男'"></ion-icon>

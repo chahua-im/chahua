@@ -1,0 +1,92 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-nav-link routerDirection="back">
+        <ion-button aria-label="返回设置">
+          <ion-icon slot="start" [icon]="backIcon" aria-hidden="true"></ion-icon>
+          返回
+        </ion-button>
+      </ion-nav-link>
+    </ion-buttons>
+    <ion-title role="heading" aria-level="1">好友验证</ion-title>
+    <ion-buttons slot="end"><ion-button (click)="modal.dismiss()">完成</ion-button></ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content color="light">
+  <ion-list [inset]="true" [attr.aria-busy]="loading() || saving()">
+    @if (loading()) {
+      <ion-item lines="none">
+        <ion-spinner slot="start" role="status" aria-label="正在加载好友验证设置"></ion-spinner>
+      </ion-item>
+    } @else if (loadError()) {
+      <ion-item lines="none">
+        <ion-label class="ion-text-wrap" color="danger" role="alert">好友验证设置加载失败。</ion-label>
+        <ion-button slot="end" fill="clear" (click)="loadVerification()">重试</ion-button>
+      </ion-item>
+    } @else {
+      <div role="listitem">
+        <ion-radio-group [formField]="verificationForm.mode" aria-label="好友验证" (ionChange)="saved.set(false)">
+          <ion-item>
+            <ion-icon slot="start" [icon]="allowIcon" color="primary" aria-hidden="true"></ion-icon>
+            <ion-radio [value]="Mode.direct" [disabled]="saving()" justify="space-between">
+              <span class="ion-text-wrap">允许任何人添加我</span>
+            </ion-radio>
+          </ion-item>
+          <ion-item>
+            <ion-icon slot="start" [icon]="messageIcon" color="primary" aria-hidden="true"></ion-icon>
+            <ion-radio [value]="Mode.need_message" [disabled]="saving()" justify="space-between">
+              <span class="ion-text-wrap">需要验证消息</span>
+            </ion-radio>
+          </ion-item>
+          <ion-item>
+            <ion-icon slot="start" [icon]="questionIcon" color="primary" aria-hidden="true"></ion-icon>
+            <ion-radio [value]="Mode.question" [disabled]="saving()" justify="space-between">
+              <span class="ion-text-wrap">需要回答问题</span>
+            </ion-radio>
+          </ion-item>
+          <ion-item lines="none">
+            <ion-icon slot="start" [icon]="forbidIcon" color="primary" aria-hidden="true"></ion-icon>
+            <ion-radio [value]="Mode.forbid" [disabled]="saving()" justify="space-between">
+              <span class="ion-text-wrap">拒绝任何人添加我</span>
+            </ion-radio>
+          </ion-item>
+        </ion-radio-group>
+      </div>
+      @if (verification().mode === Mode.question) {
+        <ion-item>
+          <ion-textarea
+            label="设置问题"
+            labelPlacement="stacked"
+            placeholder="填写申请者需要回答的问题"
+            [autoGrow]="true"
+            [maxlength]="100"
+            [formField]="verificationForm.question"
+            (ionInput)="saved.set(false)"></ion-textarea>
+        </ion-item>
+        @if (verificationForm.question().invalid()) {
+          <ion-item lines="none"><ion-note color="danger" role="alert">请填写 1–100 字的问题。</ion-note></ion-item>
+        }
+      }
+      <ion-item lines="none">
+        @if (saveError()) {
+          <ion-label class="ion-text-wrap" color="danger" role="alert">保存失败，请重试。</ion-label>
+        } @else if (saved()) {
+          <ion-label color="medium" role="status">已保存</ion-label>
+        }
+        <ion-button
+          slot="end"
+          fill="clear"
+          [disabled]="verificationForm().disabled() || verificationForm().invalid()"
+          aria-label="保存"
+          (click)="saveVerification()">
+          <span class="action-content" [attr.aria-busy]="saving()">
+            <span class="action-label">保存</span>
+            @if (saving()) {
+              <ion-spinner role="status" aria-label="正在保存"></ion-spinner>
+            }
+          </span>
+        </ion-button>
+      </ion-item>
+    }
+  </ion-list>
+</ion-content>

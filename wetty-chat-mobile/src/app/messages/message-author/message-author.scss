@@ -1,0 +1,40 @@
+:host {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.sender-name {
+  flex-grow: 1;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--sender-color) 75%, var(--ion-text-color));
+}
+.sender-group {
+  background: var(--group-light, rgba(var(--ion-text-color-rgb), 0.25));
+  color: var(--ion-color-primary-contrast);
+  padding: 0 5px;
+  border-radius: 2px;
+  font-size: 10px;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.gender {
+  flex-shrink: 0;
+  color: #3cb4f0;
+}
+.female {
+  color: #ff8080;
+}
+:host(.own) .sender-name {
+  color: inherit;
+}
+:host(.own) .sender-group {
+  background: rgba(var(--ion-color-primary-contrast-rgb), 0.25);
+}
+@media (prefers-color-scheme: dark) {
+  :host(:not(.own)) .sender-group {
+    background: var(--group-dark, var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)));
+  }
+}

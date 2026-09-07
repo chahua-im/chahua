@@ -125,8 +125,8 @@ fn broadcast_reaction_update(
     path = "/",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("message_id" = i64, Path, description = "Message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Message ID"),
     ),
     responses(
         (status = 200, description = "Reaction details", body = ReactionDetailResponse),
@@ -209,8 +209,8 @@ async fn get_reaction_details(
     path = "/{emoji}",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("message_id" = i64, Path, description = "Message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Message ID"),
         ("emoji" = String, Path, description = "Emoji character"),
     ),
     responses(
@@ -285,8 +285,8 @@ async fn put_reaction(
     path = "/{emoji}",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("message_id" = i64, Path, description = "Message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Message ID"),
         ("emoji" = String, Path, description = "Emoji character"),
     ),
     responses(

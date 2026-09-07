@@ -1,0 +1,149 @@
+<ion-modal
+  class="message-menu-modal"
+  aria-label="消息操作"
+  [animated]="false"
+  [isOpen]="!!message()"
+  (didDismiss)="selection.set(undefined)">
+  <ng-template>
+    @if (selection(); as selection) {
+      @if (message(); as message) {
+        <div class="menu-surface" (click)="dismissBackdrop($event)">
+          @if (choosingEmoji()) {
+            <div class="emoji-panel">
+              <button #pickerBack type="button" class="picker-back" (click)="choosingEmoji.set(false)">
+                返回消息操作
+              </button>
+              @defer {
+                <app-emoji-picker (chosen)="reactTo(message, $event)"></app-emoji-picker>
+              } @loading (after 100ms) {
+                <div class="loading-status" role="status" aria-label="正在加载表情">
+                  <ion-spinner aria-hidden="true"></ion-spinner>
+                </div>
+              } @error {
+                <p role="alert">表情加载失败，请关闭后重试。</p>
+              }
+            </div>
+          } @else {
+            <div
+              #stack
+              class="menu-stack"
+              [class.own]="selection.own"
+              [style.left.px]="position().left"
+              [style.top.px]="position().top"
+              [style.width.px]="position().width">
+              @if (canReact()) {
+                <div #reactionBar class="reactions panel" role="group" aria-label="表态表情">
+                  @for (emoji of emojis(['👍', '❤️', '😂', '😮', '😢']); track emoji) {
+                    <button
+                      type="button"
+                      [attr.aria-label]="'表态 ' + emoji"
+                      [attr.aria-pressed]="selected(emoji)"
+                      (click)="reactTo(message, emoji)">
+                      {{ emoji }}
+                    </button>
+                  }
+                  @if (message.reactions.length < 50) {
+                    <button type="button" aria-label="更多表态表情" (click)="choosingEmoji.set(true)">
+                      <ion-icon [icon]="icons.addOutline" aria-hidden="true"></ion-icon>
+                    </button>
+                  }
+                </div>
+              }
+              <div
+                class="preview"
+                [style.width.px]="selection.rect.width"
+                [style.max-height.px]="position().previewHeight">
+                <app-message
+                  [showAllAvatars]="showAllAvatars()"
+                  [message]="message"
+                  [own]="selection.own"
+                  [first]="selection.first"
+                  [last]="selection.last"
+                  [canOpenThread]="!threadId()"
+                  [preview]="true"></app-message>
+              </div>
+              <div #actions class="actions panel" role="group" aria-label="消息操作">
+                <button type="button" [disabled]="!canReply()" (click)="choose(Action.Reply)">
+                  <ion-icon [icon]="icons.arrowUndoOutline" aria-hidden="true"></ion-icon>
+                  <span>回复</span>
+                </button>
+                @if (canThread()) {
+                  <button type="button" (click)="choose(Action.Thread)">
+                    <ion-icon [icon]="icons.chatbubblesOutline" aria-hidden="true"></ion-icon>
+                    <span>话题</span>
+                  </button>
+                }
+                @if (admin() && (pinned() || (!message.isDeleted && message.messageType !== MessageType.sticker))) {
+                  <button type="button" [disabled]="conversation.pinsLoading() || busy()" (click)="choose(Action.Pin)">
+                    <ion-icon [icon]="icons.pinOutline" aria-hidden="true"></ion-icon>
+                    <span>{{ pinned() ? '取消置顶' : '置顶' }}</span>
+                  </button>
+                }
+                @if (canCopy()) {
+                  <button type="button" (click)="choose(Action.Copy)">
+                    <ion-icon [icon]="icons.copyOutline" aria-hidden="true"></ion-icon>
+                    <span>复制</span>
+                  </button>
+                }
+                @if (canSave()) {
+                  <button type="button" (click)="choose(Action.Save)">
+                    <ion-icon [icon]="icons.bookmarkOutline" aria-hidden="true"></ion-icon>
+                    <span>收藏</span>
+                  </button>
+                }
+                @if (message.messageType !== MessageType.invite) {
+                  <button type="button" (click)="choose(Action.Link)">
+                    <ion-icon [icon]="icons.linkOutline" aria-hidden="true"></ion-icon>
+                    <span>链接</span>
+                  </button>
+                }
+                @if (canRecall()) {
+                  <button type="button" (click)="choose(Action.Recall)">
+                    <ion-icon [icon]="icons.trashOutline" aria-hidden="true"></ion-icon>
+                    <span>撤回</span>
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      }
+    }
+  </ng-template>
+</ion-modal>
+<ion-alert
+  [isOpen]="!!confirmation()"
+  [header]="confirmation()?.action === Action.Recall ? '撤回消息' : confirmation()?.pinned ? '取消置顶' : '置顶消息'"
+  [message]="
+    confirmation()?.action === Action.Recall
+      ? '撤回后，其他成员将无法查看这条消息。'
+      : confirmation()?.pinned
+        ? '确定取消这条消息的置顶？'
+        : '置顶后，此会话的成员都能看到这条置顶消息。'
+  "
+  [buttons]="[
+    { text: '取消', role: 'cancel' },
+    { text: '确认', role: 'confirm' },
+  ]"
+  (didDismiss)="confirm($event)"></ion-alert>
+<ion-toast
+  [isOpen]="!!notice()"
+  [duration]="2500"
+  (didDismiss)="notice.set(undefined)"
+  [message]="
+    notice() === Notice.Copied
+      ? '已复制'
+      : notice() === Notice.Saved
+        ? '已收藏'
+        : notice() === Notice.Pinned
+          ? '已置顶'
+          : notice() === Notice.Unpinned
+            ? '已取消置顶'
+            : notice() === Notice.Recalled
+              ? '已撤回'
+              : notice() === Notice.ReactionLimit
+                ? '每人最多添加 5 种表态，每条消息最多 50 种。'
+                : notice() === Notice.MetadataFailed
+                  ? '操作权限或置顶状态加载失败，请重新打开菜单重试。'
+                  : '操作失败，请重试。'
+  "></ion-toast>

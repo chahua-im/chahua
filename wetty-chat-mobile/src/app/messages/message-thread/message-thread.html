@@ -1,0 +1,12 @@
+<button
+  type="button"
+  class="thread-entry"
+  [disabled]="preview()"
+  [attr.aria-label]="info().replyCount + ' 条回复'"
+  (click)="open.emit()">
+  <span class="label">
+    <ion-icon [icon]="icons.chatbubbles" aria-hidden="true"></ion-icon>
+    {{ info().replyCount }} 条回复
+  </span>
+  <ion-icon class="arrow" [icon]="icons.chevronForward" aria-hidden="true"></ion-icon>
+</button>

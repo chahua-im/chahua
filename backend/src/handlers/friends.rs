@@ -378,7 +378,7 @@ async fn list_friend_request_history(
     path = "/requests/{request_id}/accept",
     tag = "friends",
     params(
-        ("request_id" = i64, Path, description = "Friend request ID"),
+        ("request_id" = String, Path, description = "Friend request ID"),
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     ),
     responses((status = 200, description = "Request accepted", body = FriendRequestResponse)),
@@ -412,7 +412,7 @@ async fn accept_friend_request(
     path = "/requests/{request_id}/reject",
     tag = "friends",
     params(
-        ("request_id" = i64, Path, description = "Friend request ID"),
+        ("request_id" = String, Path, description = "Friend request ID"),
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     ),
     responses(
@@ -452,7 +452,7 @@ async fn reject_friend_request(
     path = "/requests/{request_id}/archive",
     tag = "friends",
     params(
-        ("request_id" = i64, Path, description = "Friend request ID"),
+        ("request_id" = String, Path, description = "Friend request ID"),
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth")
     ),
     responses((status = 204, description = "Request archived")),

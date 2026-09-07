@@ -1,0 +1,33 @@
+@if (message().isDeleted) {
+  <ng-container>消息已删除</ng-container>
+} @else if (message().message?.trim()) {
+  <ng-container>{{ message().message }}</ng-container>
+} @else {
+  @switch (message().messageType) {
+    @case (MessageType.sticker) {
+      <ng-container>[表情]</ng-container>
+    }
+    @case (MessageType.audio) {
+      <ng-container>[语音]</ng-container>
+    }
+    @case (MessageType.file) {
+      <ng-container>[文件]</ng-container>
+    }
+    @case (MessageType.invite) {
+      <ng-container>[邀请]</ng-container>
+    }
+    @default {
+      @switch (media()) {
+        @case (MediaKind.Image) {
+          <ng-container>[图片]</ng-container>
+        }
+        @case (MediaKind.Video) {
+          <ng-container>[视频]</ng-container>
+        }
+        @default {
+          <ng-container>[非文本消息]</ng-container>
+        }
+      }
+    }
+  }
+}

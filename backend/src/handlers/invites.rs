@@ -437,7 +437,7 @@ async fn get_invites(
     path = "/invite/{invite_id}",
     tag = "invites",
     params(
-        ("invite_id" = i64, Path, description = "Invite ID")
+        ("invite_id" = String, Path, description = "Invite ID")
     ),
     responses(
         (status = 200, description = "Invite details", body = InviteResponse)
@@ -514,7 +514,7 @@ async fn get_invite_by_code(
     path = "/invite/{invite_id}",
     tag = "invites",
     params(
-        ("invite_id" = i64, Path, description = "Invite ID")
+        ("invite_id" = String, Path, description = "Invite ID")
     ),
     request_body = PatchInviteBody,
     responses(
@@ -550,7 +550,7 @@ async fn patch_invite(
     path = "/invite/{invite_id}",
     tag = "invites",
     params(
-        ("invite_id" = i64, Path, description = "Invite ID")
+        ("invite_id" = String, Path, description = "Invite ID")
     ),
     responses(
         (status = 204, description = "Invite deleted")

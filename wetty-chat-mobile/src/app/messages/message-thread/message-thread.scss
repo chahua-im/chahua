@@ -1,0 +1,38 @@
+:host {
+  display: block;
+  margin: 8px -12px -8px;
+  border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+.thread-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--thread-color, var(--ion-color-primary-shade));
+  text-align: start;
+  font-size: 14px;
+  cursor: pointer;
+}
+.thread-entry:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -4px;
+}
+.label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  white-space: nowrap;
+}
+ion-icon {
+  flex-shrink: 0;
+  font-size: 18px;
+}
+@media (prefers-color-scheme: dark) {
+  .thread-entry {
+    color: var(--thread-color, var(--ion-color-primary-tint));
+  }
+}

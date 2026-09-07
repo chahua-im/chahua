@@ -1,4 +1,0 @@
-<IfModule mod_headers.c>
-    Header set Access-Control-Allow-Origin "https://chahua.app"
-    Header set Cache-Control "public, max-age=31536000, immutable" "expr=%{REQUEST_URI} =~ m#-[A-Za-z0-9\-_]{8}\.#"
-</IfModule>

@@ -1,0 +1,25 @@
+ion-avatar {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--ion-color-primary-contrast);
+  font-size: 15px;
+
+  &.placeholder {
+    background: var(--ion-color-primary);
+  }
+}
+
+ion-segment {
+  width: 100%;
+  max-width: 400px;
+}
+
+ion-segment-button {
+  --padding-start: initial;
+  --padding-end: initial;
+  min-width: 0;
+}
