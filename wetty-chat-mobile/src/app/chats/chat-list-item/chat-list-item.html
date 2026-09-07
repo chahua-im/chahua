@@ -1,0 +1,126 @@
+<ion-item-sliding
+  [disabled]="actionsAlwaysVisible() || pendingAction() || (!startActions().length && !endActions().length)">
+  @if (!actionsAlwaysVisible() && startActions().length) {
+    <ion-item-options side="start">
+      <ng-container [ngTemplateOutlet]="swipeOptions" [ngTemplateOutletContext]="{ $implicit: 'start' }"></ng-container>
+    </ion-item-options>
+  }
+  <ion-item
+    [routerLink]="entry().link"
+    routerLinkActive="selected"
+    [routerLinkActiveOptions]="{ exact: true }"
+    #active="routerLinkActive"
+    [color]="active.isActive ? 'primary' : undefined"
+    ariaCurrentWhenActive="page"
+    [detail]="false"
+    [attr.aria-busy]="!!pendingAction()"
+    (click)="active.isActive && selected.emit()">
+    @if (actionsAlwaysVisible() && startActions().length) {
+      <ion-buttons slot="start">
+        <ng-container
+          [ngTemplateOutlet]="inlineButtons"
+          [ngTemplateOutletContext]="{ $implicit: 'start' }"></ng-container>
+      </ion-buttons>
+    }
+    <span slot="start" class="avatar-stack" aria-hidden="true">
+      <ion-avatar [class.placeholder]="!entry().avatar" [class.icon-avatar]="!!entry().icon">
+        @if (entry().icon; as icon) {
+          <ion-icon [icon]="icon"></ion-icon>
+        } @else if (entry().avatar; as src) {
+          <img [src]="src" width="48" height="48" decoding="async" alt="" />
+        } @else {
+          {{ entry().avatarName?.slice(0, 1) ?? entry().title?.slice(0, 1) }}
+        }
+      </ion-avatar>
+      @if (entry().badgeIcon || entry().badgeAvatar || entry().badgeName) {
+        <ion-avatar
+          class="avatar-badge"
+          [class.placeholder]="!entry().badgeAvatar"
+          [class.icon-avatar]="!!entry().badgeIcon">
+          @if (entry().badgeIcon; as icon) {
+            <ion-icon [icon]="icon"></ion-icon>
+          } @else if (entry().badgeAvatar; as src) {
+            <img [src]="src" width="26" height="26" decoding="async" alt="" />
+          } @else {
+            {{ entry().badgeName?.slice(0, 1) }}
+          }
+        </ion-avatar>
+      }
+    </span>
+    <ion-label class="ion-text-nowrap">
+      <h3>
+        {{ entry().title }}
+        <ng-content select="[slot=title]"></ng-content>
+      </h3>
+      <p>
+        @if (entry().sender; as sender) {
+          <ion-text [color]="active.isActive ? undefined : 'primary'">{{ sender }}:</ion-text>
+          {{ ' ' }}
+        }
+        {{ entry().subtitle }}
+        <ng-content select="[slot=preview]"></ng-content>
+      </p>
+    </ion-label>
+    @if (!actionsAlwaysVisible() && (entry().time || entry().unreadCount)) {
+      <div slot="end" class="meta">
+        @if (entry().time) {
+          <span>{{ entry().time | chatDate }}</span>
+        }
+        @if (entry().unreadCount; as count) {
+          <ion-badge [color]="active.isActive ? 'light' : 'primary'" [attr.aria-label]="count + ' 条未读消息'">
+            {{ count >= 1000 ? '999+' : count }}
+          </ion-badge>
+        }
+      </div>
+    }
+    @if (actionsAlwaysVisible() && endActions().length) {
+      <ion-buttons slot="end">
+        <ng-container
+          [ngTemplateOutlet]="inlineButtons"
+          [ngTemplateOutletContext]="{ $implicit: 'end' }"></ng-container>
+      </ion-buttons>
+    }
+    @if (pendingAction() && !actionsAlwaysVisible()) {
+      <ion-spinner slot="end" role="status" aria-label="正在处理操作"></ion-spinner>
+    }
+    <ng-content select="[slot=end]"></ng-content>
+  </ion-item>
+  @if (!actionsAlwaysVisible() && endActions().length) {
+    <ion-item-options side="end">
+      <ng-container [ngTemplateOutlet]="swipeOptions" [ngTemplateOutletContext]="{ $implicit: 'end' }"></ng-container>
+    </ion-item-options>
+  }
+</ion-item-sliding>
+@if (error()) {
+  <ion-item lines="none"><ion-label color="danger" role="alert">操作失败，请重试。</ion-label></ion-item>
+}
+
+<ng-template #swipeOptions let-side>
+  @for (action of side === 'start' ? startActions() : endActions(); track action.label) {
+    <ion-item-option
+      [color]="action.color ?? 'primary'"
+      [disabled]="!!pendingAction()"
+      (click)="perform(action, $event)">
+      <ion-icon slot="top" [icon]="action.icon" aria-hidden="true"></ion-icon>
+      {{ action.label }}
+    </ion-item-option>
+  }
+</ng-template>
+<ng-template #inlineButtons let-side>
+  @for (action of side === 'start' ? startActions() : endActions(); track action.label) {
+    <ion-button
+      size="small"
+      [color]="action.color ?? 'primary'"
+      [disabled]="!!pendingAction()"
+      [attr.aria-label]="action.label"
+      [title]="action.label"
+      (click)="perform(action, $event)">
+      <span class="action-content" [attr.aria-busy]="pendingAction()?.label === action.label">
+        <ion-icon class="action-label" [icon]="action.icon" aria-hidden="true"></ion-icon>
+        @if (pendingAction()?.label === action.label) {
+          <ion-spinner role="status" aria-label="正在处理操作"></ion-spinner>
+        }
+      </span>
+    </ion-button>
+  }
+</ng-template>

@@ -1,0 +1,11 @@
+ion-split-pane {
+  --side-width: 384px;
+  --side-min-width: 384px;
+  --side-max-width: 384px;
+}
+
+.loading-status {
+  height: 100%;
+  display: grid;
+  place-items: center;
+}

@@ -1,0 +1,171 @@
+import { DatePipe } from '@angular/common';
+import { Component, computed, DestroyRef, ElementRef, inject, input, output } from '@angular/core';
+import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
+import { arrowUndoOutline } from 'ionicons/icons';
+import { MessageType, type MessageResponse } from '../../../generated/models';
+import { MessageAttachments, type MessageAttachmentSource } from '../message-attachments/message-attachments';
+import { MessageAuthor } from '../message-author/message-author';
+import { mediaOverlay } from '../media-overlay';
+import { MessagePreview } from '../message-preview/message-preview';
+import { MessageReactions } from '../message-reactions/message-reactions';
+import { MessageThread } from '../message-thread/message-thread';
+import { userColors } from '../user-colors';
+import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
+
+export type MessageContent = MessageAttachmentSource &
+  Pick<MessageResponse, 'id' | 'sender' | 'message'> &
+  Partial<Pick<MessageResponse, 'isDeleted' | 'reactions' | 'replyRootId' | 'threadInfo' | 'replyToMessage'>>;
+
+export interface MessageMenuSelection {
+  messageId: SnowflakeID;
+  element: HTMLElement;
+  rect: DOMRect;
+  first: boolean;
+  last: boolean;
+  own: boolean;
+}
+
+@Component({
+  selector: 'app-message',
+  templateUrl: './message.html',
+  styleUrl: './message.scss',
+  imports: [
+    DatePipe,
+    IonAvatar,
+    IonIcon,
+    IonSpinner,
+    MessageAttachments,
+    MessageAuthor,
+    MessagePreview,
+    MessageReactions,
+    MessageThread,
+  ],
+  host: {
+    '[attr.data-message-id]': 'decodeId(message().id)',
+    '[style.--sender-light]': 'senderColors().light',
+    '[style.--sender-dark]': 'senderColors().dark',
+    '[style.--reply-light]': 'replyColors().light',
+    '[style.--reply-dark]': 'replyColors().dark',
+  },
+})
+export class Message<T extends MessageContent = MessageResponse> {
+  protected readonly decodeId = decodeId;
+  readonly message = input.required<T>();
+  protected readonly system = MessageType.system;
+  readonly own = input.required<boolean>();
+  readonly first = input(true);
+  readonly last = input(true);
+  protected readonly showAvatar = computed(() => this.last() || this.showAllAvatars());
+  readonly showAllAvatars = input(false);
+  readonly preview = input(false);
+  readonly interactive = input(true);
+  readonly canReply = input(true);
+  readonly canOpenThread = input(false);
+  readonly reply = output<T>();
+  readonly jumpingTo = input<SnowflakeID>();
+  readonly jumpDisabled = input(false);
+  readonly jump = output<SnowflakeID>();
+  readonly openThread = output<SnowflakeID>();
+  readonly menu = output<MessageMenuSelection>();
+  readonly react = output<string>();
+  private press?: { pointerId: number; x: number; y: number; timer: ReturnType<typeof setTimeout> };
+  private longPressed = false;
+  protected readonly name = computed(() => this.message().sender.name ?? String(this.message().sender.uid));
+  protected readonly senderColors = computed(() => userColors(this.name()));
+  protected readonly hasMedia = computed(() => {
+    const message = this.message();
+    return !message.isDeleted && (message.attachments.length > 0 || !!message.sticker);
+  });
+  protected readonly isSticker = computed(
+    () => !this.message().isDeleted && this.message().messageType === MessageType.sticker,
+  );
+  protected readonly mediaOverlay = computed(() => !this.message().isDeleted && mediaOverlay(this.message()));
+  protected readonly hasReactions = computed(() => !this.message().isDeleted && !!this.message().reactions?.length);
+  protected readonly threadInfo = computed(() => {
+    const message = this.message();
+    return this.canOpenThread() && !message.isDeleted && !message.replyRootId ? message.threadInfo : undefined;
+  });
+  protected readonly quoted = computed(() => {
+    const message = this.message();
+    return message.isDeleted || message.replyToMessage?.isDeleted ? undefined : message.replyToMessage;
+  });
+  protected readonly quoteName = computed(() => {
+    const sender = this.quoted()?.sender;
+    return sender ? (sender.name ?? String(sender.uid)) : '';
+  });
+  protected readonly replyColors = computed(() => userColors(this.quoteName()));
+  protected readonly replyIcon = arrowUndoOutline;
+
+  constructor() {
+    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    const suppressClick = (event: MouseEvent) => {
+      if (this.preview() || (this.longPressed && event.detail > 0)) {
+        this.longPressed = false;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    host.addEventListener('click', suppressClick, true);
+    inject(DestroyRef).onDestroy(() => {
+      this.cancelPress();
+      host.removeEventListener('click', suppressClick, true);
+    });
+  }
+
+  protected showMenu(event: Event, element: HTMLElement) {
+    if (this.preview() || !this.interactive()) return;
+    event.preventDefault();
+    this.cancelPress();
+    if (!this.longPressed) this.emitMenu(element);
+  }
+
+  protected menuKey(event: KeyboardEvent, element: HTMLElement) {
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+      this.longPressed = false;
+      this.showMenu(event, element);
+    }
+  }
+
+  protected startPress(event: PointerEvent, element: HTMLElement) {
+    this.cancelPress();
+    this.longPressed = false;
+    if (!this.interactive() || this.preview() || event.pointerType !== 'touch' || !event.isPrimary) return;
+    this.press = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      timer: setTimeout(() => {
+        this.press = undefined;
+        this.longPressed = true;
+        this.emitMenu(element);
+      }, 350),
+    };
+  }
+
+  protected movePress(event: PointerEvent) {
+    const press = this.press;
+    if (
+      press?.pointerId === event.pointerId &&
+      (Math.abs(event.clientX - press.x) > 10 || Math.abs(event.clientY - press.y) > 10)
+    ) {
+      this.cancelPress();
+    }
+  }
+
+  protected cancelPress() {
+    clearTimeout(this.press?.timer);
+    this.press = undefined;
+  }
+
+  private emitMenu(element: HTMLElement) {
+    if (!this.interactive() || this.preview() || this.message().messageType === MessageType.system) return;
+    this.menu.emit({
+      messageId: this.message().id,
+      element,
+      rect: element.getBoundingClientRect(),
+      first: this.first(),
+      last: this.last(),
+      own: this.own(),
+    });
+  }
+}

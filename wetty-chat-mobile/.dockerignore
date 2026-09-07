@@ -1,9 +1,0 @@
-node_modules
-dist
-prod-dist
-coverage
-test_output
-.vite
-.DS_Store
-*.log
-

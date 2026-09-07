@@ -215,7 +215,7 @@ fn apply_thread_read(
     path = "/{thread_root_id}/read",
     tag = "threads",
     params(
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     request_body = MarkThreadReadBody,
     responses(
@@ -254,7 +254,7 @@ async fn mark_thread_read(
     path = "/{thread_root_id}/read-state",
     tag = "threads",
     params(
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = OK, body = ThreadReadStateResponse),
@@ -320,8 +320,8 @@ pub struct ThreadSubscribePath {
     path = "/",
     tag = "threads",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     request_body = MarkThreadReadBody,
     responses(
@@ -359,8 +359,8 @@ async fn mark_thread_read_in_chat(
     path = "/",
     tag = "threads",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = OK, body = ThreadReadStateResponse),
@@ -395,8 +395,8 @@ async fn get_thread_read_state_in_chat(
     path = "/",
     tag = "threads",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = NO_CONTENT),
@@ -452,8 +452,8 @@ async fn subscribe_thread(
     path = "/",
     tag = "threads",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = NO_CONTENT),
@@ -499,8 +499,8 @@ pub struct ThreadSubscriptionStatusPath {
     path = "/",
     tag = "threads",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = OK, body = ThreadSubscriptionStatusResponse),
@@ -537,8 +537,8 @@ async fn get_subscription_status(
     path = "/",
     tag = "threads",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = NO_CONTENT),
@@ -577,8 +577,8 @@ async fn archive_thread(
     path = "/",
     tag = "threads",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_root_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
     ),
     responses(
         (status = NO_CONTENT),

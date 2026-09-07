@@ -206,7 +206,7 @@ fn attachment_cursors(
     path = "/",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ("kind" = ChatAttachmentKindFilter, Query, description = "Required attachment kind filter: image, video, other, or all"),
         ("limit" = Option<i64>, Query, description = "Target minimum number of attachments to return. The response can exceed this value so attachments from one message are not split across pages."),
         ("before" = Option<String>, Query, description = "Fetch older attachments before this message ID cursor. Use olderCursor from the previous response."),

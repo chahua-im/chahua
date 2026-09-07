@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>茶话</title>
+
+    <base href="/" />
+
+    <meta name="color-scheme" content="light dark" />
+    <meta name="viewport" content="viewport-fit=cover, width=device-width, initial-scale=1.0" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="msapplication-tap-highlight" content="no" />
+
+    <link rel="icon" type="image/png" href="icons/pwa-64x64.png" />
+
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/pwa-192x192.png" />
+    <meta name="theme-color" content="#f7f7f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)" />
+
+    <!-- add to homescreen for ios -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <style>
+      .startup-loading {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        font:
+          16px system-ui,
+          sans-serif;
+        color: var(--ion-text-color, light-dark(#000, #fff));
+        background: var(--ion-background-color, light-dark(#fff, #000));
+      }
+      .startup-spinner {
+        display: inline-block;
+        position: relative;
+        width: 28px;
+        height: 28px;
+        user-select: none;
+      }
+      .startup-spinner svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform-origin: center;
+        animation: startup-fade 1s linear infinite;
+        animation-delay: calc(var(--spoke) * 125ms - 1s);
+      }
+      .startup-spinner line {
+        stroke: currentColor;
+        stroke-width: 7px;
+        stroke-linecap: round;
+      }
+      @keyframes startup-fade {
+        from {
+          opacity: 1;
+        }
+        to {
+          opacity: 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .startup-spinner svg {
+          animation: none;
+          opacity: 0.6;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <app-root>
+      <div class="startup-loading" role="status" aria-label="正在加载茶话">
+        <span class="startup-spinner" aria-hidden="true">
+          <svg viewBox="0 0 64 64" style="transform: rotate(180deg); --spoke: 0">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+          <svg viewBox="0 0 64 64" style="transform: rotate(225deg); --spoke: 1">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+          <svg viewBox="0 0 64 64" style="transform: rotate(270deg); --spoke: 2">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+          <svg viewBox="0 0 64 64" style="transform: rotate(315deg); --spoke: 3">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+          <svg viewBox="0 0 64 64" style="transform: rotate(0deg); --spoke: 4">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+          <svg viewBox="0 0 64 64" style="transform: rotate(45deg); --spoke: 5">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+          <svg viewBox="0 0 64 64" style="transform: rotate(90deg); --spoke: 6">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+          <svg viewBox="0 0 64 64" style="transform: rotate(135deg); --spoke: 7">
+            <line transform="translate(32,32)" y1="14" y2="26" />
+          </svg>
+        </span>
+      </div>
+    </app-root>
+  </body>
+</html>

@@ -47,34 +47,40 @@ use crate::services::messages::{
     SendMessageOutcome,
 };
 use crate::services::social;
-#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[derive(serde::Deserialize, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
 pub struct ListMessagesQuery {
+    /// Cursor: fetch messages before this ID
     #[serde(
         default,
         deserialize_with = "crate::serde_i64_string::opt::deserialize"
     )]
-    #[schema(value_type = Option<String>)]
+    #[param(value_type = Option<String>)]
     before: Option<i64>,
+    /// Cursor: fetch messages around this ID
     #[serde(
         default,
         deserialize_with = "crate::serde_i64_string::opt::deserialize"
     )]
-    #[schema(value_type = Option<String>)]
+    #[param(value_type = Option<String>)]
     around: Option<i64>,
+    /// Cursor: fetch messages after this ID
     #[serde(
         default,
         deserialize_with = "crate::serde_i64_string::opt::deserialize"
     )]
-    #[schema(value_type = Option<String>)]
+    #[param(value_type = Option<String>)]
     after: Option<i64>,
+    /// Max number of messages to return
     #[serde(default)]
     max: Option<i64>,
+    /// Thread root ID to filter by
     #[serde(
         default,
         deserialize_with = "crate::serde_i64_string::opt::deserialize"
     )]
-    #[schema(value_type = Option<String>)]
+    #[param(value_type = Option<String>)]
     thread_id: Option<i64>,
 }
 
@@ -153,12 +159,8 @@ fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize>
     path = "/",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("before" = Option<String>, Query, description = "Cursor: fetch messages before this ID"),
-        ("around" = Option<String>, Query, description = "Cursor: fetch messages around this ID"),
-        ("after" = Option<String>, Query, description = "Cursor: fetch messages after this ID"),
-        ("max" = Option<i64>, Query, description = "Max number of messages to return"),
-        ("thread_id" = Option<String>, Query, description = "Thread root ID to filter by"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ListMessagesQuery,
     ),
     responses(
         (status = 200, description = "List of messages", body = ListMessagesResponse),
@@ -319,7 +321,7 @@ async fn get_messages(
     path = "/search",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         SearchMessagesQuery,
     ),
     responses(
@@ -504,8 +506,8 @@ fn record_search_candidate_drops(metrics: &MessageSearchMetrics, drops: SearchCa
     path = "/{message_id}",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("message_id" = i64, Path, description = "Message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Message ID"),
     ),
     responses(
         (status = 200, description = "Single message", body = MessageResponse),
@@ -551,7 +553,7 @@ async fn get_message(
     path = "/",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"),
     ),
     request_body = CreateMessageBody,
@@ -637,8 +639,8 @@ async fn post_message(
     path = "/threads/{thread_id}/messages",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("thread_id" = i64, Path, description = "Thread root message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_id" = String, Path, description = "Thread root message ID"),
     ),
     request_body = CreateMessageBody,
     responses(
@@ -818,8 +820,8 @@ pub(super) async fn post_thread_message(
     path = "/{message_id}",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("message_id" = i64, Path, description = "Message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Message ID"),
     ),
     request_body = UpdateMessageBody,
     responses(
@@ -987,8 +989,8 @@ async fn patch_message(
     path = "/{message_id}",
     tag = "chats",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
-        ("message_id" = i64, Path, description = "Message ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("message_id" = String, Path, description = "Message ID"),
     ),
     responses(
         (status = 204, description = "Message deleted"),
@@ -1187,6 +1189,36 @@ mod tests {
     use crate::errors::AppError;
     use crate::models::MessageType;
     use crate::services::message_search::MessageSearchSort;
+
+    #[test]
+    fn message_query_documentation_matches_runtime_names_and_preserves_id_precision() {
+        let document = serde_json::to_value(super::router().into_openapi()).unwrap();
+        let parameters = document["paths"]["/"]["get"]["parameters"]
+            .as_array()
+            .unwrap();
+        let query: Vec<_> = parameters
+            .iter()
+            .filter(|parameter| parameter["in"] == "query")
+            .collect();
+        assert_eq!(query.len(), 5);
+        assert!(!query
+            .iter()
+            .any(|parameter| parameter["name"] == "thread_id"));
+        for name in ["before", "around", "after", "threadId"] {
+            let parameter = query
+                .iter()
+                .find(|parameter| parameter["name"] == name)
+                .unwrap();
+            assert_eq!(parameter["schema"]["type"], "string", "{name}");
+            assert_eq!(parameter["required"], false, "{name}");
+        }
+        let uri = "/?threadId=9223372036854775807&after=9007199254740993"
+            .parse()
+            .unwrap();
+        let parsed = axum::extract::Query::<super::ListMessagesQuery>::try_from_uri(&uri).unwrap();
+        assert_eq!(parsed.thread_id, Some(i64::MAX));
+        assert_eq!(parsed.after, Some(9_007_199_254_740_993));
+    }
 
     #[test]
     fn rejects_system_message_type_from_clients() {

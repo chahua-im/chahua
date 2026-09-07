@@ -1,0 +1,19 @@
+ion-button {
+  --color: var(--ion-color-primary-shade);
+}
+
+@media (prefers-color-scheme: dark) {
+  ion-button {
+    --color: color-mix(in srgb, var(--ion-color-primary-tint) 85%, var(--ion-text-color));
+  }
+}
+
+.profile ion-avatar {
+  width: 88px;
+  height: 88px;
+  margin-inline: auto;
+}
+
+.profile-placeholder {
+  font-size: 88px;
+}

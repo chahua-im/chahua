@@ -1,0 +1,60 @@
+@for (item of items(); track item.id; let last = $last) {
+  @if (item.kind === MediaKind.Image || item.kind === MediaKind.Video) {
+    <div
+      class="media-frame"
+      [class.sticker]="item.sticker"
+      [style.width.px]="item.displayWidth"
+      [style.aspect-ratio]="item.width + ' / ' + item.height">
+      @if (failed().has(item.id)) {
+        <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
+      } @else if (item.kind === MediaKind.Image) {
+        <a [href]="item.url" target="_blank" rel="noopener" [attr.aria-label]="'查看' + item.fileName">
+          <img [src]="item.url" loading="lazy" decoding="async" [alt]="item.fileName" (error)="fail(item.id)" />
+        </a>
+      } @else {
+        <video
+          [src]="item.url"
+          [controls]="!item.sticker"
+          [autoplay]="item.sticker"
+          [loop]="item.sticker"
+          [muted]="item.sticker"
+          playsinline
+          preload="metadata"
+          [attr.aria-label]="item.fileName"
+          (error)="fail(item.id)"></video>
+      }
+      @if (last && overlayTime()) {
+        <ion-badge class="media-time" color="medium">
+          <time [attr.datetime]="message().createdAt">{{ message().createdAt | date: 'HH:mm' }}</time>
+        </ion-badge>
+      }
+    </div>
+  } @else if (item.kind === MediaKind.Audio) {
+    <div class="audio-frame">
+      @if (failed().has(item.id)) {
+        <a class="media-error" [href]="item.url" target="_blank" rel="noopener">无法播放，打开语音文件</a>
+      } @else {
+        <audio [src]="item.url" controls preload="none" aria-label="语音消息" (error)="fail(item.id)"></audio>
+      }
+    </div>
+  } @else {
+    <a class="file" [href]="item.url" [attr.download]="item.fileName" target="_blank" rel="noopener">
+      <ion-icon [icon]="fileIcon" aria-hidden="true"></ion-icon>
+      <span class="file-info">
+        <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
+        @if (item.size !== undefined) {
+          <small>
+            @if (item.size < 1024) {
+              {{ item.size }} B
+            } @else if (item.size < 1024 * 1024) {
+              {{ (item.size / 1024).toFixed(1) }} KB
+            } @else {
+              {{ (item.size / (1024 * 1024)).toFixed(1) }} MB
+            }
+          </small>
+        }
+      </span>
+      <ion-icon [icon]="downloadIcon" aria-label="下载"></ion-icon>
+    </a>
+  }
+}
