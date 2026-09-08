@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,15 +46,20 @@ function Harness(): ReactElement {
     onTextChange: onMentionTextChange,
   } = useMentionAutocomplete(textareaRef, text, 1);
 
-  selectMentionRef.current = selectMention;
-  sendRef.current = () => {
-    // Mirrors MessageComposeBar.handleSend: convert to wire format first,
-    // then trim so mention offsets are computed against the raw text.
-    const wire = toWireFormat(text).trim();
-    setSent(wire);
-    setText('');
-    clearMentions();
-  };
+  // Expose the mention select action and a send stub (mirroring
+  // MessageComposeBar.handleSend) to the test body. Filled in an effect so
+  // lint's react-hooks/immutability rule stays satisfied.
+  useEffect(() => {
+    selectMentionRef.current = selectMention;
+    sendRef.current = () => {
+      // Mirrors MessageComposeBar.handleSend: convert to wire format first,
+      // then trim so mention offsets are computed against the raw text.
+      const wire = toWireFormat(text).trim();
+      setSent(wire);
+      setText('');
+      clearMentions();
+    };
+  }, [selectMention, toWireFormat, text, clearMentions]);
 
   return (
     <div>
