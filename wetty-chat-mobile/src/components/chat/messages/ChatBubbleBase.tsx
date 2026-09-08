@@ -320,9 +320,7 @@ export function ChatBubbleBase({
         >
           {hasBottomContent &&
             (markdownNodes ? (
-              <div
-                className={`${styles.markdownBody}${markdownHasBlocks ? ` ${styles.markdownBlocks}` : ''}`}
-              >
+              <div className={`${styles.markdownBody}${markdownHasBlocks ? ` ${styles.markdownBlocks}` : ''}`}>
                 {markdownNodes}
               </div>
             ) : (

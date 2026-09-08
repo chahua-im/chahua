@@ -41,20 +41,14 @@ function previewBlocks(tokens: readonly Token[], options: MarkdownRenderOptions)
     switch (token.type) {
       case 'paragraph_open': {
         const closeIndex = findMatchingTokenEnd(tokens, i);
-        const content = renderInlineTokens(
-          inlineChildrenOf(tokens.slice(i + 1, closeIndex)),
-          options,
-        );
+        const content = renderInlineTokens(inlineChildrenOf(tokens.slice(i + 1, closeIndex)), options);
         addUnit(content);
         i = closeIndex + 1;
         break;
       }
       case 'heading_open': {
         const closeIndex = findMatchingTokenEnd(tokens, i);
-        const content = renderInlineTokens(
-          inlineChildrenOf(tokens.slice(i + 1, closeIndex)),
-          options,
-        );
+        const content = renderInlineTokens(inlineChildrenOf(tokens.slice(i + 1, closeIndex)), options);
         addUnit(createElement('strong', null, content));
         i = closeIndex + 1;
         break;
@@ -123,10 +117,7 @@ function previewBlocks(tokens: readonly Token[], options: MarkdownRenderOptions)
   return parts;
 }
 
-export function renderMarkdownPreview(
-  text: string,
-  options: MarkdownRenderOptions = {},
-): ReactNode[] {
+export function renderMarkdownPreview(text: string, options: MarkdownRenderOptions = {}): ReactNode[] {
   if (!text) return [];
   const singleLine: MarkdownRenderOptions = { ...options, singleLine: true };
   return previewBlocks(markdownEngine.parse(text, {}), singleLine);

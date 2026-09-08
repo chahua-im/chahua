@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  mentionEntriesToWire,
-  relocateMentionEntries,
-  type MentionEntry,
-} from './useMentionAutocomplete';
+import { mentionEntriesToWire, relocateMentionEntries, type MentionEntry } from './useMentionAutocomplete';
 
 const entry = (start: number, end: number, username = 'devuser2', uid = 7): MentionEntry => ({
   uid,
@@ -18,33 +14,21 @@ describe('relocateMentionEntries', () => {
   });
 
   it('shifts an entry forward when characters are inserted before it', () => {
-    expect(relocateMentionEntries('Hi @devuser2', [entry(3, 12)], 'Hi *@devuser2')).toEqual([
-      entry(4, 13),
-    ]);
+    expect(relocateMentionEntries('Hi @devuser2', [entry(3, 12)], 'Hi *@devuser2')).toEqual([entry(4, 13)]);
   });
 
   it('shifts an entry backward when text before it is deleted', () => {
-    expect(relocateMentionEntries('Hi @devuser2 world', [entry(3, 12)], '@devuser2 world')).toEqual([
-      entry(0, 9),
-    ]);
+    expect(relocateMentionEntries('Hi @devuser2 world', [entry(3, 12)], '@devuser2 world')).toEqual([entry(0, 9)]);
   });
 
   it('re-locates an entry wrapped in bold/italic/strike markers', () => {
-    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '**@devuser2** ')).toEqual([
-      entry(2, 11),
-    ]);
-    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '*@devuser2* ')).toEqual([
-      entry(1, 10),
-    ]);
-    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '~~@devuser2~~ ')).toEqual([
-      entry(2, 11),
-    ]);
+    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '**@devuser2** ')).toEqual([entry(2, 11)]);
+    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '*@devuser2* ')).toEqual([entry(1, 10)]);
+    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '~~@devuser2~~ ')).toEqual([entry(2, 11)]);
   });
 
   it('re-locates an entry when a marker is inserted only before it', () => {
-    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '*@devuser2 ')).toEqual([
-      entry(1, 10),
-    ]);
+    expect(relocateMentionEntries('@devuser2 ', [entry(0, 9)], '*@devuser2 ')).toEqual([entry(1, 10)]);
   });
 
   it('drops the entry when the mention text itself is edited', () => {
@@ -55,15 +39,9 @@ describe('relocateMentionEntries', () => {
 
   it('shifts several entries independently across one edit', () => {
     const previous = '@alice see @bob now';
-    const before: MentionEntry[] = [
-      entry(0, 6, 'alice', 1),
-      entry(11, 15, 'bob', 2),
-    ];
+    const before: MentionEntry[] = [entry(0, 6, 'alice', 1), entry(11, 15, 'bob', 2)];
     const next = '**@alice** see @bob now';
-    expect(relocateMentionEntries(previous, before, next)).toEqual([
-      entry(2, 8, 'alice', 1),
-      entry(15, 19, 'bob', 2),
-    ]);
+    expect(relocateMentionEntries(previous, before, next)).toEqual([entry(2, 8, 'alice', 1), entry(15, 19, 'bob', 2)]);
   });
 
   it('returns the same array reference when nothing changed', () => {

@@ -7,10 +7,7 @@ import { findCodeRegions } from '@/utils/markdown/codeRegions';
 import { hasEscapedPunctuation } from '@/utils/markdown/detect';
 import { markdownEngine } from '@/utils/markdown/engine';
 import { buildPlaceholder } from '@/utils/markdown/placeholder';
-import {
-  renderMarkdownTokens,
-  type MarkdownRenderOptions,
-} from '@/utils/markdown/react-renderer';
+import { renderMarkdownTokens, type MarkdownRenderOptions } from '@/utils/markdown/react-renderer';
 import { tokensContainBlocks, tokensContainMarkup } from '@/utils/markdown/tokens';
 import { decodePermalink } from '@/utils/permalinkUrl';
 import styles from './ChatBubble.module.scss';
@@ -171,8 +168,6 @@ export function renderMessageContentLegacy(
 
   return result;
 }
-
-
 
 interface MentionWidget {
   uid: number;

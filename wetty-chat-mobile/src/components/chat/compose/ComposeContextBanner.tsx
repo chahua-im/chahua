@@ -48,9 +48,7 @@ export function ComposeContextBanner({ editing, replyTo, onCancelEdit, onCancelR
       <div className={`${styles.replyText} ${styles.replyPreviewTappable}`} onClick={handleJumpToReply}>
         <span className={styles.replyUsername}>{t`Replying to ${replyTo.username}`}</span>
         <span className={styles.replySnippet}>
-          <MarkdownSummaryText
-            text={formatMessagePreview(replyTo, getNotificationPreviewLabels(locale))}
-          />
+          <MarkdownSummaryText text={formatMessagePreview(replyTo, getNotificationPreviewLabels(locale))} />
         </span>
       </div>
       <button type="button" className={styles.replyClose} aria-label={t`Cancel reply`} onClick={onCancelReply}>

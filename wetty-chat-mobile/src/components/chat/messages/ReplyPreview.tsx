@@ -40,9 +40,7 @@ export function ReplyPreview({ replyTo, isSent, interactive, onReplyTap }: Reply
         {replyTo.senderName}
       </div>
       <div className={styles.replyPreviewText}>
-        <MarkdownSummaryText
-          text={formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
-        />
+        <MarkdownSummaryText text={formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))} />
       </div>
     </div>
   );

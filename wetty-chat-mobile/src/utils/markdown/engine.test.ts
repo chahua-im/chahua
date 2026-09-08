@@ -46,9 +46,7 @@ describe('`*` is not a list marker', () => {
   });
 
   it('still allows emphasis right after a literal star line', () => {
-    expect(markdownEngine.render('* item\n**bold**', {}).trim()).toBe(
-      '<p>* item<br>\n<strong>bold</strong></p>',
-    );
+    expect(markdownEngine.render('* item\n**bold**', {}).trim()).toBe('<p>* item<br>\n<strong>bold</strong></p>');
   });
 
   it('keeps dash and ordered lists working', () => {
@@ -68,9 +66,7 @@ describe('single-asterisk italic space-adaptation', () => {
   });
 
   it('forgives only one stray space, not symmetric spacing', () => {
-    expect(markdownEngine.render('*italic words here *', {}).trim()).toContain(
-      '<em>italic words here</em>',
-    );
+    expect(markdownEngine.render('*italic words here *', {}).trim()).toContain('<em>italic words here</em>');
     expect(markdownEngine.render('* x *', {}).trim()).toBe('<p>* x *</p>');
   });
 

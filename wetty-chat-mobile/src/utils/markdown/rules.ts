@@ -139,10 +139,7 @@ function underlinePostProcess(state: StateInline, delimiters: StateInline['delim
     token.nesting = -1;
     token.markup = '__';
     token.content = '';
-    if (
-      state.tokens[endDelim.token - 1].type === 'text' &&
-      state.tokens[endDelim.token - 1].content === '_'
-    ) {
+    if (state.tokens[endDelim.token - 1].type === 'text' && state.tokens[endDelim.token - 1].content === '_') {
       loneMarkers.push(endDelim.token - 1);
     }
   }

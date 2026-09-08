@@ -65,7 +65,8 @@ export const FEATURES = {
   },
   messageMarkdown: {
     enabled: true,
-    description: 'Renders chat messages (and chat-list previews) as Markdown and shows a formatting toolbar when text is selected in the composer.',
+    description:
+      'Renders chat messages (and chat-list previews) as Markdown and shows a formatting toolbar when text is selected in the composer.',
   },
 } as const;
 

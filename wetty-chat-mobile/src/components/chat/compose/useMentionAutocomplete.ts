@@ -78,7 +78,10 @@ export function relocateMentionEntries(
   let prefix = 0;
   while (prefix < maxAnchor && previousText[prefix] === nextText[prefix]) prefix += 1;
   let suffix = 0;
-  while (suffix < maxAnchor - prefix && previousText[previousText.length - 1 - suffix] === nextText[nextText.length - 1 - suffix]) {
+  while (
+    suffix < maxAnchor - prefix &&
+    previousText[previousText.length - 1 - suffix] === nextText[nextText.length - 1 - suffix]
+  ) {
     suffix += 1;
   }
 
@@ -204,9 +207,7 @@ export function useMentionAutocomplete(
 
   const onTextChange = useCallback(
     (newText: string) => {
-      setMentionEntries((prev) =>
-        prev.length === 0 ? prev : relocateMentionEntries(text, prev, newText),
-      );
+      setMentionEntries((prev) => (prev.length === 0 ? prev : relocateMentionEntries(text, prev, newText)));
 
       const ta = textareaRef.current;
       if (!ta) {
