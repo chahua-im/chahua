@@ -9,7 +9,7 @@
         (ionCancel)="searching.set(false); search.set('')" />
     } @else if (list().archived || list().requestHistory) {
       <ion-buttons slot="start">
-        <ion-button [routerLink]="['/chats', list().tab]" routerDirection="back">
+        <ion-button (click)="openList.emit({ tab: list().tab, archived: false, requestHistory: false })">
           <ion-icon slot="icon-only" [icon]="backIcon"></ion-icon>
         </ion-button>
       </ion-buttons>
@@ -40,7 +40,7 @@
     }
   </ion-toolbar>
 </ion-header>
-<ion-content>
+<ion-content appScrollbars>
   @if (searching()) {
     <app-directory-search [query]="search()" />
   } @else {
@@ -53,20 +53,22 @@
     @if (!list().archived && !list().requestHistory) {
       <ion-list>
         <app-chat-list-item
+          [button]="true"
+          (selected)="openList.emit({ tab: list().tab, archived: true, requestHistory: false })"
           [entry]="{
             title: '已归档',
             subtitle: '查看已归档的对话',
             icon: archiveIcon,
-            link: ['/chats', list().tab, 'archived'],
             unreadCount: archivedUnreadCount(),
           }"></app-chat-list-item>
         @if (showHistoryEntry()) {
           <app-chat-list-item
+            [button]="true"
+            (selected)="openList.emit({ tab: ListTab.Friends, archived: false, requestHistory: true })"
             [entry]="{
               title: '好友请求',
               subtitle: '查看好友请求记录',
               icon: requestsIcon,
-              link: ['/chats/friends/archived-requests'],
             }"></app-chat-list-item>
         }
         @if (countError()) {

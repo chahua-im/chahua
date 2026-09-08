@@ -1,15 +1,15 @@
-@for (item of items(); track item.id; let last = $last) {
+@for (item of items(); track item.id ?? item.url; let last = $last) {
   @if (item.kind === MediaKind.Image || item.kind === MediaKind.Video) {
     <div
       class="media-frame"
       [class.sticker]="item.sticker"
       [style.width.px]="item.displayWidth"
       [style.aspect-ratio]="item.width + ' / ' + item.height">
-      @if (failed().has(item.id)) {
+      @if (failed().has(item.id ?? item.url)) {
         <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
       } @else if (item.kind === MediaKind.Image) {
-        <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id, $event)">
-          <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id)" />
+        <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id ?? item.url, $event)">
+          <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id ?? item.url)" />
         </a>
       } @else {
         <video
@@ -20,20 +20,27 @@
           [muted]="item.sticker"
           playsinline
           preload="metadata"
-          (error)="fail(item.id)"></video>
+          (error)="fail(item.id ?? item.url)"></video>
+      }
+      @if (item.uploading) {
+        <div class="upload-overlay"><ion-spinner /></div>
       }
       @if (last && overlayTime()) {
         <ion-badge class="media-time" color="medium">
           <time [attr.datetime]="message().createdAt">{{ message().createdAt | date: 'HH:mm' }}</time>
+          <app-message-status [delivery]="delivery()" />
         </ion-badge>
       }
     </div>
   } @else if (item.kind === MediaKind.Audio) {
     <div class="audio-frame">
-      @if (failed().has(item.id)) {
+      @if (failed().has(item.id ?? item.url)) {
         <a class="media-error" [href]="item.url" target="_blank" rel="noopener">无法播放，打开语音文件</a>
       } @else {
-        <audio [src]="item.url" controls preload="none" (error)="fail(item.id)"></audio>
+        <audio [src]="item.url" controls preload="none" (error)="fail(item.id ?? item.url)"></audio>
+      }
+      @if (item.uploading) {
+        <div class="upload-overlay"><ion-spinner /></div>
       }
     </div>
   } @else {
@@ -53,7 +60,11 @@
           </small>
         }
       </span>
-      <ion-icon [icon]="downloadIcon"></ion-icon>
+      @if (item.uploading) {
+        <ion-spinner />
+      } @else {
+        <ion-icon [icon]="downloadIcon"></ion-icon>
+      }
     </a>
   }
 }

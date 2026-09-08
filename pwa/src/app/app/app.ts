@@ -18,6 +18,7 @@ import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
 import { SessionStore } from '../session/session-store';
 import { SettingsModal } from '../settings/settings-modal/settings-modal';
+import { ContentScrollbars } from '../content-scrollbars';
 
 enum StartupError {
   Expired,
@@ -29,7 +30,18 @@ enum StartupError {
   templateUrl: './app.html',
   styleUrl: './app.scss',
   host: { '(window:popstate)': 'browserTransition.set($event.hasUAVisualTransition)' },
-  imports: [IonApp, IonButton, IonContent, IonMenu, IonRouterOutlet, IonSpinner, IonSplitPane, ChatList, SettingsModal],
+  imports: [
+    ContentScrollbars,
+    IonApp,
+    IonButton,
+    IonContent,
+    IonMenu,
+    IonRouterOutlet,
+    IonSpinner,
+    IonSplitPane,
+    ChatList,
+    SettingsModal,
+  ],
 })
 export class App {
   private readonly router = inject(Router);
@@ -38,7 +50,10 @@ export class App {
       filter((event) => event instanceof NavigationEnd),
       map(() => listSelection(this.router.routerState.snapshot.root)),
     ),
-    { initialValue: listSelection(this.router.routerState.snapshot.root) },
+    {
+      initialValue: listSelection(this.router.routerState.snapshot.root),
+      equal: (a, b) => a?.tab === b?.tab && a?.archived === b?.archived && a?.requestHistory === b?.requestHistory,
+    },
   );
   protected readonly sidebarSelection = linkedSignal({
     source: this.routeSelection,

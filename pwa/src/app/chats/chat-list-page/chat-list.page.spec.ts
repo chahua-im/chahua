@@ -1,9 +1,9 @@
-import { Component, input, signal } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { routes } from '../../app.routes';
-import { ListTab } from '../list-tabs';
+import { ListTab, type ListSelection } from '../list-tabs';
 import { vi } from 'vitest';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
@@ -19,6 +19,7 @@ afterEach(() => vi.unstubAllGlobals());
 class ListStub {
   readonly active = input(true);
   readonly selection = input();
+  readonly openList = output<ListSelection>();
 }
 
 describe('ChatListPage', () => {

@@ -1,6 +1,8 @@
 import { MessageType, type MessageResponse } from '../../generated/models';
 
-export function messageRows(messages: readonly MessageResponse[]) {
+export function messageRows<T extends Pick<MessageResponse, 'createdAt' | 'messageType' | 'sender'>>(
+  messages: readonly T[],
+) {
   const dates = messages.map((message) => new Date(message.createdAt).toDateString());
   const continuesGroup = (left: number, right: number) => {
     const previous = messages[left];

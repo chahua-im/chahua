@@ -9,6 +9,7 @@ import { UserProfile } from '../user-profile/user-profile';
 import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
 import { encodeId, decodeId } from '../../api/snowflake-id';
 import { signal } from '@angular/core';
+import { ContentScrollbars } from '../../content-scrollbars';
 export function decodePermalink(encoded: string) {
   const bytes = Uint8Array.from(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
   if (bytes.length !== 16) throw new Error('无效消息链接');
@@ -17,9 +18,9 @@ export function decodePermalink(encoded: string) {
 }
 @Component({
   selector: 'app-chat-link',
-  imports: [IonContent, IonSpinner, IonButton],
+  imports: [ContentScrollbars, IonContent, IonSpinner, IonButton],
   host: { class: 'ion-page' },
-  template: `<ion-content>
+  template: `<ion-content appScrollbars>
     @if (failed()) {
       <p class="ion-padding">
         链接无法打开。<ion-button fill="clear" (click)="open()">重试</ion-button

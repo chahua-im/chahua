@@ -18,6 +18,7 @@
       </div>
     }
     @for (upload of visualUploads(); track upload) {
+      @let state = upload.state();
       <div class="upload">
         @if (upload.file.type.startsWith('image/')) {
           <img [src]="upload.url" />
@@ -25,11 +26,11 @@
           <audio [src]="upload.url" controls></audio>
         }
         <span>{{ upload.file.name }}</span>
-        @if (upload.status === Status.Uploading || upload.status === Status.Processing) {
+        @if (state.status === Status.Uploading || state.status === Status.Processing) {
           <ion-spinner />
-          <span>{{ (upload.progress * 100).toFixed(0) }}%</span>
-        } @else if (upload.status === Status.Failed) {
-          <ion-button fill="clear" (click)="retryUpload(upload)">重试</ion-button>
+          <span>{{ (state.progress * 100).toFixed(0) }}%</span>
+        } @else if (state.status === Status.Failed) {
+          <ion-button fill="clear" (click)="upload.retry()">重试</ion-button>
         }
         <ion-button fill="clear" [disabled]="disabled()" (click)="remove(upload)">
           <ion-icon [icon]="icons.closeOutline" />
@@ -92,7 +93,7 @@
   @if (useVoice()) {
     <app-voice-recorder
       [(active)]="voiceActive"
-      [disabled]="disabled() || pendingUpload()"
+      [disabled]="disabled()"
       (activeChange)="$event && panel.set(Panel.None)"
       (submitted)="sendVoice($event)"
       (discarded)="discardVoice()" />

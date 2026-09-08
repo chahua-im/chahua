@@ -5,7 +5,7 @@
       <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
     </ion-toolbar>
   </ion-header>
-  <ion-content><ng-container [ngTemplateOutlet]="library" /></ion-content>
+  <ion-content appScrollbars><ng-container [ngTemplateOutlet]="library" /></ion-content>
 } @else {
   <ng-container [ngTemplateOutlet]="library" />
 }

@@ -4,7 +4,7 @@
     <ion-buttons slot="end"><ion-button (click)="close()">完成</ion-button></ion-buttons>
   </ion-toolbar>
 </ion-header>
-<ion-content color="light">
+<ion-content appScrollbars color="light">
   @if (session.user(); as user) {
     <div class="profile ion-text-center ion-padding">
       @if (user.avatarUrl; as avatar) {

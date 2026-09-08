@@ -29,11 +29,13 @@ import {
 import { decodeId } from '../../api/snowflake-id';
 import { ChatListStore } from '../chat-list-store';
 import { SessionStore } from '../../session/session-store';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-user-profile',
   templateUrl: './user-profile.html',
   imports: [
+    ContentScrollbars,
     FormField,
     IonHeader,
     IonToolbar,

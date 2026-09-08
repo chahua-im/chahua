@@ -1,18 +1,20 @@
 import { booleanAttribute, ChangeDetectorRef, Component, computed, inject, input, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { IonContent, IonHeader, IonIcon, IonTitle, IonToolbar } from '@ionic/angular';
+import { IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, NavController } from '@ionic/angular';
 import { chatbubblesOutline } from 'ionicons/icons';
 import { fromEvent, map } from 'rxjs';
 import { ChatList } from '../chat-list/chat-list';
-import { ListTab } from '../list-tabs';
+import { ListTab, type ListSelection } from '../list-tabs';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-chats',
   templateUrl: './chat-list.page.html',
   styleUrl: './chat-list.page.scss',
-  imports: [ChatList, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar],
+  imports: [ContentScrollbars, ChatList, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar],
 })
 export class ChatListPage {
+  private readonly nav = inject(NavController);
   readonly tab = input(ListTab.Messages);
   readonly archived = input(false, { transform: booleanAttribute });
   readonly requestHistory = input(false, { transform: booleanAttribute });
@@ -29,6 +31,13 @@ export class ChatListPage {
   private readonly changeDetector = inject(ChangeDetectorRef);
   protected readonly listActive = signal(true);
   protected readonly chatIcon = chatbubblesOutline;
+
+  protected openList(selection: ListSelection) {
+    const url = ['/chats', selection.tab];
+    if (selection.archived) url.push('archived');
+    if (selection.requestHistory) url.push('archived-requests');
+    return this.archived() || this.requestHistory() ? this.nav.navigateBack(url) : this.nav.navigateForward(url);
+  }
 
   ionViewDidEnter() {
     this.listActive.set(true);

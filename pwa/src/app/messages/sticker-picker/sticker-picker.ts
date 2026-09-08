@@ -26,11 +26,13 @@ import {
   type SnowflakeID,
 } from '../../../generated/models';
 import { MessageAttachments } from '../message-attachments/message-attachments';
+import { ContentScrollbars } from '../../content-scrollbars';
 @Component({
   selector: 'app-sticker-picker',
   templateUrl: './sticker-picker.html',
   styleUrl: './sticker-picker.scss',
   imports: [
+    ContentScrollbars,
     IonIcon,
     IonPopover,
     NgTemplateOutlet,

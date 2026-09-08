@@ -56,9 +56,9 @@ flowchart TD
 
 | 组件         | 输入、输出或入口                                                                             | 局部状态                                                                   | 服务依赖与职责                                                                                                                                                              |
 | ------------ | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App          | 浏览器 popstate、分栏可见性、路由栈事件                                                      | 登录 loading/error、分栏可见性、sidebarSelection、浏览器是否已播放返回动画 | SessionStore 初始化身份；Router 协调 Ionic 默认页面动画；解析路由并向侧栏传递列表选择，装配分栏和设置弹窗                                                                   |
-| ChatListPage | 路由输入 tab、archived、requestHistory；Ionic 进入/离开事件                                  | listActive、宽屏媒体查询状态                                               | 为移动列表提供 selection/active，宽屏仅创建聊天占位页；离开时驱动子查询清理                                                                                                 |
-| ChatList     | 输入 selection、active；点击分类、设置、刷新和续页                                           | 首次展示 ready、下拉 refreshing；其他行、排序、加载和计数为派生状态        | ChatListStore 提供列表/计数/好友请求，ChatStore 提供聊天操作，DraftStore 提供草稿，Preferences 决定话题展示，SessionStore 提供当前用户，ConversationNavigation 定位当前对话 |
+| App          | 浏览器 popstate、分栏可见性、路由栈事件                                                      | 登录 loading/error、分栏可见性、sidebarSelection、浏览器是否已播放返回动画 | SessionStore 初始化身份；Router 协调 Ionic 默认页面动画；解析路由并持有侧栏选择；双栏列表切换仅更新局部状态，装配分栏和设置弹窗                                             |
+| ChatListPage | 路由输入 tab、archived、requestHistory；Ionic 进入/离开事件                                  | listActive、宽屏媒体查询状态                                               | 为移动列表提供 selection/active，并将 openList 转成路由导航；宽屏仅创建聊天占位页；离开时驱动子查询清理                                                                     |
+| ChatList     | 输入 selection、active；输出 openList；点击设置、刷新和续页                                  | 首次展示 ready、下拉 refreshing；其他行、排序、加载和计数为派生状态        | ChatListStore 提供列表/计数/好友请求，ChatStore 提供聊天操作，DraftStore 提供草稿，Preferences 决定话题展示，SessionStore 提供当前用户，ConversationNavigation 定位当前对话 |
 | ChatListItem | entry、startActions、endActions、actionsAlwaysVisible；输出 selected；投影 title/preview/end | pendingAction、操作 error                                                  | 通用列表行；执行父组件提供的 run，管理滑动收起、局部 spinner 和错误；不注入业务 Store                                                                                       |
 
 App 和 ChatListPage 根据布局创建桌面或移动 ChatList，隐藏布局不创建列表实例。页面转场期间的实例共享 Store 中的查询。组件选择 `chats(archived)`、`threads(archived)`、`friendRequests(history)` 和归档计数查询；active 控制其消费者生命周期。
@@ -67,13 +67,13 @@ ChatList 在 TypeScript 中派生行数据、排序时间和操作回调，在�
 
 ## 消息页面
 
-| 组件               | 路由输入                                                     | 局部状态                                                                                                                            | 服务与子组件                                                                                                                                                                |
-| ------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ConversationPage   | id、threadId、message、reply；十进制路由 ID 转成 SnowflakeID | 页面进入上下文、滚动/触摸活动、定位目标、固定未读边界、底部状态、输入与回复预览、发送状态、话题按钮状态、当前置顶选择和置顶读取错误 | 提供 ConversationStore；消费 ChatStore 的读状态、订阅、置顶与标题、DraftStore、Preferences、SessionStore、Connection 和 ConversationNavigation；驱动 Message 与 MessageMenu |
-| PinnedMessagesPage | id、threadId                                                 | 活跃版本、loading/failed                                                                                                            | 消费 ChatStore 的共享 ChatPins，派生置顶消息数组，驱动 Message 和 MessageMenu；无 ConversationStore                                                                         |
-| SavedMessagesPage  | 无                                                           | 活跃版本、收藏列表与游标、loading/failed、removingSavedId/removeFailed                                                              | 直接使用 SavedMessagesService；快照经 savedMessageContent 交给 Message；无消息菜单与 ConversationStore                                                                      |
+| 组件               | 路由输入                                                     | 局部状态                                                                                                                                | 服务与子组件                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ConversationPage   | id、threadId、message、reply；十进制路由 ID 转成 SnowflakeID | 页面进入上下文、滚动/触摸活动、定位目标、固定未读边界、底部状态、输入与回复预览、编辑保存状态、话题按钮状态、当前置顶选择和置顶读取错误 | 提供 ConversationStore；合并 MessageOutbox 待发消息；消费 ChatStore 的读状态、订阅、置顶与标题、DraftStore、Preferences、SessionStore、Connection 和 ConversationNavigation；驱动 Message 与 MessageMenu |
+| PinnedMessagesPage | id、threadId                                                 | 活跃版本、loading/failed                                                                                                                | 消费 ChatStore 的共享 ChatPins，派生置顶消息数组，驱动 Message 和 MessageMenu；无 ConversationStore                                                                                                      |
+| SavedMessagesPage  | 无                                                           | 活跃版本、收藏列表与游标、loading/failed、removingSavedId/removeFailed                                                                  | 直接使用 SavedMessagesService；快照经 savedMessageContent 交给 Message；无消息菜单与 ConversationStore                                                                                                   |
 
-ConversationPage 的 `rows` 来自 `messageRows`，保存消息引用及日期/分组标志。同一作者连续消息之间留 2px，分组之间留 8px；分组间距使用 first/last，与是否显示所有头像无关。`selectedPin` 从置顶列表和 selectedPinId 派生。pendingNavigation 同时用于置顶、引用、历史导航的位置反馈。右下角下箭头显示共享 ChatStore 的未读数，离开底部约 40px 或仍有较新分页时出现，录音时隐藏。点击引用时页面记录来源消息 ID，点击下箭头逐层返回来源；没有返回记录时定位最新。滚动经过来源、回到最新或离开页面会清理对应记录。按钮与角标节点保持挂载，显示切换不改变滚动容器结构。
+ConversationPage 的 `rows` 将已确认区间与 MessageOutbox 队尾合并，再由 `messageRows` 派生日期/分组标志；本地行与确认回声按 clientGeneratedId 保持同一个渲染键。同一作者连续消息之间留 2px，分组之间留 8px；分组间距使用 first/last，与是否显示所有头像无关。`selectedPin` 从置顶列表和 selectedPinId 派生。pendingNavigation 同时用于置顶、引用、历史导航的位置反馈。右下角下箭头显示共享 ChatStore 的未读数，离开底部约 40px 或仍有较新分页时出现，录音时隐藏。点击引用时页面记录来源消息 ID，点击下箭头逐层返回来源；没有返回记录时定位最新。滚动经过来源、回到最新或离开页面会清理对应记录。按钮与角标节点保持挂载，显示切换不改变滚动容器结构。
 
 SavedMessagesPage 的收藏数据是快照，`savedMessageContent` 仅映射 Message 需要的展示字段。收藏使用 `interactive=false`，来源、日期、查看原消息和取消收藏按钮由页面展示。PinnedMessagesPage 的置顶行保留回复、定位、话题和消息菜单交互。
 
@@ -126,21 +126,21 @@ MessageMenu 从父页面传入的 messages 数组中解析选中的消息，因�
 
 ## 资料、搜索与消息输入
 
-| 组件            | 输入／输出                                                 | 局部状态和请求                                                                     |
-| --------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| StartChat       | 创建、加入或加好友模式；可选邀请码                         | 群名称、邀请码、邀请预览及提交状态；创建群或兑换邀请成功后打开聊天                 |
-| DirectorySearch | 搜索文字、是否只搜索用户                                   | 已加入群组与用户结果；群组支持继续分页，旧搜索结果不覆盖新查询                     |
-| UserProfile     | 用户摘要                                                   | 好友关系、验证方式、验证文本与操作状态；添加、删除、拉黑和私聊入口                 |
-| ChatDetails     | chatId、threadId、threadRoot；输出 closed                                                     | 群资料、好友关系、编辑表单、当前子视图和请求状态；静音消费 ChatStore，共用侧栏和 modal 内容                       |
-| ChatMembers     | chatId                                                     | 成员搜索、分页、权限与操作状态；管理员可修改角色或移除成员                         |
-| ChatInvites     | chatId                                                     | 邀请列表、类型、限制、过期时间与分享目标；目标群来自已加入群组查询                 |
-| ChatSearch      | chatId                                                     | 关键词、相关度／最新排序、搜索结果和偏移量；结果可定位原消息                       |
-| ChatAttachments | chatId                                                     | 图片／视频／文件分类、消息游标与附件列表                                           |
-| ChatLink        | 旧式资料、邀请码或消息链接                                 | 解析链接并打开对应页面或弹窗；邀请只预览，加入需要点击确认                         |
-| MessageText     | 正文、mentions、是否交互                                   | 同步解析名字和链接；点击提及才打开用户资料，不补取名字后替换消息文字               |
-| MessageComposer | chatId、text 双向绑定、editing、disabled；输出 Composition | 附件、压缩与上传进度、面板选择和提及候选；父页面拥有草稿、回复、编辑目标和发送请求 |
-| StickerPicker   | 可选贴纸／贴纸包、embedded、disabled；输出 selected        | 收藏、贴纸网格、底部包切换及长按菜单；输入栏内嵌和独立弹窗共用展示                 |
-| MediaViewer     | 图片集合和初始位置                                         | 当前图片、放大状态与切换手势；不修改消息区域高度                                   |
+| 组件            | 输入／输出                                                 | 局部状态和请求                                                                                     |
+| --------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| StartChat       | 创建、加入或加好友模式；可选邀请码                         | 群名称、邀请码、邀请预览及提交状态；创建群或兑换邀请成功后打开聊天                                 |
+| DirectorySearch | 搜索文字、是否只搜索用户                                   | 已加入群组与用户结果；群组支持继续分页，旧搜索结果不覆盖新查询                                     |
+| UserProfile     | 用户摘要                                                   | 好友关系、验证方式、验证文本与操作状态；添加、删除、拉黑和私聊入口                                 |
+| ChatDetails     | chatId、threadId、threadRoot；输出 closed                  | 群资料、好友关系、编辑表单、当前子视图和请求状态；静音消费 ChatStore，共用侧栏和 modal 内容        |
+| ChatMembers     | chatId                                                     | 成员搜索、分页、权限与操作状态；管理员可修改角色或移除成员                                         |
+| ChatInvites     | chatId                                                     | 邀请列表、类型、限制、过期时间与分享目标；目标群来自已加入群组查询                                 |
+| ChatSearch      | chatId                                                     | 关键词、相关度／最新排序、搜索结果和偏移量；结果可定位原消息                                       |
+| ChatAttachments | chatId                                                     | 图片／视频／文件分类、消息游标与附件列表                                                           |
+| ChatLink        | 旧式资料、邀请码或消息链接                                 | 解析链接并打开对应页面或弹窗；邀请只预览，加入需要点击确认                                         |
+| MessageText     | 正文、mentions、是否交互                                   | 同步解析名字和链接；点击提及才打开用户资料，不补取名字后替换消息文字                               |
+| MessageComposer | chatId、text 双向绑定、editing、disabled；输出 Composition | 未提交的上传任务、面板选择和提及候选；提交后任务移交 MessageOutbox；父页面拥有输入、回复与编辑目标 |
+| StickerPicker   | 可选贴纸／贴纸包、embedded、disabled；输出 selected        | 收藏、贴纸网格、底部包切换及长按菜单；输入栏内嵌和独立弹窗共用展示                                 |
+| MediaViewer     | 图片集合和初始位置                                         | 当前图片、放大状态与切换手势；不修改消息区域高度                                                   |
 
 消息输入框显示可读的提及名字，DraftStore 与发送正文保存 `@[uid:UID]`。编辑文本时只保留完整、未被修改的提及标记。编辑已发送消息使用独立编辑目标，editText 与未发送文字、回复目标相互独立，取消或保存编辑不需要从 DraftStore 恢复输入。输入和回复选择只修改页面局部状态；离开会话、切换会话及页面进入后台时才更新 DraftStore 和聊天列表中的草稿。
 
@@ -148,9 +148,11 @@ MessageMenu 从父页面传入的 messages 数组中解析选中的消息，因�
 
 Ionic 动态弹窗会向组件注入保留属性 `modal`。手写组件中的 ModalController 字段使用 `modals`，避免控制器被弹窗元素覆盖。
 
-VoiceRecorder 是输入栏的子组件，持有手势、麦克风、录音文件、预览 URL 和计时。active 双向绑定控制输入栏显示；submitted 交给 MessageComposer 上传，discarded 清除待发送语音。松开保存，向左取消，向上松开发送；权限请求结束后才到达的录音不会在松手后启动。
+VoiceRecorder 是输入栏的子组件，持有手势、麦克风、录音文件、预览 URL 和计时。active 双向绑定控制输入栏显示；submitted 经 MessageComposer 创建上传任务并立即移交 MessageOutbox，discarded 清除尚未提交的语音。松开保存，向左取消，向上松开发送；权限请求结束后才到达的录音不会在松手后启动。
 
-回复／编辑预览由 ConversationPage 投影到输入框内部。回复预览采用与消息引用相同的 3px 竖线、14px 字号、1.4 行高与 4px/8px 内边距，使用同一作者亮暗色。右侧关闭按钮与下方贴纸按钮的宽度、图标尺寸和水平中心一致。话题 toolbar 使用根消息的 MessagePreview，与聊天列表相同；根消息优先复用消息区间或 ChatStore，缺失时读取单条消息。订阅、归档和取消归档共用一个状态按钮。
+回复／编辑预览由 ConversationPage 投影到输入框内部。回复输入栏使用独立于消息气泡引用的紧凑布局：总高 52px、竖线 2×38px、上下留白 8px/6px；文字 14px、行高 17px、两行间隔 1px，标题字重 500。竖线与输入文字共用左侧缩进，背景透明，作者名和竖线使用主题主色。右侧关闭按钮与下方贴纸按钮的宽度、图标尺寸和水平中心一致。话题 toolbar 使用根消息的 MessagePreview，与聊天列表相同；根消息优先复用消息区间或 ChatStore，缺失时读取单条消息。订阅、归档和取消归档共用一个状态按钮。
+
+Message 的 delivery 与 uploads 输入来自待发队列；MessageStatus 在正文或媒体的时间后显示空心／实心圆圈勾，Message 的 retry 输出交回队列。MessageAttachments 按本地 URL 匹配上传任务，显示附件本身的进度 spinner。本地行允许缺少服务器 ID，所有服务器交互只对已确认区间开放。
 
 ## 响应式聊天资料
 
@@ -160,4 +162,12 @@ ChatAvatar 接收头像展示数据和尺寸，ChatListItem 使用 48px，ChatDe
 
 ChatDetails 的侧栏和 modal 均无 toolbar；右上角提供独立关闭按钮，子视图的返回入口位于内容区。首屏是头像、标题、横排搜索／静音／退出群组或删除好友／更多，以及图片、视频、文件三个 tab。更多中包含用户资料、聊天收藏、群成员、邀请与编辑入口。媒体、搜索和成员列表仍由各自组件管理分页；只有显示相应内容时才请求。操作按钮在请求期间禁用，静音和移除操作在原图标位置显示 spinner。
 
-消息作者名、引用作者名和头像占位背景沿用旧版按显示名字计算的 31 倍字符 hash，在浅色／深色各七种颜色中选择同一索引。自己发送的气泡中，作者名和引用名字使用气泡的对比色。
+消息作者名、消息气泡内的引用作者名和头像占位背景沿用旧版按显示名字计算的 31 倍字符 hash，在浅色／深色各七种颜色中选择同一索引。自己发送的气泡中，作者名和引用名字使用气泡的对比色。
+
+## 滚动条
+
+各页面的 `ion-content` 使用 `ContentScrollbars` 指令。OverlayScrollbars 的 `cancel.nativeScrollbarsOverlaid` 在原生滚动条已悬浮时取消初始化，保留原生滚动条；占用宽度的环境使用支持拖动、自动隐藏和亮暗色的悬浮滑块。 滑块平时为 3px 的淡色细条，悬停或拖动时通过库自带的过渡变为 6px 并加深颜色。
+
+指令复用 `IonContent.getScrollElement()` 返回的滚动区域，滑块位于 `fixed` 插槽。Ionic 继续管理滚动、刷新和分页，消息节点不被搬到新容器。原生滚动条只在自定义实例成功创建后隐藏。
+
+Ionic 的内容位于 light DOM，通过插槽进入滚动区域；指令观察直属内容块的尺寸及增减，在动画帧内合并刷新滑块测量。消息追加、历史分页和图片加载均通过内容高度变化更新滑块。实例与观察器在指令销毁时清理；原生悬浮环境不创建这些内容观察器。

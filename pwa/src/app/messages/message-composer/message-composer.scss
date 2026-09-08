@@ -1,4 +1,5 @@
 :host {
+  --composer-padding-start: 12px;
   display: block;
 }
 .uploads {
@@ -89,7 +90,7 @@ ion-textarea {
   font-size: 16px;
   --padding-top: 7px;
   --padding-bottom: 7px;
-  --padding-start: 12px;
+  --padding-start: var(--composer-padding-start);
   --padding-end: 4px;
 }
 .action-slot {

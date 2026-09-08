@@ -4,7 +4,7 @@
     <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
   </ion-toolbar>
 </ion-header>
-<ion-content>
+<ion-content appScrollbars>
   <div class="ion-padding ion-text-center">
     @if (user().avatarUrl) {
       <ion-avatar style="width: 80px; height: 80px; margin: auto"><img [src]="user().avatarUrl" /></ion-avatar>
