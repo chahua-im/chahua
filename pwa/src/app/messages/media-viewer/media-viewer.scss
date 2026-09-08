@@ -1,0 +1,25 @@
+:host {
+  --background: var(--ion-background-color);
+}
+.viewer {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  touch-action: pinch-zoom;
+}
+img {
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+.zoom {
+  display: block;
+  width: 200%;
+  height: auto;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+.zoom img {
+  max-width: none;
+  width: 100%;
+  height: auto;
+}

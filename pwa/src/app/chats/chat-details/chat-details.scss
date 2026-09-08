@@ -1,0 +1,65 @@
+:host {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+ion-content {
+  --padding-top: var(--ion-safe-area-top, 0px);
+  --padding-bottom: var(--ion-safe-area-bottom, 0px);
+}
+.close-button {
+  top: calc(var(--ion-safe-area-top, 0px) + 4px);
+  inset-inline-end: 4px;
+}
+.profile app-chat-avatar {
+  margin-inline: auto;
+}
+.profile h2 {
+  overflow-wrap: anywhere;
+}
+.profile p {
+  color: var(--ion-color-medium);
+  white-space: pre-wrap;
+}
+.quick-actions {
+  display: flex;
+  gap: 8px;
+}
+.quick-actions ion-button {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  height: 64px;
+  --padding-start: 4px;
+  --padding-end: 4px;
+  --border-radius: 12px;
+  --box-shadow: none;
+  --background: var(--ion-background-color, #fff);
+  --color: var(--ion-color-primary);
+  --background-activated: var(--ion-color-light-shade);
+}
+.quick-actions span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.quick-actions ion-icon {
+  font-size: 24px;
+}
+.destructive {
+  color: var(--ion-color-danger);
+}
+.attachments {
+  background: var(--ion-background-color, #fff);
+  padding-top: 8px;
+  margin-top: 20px;
+}
+
+.quick-actions ion-spinner {
+  width: 24px;
+  height: 24px;
+}

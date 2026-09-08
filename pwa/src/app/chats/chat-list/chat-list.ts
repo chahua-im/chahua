@@ -1,3 +1,6 @@
+import { DirectorySearch } from '../directory-search/directory-search';
+import { StartChat, StartChatKind } from '../start-chat/start-chat';
+import { ModalController, IonSearchbar } from '@ionic/angular';
 import { Component, computed, effect, inject, input, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import {
@@ -66,6 +69,8 @@ enum ListRowKind {
     '[attr.data-list-tab]': 'list().tab',
   },
   imports: [
+    DirectorySearch,
+    IonSearchbar,
     RouterLink,
     IonRouterLink,
     IonTitle,
@@ -95,6 +100,16 @@ enum ListRowKind {
 })
 export class ChatList {
   readonly active = input(true);
+  private readonly modals = inject(ModalController);
+  protected readonly StartKind = StartChatKind;
+  protected readonly searching = signal(false);
+  protected readonly search = signal('');
+  protected async start(kind: StartChatKind) {
+    await this.addMenu()?.dismiss();
+    const modal = await this.modals.create({ component: StartChat, componentProps: { kind } });
+    await modal.present();
+  }
+  private readonly addMenu = viewChild<IonPopover>('addMenu');
   private readonly drafts = inject(DraftStore);
   protected readonly lists = inject(ChatListStore);
   protected readonly navigation = inject(ConversationNavigation);

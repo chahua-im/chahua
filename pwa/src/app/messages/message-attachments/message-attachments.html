@@ -8,7 +8,7 @@
       @if (failed().has(item.id)) {
         <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
       } @else if (item.kind === MediaKind.Image) {
-        <a [href]="item.url" target="_blank" rel="noopener">
+        <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id, $event)">
           <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id)" />
         </a>
       } @else {

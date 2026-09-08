@@ -1,3 +1,4 @@
+import { messageParts } from '../message-text/message-text';
 import { DOCUMENT } from '@angular/common';
 import {
   afterRenderEffect,
@@ -41,6 +42,7 @@ export enum MessageAction {
   Save,
   Link,
   Recall,
+  Edit,
 }
 
 @Component({
@@ -56,6 +58,7 @@ export class MessageMenu {
   readonly canReply = input(true);
   readonly showAllAvatars = input(false);
   readonly reply = output<MessageResponse>();
+  readonly edit = output<MessageResponse>();
   readonly openThread = output<SnowflakeID>();
   readonly messages = input.required<readonly MessageResponse[]>();
   protected readonly pins = computed(() => this.chatInfo.pins(this.chatId(), this.threadId()));
@@ -102,6 +105,7 @@ export class MessageMenu {
     trashOutline,
   };
   protected readonly choosingEmoji = signal(false);
+  protected readonly placed = signal(false);
   protected readonly position = signal({ left: 12, top: 12, width: 276, previewHeight: 300 });
   private readonly stack = viewChild<ElementRef<HTMLElement>>('stack');
   private readonly reactionBar = viewChild<ElementRef<HTMLElement>>('reactionBar');
@@ -140,6 +144,15 @@ export class MessageMenu {
     const message = this.message();
     return !!message && !message.isDeleted && ![MessageType.sticker, MessageType.invite].includes(message.messageType);
   });
+  protected readonly canEdit = computed(() => {
+    const message = this.message();
+    return (
+      !!message &&
+      !message.isDeleted &&
+      message.messageType === MessageType.text &&
+      message.sender.uid === this.session.user()?.uid
+    );
+  });
   protected readonly canRecall = computed(() => {
     const message = this.message();
     return !!message && !message.isDeleted && this.canRecallMessage(message);
@@ -155,6 +168,7 @@ export class MessageMenu {
       const bar = this.reactionBar()?.nativeElement;
       const actions = this.actions()?.nativeElement;
       const place = () => {
+        if (!stack.offsetWidth) return;
         const rect = selection.element.isConnected ? selection.element.getBoundingClientRect() : selection.rect;
         const viewport = window.visualViewport;
         const style = getComputedStyle(stack.parentElement!);
@@ -164,17 +178,24 @@ export class MessageMenu {
         const top = (viewport?.offsetTop ?? 0) + parseFloat(style.paddingTop) + 12;
         const availableWidth = (viewport?.width ?? window.innerWidth) - horizontalInset - 24;
         const width = Math.min(Math.max(rect.width, 276), availableWidth);
+        stack.style.width = `${width}px`;
         const height = (viewport?.height ?? window.innerHeight) - verticalInset - 24;
         const previewHeight = Math.max(
           0,
           height - (bar?.offsetHeight ?? 0) - (actions?.offsetHeight ?? 0) - (bar ? 16 : 8),
         );
-        this.position.set({
+        const preview = stack.querySelector<HTMLElement>('.preview');
+        if (preview) preview.style.maxHeight = `${previewHeight}px`;
+        const position = {
           width,
           previewHeight,
           left: Math.max(left, Math.min(own ? rect.right - width : rect.left, left + availableWidth - width)),
           top: Math.max(top, Math.min(rect.top - (bar ? bar.offsetHeight + 8 : 0), top + height - stack.offsetHeight)),
-        });
+        };
+        this.position.set(position);
+        stack.style.left = `${position.left}px`;
+        stack.style.top = `${position.top}px`;
+        this.placed.set(true);
       };
       const observer = new ResizeObserver(place);
       observer.observe(stack);
@@ -208,6 +229,7 @@ export class MessageMenu {
     const focused = this.document.activeElement;
     if (focused instanceof HTMLElement) focused.blur();
     this.choosingEmoji.set(false);
+    this.placed.set(false);
     this.selection.set(selection);
     const version = this.version;
     void Promise.all([this.chatInfo.ensureDetails(this.chatId()), this.pins().ensure()]).catch(() => {
@@ -243,7 +265,9 @@ export class MessageMenu {
       );
       const text =
         action === MessageAction.Copy
-          ? message.message!
+          ? messageParts(message.message!, message.mentions)
+              .map((part) => part.text)
+              .join('')
           : new URL(this.router.serializeUrl(url), this.document.baseURI).href;
       void this.close();
       await this.perform(() => navigator.clipboard.writeText(text), MessageNotice.Copied);
@@ -253,6 +277,9 @@ export class MessageMenu {
     await this.close();
     if (version !== this.version) return;
     switch (action) {
+      case MessageAction.Edit:
+        this.edit.emit(message);
+        break;
       case MessageAction.Reply:
         if (this.canReply()) this.reply.emit(message);
         break;

@@ -91,4 +91,24 @@ describe('App', () => {
     expect(fixture.nativeElement.querySelector('p').textContent).toContain('授权已失效');
     expect(fixture.nativeElement.querySelector('app-chat-list')).toBeNull();
   });
+  it('animates only tab content while keeping the shared toolbar stationary', async () => {
+    TestBed.overrideComponent(App, {
+      set: { template: '<ion-router-outlet #outlet (stackWillChange)="prepareTransition(outlet)" />' },
+    });
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const outlet = fixture.debugElement.query(By.directive(IonRouterOutlet)).componentInstance as IonRouterOutlet;
+    fixture.componentInstance['prepareTransition'](outlet);
+    const enteringEl = document.createElement('div');
+    enteringEl.innerHTML =
+      '<app-chat-list data-list-tab="friends"><ion-header></ion-header><ion-content></ion-content></app-chat-list>';
+    const leavingEl = document.createElement('div');
+    leavingEl.innerHTML =
+      '<app-chat-list data-list-tab="messages"><ion-header></ion-header><ion-content></ion-content></app-chat-list>';
+    const element: HTMLIonRouterOutletElement = fixture.nativeElement.querySelector('ion-router-outlet');
+    const animation = element.animation!(element, { enteringEl, leavingEl });
+    expect(animation.elements).toEqual([enteringEl.querySelector('ion-content')]);
+    expect(animation.elements).not.toContain(enteringEl.querySelector('ion-header'));
+    animation.destroy();
+  });
 });

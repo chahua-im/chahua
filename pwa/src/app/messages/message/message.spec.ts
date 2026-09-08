@@ -43,6 +43,46 @@ describe('Message', () => {
     return fixture;
   }
 
+  it('replies after a left swipe starting on a mention and suppresses the following tap', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      message: '@[uid:2]',
+      mentions: [{ uid: 2, username: '朋友', gender: 0 }],
+    });
+    fixture.detectChanges();
+    const row = fixture.nativeElement.querySelector('.chat-row') as HTMLElement;
+    row.setPointerCapture = vi.fn();
+    const mention = row.querySelector('app-message-text button') as HTMLElement;
+    const replied = vi.fn();
+    fixture.componentInstance.reply.subscribe(replied);
+    pointer(mention, 'pointerdown', { clientX: 150 });
+    pointer(mention, 'pointermove', { clientX: 80 });
+    fixture.detectChanges();
+    expect(row.style.transform).toBe('translateX(-70px)');
+    expect(fixture.nativeElement.querySelector('.swipe-reply.burst')).not.toBeNull();
+    pointer(row, 'pointerup', { clientX: 80 });
+    expect(replied).toHaveBeenCalledOnce();
+    const clicked = vi.fn();
+    mention.addEventListener('click', clicked);
+    mention.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(clicked).not.toHaveBeenCalled();
+  });
+
+  it('keeps vertical scrolling from activating swipe reply', async () => {
+    const fixture = await render();
+    const bubble = fixture.nativeElement.querySelector('.bubble') as HTMLElement;
+    const replied = vi.fn();
+    fixture.componentInstance.reply.subscribe(replied);
+    pointer(bubble, 'pointerdown', { clientX: 150 });
+    pointer(bubble, 'pointermove', { clientX: 148, clientY: 80 });
+    pointer(bubble, 'pointermove', { clientX: 70, clientY: 80 });
+    pointer(bubble, 'pointerup');
+    fixture.detectChanges();
+    expect(replied).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.querySelector('.chat-row').style.transform).toBe('');
+  });
+
   it('shows identity only on the first message and the avatar and tail only on the last', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('last', false);

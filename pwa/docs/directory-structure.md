@@ -20,13 +20,30 @@ src/
     ├── chats/                    ChatStore、ChatPins、ChatListStore、分类与日期格式
     │   ├── chat-list-page/        移动端路由页面与 Ionic 生命周期
     │   ├── chat-list/             分类、混合排序与列表渲染
-    │   └── chat-list-item/        通用列表项与局部操作反馈
+    │   ├── chat-list-item/        通用列表项与局部操作反馈
+    │   ├── chat-avatar/           列表与资料共用的可缩放头像、话题角标
+    │   ├── start-chat/            创建、加入、添加好友入口
+    │   ├── directory-search/      群组与用户搜索
+    │   ├── user-profile/          用户资料与好友关系操作
+    │   ├── chat-details/          聊天资料及子视图
+    │   ├── chat-members/          成员搜索与管理
+    │   ├── chat-invites/          邀请管理与分享
+    │   └── chat-link/             链接解析和导航
     ├── conversations/            ConversationStore、导航、草稿、消息分组与滚动工具
     │   ├── conversation/         连续消息页面
     │   ├── pinned-messages/       置顶消息页面
-    │   └── saved-messages/        收藏页面及快照展示适配
+    │   ├── saved-messages/        全部或单聊天收藏及快照展示
+    │   ├── chat-search/           聊天内消息搜索
+    │   └── chat-attachments/      聊天附件汇总
     ├── messages/                 MessageActions、事件类型、合并、表态与媒体规则
     │   ├── message/              消息气泡与手势
+    │   ├── message-text/         提及和链接展示
+    │   ├── message-composer/     输入、下方面板、附件及提及编辑工具
+    │   ├── voice-recorder/       录音手势、计时与本地预览
+    │   ├── media-processing/     图片／视频压缩、HEIC 转换和动图保护
+    │   ├── sticker-picker/       贴纸选择、收藏与订阅
+    │   ├── media-viewer/         图片查看器
+    │   ├── upload.ts            媒体尺寸读取与签名上传函数
     │   ├── message-author/        作者展示
     │   ├── message-attachments/   附件展示与媒体类型判断
     │   ├── message-menu/          菜单、确认、操作反馈与权限展示
@@ -58,3 +75,7 @@ src/
 - 测试随实现放置，组件和状态直接通过具体文件导入。
 
 根目录保存构建配置，`scripts/` 保存开发和生成脚本，`public/` 保存静态资源及推送 Worker，`docs/` 描述工程当前状态。服务的注入作用域见[数据流](data-flow.md)，组件间关系见[Components](components.md)。
+
+资料表单、搜索结果、成员和邀请分页由消费它们的组件局部持有，不进入 ChatStore。会话资料使用内联 IonModal，其他弹窗由 Ionic ModalController 创建，`useSetInputAPI` 支持 signal inputs。所有页面和弹窗使用静态组件引用；既有 EmojiPicker 保留 `@defer`。
+
+`src/test-providers.ts` 提供测试用路由、HTTP mock 和弹窗替身；测试不会使用开发 token 或生产代理。

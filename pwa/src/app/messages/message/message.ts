@@ -1,5 +1,10 @@
+import { StartChat, StartChatKind } from '../../chats/start-chat/start-chat';
+import { StickerPicker } from '../sticker-picker/sticker-picker';
+import { MessageText } from '../message-text/message-text';
+import { UserProfile } from '../../chats/user-profile/user-profile';
+import { ModalController } from '@ionic/angular';
 import { DatePipe } from '@angular/common';
-import { Component, computed, DestroyRef, ElementRef, inject, input, output } from '@angular/core';
+import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
 import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
 import { arrowUndoOutline } from 'ionicons/icons';
 import { MessageType, type MessageResponse } from '../../../generated/models';
@@ -14,7 +19,12 @@ import { userColors } from '../user-colors';
 
 export type MessageContent = MessageAttachmentSource &
   Pick<MessageResponse, 'id' | 'sender' | 'message'> &
-  Partial<Pick<MessageResponse, 'isDeleted' | 'reactions' | 'replyRootId' | 'threadInfo' | 'replyToMessage'>>;
+  Partial<
+    Pick<
+      MessageResponse,
+      'isEdited' | 'mentions' | 'isDeleted' | 'reactions' | 'replyRootId' | 'threadInfo' | 'replyToMessage'
+    >
+  >;
 
 export interface MessageMenuSelection {
   messageId: SnowflakeID;
@@ -35,6 +45,7 @@ export interface MessageMenuSelection {
     IonIcon,
     IonSpinner,
     MessageAttachments,
+    MessageText,
     MessageAuthor,
     MessagePreview,
     MessageReactions,
@@ -49,9 +60,37 @@ export interface MessageMenuSelection {
   },
 })
 export class Message<T extends MessageContent = MessageResponse> {
+  private readonly modals = inject(ModalController);
+  protected async profile() {
+    if (this.preview() || !this.interactive()) return;
+    const sender = this.message().sender;
+    const modal = await this.modals.create({
+      component: UserProfile,
+      componentProps: { user: { ...sender, username: sender.name } },
+    });
+    await modal.present();
+  }
   protected readonly decodeId = decodeId;
   readonly message = input.required<T>();
   protected readonly system = MessageType.system;
+  protected readonly Type = MessageType;
+  protected async invite(event: Event) {
+    event.stopPropagation();
+    const modal = await this.modals.create({
+      component: StartChat,
+      componentProps: { kind: StartChatKind.Join, code: this.message().message ?? '' },
+    });
+    await modal.present();
+  }
+  protected async sticker(event: Event) {
+    if (!this.isSticker() || this.preview() || !this.interactive()) return;
+    event.stopPropagation();
+    const modal = await this.modals.create({
+      component: StickerPicker,
+      componentProps: { selectable: false, stickerId: this.message().sticker?.id },
+    });
+    await modal.present();
+  }
   readonly own = input.required<boolean>();
   readonly first = input(true);
   readonly last = input(true);
@@ -70,6 +109,55 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly react = output<string>();
   private press?: { pointerId: number; x: number; y: number; timer: ReturnType<typeof setTimeout> };
   private longPressed = false;
+  protected readonly swipe = signal(0);
+  protected readonly dragging = signal(false);
+  protected readonly burst = signal(false);
+  private touch?: { x: number; y: number; horizontal: boolean };
+  protected startSwipe(event: PointerEvent) {
+    if (
+      event.pointerType !== 'touch' ||
+      !event.isPrimary ||
+      !this.canReply() ||
+      this.preview() ||
+      !this.interactive() ||
+      this.message().isDeleted
+    )
+      return;
+    if ((event.target as HTMLElement).closest('audio, video')) return;
+    this.longPressed = false;
+    this.touch = { x: event.clientX, y: event.clientY, horizontal: false };
+  }
+  protected moveSwipe(event: PointerEvent) {
+    this.movePress(event);
+    const touch = this.touch;
+    if (!touch) return;
+    const dx = touch.x - event.clientX;
+    const dy = Math.abs(event.clientY - touch.y);
+    if (!touch.horizontal) {
+      if (dy > 10 && dy >= Math.abs(dx)) {
+        this.touch = undefined;
+        return;
+      }
+      if (dx < 10 || dx <= dy) return;
+      touch.horizontal = true;
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+      this.cancelPress();
+      this.dragging.set(true);
+    }
+    const offset = Math.max(0, Math.min(dx, 80));
+    if (offset >= 60 && this.swipe() < 60) this.burst.set(true);
+    this.swipe.set(offset);
+  }
+  protected endSwipe(cancelled = false) {
+    this.cancelPress();
+    if (this.touch?.horizontal) {
+      this.longPressed = true;
+      if (!cancelled && this.swipe() >= 60) this.reply.emit(this.message());
+    }
+    this.touch = undefined;
+    this.dragging.set(false);
+    this.swipe.set(0);
+  }
   protected readonly name = computed(() => this.message().sender.name ?? String(this.message().sender.uid));
   protected readonly senderColors = computed(() => userColors(this.name()));
   protected readonly hasMedia = computed(() => {

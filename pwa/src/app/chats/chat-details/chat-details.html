@@ -1,0 +1,148 @@
+<ion-content color="light">
+  <ion-button class="close-button" slot="fixed" fill="clear" (click)="closed.emit()">
+    <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
+  </ion-button>
+  @if (view() !== View.Info) {
+    <ion-button fill="clear" (click)="view.set(View.Info)">返回</ion-button>
+  }
+  @switch (view()) {
+    @case (View.Members) {
+      <app-chat-members [chatId]="chatId()" />
+    }
+    @case (View.Invites) {
+      <app-chat-invites [chatId]="chatId()" />
+    }
+    @case (View.Search) {
+      <app-chat-search [chatId]="chatId()" />
+    }
+    @case (View.More) {
+      @if (chat(); as chat) {
+        <ion-list [inset]="true">
+          @if (chat.kind === Kind.dm) {
+            <ion-item [button]="true" (click)="profile()">
+              <ion-icon slot="start" color="primary" [icon]="icons.personOutline" />
+              <ion-label>用户资料</ion-label>
+            </ion-item>
+          }
+          <ion-item [button]="true" (click)="saved()">
+            <ion-icon slot="start" color="primary" [icon]="icons.bookmarkOutline" />
+            <ion-label>本聊天收藏</ion-label>
+          </ion-item>
+          @if (chat.kind === Kind.group) {
+            <ion-item [button]="true" (click)="view.set(View.Members)">
+              <ion-icon slot="start" color="primary" [icon]="icons.peopleOutline" />
+              <ion-label>群成员</ion-label>
+            </ion-item>
+            @if (chat.myRole === Role.admin) {
+              <ion-item [button]="true" (click)="view.set(View.Invites)">
+                <ion-icon slot="start" color="primary" [icon]="icons.linkOutline" />
+                <ion-label>邀请链接</ion-label>
+              </ion-item>
+              <ion-item [button]="true" (click)="view.set(View.Edit)">
+                <ion-icon slot="start" color="primary" [icon]="icons.createOutline" />
+                <ion-label>编辑群资料</ion-label>
+              </ion-item>
+            }
+          }
+        </ion-list>
+      }
+    }
+    @case (View.Edit) {
+      <ion-list [inset]="true">
+        <ion-item><input class="field" [formField]="fields.name" placeholder="群名称" /></ion-item>
+        <ion-item><textarea class="field" [formField]="fields.description" placeholder="群简介"></textarea></ion-item>
+        <ion-item>
+          <ion-select label="群可见性" [formField]="fields.visibility">
+            <ion-select-option [value]="Visibility.private">私密</ion-select-option>
+            <ion-select-option [value]="Visibility.semi_public">半公开</ion-select-option>
+            <ion-select-option [value]="Visibility.public">公开</ion-select-option>
+          </ion-select>
+        </ion-item>
+      </ion-list>
+      <input #avatarInput type="file" accept="image/*" hidden (change)="avatar($event)" />
+      <ion-button fill="clear" [disabled]="busy()" (click)="avatarInput.click()">更换头像</ion-button>
+      <ion-button [disabled]="busy() || !values().name.trim()" (click)="save()">保存</ion-button>
+    }
+    @default {
+      @if (chat(); as chat) {
+        <div class="profile ion-text-center ion-padding">
+          <app-chat-avatar [entry]="avatarEntry()" [size]="88" />
+          <h2>
+            @if (threadId()) {
+              @if (threadRoot(); as root) {
+                <app-message-preview [message]="root" />
+              } @else {
+                话题
+              }
+            } @else {
+              {{ chat.kind === Kind.dm ? (chat.peer?.username ?? chat.name) : chat.name }}
+            }
+          </h2>
+          @if (threadId()) {
+            <p>{{ chat.kind === Kind.dm ? chat.peer?.username : chat.name }}</p>
+          } @else if (chat.description) {
+            <p>{{ chat.description }}</p>
+          }
+        </div>
+        <div class="quick-actions ion-padding-horizontal">
+          <ion-button fill="solid" (click)="view.set(View.Search)">
+            <span>
+              <ion-icon [icon]="icons.searchOutline" />
+              搜索
+            </span>
+          </ion-button>
+          <ion-button fill="solid" [disabled]="busy()" (click)="toggleMute()">
+            <span>
+              @if (pending() === Action.Mute) {
+                <ion-spinner />
+              } @else {
+                <ion-icon [icon]="muted() ? icons.notificationsOffOutline : icons.notificationsOutline" />
+              }
+              {{ muted() ? '取消静音' : threadId() ? '静音聊天' : '静音' }}
+            </span>
+          </ion-button>
+          @if (chat.kind === Kind.group || relationship()?.isFriend) {
+            <ion-button fill="solid" [disabled]="busy()" (click)="leave()">
+              <span class="destructive">
+                @if (pending() === Action.Leave) {
+                  <ion-spinner />
+                } @else {
+                  <ion-icon [icon]="chat.kind === Kind.dm ? icons.personRemoveOutline : icons.exitOutline" />
+                }
+                {{ chat.kind === Kind.dm ? '删除好友' : '退群' }}
+              </span>
+            </ion-button>
+          } @else if (chat.peer && !busy()) {
+            <ion-button fill="solid" (click)="profile()">
+              <span>
+                <ion-icon [icon]="icons.personOutline" />
+                资料
+              </span>
+            </ion-button>
+          }
+          <ion-button fill="solid" (click)="view.set(View.More)">
+            <span>
+              <ion-icon [icon]="icons.ellipsisHorizontal" />
+              更多
+            </span>
+          </ion-button>
+        </div>
+        <div class="attachments">
+          @if (threadId()) {
+            <p class="ion-padding-horizontal">所属聊天的媒体</p>
+          }
+          <app-chat-attachments [chatId]="chatId()" />
+        </div>
+      }
+    }
+  }
+  @if (pending() === Action.Load || pending() === Action.Save || pending() === Action.Avatar) {
+    <div class="loading-status"><ion-spinner /></div>
+  }
+  @if (error()) {
+    <p class="ion-padding">
+      操作失败，请重试。
+      <ion-button fill="clear" (click)="load()">刷新</ion-button>
+    </p>
+  }
+</ion-content>

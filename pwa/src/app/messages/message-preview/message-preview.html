@@ -1,7 +1,7 @@
 @if (message().isDeleted) {
   <ng-container>消息已删除</ng-container>
 } @else if (message().message?.trim()) {
-  <ng-container>{{ message().message }}</ng-container>
+  <app-message-text [text]="message().message!" [mentions]="message().mentions ?? []" [interactive]="false" />
 } @else {
   @switch (message().messageType) {
     @case (MessageType.sticker) {

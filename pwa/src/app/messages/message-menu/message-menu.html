@@ -20,6 +20,7 @@
             <div
               #stack
               class="menu-stack"
+              [style.visibility]="placed() ? null : 'hidden'"
               [class.own]="selection.own"
               [style.left.px]="position().left"
               [style.top.px]="position().top"
@@ -56,6 +57,12 @@
                   <ion-icon [icon]="icons.arrowUndoOutline"></ion-icon>
                   <span>回复</span>
                 </button>
+                @if (canEdit()) {
+                  <button type="button" [disabled]="!canReply()" (click)="choose(Action.Edit)">
+                    <ion-icon [icon]="icons.copyOutline" />
+                    <span>编辑</span>
+                  </button>
+                }
                 @if (canThread()) {
                   <button type="button" (click)="choose(Action.Thread)">
                     <ion-icon [icon]="icons.chatbubblesOutline"></ion-icon>

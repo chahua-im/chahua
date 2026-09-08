@@ -1,0 +1,23 @@
+<ion-searchbar placeholder="搜索聊天消息" [debounce]="300" (ionInput)="query.set($event.detail.value || '')" />
+<ion-segment
+  [value]="sort()"
+  (ionChange)="sort.set($event.detail.value === Sort.newest ? Sort.newest : Sort.relevance)">
+  <ion-segment-button [value]="Sort.relevance"><ion-label>相关度</ion-label></ion-segment-button>
+  <ion-segment-button [value]="Sort.newest"><ion-label>最新</ion-label></ion-segment-button>
+</ion-segment>
+@for (message of messages(); track message.id) {
+  <div (click)="locate(message)"><app-message [message]="message" [own]="false" [interactive]="false" inert /></div>
+}
+@if (loading()) {
+  <div class="loading-status"><ion-spinner /></div>
+} @else if (error()) {
+  <p class="ion-padding">
+    搜索失败。
+    <ion-button fill="clear" (click)="load()">重试</ion-button>
+  </p>
+} @else if (query().trim() && !messages().length) {
+  <p class="ion-padding ion-text-center">没有找到消息</p>
+}
+@if (cursor() != null) {
+  <ion-button fill="clear" [disabled]="loading()" (click)="load(true)">加载更多</ion-button>
+}

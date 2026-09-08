@@ -28,6 +28,7 @@ bootstrapApplication(App, {
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
     provideIonicAngular({
       mode: 'ios',
+      useSetInputAPI: true,
     }),
     provideRouter(routes, withComponentInputBinding()),
   ],
