@@ -1,0 +1,174 @@
+<ion-header [translucent]="true">
+  <ion-toolbar>
+    <ion-title>安装 茶话</ion-title>
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars [fullscreen]="true" class="landing-page">
+  <section class="landing-hero">
+    <div class="landing-hero__copy">
+      <h1>把茶话添加到主屏幕</h1>
+      <p>安装后可以像原生应用一样从桌面直接启动。</p>
+      <p>如果你要向朋友推荐，请发送论坛帖子的地址，不要直接发送当前页面地址。当前页面的地址包含你的账号登录信息。</p>
+    </div>
+  </section>
+
+  <section id="platform-guides" class="landing-content">
+    <ion-segment
+      mode="ios"
+      [value]="selected()"
+      [scrollable]="true"
+      class="landing-platform-segment"
+      (ionChange)="select($event.detail.value)">
+      <ion-segment-button
+        value="android"
+        [class.landing-platform-segment__button--current]="detected === Platform.android">
+        Android
+      </ion-segment-button>
+      <ion-segment-button value="ios" [class.landing-platform-segment__button--current]="detected === Platform.ios">
+        iOS
+      </ion-segment-button>
+      <ion-segment-button
+        value="windows"
+        [class.landing-platform-segment__button--current]="detected === Platform.windows">
+        Windows
+      </ion-segment-button>
+      <ion-segment-button value="macos" [class.landing-platform-segment__button--current]="detected === Platform.macos">
+        macOS
+      </ion-segment-button>
+      <ion-segment-button value="linux" [class.landing-platform-segment__button--current]="detected === Platform.linux">
+        Linux
+      </ion-segment-button>
+    </ion-segment>
+
+    <ion-card class="landing-card">
+      @if (selected() === Platform.android) {
+        <ion-card-content>
+          <ol class="landing-steps">
+            <li>
+              使用
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.logoChrome" class="landing-inline-text__icon" />
+                <span>Chrome 浏览器</span>
+              </span>
+              访问本页
+            </li>
+            <li>
+              点击
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.ellipsisVertical" class="landing-inline-text__icon" />
+                <span>菜单</span>
+              </span>
+            </li>
+            <li>选择“添加到主屏幕”，然后点“安装”</li>
+            <li>确认安装，之后即可从桌面直接打开</li>
+          </ol>
+          <ion-text color="medium">
+            <p class="landing-note">如果浏览器主动弹出了安装界面，直接点安装即可。</p>
+            <p class="landing-note">
+              如果无法使用 Chrome，也可以用
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.logoEdge" class="landing-inline-text__icon" />
+                <span>Edge 浏览器</span>
+              </span>
+              <br />
+              点击
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.menuOutline" class="landing-inline-text__icon" />
+                <span>菜单</span>
+              </span>
+              ，选择“添加至手机” (可能会在第二页)。
+            </p>
+          </ion-text>
+        </ion-card-content>
+      }
+
+      @if (selected() === Platform.ios) {
+        <ion-card-content>
+          <ol class="landing-steps">
+            <li>
+              使用
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.logoApple" class="landing-inline-text__icon" />
+                <span>Safari 浏览器</span>
+              </span>
+              访问本页
+            </li>
+            <li>
+              点击
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.ellipsisHorizontal" class="landing-inline-text__icon" />
+                <span>菜单</span>
+              </span>
+              ，选择
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.shareOutline" class="landing-inline-text__icon" />
+                <span>共享</span>
+              </span>
+            </li>
+            <li>选择 “添加到主屏幕” (可能会在 “查看更多” 里面)</li>
+            <li>确认添加，之后即可从桌面直接打开</li>
+          </ol>
+        </ion-card-content>
+      }
+
+      @if (selected() === Platform.windows) {
+        <ion-card-content>
+          <ol class="landing-steps">
+            <li>
+              使用
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.logoEdge" class="landing-inline-text__icon" />
+                <span>Edge 浏览器</span>
+              </span>
+              访问本页。
+            </li>
+            <li>
+              点击
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.ellipsisHorizontal" class="landing-inline-text__icon" />
+                <span>菜单</span>
+              </span>
+            </li>
+            <li>选择“更多工具” &gt; “应用” &gt; “将此站点安装为应用”。</li>
+            <li>自行选择将图标创建在任务栏、开始菜单或桌面。</li>
+          </ol>
+          <ion-text color="medium">
+            <p class="landing-note">如果浏览器在地址栏显示了安装应用按钮，直接点安装即可</p>
+          </ion-text>
+        </ion-card-content>
+      }
+
+      @if (selected() === Platform.macos) {
+        <ion-card-content>
+          <ol class="landing-steps">
+            <li>
+              使用
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.logoApple" class="landing-inline-text__icon" />
+                <span>Safari 浏览器</span>
+              </span>
+              访问本页
+            </li>
+            <li>
+              点击
+              <span class="landing-inline-text">
+                <ion-icon [icon]="icons.shareOutline" class="landing-inline-text__icon" />
+                <span>共享</span>
+              </span>
+            </li>
+            <li>选择“添加到程序坞”</li>
+            <li>确认添加，之后即可从程序坞或“App”中打开</li>
+          </ol>
+        </ion-card-content>
+      }
+
+      @if (selected() === Platform.linux) {
+        <ion-card-content>
+          <ion-text color="medium">
+            <p class="landing-note landing-note--compact">这点小问题想必难不住你 :)</p>
+          </ion-text>
+        </ion-card-content>
+      }
+    </ion-card>
+  </section>
+</ion-content>

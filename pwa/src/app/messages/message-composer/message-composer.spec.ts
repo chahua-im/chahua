@@ -1,8 +1,9 @@
-import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpTestingController } from '@angular/common/http/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { vi } from 'vitest';
+import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import {
   AttachmentUploadPurpose,
@@ -10,12 +11,12 @@ import {
   MessageType,
   type AttachmentResponse,
   type MentionInfo,
-  type MessageResponse,
   type SnowflakeID,
   type StickerSummary,
 } from '../../../generated/models';
 import { decodeId, encodeId } from '../../api/snowflake-id';
 import { testChat, testMessage } from '../../api/testing';
+import type { MessageContent } from '../message/message';
 import { AttachmentUpload, UploadStatus } from '../upload';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { MessageComposer, type Composition } from './message-composer';
@@ -51,9 +52,26 @@ describe('Message composer upload ownership', () => {
   let fixture: ComponentFixture<MessageComposer>;
   let composer: MessageComposer;
   let http: HttpTestingController;
+  let queueUploads: AttachmentUpload[];
   let submitted: ReturnType<typeof vi.fn<(composition: Composition) => void>>;
+  const existing: AttachmentResponse = {
+    id: encodeId('90'),
+    fileName: 'existing.gif',
+    kind: 'image/gif',
+    size: 5,
+    url: 'https://media.invalid/existing',
+  };
+
+  const pendingMessage: MessageContent = {
+    sender: testMessage.sender,
+    createdAt: testMessage.createdAt,
+    messageType: MessageType.text,
+    message: '待发消息',
+    attachments: [],
+  };
 
   beforeEach(() => {
+    queueUploads = [];
     TestBed.configureTestingModule({ providers: [provideChahuaBaseUrl('/_api')] });
     http = TestBed.inject(HttpTestingController);
     FakeUpload.requests = [];
@@ -81,6 +99,7 @@ describe('Message composer upload ownership', () => {
   });
   afterEach(() => {
     fixture.destroy();
+    for (const upload of queueUploads) upload.dispose();
     for (const [composition] of submitted.mock.calls) for (const upload of composition.uploads ?? []) upload.dispose();
     http.verify({ ignoreCancelled: true });
     vi.unstubAllGlobals();
@@ -94,9 +113,19 @@ describe('Message composer upload ownership', () => {
         : new File(['hello'], 'note.txt', { type: 'text/plain' });
     return composer['addFile'](file, purpose)!;
   }
-  function edit(message: MessageResponse = testMessage) {
+  function edit(message: MessageContent = testMessage, uploads: readonly AttachmentUpload[] = []) {
     fixture.componentRef.setInput('editing', message);
+    fixture.componentRef.setInput('editingUploads', uploads);
     fixture.detectChanges();
+  }
+  function queuedUpload(name = 'queued.gif') {
+    const upload = new AttachmentUpload(
+      TestBed.inject(AttachmentsService),
+      new File(['queued'], name, { type: 'image/gif' }),
+      AttachmentUploadPurpose.media,
+    );
+    queueUploads.push(upload);
+    return upload;
   }
   async function startStorage(id: SnowflakeID = encodeId('100')) {
     const index = FakeUpload.requests.length;
@@ -282,59 +311,259 @@ describe('Message composer upload ownership', () => {
     expect(composer.text()).toBe('保留文字');
   });
 
-  it('keeps editing blocked until attachments are ready and only clears completed edit attachments', async () => {
-    const existing: AttachmentResponse = {
-      id: encodeId('90'),
-      fileName: 'existing.gif',
-      kind: 'image/gif',
-      size: 5,
-      url: 'https://media.invalid/existing',
-    };
+  it.each(['processing', 'uploading', 'failed', 'ready'] as const)(
+    'hands off %s edit uploads before the receiver immediately exits editing',
+    async (phase) => {
+      const removed = { ...existing, id: encodeId('91'), fileName: 'removed.gif' };
+      const mentions = [{ uid: 42, gender: 1, username: '原消息名字' }];
+      edit({ ...testMessage, attachments: [existing, removed], mentions });
+      composer['removeExisting'](removed.id);
+      composer.text.set('@[uid:42] 修改后的说明');
+      const upload = add(AttachmentUploadPurpose.media);
+      const dispose = vi.spyOn(upload, 'dispose');
+      const pending = upload.retry();
+      expect(upload.state().status).toBe(UploadStatus.Processing);
+      let xhr: FakeUpload | undefined;
+      if (phase !== 'processing') {
+        xhr = await startStorage();
+        expect(upload.state().status).toBe(UploadStatus.Uploading);
+        if (phase !== 'uploading') {
+          xhr.finish(phase === 'failed' ? 403 : 200);
+          await pending;
+          expect(upload.state().status).toBe(phase === 'failed' ? UploadStatus.Failed : UploadStatus.Ready);
+        }
+      }
+      composer.submitted.subscribe(() => {
+        expect(composer['uploads']()).toEqual([]);
+        fixture.componentRef.setInput('editing', undefined);
+        fixture.detectChanges();
+        expect(composer['existing']()).toEqual([]);
+      });
+      expect(composer['canSend']()).toBe(true);
+      fixture.detectChanges();
+      const button = fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      expect(button.querySelector('ion-spinner')).toBeNull();
+      button.click();
+      expect(submitted).toHaveBeenCalledExactlyOnceWith({
+        messageType: MessageType.text,
+        attachmentIds: [existing.id],
+        uploads: [upload],
+        mentions,
+      });
+      composer.reset();
+      fixture.destroy();
+      expect(dispose).not.toHaveBeenCalled();
+      expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(upload.url);
+      if (xhr) expect(xhr.abort).not.toHaveBeenCalled();
+      const continuation = upload.retry();
+      if (phase === 'processing' || phase === 'failed') xhr = await startStorage();
+      if (phase !== 'ready') xhr!.finish();
+      await expect(continuation).resolves.toBe(encodeId('100'));
+      expect(dispose).not.toHaveBeenCalled();
+      expect(composer.text()).toBe('@[uid:42] 修改后的说明');
+    },
+  );
+
+  it('saves existing attachment ids without requiring text or new uploads', () => {
     edit({ ...testMessage, attachments: [existing] });
-    composer.text.set('修改后的说明');
-    const upload = add(AttachmentUploadPurpose.media);
-    const pending = upload.retry();
-    expect(composer['canSend']()).toBe(false);
-    composer['submit']();
-    expect(submitted).not.toHaveBeenCalled();
-    const xhr = await startStorage();
-    expect(composer['canSend']()).toBe(false);
-    composer['submit']();
-    expect(submitted).not.toHaveBeenCalled();
-    xhr.finish(403);
-    await pending;
-    expect(composer['canSend']()).toBe(false);
-    composer['submit']();
-    expect(submitted).not.toHaveBeenCalled();
-    const retry = upload.retry();
-    (await startStorage(encodeId('101'))).finish();
-    await retry;
+    composer.text.set('  ');
     expect(composer['canSend']()).toBe(true);
     composer['submit']();
     expect(submitted).toHaveBeenCalledExactlyOnceWith({
       messageType: MessageType.text,
-      attachmentIds: [existing.id, encodeId('101')],
+      attachmentIds: [existing.id],
+      uploads: [],
       mentions: [],
     });
-    expect(composer['uploads']()).toEqual([upload]);
-    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(upload.url);
-    const next = add(AttachmentUploadPurpose.media);
-    composer.complete([existing.id, encodeId('101')]);
-    expect(composer['uploads']()).toEqual([next]);
-    expect(composer['existing']()).toEqual([]);
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith(upload.url);
-    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(next.url);
-    expect(composer.text()).toBe('修改后的说明');
+    http.expectNone('/_api/attachments/config');
   });
 
-  it('does not let completion of a sent message clear current non-editing attachments', async () => {
-    const upload = add();
-    const pending = upload.retry();
-    (await startStorage()).finish();
+  it('allows an edit containing only unfinished new media', () => {
+    edit();
+    composer.text.set('  ');
+    const upload = add(AttachmentUploadPurpose.media);
+    expect(upload.state().status).toBe(UploadStatus.Processing);
+    expect(composer['canSend']()).toBe(true);
+    composer['submit']();
+    expect(submitted).toHaveBeenCalledExactlyOnceWith({
+      messageType: MessageType.text,
+      attachmentIds: [],
+      uploads: [upload],
+      mentions: [],
+    });
+    expect(composer['uploads']()).toEqual([]);
+    expect(http.expectOne('/_api/attachments/config').cancelled).toBe(false);
+  });
+
+  it('only cancels the current draft when an earlier edit has handed off its upload', async () => {
+    edit();
+    const sent = add(AttachmentUploadPurpose.media);
+    const sentRequest = await startStorage();
+    composer['submit']();
+    fixture.componentRef.setInput('editing', undefined);
+    fixture.detectChanges();
+    const retained = add(AttachmentUploadPurpose.media);
+    const retainedRequest = http.expectOne('/_api/attachments/config');
+    composer.reset();
+    expect(retainedRequest.cancelled).toBe(true);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(retained.url);
+    expect(sentRequest.abort).not.toHaveBeenCalled();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(sent.url);
+  });
+
+  it('edits a message without an id and hands off borrowed and new tasks before immediately exiting', async () => {
+    const borrowed = queuedUpload();
+    const borrowedPending = borrowed.retry();
+    const borrowedRequest = await startStorage();
+    const selection = Object.freeze([borrowed]);
+    edit(
+      {
+        ...pendingMessage,
+        attachments: [
+          existing,
+          { url: borrowed.url, kind: borrowed.file.type, fileName: borrowed.file.name, size: borrowed.file.size },
+        ],
+      },
+      selection,
+    );
+    const owned = add(AttachmentUploadPurpose.media);
+    const ownedPending = owned.retry();
+    const dispose = vi.spyOn(owned, 'dispose');
+    borrowedRequest.upload.onprogress?.({ lengthComputable: true, loaded: 1, total: 4 });
+    fixture.detectChanges();
+    expect(composer.editing()?.id).toBeUndefined();
+    expect(composer['existing']()).toEqual([existing]);
+    expect(composer['visualUploads']()).toEqual([borrowed, owned]);
+    expect(fixture.nativeElement.querySelectorAll('.upload')).toHaveLength(3);
+    expect(fixture.nativeElement.querySelector('.uploads').textContent).toContain('25%');
+    composer.submitted.subscribe(() => {
+      expect(composer['uploads']()).toEqual([]);
+      expect(composer['borrowedUploads']()).toEqual([]);
+      fixture.componentRef.setInput('editing', undefined);
+      fixture.componentRef.setInput('editingUploads', []);
+      fixture.detectChanges();
+      composer.reset();
+      fixture.destroy();
+    });
+    expect(composer['canSend']()).toBe(true);
+    (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
+    expect(submitted).toHaveBeenCalledExactlyOnceWith({
+      messageType: MessageType.text,
+      attachmentIds: [existing.id],
+      uploads: [borrowed, owned],
+      mentions: [],
+    });
+    expect(selection).toEqual([borrowed]);
+    expect(dispose).not.toHaveBeenCalled();
+    expect(borrowedRequest.abort).not.toHaveBeenCalled();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(borrowed.url);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(owned.url);
+    borrowedRequest.finish();
+    await expect(borrowedPending).resolves.toBe(encodeId('100'));
+    (await startStorage(encodeId('101'))).finish();
+    await expect(ownedPending).resolves.toBe(encodeId('101'));
+  });
+
+  it('deselects failed borrowed tasks without disposal and restores them when editing is reopened', async () => {
+    const borrowed = queuedUpload();
+    const pending = borrowed.retry();
+    const request = await startStorage();
+    request.finish(403);
     await pending;
-    composer.complete([encodeId('100')]);
-    expect(composer['uploads']()).toEqual([upload]);
-    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(upload.url);
+    const dispose = vi.spyOn(borrowed, 'dispose');
+    const selection = Object.freeze([borrowed]);
+    edit(pendingMessage, selection);
+    expect(composer['error']()).toBe(true);
+    expect(composer['canSend']()).toBe(true);
+    const owned = add(AttachmentUploadPurpose.media);
+    const ownedRequest = http.expectOne('/_api/attachments/config');
+    composer['remove'](borrowed);
+    expect(composer['visualUploads']()).toEqual([owned]);
+    expect(composer['error']()).toBe(false);
+    expect(selection).toEqual([borrowed]);
+    composer['remove'](owned);
+    expect(ownedRequest.cancelled).toBe(true);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(owned.url);
+    expect(composer['canSend']()).toBe(false);
+    composer['submit']();
+    expect(submitted).not.toHaveBeenCalled();
+    fixture.componentRef.setInput('editing', undefined);
+    fixture.detectChanges();
+    edit(pendingMessage, selection);
+    expect(composer['visualUploads']()).toEqual([borrowed]);
+    expect(dispose).not.toHaveBeenCalled();
+    expect(request.abort).not.toHaveBeenCalled();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(borrowed.url);
+    const retry = borrowed.retry();
+    (await startStorage(encodeId('101'))).finish();
+    await expect(retry).resolves.toBe(encodeId('101'));
+  });
+
+  it.each(['cancel', 'reset', 'destroy'] as const)('only disposes newly created edit tasks on %s', async (action) => {
+    const borrowed = queuedUpload();
+    const pending = borrowed.retry();
+    const borrowedRequest = await startStorage();
+    edit(pendingMessage, [borrowed]);
+    const owned = add(AttachmentUploadPurpose.media);
+    const ownedRequest = await startStorage(encodeId('101'));
+    if (action === 'cancel') {
+      fixture.componentRef.setInput('editing', undefined);
+      fixture.componentRef.setInput('editingUploads', []);
+      fixture.detectChanges();
+    } else if (action === 'reset') composer.reset();
+    else fixture.destroy();
+    expect(composer['selectedUploads']()).toEqual([]);
+    expect(ownedRequest.abort).toHaveBeenCalledOnce();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(owned.url);
+    expect(borrowedRequest.abort).not.toHaveBeenCalled();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(borrowed.url);
+    borrowedRequest.finish();
+    await expect(pending).resolves.toBe(encodeId('100'));
+  });
+
+  it('replaces borrowed selection when the queue input changes while retaining newly created tasks', () => {
+    const first = queuedUpload();
+    edit(pendingMessage, [first]);
+    const owned = add(AttachmentUploadPurpose.media);
+    const next = queuedUpload('next.gif');
+    fixture.componentRef.setInput('editingUploads', Object.freeze([next]));
+    fixture.detectChanges();
+    expect(composer['visualUploads']()).toEqual([next, owned]);
+    expect(composer['uploads']()).toEqual([owned]);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    composer['submit']();
+    expect(submitted).toHaveBeenCalledExactlyOnceWith({
+      messageType: MessageType.text,
+      attachmentIds: [],
+      uploads: [next, owned],
+      mentions: [],
+    });
+  });
+
+  it('counts borrowed tasks toward the attachment limit and leaves deselected tasks to the queue on save', () => {
+    const borrowed = queuedUpload();
+    const request = http.expectOne('/_api/attachments/config');
+    const attachments = Array.from({ length: 19 }, (_, index) => ({ ...existing, id: encodeId(String(index + 1)) }));
+    edit({ ...pendingMessage, attachments }, [borrowed]);
+    expect(add(AttachmentUploadPurpose.media)).toBeUndefined();
+    expect(composer['tooMany']()).toBe(true);
+    http.expectNone('/_api/attachments/config');
+    composer['remove'](borrowed);
+    const owned = add(AttachmentUploadPurpose.media);
+    expect(owned).toBeInstanceOf(AttachmentUpload);
+    composer['submit']();
+    expect(submitted).toHaveBeenCalledExactlyOnceWith({
+      messageType: MessageType.text,
+      attachmentIds: attachments.map((attachment) => attachment.id),
+      uploads: [owned],
+      mentions: [],
+    });
+    composer.reset();
+    fixture.destroy();
+    expect(request.cancelled).toBe(false);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(borrowed.url);
+    expect(http.expectOne('/_api/attachments/config').cancelled).toBe(false);
   });
 
   it.each(['reset', 'destroy'] as const)('only cancels tasks still owned by the composer on %s', async (action) => {
@@ -392,16 +621,91 @@ describe('Message composer upload ownership', () => {
     expect(submitted.mock.calls[0][0].mentions).toEqual(mentions);
   });
 
-  it('preserves edit restrictions and explicit disabled state', () => {
-    edit();
-    expect(composer['addFile'](new File(['file'], 'note.txt'), AttachmentUploadPurpose.file)).toBeUndefined();
-    expect(composer['unsupported']()).toBe(true);
-    http.expectNone('/_api/attachments/config');
-    composer.text.set('修改');
-    fixture.componentRef.setInput('disabled', true);
+  it.each([false, true])('rejects empty or whitespace-only content when editing is %s', (editing) => {
+    if (editing) {
+      edit({ ...testMessage, attachments: [existing] });
+      composer['removeExisting'](existing.id);
+    }
+    for (const text of ['', '  \n ']) {
+      composer.text.set(text);
+      expect(composer['canSend']()).toBe(false);
+      composer['submit']();
+    }
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
+  it('keeps text submission and attachment selection blocked during recording', () => {
+    const recorder = fixture.debugElement.query(By.directive(VoiceRecorder)).componentInstance as VoiceRecorder;
+    recorder.active.set(true);
+    fixture.detectChanges();
+    expect(composer.voiceActive()).toBe(true);
+    expect(fixture.nativeElement.querySelector('.attach-button').disabled).toBe(true);
+    expect(fixture.nativeElement.querySelector('.input-wrapper').hidden).toBe(true);
+    composer.text.set('录音中的文字');
     expect(composer['canSend']()).toBe(false);
     composer['submit']();
-    composer['sendVoice'](new File(['voice'], 'voice.m4a'));
     expect(submitted).not.toHaveBeenCalled();
+    composer.voiceActive.set(false);
+    composer['submit']();
+    expect(submitted).toHaveBeenCalledExactlyOnceWith({
+      messageType: MessageType.text,
+      attachmentIds: [],
+      uploads: [],
+      mentions: [],
+    });
+  });
+
+  it('preserves image/video-only editing and hides voice and sticker controls', () => {
+    edit();
+    expect(composer['addFile'](new File(['file'], 'note.txt'), AttachmentUploadPurpose.file)).toBeUndefined();
+    expect(composer['addFile'](new File(['voice'], 'voice.m4a'), AttachmentUploadPurpose.voice)).toBeUndefined();
+    expect(composer['unsupported']()).toBe(true);
+    composer['sendVoice'](new File(['voice'], 'voice.m4a'));
+    expect(composer['useVoice']()).toBe(false);
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(VoiceRecorder))).toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-button')).toBeNull();
+    expect(submitted).not.toHaveBeenCalled();
+    http.expectNone('/_api/attachments/config');
+    composer.text.set('修改');
+    composer['submit']();
+    expect(submitted).toHaveBeenCalledExactlyOnceWith({
+      messageType: MessageType.text,
+      attachmentIds: [],
+      uploads: [],
+      mentions: [],
+    });
+  });
+  it('keeps text and attachment ownership when a blocked DM cannot send', () => {
+    fixture.componentRef.setInput('relationship', { canDm: false, blocking: true });
+    composer.text.set('稍后发送');
+    composer['existing'].set([existing]);
+    fixture.detectChanges();
+    composer['submit']();
+    expect(submitted).not.toHaveBeenCalled();
+    expect(composer.text()).toBe('稍后发送');
+    expect(composer['existing']()).toEqual([existing]);
+    expect(composer['blocked']()).toBe(true);
+    expect(composer['canSend']()).toBe(true);
+    fixture.componentRef.setInput('relationship', { canDm: true });
+    fixture.detectChanges();
+    composer['submit']();
+    expect(submitted).toHaveBeenCalledOnce();
+  });
+  it('selects mention candidates before Enter can send and leaves IME composition alone', async () => {
+    const first = { uid: 2, username: '甲', gender: 0, role: GroupRole.member, joinedAt: '' };
+    const second = { ...first, uid: 3, username: '乙' };
+    composer['suggestions'].set([first, second]);
+    const mention = vi
+      .spyOn(composer as unknown as { mention: (user: typeof first) => Promise<void> }, 'mention')
+      .mockResolvedValue();
+    composer['key'](new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    composer['key'](new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }));
+    expect(mention).not.toHaveBeenCalled();
+    composer['key'](new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(mention).toHaveBeenCalledWith(second);
+    expect(submitted).not.toHaveBeenCalled();
+    composer['key'](new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(composer['suggestions']()).toEqual([]);
   });
 });

@@ -1,0 +1,19 @@
+<button class="play" type="button" (click)="toggle()">
+  @if (loading()) {
+    <ion-spinner />
+  } @else {
+    <ion-icon [icon]="failed() ? icons.refreshOutline : playing() ? icons.pause : icons.play" />
+  }
+</button>
+<div class="track">
+  <div #wave class="wave"></div>
+  @if (!waveform()) {
+    <input class="fallback" type="range" min="0" [max]="duration() || 1" [value]="elapsed()" (input)="seek($event)" />
+  }
+  <span class="time">{{ time(elapsed() || duration()) }}</span>
+</div>
+@if (failed()) {
+  <a class="speed" [href]="src()" target="_blank">原文件</a>
+} @else {
+  <button type="button" class="speed" (click)="speed()">{{ rate() }}×</button>
+}

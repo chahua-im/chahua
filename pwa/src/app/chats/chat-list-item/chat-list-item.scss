@@ -14,6 +14,10 @@ ion-label p {
   font-size: 13px;
 }
 
+ion-item:not(.selected) ion-label p {
+  --message-action-color: var(--ion-color-primary);
+}
+
 ion-label ion-text {
   font-weight: 500;
 }
@@ -32,4 +36,9 @@ ion-item:not(.selected) .meta > span {
 
 ion-item.selected app-chat-avatar {
   --avatar-badge-border: var(--ion-color-primary);
+}
+
+.muted-icon {
+  margin-inline-start: 4px;
+  vertical-align: middle;
 }

@@ -1,17 +1,21 @@
-import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
+import { ModalController } from '@ionic/angular';
+import { alertCircleOutline, checkmarkOutline, cloudUploadOutline, timeOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
 import { AttachmentUploadPurpose, MessageType, type MessagePreview } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
+import { MessageDelivery } from '../message-delivery';
+import { UploadStatus, type AttachmentUpload } from '../upload';
 import { Message, type MessageContent } from './message';
-import { MessageDelivery } from '../message-status';
-import { type AttachmentUpload, UploadStatus } from '../upload';
 
 describe('Message', () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   function pointer(element: HTMLElement, type: string, options: PointerEventInit = {}) {
     element.dispatchEvent(
@@ -176,7 +180,8 @@ describe('Message', () => {
     fixture.componentRef.setInput('message', { ...message, isDeleted: true });
     fixture.detectChanges();
     expect(element.querySelector('app-message-attachments')).toBeNull();
-    expect(element.querySelector('.message-text')?.textContent).toBe('消息已删除');
+    expect(element.querySelector('.chat-row, .system-message')).toBeNull();
+    expect(element.textContent?.trim()).toBe('');
   });
 
   it('opens a topic from a root message and hides the entry inside topics or deleted messages', async () => {
@@ -249,9 +254,7 @@ describe('Message', () => {
     fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
     fixture.detectChanges();
     expect(element.querySelectorAll('app-message-status ion-icon')).toHaveLength(1);
-    expect(fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon).toBe(
-      checkmarkCircleOutline,
-    );
+    expect(fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon).toBe(timeOutline);
   });
 
   it('keeps sticker reactions outside the transparent media and its timestamp on the sticker', async () => {
@@ -287,7 +290,7 @@ describe('Message', () => {
     fixture.componentRef.setInput('own', true);
     fixture.detectChanges();
     expect(fixture.debugElement.query(By.css('.media-time app-message-status ion-icon')).componentInstance.icon).toBe(
-      checkmarkCircle,
+      checkmarkOutline,
     );
   });
 
@@ -306,6 +309,7 @@ describe('Message', () => {
     expect(context.defaultPrevented).toBe(true);
     expect(menu).toHaveBeenLastCalledWith({
       messageId: fixture.componentInstance.message().id,
+      clientGeneratedId: undefined,
       element: bubble,
       rect,
       first: false,
@@ -317,6 +321,103 @@ describe('Message', () => {
     fixture.detectChanges();
     fixture.nativeElement.dispatchEvent(context);
     expect(menu).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, testMessage.id])('opens a queued message menu with its real IDs: server ID %s', async (id) => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', { ...testMessage, id, message: '待发送' });
+    fixture.componentRef.setInput('outgoingId', 'queued-message');
+    fixture.componentRef.setInput('interactive', false);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    const bubble = element.querySelector<HTMLElement>('.bubble')!;
+    const menu = vi.fn();
+    fixture.componentInstance.menu.subscribe(menu);
+    const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    bubble.dispatchEvent(context);
+    expect(context.defaultPrevented).toBe(true);
+    expect(menu).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        messageId: id,
+        clientGeneratedId: 'queued-message',
+        element: bubble,
+      }),
+    );
+    expect(element.hasAttribute('data-message-id')).toBe(id != null);
+  });
+
+  it('opens a queued touch menu while profile, quote, reaction and swipe actions stay blocked', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      id: undefined,
+      replyToMessage: { ...testMessage, mentions: [] },
+      reactions: [{ emoji: '👍', count: 1 }],
+      threadInfo: { replyCount: 1 },
+    });
+    fixture.componentRef.setInput('outgoingId', 'queued-message');
+    fixture.componentRef.setInput('interactive', false);
+    fixture.componentRef.setInput('canOpenThread', true);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    const bubble = element.querySelector<HTMLElement>('.bubble')!;
+    const menu = vi.fn();
+    const serverAction = vi.fn();
+    const profile = vi.spyOn(TestBed.inject(ModalController), 'create');
+    fixture.componentInstance.menu.subscribe(menu);
+    fixture.componentInstance.reply.subscribe(serverAction);
+    fixture.componentInstance.jump.subscribe(serverAction);
+    fixture.componentInstance.react.subscribe(serverAction);
+    fixture.componentInstance.openThread.subscribe(serverAction);
+    element.querySelector<HTMLButtonElement>('.reply-preview')!.click();
+    element.querySelector<HTMLElement>('.avatar')!.click();
+    expect(element.querySelector('.reply-button, button.reaction, .swipe-reply, .thread-entry')).toBeNull();
+    vi.useFakeTimers();
+    pointer(bubble, 'pointerdown', { clientX: 150 });
+    vi.advanceTimersByTime(350);
+    expect(menu).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ clientGeneratedId: 'queued-message', messageId: undefined }),
+    );
+    bubble.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(menu).toHaveBeenCalledOnce();
+    pointer(bubble, 'pointermove', { clientX: 70 });
+    pointer(bubble, 'pointerup');
+    expect(serverAction).not.toHaveBeenCalled();
+    expect(profile).not.toHaveBeenCalled();
+    expect(element.querySelector<HTMLElement>('.chat-row')!.style.transform).toBe('');
+  });
+
+  it.each(['pointermove', 'pointercancel'])('cancels a queued touch menu after %s', async (type) => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', { ...testMessage, id: undefined });
+    fixture.componentRef.setInput('outgoingId', 'queued-message');
+    fixture.componentRef.setInput('interactive', false);
+    fixture.detectChanges();
+    const bubble = fixture.nativeElement.querySelector('.bubble') as HTMLElement;
+    const menu = vi.fn();
+    fixture.componentInstance.menu.subscribe(menu);
+    vi.useFakeTimers();
+    pointer(bubble, 'pointerdown');
+    vi.advanceTimersByTime(200);
+    pointer(bubble, type, { clientY: 80 });
+    vi.advanceTimersByTime(400);
+    expect(menu).not.toHaveBeenCalled();
+  });
+
+  it('keeps queued previews from opening another menu', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', { ...testMessage, id: undefined });
+    fixture.componentRef.setInput('outgoingId', 'queued-message');
+    fixture.componentRef.setInput('preview', true);
+    fixture.detectChanges();
+    const bubble = fixture.nativeElement.querySelector('.bubble') as HTMLElement;
+    const menu = vi.fn();
+    fixture.componentInstance.menu.subscribe(menu);
+    bubble.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    vi.useFakeTimers();
+    pointer(bubble, 'pointerdown');
+    vi.advanceTimersByTime(400);
+    expect(menu).not.toHaveBeenCalled();
   });
 
   it('opens once after a touch hold and suppresses its synthesized quote click without changing taps', async () => {
@@ -396,6 +497,57 @@ describe('Message', () => {
     expect(fixture.nativeElement.querySelector('.reactions')).toBeNull();
   });
 
+  it('shows up to five reaction avatars with overflow and a name when the avatar URL is absent', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      reactions: [
+        {
+          emoji: '👍',
+          count: 7,
+          reactors: Array.from({ length: 6 }, (_, i) => ({
+            uid: i + 10,
+            name: '小茶',
+            avatarUrl: i ? `https://example.com/${i}.jpg` : undefined,
+          })),
+        },
+      ],
+    });
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelectorAll('.reactor')).toHaveLength(5);
+    expect(element.querySelectorAll('.reactor img')).toHaveLength(4);
+    expect(element.querySelector('.reactor')?.textContent?.trim()).toBe('小');
+    expect(element.querySelector('.overflow')?.textContent).toBe('+2');
+    expect(element.querySelector('.count')).toBeNull();
+    const react = vi.fn();
+    fixture.componentInstance.react.subscribe(react);
+    element.querySelector<HTMLImageElement>('.reactor img')!.click();
+    expect(react).toHaveBeenCalledExactlyOnceWith('👍');
+  });
+
+  it.each([false, true])(
+    'updates reaction avatars when the summary changes, including previews: %s',
+    async (preview) => {
+      const fixture = await render();
+      fixture.componentRef.setInput('preview', preview);
+      const setReactor = (uid: number) => {
+        fixture.componentRef.setInput('message', {
+          ...testMessage,
+          reactions: [{ emoji: '❤️', count: 1, reactors: [{ uid, avatarUrl: `https://example.com/${uid}.jpg` }] }],
+        });
+        fixture.detectChanges();
+      };
+      setReactor(10);
+      setReactor(20);
+      const element: HTMLElement = fixture.nativeElement;
+      expect(element.querySelectorAll('.reactor')).toHaveLength(1);
+      expect(element.querySelector<HTMLImageElement>('.reactor img')?.src).toBe('https://example.com/20.jpg');
+      expect(element.querySelector('.count, .overflow')).toBeNull();
+      expect(element.querySelector('button.reaction') !== null).toBe(!preview);
+    },
+  );
+
   it('renders an inert preview without avatars or actions while preserving quotes and reaction counts', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('preview', true);
@@ -433,14 +585,14 @@ describe('Message', () => {
     expect(icon()).toBeUndefined();
     fixture.componentRef.setInput('own', true);
     fixture.detectChanges();
-    expect(icon()).toBe(checkmarkCircle);
+    expect(icon()).toBe(checkmarkOutline);
     expect(element.querySelector('time')?.textContent).toContain('09:07');
     fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
     fixture.detectChanges();
-    expect(icon()).toBe(checkmarkCircleOutline);
+    expect(icon()).toBe(timeOutline);
     fixture.componentRef.setInput('delivery', MessageDelivery.Sent);
     fixture.detectChanges();
-    expect(icon()).toBe(checkmarkCircle);
+    expect(icon()).toBe(checkmarkOutline);
     fixture.componentRef.setInput('own', false);
     fixture.detectChanges();
     expect(icon()).toBeUndefined();
@@ -486,7 +638,9 @@ describe('Message', () => {
     const element: HTMLElement = fixture.nativeElement;
     expect(element.hasAttribute('data-message-id')).toBe(false);
     expect(element.querySelectorAll('time')).toHaveLength(1);
-    expect(element.querySelector('app-message-status ion-icon')).toBeNull();
+    expect(fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon).toBe(
+      alertCircleOutline,
+    );
     const retry = vi.fn();
     fixture.componentInstance.retry.subscribe(retry);
     const button = element.querySelector<HTMLButtonElement>('.retry-button')!;
@@ -545,7 +699,7 @@ describe('Message', () => {
     }
   });
 
-  it('passes live uploads to attachments and waits for delivery confirmation after an upload is ready', async () => {
+  it.each(['', '图片说明'])('shows upload, send, confirmation and failure status with caption %j', async (caption) => {
     const fixture = await render();
     const upload = {
       file: new File(['image'], '图片.jpg', { type: 'image/jpeg' }),
@@ -557,7 +711,7 @@ describe('Message', () => {
     fixture.componentRef.setInput('message', {
       ...testMessage,
       id: undefined,
-      message: '',
+      message: caption,
       attachments: [{ kind: upload.file.type, url: upload.url, fileName: upload.file.name, size: upload.file.size }],
     });
     fixture.componentRef.setInput('uploads', [upload]);
@@ -568,15 +722,64 @@ describe('Message', () => {
     const element: HTMLElement = fixture.nativeElement;
     expect(element.querySelector('.media-frame .upload-overlay ion-spinner')).not.toBeNull();
     expect(element.querySelector('img')?.getAttribute('src')).toBe(upload.url);
-    const icon = () =>
-      fixture.debugElement.query(By.css('.media-time app-message-status ion-icon')).componentInstance.icon;
-    expect(icon()).toBe(checkmarkCircleOutline);
+    const icon = () => fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon;
+    expect(icon()).toBe(cloudUploadOutline);
+    upload.state.set({ status: UploadStatus.Uploading, progress: 0.5 });
+    await fixture.whenStable();
+    expect(icon()).toBe(cloudUploadOutline);
+    expect(element.querySelector('.upload-overlay ion-spinner')).not.toBeNull();
+    fixture.componentRef.setInput('delivery', MessageDelivery.Failed);
+    fixture.detectChanges();
+    expect(icon()).toBe(alertCircleOutline);
+    expect(element.querySelector('.upload-overlay ion-spinner')).not.toBeNull();
+    const retry = vi.fn();
+    fixture.componentInstance.retry.subscribe(retry);
+    element.querySelector<HTMLButtonElement>('.retry-button')!.click();
+    expect(retry).toHaveBeenCalledOnce();
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+    fixture.detectChanges();
+    expect(icon()).toBe(cloudUploadOutline);
+    expect(element.querySelector('.retry-button')).toBeNull();
     upload.state.set({ status: UploadStatus.Ready, progress: 1, id: encodeId('9007199254741101') });
     await fixture.whenStable();
     expect(element.querySelector('.upload-overlay')).toBeNull();
-    expect(icon()).toBe(checkmarkCircleOutline);
+    expect(fixture.componentInstance.delivery()).toBe(MessageDelivery.Sending);
+    expect(icon()).toBe(timeOutline);
     fixture.componentRef.setInput('delivery', MessageDelivery.Sent);
     fixture.detectChanges();
-    expect(icon()).toBe(checkmarkCircle);
+    expect(icon()).toBe(checkmarkOutline);
+  });
+  it('waits for every upload and keeps confirmed and incoming messages from showing an upload status', async () => {
+    const fixture = await render();
+    const uploads = ['blob:first', 'blob:second'].map((url) => ({
+      file: new File(['image'], '图片.jpg', { type: 'image/jpeg' }),
+      url,
+      purpose: AttachmentUploadPurpose.media,
+      state: signal<ReturnType<AttachmentUpload['state']>>({ status: UploadStatus.Ready, progress: 1 }),
+      retry: vi.fn<AttachmentUpload['retry']>(),
+    }));
+    uploads[1].state.set({ status: UploadStatus.Uploading, progress: 0.5 });
+    fixture.componentRef.setInput('uploads', uploads);
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+    fixture.detectChanges();
+    const icon = () => fixture.debugElement.query(By.css('app-message-status ion-icon'))?.componentInstance.icon;
+    expect(icon()).toBe(cloudUploadOutline);
+    uploads[1].state.set({ status: UploadStatus.Ready, progress: 1 });
+    await fixture.whenStable();
+    expect(icon()).toBe(timeOutline);
+    uploads[0].state.set({ status: UploadStatus.Processing, progress: 0 });
+    await fixture.whenStable();
+    expect(icon()).toBe(cloudUploadOutline);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sent);
+    fixture.detectChanges();
+    expect(icon()).toBe(checkmarkOutline);
+    fixture.componentRef.setInput('delivery', undefined);
+    fixture.detectChanges();
+    expect(icon()).toBe(checkmarkOutline);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+    fixture.componentRef.setInput('own', false);
+    fixture.detectChanges();
+    expect(icon()).toBeUndefined();
   });
 });

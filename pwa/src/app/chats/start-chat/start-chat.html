@@ -17,9 +17,23 @@
         <ion-button fill="clear" [disabled]="busy() || !values().code.trim()" (click)="lookup()">查看邀请</ion-button>
         @if (preview(); as invite) {
           <ion-item>
+            @if (invite.chat.avatar) {
+              <ion-avatar slot="start"><img [src]="invite.chat.avatar" /></ion-avatar>
+            }
             <ion-label>
               <h2>{{ invite.chat.name }}</h2>
               <p>{{ invite.chat.description }}</p>
+              @switch (status(invite.invite)) {
+                @case (Status.Expired) {
+                  <p>邀请已过期</p>
+                }
+                @case (Status.Revoked) {
+                  <p>邀请已撤销</p>
+                }
+                @case (Status.Used) {
+                  <p>邀请已使用</p>
+                }
+              }
             </ion-label>
           </ion-item>
         }

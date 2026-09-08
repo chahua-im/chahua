@@ -2,8 +2,8 @@
   <div class="voice-display">
     @if (phase() === Phase.Recorded) {
       <span class="timer">{{ elapsed() }}</span>
-      <audio [src]="url()" controls preload="metadata"></audio>
-      <button type="button" class="delete" [disabled]="disabled()" (click)="discard()">
+      <app-voice-player [src]="url()!" />
+      <button type="button" class="delete" (click)="discard()">
         <ion-icon [icon]="icons.trash" />
       </button>
     } @else {
@@ -19,12 +19,8 @@
 }
 <div class="action-slot">
   @if (phase() === Phase.Recorded) {
-    <button type="button" class="round send" [disabled]="disabled()" (click)="send()">
-      @if (disabled()) {
-        <ion-spinner />
-      } @else {
-        <ion-icon [icon]="icons.send" />
-      }
+    <button type="button" class="round send" (click)="send()">
+      <ion-icon [icon]="icons.send" />
     </button>
   } @else {
     <div
@@ -37,24 +33,34 @@
       <button
         type="button"
         class="round microphone"
-        [disabled]="disabled() || !available"
+        (click)="!available && failure.set(Failure.Unsupported)"
         (pointerdown)="start($event)"
         (pointermove)="move($event)"
         (pointerup)="finish($event)"
         (pointercancel)="finish($event, true)"
         (contextmenu)="$event.preventDefault()">
         <ion-icon
-          [icon]="target() === Target.Cancel ? icons.trash : target() === Target.Send ? icons.arrowUp : icons.mic" />
+          [icon]="
+            target() === Target.Cancel
+              ? icons.trash
+              : target() === Target.Send
+                ? icons.arrowUp
+                : available
+                  ? icons.micOutline
+                  : icons.micOffOutline
+          " />
       </button>
     </div>
   }
 </div>
-@if (failed() || tooShort()) {
-  <div class="voice-error">
-    @if (tooShort()) {
-      录音太短
-    } @else {
-      无法录音，请检查麦克风权限
-    }
-  </div>
+@if (tooShort()) {
+  <div class="voice-error">录音太短</div>
 }
+<ion-alert
+  [isOpen]="failure() != null"
+  header="无法录音"
+  [message]="
+    failure() === Failure.Unsupported ? '当前浏览器不支持录音，请使用其他浏览器。' : '无法录音，请检查麦克风权限。'
+  "
+  [buttons]="['知道了']"
+  (didDismiss)="failure.set(undefined)" />

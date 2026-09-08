@@ -1,22 +1,47 @@
-import { TestBed } from '@angular/core/testing';
 import { HttpTestingController } from '@angular/common/http/testing';
-import { GroupVisibility } from '../../generated/models';
-import { signal } from '@angular/core';
+import { DestroyRef, signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { firstValueFrom, takeUntil } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
+import { FriendsService } from '../../generated/endpoints/friends/friends.service';
+import type { FriendRelationshipResponse } from '../../generated/models';
+import { GroupRole, GroupVisibility } from '../../generated/models';
+import { activeQuery } from '../api/query';
+import { testChat, testUser, wireChat } from '../api/testing';
+import { SessionStore } from '../session/session-store';
+import { ChatDetails } from './chat-details/chat-details';
 import { ChatListStore } from './chat-list-store';
 import { ChatStore } from './chat-store';
-import { SessionStore } from '../session/session-store';
-import { testUser, testChat, wireChat } from '../api/testing';
-import { UserProfile } from './user-profile/user-profile';
-import { StartChat, StartChatKind } from './start-chat/start-chat';
-import { ChatDetails } from './chat-details/chat-details';
 import { DirectorySearch } from './directory-search/directory-search';
+import { StartChat, StartChatKind } from './start-chat/start-chat';
+import { UserProfile } from './user-profile/user-profile';
 describe('Chat feature requests', () => {
   let http: HttpTestingController;
   const lists = { refreshChats: vi.fn() };
-  const store = { chatState: vi.fn(), invalidate: vi.fn(), ensureDetails: vi.fn().mockResolvedValue(undefined) };
+  const relationships = new Map<number, ReturnType<typeof activeQuery<FriendRelationshipResponse | undefined>>>();
+  const store = {
+    relationship: (uid: number) => {
+      let query = relationships.get(uid);
+      if (!query) {
+        query = activeQuery<FriendRelationshipResponse | undefined>(
+          TestBed.inject(DestroyRef),
+          (cancel) => firstValueFrom(TestBed.inject(FriendsService).getFriendRelationship(uid).pipe(takeUntil(cancel))),
+          undefined,
+        );
+        relationships.set(uid, query);
+      }
+      return query;
+    },
+    get: vi.fn(),
+    isMuted: () => false,
+    mutedUntil: () => undefined,
+    chatState: vi.fn(),
+    invalidate: vi.fn(),
+    ensureDetails: vi.fn().mockResolvedValue(undefined),
+  };
   beforeEach(() => {
+    relationships.clear();
     TestBed.configureTestingModule({
       providers: [
         provideChahuaBaseUrl('/_api'),
@@ -32,6 +57,7 @@ describe('Chat feature requests', () => {
     const fixture = TestBed.createComponent(UserProfile);
     fixture.componentRef.setInput('user', { uid: 2, username: '朋友', gender: 0 });
     fixture.detectChanges();
+    await Promise.resolve();
     const requests = http.match((req) => req.method === 'GET');
     expect(requests).toHaveLength(2);
     for (const request of requests)
@@ -65,6 +91,26 @@ describe('Chat feature requests', () => {
     await sending;
     expect(fixture.componentInstance['sent']()).toBe(true);
   });
+  it('shares an existing relationship and reflects refreshes without a second profile snapshot', async () => {
+    const query = store.relationship(2);
+    const release = query.activate();
+    await Promise.resolve();
+    http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true, canDm: true });
+    await vi.waitFor(() => expect(query.loading()).toBe(false));
+    const fixture = TestBed.createComponent(UserProfile);
+    fixture.componentRef.setInput('user', { uid: 2, username: '朋友', gender: 0 });
+    fixture.detectChanges();
+    http.expectOne('/_api/friends/add-info/2').flush({ mode: 'need_message' });
+    http.expectNone('/_api/friends/2');
+    expect(fixture.componentInstance['relationship']()).toBe(query.value());
+    const refresh = query.refresh();
+    await Promise.resolve();
+    http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: false, canDm: false, blocking: true });
+    await refresh;
+    expect(fixture.componentInstance['relationship']()?.blocking).toBe(true);
+    fixture.destroy();
+    release();
+  });
   it('does not redeem an invite after its displayed code has been changed', async () => {
     const fixture = TestBed.createComponent(StartChat);
     fixture.componentRef.setInput('kind', StartChatKind.Join);
@@ -80,13 +126,11 @@ describe('Chat feature requests', () => {
     expect(http.match((req) => req.method === 'POST')).toHaveLength(0);
   });
   it('updates group metadata through the existing patch endpoint and refreshes the chat cache', async () => {
+    store.get.mockReturnValue({ ...testChat, myRole: GroupRole.admin, description: '旧简介' });
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
-    http.expectOne((req) => req.method === 'GET').flush({ ...wireChat, myRole: 'admin', description: '旧简介' });
-    await Promise.resolve();
-    fixture.detectChanges();
-    http.expectOne((req) => req.url.includes('/attachments')).flush({ attachments: [] });
+    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
     await fixture.whenStable();
     fixture.componentInstance['values'].set({
       name: '新群名',

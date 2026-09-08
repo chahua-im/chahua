@@ -6,15 +6,15 @@ import { provideRouter, Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
+import { GroupRole, MessageType, ServerWsMessageType, type MessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { encodeId } from '../../api/snowflake-id';
 import { mockRealtime, testUser, wireChat, wireMessage } from '../../api/testing';
-import { SessionStore } from '../../session/session-store';
-import { Preferences } from '../../settings/preferences';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
+import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
 import { PinnedMessagesPage } from './pinned-messages.page';
 
 const savedSnapshot = () => ({
@@ -62,7 +62,7 @@ describe('PinnedMessagesPage', () => {
     vi.restoreAllMocks();
   });
 
-  async function pins(role = GroupRole.admin, thread = false) {
+  async function pins(role = GroupRole.admin, thread = false, deleted = false) {
     fixture.componentRef.setInput('id', wireChat.id);
     if (thread) fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
@@ -74,7 +74,7 @@ describe('PinnedMessagesPage', () => {
           chatId: wireChat.id,
           pinnedAt: '2026-09-07T12:00:00Z',
           pinnedBy: 1,
-          message: structuredClone(wireMessage),
+          message: { ...structuredClone(wireMessage), isDeleted: deleted },
           ...(thread ? { threadRootId: '100' } : {}),
         },
       ],
@@ -115,6 +115,23 @@ describe('PinnedMessagesPage', () => {
     });
     http.expectNone((request) => request.url.endsWith('/read') || request.url.endsWith('/read-state'));
   });
+
+  it.each([false, true])(
+    'omits recalled pins from messages and date groups, including initial loading: %s',
+    async (deleted) => {
+      const pin = await pins(GroupRole.admin, false, deleted);
+      if (!deleted)
+        TestBed.inject(Connection).acceptChange({
+          type: ServerWsMessageType.messageDeleted,
+          payload: { ...pin.message, isDeleted: true },
+        });
+      await settle();
+      fixture.detectChanges();
+      expect(page['messages']()).toEqual([]);
+      expect(fixture.nativeElement.querySelector('app-message, .message-date')).toBeNull();
+      expect(fixture.nativeElement.querySelector('.message-list').textContent).toContain('暂无置顶消息');
+    },
+  );
 
   it('requires confirmation before deleting a pin from its own thread scope', async () => {
     const pin = await pins(GroupRole.admin, true);

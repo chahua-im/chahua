@@ -1,14 +1,14 @@
-import { Component, effect, inject, input, signal, DestroyRef } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
-  IonItem,
-  IonList,
-  IonLabel,
   IonAvatar,
   IonButton,
-  IonSpinner,
+  IonItem,
+  IonLabel,
+  IonList,
   IonListHeader,
+  IonSpinner,
   ModalController,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
@@ -31,6 +31,8 @@ import { UserProfile } from '../user-profile/user-profile';
 export class DirectorySearch {
   readonly query = input('');
   readonly usersOnly = input(false);
+  readonly selecting = input(false);
+  readonly selected = output<MemberSummary>();
   private readonly api = inject(GroupsService);
   private readonly users = inject(UsersService);
   private readonly router = inject(Router);
@@ -98,6 +100,10 @@ export class DirectorySearch {
     void this.router.navigate(['/chats/chat', decodeId(id)]);
   }
   protected async profile(user: MemberSummary) {
+    if (this.selecting()) {
+      this.selected.emit(user);
+      return;
+    }
     const modal = await this.modals.create({ component: UserProfile, componentProps: { user } });
     await modal.present();
   }

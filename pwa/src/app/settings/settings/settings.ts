@@ -11,27 +11,27 @@ import {
   IonList,
   IonNav,
   IonNote,
+  IonSpinner,
   IonTitle,
   IonToggle,
-  IonSpinner,
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
+import type { ToggleCustomEvent } from '@ionic/core';
 import {
   bookmarkOutline,
+  notificationsOutline,
   personCircleOutline,
+  refreshOutline,
   settingsOutline,
   shieldCheckmarkOutline,
-  notificationsOutline,
-  refreshOutline,
 } from 'ionicons/icons';
-import type { ToggleCustomEvent } from '@ionic/core';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
 import { GeneralSettings } from '../general-settings/general-settings';
-import { ContentScrollbars } from '../../content-scrollbars';
 
 export enum SettingsDismissRole {
   Saved = 'saved',
@@ -92,7 +92,7 @@ export class Settings {
 
   protected async setNotifications(event: ToggleCustomEvent) {
     await this.notifications.setEnabled(event.detail.checked);
-    event.target.checked = this.notifications.subscribed();
+    event.target.checked = this.notifications.enabled();
   }
 
   protected async checkUpdates() {

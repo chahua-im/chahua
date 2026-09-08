@@ -77,6 +77,9 @@ button:disabled {
   gap: 7px;
   padding: 0;
 }
+.actions .destructive {
+  color: var(--ion-color-danger);
+}
 .actions ion-icon {
   font-size: 23px;
 }

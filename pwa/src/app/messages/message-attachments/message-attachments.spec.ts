@@ -1,13 +1,16 @@
-import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { ModalController } from '@ionic/angular';
 import { vi } from 'vitest';
 import type { AttachmentResponse, MessageResponse } from '../../../generated/models';
 import { AttachmentUploadPurpose, MessageType } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
-import { MessageAttachments, type MessageAttachmentSource } from './message-attachments';
 import { type AttachmentUpload, UploadStatus } from '../upload';
+import { VoicePlayer } from '../voice-player/voice-player';
+import { MediaKind } from './media-kind';
+import { MessageAttachments, type MessageAttachmentSource } from './message-attachments';
 
 const image: AttachmentResponse = {
   id: encodeId('9007199254741101'),
@@ -50,7 +53,7 @@ describe('MessageAttachments', () => {
     expect(frames[1].style.aspectRatio).toBe('1080 / 1920');
     expect(element.querySelector('img')?.getAttribute('loading')).toBe('lazy');
     const video = element.querySelector('video')!;
-    expect(video.controls).toBe(true);
+    expect(video.controls).toBe(false);
     expect(video.autoplay).toBe(false);
     const before = frames[1].getAttribute('style');
     video.dispatchEvent(new Event('loadedmetadata'));
@@ -119,21 +122,15 @@ describe('MessageAttachments', () => {
     expect(link.textContent).toContain('2.0 KB');
   });
 
-  it('renders voice attachments with native controls and a fixed error container', async () => {
+  it('renders voice attachments with the waveform player inside a fixed container', async () => {
     const fixture = await render({
       messageType: MessageType.audio,
       attachments: [{ ...image, kind: 'audio/ogg', url: 'https://example.com/voice.ogg' }],
     });
     const element: HTMLElement = fixture.nativeElement;
-    const audio = element.querySelector('audio')!;
-    expect(audio.controls).toBe(true);
-    expect(audio.preload).toBe('none');
-    expect(audio.src).toBe('https://example.com/voice.ogg');
-    audio.dispatchEvent(new Event('error'));
-    fixture.detectChanges();
-    const link = element.querySelector<HTMLAnchorElement>('.audio-frame .media-error')!;
-    expect(link.textContent).toBe('无法播放，打开语音文件');
-    expect(link.getAttribute('href')).toBe(audio.src);
+    expect(element.querySelector('audio')).toBeNull();
+    const audio = fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer;
+    expect(audio.src()).toBe('https://example.com/voice.ogg');
   });
 
   function upload(url: string, kind = 'image/jpeg') {
@@ -149,7 +146,7 @@ describe('MessageAttachments', () => {
   it.each([
     [MessageType.text, 'image/jpeg', '.media-frame', 'img'],
     [MessageType.text, 'video/mp4', '.media-frame', 'video'],
-    [MessageType.audio, 'audio/ogg', '.audio-frame', 'audio'],
+    [MessageType.audio, 'audio/ogg', '.audio-frame', 'app-voice-player'],
     [MessageType.file, 'application/pdf', '.file', 'a'],
   ])(
     'reacts to upload signals on each %s / %s attachment and preserves its blob preview',
@@ -164,7 +161,11 @@ describe('MessageAttachments', () => {
       const element: HTMLElement = fixture.nativeElement;
       const node = element.querySelector(media)!;
       const attribute = media === 'a' ? 'href' : 'src';
-      expect(node.getAttribute(attribute)).toBe(local.url);
+      expect(
+        media === 'app-voice-player'
+          ? (fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer).src()
+          : node.getAttribute(attribute),
+      ).toBe(local.url);
       expect(element.querySelectorAll(`${frame} ion-spinner`)).toHaveLength(1);
       expect(element.textContent).not.toMatch(/加载中|上传中|处理中/);
       local.state.set({ status: UploadStatus.Uploading, progress: 0.4, width: 600, height: 1200 });
@@ -177,14 +178,22 @@ describe('MessageAttachments', () => {
       local.state.set({ status: UploadStatus.Failed, progress: 0.4 });
       await fixture.whenStable();
       expect(element.querySelector('ion-spinner')).toBeNull();
-      expect(node.getAttribute(attribute)).toBe(local.url);
+      expect(
+        media === 'app-voice-player'
+          ? (fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer).src()
+          : node.getAttribute(attribute),
+      ).toBe(local.url);
       local.state.set({ status: UploadStatus.Uploading, progress: 0 });
       await fixture.whenStable();
       expect(element.querySelector(`${frame} ion-spinner`)).not.toBeNull();
       local.state.set({ status: UploadStatus.Ready, progress: 1, id: image.id });
       await fixture.whenStable();
       expect(element.querySelector('ion-spinner')).toBeNull();
-      expect(node.getAttribute(attribute)).toBe(local.url);
+      expect(
+        media === 'app-voice-player'
+          ? (fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer).src()
+          : node.getAttribute(attribute),
+      ).toBe(local.url);
       expect(local.retry).not.toHaveBeenCalled();
     },
   );
@@ -230,8 +239,10 @@ describe('MessageAttachments', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
+        cssClass: 'media-viewer-overlay',
+        animated: false,
         componentProps: {
-          images: [expect.objectContaining({ url: 'blob:first' }), expect.objectContaining({ url: 'blob:second' })],
+          media: [expect.objectContaining({ url: 'blob:first' }), expect.objectContaining({ url: 'blob:second' })],
           initial: 1,
         },
       }),
@@ -240,10 +251,36 @@ describe('MessageAttachments', () => {
     create.mockRestore();
   });
 
+  it('opens a video with all images and videos from its message, excluding files', async () => {
+    const fixture = await render({
+      attachments: [
+        image,
+        { ...image, id: encodeId('9007199254741103'), url: 'https://example.com/clip.mp4', kind: 'video/mp4' },
+        { ...image, id: encodeId('9007199254741105'), kind: 'application/pdf' },
+      ],
+    });
+    const modal = Object.assign(document.createElement('ion-modal'), { present: vi.fn().mockResolvedValue(undefined) });
+    const create = vi.spyOn(TestBed.inject(ModalController), 'create').mockResolvedValue(modal);
+    fixture.nativeElement.querySelector('.video-open').click();
+    await fixture.whenStable();
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cssClass: 'media-viewer-overlay',
+        componentProps: {
+          media: [
+            expect.objectContaining({ kind: MediaKind.Image }),
+            expect.objectContaining({ kind: MediaKind.Video }),
+          ],
+          initial: 1,
+        },
+      }),
+    );
+    create.mockRestore();
+  });
+
   it.each([
     [MessageType.text, 'image/jpeg', 'img'],
     [MessageType.text, 'video/mp4', 'video'],
-    [MessageType.audio, 'audio/ogg', 'audio'],
   ])('offers the original blob URL when a local %s / %s preview fails', async (type, kind, media) => {
     const fixture = await render({
       messageType: type,

@@ -56,6 +56,25 @@ describe('ChatListStore archived unread', () => {
     };
   }
 
+  it('shares one query between archived counts and the system app badge', async () => {
+    const unread = scope.get(ChatListStore).unread;
+    const releaseList = counts.chats.activate();
+    const releaseBadge = unread.activate();
+    await settle();
+    http.expectOne('/_api/chats/unread').flush({ ...chatTotal(17), unreadCount: 3 });
+    await settle();
+    expect(counts.chats.value()).toBe(17);
+    expect(unread.value()?.unreadCount).toBe(3);
+    releaseList();
+    resync.next();
+    await settle();
+    http.expectOne('/_api/chats/unread').flush({ ...chatTotal(8), unreadCount: 0 });
+    await settle();
+    expect(unread.value()?.unreadCount).toBe(0);
+    expect(counts.chats.value()).toBe(8);
+    releaseBadge();
+  });
+
   it('uses a zero backend total without probing archived records', async () => {
     counts.chats.activate();
     counts.threads.activate();

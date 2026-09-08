@@ -26,13 +26,13 @@ import {
 import type { MessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { SessionStore } from '../../session/session-store';
-import { Preferences } from '../../settings/preferences';
 import { ChatStore } from '../../chats/chat-store';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
-import { messageRows } from '../message-rows';
 import { Message } from '../../messages/message/message';
-import { ContentScrollbars } from '../../content-scrollbars';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
+import { messageRows } from '../message-rows';
 
 @Component({
   selector: 'app-pinned-messages',
@@ -64,6 +64,7 @@ export class PinnedMessagesPage {
     this.pins()
       .items()
       .map((pin) => pin.message)
+      .filter((message) => !message.isDeleted)
       .sort((a, b) => a.id - b.id),
   );
   protected readonly rows = computed(() => messageRows(this.messages()));

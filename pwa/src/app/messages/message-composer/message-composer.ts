@@ -1,25 +1,24 @@
-import { ElementRef } from '@angular/core';
-import { VoiceRecorder } from '../voice-recorder/voice-recorder';
-import { mayBeMediaFile } from '../media-processing/file-type';
-import { displayText, editText, wireText } from './mention-text';
 import {
   Component,
   computed,
+  DestroyRef,
   effect,
+  ElementRef,
   inject,
   input,
+  linkedSignal,
   model,
   output,
   signal,
-  viewChild,
-  DestroyRef,
   untracked,
+  viewChild,
 } from '@angular/core';
-import { IonButton, IonIcon, IonTextarea, IonSpinner, IonList, IonItem, IonLabel } from '@ionic/angular';
-import { addCircleOutline, happyOutline, send, closeOutline, imageOutline, documentOutline } from 'ionicons/icons';
+import { IonAlert, IonButton, IonIcon, IonItem, IonLabel, IonList, IonSpinner, IonTextarea } from '@ionic/angular';
+import { addCircleOutline, closeOutline, documentOutline, happyOutline, imageOutline, send } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
+import type { FriendRelationshipResponse } from '../../../generated/models';
 import {
   AttachmentUploadPurpose,
   MessageType,
@@ -27,12 +26,16 @@ import {
   type AttachmentResponse,
   type MemberResponse,
   type MentionInfo,
-  type MessageResponse,
   type SnowflakeID,
   type StickerSummary,
 } from '../../../generated/models';
-import { AttachmentUpload, UploadStatus } from '../upload';
+import { mayBeMediaFile } from '../media-processing/file-type';
+import type { MessageContent } from '../message/message';
 import { StickerPicker } from '../sticker-picker/sticker-picker';
+import { AttachmentUpload, UploadStatus } from '../upload';
+import { VoicePlayer } from '../voice-player/voice-player';
+import { VoiceRecorder } from '../voice-recorder/voice-recorder';
+import { displayText, editText, wireText } from './mention-text';
 export interface Composition {
   messageType: MessageType;
   attachmentIds: SnowflakeID[];
@@ -49,15 +52,36 @@ enum Panel {
   selector: 'app-message-composer',
   templateUrl: './message-composer.html',
   styleUrl: './message-composer.scss',
-  imports: [IonButton, IonIcon, IonTextarea, IonSpinner, IonList, IonItem, IonLabel, StickerPicker, VoiceRecorder],
-  host: { '(document:click)': 'outside($event)' },
+  imports: [
+    IonAlert,
+    VoicePlayer,
+    IonButton,
+    IonIcon,
+    IonTextarea,
+    IonSpinner,
+    IonList,
+    IonItem,
+    IonLabel,
+    StickerPicker,
+    VoiceRecorder,
+  ],
+  host: { '(document:click)': 'outside($event)', '(dragover)': 'dragover($event)', '(drop)': 'drop($event)' },
 })
 export class MessageComposer {
   readonly text = model('');
+  readonly relationship = input<FriendRelationshipResponse>();
+  protected readonly blocked = signal(false);
+  private canWrite() {
+    const allowed = this.relationship()?.canDm !== false;
+    this.blocked.set(!allowed);
+    return allowed;
+  }
   readonly chatId = input.required<SnowflakeID>();
-  readonly disabled = input(false);
-  readonly editing = input<MessageResponse>();
+  readonly editing = input<MessageContent>();
+  readonly editingUploads = input<readonly AttachmentUpload[]>([]);
   readonly submitted = output<Composition>();
+  readonly editLast = output<void>();
+  readonly escape = output<void>();
   protected readonly icons = { addCircleOutline, happyOutline, send, closeOutline, imageOutline, documentOutline };
   protected readonly Status = UploadStatus;
   private readonly api = inject(AttachmentsService);
@@ -71,9 +95,17 @@ export class MessageComposer {
   private readonly destroy = inject(DestroyRef);
   private readonly textarea = viewChild(IonTextarea);
   protected readonly uploads = signal<AttachmentUpload[]>([]);
+  protected readonly borrowedUploads = linkedSignal(() => this.editingUploads());
+  protected readonly selectedUploads = computed(() => [...this.borrowedUploads(), ...this.uploads()]);
   protected readonly existing = signal<AttachmentResponse[]>([]);
-  protected readonly error = computed(() => this.uploads().some((u) => u.state().status === UploadStatus.Failed));
+  protected readonly error = computed(() =>
+    this.selectedUploads().some((u) => u.state().status === UploadStatus.Failed),
+  );
   protected readonly suggestions = signal<MemberResponse[]>([]);
+  protected readonly selectedSuggestion = linkedSignal(() => {
+    this.suggestions();
+    return 0;
+  });
   protected readonly tooMany = signal(false);
   protected readonly unsupported = signal(false);
   private mentionVersion = 0;
@@ -88,19 +120,14 @@ export class MessageComposer {
       ]),
     ),
   );
-  protected readonly uploading = computed(() => this.uploads().some((u) => u.state().status !== UploadStatus.Ready));
   protected readonly canSend = computed(
-    () =>
-      !this.disabled() &&
-      (!this.editing() || !this.uploading()) &&
-      !this.voiceActive() &&
-      (!!this.text().trim() || !!this.existing().length || !!this.uploads().length),
+    () => !this.voiceActive() && (!!this.text().trim() || !!this.existing().length || !!this.selectedUploads().length),
   );
   protected readonly visualUploads = computed(() =>
-    this.uploads().filter((u) => u.purpose !== AttachmentUploadPurpose.voice),
+    this.selectedUploads().filter((u) => u.purpose !== AttachmentUploadPurpose.voice),
   );
   protected readonly useVoice = computed(
-    () => !this.editing() && !this.text().trim() && !this.existing().length && !this.uploads().length,
+    () => !this.editing() && !this.text().trim() && !this.existing().length && !this.selectedUploads().length,
   );
   protected async togglePanel(panel: Panel) {
     this.panel.set(this.panel() === panel ? Panel.None : panel);
@@ -121,7 +148,10 @@ export class MessageComposer {
       const message = this.editing();
       untracked(() => {
         this.reset();
-        this.existing.set(message?.attachments ?? []);
+        this.existing.set(
+          message?.attachments.filter((attachment): attachment is AttachmentResponse => attachment.id != null) ?? [],
+        );
+        this.borrowedUploads.set(message ? this.editingUploads() : []);
       });
     });
     this.destroy.onDestroy(() => this.reset());
@@ -132,6 +162,7 @@ export class MessageComposer {
   reset() {
     for (const upload of this.uploads()) upload.dispose();
     this.uploads.set([]);
+    this.borrowedUploads.set([]);
     this.existing.set([]);
     this.voice()?.reset();
     this.panel.set(Panel.None);
@@ -149,6 +180,16 @@ export class MessageComposer {
     for (const file of files) this.addFile(file, purpose);
   }
 
+  dragover(event: DragEvent) {
+    if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) event.preventDefault();
+  }
+  drop(event: DragEvent) {
+    if (!event.dataTransfer?.files.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    for (const file of Array.from(event.dataTransfer?.files ?? []))
+      this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
+  }
   protected paste(event: ClipboardEvent) {
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!files.length) return;
@@ -157,7 +198,7 @@ export class MessageComposer {
       this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
   }
   private addFile(file: File, purpose: AttachmentUploadPurpose) {
-    if (this.uploads().length + this.existing().length >= 20) {
+    if (this.selectedUploads().length + this.existing().length >= 20) {
       this.tooMany.set(true);
       return;
     }
@@ -170,7 +211,8 @@ export class MessageComposer {
     return upload;
   }
   protected remove(upload: AttachmentUpload) {
-    upload.dispose();
+    if (this.uploads().includes(upload)) upload.dispose();
+    this.borrowedUploads.update((items) => items.filter((item) => item !== upload));
     this.uploads.update((items) => items.filter((item) => item !== upload));
   }
   protected removeExisting(id: SnowflakeID) {
@@ -237,33 +279,24 @@ export class MessageComposer {
       ).values(),
     ];
   }
-  complete(ids: readonly SnowflakeID[]) {
-    if (!this.editing()) return;
-    for (const upload of this.uploads()) {
-      const id = upload.state().id;
-      if (id != null && ids.includes(id)) this.remove(upload);
-    }
-    this.existing.update((items) => items.filter((item) => !ids.includes(item.id)));
-  }
   private handoff(messageType: MessageType, uploads: AttachmentUpload[]) {
+    if (!this.canWrite()) return false;
     // Detach before emitting: the receiver may synchronously reset or destroy the composer.
     this.uploads.update((items) => items.filter((item) => !uploads.includes(item)));
+    this.borrowedUploads.update((items) => items.filter((item) => !uploads.includes(item)));
     this.submitted.emit({
       messageType,
-      attachmentIds: [],
+      attachmentIds: this.existing().map((attachment) => attachment.id),
       uploads,
       ...(messageType === MessageType.text ? { mentions: this.mentionSnapshot() } : {}),
     });
+    return true;
   }
   protected submit() {
     if (!this.canSend()) return;
-    const uploads = this.uploads();
+    const uploads = this.selectedUploads();
     if (this.editing()) {
-      this.submitted.emit({
-        messageType: MessageType.text,
-        attachmentIds: [...this.existing().map((a) => a.id), ...uploads.map((u) => u.state().id!)],
-        mentions: this.mentionSnapshot(),
-      });
+      this.handoff(MessageType.text, uploads);
       return;
     }
     const files = uploads.filter((u) => u.purpose === AttachmentUploadPurpose.file);
@@ -273,21 +306,46 @@ export class MessageComposer {
     else this.handoff(MessageType.text, uploads);
   }
   protected sticker(sticker: StickerSummary) {
-    if (this.disabled()) return;
+    if (!this.canWrite()) return;
     this.panel.set(Panel.None);
     this.submitted.emit({ messageType: MessageType.sticker, attachmentIds: [], sticker });
   }
   protected sendVoice(file: File) {
-    if (this.disabled() || this.editing()) return;
+    if (this.editing() || !this.canWrite()) return;
     const upload = this.addFile(file, AttachmentUploadPurpose.voice);
     if (!upload) return;
-    this.handoff(MessageType.audio, [upload]);
-    this.voice()?.reset();
+    if (this.handoff(MessageType.audio, [upload]) !== false) this.voice()?.reset();
   }
   protected discardVoice() {
     for (const upload of this.uploads()) if (upload.purpose === AttachmentUploadPurpose.voice) this.remove(upload);
   }
   protected key(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229) return;
+    const suggestions = this.suggestions();
+    if (suggestions.length && ['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Enter') void this.mention(suggestions[this.selectedSuggestion()]);
+      else if (event.key === 'Escape') {
+        this.mentionVersion++;
+        this.suggestions.set([]);
+      } else
+        this.selectedSuggestion.update(
+          (index) => (index + (event.key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length,
+        );
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.escape.emit();
+      return;
+    }
+    if (event.key === 'ArrowUp' && !this.text() && !this.editing() && !this.selectedUploads().length) {
+      event.preventDefault();
+      this.editLast.emit();
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && window.matchMedia('(hover: hover)').matches) {
       event.preventDefault();
       this.submit();

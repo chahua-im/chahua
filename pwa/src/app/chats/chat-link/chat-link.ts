@@ -1,15 +1,14 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { IonContent, IonSpinner, IonButton, ModalController } from '@ionic/angular';
+import { IonButton, IonContent, IonSpinner, ModalController } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
-import { UsersService } from '../../../generated/endpoints/users/users.service';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
+import { UsersService } from '../../../generated/endpoints/users/users.service';
+import { decodeId, encodeId } from '../../api/snowflake-id';
+import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { StartChat, StartChatKind } from '../start-chat/start-chat';
 import { UserProfile } from '../user-profile/user-profile';
-import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
-import { encodeId, decodeId } from '../../api/snowflake-id';
-import { signal } from '@angular/core';
-import { ContentScrollbars } from '../../content-scrollbars';
 export function decodePermalink(encoded: string) {
   const bytes = Uint8Array.from(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
   if (bytes.length !== 16) throw new Error('无效消息链接');

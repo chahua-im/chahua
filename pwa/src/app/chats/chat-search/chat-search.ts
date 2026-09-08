@@ -1,25 +1,39 @@
-import { dismissChatOverlays } from '../../chats/dismiss-chat-overlays';
-import { Component, effect, inject, input, signal, DestroyRef } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
+  IonButton,
+  IonInfiniteScroll,
+  IonInfiniteScrollContent,
+  IonLabel,
   IonSearchbar,
   IonSegment,
   IonSegmentButton,
-  IonLabel,
-  IonButton,
   IonSpinner,
   ModalController,
+  type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
-import { MessageSearchSort, type SnowflakeID, type MessageResponse } from '../../../generated/models';
+import { MessageSearchSort, type MessageResponse, type SnowflakeID } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { Message } from '../../messages/message/message';
+import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
+import { dismissChatOverlays } from '../dismiss-chat-overlays';
 @Component({
   selector: 'app-chat-search',
   templateUrl: './chat-search.html',
-  imports: [IonSearchbar, IonSegment, IonSegmentButton, IonLabel, IonButton, IonSpinner, Message],
+  imports: [
+    IonInfiniteScroll,
+    IonInfiniteScrollContent,
+    IonSearchbar,
+    IonSegment,
+    IonSegmentButton,
+    IonLabel,
+    IonButton,
+    IonSpinner,
+    Message,
+  ],
 })
 export class ChatSearch {
   readonly chatId = input.required<SnowflakeID>();
@@ -36,6 +50,7 @@ export class ChatSearch {
   private readonly destroy = inject(DestroyRef);
   private version = 0;
   constructor() {
+    fillScrollViewport(this.loading, this.error, this.cursor, () => this.load(true));
     effect(() => {
       this.chatId();
       this.query();
@@ -43,7 +58,15 @@ export class ChatSearch {
       void this.load();
     });
   }
+  protected async more(event: InfiniteScrollCustomEvent) {
+    try {
+      await this.load(true);
+    } finally {
+      await event.target.complete();
+    }
+  }
   protected async load(more = false) {
+    if (more && (this.loading() || this.cursor() == null)) return;
     const version = ++this.version;
     const q = this.query().trim();
     if (!more) {

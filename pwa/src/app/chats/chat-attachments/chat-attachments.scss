@@ -1,0 +1,25 @@
+.media {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  button {
+    position: relative;
+    padding: 0;
+    aspect-ratio: 1;
+    background: var(--ion-color-light);
+    overflow: hidden;
+    cursor: pointer;
+  }
+  img {
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+  }
+}
+.opening {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(var(--ion-background-color-rgb), 0.45);
+}
