@@ -527,6 +527,9 @@ msgstr "Failed to open link"
 msgid "Failed to pin message"
 msgstr "Failed to pin message"
 
+msgid "Failed to react to message"
+msgstr "Failed to react to message"
+
 msgid "Failed to refresh chats"
 msgstr "Failed to refresh chats"
 
@@ -535,6 +538,9 @@ msgstr "Failed to reject request"
 
 msgid "Failed to remove member"
 msgstr "Failed to remove member"
+
+msgid "Failed to remove reaction"
+msgstr "Failed to remove reaction"
 
 msgid "Failed to remove sticker"
 msgstr "Failed to remove sticker"

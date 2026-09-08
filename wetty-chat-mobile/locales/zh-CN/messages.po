@@ -527,6 +527,9 @@ msgstr "打开链接失败"
 msgid "Failed to pin message"
 msgstr "置顶消息失败"
 
+msgid "Failed to react to message"
+msgstr "添加回应失败"
+
 msgid "Failed to refresh chats"
 msgstr "刷新聊天失败"
 
@@ -535,6 +538,9 @@ msgstr "拒绝请求失败"
 
 msgid "Failed to remove member"
 msgstr "移除成员失败"
+
+msgid "Failed to remove reaction"
+msgstr "移除回应失败"
 
 msgid "Failed to remove sticker"
 msgstr "移除贴纸失败"
