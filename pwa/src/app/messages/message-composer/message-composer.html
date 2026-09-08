@@ -100,7 +100,8 @@
         [rows]="1"
         [value]="display().text"
         (ionInput)="changed($event.detail.value || '')"
-        (ionFocus)="focusChanged(true)" (ionBlur)="focusChanged(false)"
+        (ionFocus)="focusChanged(true)"
+        (ionBlur)="focusChanged(false)"
         (paste)="paste($event)"
         (keydown)="key($event)" />
       @if (!editing()) {
