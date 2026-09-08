@@ -164,7 +164,8 @@ fn require_pin_permission(conn: &mut PgConnection, chat_id: i64, uid: i32) -> Re
         .select(groups::kind)
         .first(conn)?;
     if kind == GroupKind::Dm {
-        check_membership(conn, chat_id, uid)
+        check_membership(conn, chat_id, uid)?;
+        crate::services::social::require_chat_writable(conn, chat_id, uid)
     } else {
         require_admin_role(conn, chat_id, uid)
     }
