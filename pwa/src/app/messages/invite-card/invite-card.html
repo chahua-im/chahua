@@ -1,0 +1,32 @@
+<ion-avatar>
+  @if (preview()?.chat?.avatar) {
+    <img [src]="preview()?.chat?.avatar" />
+  }
+</ion-avatar>
+<div>
+  <strong>{{ preview()?.chat?.name || '群组邀请' }}</strong>
+  <small>
+    @if (loading()) {
+      <ion-spinner />
+    } @else if (failed()) {
+      邀请失效或无法加载，点击重试
+    } @else if (preview()?.alreadyMember) {
+      已加入，打开群组
+    } @else {
+      @switch (status(preview()!.invite)) {
+        @case (Status.Expired) {
+          邀请已过期
+        }
+        @case (Status.Revoked) {
+          邀请已撤销
+        }
+        @case (Status.Used) {
+          邀请已使用
+        }
+        @default {
+          查看群资料并加入
+        }
+      }
+    }
+  </small>
+</div>

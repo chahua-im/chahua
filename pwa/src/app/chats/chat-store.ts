@@ -1,10 +1,12 @@
-import { DestroyRef, inject, Service, signal } from '@angular/core';
+import { DestroyRef, effect, inject, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, Subject, timer, type Observable } from 'rxjs';
+import { firstValueFrom, Subject, takeUntil, timer, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
+import { FriendsService } from '../../generated/endpoints/friends/friends.service';
 import { GroupsService } from '../../generated/endpoints/groups/groups.service';
 import { PinsService } from '../../generated/endpoints/pins/pins.service';
 import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
+import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
   type ChatListItem,
@@ -17,11 +19,13 @@ import {
   type ThreadSubscriptionStatusResponse,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
+import { activeQuery } from '../api/query';
 import type { SnowflakeID } from '../api/snowflake-id';
-import { ChatPins } from './chat-pins';
 import { isMessageChange, type MessageChange } from '../messages/message-change';
+import { ChatPins } from './chat-pins';
 
-export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> & Pick<GroupInfoResponse, 'myRole'>;
+export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> &
+  Partial<Pick<GroupInfoResponse, 'myRole' | 'description' | 'visibility' | 'mutedUntil'>>;
 type ChatSummary = Pick<ChatListItem, 'lastMessage' | 'lastMessageAt' | 'archived' | 'mutedUntil'>;
 type ThreadSummary = Omit<ThreadListItem, 'unreadCount' | 'lastReadMessageId' | 'archived'>;
 interface ChatReadOperation {
@@ -38,6 +42,24 @@ export enum ChatChangeKind {
 
 @Service()
 export class ChatStore {
+  private readonly friends = inject(FriendsService);
+  private readonly relationships = new Map<
+    number,
+    ReturnType<typeof activeQuery<FriendRelationshipResponse | undefined>>
+  >();
+  relationship(uid: number) {
+    let query = this.relationships.get(uid);
+    if (!query) {
+      query = activeQuery<FriendRelationshipResponse | undefined>(
+        this.destroyRef,
+        (cancel) => firstValueFrom(this.friends.getFriendRelationship(uid).pipe(takeUntil(cancel))),
+        undefined,
+      );
+      this.relationships.set(uid, query);
+    }
+    return query;
+  }
+
   private readonly api = inject(ChatsService);
   private readonly groupsApi = inject(GroupsService);
   private readonly threadsApi = inject(ThreadsService);
@@ -66,11 +88,47 @@ export class ChatStore {
   private readonly subscriptionRequests = new Map<SnowflakeID, Promise<void>>();
   private readonly readRequests = new Map<SnowflakeID, { messageId: SnowflakeID; promise: Promise<void> }>();
   private readonly pinScopes = new Map<SnowflakeID, ChatPins>();
-  private readonly changes = new Subject<{ kind: ChatChangeKind; chatId: SnowflakeID; threadId?: SnowflakeID }>();
+  private readonly changes = new Subject<{
+    kind: ChatChangeKind;
+    chatId: SnowflakeID;
+    threadId?: SnowflakeID;
+    readThrough?: SnowflakeID;
+  }>();
   readonly changes$ = this.changes.asObservable();
 
+  private readonly muteTime = signal(Date.now());
+
+  mutedUntil(chatId: SnowflakeID) {
+    return (this.chatState(chatId) ?? this.get(chatId))?.mutedUntil;
+  }
+
+  isMuted(chatId: SnowflakeID) {
+    this.muteTime();
+    return Date.parse(this.mutedUntil(chatId) ?? '') > Date.now();
+  }
+
   constructor() {
+    effect((onCleanup) => {
+      this.muteTime();
+      const now = Date.now();
+      const ids = new Set([...this.entries().keys(), ...this.summaries().keys()]);
+      const expirations = [...ids]
+        .map((id) => ({ id, until: Date.parse(this.mutedUntil(id) ?? '') }))
+        .filter(({ until }) => until > now && until - now <= 7 * 86400_000);
+      if (!expirations.length) return;
+      const timer = setTimeout(
+        () => {
+          const current = Date.now();
+          this.muteTime.set(current);
+          for (const { id, until } of expirations) if (until <= current) this.changed(ChatChangeKind.Read, id);
+        },
+        Math.max(0, Math.min(...expirations.map(({ until }) => until)) - Date.now()),
+      );
+      onCleanup(() => clearTimeout(timer));
+    });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
+      this.muteTime.set(Date.now());
+      for (const query of this.relationships.values()) void query.refresh();
       this.invalidate();
       this.invalidateReads();
       this.invalidateThreadReads();
@@ -83,6 +141,12 @@ export class ChatStore {
         for (const pins of this.pinScopes.values()) pins.receiveChange(event);
       }
       switch (event.type) {
+        case ServerWsMessageType.friendshipRemoved:
+          void this.relationships.get(event.payload.actorUid)?.refresh();
+          break;
+        case ServerWsMessageType.friendRequestResolved:
+          void this.relationships.get(event.payload.byUid)?.refresh();
+          break;
         case ServerWsMessageType.message:
           if (event.payload.replyRootId) this.invalidateSubscriptions(event.payload.replyRootId);
           else this.receiveMessage(event.payload);
@@ -153,7 +217,10 @@ export class ChatStore {
         const chat = await firstValueFrom(this.groupsApi.getGroup(id).pipe(takeUntilDestroyed(this.destroyRef)));
         if (revision !== this.revision) continue;
         if (this.entries().get(id) === cached) this.remember([chat]);
-        this.entries.update((entries) => new Map(entries).set(id, { ...entries.get(id)!, myRole: chat.myRole }));
+        const { myRole, description, visibility, mutedUntil } = chat;
+        this.entries.update((entries) =>
+          new Map(entries).set(id, { ...entries.get(id)!, myRole, description, visibility, mutedUntil }),
+        );
         this.detailsFresh.add(id);
       }
     })().finally(() => this.requests.delete(id));
@@ -303,8 +370,8 @@ export class ChatStore {
     );
   }
 
-  private changed(kind: ChatChangeKind, chatId: SnowflakeID, threadId?: SnowflakeID) {
-    this.changes.next({ kind, chatId, threadId });
+  private changed(kind: ChatChangeKind, chatId: SnowflakeID, threadId?: SnowflakeID, readThrough?: SnowflakeID) {
+    this.changes.next({ kind, chatId, threadId, readThrough });
   }
   getReadState(chatId: SnowflakeID): Promise<MarkChatReadStateResponse> {
     return this.readOperation(chatId).refresh ?? this.refreshUnread(chatId);
@@ -341,8 +408,7 @@ export class ChatStore {
       if (messageId > current.messageId) current.messageId = messageId;
       return current.promise;
     }
-    const lastRead =
-      this.readStates().get(chatId)?.state.lastReadMessageId ?? this.cachedReadState(chatId)?.lastReadMessageId;
+    const lastRead = this.readStates().get(chatId)?.state.lastReadMessageId;
     if (lastRead && messageId <= lastRead) {
       this.releaseReadOperation(chatId, operation);
       return Promise.resolve();
@@ -360,7 +426,7 @@ export class ChatStore {
           this.api.markAsRead(chatId, { messageId: target }).pipe(takeUntilDestroyed(this.destroyRef)),
         );
         if (this.destroyRef.destroyed) return;
-        this.changed(ChatChangeKind.Read, chatId);
+        this.changed(ChatChangeKind.Read, chatId, undefined, state.lastReadMessageId ?? target);
         const lastRead = this.readStates().get(chatId)?.state.lastReadMessageId;
         if (!lastRead || (state.lastReadMessageId && state.lastReadMessageId >= lastRead)) {
           this.applyReadState(chatId, state);
@@ -425,9 +491,13 @@ export class ChatStore {
     this.applyChatState(chatId, { archived, mutedUntil: archived ? '9999-12-31T23:59:59Z' : undefined });
     this.changed(ChatChangeKind.Membership, chatId);
   }
-  async setMuted(chatId: SnowflakeID, muted: boolean) {
+  async setMuted(chatId: SnowflakeID, muted: boolean, durationSeconds?: number) {
     const state = muted
-      ? await firstValueFrom(this.groupsApi.putMute(chatId, {}).pipe(takeUntilDestroyed(this.destroyRef)))
+      ? await firstValueFrom(
+          this.groupsApi
+            .putMute(chatId, durationSeconds ? { durationSeconds } : {})
+            .pipe(takeUntilDestroyed(this.destroyRef)),
+        )
       : await firstValueFrom(this.groupsApi.deleteMute(chatId).pipe(takeUntilDestroyed(this.destroyRef))).then(() => ({
           mutedUntil: undefined,
           archived: false,
@@ -559,6 +629,12 @@ export class ChatStore {
     this.changed(ChatChangeKind.Membership, chatId, rootId);
     await updated;
   }
+  async unsubscribeThread(chatId: SnowflakeID, rootId: SnowflakeID) {
+    await this.response(this.threadsApi.unsubscribeThread(chatId, rootId));
+    if (this.destroyRef.destroyed) return;
+    await this.updateSubscription(chatId, rootId, { subscribed: false });
+    this.changed(ChatChangeKind.Membership, chatId, rootId);
+  }
   markThreadRead(chatId: SnowflakeID, rootId: SnowflakeID, messageId: SnowflakeID): Promise<void> {
     if (this.destroyRef.destroyed) return Promise.resolve();
     const current = this.readRequests.get(rootId);
@@ -584,7 +660,7 @@ export class ChatStore {
               : await this.response(this.threadsApi.getThreadReadStateInChat(chatId, rootId));
         }
         if (this.destroyRef.destroyed) return;
-        this.changed(ChatChangeKind.Read, chatId, rootId);
+        this.changed(ChatChangeKind.Read, chatId, rootId, state.lastReadMessageId ?? target);
         this.threadReads.update((states) =>
           new Map(states).set(rootId, { state, version: ++this.version, dirty: false }),
         );

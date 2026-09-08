@@ -1,8 +1,8 @@
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Component, ChangeDetectorRef, getDebugNode, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, getDebugNode, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter, Router } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { IonNav, ModalController, provideIonicAngular } from '@ionic/angular';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -11,13 +11,15 @@ import { jsonInterceptor } from '../../api/json.interceptor';
 import { testUser } from '../../api/testing';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
-import { Preferences } from '../preferences';
 import { SessionStore } from '../../session/session-store';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
+import { Preferences } from '../preferences';
 import { Settings, SettingsDismissRole } from './settings';
 
 @Component({ imports: [IonNav], template: '<ion-nav [root]="root"></ion-nav>' })
-class SettingsHost { readonly root = Settings; }
+class SettingsHost {
+  readonly root = Settings;
+}
 
 describe('Settings', () => {
   let fixture: ComponentFixture<SettingsHost>;
@@ -28,6 +30,7 @@ describe('Settings', () => {
   let notifications: {
     supported: boolean;
     subscribed: ReturnType<typeof signal<boolean>>;
+    enabled: ReturnType<typeof signal<boolean>>;
     busy: ReturnType<typeof signal<boolean>>;
     error: ReturnType<typeof signal<PushNotificationError | undefined>>;
     refresh: ReturnType<typeof vi.fn>;
@@ -53,6 +56,7 @@ describe('Settings', () => {
     notifications = {
       supported: true,
       subscribed: signal(false),
+      enabled: signal(false),
       busy: signal(false),
       error: signal<PushNotificationError | undefined>(undefined),
       refresh: vi.fn().mockResolvedValue(undefined),

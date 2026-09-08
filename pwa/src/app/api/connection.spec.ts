@@ -47,7 +47,7 @@ describe('Connection', () => {
     TestBed.configureTestingModule({
       providers: [
         provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { token: signal('test-jwt'), user } },
+        { provide: SessionStore, useValue: { token: signal('test-jwt'), user, updateProfile: vi.fn() } },
       ],
     });
     const realtime = TestBed.inject(Connection);
@@ -60,9 +60,11 @@ describe('Connection', () => {
     TestBed.tick();
     const socket = TestSocket.instances[0];
     expect(socket.url.pathname).toBe('/_api/ws');
+    expect(realtime.connected()).toBe(false);
     socket.open();
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'auth', ticket: 'test-jwt' }));
     socket.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
+    expect(realtime.connected()).toBe(true);
     realtime.accept(testMessage);
     socket.receive({ type: 'message', payload: wireMessage });
     socket.receive({
@@ -92,6 +94,11 @@ describe('Connection', () => {
       payload: { chatId: testChat.id, archived: false, mutedUntil: null },
     });
     expect(resync).toHaveBeenCalledOnce();
+    expect(TestBed.inject(SessionStore).updateProfile).toHaveBeenCalledWith(testMessage);
+    user.set({ ...testUser, username: '新名字' });
+    TestBed.tick();
+    expect(TestSocket.instances).toHaveLength(1);
+    expect(socket.close).not.toHaveBeenCalled();
     vi.advanceTimersByTime(10000);
     expect(socket.send.mock.calls.at(-1)?.[0]).toContain('"type":"ping"');
     socket.close();
@@ -118,7 +125,7 @@ describe('Connection', () => {
     TestBed.configureTestingModule({
       providers: [
         provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { token: signal('test-jwt'), user } },
+        { provide: SessionStore, useValue: { token: signal('test-jwt'), user, updateProfile: vi.fn() } },
       ],
     });
     const resync = vi.fn();

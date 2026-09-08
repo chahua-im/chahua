@@ -19,11 +19,11 @@ import {
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
-import { chevronBackOutline, personAddOutline, chatbubbleOutline, helpCircleOutline, banOutline } from 'ionicons/icons';
+import { banOutline, chatbubbleOutline, chevronBackOutline, helpCircleOutline, personAddOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
 import { FriendAddVerificationMode } from '../../../generated/models';
-import { ContentScrollbars } from '../../content-scrollbars';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 
 @Component({
   selector: 'app-friend-verification-settings',

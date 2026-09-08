@@ -18,6 +18,9 @@
 } @else if (query().trim() && !messages().length) {
   <p class="ion-padding ion-text-center">没有找到消息</p>
 }
-@if (cursor() != null) {
-  <ion-button fill="clear" [disabled]="loading()" (click)="load(true)">加载更多</ion-button>
-}
+<ion-infinite-scroll
+  threshold="100px"
+  [disabled]="cursor() == null || loading() || error()"
+  (ionInfinite)="more($event)">
+  <ion-infinite-scroll-content />
+</ion-infinite-scroll>

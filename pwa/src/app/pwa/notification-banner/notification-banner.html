@@ -1,0 +1,20 @@
+@if (enabled() && notifications.banner(); as message) {
+  <div class="notification">
+    <button type="button" class="message" (click)="notifications.open(message.chatId, message.id, message.replyRootId)">
+      <app-chat-avatar [entry]="entry()" [size]="44" />
+      <span class="text">
+        <span class="heading">
+          <strong>{{ entry().title }}</strong>
+          <small>现在</small>
+        </span>
+        <span>
+          @if (entry().sender; as sender) {
+            {{ sender }}:
+          }
+          <app-message-preview [message]="message" />
+        </span>
+      </span>
+    </button>
+    <button type="button" class="close" (click)="notifications.dismiss()"><ion-icon [icon]="closeIcon" /></button>
+  </div>
+}

@@ -1,9 +1,17 @@
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { SwPush } from '@angular/service-worker';
-import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
+import { ModalController } from '@ionic/angular';
+import { BehaviorSubject, NEVER, of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { PushService } from '../../generated/endpoints/push/push.service';
 import { ApiPushProvider } from '../../generated/models';
+import { Connection } from '../api/connection';
+import { testUser } from '../api/testing';
+import { ChatListStore } from '../chats/chat-list-store';
+import { ChatStore } from '../chats/chat-store';
+import { SessionStore } from '../session/session-store';
 import { PushNotificationError, PushNotifications } from './push-notifications';
 
 describe('PushNotifications', () => {
@@ -31,7 +39,20 @@ describe('PushNotifications', () => {
     getSubscriptionStatus: ReturnType<typeof vi.fn>;
   };
 
+  const dependencies = () => [
+    provideRouter([]),
+    { provide: Connection, useValue: { events$: new Subject(), resync$: new Subject() } },
+    { provide: ChatStore, useValue: { changes$: new Subject() } },
+    { provide: ChatListStore, useValue: {} },
+    { provide: SessionStore, useValue: { user: signal(testUser) } },
+    { provide: ModalController, useValue: { getTop: async () => undefined } },
+  ];
   beforeEach(() => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    });
     notification = { permission: 'granted', requestPermission: vi.fn().mockResolvedValue('granted') };
     vi.stubGlobal('Notification', notification);
     vi.stubGlobal('PushManager', class {});
@@ -55,10 +76,7 @@ describe('PushNotifications', () => {
       getSubscriptionStatus: vi.fn().mockReturnValue(of({ hasActiveSubscription: true, hasMatchingEndpoint: true })),
     };
     TestBed.configureTestingModule({
-      providers: [
-        { provide: SwPush, useValue: browser },
-        { provide: PushService, useValue: api },
-      ],
+      providers: [...dependencies(), { provide: SwPush, useValue: browser }, { provide: PushService, useValue: api }],
     });
   });
 
@@ -111,10 +129,7 @@ describe('PushNotifications', () => {
     vi.stubGlobal('navigator', { serviceWorker: {} });
     browser.isEnabled = false;
     TestBed.configureTestingModule({
-      providers: [
-        { provide: SwPush, useValue: browser },
-        { provide: PushService, useValue: api },
-      ],
+      providers: [...dependencies(), { provide: SwPush, useValue: browser }, { provide: PushService, useValue: api }],
     });
     service = TestBed.inject(PushNotifications);
     await service.refresh();
@@ -128,6 +143,7 @@ describe('PushNotifications', () => {
     expect(browser.unsubscribe).toHaveBeenCalledOnce();
     expect(service.error()).toBe(PushNotificationError.BackendSubscribeFailed);
     expect(service.subscribed()).toBe(false);
+    expect(service.enabled()).toBe(true);
   });
 
   it('preserves an existing browser endpoint when backend registration fails', async () => {

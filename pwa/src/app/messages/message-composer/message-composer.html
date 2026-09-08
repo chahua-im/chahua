@@ -1,7 +1,7 @@
 @if (suggestions().length) {
   <ion-list class="mentions">
-    @for (member of suggestions(); track member.uid) {
-      <ion-item [button]="true" (click)="mention(member)">
+    @for (member of suggestions(); track member.uid; let i = $index) {
+      <ion-item [button]="true" [class.selected]="i === selectedSuggestion()" (click)="mention(member)">
         <ion-label>{{ member.username || member.uid }}</ion-label>
       </ion-item>
     }
@@ -12,7 +12,7 @@
     @for (item of existing(); track item.id) {
       <div class="upload">
         <span>{{ item.fileName }}</span>
-        <ion-button fill="clear" [disabled]="disabled()" (click)="removeExisting(item.id)">
+        <ion-button fill="clear" (click)="removeExisting(item.id)">
           <ion-icon [icon]="icons.closeOutline" />
         </ion-button>
       </div>
@@ -23,7 +23,7 @@
         @if (upload.file.type.startsWith('image/')) {
           <img [src]="upload.url" />
         } @else if (upload.file.type.startsWith('audio/')) {
-          <audio [src]="upload.url" controls></audio>
+          <app-voice-player [src]="upload.url" />
         }
         <span>{{ upload.file.name }}</span>
         @if (state.status === Status.Uploading || state.status === Status.Processing) {
@@ -32,7 +32,7 @@
         } @else if (state.status === Status.Failed) {
           <ion-button fill="clear" (click)="upload.retry()">重试</ion-button>
         }
-        <ion-button fill="clear" [disabled]="disabled()" (click)="remove(upload)">
+        <ion-button fill="clear" (click)="remove(upload)">
           <ion-icon [icon]="icons.closeOutline" />
         </ion-button>
       </div>
@@ -60,7 +60,7 @@
   <button
     type="button"
     class="attach-button"
-    [disabled]="disabled() || voiceActive()"
+    [disabled]="voiceActive()"
     [class.selected]="panel() === Panel.Attachments"
     (click)="togglePanel(Panel.Attachments)">
     <ion-icon [icon]="icons.addCircleOutline" />
@@ -73,7 +73,6 @@
         [autoGrow]="true"
         [rows]="1"
         [value]="display().text"
-        [disabled]="disabled()"
         (ionInput)="changed($event.detail.value || '')"
         (ionFocus)="panel.set(Panel.None)"
         (paste)="paste($event)"
@@ -82,7 +81,6 @@
         <button
           type="button"
           class="sticker-button"
-          [disabled]="disabled()"
           [class.selected]="panel() === Panel.Stickers"
           (click)="togglePanel(Panel.Stickers)">
           <ion-icon [icon]="icons.happyOutline" />
@@ -93,7 +91,6 @@
   @if (useVoice()) {
     <app-voice-recorder
       [(active)]="voiceActive"
-      [disabled]="disabled()"
       (activeChange)="$event && panel.set(Panel.None)"
       (submitted)="sendVoice($event)"
       (discarded)="discardVoice()" />
@@ -105,11 +102,7 @@
         [disabled]="!canSend()"
         (mousedown)="$event.preventDefault()"
         (click)="submit()">
-        @if (disabled()) {
-          <ion-spinner />
-        } @else {
-          <ion-icon [icon]="icons.send" />
-        }
+        <ion-icon [icon]="icons.send" />
       </button>
     </div>
   }
@@ -128,6 +121,19 @@
     </div>
   }
   @case (Panel.Stickers) {
-    <app-sticker-picker [embedded]="true" [disabled]="disabled()" (selected)="sticker($event)" />
+    <app-sticker-picker [embedded]="true" (selected)="sticker($event)" />
   }
 }
+
+<ion-alert
+  [isOpen]="blocked()"
+  header="无法发送消息"
+  [message]="
+    relationship()?.blocking
+      ? '你已将对方拉黑，解除拉黑后可以继续聊天。'
+      : relationship()?.blockedBy
+        ? '对方暂时无法接收你的消息。'
+        : '你们已不是好友，重新添加好友后可以继续聊天。'
+  "
+  [buttons]="['知道了']"
+  (didDismiss)="blocked.set(false)" />

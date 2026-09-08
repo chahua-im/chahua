@@ -7,6 +7,7 @@
 }
 
 .chat-row {
+  transition: transform 160ms ease-out;
   display: flex;
   align-items: flex-end;
   gap: 8px;
@@ -26,7 +27,6 @@
   > .message-stack {
     width: 100%;
     max-width: none;
-    box-sizing: border-box;
   }
 }
 
@@ -200,6 +200,8 @@ app-message-reactions {
 
   .bubble {
     --thread-color: var(--ion-color-primary-contrast);
+    --voice-color: var(--ion-color-primary-contrast);
+    --voice-play-color: var(--ion-color-primary-shade);
     background: var(--ion-color-primary-shade);
     color: var(--ion-color-primary-contrast);
     border-radius: 18px 18px 4px 18px;
@@ -271,9 +273,6 @@ app-message-reactions {
   }
 }
 
-.chat-row {
-  transition: transform 160ms ease-out;
-}
 .chat-row.dragging {
   transition: none;
 }
@@ -307,17 +306,11 @@ app-message-reactions {
 
 .invite-card {
   display: block;
-  width: 220px;
   max-width: 100%;
-  height: 72px;
-  padding: 8px;
+  padding: 0;
   text-align: start;
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
-}
-.invite-card small {
-  font-size: 12px;
-  opacity: 0.7;
 }

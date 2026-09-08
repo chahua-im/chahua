@@ -1,5 +1,8 @@
 <ion-header>
   <ion-toolbar>
+    @if (!realtime.connected()) {
+      <ion-spinner slot="end" />
+    }
     @if (searching()) {
       <ion-searchbar
         placeholder="搜索群组和用户"
@@ -60,6 +63,7 @@
             subtitle: '查看已归档的对话',
             icon: archiveIcon,
             unreadCount: archivedUnreadCount(),
+            unreadColor: 'medium',
           }"></app-chat-list-item>
         @if (showHistoryEntry()) {
           <app-chat-list-item
@@ -269,3 +273,5 @@
     </ion-list>
   </ng-template>
 </ion-popover>
+
+<app-chat-mute />

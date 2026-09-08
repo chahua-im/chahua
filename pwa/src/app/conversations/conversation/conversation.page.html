@@ -1,6 +1,9 @@
 <div class="conversation-main">
   <ion-header>
     <ion-toolbar>
+      @if (!realtime.connected()) {
+        <ion-spinner slot="end" />
+      }
       <ion-buttons slot="start" class="ion-hide-md-up">
         <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
       </ion-buttons>
@@ -95,6 +98,9 @@
     (touchstart)="scrolling.touchStart()"
     (touchend)="scrolling.touchEnd()"
     (touchcancel)="scrolling.touchEnd()">
+    @if (scrolling.moving() && visibleDate(); as date) {
+      <span slot="fixed" class="floating-date">{{ date | date: 'yyyy年M月d日' }}</span>
+    }
     <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
     <div>
       @if (threadError()) {
@@ -109,61 +115,63 @@
           <ion-button fill="clear" (click)="loadSubscription()">重新加载话题状态</ion-button>
         </div>
       }
-      @if (conversation.page(); as page) {
-        @if (page.olderCursor) {
-          <div class="ion-text-center">
-            <button
-              type="button"
-              class="pagination-control"
-              [disabled]="!conversation.canLoad(PageDirection.Older)"
-              (click)="loadPage(PageDirection.Older)">
-              <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Older"></ion-spinner>
-            </button>
-          </div>
-        }
-        <div class="message-list">
-          @for (row of rows(); track row.key) {
-            @if (row.dateBreak) {
-              <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
-            }
-            @if (firstUnreadId() && row.message.id === firstUnreadId()) {
-              <p #unreadSeparator class="unread-separator">以下是未读消息</p>
-            }
-            <app-message
-              [showAllAvatars]="preferences.showAllAvatars()"
-              [message]="row.message"
-              [interactive]="!!row.confirmed"
-              [delivery]="row.outgoing?.delivery()"
-              [uploads]="row.outgoing?.uploads ?? []"
-              (retry)="row.outgoing && outbox.retry(row.outgoing)"
-              [own]="row.message.sender.uid === session.user()?.uid"
-              [first]="row.first"
-              [last]="row.last"
-              [canReply]="!sending() && !editing()"
-              [jumpingTo]="jumpingTo()"
-              [jumpDisabled]="!!pendingNavigation()"
-              [canOpenThread]="!threadId()"
-              (reply)="row.confirmed && startReply(row.confirmed)"
-              (menu)="menu()?.open($event)"
-              (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
-              (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
-              (openThread)="openThread($event)"></app-message>
-          } @empty {
+      @if (conversation.page()?.olderCursor) {
+        <div class="ion-text-center">
+          <button
+            type="button"
+            class="pagination-control"
+            [disabled]="!conversation.canLoad(PageDirection.Older)"
+            (click)="loadPage(PageDirection.Older)">
+            <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Older"></ion-spinner>
+          </button>
+        </div>
+      }
+      <div class="message-list">
+        @for (row of rows(); track row.key) {
+          @if (row.dateBreak) {
+            <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
+          }
+          @if (firstUnreadId() && row.message.id === firstUnreadId()) {
+            <p #unreadSeparator class="unread-separator">以下是未读消息</p>
+          }
+          <app-message
+            [showAllAvatars]="preferences.showAllAvatars()"
+            [message]="row.message"
+            [interactive]="!!row.confirmed && !row.outgoing"
+            [outgoingId]="row.outgoing?.clientGeneratedId"
+            [delivery]="row.outgoing?.delivery()"
+            [uploads]="row.outgoing?.uploads ?? []"
+            (retry)="row.outgoing && outbox.retry(row.outgoing)"
+            [own]="row.message.sender.uid === session.user()?.uid"
+            [first]="row.first"
+            [last]="row.last"
+            [canReply]="!editing()"
+            [jumpingTo]="jumpingTo()"
+            [jumpDisabled]="!!pendingNavigation()"
+            [canOpenThread]="!threadId()"
+            (reply)="row.confirmed && startReply(row.confirmed)"
+            (menu)="menu()?.open($event)"
+            (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
+            (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
+            (openThread)="openThread($event)"></app-message>
+        } @empty {
+          @if (conversation.page()) {
             <p class="ion-text-center">暂无消息</p>
           }
-        </div>
-        @if (page.newerCursor) {
-          <div class="ion-text-center">
-            <button
-              type="button"
-              class="pagination-control"
-              [disabled]="!conversation.canLoad(PageDirection.Newer)"
-              (click)="loadPage(PageDirection.Newer)">
-              <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Newer"></ion-spinner>
-            </button>
-          </div>
         }
-      } @else if (conversation.loading()) {
+      </div>
+      @if (conversation.page()?.newerCursor) {
+        <div class="ion-text-center">
+          <button
+            type="button"
+            class="pagination-control"
+            [disabled]="!conversation.canLoad(PageDirection.Newer)"
+            (click)="loadPage(PageDirection.Newer)">
+            <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Newer"></ion-spinner>
+          </button>
+        </div>
+      }
+      @if (!conversation.page() && conversation.loading()) {
         <div class="loading-status">
           <ion-spinner></ion-spinner>
         </div>
@@ -207,23 +215,23 @@
     }
   </ion-content>
   <ion-footer>
-    @if (sendError()) {
-      <p class="ion-padding-horizontal">编辑失败，请重试。</p>
-    }
     <app-message-composer
+      [relationship]="relationship()"
       [chatId]="id()"
       [text]="editing() ? editText() : draft()"
       (textChange)="updateDraft($event)"
       [editing]="editing()"
-      [disabled]="sending() || conversation.loading() || !conversation.page()"
-      (submitted)="sendMessage($event)">
+      [editingUploads]="editingUploads()"
+      (submitted)="sendMessage($event)"
+      (editLast)="editLastMessage()"
+      (escape)="escapeComposer()">
       @if (editing(); as edit) {
         <div class="reply-context">
           <div class="reply-description">
             <strong>编辑消息</strong>
             <span><app-message-preview [message]="edit" /></span>
           </div>
-          <button type="button" class="reply-close" [disabled]="sending()" (click)="cancelEdit()">
+          <button type="button" class="reply-close" (click)="cancelEdit()">
             <ion-icon [icon]="closeIcon" />
           </button>
         </div>
@@ -234,17 +242,17 @@
             class="reply-description"
             [disabled]="!!pendingNavigation()"
             (click)="goTo({ type: ConversationTargetKind.Message, messageId: message.id })">
-            <strong>{{ message.sender.name ?? message.sender.uid }}</strong>
+            <strong>正在回复 {{ message.sender.name ?? message.sender.uid }}</strong>
             <span><app-message-preview [message]="message" /></span>
           </button>
-          <button type="button" class="reply-close" [disabled]="sending()" (click)="cancelReply()">
+          <button type="button" class="reply-close" (click)="cancelReply()">
             <ion-icon [icon]="closeIcon" />
           </button>
         </div>
       } @else if (savedReplyId()) {
         <div class="reply-context">
           <div class="reply-description"><strong>回复消息</strong></div>
-          <button type="button" class="reply-close" [disabled]="sending()" (click)="cancelReply()">
+          <button type="button" class="reply-close" (click)="cancelReply()">
             <ion-icon [icon]="closeIcon" />
           </button>
         </div>
@@ -276,8 +284,9 @@
   [messages]="conversation.items()"
   [chatId]="id()"
   [threadId]="threadId()"
-  [canReply]="!sending() && !editing()"
+  [canReply]="!editing()"
   [showAllAvatars]="preferences.showAllAvatars()"
   (reply)="startReply($event)"
   (edit)="startEdit($event)"
+  (editQueued)="startEdit($event)"
   (openThread)="openThread($event)"></app-message-menu>

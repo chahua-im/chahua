@@ -1,11 +1,10 @@
-import { File as NodeFile, Blob as NodeBlob } from 'node:buffer';
-import { beforeEach } from 'vitest';
+import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isAnimatedImageFile } from './animated-image';
 beforeEach(() => {
   vi.stubGlobal('File', NodeFile);
   vi.stubGlobal('Blob', NodeBlob);
 });
-import { describe, expect, it, afterEach, vi } from 'vitest';
-import { isAnimatedImageFile } from './animated-image';
 
 const ascii = (value: string) => Array.from(value, (character) => character.charCodeAt(0));
 

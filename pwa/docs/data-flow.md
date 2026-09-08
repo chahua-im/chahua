@@ -1,222 +1,167 @@
 # 数据流
 
-客户端通过生成的 HTTP 客户端和一个 WebSocket 连接访问后端。列表和跨页面资料存于应用共享服务；连续消息区间属于页面；菜单、滚动、表单和操作反馈属于组件。
+HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料与列表查询属于应用；连续消息区间属于页面；滚动、表单、搜索结果与操作反馈属于组件。
 
-## 状态所有权
+## 所有权与存储
 
-| 所有者                         | 作用域与持有数据                                                                     | 消费者                                            |
-| ------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| SessionStore                   | 应用：token、当前用户                                                                | App、认证拦截器、Connection、用户相关组件         |
-| Connection                     | 应用：唯一 WebSocket、心跳、重连和最近 256 个新消息 ID                               | ChatStore、ChatListStore、ConversationStore、页面 |
-| ChatStore                      | 应用：聊天资料、最后消息摘要、归档/静音、已读、话题摘要与订阅、按范围缓存的 ChatPins | 列表、对话页面、置顶页面、消息菜单                |
-| ChatListStore                  | 应用：各查询的成员 ID、游标、加载/失效状态、消费者；好友请求与归档计数查询           | ChatList                                          |
-| DraftStore                     | 应用与 localStorage：按账号及 chatId/threadId 保存文字、回复目标 ID、保存时间        | 列表预览和对话输入                                |
-| Preferences                    | 应用与 localStorage：消息页话题开关、全部头像开关                                    | ChatList、页面、设置                              |
-| ConversationStore              | 每个 ConversationPage：连续消息区间、双向游标、加载状态、待应用补丁与请求上下文      | 所在页面                                          |
-| MessageOutbox                  | 应用内存：已提交消息、clientGeneratedId、上传任务、确认与失败状态；按会话顺序提交    | ConversationPage → Message / MessageAttachments   |
-| MessageActions                 | 每个 MessageMenu：收藏、撤回、表态的请求操作；不持有消息缓存                         | MessageMenu                                       |
-| ConversationNavigation         | 应用：即时导航指令流，不缓存页面数据                                                 | ChatList 发出，当前 ConversationPage 接收         |
-| AppUpdates / PushNotifications | 应用：更新与通知订阅状态                                                             | 设置页面                                          |
+| 所有者                 | 保存的状态                                                              | 生命周期                             |
+| ---------------------- | ----------------------------------------------------------------------- | ------------------------------------ |
+| SessionStore           | token、当前用户及用户组                                                 | 应用；token 保存到 localStorage      |
+| Connection             | 唯一 WebSocket、认证/心跳/重连、最近 256 个新消息 ID                    | 应用                                 |
+| ChatStore              | 聊天资料、摘要、归档/静音、已读、话题摘要与订阅、好友关系查询、ChatPins | 应用缓存，不保存全部历史消息         |
+| ChatListStore          | 查询成员 ID、游标、覆盖范围、消费者、好友请求与共享未读响应             | 应用；无消费者时取消读取             |
+| ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁                        | 每个 ConversationPage；页面离开释放  |
+| MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                             | 应用内存；跨页面，整页刷新不恢复     |
+| DraftStore             | 文字、回复目标 ID、保存时间                                             | 按账号和聊天/话题保存到 localStorage |
+| Preferences            | 话题/头像显示偏好、最近表情                                             | localStorage                         |
+| MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                     |
+| ConversationNavigation | 即时导航指令，不保存消息或位置                                          | 应用；当前页面消费                   |
+| PushNotifications      | 本机通知意图、注册状态、当前横幅、去重记录                              | 应用；本机意图保存到 localStorage    |
+| AppUpdates             | 检查更新和可更新状态                                                    | 应用                                 |
 
-组件持有的详细字段和父子传递关系见 [Components](components.md)。
+ChatPins 是 ChatStore 内部的普通对象，不是额外服务。UserProfile、ChatDetails 和 ConversationPage 共享按 UID 的好友关系查询。收藏由 SavedMessagesPage 持有快照，不进入活消息缓存。组件字段见[组件](components.md)。
 
 ```mermaid
 flowchart TD
-  HTTP[Orval HTTP 客户端] --> LISTS[ChatListStore：查询成员与分页]
-  HTTP --> CHAT[ChatStore：共享聊天数据]
-  HTTP --> STORE[ConversationStore：页面消息区间]
-  HTTP --> SAVED[SavedMessagesPage：收藏快照]
+  API[生成 HTTP 客户端] --> LISTS[ChatListStore：查询成员与分页]
+  API --> CHAT[ChatStore：共享资料、关系、已读、置顶]
+  API --> RANGE[ConversationStore：连续消息]
   WS[WebSocket] --> CONNECTION[Connection]
-  CONNECTION -->|摘要、已读失效、订阅、置顶| CHAT
-  CONNECTION -->|查询失效| LISTS
-  CONNECTION -->|编辑、撤回、表态、话题统计| STORE
-  CONNECTION -->|新消息与重连| PAGE[ConversationPage]
-  LISTS -->|列表响应入库| CHAT
-  CHAT -->|按成员 ID 组成列表行| LISTS
-  LISTS -->|列表、计数| LIST[ChatList]
-  CHAT -->|资料、读位置、订阅、置顶| PAGE
-  CHAT -->|置顶消息| PINS[PinnedMessagesPage]
-  CHAT -->|本地操作成功：刷新查询与计数| LISTS
-  PAGE -->|提交文本、回复与上传任务| OUTBOX[MessageOutbox：待发队列]
-  OUTBOX -->|本地消息与发送状态| PAGE
-  OUTBOX -->|上传完成后创建消息| HTTP
-  CONNECTION -->|消息确认| OUTBOX
-  OUTBOX -->|HTTP确认的已发布消息| CONNECTION
-  PAGE -->|打开、分页、新消息| STORE
-  STORE -->|消息数组| PAGE
-  PAGE -->|消息数组与选择| MENU[MessageMenu]
-  PINS -->|消息数组与选择| MENU
-  MENU -->|权限、置顶操作| CHAT
-  MENU -->|回复、打开话题| PAGE
-  MENU -->|收藏、撤回、表态| ACTIONS[MessageActions]
-  ACTIONS -->|写请求| HTTP
-  ACTIONS -->|消息变化| CONNECTION
-  CHAT -->|置顶写结果| CONNECTION
-  DRAFT[DraftStore] -->|预览与排序时间| LIST
-  PAGE <-->|编辑与恢复| DRAFT
-  PAGE --> VIEW[Message 及展示子组件]
-  PINS --> VIEW
-  SAVED --> VIEW
+  CONNECTION --> CHAT
+  CONNECTION --> LISTS
+  CONNECTION --> RANGE
+  CONNECTION --> PAGE[ConversationPage]
+  LISTS -->|接收列表数据| CHAT
+  CHAT -->|根据成员 ID 派生行| LISTS
+  LISTS --> LIST[ChatList]
+  CHAT --> PAGE
+  PAGE -->|打开、分页、接收消息| RANGE
+  RANGE -->|消息数组| PAGE
+  PAGE -->|提交内容与上传任务| OUTBOX[MessageOutbox]
+  OUTBOX -->|预览与发送状态| PAGE
+  OUTBOX -->|写请求| API
+  OUTBOX -->|HTTP 确认| CONNECTION
+  CONNECTION -->|WS 确认| OUTBOX
+  PAGE --> VIEW[Message / Composer / ChatDetails]
+  DRAFT[DraftStore] --> LIST
+  PAGE <-->|离开时保存、进入时恢复| DRAFT
+  CONNECTION --> NOTIFY[PushNotifications]
+  CHAT --> NOTIFY
+  LISTS -->|同一未读响应| NOTIFY
+  NOTIFY <--> WORKER[push-worker.js]
+  PUSH[Web Push] --> WORKER
 ```
 
-`ChatStore` 不保存所有历史消息。聊天摘要、话题摘要和已读字段各有一份共享状态；列表查询保存成员 ID，并从共享状态派生行对象。`ChatPins` 是 ChatStore 按聊天/话题创建的普通对象，置顶栏、置顶页面和菜单消费同一份集合。
+## 身份、协议与入口
 
-收藏快照只由 `SavedMessagesPage` 持有。`MessageMenu` 从页面传入的消息数组中解析当前选择，不依赖消息区间 Store。
+SessionStore 按 URL token、localStorage、开发预设选择身份并移除 URL 中的 token。随后依次 `POST /auth/refresh`、`GET /users/me`、`GET /users/search?q=UID&limit=1`；最后一步补用户组，失败不阻塞登录。后续 HTTP 和 WS 中的本人资料更新共享身份；全局与单聊天收藏快照均不参与更新。待发消息从当前身份派生作者资料，更新资料不重连 WebSocket。
 
-## 协议与本地存储
+API 基地址为 `/_api`。SnowflakeID 是有意使用的可排序无损 number 编码，HTTP/WS/路由边界编解码，普通 UID 和计数不转换。null/undefined 原样保留；仅 UpdateChatBody.avatarImageId 与 PatchInviteBody.expiresAt 显式允许请求 null 表达清除。JSON 拦截器保留 FormData，二进制上传不按 JSON 转换。
 
-请求基地址是 `/_api`。`SessionStore.initialize()` 依次检查 URL token、localStorage 和开发预设，执行 `POST /auth/refresh` 与 `GET /users/me`。启动加载和错误由 App 持有，身份就绪后显示业务页面。开发预设的配置见 [README](../README.md)。
+`/landing` 无需登录即可阅读安装指引，仍由 SessionStore 提取 token。已安装应用进入聊天；携带邀请码时进入邀请预览，不自动兑换。其他业务页面由 App 的身份加载/错误状态控制。
 
-业务 ID 使用 `SnowflakeID` 品牌类型：有限、非零、可排序的 number，可以无损表示非负 i64。HTTP 与 WS 响应在边界编码；路由输入使用 `encodeId`，链接和协议输出使用 `decodeId`。普通 UID、计数和日期游标不参与这种转换。
+Service Worker 缓存应用资源和表情数据，不缓存业务 API。共享聊天数据仅在内存，连续消息随页面离开释放，没有离线消息数据库。
 
-HTTP 和 WS 边界仅转换 ID。可选字段在 TypeScript 中声明为 `field?: T`，响应中的 `null` 原样保留；可选链、空值合并和必要的 `== null` 判断同时适配 null/undefined。0、false 和空字符串仍按其业务含义处理。`UpdateChatBody.avatarImageId` 与 `PatchInviteBody.expiresAt` 显式允许请求 null，用于清除头像和过期时间。生成的 `json-codecs.ts` 只记录需要 ID 转换的路径。
+## 何时请求
 
-共享聊天缓存保留在本次应用运行的内存中，不按列表可见性逐条回收；连续消息与收藏随页面离开释放。token、展示偏好和草稿保存在 localStorage。Service Worker 缓存应用资源和表情数据，没有 API 数据缓存或离线消息数据库。
+下表省略 `/_api`，c/t/m 分别表示聊天、话题根和消息 ID。
 
-## 请求时机
+| 触发                          | 接口与参数                                                             | 消费路径                              |
+| ----------------------------- | ---------------------------------------------------------------------- | ------------------------------------- |
+| 激活聊天分类或续页            | `GET /chats?limit=50`，归档加 archived，续页加 after                   | ChatListStore → ChatStore → ChatList  |
+| 话题 tab，或消息 tab 开启话题 | `GET /threads?limit=20`，archived 与 before 时间游标                   | ChatListStore → ChatStore → ChatList  |
+| 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatList              |
+| 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                          |
+| 显示归档计数                  | `GET /chats/unread`；需要话题时读 `/threads/unread`                    | 查询由实际消费者激活                  |
+| 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限          |
+| 私聊或用户资料缺关系          | `GET /friends/{uid}`                                                   | ChatStore.relationship → 三处共用     |
+| 用户资料的验证方式            | `GET /friends/add-info/{uid}`                                          | UserProfile 局部保存                  |
+| 恢复普通对话，读状态无缓存    | `GET /chats/{c}/unread`                                                | 页面决定打开位置                      |
+| 恢复话题，读状态无缓存        | `GET /chats/{c}/threads/{t}/read-state`                                | 页面决定打开位置                      |
+| 话题缺订阅状态                | `GET /chats/{c}/threads/{t}/subscribe`                                 | ChatStore → 订阅/归档按钮             |
+| 打开、定位、双向分页          | `GET /chats/{c}/messages?max=50`，around/before/after；话题加 threadId | ConversationStore → 页面              |
+| 回复预览或话题根缺失          | `GET /chats/{c}/messages/{m}`                                          | 页面局部预览                          |
+| 活跃可见消息进入视口          | 普通/话题 read 的 POST，1 秒合并目标                                   | ChatStore 更新读状态和计数            |
+| 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                         |
+| 全局或单聊天收藏              | `GET /saved-messages` 或 `/chats/{c}/saved-messages`，limit=50、before | SavedMessagesPage 快照                |
+| 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标 |
+| 资料中的成员标签              | `GET /group/{c}/members`，q、limit、after                              | ChatMembers 局部分页                  |
+| 资料中的话题标签              | `GET /chats/{c}/messages?max=50`，before                               | ChatThreads 筛选 threadInfo 根消息    |
+| 资料中的媒体标签              | `GET /chats/{c}/attachments`，kind、limit、before                      | ChatAttachments 局部分页              |
+| 打开媒体或定位附件            | `GET /chats/{c}/messages/{m}`                                          | 当前消息的媒体集合，或所属话题路由    |
+| 聊天内消息搜索                | `GET /chats/{c}/messages/search`，q、sort、limit、offset               | ChatSearch 局部分页                   |
+| 邀请预览与管理                | `GET /invites/invite?inviteCode=...`、`GET /invites`                   | InviteCard、StartChat、ChatInvites    |
+| 查看完整表态                  | `GET /chats/{c}/messages/{m}/reactions`                                | ReactionDetails；按表情本地过滤       |
+| 打开贴纸库                    | 收藏、已订阅包、自有包三个 GET                                         | StickerPicker；切包读取该包详情       |
+| 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                              |
 
-下表省略 `/_api`。`c` 表示 chatId，`t` 表示 threadRootId，`m` 表示 messageId。
+创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。请求期间的具体反馈见[加载标识](loading-indicators.md)。
 
-### 列表与计数
+## 分页、刷新与页面生命周期
 
-| 触发条件                           | 请求                                                      | 数据流向                                        |
-| ---------------------------------- | --------------------------------------------------------- | ----------------------------------------------- |
-| 激活需要聊天的分类，查询已失效     | `GET /chats?limit=50`；归档页加 `archived=true`           | ChatListStore → ChatList；群组/好友由 kind 过滤 |
-| 聊天列表续页                       | 同接口加 `after=游标`                                     | 响应更新 ChatStore，成员 ID 合并到同一查询      |
-| 激活话题 tab，或消息 tab 开启话题  | `GET /threads?limit=20&archived=false或true`              | ChatListStore → ChatList                        |
-| 话题列表续页                       | 同接口加 `before=时间游标`                                | 响应更新 ChatStore，成员 ID 合并到同一查询      |
-| 消息/好友分类展示活跃好友请求      | `GET /friends/requests?archived=false`                    | ChatListStore → ChatList                        |
-| 打开好友请求历史页                 | `GET /friends/requests?archived=true`                     | 独立历史查询；前端没有续页操作                  |
-| 普通分类展示归档角标               | `GET /chats/unread`；需要话题时再取 `GET /threads/unread` | 只激活当前分类消费的计数                        |
-| 话题行缺少所属聊天资料             | 每个未缓存 chatId 调用 `GET /group/{c}`                   | ChatStore → 行头像、名称、聊天类型              |
-| 下拉刷新、前台恢复、重连或相关推送 | 查询失效；有消费者时请求，无消费者时等待下次激活          | 共享查询及资料缓存                              |
+列表查询按普通/归档范围共享成员和进行中的请求；记录成员 ID、游标和覆盖边界，字段从 ChatStore 派生。刷新读取到已加载条目数或末尾，齐备后替换，期间保留现有内容。初次显示或切分类等待当前分类的列表查询，固定入口和归档角标不参与等待。
 
-群组与好友分类都显示后端返回的**归档对话未读消息总数**。消息分类在显示话题时叠加归档话题未读消息数；话题分类只显示话题计数。
+只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
 
-“已归档”入口在主列表固定存在；好友分类还固定显示“好友请求”历史入口。入口不依赖计数或历史列表成功加载。归档明细和好友请求历史只在进入对应页面时加载。
+资料列表的游标与请求属于各组件，切换标签后释放；使用 Ionic infinite-scroll，首屏不足一屏时 fillScrollViewport 继续补页。ChatThreads 的游标来自原始消息响应，不从筛选结果推算，因此空话题页仍能续读；结果不限订阅状态。搜索与媒体汇总作用于所属聊天。
 
-### 对话与已读
+连续消息每页最多 50 条，使用普通 DOM。接近边缘 1.5 个视口时预取，一次一个方向；手指离开且惯性结束后才合并历史，以首条可见消息底部为锚。媒体预留尺寸。浮动日期复用同一滚动状态和可见消息测量。
 
-| 触发条件                                     | 请求                                                         | 结果用途                                    |
-| -------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------- |
-| 进入对话，基础资料无有效缓存                 | `GET /group/{c}`                                             | ChatStore → 标题                            |
-| 普通对话恢复，已读状态无有效缓存             | `GET /chats/{c}/unread`                                      | 页面决定打开位置                            |
-| 话题恢复，列表无有效读位置                   | `GET /chats/{c}/threads/{t}/read-state`                      | 页面决定打开位置                            |
-| 当前话题缺少订阅状态                         | `GET /chats/{c}/threads/{t}/subscribe`                       | ChatStore → 订阅/归档按钮                   |
-| 打开消息区间                                 | `GET /chats/{c}/messages?max=50`，按需加 `around=m`          | ConversationStore → 页面消息行              |
-| 加载历史/后续消息                            | 同接口加 `before=olderCursor` 或 `after=newerCursor`         | 同一连续消息区间；话题读取均带 `threadId=t` |
-| 点击引用、消息链接或置顶预览，目标未在区间内 | 同消息接口加 `around=m`                                      | 精确定位；不存在时保留当前区间并提示        |
-| 恢复草稿的回复预览                           | `GET /chats/{c}/messages/{m}`                                | 页面回复预览；读取失败时文字仍可编辑        |
-| 页面活跃可见，消息底部进入视口               | `POST /chats/{c}/read` 或 `POST /chats/{c}/threads/{t}/read` | 1 秒合并读目标，响应更新已读状态与角标      |
-| 用户标记未读                                 | `POST /chats/{c}/unread`                                     | 与正在发送的已读操作协调，应用后端结果      |
-| 位于最新区间时重连                           | 消息接口加 `after=当前最后ID`，最多补一页                    | 其余空隙通过后续分页补齐                    |
+Ionic 会缓存页面实例。完成离开时清理连续区间、局部输入、菜单和读取；仅在真正离开后执行，允许取消 iOS 返回手势。列表释放查询消费者，共享资料/置顶仍可复用。写操作不因路由离开而主动取消；组件销毁结束组件请求，MessageOutbox 跨页面继续。异步结果使用请求版本或进入上下文，旧结果不能覆盖新页面。[Ionic 生命周期](https://ionicframework.com/docs/angular/lifecycle)
 
-页面进入时固定未读边界。短尾部可直接定位最新，较长的未读区间定位到未读分隔线；切换到最新位置或精确消息使用同一页面导航操作。
+分栏下 App 持有 sidebarSelection，分类切换不改路由；单列由 ChatListPage 转换为路由。设置沿用 `/settings` 浏览器地址，内部保留底层聊天路由。ConversationNavigation 只用于已打开会话的即时定位，不保存第二份导航状态。
 
-右下角下箭头优先返回引用跳转的来源消息，否则定位最新；目标消息已在区间内或当前区间已包含最新消息时不重复请求。角标读取 ChatStore 已有的后端未读计数，不复制计数状态。当前普通对话未跟随底部时收到新消息，会通过去重的 `getReadState` 补取未读数；可见消息的已读响应同步更新角标。话题沿用话题列表或标记已读响应中最近取得的计数，尚未取得计数时不显示数字，不额外遍历话题列表。协议没有未读表态的计数、查询和标记已读能力，因此不提供心形导航。
+## 实时事件与未推送的数据
 
-### 消息操作与设置
+| 事件                                                      | 更新路径                                                                                              |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；当前页面决定接收和是否跟随底部 |
+| messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；正在读取的区间保留补丁                                                    |
+| reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                            |
+| pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                 |
+| threadUpdate                                              | 更新根消息统计，刷新活跃话题列表与计数                                                                |
+| threadMembershipChanged                                   | 订阅失效，当前页面补读，列表和计数刷新                                                                |
+| friendRequestReceived / friendRequestResolved             | 请求列表失效；接受时刷新聊天，相关好友关系查询失效                                                    |
+| friendshipRemoved                                         | 刷新相关关系查询和聊天归档计数                                                                        |
+| chatArchiveStateChanged                                   | 更新归档/静音字段，刷新受影响列表与计数                                                               |
+| 首次 presenceUpdate、恢复前台                             | Connection 发出 resync；活跃查询刷新，当前页面补必要元数据                                            |
 
-| 操作                   | 请求与状态归属                                                                                                               |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| 打开消息菜单           | MessageMenu 调用 ChatStore.ensureDetails 和当前 ChatPins.ensure；必要时读取 `GET /group/{c}` 和当前范围的 pins               |
-| 读取置顶               | `GET /chats/{c}/pins` 或 `GET /chats/{c}/threads/{t}/pins`；ChatStore 的 ChatPins 持有                                       |
-| 置顶/取消置顶          | ChatPins.set 发出同范围 pins 的 POST 或 `DELETE .../pins/{pinId}`，发布置顶变化                                              |
-| 收藏                   | MessageActions：`PUT /saved-messages/{m}`                                                                                    |
-| 撤回                   | MessageActions：`DELETE /chats/{c}/messages/{m}`，成功后发布消息删除事件                                                     |
-| 添加/取消表态          | MessageActions 立即发布个人选择，再 `PUT/DELETE /chats/{c}/messages/{m}/reactions/{emoji}`                                   |
-| 查看收藏/续页          | SavedMessagesPage：`GET /saved-messages?limit=50`，续页加 `before=游标`                                                      |
-| 取消收藏               | SavedMessagesPage：`DELETE /saved-messages/by-id/{savedId}`                                                                  |
-| 发送消息               | MessageOutbox：`POST /chats/{c}/messages` 或 `POST /chats/{c}/threads/{t}/messages`；成功结果进入 Connection                 |
-| 聊天归档/恢复          | ChatStore：`PUT/DELETE /chats/{c}/archive`；更新列表和计数                                                                   |
-| 聊天静音/恢复          | ChatStore：`PUT/DELETE /group/{c}/mute`；更新列表和计数                                                                      |
-| 话题订阅               | ChatStore：`PUT /chats/{c}/threads/{t}/subscribe`                                                                            |
-| 话题归档/恢复          | ChatStore：`PUT/DELETE /chats/{c}/threads/{t}/archive`                                                                       |
-| 接受/拒绝/归档好友请求 | ChatListStore：`POST .../requests/{id}/accept`、`POST .../reject`、`PUT .../archive`；操作后刷新请求列表，接受还刷新聊天列表 |
-| 打开/保存好友验证设置  | 表单组件：`GET/PUT /friends/me/settings`                                                                                     |
-| 打开设置，检查通知订阅 | PushNotifications：读取浏览器订阅；存在时 `GET /push/subscription-status?endpoint=...`                                       |
-| 开启通知               | 浏览器授权、必要时 `GET /push/vapid-public-key`，创建浏览器订阅并 `POST /push/subscribe`                                     |
-| 关闭通知               | `POST /push/unsubscribe`，随后取消浏览器订阅                                                                                 |
-| 检查更新               | AppUpdates 调用 Angular Service Worker 更新检查，不经过业务 API                                                              |
+Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。presenceUpdate 无在线用户列表消费者，stickerPackOrderUpdated 也无界面消费者。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。
 
-## 分页与缓存规则
+没有推送的数据靠本地写响应、页面进入、手动刷新或 resync。好友验证配置进入时读取；贴纸库进入时读取；创建贴纸包直接使用完整响应，上传后只重读该包。静音和远端已读没有专门跨设备推送，不增设轮询。较早开始的读取不能覆盖较新推送或本地操作；已读交错时补取对应读状态，不猜增减值。
 
-聊天与话题查询对组件提供 `items`、`loading`、`loadingMore`、`hasMore`、`loadedThrough`、`activate`、`refresh`、`loadMore`。游标由各自实现持有。聊天错误使用 `ChatListError` 区分首次读取、已读、近期刷新和续页；话题与好友请求使用错误标志。
+## 输入、草稿与队列
 
-查询按普通/归档范围共享成员和进行中的请求。ChatStore 接收列表响应中的数据，查询仅保留成员 ID、分页边界及查询状态。成员关系决定哪些聊天已加载，共享的归档/订阅状态决定它们当前属于哪个范围。最后一个消费者释放时取消列表读取。刷新从第一页读取到已加载的条目数量或列表末尾；结果齐备后整体替换，刷新期间保留内容。
+输入和回复选择属于 ConversationPage，Composer 持有未提交上传任务。离开、切换会话、后台和 pagehide 才写 DraftStore；相同内容不重复写，空内容删除。编辑已发送消息使用独立文本。提交成功入队即清空对应草稿，迟到的确认不碰新输入。列表按消息活动与草稿保存时间的较新者排序，不为未加载聊天创建草稿行。
 
-只有“消息”tab 且开启“在消息中显示话题”时使用共同覆盖范围。两个来源记录服务器最后一页覆盖到的时间，未加载为 `Infinity`，加载到底为 `-Infinity`；混合列表展示时间不早于两个边界较新者的行。触底只补覆盖较浅的来源，边界相同则一起补。群组、好友、话题 tab 独立展示和分页。
+附件选择后立刻处理和上传；发送时把任务引用移交 MessageOutbox，立即上屏并释放输入区。编辑借用原任务，取消编辑不取消队列上传。文件、语音、贴纸单独发送时保留其他输入内容。已知私聊不可发送时，点击提交说明原因并保留文本、附件和录音；关系未知时交给服务器最终判断。
 
-列表初次显示或切换分类时等待该分类的列表请求结束，已有局部缓存也参与这一等待。后续刷新保留列表节点。固定入口和独立角标不参与首次内容等待。
+附件准备不占发送顺序；准备好后与文字共用每聊天的串行发送。前一条等待确认时暂停后续提交，失败后放行下一条；不同聊天独立。创建请求发出后冻结正文、附件 ID 与 clientGeneratedId，重试使用原请求。编辑已发请求需先取得 ID，再 PATCH；未发请求的编辑直接修改待发内容。
 
-消息采用普通 DOM 列表，每页最多 50 条，不使用虚拟列表。距离边缘不足 1.5 个视口时预取，同一时间只加载一个方向。历史页等待手指离开且滚动惯性停止后合并，保持首条可见消息底部的视口位置；这一锚点覆盖相同作者分组时作者栏消失的高度变化。媒体尺寸在资源加载前预留，缺尺寸的媒体使用固定回退框。
+撤回立即隐藏并停止创建重试，dispose 附件任务；尚未发请求可直接删除。已发请求保留撤回意图，迟到响应、WS 或正常加载取得对应 ID 后补 DELETE。协议不能按 clientGeneratedId 查询/撤回，不扫历史兜底。队列关闭或整页刷新不持久化。
 
-## 实时事件与一致性
+本地与确认回声按 clientGeneratedId 保持行身份。已接受但尚未发布的语音继续用本地音频；WS、列表或后续 GET 确认发布后再换服务器附件。此时 GET 的 404 不触发重新创建。
 
-| 事件                                                      | 消费与更新                                                                                                                                                                         |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| message                                                   | Connection 对 HTTP 成功与 WS 回声按 ID 去重；ChatStore 更新预览并使已读失效，活跃 ChatListStore 查询补取未读，当前页面筛选所属对话并交给 ConversationStore；是否跟随底部由页面决定 |
-| messageUpdated / messageDeleted / messagesBulkDeleted     | ChatStore 更新摘要及已加载的置顶内容；ChatListStore 刷新必要查询；ConversationStore 更新消息区间，进行中的消息读取保留事件补丁                                                     |
-| reactionUpdated                                           | ConversationStore 更新消息表态，ChatStore 更新置顶表态；广播未带个人选择时保留已知 reactedByMe                                                                                     |
-| pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | ChatStore 按聊天/话题范围更新已缓存的 ChatPins                                                                                                                                     |
-| threadUpdate                                              | ConversationStore 更新根消息的话题统计；ChatListStore 刷新话题列表与计数                                                                                                           |
-| threadMembershipChanged                                   | 订阅缓存失效，当前话题页面补取订阅状态，列表和话题计数刷新                                                                                                                         |
-| friendRequestReceived / friendRequestResolved             | 好友请求查询失效；接受请求还刷新聊天列表                                                                                                                                           |
-| chatArchiveStateChanged                                   | 更新聊天归档/静音字段，刷新列表与聊天归档计数                                                                                                                                      |
-| friendshipRemoved                                         | 刷新聊天归档计数                                                                                                                                                                   |
-| 首次 presenceUpdate、恢复前台                             | Connection 发出 resync，活跃查询刷新，聊天资料失效，当前页面补取需要的数据                                                                                                         |
+## 媒体与语音
 
-Connection 维护一条认证连接，每 10 秒发送心跳。重连采用有上限的退避；页面恢复前台时检查连接新鲜度。历史消息区间在重连时不做后台重验，断线期间的编辑、撤回和表态变化可能在重新打开区间后才可见。
+上传先读取限制，照片入口检测/压缩后申请签名 URL；文件入口保留原字节。签名 PUT 使用返回头，不携带聊天 token。AttachmentUpload 持有进度、AbortSignal、本地 URL 和成功 ID；重试复用已有任务/ID，释放时取消处理与上传。
 
-`presenceUpdate` 用于连接握手和心跳，没有在线用户列表消费者。`stickerPackOrderUpdated` 经 Connection 转发，界面没有消费该事件。
+静态图片长边限制 1920，尝试 AVIF/WebP/JPEG，低于原体积 75% 才采用；视频通过 Mediabunny 转码，低于原体积 50% 且轨道完整才采用。保留动图，HEIC 必要时解码，编码失败回退原文件。浏览器已启动的不可取消编码结束后丢弃结果，不再上传。
 
-没有对应推送的信息依靠操作响应、页面进入时的必要读取、手动刷新和 resync 更新。收藏是保存时的快照；好友验证设置进入时读取；展示偏好和草稿为本地数据。表态操作即时更新本地选择，服务端广播更新总数；失败显示操作提示，不额外读取消息详情或自动回滚。
+录音保存阶段只留本地 Blob，明确发送才上传。VoicePlayer 点击后同步启动 Audio 保留 Safari 用户激活，WaveSurfer 读取真实波形；波形 CORS 失败不影响可用播放，同一时间只播放一条。MediaViewer 仅浏览当前消息的图片/视频，不合并整聊天媒体。
 
-共享字段带有请求版本，较早开始的列表读取不会覆盖较新的消息、已读或订阅结果；后续刷新可以更新这些字段，不设临时覆盖表。已读操作合并目标并串行执行，若 HTTP 读取和推送交错导致计数无法确定，则补取对应聊天/话题的读状态。ChatStore 的本地操作成功事件只通知 ChatListStore 刷新受影响的查询或计数。消息区间中的事件补丁保护进行中的读取结果，不构成全局消息仓库。
+## 通知与静音
 
-## 页面生命周期
+在线 WebSocket 优先；后台仍运行的页面直接让 Worker 展示系统通知，未运行时由 Web Push 兜底。前台正在阅读对应会话不提醒；单列其他页面显示顶部横幅，双列/三列不显示应用内横幅，均登记去重。
 
-App 解析路由并保留桌面侧栏的列表选择；ChatListPage 接收路由输入，向移动端 ChatList 传递 selection 和 active。桌面侧栏只在分栏可见时创建，宽屏下 ChatListPage 不创建移动列表。ChatList 通过 openList 输出 tab、归档和好友请求列表的切换意图，不订阅路由变化。双栏下 App 只更新 sidebarSelection，不修改 URL 或历史记录，右侧会话和输入内容保持原位；单栏下 ChatListPage 将切换转换为列表路由，归档和好友请求的返回使用 Ionic 返回方向。设置弹窗等只改变查询参数的导航不会重置侧栏选择。
+本机通知意图与 Push 注册分别保存。授权成功后，注册失败不阻止在线系统提醒；前台横幅不要求系统权限，显式关闭通知也关闭横幅。开启需浏览器授权、VAPID key 和 `/push/subscribe`；关闭调用 `/push/unsubscribe` 并取消浏览器订阅；进入设置、恢复前台、重连检查注册状态。
 
-Ionic 可以保留离开的页面实例。页面离开时重置 ConversationStore、取消消息或收藏读取、清空菜单与当前输入展示。列表页释放查询消费者；共享聊天、读位置和置顶缓存仍可复用，正在读取的共享置顶不因一个页面离开而取消。DraftStore 中的持久草稿保留。组件销毁也执行相应清理。[Ionic 页面生命周期](https://ionicframework.com/docs/angular/lifecycle)
+规则读取 ChatStore：自己、系统和已撤回消息不提醒；普通提及绕过静音，回复自己可绕过归档。话题按订阅/归档判断，提及是例外，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史。
 
-写操作不会因为页面离开而主动取消；组件销毁时由 DestroyRef 结束其请求。异步结果使用上下文或版本检查，防止旧页面操作覆盖新的 UI。MessageMenu.reset 清空菜单、确认和提示，正在结束的旧操作不会向新页面展示结果。
+Worker 串行处理页面与 Push，按消息 ID 去重，保留最近 512 个 ID，重启从通知中心恢复；已关闭通知不持久保存去重记录。已读按聊天/话题确认边界清理，撤回按 ID 清理；最近 256 个读范围抑制迟到通知。点击导航至 `?message=ID`，复用当前应用以保留队列。
 
-输入和回复选择只保存在 ConversationPage。离开会话、切换聊天或话题、页面进入后台及 pagehide 时，将未发送文字和回复目标保存到 DraftStore；相同内容不重复写入，空内容移除已有草稿。输入过程中不更新聊天列表的草稿预览或排序时间。编辑已发送消息使用独立的 editText，离开时仍只保存未发送内容。文字消息入队时立即清空已提交的输入与持久草稿，后续确认或失败只更新队列，不改动用户正在输入的新草稿。列表用消息活动时间与草稿保存时间中的较新者排序，未加载的聊天不会因本地草稿而单独创建列表行。
+ChatListStore.unread 的完整响应同时服务归档数、系统角标和后台标题，不额外相加话题/静音/归档计数。支持角标或标签隐藏时激活同一查询；前台恢复普通标题。
 
-## 搜索与管理请求
+ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c}/mute`；永久省略 durationSeconds。一个到期定时器更新标志与计数，取消静音按协议同时取消归档。话题使用自身订阅/归档操作。
 
-- 聊天列表加号中的搜索把 toolbar 切换为搜索条，300ms 输入防抖后请求 `GET /group`（已加入范围）和 `GET /users/search`。群组用返回的游标分页；用户接口没有分页游标。此入口不搜索所有聊天的消息。
-- 聊天资料按需请求 `GET /group/:id`，成员子视图请求 `GET /group/:id/members`；群资料保存后更新 ChatStore，并刷新聊天列表。角色更新、移除成员和退出群组使用现有成员接口。
-- 用户资料同时读取好友关系和添加验证方式；只有点击操作后才发送添加、删除或拉黑请求。消息正文中的提及不触发这些请求。
-- 邀请预览使用 `GET /invites/invite?inviteCode=...`，点击加入才请求 `/invites/redeem`。邀请码变化会使已有预览失效。邀请列表与创建、撤销、分享使用现有 invites 接口。
-- 聊天内搜索使用 `/chats/:id/messages/search` 的 `q`、`sort`、`limit`、`offset`。后端没有全局消息搜索、发送者或日期过滤参数。附件汇总单独使用 `/chats/:id/attachments` 的 `kind` 和消息游标；定位附件时读取原消息，确定是否进入话题。
-- 收藏页面按可选 chatId 选择全局收藏或单聊天收藏接口；两种入口共用分页与消息展示。
-
-## 消息输入与上传
-
-MessageComposer 拥有尚未提交的 AttachmentUpload 任务，VoiceRecorder 子组件管理设备资源。照片先读取上传限制，检测文件类型、尺寸并压缩，再申请签名上传地址；文件入口保留原始字节，不经过照片压缩；PUT 上传直接使用存储返回的签名请求头，不携带聊天登录 token。AttachmentUpload 自身持有进度、取消信号、本地 URL 和完成后的附件 ID；重试复用正在执行的任务或已成功上传的 ID。
-
-点击发送时，Composition 将已选中的上传任务和提及名字快照移交给 MessageOutbox，不必等处理或上传完成。文字消息可附带图片和视频；普通文件单独发送且不携带文字，语音消息只包含一个音频附件。发送文件、语音或贴纸时，未发送的文本和其他类别附件仍保留在输入区。输入区重置只取消仍由它持有的任务；入队后的上传与请求可跨会话页面继续。队列存在当前应用内存中，不跨整页刷新恢复；账号切换会清理队列和上传资源。
-
-ConversationPage 将本地消息追加到已加载消息之后，复用 Message、MessageAttachments 和日期／作者分组，不伪造 Snowflake ID。待发消息不参与服务器菜单操作、定位锚点或已读计算。点击发送立即显示本地内容、清空对应输入和回复，并定位最新一次；确认到达时不再强制滚动。时间后的空心圆圈勾表示待确认，实心圆圈勾表示服务器已接收；未完成的附件在自身位置显示 Ionic spinner，失败消息在原位置提供重试。
-
-MessageOutbox 等待附件任务完成后才调用创建消息接口；同一会话的请求按提交顺序执行，上传可并行，不同会话互不阻塞。失败重试复用该条消息的正文、回复、附件 ID 和 clientGeneratedId；输入栏再次发送相同文字是新消息。HTTP 与 WS 确认按 clientGeneratedId 匹配本地记录，WS 先到时迟到的 HTTP 错误不会回退成功状态；Connection 仍按服务器消息 ID 去重。已确认记录进入 ConversationStore 的实际区间后才移交并释放本地资源；历史区间中的未交接记录仍显示在底部。编辑仍由页面提交 PATCH，并沿 messageUpdated 更新路径处理，不覆盖未发送草稿。
-
-语音创建接口确认后，图标变为实心，但继续使用本地音频播放；发布 WS、列表 GET 或重连后按 ID 的 GET 获得已发布消息后才换成服务器附件。未发布语音的 GET 返回 404，保持接收成功状态，不重新创建消息。
-
-写操作只在 HTTP mock 或本地后端上测试。需要真实后端时使用本地服务器与开发数据库 `10.198.3.214`，不得对生产服务器执行消息发送、好友关系、邀请、已读或其他写操作。
-
-照片压缩与旧版使用同一流程：长边限制为1920，静态图片依次尝试 AVIF／WebP／JPEG，只有体积低于原文件75%才使用压缩结果；视频通过 Mediabunny 转码，仅在体积低于原文件50%且不丢失轨道时使用结果。GIF、APNG、动态 WebP／AVIF 保留动画；无法直接读取的 HEIC 使用 heic-to 解码。转换失败或编码不可用时回退到原文件，取消则结束任务。压缩与传输共用取消信号，最终上传尺寸和大小来自实际提交文件。
-
-录音仅在明确发送时上传；松手保存的录音留在组件本地，可播放或删除。左移取消、页面离开以及迟到的麦克风授权都不会发送消息。
-
-## 会话资料面板
-
-打开 ChatDetails 时读取 `/group/:id`；私聊另读 `/friends/:uid` 决定是否显示删除好友。资料就绪后，媒体组件读取图片分类第一页；切换视频、文件 tab 才读取对应分类，后续分页使用接口的消息游标。
-
-静音调用 ChatStore.setMuted，经 `/group/:id/mute` 更新共享聊天状态；资料面板优先读取 ChatStore.chatState，聊天尚未进入列表时才使用资料响应的 mutedUntil。列表操作与 websocket 的聊天状态更新会同步反映在面板上。删除好友使用 friends 接口，退群使用 members 接口，均在确认后提交。
-
-话题标题与角标消费 ConversationPage 传入的根消息引用。当前搜索、附件汇总和静音协议作用于所属聊天，资料中媒体标为“所属聊天的媒体”，不假装按话题过滤。
-
-上传测试拦截预签名请求与对象存储 PUT，不向真实 S3 上传。
+测试拦截 HTTP、WebSocket 与上传。禁止向生产服写入或测试上传 S3；必须实测写入时使用本地后端及开发数据库 `10.198.3.214`。

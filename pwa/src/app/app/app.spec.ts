@@ -5,9 +5,10 @@ import { By } from '@angular/platform-browser';
 import { Navigation, Router, provideRouter } from '@angular/router';
 import { IonRouterOutlet } from '@ionic/angular';
 import { afterAll, vi } from 'vitest';
-import { App } from './app';
-import { SessionStore } from '../session/session-store';
 import { ListTab } from '../chats/list-tabs';
+import { PushNotifications } from '../pwa/push-notifications';
+import { SessionStore } from '../session/session-store';
+import { App } from './app';
 
 describe('App', () => {
   const session = { initialize: vi.fn<() => Promise<void>>(), user: signal(undefined) };
@@ -17,7 +18,11 @@ describe('App', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false, addListener() {}, removeListener() {} }));
     await TestBed.configureTestingModule({
       imports: [App],
-      providers: [provideRouter([]), { provide: SessionStore, useValue: session }],
+      providers: [
+        { provide: PushNotifications, useValue: { start: vi.fn(), banner: signal(undefined) } },
+        provideRouter([]),
+        { provide: SessionStore, useValue: session },
+      ],
     }).compileComponents();
   });
 

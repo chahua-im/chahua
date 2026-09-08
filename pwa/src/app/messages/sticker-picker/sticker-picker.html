@@ -20,7 +20,6 @@
       <button
         type="button"
         class="sticker-item"
-        [disabled]="busy() || disabled()"
         (click)="send(sticker)"
         (pointerdown)="press(sticker, $event)"
         (pointermove)="move($event)"
@@ -42,6 +41,13 @@
       <p class="empty">暂无贴纸</p>
     }
   </div>
+  @if (pack()?.ownerUid === session.user()?.uid) {
+    <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event)" />
+    <ion-button fill="clear" [disabled]="busy()" (click)="stickerFile.click()">
+      <ion-icon slot="start" [icon]="icons.cloudUploadOutline" />
+      添加贴纸
+    </ion-button>
+  }
   <div class="pack-bar">
     <button type="button" class="pack-tab" [class.selected]="!pack()" [disabled]="busy()" (click)="load()">
       <ion-icon [icon]="icons.heart" />
@@ -61,6 +67,9 @@
         }
       </button>
     }
+    <button type="button" class="pack-tab" [disabled]="busy()" (click)="createPack()">
+      <ion-icon [icon]="icons.addOutline" />
+    </button>
   </div>
 </ng-template>
 <ion-popover [isOpen]="!!menu()" [event]="menu()?.event" (didDismiss)="menu.set(undefined)">

@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { filter, map, merge, Subject } from 'rxjs';
 import type { ChatListItem, MeResponse, MessageResponse } from '../../generated/models';
 import { GroupKind, MessageType, ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
@@ -41,6 +42,7 @@ export function mockRealtime({
   resync$ = new Subject<void>(),
 } = {}) {
   return {
+    connected: signal(true),
     events$: merge(
       events$,
       messages$.pipe(map((payload): ServerWsMessage => ({ type: ServerWsMessageType.message, payload }))),

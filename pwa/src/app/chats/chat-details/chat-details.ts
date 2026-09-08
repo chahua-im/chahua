@@ -1,4 +1,4 @@
-import { dismissChatOverlays } from '../dismiss-chat-overlays';
+import { DatePipe } from '@angular/common';
 import {
   Component,
   computed,
@@ -10,86 +10,101 @@ import {
   output,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  chatbubbles,
-  searchOutline,
-  notificationsOffOutline,
-  notificationsOutline,
-  exitOutline,
-  personRemoveOutline,
-  bookmarkOutline,
-  peopleOutline,
-  linkOutline,
-  createOutline,
-  personOutline,
-  closeOutline,
-  ellipsisHorizontal,
-} from 'ionicons/icons';
-import { ChatAvatar } from '../chat-avatar/chat-avatar';
-import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
 import { form, FormField } from '@angular/forms/signals';
 import { Router } from '@angular/router';
 import {
+  AlertController,
   IonButton,
   IonContent,
-  IonList,
+  IonIcon,
   IonItem,
   IonLabel,
-  IonIcon,
-  IonSpinner,
+  IonList,
+  IonPopover,
+  IonSegment,
+  IonSegmentButton,
   IonSelect,
   IonSelectOption,
+  IonSpinner,
   ModalController,
-  AlertController,
 } from '@ionic/angular';
+import {
+  archiveOutline,
+  bookmarkOutline,
+  chatbubbles,
+  closeOutline,
+  createOutline,
+  ellipsisHorizontal,
+  exitOutline,
+  linkOutline,
+  notificationsOffOutline,
+  notificationsOutline,
+  personOutline,
+  personRemoveOutline,
+  searchOutline,
+  star,
+  starOutline,
+} from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
+import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
 import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
 import {
+  ChatAttachmentKindFilter,
   GroupKind,
   GroupRole,
   GroupVisibility,
-  type GroupInfoResponse,
-  type SnowflakeID,
-  type MessageResponse,
   type MessagePreview as MessagePreviewData,
-  type FriendRelationshipResponse,
+  type MessageResponse,
+  type SnowflakeID,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
+import { mediaDimensions } from '../../messages/media-processing/prepare-media';
+import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { uploadBlob } from '../../messages/upload';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
-import { ChatStore } from '../chat-store';
+import { ChatAttachments } from '../chat-attachments/chat-attachments';
+import { ChatAvatar } from '../chat-avatar/chat-avatar';
+import { ChatInvites } from '../chat-invites/chat-invites';
 import { ChatListStore } from '../chat-list-store';
 import { ChatMembers } from '../chat-members/chat-members';
-import { ChatInvites } from '../chat-invites/chat-invites';
+import { ChatMute } from '../chat-mute/chat-mute';
+import { ChatSearch } from '../chat-search/chat-search';
+import { ChatStore } from '../chat-store';
+import { ChatThreads } from '../chat-threads/chat-threads';
+import { dismissChatOverlays } from '../dismiss-chat-overlays';
 import { UserProfile } from '../user-profile/user-profile';
-import { ChatSearch } from '../../conversations/chat-search/chat-search';
-import { ChatAttachments } from '../../conversations/chat-attachments/chat-attachments';
-import { mediaDimensions, uploadBlob } from '../../messages/upload';
-import { ContentScrollbars } from '../../content-scrollbars';
 enum DetailAction {
-  Load,
   Mute,
+  Subscription,
+  Archive,
   Save,
   Avatar,
   Leave,
 }
 
+enum GroupTab {
+  Threads = 'threads',
+  Members = 'members',
+}
+type ContentTab = ChatAttachmentKindFilter | GroupTab;
+
 enum DetailView {
   Info,
-  Members,
   Invites,
   Search,
   Edit,
-  More,
 }
 @Component({
   selector: 'app-chat-details',
   templateUrl: './chat-details.html',
   styleUrl: './chat-details.scss',
   imports: [
+    DatePipe,
+    ChatMute,
     ContentScrollbars,
     FormField,
     IonButton,
@@ -99,11 +114,15 @@ enum DetailView {
     IonLabel,
     IonIcon,
     IonSpinner,
+    IonPopover,
     IonSelect,
+    IonSegment,
+    IonSegmentButton,
     IonSelectOption,
     ChatAvatar,
     MessagePreview,
     ChatMembers,
+    ChatThreads,
     ChatInvites,
     ChatSearch,
     ChatAttachments,
@@ -116,13 +135,15 @@ export class ChatDetails {
   readonly threadRoot = input<MessageResponse | MessagePreviewData>();
   readonly closed = output<void>();
   protected readonly icons = {
+    archiveOutline,
+    starOutline,
+    star,
     searchOutline,
     notificationsOffOutline,
     notificationsOutline,
     exitOutline,
     personRemoveOutline,
     bookmarkOutline,
-    peopleOutline,
     linkOutline,
     createOutline,
     personOutline,
@@ -132,7 +153,11 @@ export class ChatDetails {
   private readonly friends = inject(FriendsService);
   private readonly destroy = inject(DestroyRef);
   private loadVersion = 0;
-  protected readonly relationship = signal<FriendRelationshipResponse | undefined>(undefined);
+  private readonly peerUid = computed(() => this.chat()?.peer?.uid);
+  protected readonly relationship = computed(() => {
+    const uid = this.peerUid();
+    return uid ? this.store.relationship(uid).value() : undefined;
+  });
   protected readonly modals = inject(ModalController);
   private readonly router = inject(Router);
   private readonly api = inject(GroupsService);
@@ -141,7 +166,8 @@ export class ChatDetails {
   private readonly store = inject(ChatStore);
   private readonly lists = inject(ChatListStore);
   private readonly alerts = inject(AlertController);
-  protected readonly chat = signal<GroupInfoResponse | undefined>(undefined);
+  protected readonly chat = computed(() => this.store.get(this.chatId()));
+  protected readonly loading = signal(false);
   protected readonly Action = DetailAction;
   protected readonly pending = signal<DetailAction | undefined>(undefined);
   protected readonly busy = computed(() => this.pending() != null);
@@ -155,9 +181,27 @@ export class ChatDetails {
     this.threadId();
     return DetailView.Info;
   });
-  protected readonly muted = computed(() => {
-    const state = this.store.chatState(this.chatId()) ?? this.chat();
-    return Date.parse(state?.mutedUntil ?? '') > Date.now();
+  protected readonly GroupTab = GroupTab;
+  protected readonly AttachmentKind = ChatAttachmentKindFilter;
+  protected readonly tab = linkedSignal<ContentTab>(() => {
+    this.chatId();
+    return this.threadId() ? ChatAttachmentKindFilter.image : GroupTab.Threads;
+  });
+  protected changeTab(value: unknown) {
+    if (
+      Object.values(GroupTab).includes(value as GroupTab) ||
+      Object.values(ChatAttachmentKindFilter).includes(value as ChatAttachmentKindFilter)
+    )
+      this.tab.set(value as ContentTab);
+  }
+  private readonly muteMenu = viewChild.required(ChatMute);
+  protected readonly muted = computed(() => this.store.isMuted(this.chatId()));
+  protected readonly mutedUntil = computed(() => (this.muted() ? this.store.mutedUntil(this.chatId()) : undefined));
+  protected readonly permanentMute = computed(() => (this.mutedUntil() ?? '').startsWith('9999'));
+  protected readonly archived = computed(() => this.store.chatState(this.chatId())?.archived ?? false);
+  protected readonly subscription = computed(() => {
+    const root = this.threadId();
+    return root ? this.store.subscription(this.chatId(), root) : undefined;
   });
   protected readonly avatarEntry = computed(() => {
     const chat = this.chat();
@@ -174,6 +218,15 @@ export class ChatDetails {
   protected readonly values = signal({ name: '', description: '', visibility: GroupVisibility.private });
   protected readonly fields = form(this.values);
   constructor() {
+    effect((onCleanup) => {
+      const uid = this.peerUid();
+      if (uid && uid !== this.session.user()?.uid) onCleanup(this.store.relationship(uid).activate());
+    });
+    effect(() => {
+      const root = this.threadId();
+      if (root && !this.subscription())
+        untracked(() => void this.store.loadSubscription(this.chatId(), root).catch(() => this.error.set(true)));
+    });
     effect(() => {
       this.chatId();
       untracked(() => void this.load());
@@ -182,34 +235,56 @@ export class ChatDetails {
   protected async load() {
     const version = ++this.loadVersion;
     const id = this.chatId();
-    this.pending.set(DetailAction.Load);
+    this.loading.set(true);
     this.error.set(false);
-    this.chat.set(undefined);
-    this.relationship.set(undefined);
     try {
-      const chat = await firstValueFrom(this.api.getGroup(id).pipe(takeUntilDestroyed(this.destroy)));
-      if (version !== this.loadVersion) return;
-      if (chat.peer && chat.peer.uid !== this.session.user()?.uid) {
-        const relationship = await firstValueFrom(
-          this.friends.getFriendRelationship(chat.peer.uid).pipe(takeUntilDestroyed(this.destroy)),
-        );
-        if (version !== this.loadVersion) return;
-        this.relationship.set(relationship);
-      }
-      this.chat.set(chat);
-      this.values.set({ name: chat.name, description: chat.description || '', visibility: chat.visibility });
+      await this.store.ensureDetails(id);
     } catch {
       if (version === this.loadVersion && !this.destroy.destroyed) this.error.set(true);
     } finally {
-      if (version === this.loadVersion) this.pending.set(undefined);
+      if (version === this.loadVersion) this.loading.set(false);
     }
+  }
+  protected edit() {
+    const chat = this.chat()!;
+    this.values.set({
+      name: chat.name ?? '',
+      description: chat.description ?? '',
+      visibility: chat.visibility ?? GroupVisibility.private,
+    });
+    this.view.set(DetailView.Edit);
   }
   protected async toggleMute() {
     if (this.busy()) return;
     this.pending.set(DetailAction.Mute);
     this.error.set(false);
     try {
-      await this.store.setMuted(this.chatId(), !this.muted());
+      await this.muteMenu().toggle(this.chatId());
+    } catch {
+      this.error.set(true);
+    } finally {
+      this.pending.set(undefined);
+    }
+  }
+  protected async toggleSubscription() {
+    if (this.busy() || !this.subscription()) return;
+    this.pending.set(DetailAction.Subscription);
+    this.error.set(false);
+    try {
+      if (this.subscription()!.subscribed) await this.store.unsubscribeThread(this.chatId(), this.threadId()!);
+      else await this.store.subscribeThread(this.chatId(), this.threadId()!);
+    } catch {
+      this.error.set(true);
+    } finally {
+      this.pending.set(undefined);
+    }
+  }
+  protected async toggleThreadArchive() {
+    if (this.busy() || !this.subscription()) return;
+    this.pending.set(DetailAction.Archive);
+    this.error.set(false);
+    try {
+      await this.store.setThreadArchived(this.chatId(), this.threadId()!, !this.subscription()!.archived);
     } catch {
       this.error.set(true);
     } finally {
@@ -220,8 +295,7 @@ export class ChatDetails {
     this.pending.set(DetailAction.Save);
     this.error.set(false);
     try {
-      const updated = await firstValueFrom(this.api.patchGroup(this.chatId(), this.values()));
-      this.chat.set(updated);
+      await firstValueFrom(this.api.patchGroup(this.chatId(), this.values()));
       this.store.invalidate();
       await this.store.ensureDetails(this.chatId());
       this.lists.refreshChats();
@@ -251,7 +325,7 @@ export class ChatDetails {
         }),
       );
       await uploadBlob(upload.uploadUrl, file, upload.uploadHeaders);
-      this.chat.set(await firstValueFrom(this.api.patchGroup(chatId, { avatarImageId: upload.imageId })));
+      await firstValueFrom(this.api.patchGroup(chatId, { avatarImageId: upload.imageId }));
       this.store.invalidate();
       await this.store.ensureDetails(this.chatId());
       this.lists.refreshChats();
@@ -263,6 +337,7 @@ export class ChatDetails {
   }
   protected async leave() {
     const chat = this.chat()!;
+    const chatId = this.chatId();
     const isDm = chat.kind === GroupKind.dm;
     const alert = await this.alerts.create({
       header: isDm ? '删除好友' : '退出群组',
@@ -278,7 +353,7 @@ export class ChatDetails {
       await firstValueFrom(
         isDm
           ? this.friends.deleteFriend(chat.peer!.uid)
-          : this.members.deleteRemoveMember(chat.id, this.session.user()!.uid),
+          : this.members.deleteRemoveMember(chatId, this.session.user()!.uid),
       );
       this.lists.refreshChats();
       await dismissChatOverlays(this.modals);

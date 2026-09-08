@@ -67,10 +67,6 @@ describe('SavedMessagesPage', () => {
     fixture.detectChanges();
   }
 
-  async function settle() {
-    for (let step = 0; step < 8; step++) await Promise.resolve();
-  }
-
   it('paginates immutable saved snapshots and locates the original topic message', async () => {
     await saved();
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('收藏');

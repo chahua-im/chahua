@@ -1,0 +1,39 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>表态</ion-title>
+    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
+  </ion-toolbar>
+  <ion-segment [scrollable]="true" [value]="emoji()" (ionChange)="emoji.set($event.detail.value?.toString() ?? '')">
+    <ion-segment-button value="">
+      <ion-label>全部 {{ count() }}</ion-label>
+    </ion-segment-button>
+    @for (group of groups(); track group.emoji) {
+      <ion-segment-button [value]="group.emoji">
+        <ion-label>{{ group.emoji }} {{ group.reactors.length }}</ion-label>
+      </ion-segment-button>
+    }
+  </ion-segment>
+</ion-header>
+<ion-content appScrollbars>
+  @if (loading()) {
+    <div class="loading-status"><ion-spinner /></div>
+  } @else if (error()) {
+    <ion-button fill="clear" (click)="load()">加载失败，重试</ion-button>
+  } @else {
+    <ion-list>
+      @for (group of visible(); track group.emoji) {
+        @for (user of group.reactors; track user.uid) {
+          <ion-item>
+            <ion-avatar slot="start">
+              @if (user.avatarUrl) {
+                <img [src]="user.avatarUrl" />
+              }
+            </ion-avatar>
+            <ion-label>{{ user.name || user.uid }}</ion-label>
+            <span slot="end">{{ group.emoji }}</span>
+          </ion-item>
+        }
+      }
+    </ion-list>
+  }
+</ion-content>

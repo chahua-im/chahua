@@ -3,15 +3,19 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
 import { IonModal } from '@ionic/angular';
+import { timeOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
-import { GroupRole, MessageType } from '../../../generated/models';
+import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../../api/testing';
-import { SessionStore } from '../../session/session-store';
 import { ChatStore } from '../../chats/chat-store';
+import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
 import { MessageActions } from '../message-actions';
+import { MessageDelivery } from '../message-delivery';
 import { MessageNotice } from '../message-notice';
-import { Message } from '../message/message';
+import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
+import { Message, type MessageContent } from '../message/message';
 import { MessageAction, MessageMenu } from './message-menu';
 
 describe('MessageMenu', () => {
@@ -31,6 +35,11 @@ describe('MessageMenu', () => {
     ensure: vi.fn().mockResolvedValue(undefined),
     set: vi.fn().mockResolvedValue(undefined),
   };
+  const ensureDetails = vi.fn().mockResolvedValue(undefined);
+  const outbox = {
+    items: signal<OutgoingMessage[]>([]),
+    cancel: vi.fn<(item: OutgoingMessage) => void>(),
+  };
   const actions = {
     save: vi.fn().mockResolvedValue(undefined),
     recall: vi.fn().mockResolvedValue(undefined),
@@ -49,6 +58,8 @@ describe('MessageMenu', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    outbox.items.set([]);
+    outbox.cancel.mockReset();
     setMessages([testMessage]);
     admin.set(false);
     pinned.set(false);
@@ -65,13 +76,15 @@ describe('MessageMenu', () => {
     await TestBed.configureTestingModule({
       imports: [MessageMenu],
       providers: [
+        { provide: Preferences, useValue: { recentReactions: signal([]), rememberReaction: vi.fn() } },
         provideRouter([]),
+        { provide: MessageOutbox, useValue: outbox },
         {
           provide: ChatStore,
           useValue: {
             pins: () => conversation,
             get: () => ({ myRole: admin() ? GroupRole.admin : GroupRole.member }),
-            ensureDetails: vi.fn().mockResolvedValue(undefined),
+            ensureDetails,
           },
         },
         { provide: SessionStore, useValue: { user: signal({ ...testUser, uid: testMessage.sender.uid + 1 }) } },
@@ -98,6 +111,207 @@ describe('MessageMenu', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  function openQueued(
+    message: MessageContent = {
+      messageType: MessageType.text,
+      message: '待发送的文字',
+      sender: { ...testMessage.sender, uid: testMessage.sender.uid + 1 },
+      createdAt: testMessage.createdAt,
+      attachments: [],
+    },
+  ) {
+    menu.reset();
+    const content = signal(message);
+    const cancelled = signal(false);
+    const item = {
+      clientGeneratedId: 'queued-message',
+      chatId: testChat.id,
+      message: content,
+      uploads: [],
+      delivery: signal(MessageDelivery.Sending),
+      confirmed: signal<MessageResponse | undefined>(undefined),
+      published: signal(false),
+      cancelled,
+      body: { clientGeneratedId: 'queued-message', messageType: message.messageType, message: message.message },
+      disposed: false,
+    } satisfies OutgoingMessage;
+    outbox.items.set([item]);
+    outbox.cancel.mockImplementation(() => cancelled.set(true));
+    vi.clearAllMocks();
+    menu.open({ ...selection(), messageId: message.id, clientGeneratedId: item.clientGeneratedId, own: true });
+    fixture.detectChanges();
+    return { item, content, cancelled };
+  }
+
+  it('offers only local text actions without loading permissions or pins', () => {
+    admin.set(true);
+    fixture.componentRef.setInput('canReply', false);
+    const { content } = openQueued();
+    expect(labels()).toEqual(['编辑', '复制', '撤回']);
+    expect(fixture.nativeElement.querySelector('.reactions')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.actions button').disabled).toBe(false);
+    const preview = fixture.debugElement.query(By.directive(Message)).componentInstance as Message<MessageContent>;
+    expect(preview.message()).toBe(content());
+    expect(preview.message()).not.toHaveProperty('id');
+    expect(ensureDetails).not.toHaveBeenCalled();
+    expect(conversation.ensure).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [MessageType.audio, ['撤回']],
+    [MessageType.sticker, ['撤回']],
+    [MessageType.file, ['复制', '撤回']],
+  ])('limits queued %s actions to its supported content', (messageType, expected) => {
+    openQueued({
+      messageType,
+      message: '文件说明',
+      sender: testMessage.sender,
+      createdAt: testMessage.createdAt,
+      attachments: [],
+    });
+    expect(labels()).toEqual(expected);
+    expect(ensureDetails).not.toHaveBeenCalled();
+    expect(conversation.ensure).not.toHaveBeenCalled();
+  });
+
+  it('delegates queued editing without cancelling the item or requiring server reply permission', async () => {
+    fixture.componentRef.setInput('canReply', false);
+    const { item } = openQueued();
+    const editQueued = vi.fn();
+    const edit = vi.fn();
+    menu.editQueued.subscribe(editQueued);
+    menu.edit.subscribe(edit);
+    await menu['choose'](MessageAction.Edit);
+    expect(editQueued).toHaveBeenCalledExactlyOnceWith(item);
+    expect(edit).not.toHaveBeenCalled();
+    expect(outbox.cancel).not.toHaveBeenCalled();
+    expect(menu['selection']()).toBeUndefined();
+  });
+
+  it('cancels immediately without editing, server confirmation or a recalled-success notice', async () => {
+    const { item, cancelled } = openQueued();
+    const editQueued = vi.fn();
+    menu.editQueued.subscribe(editQueued);
+    let dismiss!: (result: boolean) => void;
+    vi.mocked(IonModal.prototype.dismiss).mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        dismiss = resolve;
+      }),
+    );
+    const cancelling = menu['choose'](MessageAction.Recall);
+    expect(outbox.cancel).toHaveBeenCalledExactlyOnceWith(item);
+    expect(cancelled()).toBe(true);
+    expect(menu['confirmation']()).toBeUndefined();
+    expect(menu['notice']()).not.toBe(MessageNotice.Recalled);
+    expect(editQueued).not.toHaveBeenCalled();
+    expect(actions.recall).not.toHaveBeenCalled();
+    dismiss(true);
+    await cancelling;
+    expect(menu['selection']()).toBeUndefined();
+    expect(menu['message']()).toBeUndefined();
+  });
+
+  it('copies the current queued preview text synchronously without a server ID', async () => {
+    const { content } = openQueued();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    content.update((message) => ({
+      ...message,
+      message: '修改后 @[uid:2]',
+      mentions: [{ uid: 2, username: '小茶', gender: 0 }],
+    }));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.preview').textContent).toContain('修改后 @小茶');
+    const copying = menu['choose'](MessageAction.Copy);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('修改后 @小茶');
+    await copying;
+    expect(menu['notice']()).toBe(MessageNotice.Copied);
+    expect(ensureDetails).not.toHaveBeenCalled();
+    expect(conversation.ensure).not.toHaveBeenCalled();
+  });
+
+  it('switches an open queued menu to the server message by client ID after acknowledgement', async () => {
+    const { item, content } = openQueued();
+    const confirmed: MessageResponse = {
+      ...testMessage,
+      id: encodeId('9007199254741201'),
+      clientGeneratedId: item.clientGeneratedId,
+      message: '服务器确认的文字',
+      sender: content().sender,
+    };
+    setMessages([confirmed]);
+    fixture.detectChanges();
+    expect(labels()).toEqual(['编辑', '复制', '撤回']);
+    expect(ensureDetails).not.toHaveBeenCalled();
+    outbox.items.set([]);
+    fixture.detectChanges();
+    expect(menu['selection']()?.messageId).toBeUndefined();
+    expect(menu['serverMessage']()).toBe(confirmed);
+    expect(menu['message']()).toBe(confirmed);
+    expect(labels()).toEqual(['回复', '编辑', '话题', '复制', '收藏', '链接', '撤回']);
+    expect(ensureDetails).toHaveBeenCalledExactlyOnceWith(testChat.id);
+    expect(conversation.ensure).toHaveBeenCalledOnce();
+    await menu['choose'](MessageAction.Save);
+    expect(actions.save).toHaveBeenCalledExactlyOnceWith(confirmed);
+  });
+
+  it('hides a cancelled queue item even while it remains in the outbox', () => {
+    const { cancelled } = openQueued();
+    cancelled.set(true);
+    fixture.detectChanges();
+    expect(outbox.items()).toHaveLength(1);
+    expect(menu['queued']()).toBeUndefined();
+    expect(menu['message']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('.menu-surface')).toBeNull();
+    expect(ensureDetails).not.toHaveBeenCalled();
+  });
+
+  it('keeps server actions blocked while a queued edit shadows an existing server message', async () => {
+    const { content } = openQueued({ ...testMessage, message: '编辑中的本地内容' });
+    admin.set(true);
+    fixture.detectChanges();
+    expect(menu['serverMessage']()).toBe(testMessage);
+    expect(menu['message']()).toBe(content());
+    expect(
+      (fixture.nativeElement.querySelector('.preview app-message-status ion-icon') as HTMLIonIconElement).icon,
+    ).toBe(timeOutline);
+    expect(labels()).toEqual(['编辑', '复制', '撤回']);
+    const reply = vi.fn();
+    const thread = vi.fn();
+    menu.reply.subscribe(reply);
+    menu.openThread.subscribe(thread);
+    for (const action of [
+      MessageAction.Reply,
+      MessageAction.Thread,
+      MessageAction.Pin,
+      MessageAction.Save,
+      MessageAction.Link,
+    ]) {
+      await menu['choose'](action);
+    }
+    await menu.reactTo(testMessage, '👍');
+    expect(reply).not.toHaveBeenCalled();
+    expect(thread).not.toHaveBeenCalled();
+    expect(actions.save).not.toHaveBeenCalled();
+    expect(actions.toggleReaction).not.toHaveBeenCalled();
+    expect(menu['confirmation']()).toBeUndefined();
+    expect(ensureDetails).not.toHaveBeenCalled();
+    expect(conversation.ensure).not.toHaveBeenCalled();
+  });
+
+  it('prefers a matching server ID before falling back to the client ID', () => {
+    const other = { ...testMessage, id: encodeId('9007199254741201'), clientGeneratedId: 'other-message' };
+    setMessages([testMessage, other]);
+    menu['selection'].set({ ...selection(), clientGeneratedId: other.clientGeneratedId });
+    expect(menu['serverMessage']()).toBe(testMessage);
+    menu['selection'].set({
+      ...selection(),
+      messageId: encodeId('9007199254741203'),
+      clientGeneratedId: other.clientGeneratedId,
+    });
+    expect(menu['serverMessage']()).toBe(other);
   });
 
   it('shows member actions, then adds admin pin and recall actions in order', () => {
@@ -153,13 +367,15 @@ describe('MessageMenu', () => {
   });
 
   it('keeps the menu inside a narrow viewport and dismisses only backdrop clicks', async () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(276);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
     menu['selection'].set({ ...selection(), rect: new DOMRect(-50, -100, 1500, 70), own: true });
     fixture.detectChanges();
     TestBed.tick();
-    const position = menu['position']();
-    expect(position.left).toBeGreaterThanOrEqual(12);
-    expect(position.top).toBeGreaterThanOrEqual(12);
-    expect(position.width).toBeLessThanOrEqual(window.innerWidth - 24);
+    const stack: HTMLElement = fixture.nativeElement.querySelector('.menu-stack');
+    expect(parseFloat(stack.style.left)).toBeGreaterThanOrEqual(12);
+    expect(parseFloat(stack.style.top)).toBeGreaterThanOrEqual(12);
+    expect(parseFloat(stack.style.width)).toBeLessThanOrEqual(window.innerWidth - 24);
     fixture.nativeElement.querySelector('.preview').click();
     expect(menu['selection']()).toBeDefined();
     fixture.nativeElement.querySelector('.menu-surface').click();

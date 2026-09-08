@@ -24,7 +24,7 @@ export const jsonInterceptor: HttpInterceptorFn = (request, next) => {
       for (const value of values) params = params.append(key, decodeId(Number(value) as SnowflakeID));
     }
   }
-  const body = decodeJsonIds(request.body, operation?.body);
+  const body = request.body instanceof FormData ? request.body : decodeJsonIds(request.body, operation?.body);
 
   return next(request.clone({ params, body })).pipe(
     map((event) =>

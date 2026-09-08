@@ -1,31 +1,47 @@
+import { DatePipe } from '@angular/common';
 import { Component, effect, inject, input, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import {
-  IonList,
+  AlertController,
+  IonButton,
   IonItem,
   IonLabel,
-  IonButton,
-  IonSpinner,
+  IonList,
+  IonSearchbar,
   IonSelect,
   IonSelectOption,
-  IonSearchbar,
-  AlertController,
+  IonSpinner,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
 import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
+import type { MemberSummary } from '../../../generated/models';
 import {
-  InviteType,
-  GroupSelectorScope,
   GroupSearchMode,
+  GroupSelectorScope,
+  InviteType,
   type GroupSelectorItem,
   type InviteResponse,
   type SnowflakeID,
 } from '../../../generated/models';
+import { DirectorySearch } from '../directory-search/directory-search';
+import { inviteStatus, InviteStatus } from '../invite';
 @Component({
   selector: 'app-chat-invites',
   templateUrl: './chat-invites.html',
-  imports: [FormField, IonList, IonItem, IonLabel, IonButton, IonSpinner, IonSelect, IonSelectOption, IonSearchbar],
+  imports: [
+    DatePipe,
+    DirectorySearch,
+    FormField,
+    IonList,
+    IonItem,
+    IonLabel,
+    IonButton,
+    IonSpinner,
+    IonSelect,
+    IonSelectOption,
+    IonSearchbar,
+  ],
 })
 export class ChatInvites {
   readonly chatId = input.required<SnowflakeID>();
@@ -33,6 +49,13 @@ export class ChatInvites {
   private readonly groupsApi = inject(GroupsService);
   private readonly alerts = inject(AlertController);
   protected readonly Type = InviteType;
+  protected readonly status = inviteStatus;
+  protected readonly Status = InviteStatus;
+  protected readonly targetQuery = signal('');
+  protected readonly target = signal<MemberSummary | undefined>(undefined);
+  protected groupName(id: SnowflakeID) {
+    return this.groups().find((group) => group.id === id)?.name ?? '群组';
+  }
   protected readonly type = signal(InviteType.generic);
   protected readonly values = signal({ target: '', group: '', expiry: '' });
   protected readonly fields = form(this.values);
@@ -96,7 +119,7 @@ export class ChatInvites {
         this.api.postInvite({
           chatId: this.chatId(),
           inviteType: this.type(),
-          targetUid: this.type() === InviteType.targeted ? Number(values.target) : undefined,
+          targetUid: this.type() === InviteType.targeted ? this.target()?.uid : undefined,
           requiredChatId: this.type() === InviteType.membership ? this.requiredGroup() : undefined,
           expiresAt: values.expiry ? new Date(values.expiry).toISOString() : undefined,
         }),

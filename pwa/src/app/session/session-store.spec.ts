@@ -1,10 +1,11 @@
-import { jsonInterceptor } from '../api/json.interceptor';
 import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
-import { authInterceptor } from '../api/auth.interceptor';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
+import type { UserGroupTagInfo } from '../../generated/models';
+import { authInterceptor } from '../api/auth.interceptor';
+import { jsonInterceptor } from '../api/json.interceptor';
 import { testUser } from '../api/testing';
 import { SessionStore } from './session-store';
 
@@ -35,6 +36,13 @@ describe('SessionStore', () => {
     history.replaceState(null, '', '/');
   });
 
+  async function profile(userGroup?: UserGroupTagInfo) {
+    await Promise.resolve();
+    const request = http.expectOne(`/_api/users/search?q=${testUser.uid}&limit=1`);
+    expect(request.request.headers.get('Authorization')).toBe(`Bearer ${session.token()}`);
+    request.flush({ members: [{ uid: testUser.uid, userGroup }], excluded: [] });
+  }
+
   it('removes the URL token, refreshes it, and uses the new token for the current user', async () => {
     const login = session.initialize();
     expect(location.search).toBe('');
@@ -45,8 +53,10 @@ describe('SessionStore', () => {
     const me = http.expectOne('/_api/users/me');
     expect(me.request.headers.get('Authorization')).toBe('Bearer test-refreshed-token');
     me.flush(testUser);
+    const userGroup = { groupId: 3, name: '三水', chatGroupColor: '#4087d2', chatGroupColorDark: '#72a7de' };
+    await profile(userGroup);
     await login;
-    expect(session.user()).toEqual(testUser);
+    expect(session.user()).toEqual({ ...testUser, userGroup });
     expect(window.localStorage.getItem('chahua.auth.token')).toBe('test-refreshed-token');
     TestBed.inject(HttpClient).get('/assets/example.json').subscribe();
     const asset = http.expectOne('/assets/example.json');
@@ -68,6 +78,7 @@ describe('SessionStore', () => {
     refresh.flush({ token: 'refreshed-token' });
     await Promise.resolve();
     http.expectOne('/_api/users/me').flush(testUser);
+    await profile();
     await startup;
     expect(session.user()).toEqual(testUser);
     expect(localStorage.getItem('chahua.auth.token')).toBe('refreshed-token');
@@ -86,6 +97,88 @@ describe('SessionStore', () => {
     expect(window.localStorage.getItem('chahua.auth.token')).toBeNull();
   });
 
+  it('keeps login usable when the optional group lookup fails', async () => {
+    const login = session.initialize();
+    http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
+    await Promise.resolve();
+    http.expectOne('/_api/users/me').flush(testUser);
+    await Promise.resolve();
+    http
+      .expectOne(`/_api/users/search?q=${testUser.uid}&limit=1`)
+      .flush('', { status: 503, statusText: 'Unavailable' });
+    await login;
+    expect(session.user()).toEqual(testUser);
+    expect(session.token()).toBe('refreshed-token');
+  });
+
+  it('learns current own identity from HTTP replies while leaving saved snapshots and other users alone', async () => {
+    const group = { groupId: 3, name: '三水' };
+    session.user.set({ ...testUser, userGroup: group });
+    const client = TestBed.inject(HttpClient);
+    client.get('/_api/chats/example/messages').subscribe();
+    http.expectOne('/_api/chats/example/messages').flush({
+      messages: [
+        { sender: { uid: 99, name: '其他人', gender: 2 } },
+        {
+          sender: {
+            uid: testUser.uid,
+            name: '新名字',
+            gender: 2,
+            avatarUrl: 'https://example.com/new.jpg',
+            userGroup: { groupId: 4, name: '四水' },
+          },
+        },
+      ],
+    });
+    expect(session.user()).toMatchObject({
+      username: '新名字',
+      gender: 2,
+      avatarUrl: 'https://example.com/new.jpg',
+      userGroup: { groupId: 4, name: '四水' },
+      permissions: testUser.permissions,
+      stickerPackOrder: testUser.stickerPackOrder,
+    });
+    const fresh = session.user();
+    for (const url of ['/_api/saved-messages', '/_api/chats/example/saved-messages']) {
+      client.get(url).subscribe();
+      http
+        .expectOne(url)
+        .flush({ messages: [{ sender: { uid: testUser.uid, name: '旧名字', gender: 1, userGroup: group } }] });
+    }
+    client.get('/_api/users/search?q=99').subscribe();
+    http.expectOne('/_api/users/search?q=99').flush({ members: [{ uid: 99, username: '其他人', gender: 2 }] });
+    expect(session.user()).toBe(fresh);
+  });
+
+  it('accepts cleared group and avatar fields without clearing information absent from partial profiles', () => {
+    session.user.set({
+      ...testUser,
+      userGroup: { groupId: 3, name: '三水' },
+      avatarUrl: 'https://example.com/old.jpg',
+    });
+    session.updateProfile({
+      reactions: [{ reactors: [{ uid: testUser.uid, name: '头像表态者', avatarUrl: 'https://example.com/new.jpg' }] }],
+    });
+    expect(session.user()).toMatchObject({
+      username: '头像表态者',
+      avatarUrl: 'https://example.com/new.jpg',
+      gender: testUser.gender,
+      userGroup: { groupId: 3 },
+    });
+    session.updateProfile(testUser);
+    expect(session.user()?.userGroup?.groupId).toBe(3);
+    session.updateProfile({
+      members: [{ uid: testUser.uid, username: '新名字', gender: 2, avatarUrl: null, userGroup: null }],
+    });
+    expect(session.user()).toMatchObject({ username: '新名字', gender: 2, avatarUrl: null, userGroup: null });
+    session.user.set({ ...testUser, userGroup: { groupId: 3 } });
+    session.updateProfile({ sender: { uid: testUser.uid, name: testUser.username, gender: testUser.gender } });
+    expect(session.user()?.userGroup).toBeUndefined();
+    session.logout();
+    session.updateProfile({ sender: { uid: testUser.uid, name: '迟到的响应', gender: 2 } });
+    expect(session.user()).toBeUndefined();
+  });
+
   it('does not start authenticated requests without a URL or stored token', async () => {
     history.replaceState(null, '', '/chats');
     await session.initialize();
@@ -102,6 +195,7 @@ describe('SessionStore', () => {
     refresh.flush({ token: 'refreshed-token' });
     await Promise.resolve();
     http.expectOne('/_api/users/me').flush(testUser);
+    await profile();
     await startup;
     expect(session.user()).toEqual(testUser);
   });

@@ -1,6 +1,6 @@
-import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
-import { TestBed } from '@angular/core/testing';
 import { HttpTestingController } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { vi } from 'vitest';
 import { AttachmentsService } from '../../generated/endpoints/attachments/attachments.service';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
@@ -48,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('Signed upload', () => {
@@ -85,6 +86,49 @@ describe('Signed upload', () => {
       },
     );
     expect(FakeUpload.requests[0].send).not.toHaveBeenCalled();
+  });
+});
+
+describe('Upload activity deadlines', () => {
+  it('allows a large transfer to exceed the timeout while bytes keep progressing', async () => {
+    vi.useFakeTimers();
+    const pending = uploadBlob('https://storage.invalid/large', new Blob(['large']), {});
+    const xhr = FakeUpload.requests[0];
+    for (let bytes = 1; bytes <= 5; bytes++) {
+      await vi.advanceTimersByTimeAsync(25_000);
+      xhr.progress(bytes, 6);
+    }
+    expect(xhr.abort).not.toHaveBeenCalled();
+    xhr.finish();
+    await pending;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(xhr.abort).not.toHaveBeenCalled();
+  });
+
+  it('aborts when progress stalls, including repeated events with the same byte count', async () => {
+    vi.useFakeTimers();
+    const pending = uploadBlob('https://storage.invalid/stalled', new Blob(['file']), {});
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+    const xhr = FakeUpload.requests[0];
+    xhr.progress(1, 4);
+    await vi.advanceTimersByTimeAsync(20_000);
+    xhr.progress(1, 4);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+    expect(xhr.abort).toHaveBeenCalledOnce();
+  });
+
+  it('terminates a standalone transfer on offline and ignores callbacks after abort', async () => {
+    const progress = vi.fn();
+    const pending = uploadBlob('https://storage.invalid/offline', new Blob(), {}, undefined, progress);
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    const xhr = FakeUpload.requests[0];
+    window.dispatchEvent(new Event('offline'));
+    await rejected;
+    xhr.progress(1, 1);
+    xhr.finish();
+    expect(progress).not.toHaveBeenCalled();
+    expect(xhr.abort).toHaveBeenCalledOnce();
   });
 });
 
@@ -337,5 +381,57 @@ describe('Attachment upload tasks', () => {
     expect(xhr.abort).toHaveBeenCalledOnce();
     expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith(task.url);
     http.expectNone('/_api/attachments/config');
+  });
+
+  it('aborts only the offline attempt and reuses the preview when online retries', async () => {
+    const task = create();
+    const pending = task.retry();
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    const xhr = await sign();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    window.dispatchEvent(new Event('offline'));
+    await pending;
+    expect(xhr.abort).toHaveBeenCalledOnce();
+    expect(task.state().status).toBe(UploadStatus.Failed);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
+    online.mockReturnValue(true);
+    window.dispatchEvent(new Event('online'));
+    const retry = task.retry();
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    (await sign(encodeId('101'))).finish();
+    await expect(retry).resolves.toBe(encodeId('101'));
+    expect(task.url).toBe('blob:mock-1');
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
+  });
+
+  it('times out a pending API round and automatically retries transient failure', async () => {
+    vi.useFakeTimers();
+    const task = create();
+    const pending = task.retry();
+    const config = http.expectOne('/_api/attachments/config');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pending;
+    expect(config.cancelled).toBe(true);
+    expect(task.state().status).toBe(UploadStatus.Failed);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const retried = http.expectOne('/_api/attachments/config');
+    expect(task.state().status).toBe(UploadStatus.Uploading);
+    task.dispose();
+    expect(retried.cancelled).toBe(true);
+    await task.retry();
+  });
+
+  it('does not automatically retry permanent API errors on timers or online', async () => {
+    vi.useFakeTimers();
+    const task = create();
+    const pending = task.retry();
+    http.expectOne('/_api/attachments/config').flush({}, { status: 403, statusText: 'Forbidden' });
+    await pending;
+    expect(task.retryable).toBe(false);
+    await vi.advanceTimersByTimeAsync(120_000);
+    window.dispatchEvent(new Event('online'));
+    http.expectNone('/_api/attachments/config');
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
   });
 });
