@@ -104,6 +104,8 @@ function TestComponent({
     message: overlayMessage,
     currentUserId: 2,
     isAdmin: true,
+    isDm: false,
+    deadDm: false,
     threadId: undefined,
     pins,
     savedMessagesEnabled: true,

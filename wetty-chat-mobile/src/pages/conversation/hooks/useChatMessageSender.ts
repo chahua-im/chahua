@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { t } from '@lingui/core/macro';
 import { useDispatch } from 'react-redux';
+import { apiErrorMessage } from '@/api/errors';
 import {
   markMessagesAsRead,
   type MessageResponse,
@@ -181,9 +182,9 @@ export function useChatMessageSender({
             .then((res) => {
               dispatch(messagePatched({ chatId, messageId, message: res.data }));
             })
-            .catch((err: Error) => {
+            .catch((err: unknown) => {
               dispatch(messagePatched({ chatId, messageId, message: editingSession.originalMessage }));
-              showToast(err.message || t`Failed to edit message`);
+              showToast(apiErrorMessage(err, t`Failed to edit message`));
             })
             .finally(() => {
               revoke();
@@ -275,8 +276,8 @@ export function useChatMessageSender({
             );
             markConfirmedMessageAsRead(confirmed.id);
           })
-          .catch((err: Error) => {
-            showToast(err.message || t`Failed to send`);
+          .catch((err: unknown) => {
+            showToast(apiErrorMessage(err, t`Failed to send`));
             dispatch(
               messagePatched({
                 chatId,
@@ -372,8 +373,8 @@ export function useChatMessageSender({
             );
             markConfirmedMessageAsRead(confirmed.id);
           })
-          .catch((err: Error) => {
-            showToast(err.message || t`Failed to send`);
+          .catch((err: unknown) => {
+            showToast(apiErrorMessage(err, t`Failed to send`));
             dispatch(messagesBulkDeleted({ chatId, messageIds: [clientGeneratedId] }));
           })
           .finally(() => {
@@ -458,8 +459,8 @@ export function useChatMessageSender({
             );
             markConfirmedMessageAsRead(confirmed.id);
           })
-          .catch((err: Error) => {
-            showToast(err.message || t`Failed to send`);
+          .catch((err: unknown) => {
+            showToast(apiErrorMessage(err, t`Failed to send`));
             dispatch(
               messagePatched({
                 chatId,
@@ -547,8 +548,8 @@ export function useChatMessageSender({
           );
           markConfirmedMessageAsRead(confirmed.id);
         })
-        .catch((err: Error) => {
-          showToast(err.message || t`Failed to send`);
+        .catch((err: unknown) => {
+          showToast(apiErrorMessage(err, t`Failed to send`));
           dispatch(
             messagePatched({
               chatId,
