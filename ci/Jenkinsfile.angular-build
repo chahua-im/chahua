@@ -1,0 +1,101 @@
+pipeline {
+  agent none
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '90'))
+  }
+
+  parameters {
+    string(name: 'GIT_COMMIT_SHA', defaultValue: '', description: 'Commit SHA that passed the main Jenkins checks.')
+  }
+
+  environment {
+    PWA_ARTIFACT = 'pwa/chahua-angular.zip'
+  }
+
+  stages {
+    stage('Validate Input') {
+      steps {
+        script {
+          env.PWA_BUILD_REF = params.GIT_COMMIT_SHA?.trim() ?: 'origin/angular'
+        }
+      }
+    }
+
+    stage('Build PWA Artifact') {
+      agent {
+        kubernetes {
+          defaultContainer 'node'
+          yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  securityContext:
+    runAsUser: 1000
+  containers:
+    - name: node
+      image: node:22.22.3-bookworm
+      command:
+        - cat
+      tty: true
+'''
+        }
+      }
+
+      stages {
+        stage('Checkout') {
+          steps {
+            checkout([
+              $class: 'GitSCM',
+              branches: [[name: env.PWA_BUILD_REF]],
+              userRemoteConfigs: [[
+                credentialsId: 'github-app',
+                refspec: '+refs/heads/*:refs/remotes/origin/*',
+                url: 'https://github.com/chahua-im/chahua.git'
+              ]]
+            ])
+          }
+        }
+
+        stage('Build') {
+          steps {
+            dir('pwa') {
+              sh '''#!/usr/bin/env bash
+set -euo pipefail
+
+npm ci
+npm run build
+              '''
+            }
+          }
+        }
+
+        stage('Archive') {
+          steps {
+            zip zipFile: env.PWA_ARTIFACT,
+              dir: 'pwa/dist/app/browser',
+              archive: false
+
+            archiveArtifacts artifacts: env.PWA_ARTIFACT,
+              fingerprint: true,
+              onlyIfSuccessful: true
+          }
+        }
+
+        stage('Trigger Staging Deploy') {
+          steps {
+            build job: 'chahua/deploy/pwa-angular-staging-deploy',
+              wait: false,
+              parameters: [
+                [
+                  $class: 'RunParameterValue',
+                  name: 'PWA_BUILD',
+                  runId: "chahua/chahua-angular-build#${env.BUILD_NUMBER}"
+                ]
+              ]
+          }
+        }
+      }
+    }
+  }
+}
