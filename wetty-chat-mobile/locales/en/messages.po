@@ -161,6 +161,9 @@ msgstr "Block User"
 msgid "Blocked"
 msgstr "Blocked"
 
+msgid "Bold (Ctrl+B)"
+msgstr "Bold (Ctrl+B)"
+
 msgid "Cancel"
 msgstr "Cancel"
 
@@ -227,6 +230,9 @@ msgstr "Close viewer"
 
 msgid "Code"
 msgstr "Code"
+
+msgid "Code block"
+msgstr "Code block"
 
 msgid "Compressing"
 msgstr "Compressing"
@@ -716,6 +722,9 @@ msgstr "Invite Type"
 msgid "Invite unavailable"
 msgstr "Invite unavailable"
 
+msgid "Italic (Ctrl+I)"
+msgstr "Italic (Ctrl+I)"
+
 msgid "Join chat"
 msgstr "Join chat"
 
@@ -1089,6 +1098,9 @@ msgstr "Q: {0} · A: {1}"
 msgid "Question"
 msgstr "Question"
 
+msgid "Quote (Ctrl+Q)"
+msgstr "Quote (Ctrl+Q)"
+
 msgid "Reactions"
 msgstr "Reactions"
 
@@ -1343,6 +1355,9 @@ msgstr "stickers"
 msgid "Stickers must be an image or a WebM video."
 msgstr "Stickers must be an image or a WebM video."
 
+msgid "Strikethrough (Ctrl+D)"
+msgstr "Strikethrough (Ctrl+D)"
+
 msgid "Subscribe"
 msgstr "Subscribe"
 
@@ -1450,6 +1465,9 @@ msgstr "Unblock this user?"
 
 msgid "Unblock User"
 msgstr "Unblock User"
+
+msgid "Underline (Ctrl+U)"
+msgstr "Underline (Ctrl+U)"
 
 msgid "Unfavorite"
 msgstr "Unfavorite"

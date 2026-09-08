@@ -161,6 +161,9 @@ msgstr "封鎖使用者"
 msgid "Blocked"
 msgstr "已封鎖"
 
+msgid "Bold (Ctrl+B)"
+msgstr "粗體 (Ctrl+B)"
+
 msgid "Cancel"
 msgstr "取消"
 
@@ -227,6 +230,9 @@ msgstr "關閉檢視器"
 
 msgid "Code"
 msgstr "邀請碼"
+
+msgid "Code block"
+msgstr "程式碼區塊"
 
 msgid "Compressing"
 msgstr "壓縮中"
@@ -716,6 +722,9 @@ msgstr "邀請類型"
 msgid "Invite unavailable"
 msgstr "邀請無法使用"
 
+msgid "Italic (Ctrl+I)"
+msgstr "斜體 (Ctrl+I)"
+
 msgid "Join chat"
 msgstr "加入聊天"
 
@@ -1089,6 +1098,9 @@ msgstr "問：{0} · 答：{1}"
 msgid "Question"
 msgstr "問題"
 
+msgid "Quote (Ctrl+Q)"
+msgstr "引用 (Ctrl+Q)"
+
 msgid "Reactions"
 msgstr "回應"
 
@@ -1343,6 +1355,9 @@ msgstr "個貼紙"
 msgid "Stickers must be an image or a WebM video."
 msgstr "貼圖必須是圖片或 WebM 影片。"
 
+msgid "Strikethrough (Ctrl+D)"
+msgstr "刪除線 (Ctrl+D)"
+
 msgid "Subscribe"
 msgstr "訂閱"
 
@@ -1450,6 +1465,9 @@ msgstr "解除封鎖該使用者？"
 
 msgid "Unblock User"
 msgstr "解除封鎖使用者"
+
+msgid "Underline (Ctrl+U)"
+msgstr "底線 (Ctrl+U)"
 
 msgid "Unfavorite"
 msgstr "取消收藏"
