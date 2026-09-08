@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { getMembers, type MemberResponse } from '@/api/group';
+import { findCodeRegions } from '@/utils/markdown/codeRegions';
 
 export interface MentionEntry {
   uid: number;
@@ -57,6 +58,97 @@ function detectMentionTrigger(text: string, cursorPos: number): { query: string;
   return null;
 }
 
+/**
+ * Re-anchors mention entries (stored as absolute offsets into `previousText`)
+ * after the text has been edited into `nextText`.
+ *
+ * Edits that happen entirely before or after an entry shift its offsets;
+ * edits that touch the mention's own span drop it — unless the mention text
+ * survives verbatim inside the rewritten middle (e.g. wrapping `*@alice*` in
+ * emphasis), in which case the entry is re-located by searching for the text.
+ */
+export function relocateMentionEntries(
+  previousText: string,
+  entries: MentionEntry[],
+  nextText: string,
+): MentionEntry[] {
+  if (entries.length === 0 || previousText === nextText) return entries;
+
+  const maxAnchor = Math.min(previousText.length, nextText.length);
+  let prefix = 0;
+  while (prefix < maxAnchor && previousText[prefix] === nextText[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < maxAnchor - prefix && previousText[previousText.length - 1 - suffix] === nextText[nextText.length - 1 - suffix]) {
+    suffix += 1;
+  }
+
+  const changeStart = prefix;
+  const changeEnd = previousText.length - suffix;
+  const delta = nextText.length - previousText.length;
+  const changedNew = nextText.slice(changeStart, nextText.length - suffix);
+
+  const relocated: MentionEntry[] = [];
+  for (const entry of entries) {
+    if (entry.end <= changeStart) {
+      relocated.push(entry);
+      continue;
+    }
+    if (entry.start >= changeEnd) {
+      relocated.push({ ...entry, start: entry.start + delta, end: entry.end + delta });
+      continue;
+    }
+    if (entry.start >= changeStart && entry.end <= changeEnd) {
+      const raw = previousText.slice(entry.start, entry.end);
+      if (raw === `@${entry.username}`) {
+        const hint = entry.start - changeStart;
+        const found = indexOfClosestSubstring(changedNew, raw, hint);
+        if (found !== -1) {
+          relocated.push({ ...entry, start: changeStart + found, end: changeStart + found + raw.length });
+          continue;
+        }
+      }
+    }
+  }
+  return relocated;
+}
+
+function indexOfClosestSubstring(haystack: string, needle: string, hint: number): number {
+  let best = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let index = haystack.indexOf(needle);
+  while (index !== -1) {
+    const distance = Math.abs(index - hint);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+    index = haystack.indexOf(needle, index + 1);
+  }
+  return best;
+}
+
+/**
+ * Replaces every valid mention entry in display text with its `@[uid:N]` wire
+ * macro. Mentions whose text no longer matches the entry (edited away), or
+ * that fall inside a code region, are left verbatim — a code mention renders
+ * as plain text and must never trigger a backend reminder.
+ */
+export function mentionEntriesToWire(text: string, entries: MentionEntry[]): string {
+  if (entries.length === 0) return text;
+
+  const codeRegions = findCodeRegions(text);
+  const sorted = [...entries].sort((a, b) => b.start - a.start);
+  let result = text;
+
+  for (const entry of sorted) {
+    if (entry.start < 0 || entry.end > result.length) continue;
+    if (codeRegions.some((region) => entry.start >= region.start && entry.start < region.end)) continue;
+    if (result.slice(entry.start, entry.end) !== `@${entry.username}`) continue;
+    result = `${result.slice(0, entry.start)}@[uid:${entry.uid}]${result.slice(entry.end)}`;
+  }
+  return result;
+}
+
 export function useMentionAutocomplete(
   textareaRef: React.RefObject<HTMLTextAreaElement | null>,
   text: string,
@@ -112,15 +204,9 @@ export function useMentionAutocomplete(
 
   const onTextChange = useCallback(
     (newText: string) => {
-      // Invalidate mention entries if user edited inside a mention
-      setMentionEntries((prev) => {
-        if (prev.length === 0) return prev;
-        const filtered = prev.filter((entry) => {
-          const slice = newText.slice(entry.start, entry.end);
-          return slice === `@${entry.username}`;
-        });
-        return filtered.length === prev.length ? prev : filtered;
-      });
+      setMentionEntries((prev) =>
+        prev.length === 0 ? prev : relocateMentionEntries(text, prev, newText),
+      );
 
       const ta = textareaRef.current;
       if (!ta) {
@@ -128,7 +214,7 @@ export function useMentionAutocomplete(
         return;
       }
 
-      // Use a microtask to read selectionStart after React has flushed the value
+      // Microtask so the cursor is read after React flushed the value.
       queueMicrotask(() => {
         const cursorPos = ta.selectionStart;
         const trigger = detectMentionTrigger(newText, cursorPos);
@@ -148,7 +234,7 @@ export function useMentionAutocomplete(
         debounceRef.current = setTimeout(() => fetchMembers(trigger.query), 250);
       });
     },
-    [closeMention, fetchMembers, textareaRef],
+    [closeMention, fetchMembers, text, textareaRef],
   );
 
   const selectMention = useCallback(
@@ -250,22 +336,7 @@ export function useMentionAutocomplete(
   );
 
   const toWireFormat = useCallback(
-    (displayText: string): string => {
-      if (mentionEntries.length === 0) return displayText;
-
-      let result = displayText;
-
-      // Sort entries by start position descending so replacements don't shift offsets
-      const sorted = [...mentionEntries].sort((a, b) => b.start - a.start);
-      for (const entry of sorted) {
-        const displayMention = `@${entry.username}`;
-        const slice = result.slice(entry.start, entry.end);
-        if (slice === displayMention) {
-          result = result.slice(0, entry.start) + `@[uid:${entry.uid}]` + result.slice(entry.end);
-        }
-      }
-      return result;
-    },
+    (displayText: string): string => mentionEntriesToWire(displayText, mentionEntries),
     [mentionEntries],
   );
 
