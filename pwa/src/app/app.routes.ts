@@ -1,3 +1,4 @@
+import { ChatLink } from './chats/chat-link/chat-link';
 import { inject } from '@angular/core';
 import { RedirectCommand, Router, type CanMatchFn, type Routes } from '@angular/router';
 import { ChatListPage } from './chats/chat-list-page/chat-list.page';
@@ -9,6 +10,12 @@ import { SavedMessagesPage } from './conversations/saved-messages/saved-messages
 const matchListTab: CanMatchFn = (_route, segments) => isListTab(segments[1].path);
 
 export const routes: Routes = [
+  { path: 'm/:encoded', component: ChatLink },
+  { path: 'profile', component: ChatLink },
+  { path: 'chats/new', component: ChatLink, data: { create: true } },
+  { path: 'chats/join', component: ChatLink },
+  { path: 'chats/join/:code', component: ChatLink },
+  { path: 'chats/chat/:id/stickers/:packId', component: ChatLink },
   {
     path: 'settings',
     pathMatch: 'full',
@@ -20,6 +27,7 @@ export const routes: Routes = [
     ],
     children: [],
   },
+  { path: 'chats/chat/:id/saved', component: SavedMessagesPage },
   {
     path: 'chats/saved',
     component: SavedMessagesPage,

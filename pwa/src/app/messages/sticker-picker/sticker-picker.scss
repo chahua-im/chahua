@@ -1,0 +1,87 @@
+:host(.embedded) {
+  display: flex;
+  flex-direction: column;
+  height: 260px;
+  border-top: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
+  background: var(--ion-background-color, #fff);
+}
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 4px;
+  align-content: start;
+  padding: 8px;
+}
+.embedded .sticker-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+:host(.embedded) .sticker-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sticker-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  background: none;
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  min-width: 0;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+.sticker-item:active {
+  background: var(--ion-background-color-step-100, var(--ion-color-light));
+  transform: scale(0.88);
+}
+.sticker-item app-message-attachments {
+  display: block;
+  height: 72px;
+  width: 72px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pack-bar {
+  display: flex;
+  overflow-x: auto;
+  gap: 4px;
+  padding: 0 12px;
+  border-top: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+.pack-tab {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  font-size: 24px;
+  background: none;
+  color: var(--ion-color-medium);
+  border-top: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+}
+.pack-tab.selected {
+  border-top-color: var(--ion-color-primary);
+  color: var(--ion-color-primary);
+  background: var(--ion-background-color-step-100, var(--ion-color-light));
+}
+.pack-tab img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+.empty,
+.loading-status {
+  grid-column: 1/-1;
+  text-align: center;
+  color: var(--ion-color-medium);
+}

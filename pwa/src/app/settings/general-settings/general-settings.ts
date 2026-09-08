@@ -37,7 +37,7 @@ import { Preferences } from '../preferences';
 })
 export class GeneralSettings {
   protected readonly preferences = inject(Preferences);
-  protected readonly modal = inject(ModalController);
+  protected readonly modals = inject(ModalController);
   protected readonly threadsIcon = chatbubblesOutline;
   protected readonly avatarsIcon = personCircleOutline;
   protected readonly backIcon = chevronBackOutline;

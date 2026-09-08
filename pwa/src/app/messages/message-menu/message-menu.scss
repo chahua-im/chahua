@@ -65,6 +65,8 @@ button:disabled {
 .actions {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
+  min-height: 138px;
+  grid-auto-rows: 63px;
 }
 .actions button {
   height: 63px;

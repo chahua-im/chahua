@@ -1,5 +1,7 @@
 :host {
   display: block;
+  position: relative;
+  touch-action: pan-y pinch-zoom;
   --sender-color: var(--sender-light);
   --reply-color: var(--reply-light);
 }
@@ -8,10 +10,17 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 4px 12px;
+  padding: 1px 12px;
+
+  &.group-start {
+    padding-top: 4px;
+  }
+  &.group-end {
+    padding-bottom: 4px;
+  }
 }
 
-.preview {
+.chat-row.preview {
   padding: 0;
 
   > .message-stack {
@@ -47,8 +56,7 @@
   font-weight: 600;
 
   &.placeholder {
-    background: color-mix(in srgb, var(--sender-color) 75%, var(--ion-text-color));
-    color: var(--ion-background-color, #fff);
+    background: var(--sender-color);
   }
 }
 
@@ -110,31 +118,47 @@ app-message-reactions {
 }
 
 .reply-preview {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  position: relative;
+  touch-action: pan-y pinch-zoom;
   width: 100%;
   text-align: start;
+  font: inherit;
   color: inherit;
   cursor: pointer;
-  border-left: 3px solid var(--reply-color);
+  border: 0;
+  border-inline-start: 3px solid var(--reply-color);
+  min-width: 0;
+  overflow: hidden;
   background: color-mix(in srgb, var(--reply-color) 10%, transparent);
   padding: 4px 8px;
   border-radius: 6px;
   margin-bottom: 6px;
+
+  &.busy .reply-content {
+    visibility: hidden;
+  }
+
+  > ion-spinner {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    pointer-events: none;
+  }
 }
 
-.reply-name {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--reply-color);
-  opacity: 0.85;
-}
-
+.reply-name,
 .reply-text {
-  font-size: 12px;
-  opacity: 0.7;
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.reply-name {
+  font-weight: 600;
+  color: var(--reply-color);
 }
 
 .reply-button {
@@ -156,6 +180,7 @@ app-message-reactions {
 }
 
 .sent {
+  --message-link-color: var(--ion-color-primary-contrast);
   flex-direction: row-reverse;
 
   .bubble {
@@ -177,7 +202,6 @@ app-message-reactions {
 
   .reply-name {
     color: inherit;
-    opacity: 1;
   }
 
   .timestamp {
@@ -185,8 +209,8 @@ app-message-reactions {
   }
 
   .reply-preview {
-    border-left-color: rgba(var(--ion-color-primary-contrast-rgb), 0.5);
-    background: rgba(var(--ion-text-color-rgb), 0.1);
+    border-inline-start-color: color-mix(in srgb, var(--ion-color-primary-contrast) 50%, transparent);
+    background: color-mix(in srgb, var(--ion-text-color, #000) 10%, transparent);
   }
 }
 
@@ -220,8 +244,7 @@ app-message-reactions {
     opacity: 0;
   }
 
-  .chat-row:hover .reply-button,
-  .chat-row:focus-within .reply-button {
+  .chat-row:hover .reply-button {
     opacity: 1;
   }
 }
@@ -231,4 +254,55 @@ app-message-reactions {
     --sender-color: var(--sender-dark);
     --reply-color: var(--reply-dark);
   }
+}
+
+.chat-row {
+  transition: transform 160ms ease-out;
+}
+.chat-row.dragging {
+  transition: none;
+}
+.swipe-reply {
+  position: absolute;
+  right: 16px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  color: var(--ion-color-primary);
+  pointer-events: none;
+}
+.swipe-reply svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(90deg);
+}
+.swipe-reply.burst {
+  animation: reply-burst 200ms ease-out;
+}
+@keyframes reply-burst {
+  50% {
+    transform: scale(1.3);
+  }
+}
+@media (hover: none) {
+  .reply-button {
+    display: none;
+  }
+}
+
+.invite-card {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  height: 72px;
+  padding: 8px;
+  text-align: start;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.invite-card small {
+  font-size: 12px;
+  opacity: 0.7;
 }

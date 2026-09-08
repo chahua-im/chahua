@@ -1,3 +1,4 @@
+import { MessageType } from '../../../generated/models';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal, type WritableSignal } from '@angular/core';
@@ -52,6 +53,7 @@ describe('ConversationPage', () => {
   let scroll: HTMLElement;
   const avatars = signal(false);
   beforeEach(async () => {
+    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -117,6 +119,7 @@ describe('ConversationPage', () => {
   async function enterThread(rootId = '100', read: { lastReadMessageId?: string } = { lastReadMessageId: '101' }) {
     fixture.componentRef.setInput('threadId', rootId);
     fixture.detectChanges();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/${rootId}`).flush({ ...wireMessage, id: rootId });
     expect(TestBed.inject(ChatStore).loadSubscription).toHaveBeenCalledWith(testChat.id, encodeId(rootId));
     subscriptions.update((statuses) => new Map(statuses).set(encodeId(rootId), { subscribed: false, archived: false }));
     http.expectOne(`/_api/chats/${wireChat.id}/threads/${rootId}/read-state`).flush({ ...read });
@@ -137,8 +140,13 @@ describe('ConversationPage', () => {
 
   async function reenter() {
     component.ionViewWillEnter();
+    if (component.threadId())
+      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
+        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     const threadId = component.threadId();
     if (threadId) {
+      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(threadId)}`))
+        req.flush({ ...wireMessage, id: decodeId(threadId) });
       http
         .expectOne(`/_api/chats/${wireChat.id}/threads/${decodeId(threadId)}/read-state`)
         .flush({ lastReadMessageId: '101' });
@@ -292,14 +300,139 @@ describe('ConversationPage', () => {
     const content: HTMLElement = fixture.nativeElement.querySelector('ion-content');
     const fab: HTMLElement = content.querySelector('ion-fab')!;
     expect(fab).not.toBeNull();
-    for (const top of [450, 200, 450]) {
+    for (const top of [470, 200, 470]) {
       scroll.scrollTop = top;
       await component['onScroll']();
       await fixture.whenStable();
       expect(content.querySelector('ion-fab')).toBe(fab);
-      expect(getComputedStyle(fab).visibility).toBe(top === 450 ? 'hidden' : 'visible');
+      expect(getComputedStyle(fab).visibility).toBe(top === 470 ? 'hidden' : 'visible');
       expect(scroll.scrollTop).toBe(top);
     }
+  });
+
+  it('reads the badge from shared state, keeps its node mounted and hides it with the button', async () => {
+    const data = TestBed.inject(ChatStore);
+    const badge: HTMLElement = fixture.nativeElement.querySelector('.history-navigation ion-badge');
+    data.acceptChats([{ ...testChat, unreadCount: 37 }], data.snapshot());
+    Object.defineProperties(scroll, { scrollHeight: { value: 3000 }, clientHeight: { value: 500 } });
+    scroll.scrollTop = 1000;
+    await component['trackScroll']();
+    await fixture.whenStable();
+    expect(badge.textContent?.trim()).toBe('37');
+    expect(badge.style.opacity).toBe('1');
+    expect(component['showDownButton']()).toBe(true);
+    component['composer']()!.voiceActive.set(true);
+    expect(component['showDownButton']()).toBe(false);
+    component['composer']()!.voiceActive.set(false);
+    data.acceptChats([{ ...testChat, unreadCount: 0 }], data.snapshot());
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.history-navigation ion-badge')).toBe(badge);
+    expect(badge.style.opacity).toBe('0');
+  });
+
+  it('uses topic counts without mixing in the parent chat or fetching the thread list', async () => {
+    const data = TestBed.inject(ChatStore);
+    data.acceptChats([{ ...testChat, unreadCount: 37 }], data.snapshot());
+    data.acceptThreads(
+      [
+        {
+          chatId: testChat.id,
+          threadRootMessage: { ...testMessage, mentions: [] },
+          chatName: '测试群',
+          participants: [],
+          replyCount: 5,
+          subscribedAt: testMessage.createdAt,
+          archived: false,
+          unreadCount: 5,
+          lastReadMessageId: testMessage.id,
+          lastReplyAt: testMessage.createdAt,
+        },
+      ],
+      data.snapshot(),
+      data.subscriptionSnapshot(),
+    );
+    expect(data.unreadCount(testChat.id, testMessage.id)).toBe(5);
+    expect(data.unreadCount(testChat.id, encodeId('999'))).toBe(0);
+    expect(data.unreadCount(testChat.id)).toBe(37);
+    http.expectNone(() => true);
+  });
+
+  it('returns through nested reply jumps before going to the latest loaded messages', async () => {
+    Object.defineProperty(Element.prototype, 'animate', { value: vi.fn(), configurable: true });
+    try {
+      const opening = component['conversation'].open(encodeId('200'));
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=200`).flush({
+        messages: [100, 200, 300].map((id) => ({ ...wireMessage, id: String(id) })),
+      });
+      await opening;
+      await fixture.whenStable();
+      fixture.debugElement.queryAll(By.directive(Message))[2].componentInstance.jump.emit(encodeId('200'));
+      await fixture.whenStable();
+      fixture.debugElement.queryAll(By.directive(Message))[1].componentInstance.jump.emit(encodeId('100'));
+      await fixture.whenStable();
+      expect(component['returnMessageIds']()).toEqual([encodeId('300'), encodeId('200')]);
+      await component['navigateDown']();
+      expect(component['returnMessageIds']()).toEqual([encodeId('300')]);
+      await component['navigateDown']();
+      expect(component['returnMessageIds']()).toEqual([]);
+      await component['navigateDown']();
+      expect(component['navigatingDown']()).toBe(false);
+      http.expectNone(() => true);
+      component.ionViewDidLeave();
+      expect(component['returnMessageIds']()).toEqual([]);
+    } finally {
+      fixture.destroy();
+      Reflect.deleteProperty(Element.prototype, 'animate');
+    }
+  });
+
+  it('retains a failed return for retry and skips a deleted return target', async () => {
+    component['returnMessageIds'].set([encodeId('300')]);
+    const returning = component['navigateDown']();
+    expect(component['navigatingDown']()).toBe(true);
+    expect(component['pendingNavigation']()).toEqual({
+      type: ConversationTargetKind.Message,
+      messageId: encodeId('300'),
+    });
+    await component['navigateDown']();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`)
+      .flush('', { status: 503, statusText: 'Unavailable' });
+    await returning;
+    expect(component['navigatingDown']()).toBe(false);
+    expect(component['returnMessageIds']()).toEqual([encodeId('300')]);
+    const retrying = component['navigateDown']();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`)
+      .flush({ messages: [{ ...wireMessage, id: '299' }] });
+    await retrying;
+    expect(component['returnMessageIds']()).toEqual([]);
+    expect(component['conversation'].error()).toBe(ConversationError.Missing);
+    await component['navigateDown']();
+    expect(component['conversation'].error()).toBeUndefined();
+    http.expectNone(() => true);
+  });
+
+  it('forgets return points reached by manual scrolling and on leaving the conversation', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    const element: HTMLElement = fixture.nativeElement.querySelector('app-message');
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 20, 300, 100));
+    const later = encodeId('9007199254741999');
+    component['returnMessageIds'].set([later, testMessage.id]);
+    component.ionViewDidEnter();
+    await component['trackScroll']();
+    expect(component['returnMessageIds']()).toEqual([later]);
+    component.ionViewDidLeave();
+    expect(component['returnMessageIds']()).toEqual([]);
+  });
+
+  it('refreshes an offscreen conversation count on incoming messages without jumping down', async () => {
+    const data = TestBed.inject(ChatStore);
+    component['atBottom'].set(false);
+    incoming.next({ ...testMessage, id: encodeId('9007199254741999') });
+    expect(data.getReadState).toHaveBeenCalledWith(testChat.id);
+    expect(component['position']()).toBeUndefined();
   });
 
   it('preserves the message bottom when prepending removes its author header', async () => {
@@ -418,7 +551,7 @@ describe('ConversationPage', () => {
     component['menu']()!['selection'].set(undefined);
   });
 
-  it('clears the draft on navigation and ignores the old conversation pagination response', async () => {
+  it('saves the previous draft on navigation and ignores the old conversation pagination response', async () => {
     component['draft'].set('旧会话草稿');
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
@@ -434,12 +567,90 @@ describe('ConversationPage', () => {
     await loading;
     expect(component['conversation'].items()).toEqual([]);
     expect(component['draft']()).toBe('');
+    expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('旧会话草稿');
+    expect(TestBed.inject(DraftStore).get(encodeId('9007199254740995'))).toBeUndefined();
   });
+
+  it('keeps typing and reply selection local, persisting once when navigation starts', () => {
+    const drafts = TestBed.inject(DraftStore);
+    const write = vi.spyOn(window.localStorage, 'setItem');
+    for (const text of ['未', '未发', '未发送']) component['updateDraft'](text);
+    component['startReply'](testMessage);
+    expect(drafts.get(testChat.id)).toBeUndefined();
+    expect(write).not.toHaveBeenCalled();
+    component.ionViewWillLeave();
+    expect(drafts.get(testChat.id)).toMatchObject({ text: '未发送', replyTo: wireMessage.id });
+    expect(write).toHaveBeenCalledOnce();
+    component.ionViewDidLeave();
+    expect(write).toHaveBeenCalledOnce();
+  });
+
+  it('saves on backgrounding or pagehide, without saving on a visible event or after leaving', () => {
+    const drafts = TestBed.inject(DraftStore);
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    component['updateDraft']('后台保留');
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(drafts.get(testChat.id)).toBeUndefined();
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(drafts.get(testChat.id)?.text).toBe('后台保留');
+    component['updateDraft']('刷新保留');
+    window.dispatchEvent(new Event('pagehide'));
+    const saved = drafts.get(testChat.id);
+    expect(saved?.text).toBe('刷新保留');
+    component.ionViewDidLeave();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(drafts.get(testChat.id)).toBe(saved);
+  });
+
+  it('retains unsent text when cancelling an edit and saves that text when leaving during another edit', () => {
+    const drafts = TestBed.inject(DraftStore);
+    component['updateDraft']('还没有发送');
+    component['startReply'](testMessage);
+    component['startEdit'](testMessage);
+    component['updateDraft']('编辑已发送的消息');
+    expect(drafts.get(testChat.id)).toBeUndefined();
+    expect(component['draft']()).toBe('还没有发送');
+    component['cancelEdit']();
+    expect(component['draft']()).toBe('还没有发送');
+    component['startEdit'](testMessage);
+    component['updateDraft']('另一次编辑');
+    component.ionViewWillLeave();
+    expect(drafts.get(testChat.id)).toMatchObject({ text: '还没有发送', replyTo: wireMessage.id });
+  });
+
+  it.each(['background', 'transition', 'left'])(
+    'clears a sent draft persisted during the request: %s',
+    async (mode) => {
+      const drafts = TestBed.inject(DraftStore);
+      component['updateDraft']('正在发送');
+      const sending = component['sendMessage']();
+      const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
+      expect(drafts.get(testChat.id)).toBeUndefined();
+      if (mode === 'background') {
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+        document.dispatchEvent(new Event('visibilitychange'));
+      } else {
+        component.ionViewWillLeave();
+        vi.mocked(TestBed.inject(Router).isActive).mockReturnValue(false);
+        if (mode === 'left') component.ionViewDidLeave();
+      }
+      expect(drafts.get(testChat.id)?.text).toBe('正在发送');
+      request.flush({ ...wireMessage, message: '正在发送' });
+      await sending;
+      expect(drafts.get(testChat.id)).toBeUndefined();
+      component.ionViewDidLeave();
+      expect(drafts.get(testChat.id)).toBeUndefined();
+    },
+  );
 
   it('restores a draft after leaving and clears persisted text only after a successful send', async () => {
     component['updateDraft']('保留草稿');
     component.ionViewDidLeave();
     component.ionViewWillEnter();
+    if (component.threadId())
+      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
+        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     await fixture.whenStable();
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
     await fixture.whenStable();
@@ -454,9 +665,12 @@ describe('ConversationPage', () => {
 
   it('preserves the reply ID while typing during draft restoration and does not restore a cancelled reply', async () => {
     const drafts = TestBed.inject(DraftStore);
-    drafts.save(testChat.id, undefined, '回复草稿', testMessage.id);
     component.ionViewDidLeave();
+    drafts.save(testChat.id, undefined, '回复草稿', testMessage.id);
     component.ionViewWillEnter();
+    if (component.threadId())
+      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
+        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     await fixture.whenStable();
     const replyRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
@@ -466,14 +680,19 @@ describe('ConversationPage', () => {
     replyRequest.flush(structuredClone(wireMessage));
     await fixture.whenStable();
     expect(component['replyTo']()).toBeUndefined();
+    expect(drafts.get(testChat.id)).toMatchObject({ text: '回复草稿', replyTo: wireMessage.id });
+    component.ionViewWillLeave();
     expect(drafts.get(testChat.id)).toMatchObject({ text: '继续编辑', replyTo: undefined });
   });
 
-  it('keeps persisted text after a failed send', async () => {
+  it('keeps failed input locally and saves it when leaving', async () => {
     component['updateDraft']('待重试');
     const sending = component['sendMessage']();
     http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush('', { status: 503, statusText: 'Unavailable' });
     await sending;
+    expect(component['draft']()).toBe('待重试');
+    expect(TestBed.inject(DraftStore).get(testChat.id)).toBeUndefined();
+    component.ionViewDidLeave();
     expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('待重试');
   });
 
@@ -559,9 +778,17 @@ describe('ConversationPage', () => {
 
     component['draft'].set('相同文本');
     component['startReply'](testMessage);
-    const previousKey = component['clientGeneratedId']();
+    sending = component['sendMessage']();
+    const previous = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const previousKey = previous.request.body.clientGeneratedId;
+    previous.flush('', { status: 503, statusText: 'Unavailable' });
+    await sending;
     component['startReply']({ ...testMessage, id: encodeId('9007199254741005') });
-    expect(component['clientGeneratedId']()).not.toBe(previousKey);
+    sending = component['sendMessage']();
+    const changed = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    expect(changed.request.body.clientGeneratedId).not.toBe(previousKey);
+    changed.flush('', { status: 503, statusText: 'Unavailable' });
+    await sending;
     fixture.componentRef.setInput('id', '9007199254740995');
     fixture.detectChanges();
     http.expectOne('/_api/group/9007199254740995').flush({ ...wireChat, id: '9007199254740995' });
@@ -575,6 +802,9 @@ describe('ConversationPage', () => {
     component.ionViewDidLeave();
     read.mockReturnValue({ lastReadMessageId: encodeId('100'), unreadCount: 90 });
     component.ionViewWillEnter();
+    if (component.threadId())
+      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
+        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
       messages: [
         { ...wireMessage, id: '100' },
@@ -607,6 +837,9 @@ describe('ConversationPage', () => {
       unreadCount: 1,
     });
     component.ionViewWillEnter();
+    if (component.threadId())
+      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
+        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
       messages: [
         { ...wireMessage, id: '100' },
@@ -749,9 +982,11 @@ describe('ConversationPage', () => {
     component['draft'].set('主会话草稿');
     await enterThread();
     expect(component.threadId()).toBe(encodeId('100'));
+    expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('主会话草稿');
+    expect(TestBed.inject(DraftStore).get(testChat.id, encodeId('100'))).toBeUndefined();
     expect(component['draft']()).toBe('');
     expect(component['firstUnreadId']()).toBe(encodeId('102'));
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('话题 · 测试群');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
     expect(component['backHref']()).toBe(`/chats/chat/${wireChat.id}`);
     component['draft'].set('话题草稿');
     await enterThread('99', {});
@@ -799,6 +1034,7 @@ describe('ConversationPage', () => {
     readState.mockReturnValue({ lastReadMessageId: encodeId('100') });
     fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
+    for (const req of http.match(`/_api/chats/${wireChat.id}/messages/100`)) req.flush({ ...wireMessage, id: '100' });
     http.expectNone(`/_api/chats/${wireChat.id}/threads/100/read-state`);
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100&threadId=100`).flush({
       messages: [
@@ -811,6 +1047,9 @@ describe('ConversationPage', () => {
     component.ionViewDidLeave();
     readState.mockReturnValue(undefined);
     component.ionViewWillEnter();
+    if (component.threadId())
+      for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
+        req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     http
       .expectOne(`/_api/chats/${wireChat.id}/threads/100/read-state`)
       .flush({ lastReadMessageId: '101', unreadCount: 1 });
@@ -871,6 +1110,7 @@ describe('ConversationPage', () => {
     request.flush({ ...wireMessage, id: '103', replyRootId: '100' });
     await sending;
     expect(component['draft']()).toBe('另一个话题草稿');
+    expect(TestBed.inject(DraftStore).get(testChat.id, encodeId('100'))).toBeUndefined();
     expect(component['conversation'].items().map((item) => item.id)).toEqual([
       encodeId('99'),
       encodeId('101'),
@@ -883,14 +1123,14 @@ describe('ConversationPage', () => {
     chatInfo.remember([{ ...testChat, name: '话题所属群' }]);
     vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue(undefined);
     await enterThread();
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('话题 · 话题所属群');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: true }));
     await component['updateThread']();
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('话题 · 话题所属群');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
     chatInfo.remember([{ ...testChat, name: '群名称更新' }]);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('话题 · 群名称更新');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
   });
 
   it('loads a missing canonical subscription after the owner invalidates it', async () => {
@@ -1002,6 +1242,7 @@ describe('ConversationPage', () => {
   it('cancels a topic read-state request when the page is destroyed', async () => {
     fixture.componentRef.setInput('threadId', '100');
     fixture.detectChanges();
+    for (const req of http.match(`/_api/chats/${wireChat.id}/messages/100`)) req.flush({ ...wireMessage, id: '100' });
     const request = http.expectOne(`/_api/chats/${wireChat.id}/threads/100/read-state`);
     fixture.destroy();
     expect(request.cancelled).toBe(true);
@@ -1114,5 +1355,30 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     expect(component['menu']()!['message']()?.message).toBe('编辑后的消息');
     expect(component['menu']()!['selection']()).not.toHaveProperty('message');
+  });
+  it('edits the selected message without overwriting the separate unsent draft', async () => {
+    component['updateDraft']('未发送的草稿');
+    component['startEdit'](testMessage);
+    component['updateDraft']('编辑内容');
+    const sending = component['sendMessage']({ messageType: MessageType.text, attachmentIds: [encodeId('100')] });
+    const request = http.expectOne((req) => req.method === 'PATCH');
+    expect(request.request.body).toEqual({ message: '编辑内容', attachmentIds: ['100'] });
+    request.flush({ ...wireMessage, message: '编辑内容', isEdited: true });
+    await sending;
+    expect(component['conversation'].items()[0].message).toBe('编辑内容');
+    expect(component['draft']()).toBe('未发送的草稿');
+    expect(component['editing']()).toBeUndefined();
+  });
+
+  it('sends ordinary files without text and preserves text for a separate message', async () => {
+    component['updateDraft']('稍后发送的文字');
+    const sending = component['sendMessage']({ messageType: MessageType.file, attachmentIds: [encodeId('101')] });
+    const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
+    expect(request.request.body.messageType).toBe('file');
+    expect(request.request.body.message).toBeUndefined();
+    expect(request.request.body.attachmentIds).toEqual(['101']);
+    request.flush({ ...wireMessage, id: '9007199254741010', messageType: 'file', message: null });
+    await sending;
+    expect(component['draft']()).toBe('稍后发送的文字');
   });
 });

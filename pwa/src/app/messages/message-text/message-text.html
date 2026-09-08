@@ -1,0 +1,13 @@
+@for (part of parts(); track $index) {
+  @if (!interactive()) {
+    <ng-container>{{ part.text }}</ng-container>
+  } @else if (part.uid) {
+    <button type="button" (click)="profile(part.uid, $event)">{{ part.text }}</button>
+  } @else if (part.internal) {
+    <a [href]="part.url" (click)="follow(part.internal, $event)">{{ part.text }}</a>
+  } @else if (part.url) {
+    <a [href]="part.url" target="_blank" rel="noopener" (click)="$event.stopPropagation()">{{ part.text }}</a>
+  } @else {
+    <ng-container>{{ part.text }}</ng-container>
+  }
+}

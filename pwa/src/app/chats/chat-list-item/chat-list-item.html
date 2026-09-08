@@ -20,31 +20,7 @@
           [ngTemplateOutletContext]="{ $implicit: 'start' }"></ng-container>
       </ion-buttons>
     }
-    <span slot="start" class="avatar-stack">
-      <ion-avatar [class.placeholder]="!entry().avatar" [class.icon-avatar]="!!entry().icon">
-        @if (entry().icon; as icon) {
-          <ion-icon [icon]="icon"></ion-icon>
-        } @else if (entry().avatar; as src) {
-          <img [src]="src" width="48" height="48" decoding="async" />
-        } @else {
-          {{ entry().avatarName?.slice(0, 1) ?? entry().title?.slice(0, 1) }}
-        }
-      </ion-avatar>
-      @if (entry().badgeIcon || entry().badgeAvatar || entry().badgeName) {
-        <ion-avatar
-          class="avatar-badge"
-          [class.placeholder]="!entry().badgeAvatar"
-          [class.icon-avatar]="!!entry().badgeIcon">
-          @if (entry().badgeIcon; as icon) {
-            <ion-icon [icon]="icon"></ion-icon>
-          } @else if (entry().badgeAvatar; as src) {
-            <img [src]="src" width="26" height="26" decoding="async" />
-          } @else {
-            {{ entry().badgeName?.slice(0, 1) }}
-          }
-        </ion-avatar>
-      }
-    </span>
+    <app-chat-avatar slot="start" [entry]="entry()" />
     <ion-label class="ion-text-nowrap">
       <h3>
         {{ entry().title }}

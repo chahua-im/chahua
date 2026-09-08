@@ -30,12 +30,16 @@ export class DraftStore {
   save(chatId: SnowflakeID, threadId: SnowflakeID | undefined, text: string, replyTo?: SnowflakeID) {
     const previous = this.get(chatId, threadId);
     const replyId = replyTo ? decodeId(replyTo) : undefined;
+    if (!text.trim() && !replyId) {
+      this.clear(chatId, threadId);
+      return;
+    }
     if (previous?.text === text && previous?.replyTo === replyId) return;
-    this.update(chatId, threadId, text.trim() || replyId ? { text, replyTo: replyId, savedAt: Date.now() } : undefined);
+    this.update(chatId, threadId, { text, replyTo: replyId, savedAt: Date.now() });
   }
 
   clear(chatId: SnowflakeID, threadId?: SnowflakeID) {
-    this.update(chatId, threadId, undefined);
+    if (this.get(chatId, threadId)) this.update(chatId, threadId, undefined);
   }
 
   private key(chatId: SnowflakeID, threadId?: SnowflakeID) {

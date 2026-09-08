@@ -59,7 +59,7 @@ export enum SettingsDismissRole {
   host: { class: 'ion-page' },
 })
 export class Settings {
-  private readonly modal = inject(ModalController);
+  private readonly modals = inject(ModalController);
   protected readonly nav = inject(IonNav);
   protected readonly session = inject(SessionStore);
   protected readonly notifications = inject(PushNotifications);
@@ -81,11 +81,11 @@ export class Settings {
   }
 
   protected close() {
-    return this.modal.dismiss();
+    return this.modals.dismiss();
   }
 
   protected openSaved() {
-    return this.modal.dismiss(undefined, SettingsDismissRole.Saved);
+    return this.modals.dismiss(undefined, SettingsDismissRole.Saved);
   }
 
   protected async setNotifications(event: ToggleCustomEvent) {

@@ -1,0 +1,44 @@
+@if (query().trim()) {
+  <ion-list>
+    @if (groups().length) {
+      <ion-list-header>群组</ion-list-header>
+    }
+    @for (group of groups(); track group.id) {
+      <ion-item [button]="true" (click)="openChat(group.id)">
+        @if (group.avatar) {
+          <ion-avatar slot="start"><img [src]="group.avatar" /></ion-avatar>
+        }
+        <ion-label>
+          {{ group.name }}
+          <p>{{ group.description }}</p>
+        </ion-label>
+      </ion-item>
+    }
+    @if (cursor()) {
+      <ion-button fill="clear" [disabled]="loading()" (click)="search(true)">加载更多群组</ion-button>
+    }
+    @if (people().length) {
+      <ion-list-header>用户</ion-list-header>
+    }
+    @for (person of people(); track person.uid) {
+      <ion-item [button]="true" (click)="profile(person)">
+        @if (person.avatarUrl) {
+          <ion-avatar slot="start"><img [src]="person.avatarUrl" /></ion-avatar>
+        }
+        <ion-label>{{ person.username || person.uid }}</ion-label>
+      </ion-item>
+    }
+  </ion-list>
+  @if (loading()) {
+    <div class="loading-status"><ion-spinner /></div>
+  } @else if (error()) {
+    <p class="ion-padding">
+      搜索失败。
+      <ion-button fill="clear" (click)="search()">重试</ion-button>
+    </p>
+  } @else if (!groups().length && !people().length) {
+    <p class="ion-padding ion-text-center">没有找到结果</p>
+  }
+} @else {
+  <p class="ion-padding ion-text-center">搜索群组和用户</p>
+}
