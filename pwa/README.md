@@ -22,8 +22,7 @@ npm run test:pwa
 
 开发服务地址为 `http://localhost:4200`，生产构建输出位于 `dist/app`。HTTP 和 WebSocket 使用同源的 `/_api` 路径；开发服务代理到 `https://chahui.app/_api`。
 
-登录 token 的优先级是 URL 的 `token` 参数、localStorage、开发预设。URL token 在读取后从地址栏移除，客户端通过 `/auth/refresh` 刷新 token，并读取 `/users/me`。浏览器已有但失效的 token 会显示授权错误。
-
+登录 token 的优先级是 URL 的 `token` 参数、localStorage、开发预设。
 开发预设放在 Git 忽略的 `.env.local`，格式见 `.env.example`。`npm start` 通过编译常量注入 `CHAHUA_DEV_TOKEN`，修改后需要重启开发服务。生产构建不读取该文件。预设会随开发页面下发，能够访问开发服务的浏览器可以使用该身份；真实 token 不应提交到仓库。
 
 ## API 生成
