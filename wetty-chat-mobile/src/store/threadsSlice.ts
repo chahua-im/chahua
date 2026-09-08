@@ -3,7 +3,7 @@ import { createSelector, createSlice } from '@reduxjs/toolkit';
 import type { RootState } from './index';
 import type { MessagePreview } from '@/api/messages';
 import type { StoredThreadListItem, ThreadListItem } from '@/api/threads';
-import { applyIncomingId, type MentionIdCacheStatus } from './mentionIdCache';
+import { applyIncomingId, type UnreadIdCacheStatus } from './unreadIdCache';
 
 export interface ThreadUpdatePayload {
   threadRootId: string;
@@ -30,9 +30,9 @@ interface ThreadsState {
   subscriptionByThreadId: Record<string, boolean>;
   archivedByThreadId: Record<string, boolean>;
   unreadMentionIdsByThread: Record<string, string[]>;
-  unreadMentionIdsStatusByThread: Record<string, MentionIdCacheStatus>;
+  unreadMentionIdsStatusByThread: Record<string, UnreadIdCacheStatus>;
   unreadReactionIdsByThread: Record<string, string[]>;
-  unreadReactionIdsStatusByThread: Record<string, MentionIdCacheStatus>;
+  unreadReactionIdsStatusByThread: Record<string, UnreadIdCacheStatus>;
 }
 
 const initialState: ThreadsState = {
@@ -225,6 +225,21 @@ const threadsSlice = createSlice({
       delete state.unreadReactionIdsByThread[tid];
       delete state.unreadReactionIdsStatusByThread[tid];
     },
+    /**
+     * Record just the read position (lastReadMessageId) without touching the
+     * unread counts — used when the read state is fetched for display purposes
+     * (opening a thread) and the counts in the payload are absent, unlike
+     * `setThreadReadState` where counts are authoritative.
+     */
+    setThreadLastReadMessageId(
+      state,
+      action: PayloadAction<{ threadRootId: string; lastReadMessageId: string | null }>,
+    ) {
+      const thread = state.items.find((t) => t.threadRootMessage.id === action.payload.threadRootId);
+      if (thread) {
+        thread.lastReadMessageId = action.payload.lastReadMessageId;
+      }
+    },
     setThreadUnreadReactionIds(state, action: PayloadAction<{ threadRootId: string; ids: string[] }>) {
       const tid = action.payload.threadRootId;
       // Same mid-flight guard as mentions.
@@ -237,7 +252,7 @@ const threadsSlice = createSlice({
     },
     setThreadUnreadReactionIdsStatus(
       state,
-      action: PayloadAction<{ threadRootId: string; status: MentionIdCacheStatus }>,
+      action: PayloadAction<{ threadRootId: string; status: UnreadIdCacheStatus }>,
     ) {
       state.unreadReactionIdsStatusByThread[action.payload.threadRootId] = action.payload.status;
     },
@@ -255,7 +270,7 @@ const threadsSlice = createSlice({
     },
     setThreadUnreadMentionIdsStatus(
       state,
-      action: PayloadAction<{ threadRootId: string; status: MentionIdCacheStatus }>,
+      action: PayloadAction<{ threadRootId: string; status: UnreadIdCacheStatus }>,
     ) {
       state.unreadMentionIdsStatusByThread[action.payload.threadRootId] = action.payload.status;
     },
@@ -308,6 +323,7 @@ export const {
   incrementThreadUnreadMentions,
   incrementThreadUnreadReactions,
   setThreadReadState,
+  setThreadLastReadMessageId,
   setThreadUnreadMentionIds,
   setThreadUnreadMentionIdsStatus,
   setThreadUnreadReactionIds,
@@ -363,15 +379,14 @@ export const selectThreadUnreadReactions = (state: RootState, threadRootId: stri
 export const selectThreadUnreadMentionIds = (state: RootState, threadRootId: string): string[] =>
   state.threads.unreadMentionIdsByThread[threadRootId] ?? [];
 
-export const selectThreadUnreadMentionIdsStatus = (state: RootState, threadRootId: string): MentionIdCacheStatus =>
+export const selectThreadUnreadMentionIdsStatus = (state: RootState, threadRootId: string): UnreadIdCacheStatus =>
   state.threads.unreadMentionIdsStatusByThread[threadRootId] ?? 'idle';
 
 export const selectThreadUnreadReactionIds = (state: RootState, threadRootId: string): string[] =>
   state.threads.unreadReactionIdsByThread[threadRootId] ?? [];
 
-export const selectThreadUnreadReactionIdsStatus = (state: RootState, threadRootId: string): MentionIdCacheStatus =>
+export const selectThreadUnreadReactionIdsStatus = (state: RootState, threadRootId: string): UnreadIdCacheStatus =>
   state.threads.unreadReactionIdsStatusByThread[threadRootId] ?? 'idle';
-// Currently unused — kept for future thread detail UI that may need store-side read position.
 export const selectThreadLastReadMessageId = (state: RootState, threadId: string | undefined): string | null => {
   return selectThreadByRootId(state, threadId)?.lastReadMessageId ?? null;
 };

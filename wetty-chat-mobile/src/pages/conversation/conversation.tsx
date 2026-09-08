@@ -5,6 +5,8 @@ import { atCircle, chevronDown, heartOutline } from 'ionicons/icons';
 import { useSelector } from 'react-redux';
 import { getMessage, type MessageResponse, type User } from '@/api/messages';
 import { selectCurrentUser } from '@/store/userSlice';
+import { selectThreadLastReadMessageId, selectThreadUnreadCount } from '@/store/threadsSlice';
+import type { RootState } from '@/store';
 import { ChatVirtualScroll } from '@/components/chat/virtualScroll/ChatVirtualScroll';
 import type { ChatRow } from '@/components/chat/virtualScroll/types';
 import { type MessageComposeBarHandle } from '@/components/chat/compose/MessageComposeBar';
@@ -65,7 +67,26 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     initialResumeMessageId ? `${storeChatId}:${initialResumeMessageId}` : null,
   );
 
-  const { name, isAdmin, isMuted, lastReadMessageId, unreadCount, isDm, peer } = useChatMetadata({ chatId, threadId });
+  const {
+    name,
+    isAdmin,
+    isMuted,
+    lastReadMessageId: chatLastReadMessageId,
+    unreadCount,
+    isDm,
+    peer,
+  } = useChatMetadata({ chatId, threadId });
+  // Thread unread and read position live in threadsSlice (same source the chat/thread
+  // list badges read); the chat-level values from useChatMetadata are always 0/null
+  // for threads.
+  const threadUnreadCount = useSelector((state: RootState) =>
+    threadId ? selectThreadUnreadCount(state, threadId) : 0,
+  );
+  const threadLastReadMessageId = useSelector((state: RootState) =>
+    threadId ? selectThreadLastReadMessageId(state, threadId) : null,
+  );
+  const scrollToBottomUnreadCount = threadId ? threadUnreadCount : unreadCount;
+  const lastReadMessageId = threadId ? threadLastReadMessageId : chatLastReadMessageId;
   const chatName = threadId ? t`Thread` : (name ?? t`Loading...`);
 
   // DM is read-only (compose, pins, reactions, edits) when the peer is no
@@ -102,6 +123,8 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
   );
 
   const composeBarRef = useRef<MessageComposeBarHandle | null>(null);
+  // Filled once by getThreadReadState on open, read synchronously for the
+  // initial anchor. The live read position lives in threadsSlice.
   const threadLastReadMessageIdRef = useRef<string | null>(null);
 
   const {
@@ -133,7 +156,7 @@ function ConversationPane({ chatId, threadId, backAction }: ConversationPaneProp
     isDm,
     initialResumeMessageId,
     lastReadMessageId,
-    scrollToBottomUnreadCount: unreadCount,
+    scrollToBottomUnreadCount,
     threadLastReadMessageIdRef,
     formatDateSeparator: formatDateSeparatorForLocale,
     showToast,

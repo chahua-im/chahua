@@ -35,14 +35,14 @@ export interface UseReactionJumperResult {
   canJump: boolean;
   /** Unread-reaction message count, shown as the FAB badge. */
   unreadCount: number;
-  /** Jump to the next message with new reactions (oldest-first, cycling). */
+  /** Jump to the next message with new reactions (oldest-first, single pass). */
   jumpToNextReaction: () => Promise<void>;
 }
 
 /**
  * Thin reaction-specific wiring over the shared unread-id jumper engine.
  * Unlike mentions, one message can carry several new reactions but appears in
- * the cycle only once (the server aggregates per message).
+ * the pass only once (the server aggregates per message).
  */
 export function useReactionJumper({
   chatId,

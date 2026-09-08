@@ -8,7 +8,7 @@ import type { MemberSummary } from '@/api/users';
 import type { GroupRole } from '@/api/group';
 import { UNREAD_BADGE_COUNT_CAP } from '@/utils/unreadBadge';
 import { compareMessageOrder, isSameMessage } from './messageProjection';
-import { applyIncomingId, type MentionIdCacheStatus } from './mentionIdCache';
+import { applyIncomingId, type UnreadIdCacheStatus } from './unreadIdCache';
 
 export interface ChatMeta {
   name: string | null;
@@ -29,10 +29,10 @@ interface ChatListMeta {
   unreadCount?: number;
   unreadMentions?: number;
   unreadMentionIds?: string[];
-  unreadMentionIdsStatus?: MentionIdCacheStatus;
+  unreadMentionIdsStatus?: UnreadIdCacheStatus;
   unreadReactions?: number;
   unreadReactionIds?: string[];
-  unreadReactionIdsStatus?: MentionIdCacheStatus;
+  unreadReactionIdsStatus?: UnreadIdCacheStatus;
   lastReadMessageId?: string | null;
   lastMessage?: MessagePreview | null;
   inList?: boolean;
@@ -406,7 +406,7 @@ const chatsSlice = createSlice({
         inList: true,
       };
     },
-    setChatUnreadMentionIdsStatus(state, action: PayloadAction<{ chatId: string; status: MentionIdCacheStatus }>) {
+    setChatUnreadMentionIdsStatus(state, action: PayloadAction<{ chatId: string; status: UnreadIdCacheStatus }>) {
       const entry = getChatEntry(state, action.payload.chatId);
       entry.liveProjection = {
         ...entry.liveProjection,
@@ -462,7 +462,7 @@ const chatsSlice = createSlice({
         inList: true,
       };
     },
-    setChatUnreadReactionIdsStatus(state, action: PayloadAction<{ chatId: string; status: MentionIdCacheStatus }>) {
+    setChatUnreadReactionIdsStatus(state, action: PayloadAction<{ chatId: string; status: UnreadIdCacheStatus }>) {
       const entry = getChatEntry(state, action.payload.chatId);
       entry.liveProjection = {
         ...entry.liveProjection,
@@ -608,7 +608,7 @@ export function selectChatUnreadMentionIds(state: RootState, chatId: string): st
   return getEffectiveListMeta(entry).unreadMentionIds ?? [];
 }
 
-export function selectChatUnreadMentionIdsStatus(state: RootState, chatId: string): MentionIdCacheStatus {
+export function selectChatUnreadMentionIdsStatus(state: RootState, chatId: string): UnreadIdCacheStatus {
   return getEffectiveListMeta(state.chats.byId[chatId]).unreadMentionIdsStatus ?? 'idle';
 }
 
@@ -622,7 +622,7 @@ export function selectChatUnreadReactionIds(state: RootState, chatId: string): s
   return getEffectiveListMeta(entry).unreadReactionIds ?? [];
 }
 
-export function selectChatUnreadReactionIdsStatus(state: RootState, chatId: string): MentionIdCacheStatus {
+export function selectChatUnreadReactionIdsStatus(state: RootState, chatId: string): UnreadIdCacheStatus {
   return getEffectiveListMeta(state.chats.byId[chatId]).unreadReactionIdsStatus ?? 'idle';
 }
 

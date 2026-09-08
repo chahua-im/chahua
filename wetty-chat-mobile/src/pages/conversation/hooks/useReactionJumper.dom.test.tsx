@@ -165,7 +165,7 @@ describe('useReactionJumper', () => {
     expect(jumpToMessage).not.toHaveBeenCalled();
   });
 
-  it('jumps to the oldest reacted message on first tap, then cycles newer, then wraps', async () => {
+  it('jumps oldest-first through each reacted message once, then hides the fab', async () => {
     setChatState({ unreadReactions: 2, ids: ['30', '20'], status: 'ready' });
     await renderHook();
 
@@ -179,10 +179,37 @@ describe('useReactionJumper', () => {
     });
     expect(jumpToMessage).toHaveBeenLastCalledWith('30');
 
+    // Pass exhausted: the fab hides and further taps do nothing.
+    expect(state.canJump).toBe(false);
     await act(async () => {
       await state.jumpToNextReaction();
     });
-    expect(jumpToMessage).toHaveBeenLastCalledWith('20');
+    expect(jumpToMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('resumes the chronological pass when a newer id arrives after exhaustion', async () => {
+    setChatState({ unreadReactions: 1, ids: ['20'], status: 'ready' });
+    await renderHook();
+
+    await act(async () => {
+      await state.jumpToNextReaction();
+    });
+    expect(state.canJump).toBe(false);
+
+    // A WS notification prepends a fresh reaction to the ready cache; the pass
+    // resumes chronologically, so the next target is the new (newest) id.
+    setChatState({ unreadReactions: 2, ids: ['30', '20'], status: 'ready' });
+    await act(async () => {
+      root.render(
+        <TestComponent chatId="chat-1" jumpToMessage={jumpToMessage} onRender={(nextState) => (state = nextState)} />,
+      );
+    });
+
+    expect(state.canJump).toBe(true);
+    await act(async () => {
+      await state.jumpToNextReaction();
+    });
+    expect(jumpToMessage).toHaveBeenLastCalledWith('30');
   });
 
   it('does not jump when there are no unread reactions', async () => {
@@ -208,7 +235,7 @@ describe('useReactionJumper', () => {
     );
   });
 
-  it('cycles thread reactions oldest-first within the thread cache', async () => {
+  it('visits thread reactions oldest-first once within the thread cache, then hides', async () => {
     setThreadState({ unreadReactions: 2, ids: ['30', '20'], status: 'ready' });
     await renderHook(undefined, { threadId: 'thread-1' });
 
@@ -222,10 +249,11 @@ describe('useReactionJumper', () => {
     });
     expect(jumpToMessage).toHaveBeenLastCalledWith('30');
 
+    expect(state.canJump).toBe(false);
     await act(async () => {
       await state.jumpToNextReaction();
     });
-    expect(jumpToMessage).toHaveBeenLastCalledWith('20');
+    expect(jumpToMessage).toHaveBeenCalledTimes(2);
   });
 
   it('shows a toast and invalidates the cache when the id fetch fails', async () => {

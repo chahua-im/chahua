@@ -4,42 +4,46 @@
  * both the mention/reply and the reaction badge pipelines.
  */
 
-export type MentionIdCacheStatus = 'idle' | 'loading' | 'ready';
+export type UnreadIdCacheStatus = 'idle' | 'loading' | 'ready';
 
 /** Prepend a newly arrived unread id, deduped, keeping the list newest-first. */
-export function prependMentionId(existing: string[] | undefined, messageId: string): string[] {
+function prependUnreadId(existing: string[] | undefined, messageId: string): string[] {
   return [messageId, ...(existing ?? []).filter((id) => id !== messageId)];
 }
 
 /** Cache fields an incoming unread badge increment is applied to. */
 export interface UnreadIdCacheMeta {
   ids?: string[] | undefined;
-  status?: MentionIdCacheStatus | undefined;
+  status?: UnreadIdCacheStatus | undefined;
 }
 
 /**
  * Cache discipline for one incoming unread badge increment: prepend the new id
  * when the cache is loaded (deduped, newest-first) so it is jumpable without a
  * refetch; invalidate a mid-flight fetch — its response predates the increment
- * and must not be cached as fresh.
+ * and must not be cached as fresh. `alreadyPresent` reports whether the id was
+ * already in the loaded cache (undefined when not ready) — used by reaction
+ * badges, which aggregate one message's many reactions into a single unit.
  */
 export function applyIncomingId(
   meta: UnreadIdCacheMeta,
   messageId: string | undefined,
-): { ids: string[]; status?: MentionIdCacheStatus } {
-  const ids = messageId && meta.status === 'ready' ? prependMentionId(meta.ids, messageId) : (meta.ids ?? []);
+): { ids: string[]; status?: UnreadIdCacheStatus; alreadyPresent?: boolean } {
+  const ids = messageId && meta.status === 'ready' ? prependUnreadId(meta.ids, messageId) : (meta.ids ?? []);
   const status = meta.status === 'loading' ? 'idle' : meta.status;
-  return { ids, status };
+  const alreadyPresent = meta.status === 'ready' && messageId !== undefined && meta.ids?.includes(messageId);
+  return { ids, status, alreadyPresent };
 }
 
 /**
  * Pick the next unread id to jump to. `ids` are newest-first (descending), so
  * the oldest id is the last element.
  *
- * Rule: visit ids in chronological order (oldest -> newest), wrapping to the
- * oldest when the newest is reached, or when `lastJumpedId` is no longer in
- * the list (e.g. after mark-read shrank it). Returns `null` when there are no
- * ids.
+ * Rule: visit ids in chronological order (oldest -> newest) in a single pass —
+ * returns `null` once the newest has been visited instead of wrapping (the FAB
+ * disappears at the end of the pass). When `lastJumpedId` is no longer in the
+ * list (e.g. after mark-read shrank it), the pass restarts from the oldest
+ * remaining id. Returns `null` when there are no ids.
  */
 export function pickNextUnreadId(ids: string[], lastJumpedId: string | null): string | null {
   if (ids.length === 0) return null;
@@ -48,6 +52,6 @@ export function pickNextUnreadId(ids: string[], lastJumpedId: string | null): st
   if (lastJumpedId === null) return oldest;
   const idx = ids.indexOf(lastJumpedId);
   if (idx === -1) return oldest;
-  // idx - 1 moves toward the newer end (front of the array); wrap to oldest past the newest.
-  return ids[idx - 1] ?? oldest;
+  // idx - 1 moves toward the newer end (front of the array); past the newest the pass is over.
+  return ids[idx - 1] ?? null;
 }

@@ -35,7 +35,7 @@ export interface UseMentionJumperResult {
   canJump: boolean;
   /** Unread-mention count, shown as the FAB badge. */
   unreadCount: number;
-  /** Jump to the next unread mention (oldest-first, cycling). */
+  /** Jump to the next unread mention (oldest-first, single pass). */
   jumpToNextMention: () => Promise<void>;
 }
 
