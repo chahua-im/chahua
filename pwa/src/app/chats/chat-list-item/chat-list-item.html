@@ -6,13 +6,14 @@
     </ion-item-options>
   }
   <ion-item
+    [button]="button()"
     [routerLink]="entry().link"
     routerLinkActive="selected"
     [routerLinkActiveOptions]="{ exact: true }"
     #active="routerLinkActive"
     [color]="active.isActive ? 'primary' : undefined"
     [detail]="false"
-    (click)="active.isActive && selected.emit()">
+    (click)="(button() || active.isActive) && selected.emit()">
     @if (actionsAlwaysVisible() && startActions().length) {
       <ion-buttons slot="start">
         <ng-container

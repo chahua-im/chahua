@@ -1,9 +1,14 @@
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
+import { By } from '@angular/platform-browser';
+import { checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
-import { MessageType, type MessagePreview } from '../../../generated/models';
+import { AttachmentUploadPurpose, MessageType, type MessagePreview } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
-import { Message } from './message';
+import { Message, type MessageContent } from './message';
+import { MessageDelivery } from '../message-status';
+import { type AttachmentUpload, UploadStatus } from '../upload';
 
 describe('Message', () => {
   afterEach(() => vi.useRealTimers());
@@ -240,6 +245,13 @@ describe('Message', () => {
     expect(!!element.querySelector('.bubble app-message-reactions')).toBe(!overlay);
     expect(!!element.querySelector('.message-stack > app-message-reactions.external')).toBe(overlay);
     expect(element.querySelectorAll('time')).toHaveLength(1);
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+    fixture.detectChanges();
+    expect(element.querySelectorAll('app-message-status ion-icon')).toHaveLength(1);
+    expect(fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon).toBe(
+      checkmarkCircleOutline,
+    );
   });
 
   it('keeps sticker reactions outside the transparent media and its timestamp on the sticker', async () => {
@@ -272,6 +284,11 @@ describe('Message', () => {
     fixture.componentInstance.react.subscribe(react);
     reaction.click();
     expect(react).toHaveBeenCalledWith('❤️');
+    fixture.componentRef.setInput('own', true);
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.css('.media-time app-message-status ion-icon')).componentInstance.icon).toBe(
+      checkmarkCircle,
+    );
   });
 
   it('opens the message menu by right click with the measured bubble and group position', async () => {
@@ -406,5 +423,160 @@ describe('Message', () => {
     vi.advanceTimersByTime(400);
     expect(menu).not.toHaveBeenCalled();
     expect(jump).not.toHaveBeenCalled();
+  });
+
+  it('defaults confirmed own messages to Sent and follows delivery changes after the timestamp', async () => {
+    const fixture = await render();
+    const element: HTMLElement = fixture.nativeElement;
+    const icon = () =>
+      fixture.debugElement.query(By.css('.timestamp app-message-status ion-icon'))?.componentInstance.icon;
+    expect(icon()).toBeUndefined();
+    fixture.componentRef.setInput('own', true);
+    fixture.detectChanges();
+    expect(icon()).toBe(checkmarkCircle);
+    expect(element.querySelector('time')?.textContent).toContain('09:07');
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+    fixture.detectChanges();
+    expect(icon()).toBe(checkmarkCircleOutline);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sent);
+    fixture.detectChanges();
+    expect(icon()).toBe(checkmarkCircle);
+    fixture.componentRef.setInput('own', false);
+    fixture.detectChanges();
+    expect(icon()).toBeUndefined();
+  });
+
+  it.each([false, true])('keeps status in the text timestamp when reactions are present: %s', async (reactions) => {
+    const fixture = await render();
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      isEdited: true,
+      reactions: reactions ? [{ emoji: '👍', count: 1 }] : [],
+    });
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelectorAll('time')).toHaveLength(1);
+    expect(element.querySelector('time')?.textContent).toContain('已编辑');
+    expect(element.querySelectorAll('time app-message-status ion-icon')).toHaveLength(1);
+    expect(!!element.querySelector('.message-footer time')).toBe(reactions);
+  });
+
+  it.each([
+    [MessageType.text, undefined],
+    [MessageType.text, 'image/jpeg'],
+    [MessageType.text, 'video/mp4'],
+    [MessageType.audio, 'audio/ogg'],
+    [MessageType.file, 'application/pdf'],
+    [MessageType.sticker, 'image/webp'],
+  ])('offers message retry for failed %s / %s even while server interactions are disabled', async (type, kind) => {
+    const fixture = await render();
+    const message: MessageContent = {
+      ...testMessage,
+      id: undefined,
+      messageType: type,
+      message: kind ? '' : '待发送',
+      attachments: kind ? [{ kind, url: 'blob:local-attachment', fileName: '附件', size: 5 }] : [],
+    };
+    fixture.componentRef.setInput('message', message);
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('interactive', false);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Failed);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.hasAttribute('data-message-id')).toBe(false);
+    expect(element.querySelectorAll('time')).toHaveLength(1);
+    expect(element.querySelector('app-message-status ion-icon')).toBeNull();
+    const retry = vi.fn();
+    fixture.componentInstance.retry.subscribe(retry);
+    const button = element.querySelector<HTMLButtonElement>('.retry-button')!;
+    expect(button.textContent).toContain('发送失败');
+    button.click();
+    expect(retry).toHaveBeenCalledExactlyOnceWith(undefined);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+    fixture.detectChanges();
+    expect(element.querySelector('.retry-button')).toBeNull();
+    expect(element.querySelectorAll('app-message-status ion-icon')).toHaveLength(1);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Failed);
+    fixture.componentRef.setInput('preview', true);
+    fixture.detectChanges();
+    expect(element.querySelector('.retry-button')).toBeNull();
+  });
+
+  it.each([
+    [undefined, true],
+    [undefined, false],
+    [testMessage.id, false],
+  ])('blocks server actions for message ID %s and interactive %s', async (id, interactive) => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      id,
+      replyToMessage: { ...testMessage, mentions: [] },
+      reactions: [{ emoji: '👍', count: 1 }],
+      threadInfo: { replyCount: 1 },
+    });
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('interactive', interactive);
+    fixture.componentRef.setInput('canOpenThread', true);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.hasAttribute('data-message-id')).toBe(id != null);
+    expect(element.querySelector('.reply-button, button.reaction, .swipe-reply')).toBeNull();
+    const emitted = vi.fn();
+    fixture.componentInstance.menu.subscribe(emitted);
+    fixture.componentInstance.reply.subscribe(emitted);
+    fixture.componentInstance.jump.subscribe(emitted);
+    fixture.componentInstance.react.subscribe(emitted);
+    fixture.componentInstance.openThread.subscribe(emitted);
+    element.querySelector<HTMLButtonElement>('.reply-preview')!.click();
+    element.querySelector<HTMLButtonElement>('.thread-entry')?.click();
+    element.querySelector<HTMLElement>('.avatar')?.click();
+    const bubble = element.querySelector<HTMLElement>('.bubble')!;
+    bubble.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    vi.useFakeTimers();
+    pointer(bubble, 'pointerdown', { clientX: 150 });
+    vi.advanceTimersByTime(400);
+    pointer(bubble, 'pointermove', { clientX: 70 });
+    pointer(bubble, 'pointerup');
+    expect(emitted).not.toHaveBeenCalled();
+    if (id == null) {
+      expect(element.querySelector('app-message-status ion-icon, .thread-entry')).toBeNull();
+    }
+  });
+
+  it('passes live uploads to attachments and waits for delivery confirmation after an upload is ready', async () => {
+    const fixture = await render();
+    const upload = {
+      file: new File(['image'], '图片.jpg', { type: 'image/jpeg' }),
+      url: 'blob:pending-image',
+      purpose: AttachmentUploadPurpose.media,
+      state: signal<ReturnType<AttachmentUpload['state']>>({ status: UploadStatus.Processing, progress: 0 }),
+      retry: vi.fn<AttachmentUpload['retry']>(),
+    } satisfies Pick<AttachmentUpload, 'file' | 'url' | 'purpose' | 'state' | 'retry'>;
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      id: undefined,
+      message: '',
+      attachments: [{ kind: upload.file.type, url: upload.url, fileName: upload.file.name, size: upload.file.size }],
+    });
+    fixture.componentRef.setInput('uploads', [upload]);
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('interactive', false);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelector('.media-frame .upload-overlay ion-spinner')).not.toBeNull();
+    expect(element.querySelector('img')?.getAttribute('src')).toBe(upload.url);
+    const icon = () =>
+      fixture.debugElement.query(By.css('.media-time app-message-status ion-icon')).componentInstance.icon;
+    expect(icon()).toBe(checkmarkCircleOutline);
+    upload.state.set({ status: UploadStatus.Ready, progress: 1, id: encodeId('9007199254741101') });
+    await fixture.whenStable();
+    expect(element.querySelector('.upload-overlay')).toBeNull();
+    expect(icon()).toBe(checkmarkCircleOutline);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Sent);
+    fixture.detectChanges();
+    expect(icon()).toBe(checkmarkCircle);
   });
 });

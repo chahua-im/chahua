@@ -4,7 +4,7 @@
     <ion-title>收藏</ion-title>
   </ion-toolbar>
 </ion-header>
-<ion-content>
+<ion-content appScrollbars>
   <div class="message-list">
     @for (row of savedRows(); track row.item.id) {
       @let item = row.item;

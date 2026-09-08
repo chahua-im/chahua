@@ -1,9 +1,13 @@
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
+import { ModalController } from '@ionic/angular';
+import { vi } from 'vitest';
 import type { AttachmentResponse, MessageResponse } from '../../../generated/models';
-import { MessageType } from '../../../generated/models';
+import { AttachmentUploadPurpose, MessageType } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
-import { MessageAttachments } from './message-attachments';
+import { MessageAttachments, type MessageAttachmentSource } from './message-attachments';
+import { type AttachmentUpload, UploadStatus } from '../upload';
 
 const image: AttachmentResponse = {
   id: encodeId('9007199254741101'),
@@ -16,7 +20,7 @@ const image: AttachmentResponse = {
 };
 
 describe('MessageAttachments', () => {
-  async function render(message: Partial<MessageResponse>) {
+  async function render(message: Partial<MessageResponse> | Partial<MessageAttachmentSource>) {
     await TestBed.configureTestingModule({ imports: [MessageAttachments] }).compileComponents();
     const fixture = TestBed.createComponent(MessageAttachments);
     fixture.componentRef.setInput('message', { ...testMessage, ...message });
@@ -62,6 +66,7 @@ describe('MessageAttachments', () => {
     element.querySelector('img')!.dispatchEvent(new Event('error'));
     fixture.detectChanges();
     expect(frame.getAttribute('style')).toBe(before);
+    expect(element.querySelector('.media-error')?.textContent).toContain('加载失败，打开原文件');
     expect(element.querySelector('.media-error')?.getAttribute('href')).toBe(image.url);
   });
 
@@ -126,6 +131,130 @@ describe('MessageAttachments', () => {
     expect(audio.src).toBe('https://example.com/voice.ogg');
     audio.dispatchEvent(new Event('error'));
     fixture.detectChanges();
-    expect(element.querySelector('.audio-frame .media-error')).not.toBeNull();
+    const link = element.querySelector<HTMLAnchorElement>('.audio-frame .media-error')!;
+    expect(link.textContent).toBe('无法播放，打开语音文件');
+    expect(link.getAttribute('href')).toBe(audio.src);
+  });
+
+  function upload(url: string, kind = 'image/jpeg') {
+    return {
+      file: new File(['local'], '附件', { type: kind }),
+      url,
+      purpose: AttachmentUploadPurpose.media,
+      state: signal<ReturnType<AttachmentUpload['state']>>({ status: UploadStatus.Processing, progress: 0 }),
+      retry: vi.fn<AttachmentUpload['retry']>(),
+    } satisfies Pick<AttachmentUpload, 'file' | 'url' | 'purpose' | 'state' | 'retry'>;
+  }
+
+  it.each([
+    [MessageType.text, 'image/jpeg', '.media-frame', 'img'],
+    [MessageType.text, 'video/mp4', '.media-frame', 'video'],
+    [MessageType.audio, 'audio/ogg', '.audio-frame', 'audio'],
+    [MessageType.file, 'application/pdf', '.file', 'a'],
+  ])(
+    'reacts to upload signals on each %s / %s attachment and preserves its blob preview',
+    async (type, kind, frame, media) => {
+      const local = upload('blob:local-preview', kind);
+      const fixture = await render({
+        messageType: type,
+        attachments: [{ kind, url: local.url, fileName: local.file.name, size: local.file.size }],
+      });
+      fixture.componentRef.setInput('uploads', [local]);
+      fixture.detectChanges();
+      const element: HTMLElement = fixture.nativeElement;
+      const node = element.querySelector(media)!;
+      const attribute = media === 'a' ? 'href' : 'src';
+      expect(node.getAttribute(attribute)).toBe(local.url);
+      expect(element.querySelectorAll(`${frame} ion-spinner`)).toHaveLength(1);
+      expect(element.textContent).not.toMatch(/加载中|上传中|处理中/);
+      local.state.set({ status: UploadStatus.Uploading, progress: 0.4, width: 600, height: 1200 });
+      await fixture.whenStable();
+      expect(element.querySelector(`${frame} ion-spinner`)).not.toBeNull();
+      expect(element.querySelector(media)).toBe(node);
+      if (frame === '.media-frame') {
+        expect(element.querySelector<HTMLElement>(frame)?.style.aspectRatio).toBe('600 / 1200');
+      }
+      local.state.set({ status: UploadStatus.Failed, progress: 0.4 });
+      await fixture.whenStable();
+      expect(element.querySelector('ion-spinner')).toBeNull();
+      expect(node.getAttribute(attribute)).toBe(local.url);
+      local.state.set({ status: UploadStatus.Uploading, progress: 0 });
+      await fixture.whenStable();
+      expect(element.querySelector(`${frame} ion-spinner`)).not.toBeNull();
+      local.state.set({ status: UploadStatus.Ready, progress: 1, id: image.id });
+      await fixture.whenStable();
+      expect(element.querySelector('ion-spinner')).toBeNull();
+      expect(node.getAttribute(attribute)).toBe(local.url);
+      expect(local.retry).not.toHaveBeenCalled();
+    },
+  );
+
+  it('matches multiple ID-less uploads by URL and does not clear media errors on progress', async () => {
+    const first = upload('blob:first');
+    const second = upload('blob:second');
+    const fixture = await render({
+      attachments: [first, second].map((item) => ({
+        kind: item.file.type,
+        url: item.url,
+        fileName: item.file.name,
+        size: item.file.size,
+      })),
+    });
+    fixture.componentRef.setInput('uploads', [second, first]);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    const frames = element.querySelectorAll('.media-frame');
+    frames[0].querySelector('img')!.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    first.state.set({ status: UploadStatus.Ready, progress: 1, id: image.id });
+    second.state.set({ status: UploadStatus.Uploading, progress: 0.6 });
+    await fixture.whenStable();
+    expect(frames[0].querySelector('ion-spinner')).toBeNull();
+    expect(frames[0].querySelector('.media-error')).not.toBeNull();
+    expect(frames[0].querySelector('.media-error')?.getAttribute('href')).toBe(first.url);
+    expect(frames[1].querySelector('ion-spinner')).not.toBeNull();
+    expect(frames[1].querySelector('img')?.getAttribute('src')).toBe(second.url);
+  });
+
+  it('opens the selected local image in an ID-less album using its URL', async () => {
+    const fixture = await render({
+      attachments: ['blob:first', 'blob:second'].map((url) => ({ kind: 'image/jpeg', url, fileName: '图片', size: 5 })),
+    });
+    const present = vi.fn().mockResolvedValue(undefined);
+    const modal = Object.assign(document.createElement('ion-modal'), { present });
+    const create = vi.spyOn(TestBed.inject(ModalController), 'create').mockResolvedValue(modal);
+    const links = fixture.nativeElement.querySelectorAll('.media-frame a') as NodeListOf<HTMLAnchorElement>;
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    links[1].dispatchEvent(event);
+    await fixture.whenStable();
+    expect(event.defaultPrevented).toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        componentProps: {
+          images: [expect.objectContaining({ url: 'blob:first' }), expect.objectContaining({ url: 'blob:second' })],
+          initial: 1,
+        },
+      }),
+    );
+    expect(present).toHaveBeenCalledOnce();
+    create.mockRestore();
+  });
+
+  it.each([
+    [MessageType.text, 'image/jpeg', 'img'],
+    [MessageType.text, 'video/mp4', 'video'],
+    [MessageType.audio, 'audio/ogg', 'audio'],
+  ])('offers the original blob URL when a local %s / %s preview fails', async (type, kind, media) => {
+    const fixture = await render({
+      messageType: type,
+      attachments: [{ kind, url: 'blob:failed-preview', fileName: '附件', size: 5 }],
+    });
+    const element: HTMLElement = fixture.nativeElement;
+    element.querySelector(media)!.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    const link = element.querySelector<HTMLAnchorElement>('a.media-error')!;
+    expect(link.getAttribute('href')).toBe('blob:failed-preview');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toBe('noopener');
   });
 });

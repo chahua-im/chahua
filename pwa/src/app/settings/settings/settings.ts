@@ -31,6 +31,7 @@ import { PushNotificationError, PushNotifications } from '../../pwa/push-notific
 import { SessionStore } from '../../session/session-store';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
 import { GeneralSettings } from '../general-settings/general-settings';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 export enum SettingsDismissRole {
   Saved = 'saved',
@@ -41,6 +42,7 @@ export enum SettingsDismissRole {
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
   imports: [
+    ContentScrollbars,
     IonAvatar,
     IonButton,
     IonButtons,

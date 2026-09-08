@@ -43,7 +43,9 @@ src/
     │   ├── media-processing/     图片／视频压缩、HEIC 转换和动图保护
     │   ├── sticker-picker/       贴纸选择、收藏与订阅
     │   ├── media-viewer/         图片查看器
-    │   ├── upload.ts            媒体尺寸读取与签名上传函数
+    │   ├── upload.ts             可移交的附件上传任务、媒体尺寸与签名上传
+    │   ├── message-outbox.ts      待发队列、服务器确认与失败重试
+    │   ├── message-status.ts      消息时间后的发送状态图标
     │   ├── message-author/        作者展示
     │   ├── message-attachments/   附件展示与媒体类型判断
     │   ├── message-menu/          菜单、确认、操作反馈与权限展示

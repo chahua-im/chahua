@@ -15,14 +15,16 @@ import { MessageAuthor } from '../message-author/message-author';
 import { MessagePreview } from '../message-preview/message-preview';
 import { MessageReactions } from '../message-reactions/message-reactions';
 import { MessageThread } from '../message-thread/message-thread';
+import { MessageDelivery, MessageStatus } from '../message-status';
+import type { AttachmentUpload } from '../upload';
 import { userColors } from '../user-colors';
 
 export type MessageContent = MessageAttachmentSource &
-  Pick<MessageResponse, 'id' | 'sender' | 'message'> &
+  Pick<MessageResponse, 'sender' | 'message'> &
   Partial<
     Pick<
       MessageResponse,
-      'isEdited' | 'mentions' | 'isDeleted' | 'reactions' | 'replyRootId' | 'threadInfo' | 'replyToMessage'
+      'id' | 'isEdited' | 'mentions' | 'isDeleted' | 'reactions' | 'replyRootId' | 'threadInfo' | 'replyToMessage'
     >
   >;
 
@@ -50,9 +52,10 @@ export interface MessageMenuSelection {
     MessagePreview,
     MessageReactions,
     MessageThread,
+    MessageStatus,
   ],
   host: {
-    '[attr.data-message-id]': 'decodeId(message().id)',
+    '[attr.data-message-id]': 'messageId()',
     '[style.--sender-light]': 'senderColors().light',
     '[style.--sender-dark]': 'senderColors().dark',
     '[style.--reply-light]': 'replyColors().light',
@@ -62,7 +65,7 @@ export interface MessageMenuSelection {
 export class Message<T extends MessageContent = MessageResponse> {
   private readonly modals = inject(ModalController);
   protected async profile() {
-    if (this.preview() || !this.interactive()) return;
+    if (!this.canInteract()) return;
     const sender = this.message().sender;
     const modal = await this.modals.create({
       component: UserProfile,
@@ -70,12 +73,16 @@ export class Message<T extends MessageContent = MessageResponse> {
     });
     await modal.present();
   }
-  protected readonly decodeId = decodeId;
+  protected readonly messageId = computed(() => {
+    const id = this.message().id;
+    return id != null ? decodeId(id) : undefined;
+  });
   readonly message = input.required<T>();
   protected readonly system = MessageType.system;
   protected readonly Type = MessageType;
   protected async invite(event: Event) {
     event.stopPropagation();
+    if (!this.canInteract()) return;
     const modal = await this.modals.create({
       component: StartChat,
       componentProps: { kind: StartChatKind.Join, code: this.message().message ?? '' },
@@ -83,7 +90,7 @@ export class Message<T extends MessageContent = MessageResponse> {
     await modal.present();
   }
   protected async sticker(event: Event) {
-    if (!this.isSticker() || this.preview() || !this.interactive()) return;
+    if (!this.isSticker() || !this.canInteract()) return;
     event.stopPropagation();
     const modal = await this.modals.create({
       component: StickerPicker,
@@ -98,6 +105,14 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly showAllAvatars = input(false);
   readonly preview = input(false);
   readonly interactive = input(true);
+  protected readonly canInteract = computed(() => this.interactive() && !this.preview() && this.message().id != null);
+  readonly delivery = input<MessageDelivery>();
+  readonly uploads = input<readonly AttachmentUpload[]>([]);
+  readonly retry = output<void>();
+  protected readonly Delivery = MessageDelivery;
+  protected readonly status = computed(() =>
+    this.own() ? (this.delivery() ?? (this.message().id != null ? MessageDelivery.Sent : undefined)) : undefined,
+  );
   readonly canReply = input(true);
   readonly canOpenThread = input(false);
   readonly reply = output<T>();
@@ -118,8 +133,7 @@ export class Message<T extends MessageContent = MessageResponse> {
       event.pointerType !== 'touch' ||
       !event.isPrimary ||
       !this.canReply() ||
-      this.preview() ||
-      !this.interactive() ||
+      !this.canInteract() ||
       this.message().isDeleted
     )
       return;
@@ -152,7 +166,7 @@ export class Message<T extends MessageContent = MessageResponse> {
     this.cancelPress();
     if (this.touch?.horizontal) {
       this.longPressed = true;
-      if (!cancelled && this.swipe() >= 60) this.reply.emit(this.message());
+      if (!cancelled && this.canInteract() && this.swipe() >= 60) this.reply.emit(this.message());
     }
     this.touch = undefined;
     this.dragging.set(false);
@@ -171,7 +185,9 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected readonly hasReactions = computed(() => !this.message().isDeleted && !!this.message().reactions?.length);
   protected readonly threadInfo = computed(() => {
     const message = this.message();
-    return this.canOpenThread() && !message.isDeleted && !message.replyRootId ? message.threadInfo : undefined;
+    return this.canOpenThread() && message.id != null && !message.isDeleted && !message.replyRootId
+      ? message.threadInfo
+      : undefined;
   });
   protected readonly quoted = computed(() => {
     const message = this.message();
@@ -200,8 +216,13 @@ export class Message<T extends MessageContent = MessageResponse> {
     });
   }
 
+  protected showThread() {
+    const id = this.message().id;
+    if (this.canInteract() && id != null) this.openThread.emit(id);
+  }
+
   protected showMenu(event: Event, element: HTMLElement) {
-    if (this.preview() || !this.interactive()) return;
+    if (!this.canInteract()) return;
     event.preventDefault();
     this.cancelPress();
     if (!this.longPressed) this.emitMenu(element);
@@ -210,7 +231,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected startPress(event: PointerEvent, element: HTMLElement) {
     this.cancelPress();
     this.longPressed = false;
-    if (!this.interactive() || this.preview() || event.pointerType !== 'touch' || !event.isPrimary) return;
+    if (!this.canInteract() || event.pointerType !== 'touch' || !event.isPrimary) return;
     this.press = {
       pointerId: event.pointerId,
       x: event.clientX,
@@ -239,9 +260,10 @@ export class Message<T extends MessageContent = MessageResponse> {
   }
 
   private emitMenu(element: HTMLElement) {
-    if (!this.interactive() || this.preview() || this.message().messageType === MessageType.system) return;
+    const message = this.message();
+    if (!this.canInteract() || message.id == null || message.messageType === MessageType.system) return;
     this.menu.emit({
-      messageId: this.message().id,
+      messageId: message.id,
       element,
       rect: element.getBoundingClientRect(),
       first: this.first(),

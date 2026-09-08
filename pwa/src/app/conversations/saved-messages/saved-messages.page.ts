@@ -33,12 +33,14 @@ import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { SessionStore } from '../../session/session-store';
 import { Message } from '../../messages/message/message';
 import { savedMessageContent } from './saved-message-content';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-saved-messages',
   templateUrl: './saved-messages.page.html',
   styleUrl: './saved-messages.page.scss',
   imports: [
+    ContentScrollbars,
     DatePipe,
     IonBackButton,
     IonButton,

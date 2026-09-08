@@ -23,6 +23,9 @@
 }
 
 .media-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   position: absolute;
   right: 6px;
   bottom: 6px;
@@ -91,4 +94,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.upload-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(var(--ion-background-color-rgb), 0.45);
+  color: var(--ion-text-color);
+}
+
+.file ion-spinner {
+  flex-shrink: 0;
 }

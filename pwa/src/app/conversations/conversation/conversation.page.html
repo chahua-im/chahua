@@ -87,6 +87,7 @@
     }
   </ion-header>
   <ion-content
+    appScrollbars
     [scrollEvents]="true"
     (ionScroll)="onScroll()"
     (ionScrollStart)="scrolling.scrollStart()"
@@ -121,16 +122,20 @@
           </div>
         }
         <div class="message-list">
-          @for (row of rows(); track row.message.id) {
+          @for (row of rows(); track row.key) {
             @if (row.dateBreak) {
               <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
             }
-            @if (row.message.id === firstUnreadId()) {
+            @if (firstUnreadId() && row.message.id === firstUnreadId()) {
               <p #unreadSeparator class="unread-separator">以下是未读消息</p>
             }
             <app-message
               [showAllAvatars]="preferences.showAllAvatars()"
               [message]="row.message"
+              [interactive]="!!row.confirmed"
+              [delivery]="row.outgoing?.delivery()"
+              [uploads]="row.outgoing?.uploads ?? []"
+              (retry)="row.outgoing && outbox.retry(row.outgoing)"
               [own]="row.message.sender.uid === session.user()?.uid"
               [first]="row.first"
               [last]="row.last"
@@ -138,9 +143,9 @@
               [jumpingTo]="jumpingTo()"
               [jumpDisabled]="!!pendingNavigation()"
               [canOpenThread]="!threadId()"
-              (reply)="startReply($event)"
+              (reply)="row.confirmed && startReply(row.confirmed)"
               (menu)="menu()?.open($event)"
-              (react)="menu()?.reactTo(row.message, $event)"
+              (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
               (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
               (openThread)="openThread($event)"></app-message>
           } @empty {
@@ -200,20 +205,10 @@
         <ion-badge [style.opacity]="unreadCount() ? 1 : 0">{{ unreadCount() }}</ion-badge>
       </ion-fab>
     }
-    @if (visiblePending(); as pending) {
-      <div class="pending-message">
-        <span>{{ pending.text }}</span>
-        @if (pending.failed) {
-          <small>发送失败，可在输入栏重试</small>
-        } @else {
-          <ion-spinner />
-        }
-      </div>
-    }
   </ion-content>
   <ion-footer>
     @if (sendError()) {
-      <p class="ion-padding-horizontal">发送失败，请重试。</p>
+      <p class="ion-padding-horizontal">编辑失败，请重试。</p>
     }
     <app-message-composer
       [chatId]="id()"
@@ -233,10 +228,7 @@
           </button>
         </div>
       } @else if (replyTo(); as message) {
-        <div
-          class="reply-context"
-          [style.--reply-light]="replyColors()?.light"
-          [style.--reply-dark]="replyColors()?.dark">
+        <div class="reply-context">
           <button
             type="button"
             class="reply-description"

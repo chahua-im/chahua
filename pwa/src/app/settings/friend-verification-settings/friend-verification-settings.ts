@@ -23,12 +23,14 @@ import { chevronBackOutline, personAddOutline, chatbubbleOutline, helpCircleOutl
 import { firstValueFrom } from 'rxjs';
 import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
 import { FriendAddVerificationMode } from '../../../generated/models';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-friend-verification-settings',
   templateUrl: './friend-verification-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    ContentScrollbars,
     FormField,
     IonButton,
     IonButtons,
