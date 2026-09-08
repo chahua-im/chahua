@@ -60,7 +60,7 @@
     }
   }
   @if (message().message?.trim()) {
-    <app-message-text [text]="message().message!" [mentions]="message().mentions ?? []" [interactive]="false" />
+    <app-markdown-summary [text]="message().message!" [mentions]="message().mentions ?? []" />
   } @else if (!media().length) {
     @switch (message().messageType) {
       @case (MessageType.sticker) {

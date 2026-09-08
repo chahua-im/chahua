@@ -1,0 +1,82 @@
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { describe, expect, it } from 'vitest';
+import type { MentionInfo } from '../../../generated/models';
+
+import { MarkdownSummary } from './markdown-summary';
+
+describe('MarkdownSummary', () => {
+  let fixture: ComponentFixture<MarkdownSummary>;
+  beforeEach(() => {
+    fixture = TestBed.createComponent(MarkdownSummary);
+  });
+  function render(text: string, mentions: readonly MentionInfo[] = []) {
+    fixture.componentRef.setInput('text', text);
+    fixture.componentRef.setInput('mentions', mentions);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('renders inline Markdown (bold/italic/strikethrough/code) without raw syntax', () => {
+    const element = render('**粗**、*斜*、~~删~~、`code`');
+
+    expect(element.querySelector('strong')?.textContent).toBe('粗');
+    expect(element.querySelector('em')?.textContent).toBe('斜');
+    expect(element.querySelector('s')?.textContent).toBe('删');
+    expect(element.querySelector('code')?.textContent).toBe('code');
+    expect(element.textContent).not.toContain('**');
+    expect(element.textContent).not.toContain('~~');
+    expect(element.textContent).toBe('粗、斜、删、code');
+  });
+
+  it('flattens block Markdown into a single inline line (no block elements, no <br>)', () => {
+    const element = render('# 标题\n\n- 项一\n- 项二\n\n1. 甲\n2. 乙');
+
+    for (const tag of ['p', 'h1', 'h2', 'ul', 'ol', 'li', 'pre', 'blockquote', 'hr', 'br']) {
+      expect(element.querySelector(tag)).toBeNull();
+    }
+    // Heading is out of the subset and stays literal; lists keep their prefixes.
+    expect(element.querySelector('strong')).toBeNull();
+    expect(element.textContent).toContain('# 标题');
+    expect(element.textContent).toContain('项一');
+    expect(element.textContent).toContain('• 项二');
+    expect(element.textContent).toContain('1. 甲');
+    expect(element.textContent).toContain('2. 乙');
+  });
+
+  it('renders autolinks and markdown links as inline anchors', () => {
+    const element = render('去 [链接](https://example.com) 看 https://auto.example/a');
+
+    const anchors = Array.from(element.querySelectorAll('a'));
+    expect(anchors.map((a) => a.getAttribute('href'))).toEqual(['https://example.com', 'https://auto.example/a']);
+    expect(element.textContent).not.toContain('[链接]');
+  });
+
+  it('renders Markdown next to a literal attachment label prefix', () => {
+    const element = render('[图片] **新的设计** 已上传');
+
+    expect(element.textContent).toContain('[图片]');
+    expect(element.querySelector('strong')?.textContent).toBe('新的设计');
+    expect(element.textContent).not.toContain('**');
+  });
+
+  it('resolves mention macros to display names and keeps code regions verbatim', () => {
+    const element = render('叫 @[uid:2] 看 `@[uid:2]`', [{ uid: 2, username: '小花', gender: 0 }]);
+
+    expect(element.textContent).toContain('叫 @小花 看');
+    expect(element.querySelector('code')?.textContent).toBe('@[uid:2]');
+  });
+
+  it('keeps marker-free text on the plain path without wrapping elements', () => {
+    const element = render('5 * 3 * 4 和 1.2 段落');
+
+    expect(element.textContent).toBe('5 * 3 * 4 和 1.2 段落');
+    expect(element.querySelector('strong')).toBeNull();
+    expect(element.querySelector('em')).toBeNull();
+  });
+
+  it('renders nothing for an empty string', () => {
+    const element = render('');
+
+    expect(element.textContent).toBe('');
+  });
+});

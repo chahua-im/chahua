@@ -3,7 +3,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { RouterLink } from '@angular/router';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { MediaKind, attachmentKind } from '../message-attachments/media-kind';
-import { MessageText } from '../message-text/message-text';
+import { MarkdownSummary } from './markdown-summary';
 
 type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
   Partial<Pick<MessageResponse, 'isDeleted' | 'mentions' | 'sender'>> & {
@@ -25,7 +25,7 @@ enum SystemMessageKind {
 @Component({
   selector: 'app-message-preview',
   templateUrl: './message-preview.html',
-  imports: [MessageText, RouterLink, TranslocoPipe],
+  imports: [MarkdownSummary, RouterLink, TranslocoPipe],
   host: {
     '[class.action]':
       'message().isDeleted || message().messageType === MessageType.system || message().messageType === MessageType.invite || !message().message?.trim()',
