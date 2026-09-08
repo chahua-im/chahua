@@ -80,6 +80,13 @@
   hidden
   (change)="files($event, Purpose.media)" />
 <input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
+@if (toolbar(); as anchor) {
+  <app-format-toolbar
+    [anchor]="anchor"
+    [(linkMode)]="linkMode"
+    (format)="applyFormat($event)"
+    (submitLink)="applyFormat('link', $event)" />
+}
 <div class="bar">
   <button type="button" class="attach-button" [disabled]="voiceActive()" (click)="togglePanel(Panel.Attachments)">
     <ion-icon [icon]="icons.addCircleOutline" />
@@ -93,7 +100,7 @@
         [rows]="1"
         [value]="display().text"
         (ionInput)="changed($event.detail.value || '')"
-        (ionFocus)="panel.set(Panel.None)"
+        (ionFocus)="focusChanged(true)" (ionBlur)="focusChanged(false)"
         (paste)="paste($event)"
         (keydown)="key($event)" />
       @if (!editing()) {
