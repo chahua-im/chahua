@@ -227,6 +227,17 @@ async fn post_add_member(
     // Check if requester is admin
     require_admin_role(conn, chat_id, uid)?;
 
+    // DMs are strictly 1:1 — even a corrupted admin role must not grow them.
+    let kind: GroupKind = groups::table
+        .find(chat_id)
+        .select(groups::kind)
+        .first(conn)?;
+    if kind == GroupKind::Dm {
+        return Err(AppError::BadRequest(
+            "DM chats cannot have additional members",
+        ));
+    }
+
     let profiles = lookup_user_profiles(conn, &[body.uid])?;
     let profile = profiles.get(&body.uid);
 
@@ -492,6 +503,16 @@ async fn patch_member(
 
     // Check if requester is admin
     require_admin_role(conn, chat_id, requester_uid)?;
+
+    // Preserve the "DM members are plain members" invariant that the
+    // membership endpoints rely on.
+    let kind: GroupKind = groups::table
+        .find(chat_id)
+        .select(groups::kind)
+        .first(conn)?;
+    if kind == GroupKind::Dm {
+        return Err(AppError::BadRequest("Roles cannot be changed in DM chats"));
+    }
 
     // Prevent self-demotion
     if requester_uid == target_uid {

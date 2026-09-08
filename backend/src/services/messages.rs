@@ -129,7 +129,10 @@ impl From<MessageSendAuthorizationError> for AppError {
                 AppError::BadRequest("Threads can only be created on text messages")
             }
             MessageSendAuthorizationError::InvalidDmParticipants => {
-                AppError::Internal("DM participants missing")
+                // The caller is a member of a DM row but matches neither
+                // dm_uid (e.g. a zombie membership); that is a forbidden
+                // participant, not a server fault.
+                AppError::Forbidden("Not a participant of this chat")
             }
             MessageSendAuthorizationError::DirectMessage(error) => AppError::from(error),
             MessageSendAuthorizationError::Database(error) => AppError::from(error),
