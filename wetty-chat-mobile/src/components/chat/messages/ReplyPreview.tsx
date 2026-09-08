@@ -1,5 +1,6 @@
 import { useSelector } from 'react-redux';
 import { formatMessagePreview, type PreviewMessage, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { MarkdownSummaryText } from '@/components/chat/previews/MarkdownSummaryText';
 import { useIsDarkMode } from '@/hooks/platformHooks';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { colorForUser } from '@/utils/userColor';
@@ -39,7 +40,9 @@ export function ReplyPreview({ replyTo, isSent, interactive, onReplyTap }: Reply
         {replyTo.senderName}
       </div>
       <div className={styles.replyPreviewText}>
-        {formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
+        <MarkdownSummaryText
+          text={formatMessagePreview(replyTo.preview, getNotificationPreviewLabels(locale))}
+        />
       </div>
     </div>
   );

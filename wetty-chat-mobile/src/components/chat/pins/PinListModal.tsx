@@ -10,6 +10,7 @@ import { selectEffectiveLocale } from '@/store/settingsSlice';
 import type { PinResponse } from '@/api/pins';
 import { deletePin, deleteThreadPin } from '@/api/pins';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { MarkdownSummaryText } from '@/components/chat/previews/MarkdownSummaryText';
 import styles from './PinListModal.module.scss';
 import { useIsDesktop } from '@/hooks/platformHooks';
 
@@ -97,7 +98,8 @@ export function PinListModal({
           <IonList className={styles.list}>
             {pins.map((pin) => {
               const msg = pin.message;
-              const previewText = formatMessagePreview(msg, getNotificationPreviewLabels(locale)) || t`Message`;
+              const previewText = formatMessagePreview(msg, getNotificationPreviewLabels(locale));
+              const preview = previewText ? <MarkdownSummaryText text={previewText} /> : t`Message`;
               const senderName = msg.sender.name ?? `User ${msg.sender.uid}`;
               return (
                 <IonItem
@@ -115,7 +117,7 @@ export function PinListModal({
                     )}
                     <div className={styles.pinBody}>
                       <span className={styles.pinSender}>{senderName}</span>
-                      <span className={styles.pinMessage}>{previewText}</span>
+                      <span className={styles.pinMessage}>{preview}</span>
                     </div>
                     <div className={styles.actions}>
                       {!threadRootId && msg.threadInfo && (

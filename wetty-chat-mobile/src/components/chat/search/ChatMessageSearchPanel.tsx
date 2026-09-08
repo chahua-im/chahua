@@ -17,7 +17,8 @@ import { useSelector } from 'react-redux';
 import { type MessageResponse, searchMessages } from '@/api/messages';
 import { UserAvatar } from '@/components/UserAvatar';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
-import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
+import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { MarkdownSummaryText } from '@/components/chat/previews/MarkdownSummaryText';
 import { isMessageSearchQueryReady } from '@/utils/messageSearch';
 import styles from './ChatMessageSearchPanel.module.scss';
 
@@ -57,10 +58,10 @@ function formatResultTimestamp(isoString: string, locale: string): string {
 
 function MessageSearchResultRow({ message, locale, onSelect }: MessageSearchResultRowProps) {
   const senderName = message.sender.name ?? `User ${message.sender.uid}`;
-  const previewText = useMemo(() => {
-    const formatted = formatMessagePreview(message, getNotificationPreviewLabels(locale));
-    return truncatePreview(formatted || t`Message`);
-  }, [locale, message]);
+  const previewText = useMemo(
+    () => formatMessagePreview(message, getNotificationPreviewLabels(locale)) || t`Message`,
+    [locale, message],
+  );
   const timestamp = useMemo(() => formatResultTimestamp(message.createdAt, locale), [locale, message.createdAt]);
 
   return (
@@ -73,7 +74,9 @@ function MessageSearchResultRow({ message, locale, onSelect }: MessageSearchResu
           <span className={styles.senderName}>{senderName}</span>
           {timestamp ? <IonNote className={styles.timestamp}>{timestamp}</IonNote> : null}
         </div>
-        <p className={styles.previewText}>{previewText}</p>
+        <p className={styles.previewText}>
+          <MarkdownSummaryText text={previewText} />
+        </p>
         {message.replyRootId != null && (
           <p className={styles.threadLabel}>
             <IonIcon icon={chatbubbles} className={styles.threadIcon} /> {t`In thread`}

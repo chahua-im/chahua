@@ -11,6 +11,7 @@ import { selectChatMeta } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
 import { selectLatestThreadReplyMessage } from '@/store/messages/selectors';
 import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
+import { MarkdownSummaryText } from '@/components/chat/previews/MarkdownSummaryText';
 import styles from './ThreadListRow.module.scss';
 
 function formatRelativeTime(isoString: string, locale: string): string {
@@ -111,7 +112,9 @@ export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, e
       </span>
       <IonLabel className={styles.bodyContent}>
         {/* Row 2: replied to */}
-        <div className={styles.repliedTo}>{rootPreview || (isDm ? null : rootMsg.sender.name)}</div>
+        <div className={styles.repliedTo}>
+          {rootPreview ? <MarkdownSummaryText text={rootPreview} /> : isDm ? null : rootMsg.sender.name}
+        </div>
         {/* Row 3: latest reply or draft */}
         {draftText !== undefined ? (
           <p className={styles.latestReply}>
@@ -123,7 +126,7 @@ export function ThreadListRow({ thread, locale, isActive, draftText, onSelect, e
           lastReplyPreview && (
             <p className={styles.latestReply}>
               {!isDm && <span className={styles.latestReplySender}>{lastReply.sender.name ?? 'User'}:</span>}{' '}
-              {lastReplyPreview}
+              <MarkdownSummaryText text={lastReplyPreview} />
             </p>
           )
         )}

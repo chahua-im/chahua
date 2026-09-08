@@ -70,6 +70,7 @@ import { syncAppBadgeCount } from '@/utils/badges';
 import { getChatDisplayName } from '@/utils/chatDisplay';
 import { UserAvatar } from '@/components/UserAvatar';
 import { formatMessagePreview, getNotificationPreviewLabels, truncatePreview } from '@/utils/messagePreview';
+import { MarkdownSummaryText } from '@/components/chat/previews/MarkdownSummaryText';
 import { getAllDrafts } from '@/utils/draftSync';
 import { onDraftChange } from '@/utils/draftEvents';
 import type { AppDispatch, RootState } from '@/store';
@@ -119,10 +120,11 @@ function getMessagePreview(message: MessagePreview | null, locale: string, showS
   if (!message) return t`No messages yet`;
 
   const previewText = formatMessagePreview(message, getNotificationPreviewLabels(locale));
+  const preview = previewText ? <MarkdownSummaryText text={previewText} /> : t`New message`;
 
   // DM rows omit the sender name — the row title already names the peer.
   if (!showSender) {
-    return previewText || t`New message`;
+    return preview;
   }
 
   const senderName = message.sender?.name || 'User';
@@ -130,7 +132,7 @@ function getMessagePreview(message: MessagePreview | null, locale: string, showS
   return (
     <>
       <span className={styles.chatsListPreviewSender}>{senderName}: </span>
-      {previewText || t`New message`}
+      {preview}
     </>
   );
 }
