@@ -1,15 +1,17 @@
 import { Component, computed, input } from '@angular/core';
 import { MessageType, type MessageResponse } from '../../../generated/models';
+import { MessageText } from '../message-text/message-text';
 import { MediaKind, mediaKind } from '../message-attachments/media-kind';
 
 type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
-  Partial<Pick<MessageResponse, 'isDeleted'>> & {
+  Partial<Pick<MessageResponse, 'isDeleted' | 'mentions'>> & {
     attachments: readonly { kind: string }[];
   };
 
 @Component({
   selector: 'app-message-preview',
   templateUrl: './message-preview.html',
+  imports: [MessageText],
 })
 export class MessagePreview {
   readonly message = input.required<PreviewSource>();

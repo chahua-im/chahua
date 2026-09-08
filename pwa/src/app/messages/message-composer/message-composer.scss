@@ -1,0 +1,156 @@
+:host {
+  display: block;
+}
+.uploads {
+  display: flex;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 8px;
+}
+.upload {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 100px;
+  max-width: 280px;
+  flex-shrink: 0;
+}
+.upload img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+}
+.upload audio {
+  width: 180px;
+  height: 44px;
+}
+.upload span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mentions {
+  max-height: 200px;
+  overflow: auto;
+  margin: 0;
+}
+
+:host {
+  padding-bottom: var(--ion-safe-area-bottom, 0px);
+  background: var(--ion-background-color, #fff);
+}
+.bar {
+  display: flex;
+  align-items: flex-end;
+  padding: 8px 12px;
+  gap: 4px;
+}
+.attach-button,
+.sticker-button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  background: none;
+  flex-shrink: 0;
+  height: 36px;
+}
+.attach-button {
+  width: 36px;
+  font-size: 28px;
+  color: var(--ion-color-primary);
+}
+.sticker-button {
+  width: 32px;
+  font-size: 22px;
+  color: var(--ion-color-medium);
+}
+.sticker-button.selected {
+  color: var(--ion-color-primary);
+}
+.input-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
+  border-radius: 20px;
+  overflow: hidden;
+}
+.input-wrapper[hidden] {
+  display: none;
+}
+ion-textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  max-height: 33vh;
+  font-size: 16px;
+  --padding-top: 7px;
+  --padding-bottom: 7px;
+  --padding-start: 12px;
+  --padding-end: 4px;
+}
+.action-slot {
+  width: 44px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+}
+.send-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--ion-color-primary);
+  color: var(--ion-color-primary-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+button:disabled {
+  opacity: 0.45;
+}
+.attachment-panel {
+  height: 260px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--ion-background-color-step-150, var(--ion-color-light-shade));
+}
+.attachment-panel button {
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  padding: 0;
+  color: var(--ion-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.attachment-panel span {
+  width: 88px;
+  height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 24px;
+  background: rgba(var(--ion-color-primary-rgb), 0.08);
+  font-size: 28px;
+}
+.send-button ion-spinner {
+  width: 20px;
+  height: 20px;
+}
+
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  width: 100%;
+  padding-right: 4px;
+}

@@ -1,0 +1,59 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>用户资料</ion-title>
+    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content>
+  <div class="ion-padding ion-text-center">
+    @if (user().avatarUrl) {
+      <ion-avatar style="width: 80px; height: 80px; margin: auto"><img [src]="user().avatarUrl" /></ion-avatar>
+    }
+    <h1>{{ user().username || '用户 ' + user().uid }}</h1>
+    <p>{{ user().uid }}</p>
+    @if (user().userGroup; as group) {
+      <p>{{ group.name }}</p>
+    }
+  </div>
+  @if (busy()) {
+    <div class="loading-status"><ion-spinner /></div>
+  }
+  @if (failed()) {
+    <p class="ion-padding">
+      操作失败，请重试。
+      <ion-button fill="clear" (click)="load()">重新加载</ion-button>
+    </p>
+  }
+  @if (relationship(); as relation) {
+    <ion-list>
+      @if (relation.canDm && relation.dmChatId) {
+        <ion-item [button]="true" [disabled]="busy()" (click)="chat()"><ion-label>发消息</ion-label></ion-item>
+      }
+      @if (!relation.isFriend && !relation.blocking && !relation.blockedBy) {
+        @if (sent() || relation.hasPendingOutgoingRequest) {
+          <ion-item><ion-label>好友请求已发送</ion-label></ion-item>
+        } @else if (verification()?.mode === Mode.forbid) {
+          <ion-item><ion-label>对方暂不接受好友请求</ion-label></ion-item>
+        } @else {
+          @if (verification()?.mode === Mode.question) {
+            <ion-item>
+              <ion-label>{{ verification()?.question }}</ion-label>
+            </ion-item>
+          }
+          @if (verification()?.mode !== Mode.direct) {
+            <ion-item><input class="field" [formField]="fields.message" placeholder="验证信息" /></ion-item>
+          }
+          <ion-item [button]="true" [disabled]="busy()" (click)="send()"><ion-label>添加好友</ion-label></ion-item>
+        }
+      }
+      @if (relation.isFriend) {
+        <ion-item [button]="true" [disabled]="busy()" (click)="manage(false)">
+          <ion-label color="danger">删除好友</ion-label>
+        </ion-item>
+      }
+      <ion-item [button]="true" [disabled]="busy()" (click)="manage(true)">
+        <ion-label color="danger">{{ relation.blocking ? '解除拉黑' : '拉黑用户' }}</ion-label>
+      </ion-item>
+    </ion-list>
+  }
+</ion-content>

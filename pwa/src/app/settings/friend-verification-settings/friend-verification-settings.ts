@@ -51,7 +51,7 @@ import { FriendAddVerificationMode } from '../../../generated/models';
 })
 export class FriendVerificationSettings {
   private readonly friends = inject(FriendsService);
-  protected readonly modal = inject(ModalController);
+  protected readonly modals = inject(ModalController);
   protected readonly allowIcon = personAddOutline;
   protected readonly messageIcon = chatbubbleOutline;
   protected readonly questionIcon = helpCircleOutline;

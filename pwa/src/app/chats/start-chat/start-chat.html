@@ -1,0 +1,42 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>{{ kind() === Kind.Create ? '创建群组' : kind() === Kind.Join ? '加入群组' : '添加好友' }}</ion-title>
+    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">取消</ion-button></ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content>
+  @if (kind() === Kind.Friend) {
+    <ion-searchbar placeholder="搜索用户名或 UID" [debounce]="300" (ionInput)="query.set($event.detail.value || '')" />
+    <app-directory-search [query]="query()" [usersOnly]="true" />
+  } @else {
+    <ion-list>
+      @if (kind() === Kind.Create) {
+        <ion-item><input class="field" placeholder="群组名称" [formField]="fields.name" /></ion-item>
+      } @else {
+        <ion-item><input class="field" placeholder="邀请码或邀请链接" [formField]="fields.code" /></ion-item>
+        <ion-button fill="clear" [disabled]="busy() || !values().code.trim()" (click)="lookup()">查看邀请</ion-button>
+        @if (preview(); as invite) {
+          <ion-item>
+            <ion-label>
+              <h2>{{ invite.chat.name }}</h2>
+              <p>{{ invite.chat.description }}</p>
+            </ion-label>
+          </ion-item>
+        }
+      }
+    </ion-list>
+    <ion-button
+      class="ion-margin"
+      expand="block"
+      [disabled]="busy() || (kind() === Kind.Create ? !values().name.trim() : !previewValid())"
+      (click)="submit()">
+      {{ kind() === Kind.Create ? '创建' : preview()?.alreadyMember ? '打开群组' : '加入' }}
+    </ion-button>
+  }
+  @if (busy()) {
+    <div class="loading-status"><ion-spinner /></div>
+  }
+  @if (error()) {
+    <p class="ion-padding">操作失败，请检查后重试。</p>
+  }
+</ion-content>

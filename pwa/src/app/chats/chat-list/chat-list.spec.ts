@@ -704,7 +704,7 @@ describe('ChatList', () => {
       expect(element.querySelectorAll('ion-label p')).toHaveLength(1);
       expect(element.querySelector('ion-label h3')?.textContent?.trim()).toBe('话题开头');
       expect(element.querySelector('ion-label p')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('小花: 最新回复');
-      expect(element.querySelector('.avatar-stack > ion-avatar img')?.getAttribute('src')).toBe(entry.avatar);
+      expect(element.querySelector('app-chat-avatar > ion-avatar img')?.getAttribute('src')).toBe(entry.avatar);
       expect(element.querySelector('.avatar-badge img')?.getAttribute('src')).toBe(entry.badgeAvatar);
     });
 

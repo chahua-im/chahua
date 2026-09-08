@@ -1,0 +1,60 @@
+@if (active()) {
+  <div class="voice-display">
+    @if (phase() === Phase.Recorded) {
+      <span class="timer">{{ elapsed() }}</span>
+      <audio [src]="url()" controls preload="metadata"></audio>
+      <button type="button" class="delete" [disabled]="disabled()" (click)="discard()">
+        <ion-icon [icon]="icons.trash" />
+      </button>
+    } @else {
+      @if (phase() === Phase.Requesting) {
+        <ion-spinner />
+      } @else {
+        <span class="recording-dot"></span>
+      }
+      <span class="timer">{{ elapsed() }}</span>
+      <span class="hint">松开保存</span>
+    }
+  </div>
+}
+<div class="action-slot">
+  @if (phase() === Phase.Recorded) {
+    <button type="button" class="round send" [disabled]="disabled()" (click)="send()">
+      @if (disabled()) {
+        <ion-spinner />
+      } @else {
+        <ion-icon [icon]="icons.send" />
+      }
+    </button>
+  } @else {
+    <div
+      class="record-button"
+      [class.holding]="holding()"
+      [class.cancel]="target() === Target.Cancel"
+      [class.send-target]="target() === Target.Send">
+      <span class="target left"><ion-icon [icon]="icons.trash" /></span>
+      <span class="target top"><ion-icon [icon]="icons.arrowUp" /></span>
+      <button
+        type="button"
+        class="round microphone"
+        [disabled]="disabled() || !available"
+        (pointerdown)="start($event)"
+        (pointermove)="move($event)"
+        (pointerup)="finish($event)"
+        (pointercancel)="finish($event, true)"
+        (contextmenu)="$event.preventDefault()">
+        <ion-icon
+          [icon]="target() === Target.Cancel ? icons.trash : target() === Target.Send ? icons.arrowUp : icons.mic" />
+      </button>
+    </div>
+  }
+</div>
+@if (failed() || tooShort()) {
+  <div class="voice-error">
+    @if (tooShort()) {
+      录音太短
+    } @else {
+      无法录音，请检查麦克风权限
+    }
+  </div>
+}

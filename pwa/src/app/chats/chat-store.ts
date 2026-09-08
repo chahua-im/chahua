@@ -161,6 +161,11 @@ export class ChatStore {
     return request;
   }
 
+  chatState(id: SnowflakeID) {
+    const summary = this.summaries().get(id);
+    return summary?.stateVersion ? summary.value : undefined;
+  }
+
   chat(id: SnowflakeID): ChatListItem {
     // Query membership only contains IDs accepted from a complete list response.
     return {
@@ -265,6 +270,11 @@ export class ChatStore {
   cachedReadState(chatId: SnowflakeID) {
     const read = this.readStates().get(chatId);
     return read && !read.dirty ? read.state : undefined;
+  }
+
+  unreadCount(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
+    return read?.state.unreadCount ?? 0;
   }
 
   invalidateReads(ids?: ReadonlySet<SnowflakeID>) {

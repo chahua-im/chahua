@@ -2,7 +2,6 @@ import { NgTemplateOutlet } from '@angular/common';
 import { Component, input, output, signal, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import {
-  IonAvatar,
   IonBadge,
   IonButton,
   IonButtons,
@@ -16,18 +15,12 @@ import {
   IonSpinner,
   IonText,
 } from '@ionic/angular';
+import { ChatAvatar, type ChatAvatarData } from '../chat-avatar/chat-avatar';
 import { ChatDatePipe } from '../chat-date.pipe';
 
-export interface ChatListEntry {
-  title?: string;
+export interface ChatListEntry extends ChatAvatarData {
   subtitle?: string;
   link?: string[];
-  avatarName?: string;
-  avatar?: string;
-  icon?: string;
-  badgeName?: string;
-  badgeAvatar?: string;
-  badgeIcon?: string;
   sender?: string;
   time?: string;
   unreadCount?: number;
@@ -46,6 +39,7 @@ export interface ChatListAction {
   styleUrl: './chat-list-item.scss',
   imports: [
     ChatDatePipe,
+    ChatAvatar,
     NgTemplateOutlet,
     RouterLink,
     RouterLinkActive,
@@ -53,7 +47,6 @@ export interface ChatListAction {
     IonButton,
     IonButtons,
     IonIcon,
-    IonAvatar,
     IonBadge,
     IonItem,
     IonItemSliding,
