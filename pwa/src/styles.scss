@@ -23,20 +23,17 @@
   --ion-color-primary-tint: #4087d2;
 }
 
-// Match Ionic's iOS toolbar surface, including inherited dark modal colors.
-html,
-body,
-ion-header {
+.browser-toolbar-background {
+  // Safari samples boxes taller than 10px. Keep this element empty so text clipping paints nothing.
+  position: fixed;
+  inset: 0 0 auto;
+  height: 12px;
   background-color: var(
     --ion-toolbar-background,
     var(--ion-color-step-50, var(--ion-background-color-step-50, #f7f7f7))
   );
-}
-
-// Safari extends the background of a viewport-attached header into its top chrome.
-ion-header {
-  position: sticky;
-  top: 0;
+  background-clip: text;
+  pointer-events: none;
 }
 
 ion-modal.message-menu-modal {
