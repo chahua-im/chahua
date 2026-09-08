@@ -1,0 +1,132 @@
+@if (suggestions().length) {
+  <ion-list class="mentions">
+    @for (member of suggestions(); track member.uid) {
+      <ion-item [button]="true" (click)="mention(member)">
+        <ion-label>{{ member.username || member.uid }}</ion-label>
+      </ion-item>
+    }
+  </ion-list>
+}
+@if (existing().length || visualUploads().length) {
+  <div class="uploads">
+    @for (item of existing(); track item.id) {
+      <div class="upload">
+        <span>{{ item.fileName }}</span>
+        <ion-button fill="clear" [disabled]="disabled()" (click)="removeExisting(item.id)">
+          <ion-icon [icon]="icons.closeOutline" />
+        </ion-button>
+      </div>
+    }
+    @for (upload of visualUploads(); track upload) {
+      <div class="upload">
+        @if (upload.file.type.startsWith('image/')) {
+          <img [src]="upload.url" />
+        } @else if (upload.file.type.startsWith('audio/')) {
+          <audio [src]="upload.url" controls></audio>
+        }
+        <span>{{ upload.file.name }}</span>
+        @if (upload.status === Status.Uploading || upload.status === Status.Processing) {
+          <ion-spinner />
+          <span>{{ (upload.progress * 100).toFixed(0) }}%</span>
+        } @else if (upload.status === Status.Failed) {
+          <ion-button fill="clear" (click)="retryUpload(upload)">重试</ion-button>
+        }
+        <ion-button fill="clear" [disabled]="disabled()" (click)="remove(upload)">
+          <ion-icon [icon]="icons.closeOutline" />
+        </ion-button>
+      </div>
+    }
+  </div>
+}
+@if (tooMany()) {
+  <p class="ion-padding-horizontal">每条消息最多添加20个附件。</p>
+}
+@if (unsupported()) {
+  <p class="ion-padding-horizontal">编辑消息时只能添加图片或视频。</p>
+}
+@if (error()) {
+  <p class="ion-padding-horizontal">处理失败，请检查文件大小、权限或网络后重试。</p>
+}
+<input
+  #photos
+  type="file"
+  accept="image/*,video/*,.heic,.heif"
+  multiple
+  hidden
+  (change)="files($event, Purpose.media)" />
+<input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
+<div class="bar">
+  <button
+    type="button"
+    class="attach-button"
+    [disabled]="disabled() || voiceActive()"
+    [class.selected]="panel() === Panel.Attachments"
+    (click)="togglePanel(Panel.Attachments)">
+    <ion-icon [icon]="icons.addCircleOutline" />
+  </button>
+  <div class="input-wrapper" [hidden]="voiceActive()">
+    <ng-content />
+    <div class="input-row">
+      <ion-textarea
+        placeholder="输入消息"
+        [autoGrow]="true"
+        [rows]="1"
+        [value]="display().text"
+        [disabled]="disabled()"
+        (ionInput)="changed($event.detail.value || '')"
+        (ionFocus)="panel.set(Panel.None)"
+        (paste)="paste($event)"
+        (keydown)="key($event)" />
+      @if (!editing()) {
+        <button
+          type="button"
+          class="sticker-button"
+          [disabled]="disabled()"
+          [class.selected]="panel() === Panel.Stickers"
+          (click)="togglePanel(Panel.Stickers)">
+          <ion-icon [icon]="icons.happyOutline" />
+        </button>
+      }
+    </div>
+  </div>
+  @if (useVoice()) {
+    <app-voice-recorder
+      [(active)]="voiceActive"
+      [disabled]="disabled() || pendingUpload()"
+      (activeChange)="$event && panel.set(Panel.None)"
+      (submitted)="sendVoice($event)"
+      (discarded)="discardVoice()" />
+  } @else {
+    <div class="action-slot">
+      <button
+        type="button"
+        class="send-button"
+        [disabled]="!canSend()"
+        (mousedown)="$event.preventDefault()"
+        (click)="submit()">
+        @if (disabled()) {
+          <ion-spinner />
+        } @else {
+          <ion-icon [icon]="icons.send" />
+        }
+      </button>
+    </div>
+  }
+</div>
+@switch (panel()) {
+  @case (Panel.Attachments) {
+    <div class="attachment-panel">
+      <button type="button" (click)="photos.click()">
+        <span><ion-icon [icon]="icons.imageOutline" /></span>
+        照片
+      </button>
+      <button type="button" [disabled]="!!editing()" (click)="filesInput.click()">
+        <span><ion-icon [icon]="icons.documentOutline" /></span>
+        文件
+      </button>
+    </div>
+  }
+  @case (Panel.Stickers) {
+    <app-sticker-picker [embedded]="true" [disabled]="disabled()" (selected)="sticker($event)" />
+  }
+}

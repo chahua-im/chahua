@@ -1,0 +1,47 @@
+<ion-segment [value]="kind()" (ionChange)="change($event.detail.value)">
+  <ion-segment-button [value]="Kind.image"><ion-label>图片</ion-label></ion-segment-button>
+  <ion-segment-button [value]="Kind.video"><ion-label>视频</ion-label></ion-segment-button>
+  <ion-segment-button [value]="Kind.other"><ion-label>文件</ion-label></ion-segment-button>
+</ion-segment>
+@if (kind() === Kind.image) {
+  <div class="media">
+    @for (item of items(); track item.id; let index = $index) {
+      <button type="button" (click)="view(index)"><img [src]="item.url" loading="lazy" /></button>
+    }
+  </div>
+} @else {
+  <ion-list>
+    @for (item of items(); track item.id) {
+      <ion-item>
+        <ion-label>
+          <a [href]="item.url" target="_blank" rel="noopener">{{ item.fileName }}</a>
+          <p>{{ item.sender.name }}</p>
+        </ion-label>
+        <ion-button slot="end" fill="clear" [disabled]="!!locating()" (click)="locate(item)">
+          @if (locating() === item.id) {
+            <ion-spinner />
+          } @else {
+            定位
+          }
+        </ion-button>
+      </ion-item>
+    }
+  </ion-list>
+}
+@if (loading()) {
+  <div class="loading-status"><ion-spinner /></div>
+} @else if (error()) {
+  <p class="ion-padding">
+    加载失败。
+    <ion-button fill="clear" (click)="load()">重试</ion-button>
+  </p>
+} @else if (!items().length) {
+  <p class="ion-padding ion-text-center">暂无内容</p>
+}
+@if (cursor()) {
+  <ion-button fill="clear" [disabled]="loading()" (click)="load(true)">加载更多</ion-button>
+}
+
+@if (locateFailed()) {
+  <p class="ion-padding">无法定位原消息，请重试。</p>
+}

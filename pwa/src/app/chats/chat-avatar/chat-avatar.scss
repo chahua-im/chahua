@@ -1,0 +1,38 @@
+:host {
+  position: relative;
+  display: block;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  flex-shrink: 0;
+}
+
+ion-avatar {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--ion-color-light-contrast);
+  font-weight: 600;
+  font-size: calc(var(--avatar-size) / 3);
+}
+.placeholder {
+  background: var(--ion-color-light);
+}
+.icon-avatar {
+  background: var(--ion-color-primary);
+  color: var(--ion-color-primary-contrast);
+  font-size: calc(var(--avatar-size) * 26 / 48);
+}
+.avatar-badge {
+  position: absolute;
+  top: calc(var(--avatar-size) / -24);
+  right: calc(var(--avatar-size) / -24);
+  width: calc(var(--avatar-size) * 26 / 48);
+  height: calc(var(--avatar-size) * 26 / 48);
+  border: 2px solid var(--avatar-badge-border, var(--ion-background-color, #fff));
+  font-size: calc(var(--avatar-size) / 4);
+
+  ion-icon {
+    font-size: calc(var(--avatar-size) / 3);
+  }
+}

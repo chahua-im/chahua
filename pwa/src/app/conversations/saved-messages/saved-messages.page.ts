@@ -1,5 +1,15 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectorRef, Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  signal,
+  input,
+  effect,
+  untracked,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
@@ -14,6 +24,8 @@ import {
   IonToolbar,
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
+import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
+import { encodeId } from '../../api/snowflake-id';
 import { SavedMessagesService } from '../../../generated/endpoints/saved-messages/saved-messages.service';
 import type { SavedMessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
@@ -41,6 +53,8 @@ import { savedMessageContent } from './saved-message-content';
   ],
 })
 export class SavedMessagesPage {
+  readonly id = input<string>();
+  private readonly chatsApi = inject(ChatsService);
   protected readonly session = inject(SessionStore);
   private readonly savedApi = inject(SavedMessagesService);
   private readonly router = inject(Router);
@@ -59,7 +73,11 @@ export class SavedMessagesPage {
   protected readonly removingSavedId = signal<SnowflakeID | undefined>(undefined);
   protected readonly removeFailed = signal(false);
   constructor() {
-    this.activate();
+    effect(() => {
+      this.id();
+      untracked(() => this.activate());
+    });
+
     inject(Connection)
       .resync$.pipe(takeUntilDestroyed())
       .subscribe(() => {
@@ -99,9 +117,13 @@ export class SavedMessagesPage {
     this.failed.set(false);
     try {
       const page = await firstValueFrom(
-        this.savedApi
-          .listSavedMessages({ limit: 50, ...(more ? { before: this.nextCursor()! } : {}) })
-          .pipe(takeUntil(this.cancelReads), takeUntilDestroyed(this.destroyRef)),
+        (this.id()
+          ? this.chatsApi.listChatSavedMessages(encodeId(this.id()!), {
+              limit: 50,
+              before: more ? this.nextCursor() : undefined,
+            })
+          : this.savedApi.listSavedMessages({ limit: 50, ...(more ? { before: this.nextCursor()! } : {}) })
+        ).pipe(takeUntil(this.cancelReads), takeUntilDestroyed(this.destroyRef)),
       );
       if (version !== this.version) return;
       this.saved.update((items) => [

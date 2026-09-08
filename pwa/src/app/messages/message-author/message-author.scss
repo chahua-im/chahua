@@ -9,7 +9,8 @@
 .sender-name {
   flex-grow: 1;
   overflow-wrap: anywhere;
-  color: color-mix(in srgb, var(--sender-color) 75%, var(--ion-text-color));
+  color: var(--sender-color);
+  opacity: 0.85;
 }
 .sender-group {
   background: var(--group-light, rgba(var(--ion-text-color-rgb), 0.25));

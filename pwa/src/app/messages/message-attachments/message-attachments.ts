@@ -1,3 +1,6 @@
+import { MediaViewer } from '../media-viewer/media-viewer';
+import { ModalController } from '@ionic/angular';
+import { inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Component, computed, input, linkedSignal } from '@angular/core';
 import { IonBadge, IonIcon } from '@ionic/angular';
@@ -24,6 +27,18 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   host: { '[class.overlay-time]': 'overlayTime()' },
 })
 export class MessageAttachments {
+  private readonly modals = inject(ModalController);
+  protected async view(id: SnowflakeID, event: Event) {
+    event.preventDefault();
+    if (this.message().messageType === MessageType.sticker) return;
+    event.stopPropagation();
+    const images = this.items().filter((item) => item.kind === MediaKind.Image);
+    const modal = await this.modals.create({
+      component: MediaViewer,
+      componentProps: { images, initial: images.findIndex((item) => item.id === id) },
+    });
+    await modal.present();
+  }
   readonly message = input.required<MessageAttachmentSource>();
   readonly overlayTime = input(false);
   protected readonly MediaKind = MediaKind;

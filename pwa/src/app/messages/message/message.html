@@ -1,9 +1,37 @@
 @if (message().messageType === system) {
   <p class="system-message"><app-message-preview [message]="message()"></app-message-preview></p>
 } @else {
-  <div class="chat-row" [class.sent]="own()" [class.last]="showAvatar()" [class.preview]="preview()">
+  @if (interactive() && !preview() && canReply() && !message().isDeleted) {
+    <div class="swipe-reply" [style.opacity]="swipe() / 60" [class.burst]="burst()" (animationend)="burst.set(false)">
+      <svg viewBox="0 0 512 512">
+        <path
+          d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="35"
+          stroke-linejoin="round" />
+        <path
+          d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
+          fill="currentColor"
+          [style.clip-path]="'inset(' + (100 - (swipe() > 30 ? ((swipe() - 30) / 30) * 100 : 0)) + '% 0 0)'" />
+      </svg>
+    </div>
+  }
+  <div
+    class="chat-row"
+    [class.sent]="own()"
+    [class.group-start]="first()"
+    [class.group-end]="last()"
+    [class.last]="showAvatar()"
+    [class.preview]="preview()"
+    [class.dragging]="dragging()"
+    [style.transform]="swipe() ? 'translateX(-' + swipe() + 'px)' : null"
+    (pointerdown)="startSwipe($event)"
+    (pointermove)="moveSwipe($event)"
+    (pointerup)="endSwipe()"
+    (pointercancel)="endSwipe(true)">
     @if (!preview() && showAvatar()) {
-      <ion-avatar class="avatar" [class.placeholder]="!message().sender.avatarUrl">
+      <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
         @if (message().sender.avatarUrl; as src) {
           <img [src]="src" width="36" height="36" decoding="async" />
         } @else {
@@ -21,44 +49,71 @@
         [class.has-thread]="!!threadInfo()"
         [attr.inert]="preview() ? '' : null"
         (contextmenu)="showMenu($event, bubble)"
-        (pointerdown)="startPress($event, bubble)"
-        (pointermove)="movePress($event)"
-        (pointerup)="cancelPress()"
-        (pointercancel)="cancelPress()">
+        (pointerdown)="startPress($event, bubble)">
         @if (first() && !isSticker()) {
-          <app-message-author class="sender" [sender]="message().sender" [own]="own()"></app-message-author>
+          <app-message-author
+            class="sender"
+            [sender]="message().sender"
+            [own]="own()"></app-message-author>
         }
         @if (quoted(); as quote) {
           <button
             type="button"
-            class="reply-preview action-content"
+            class="reply-preview"
             [disabled]="jumpDisabled()"
             [class.busy]="jumpingTo() === quote.id"
             (click)="jump.emit(quote.id)">
-            <div class="action-label">
-              <div class="reply-name">{{ quoteName() }}</div>
-              <div class="reply-text"><app-message-preview [message]="quote"></app-message-preview></div>
-            </div>
+            <span class="reply-content">
+              <span class="reply-name">{{ quoteName() }}</span>
+              <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
+            </span>
             @if (jumpingTo() === quote.id) {
               <ion-spinner></ion-spinner>
             }
           </button>
         }
         @if (hasMedia()) {
-          <div class="media-content">
+          <div class="media-content" (click)="sticker($event)">
             <app-message-attachments [message]="message()" [overlayTime]="mediaOverlay()"></app-message-attachments>
           </div>
         }
         @if (!mediaOverlay()) {
           <div class="message-body">
             @if (!hasMedia()) {
-              <span class="message-text"><app-message-preview [message]="message()"></app-message-preview></span>
+              <span class="message-text">
+                @if (message().messageType === Type.invite && !message().isDeleted) {
+                  <button
+                    type="button"
+                    class="invite-card"
+                    [disabled]="!interactive() || preview()"
+                    (click)="invite($event)">
+                    群组邀请
+                    <br />
+                    <small>查看群资料并加入</small>
+                  </button>
+                } @else if (message().message && !message().isDeleted) {
+                  <app-message-text
+                    [text]="message().message!"
+                    [mentions]="message().mentions ?? []"
+                    [interactive]="interactive() && !preview()" />
+                } @else {
+                  <app-message-preview [message]="message()" />
+                }
+              </span>
             } @else if (message().message) {
-              <span class="message-text">{{ message().message }}</span>
+              <span class="message-text">
+                <app-message-text
+                  [text]="message().message!"
+                  [mentions]="message().mentions ?? []"
+                  [interactive]="interactive() && !preview()" />
+              </span>
             }
             <span class="timestamp-spacer"></span>
             @if (!hasReactions()) {
               <time class="timestamp" [attr.datetime]="message().createdAt">
+                @if (message().isEdited) {
+                  <span>已编辑</span>
+                }
                 {{ message().createdAt | date: 'HH:mm' }}
               </time>
             }
@@ -71,6 +126,9 @@
                 [preview]="preview()"
                 (react)="react.emit($event)"></app-message-reactions>
               <time class="timestamp" [attr.datetime]="message().createdAt">
+                @if (message().isEdited) {
+                  <span>已编辑</span>
+                }
                 {{ message().createdAt | date: 'HH:mm' }}
               </time>
             </div>

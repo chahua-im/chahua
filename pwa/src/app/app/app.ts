@@ -11,6 +11,7 @@ import {
   IonSpinner,
   IonSplitPane,
   iosTransitionAnimation,
+  createAnimation,
 } from '@ionic/angular';
 import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
@@ -61,7 +62,25 @@ export class App {
     outlet.animation =
       this.browserTransition() && this.router.currentNavigation()?.trigger === 'popstate'
         ? (baseEl, options) => iosTransitionAnimation(baseEl, options).duration(0)
-        : iosTransitionAnimation;
+        : (baseEl, options) => {
+            const entering = options?.enteringEl.querySelector('app-chat-list:not(.nested-list)');
+            const leaving = options?.leavingEl?.querySelector('app-chat-list:not(.nested-list)');
+            if (
+              entering &&
+              leaving &&
+              entering.getAttribute('data-list-tab') !== leaving.getAttribute('data-list-tab')
+            ) {
+              const content = entering.querySelector('ion-content')!;
+              return createAnimation()
+                .addElement(content)
+                .duration(220)
+                .easing('ease-out')
+                .fromTo('transform', 'translateX(24px)', 'translateX(0)')
+                .fromTo('opacity', '0', '1')
+                .afterClearStyles(['transform', 'opacity']);
+            }
+            return iosTransitionAnimation(baseEl, options);
+          };
   }
 
   protected async initialize() {

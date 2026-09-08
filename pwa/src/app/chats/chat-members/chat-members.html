@@ -1,0 +1,36 @@
+<ion-searchbar placeholder="搜索群成员" [debounce]="300" (ionInput)="q.set($event.detail.value || '')" />
+<ion-list>
+  @for (member of members(); track member.uid) {
+    <ion-item>
+      @if (member.avatarUrl) {
+        <ion-avatar slot="start" (click)="profile(member)"><img [src]="member.avatarUrl" /></ion-avatar>
+      }
+      <ion-label (click)="profile(member)">
+        {{ member.username || member.uid }}
+        <p>{{ member.role === Role.admin ? '管理员' : '成员' }}</p>
+      </ion-label>
+      @if (manageable() && member.uid !== session.user()?.uid) {
+        @if (busy() === member.uid) {
+          <ion-spinner slot="end" />
+        } @else {
+          <ion-button fill="clear" [disabled]="!!busy()" (click)="role(member)">
+            {{ member.role === Role.admin ? '取消管理' : '设为管理' }}
+          </ion-button>
+          <ion-button fill="clear" color="danger" [disabled]="!!busy()" (click)="remove(member)">移除</ion-button>
+        }
+      }
+    </ion-item>
+  }
+</ion-list>
+@if (loading()) {
+  <div class="loading-status"><ion-spinner /></div>
+}
+@if (error()) {
+  <p class="ion-padding">
+    操作失败，请重试。
+    <ion-button fill="clear" (click)="load()">刷新</ion-button>
+  </p>
+}
+@if (cursor() != null) {
+  <ion-button fill="clear" [disabled]="loading()" (click)="load(true)">加载更多</ion-button>
+}

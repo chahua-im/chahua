@@ -1,0 +1,20 @@
+<ion-avatar [class.placeholder]="!entry().avatar" [class.icon-avatar]="!!entry().icon">
+  @if (entry().icon; as icon) {
+    <ion-icon [icon]="icon"></ion-icon>
+  } @else if (entry().avatar; as src) {
+    <img [src]="src" [width]="size()" [height]="size()" decoding="async" />
+  } @else {
+    {{ entry().avatarName?.slice(0, 1) ?? entry().title?.slice(0, 1) }}
+  }
+</ion-avatar>
+@if (entry().badgeIcon || entry().badgeAvatar || entry().badgeName) {
+  <ion-avatar class="avatar-badge" [class.placeholder]="!entry().badgeAvatar" [class.icon-avatar]="!!entry().badgeIcon">
+    @if (entry().badgeIcon; as icon) {
+      <ion-icon [icon]="icon"></ion-icon>
+    } @else if (entry().badgeAvatar; as src) {
+      <img [src]="src" [width]="(size() * 26) / 48" [height]="(size() * 26) / 48" decoding="async" />
+    } @else {
+      {{ entry().badgeName?.slice(0, 1) }}
+    }
+  </ion-avatar>
+}

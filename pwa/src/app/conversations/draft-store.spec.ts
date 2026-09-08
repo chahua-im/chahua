@@ -44,6 +44,14 @@ describe('DraftStore', () => {
     expect(JSON.parse(window.localStorage.getItem('chahua.drafts.1')!)).toEqual({});
   });
 
+  it('does not write empty drafts or clear an already empty slot', () => {
+    const drafts = TestBed.inject(DraftStore);
+    const write = vi.spyOn(window.localStorage, 'setItem');
+    drafts.save(chat, undefined, '  ');
+    drafts.clear(chat);
+    expect(write).not.toHaveBeenCalled();
+  });
+
   it('does not change draft order when saving unchanged content and removes blank text', () => {
     const drafts = TestBed.inject(DraftStore);
     drafts.save(chat, undefined, '保留');
