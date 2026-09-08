@@ -1,5 +1,5 @@
-import { isHeicLikeMedia } from './file-type';
 import { isAnimatedImageFile } from './animated-image';
+import { isHeicLikeMedia } from './file-type';
 
 interface Dimensions {
   width: number;
@@ -112,6 +112,11 @@ export async function compressVideo(
       showWarnings: false,
     });
 
+    if (signal?.aborted) {
+      await conversion.cancel();
+      throwIfAborted(signal);
+    }
+
     if (conversion.discardedTracks.length > 0) {
       console.warn('[upload:compression] Video compression skipped, conversion would drop tracks', {
         discarded: conversion.discardedTracks.map(({ track, reason }) => ({ type: track.type, reason })),
@@ -189,10 +194,10 @@ async function compressImageSource(
   sourceDimensions: Dimensions,
   { signal, onProgress }: MediaProcessingOptions = {},
 ): Promise<CompressedMedia> {
-  throwIfAborted(signal);
+  const isFileSource = source instanceof File;
+  if (isFileSource) throwIfAborted(signal);
 
   const outputDimensions = calculateTargetImageDimensions(sourceDimensions.width, sourceDimensions.height);
-  const isFileSource = source instanceof File;
   const bitmap = isFileSource
     ? await createImageBitmap(source, {
         imageOrientation: 'from-image',
@@ -202,9 +207,10 @@ async function compressImageSource(
       })
     : source;
 
-  const canvas = new OffscreenCanvas(outputDimensions.width, outputDimensions.height);
+  let canvas: OffscreenCanvas;
   try {
     throwIfAborted(signal);
+    canvas = new OffscreenCanvas(outputDimensions.width, outputDimensions.height);
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Could not create image compression canvas');
     context.imageSmoothingQuality = 'high';
@@ -218,9 +224,9 @@ async function compressImageSource(
     throwIfAborted(signal);
     try {
       const blob = await canvas.convertToBlob({ type: format.type, quality: format.quality });
+      throwIfAborted(signal);
       if (blob.type !== format.type) continue;
 
-      throwIfAborted(signal);
       onProgress?.(1);
       if (!isFileSource || blob.size < file.size * IMAGE_COMPRESSION_RATIO) {
         return {

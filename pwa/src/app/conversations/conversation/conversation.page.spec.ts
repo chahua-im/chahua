@@ -1,17 +1,18 @@
-import { MessageType } from '../../../generated/models';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterLink } from '@angular/router';
-import { IonContent, IonTextarea, IonModal } from '@ionic/angular';
+import { IonContent, IonModal, IonTextarea } from '@ionic/angular';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { PinsService } from '../../../generated/endpoints/pins/pins.service';
 import {
+  AttachmentUploadPurpose,
   GroupRole,
+  MessageType,
   ServerWsMessageType,
   type MessageResponse,
   type ServerWsMessage,
@@ -21,17 +22,18 @@ import { Connection } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
+import { ChatStore } from '../../chats/chat-store';
+import { MessageDelivery } from '../../messages/message-delivery';
+import { MessageAction } from '../../messages/message-menu/message-menu';
+import { MessageNotice } from '../../messages/message-notice';
+import { MessageOutbox } from '../../messages/message-outbox';
+import { Message, type MessageContent } from '../../messages/message/message';
+import { UploadStatus, type AttachmentUpload } from '../../messages/upload';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { ChatStore } from '../../chats/chat-store';
 import { ConversationNavigation, ConversationTargetKind } from '../conversation-navigation';
 import { ConversationError, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
-import { MessageAction } from '../../messages/message-menu/message-menu';
-import { MessageNotice } from '../../messages/message-notice';
-import { Message, type MessageContent } from '../../messages/message/message';
-import { MessageOutbox } from '../../messages/message-outbox';
-import { MessageDelivery } from '../../messages/message-status';
 import { ConversationPage, ThreadError } from './conversation.page';
 
 function deferred<T>() {
@@ -118,6 +120,40 @@ describe('ConversationPage', () => {
     http.verify();
   });
 
+  function typeText(text: string) {
+    const textarea = fixture.debugElement.query(By.directive(IonTextarea));
+    expect((textarea.componentInstance as IonTextarea).disabled).toBeFalsy();
+    textarea.nativeElement.value = text;
+    textarea.nativeElement.dispatchEvent(new CustomEvent('ionInput', { bubbles: true, detail: { value: text } }));
+    fixture.detectChanges();
+  }
+
+  function pendingUpload(fileName = 'edit.png') {
+    const result = deferred<SnowflakeID | undefined>();
+    const state = signal<{ status: UploadStatus; progress: number; id?: SnowflakeID }>({
+      status: UploadStatus.Uploading,
+      progress: 0.25,
+    });
+    const upload = {
+      file: new File(['photo'], fileName, { type: 'image/png' }),
+      url: `data:image/png;base64,iVBORw0KGgo=#${encodeURIComponent(fileName)}`,
+      purpose: AttachmentUploadPurpose.media,
+      state,
+      retry: vi.fn(() => result.promise),
+      dispose: vi.fn(),
+    };
+    return {
+      upload: upload as unknown as AttachmentUpload,
+      progress(value: number) {
+        state.update((current) => ({ ...current, progress: value }));
+      },
+      finish(id: SnowflakeID) {
+        state.set({ status: UploadStatus.Ready, progress: 1, id });
+        result.resolve(id);
+      },
+    };
+  }
+
   async function enterThread(rootId = '100', read: { lastReadMessageId?: string } = { lastReadMessageId: '101' }) {
     fixture.componentRef.setInput('threadId', rootId);
     fixture.detectChanges();
@@ -168,6 +204,67 @@ describe('ConversationPage', () => {
       });
     await fixture.whenStable();
   }
+
+  it.each(['loading', 'failed'])(
+    'accepts input and renders a send before the initial page is available: %s',
+    async (state) => {
+      fixture.destroy();
+      fixture = TestBed.createComponent(ConversationPage);
+      component = fixture.componentInstance;
+      fixture.componentRef.setInput('id', wireChat.id);
+      fixture.detectChanges();
+      const initial = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
+      if (state === 'failed') {
+        initial.flush('', { status: 503, statusText: 'Unavailable' });
+        await fixture.whenStable();
+        expect(component['conversation'].error()).toBe(ConversationError.Open);
+      } else {
+        expect(component['conversation'].loading()).toBe(true);
+      }
+      expect(component['conversation'].page()).toBeUndefined();
+      typeText('页面未加载也能发送');
+      expect(component['draft']()).toBe('页面未加载也能发送');
+      const send: HTMLButtonElement = fixture.nativeElement.querySelector('.send-button');
+      expect(send.disabled).toBe(false);
+      send.click();
+      fixture.detectChanges();
+      const item = component['outbox'].items()[0];
+      const operation = item.operation;
+      const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+      expect(request.request.method).toBe('POST');
+      expect(request.request.body.message).toBe('页面未加载也能发送');
+      expect(component['conversation'].page()).toBeUndefined();
+      expect(component['draft']()).toBe('');
+      expect(component['rows']()).toHaveLength(1);
+      const local = fixture.debugElement.query(By.directive(Message));
+      expect(local.nativeElement.textContent).toContain('页面未加载也能发送');
+      expect((local.componentInstance as Message<MessageContent>).delivery()).toBe(MessageDelivery.Sending);
+      expect(component['pendingNavigation']()?.type).toBe(ConversationTargetKind.Latest);
+      const latest = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
+      if (state === 'loading') expect(initial.cancelled).toBe(true);
+      typeText('继续输入下一条');
+      expect((fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).disabled).toBe(false);
+      latest.flush('', { status: 503, statusText: 'Unavailable' });
+      request.flush({
+        ...wireMessage,
+        id: '9007199254741005',
+        clientGeneratedId: item.clientGeneratedId,
+        message: '页面未加载也能发送',
+      });
+      await operation;
+      await fixture.whenStable();
+      expect(component['conversation'].page()).toBeUndefined();
+      expect(component['conversation'].error()).toBe(ConversationError.Open);
+      expect(component['rows']()).toHaveLength(1);
+      expect(fixture.debugElement.query(By.directive(Message)).nativeElement).toBe(local.nativeElement);
+      expect((local.componentInstance as Message<MessageContent>).message().message).toBe('页面未加载也能发送');
+      expect((local.componentInstance as Message<MessageContent>).delivery()).toBe(MessageDelivery.Sent);
+      expect(component['draft']()).toBe('继续输入下一条');
+      expect(component['composer']()!.text()).toBe('继续输入下一条');
+      typeText('加载失败后仍能继续输入');
+      expect(component['draft']()).toBe('加载失败后仍能继续输入');
+    },
+  );
 
   it('encodes route IDs and prepends older messages in chronological order', async () => {
     fixture.detectChanges();
@@ -523,8 +620,8 @@ describe('ConversationPage', () => {
     select();
     await component['menu']()!['choose'](MessageAction.Pin);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('ion-alert').header).toBe('取消置顶');
-    expect(fixture.nativeElement.querySelector('ion-alert').isOpen).toBe(true);
+    expect(fixture.nativeElement.querySelector('app-message-menu ion-alert').header).toBe('取消置顶');
+    expect(fixture.nativeElement.querySelector('app-message-menu ion-alert').isOpen).toBe(true);
     http.expectNone((request) => request.method === 'DELETE');
     await component['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'cancel' } }));
     expect(component['pins']().items()).toHaveLength(1);
@@ -724,8 +821,6 @@ describe('ConversationPage', () => {
     expect(row.querySelector('.retry-button')).not.toBeNull();
     expect(item.delivery()).toBe(MessageDelivery.Failed);
     expect(component['draft']()).toBe('');
-    expect(component['sending']()).toBe(false);
-    expect(component['sendError']()).toBe(false);
     component.ionViewDidLeave();
     expect(TestBed.inject(DraftStore).get(testChat.id)).toBeUndefined();
     expect(TestBed.inject(MessageOutbox).items()).toEqual([item]);
@@ -747,19 +842,16 @@ describe('ConversationPage', () => {
       const body = structuredClone(first.request.body);
       expect(body.clientGeneratedId).toBe(item.clientGeneratedId);
       expect(component['draft']()).toBe('');
-      expect(component['sending']()).toBe(false);
       fixture.detectChanges();
       const local = fixture.debugElement.queryAll(By.directive(Message)).at(-1)!;
       const message = local.componentInstance as Message<MessageContent>;
       expect(message.message().id).toBeUndefined();
       expect(message.delivery()).toBe(MessageDelivery.Sending);
-      expect(message.interactive()).toBe(false);
       expect(local.nativeElement.textContent).toContain('新消息');
       first.flush('', { status: 503, statusText: 'Unavailable' });
       await sending;
       fixture.detectChanges();
       expect(component['draft']()).toBe('');
-      expect(component['sendError']()).toBe(false);
       expect(message.delivery()).toBe(MessageDelivery.Failed);
       expect(local.nativeElement.querySelector('.retry-button')).not.toBeNull();
 
@@ -781,7 +873,8 @@ describe('ConversationPage', () => {
         fixture.detectChanges();
         expect(fixture.debugElement.queryAll(By.directive(Message))).toHaveLength(2);
       }
-      retry.flush(structuredClone(response));
+      if (firstAcknowledgement === 'websocket') expect(retry.cancelled).toBe(true);
+      else retry.flush(structuredClone(response));
       await retrying;
       if (firstAcknowledgement === 'http') incoming.next(echoed);
       await fixture.whenStable();
@@ -808,7 +901,7 @@ describe('ConversationPage', () => {
     const firstRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
     timestamp.mockReturnValueOnce('2000-01-01T00:00:00Z');
     component['updateDraft']('第二条本地消息');
-    const secondSending = component['sendMessage']();
+    void component['sendMessage']();
     const [first, second] = component['outbox'].items();
     expect(first.clientGeneratedId).not.toBe(second.clientGeneratedId);
     expect(first.message().createdAt).toBe('2000-01-02T00:00:00Z');
@@ -834,7 +927,6 @@ describe('ConversationPage', () => {
         .map((row) => row.outgoing),
     ).toEqual([first, second]);
     expect(component['draft']()).toBe('');
-    expect(component['sending']()).toBe(false);
     firstRequest.flush({
       ...wireMessage,
       id: '9007199254741007',
@@ -842,14 +934,86 @@ describe('ConversationPage', () => {
       message: '第一条本地消息',
     });
     await firstSending;
-    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush('', { status: 503, statusText: 'Unavailable' });
-    await secondSending;
+    const secondRequest = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
+    secondRequest.flush('', { status: 503, statusText: 'Unavailable' });
+    await vi.waitFor(() => expect(second.delivery()).toBe(MessageDelivery.Failed));
     await fixture.whenStable();
     const rows = fixture.debugElement.queryAll(By.directive(Message));
     expect(rows).toHaveLength(4);
     expect(rows.at(-1)!.nativeElement).toBe(rendered.at(-1)!.nativeElement);
     expect(component['rows']().at(-1)?.outgoing).toBe(second);
     expect(second.delivery()).toBe(MessageDelivery.Failed);
+  });
+
+  it('sends later text while an attachment uploads and displays confirmations in server order', async () => {
+    const media = pendingUpload();
+    component['updateDraft']('附件消息');
+    void component['sendMessage']({ messageType: MessageType.text, attachmentIds: [], uploads: [media.upload] });
+    const attachmentItem = component['outbox'].items()[0];
+    typeText('先发的文字');
+    (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
+    const firstText = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
+    expect(firstText.request.body.message).toBe('先发的文字');
+    expect(firstText.request.body.attachmentIds).toEqual([]);
+    typeText('后发的文字');
+    (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
+    const [, firstTextItem, secondTextItem] = component['outbox'].items();
+    fixture.detectChanges();
+    expect(component['rows']()).toHaveLength(4);
+    expect(attachmentItem.delivery()).toBe(MessageDelivery.Sending);
+    expect(media.upload.state().status).toBe(UploadStatus.Uploading);
+    http.expectNone((request) => request.method === 'POST');
+    typeText('继续保留的草稿');
+    firstText.flush({
+      ...wireMessage,
+      id: '9007199254741005',
+      clientGeneratedId: firstTextItem.clientGeneratedId,
+      message: '先发的文字',
+    });
+    const secondText = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
+    expect(secondText.request.body.message).toBe('后发的文字');
+    expect(secondText.request.body.clientGeneratedId).toBe(secondTextItem.clientGeneratedId);
+    secondText.flush({
+      ...wireMessage,
+      id: '9007199254741007',
+      clientGeneratedId: secondTextItem.clientGeneratedId,
+      message: '后发的文字',
+    });
+    await vi.waitFor(() => expect(secondTextItem.delivery()).toBe(MessageDelivery.Sent));
+    await fixture.whenStable();
+    expect(media.upload.state().status).toBe(UploadStatus.Uploading);
+    expect(component['outbox'].items()).toEqual([attachmentItem]);
+    expect(component['rows']().map((row) => row.message.message)).toEqual([
+      '测试消息',
+      '先发的文字',
+      '后发的文字',
+      '附件消息',
+    ]);
+    media.finish(encodeId('100'));
+    const attachment = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
+    expect(attachment.request.body.message).toBe('附件消息');
+    expect(attachment.request.body.attachmentIds).toEqual(['100']);
+    attachment.flush({
+      ...wireMessage,
+      id: '9007199254741009',
+      clientGeneratedId: attachmentItem.clientGeneratedId,
+      message: '附件消息',
+      hasAttachments: true,
+      attachments: [{ id: '100', url: media.upload.url, fileName: 'edit.png', kind: 'image/png', size: 5 }],
+    });
+    await vi.waitFor(() => expect(attachmentItem.delivery()).toBe(MessageDelivery.Sent));
+    await fixture.whenStable();
+    expect(component['rows']().map((row) => row.message.id)).toEqual([
+      testMessage.id,
+      encodeId('9007199254741005'),
+      encodeId('9007199254741007'),
+      encodeId('9007199254741009'),
+    ]);
+    expect(fixture.debugElement.queryAll(By.directive(Message))).toHaveLength(4);
+    expect(component['rows']().filter((row) => row.key === attachmentItem.clientGeneratedId)).toHaveLength(1);
+    expect(component['outbox'].items()).toEqual([]);
+    expect(component['draft']()).toBe('继续保留的草稿');
+    expect(component['composer']()!.text()).toBe('继续保留的草稿');
   });
 
   it('retains live messages while older pages load and deduplicates echoed messages', async () => {
@@ -1216,7 +1380,6 @@ describe('ConversationPage', () => {
     expect(request.request.body.message).toBe('话题消息');
     expect(component['draft']()).toBe('');
     expect(component['rows']().at(-1)?.outgoing?.threadId).toBe(encodeId('100'));
-    expect(component['sending']()).toBe(false);
     request.flush({
       ...wireMessage,
       id: '103',
@@ -1260,7 +1423,7 @@ describe('ConversationPage', () => {
     await enterThread('99');
     expect(request.cancelled).toBe(false);
     expect(component['outbox'].items()).toContain(item);
-    expect(component['outgoing']()).toEqual([]);
+    expect(component['rows']().some((row) => row.outgoing === item)).toBe(false);
     component['draft'].set('另一个话题草稿');
     request.flush({
       ...wireMessage,
@@ -1317,60 +1480,62 @@ describe('ConversationPage', () => {
     expect(component['pins']()).toBe(sharedPins);
   });
 
-  it.each(['success', 'failure'])('continues the queue after an earlier send %s across reentry', async (result) => {
-    const accept = vi.spyOn(TestBed.inject(Connection), 'accept');
-    component['draft'].set('第一次进入的消息');
-    const oldSending = component['sendMessage']();
-    const oldRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    const oldItem = component['outbox'].items()[0];
-    component.ionViewDidLeave();
-    expect(oldRequest.cancelled).toBe(false);
-    await reenter();
-    expect(component['draft']()).toBe('');
-    expect(component['rows']().at(-1)?.outgoing).toBe(oldItem);
-    component['draft'].set('再次进入的消息');
-    component['replyTo'].set(testMessage);
-    const newSending = component['sendMessage']();
-    const newItem = component['outbox'].items().at(-1)!;
-    expect(
-      component['rows']()
-        .slice(-2)
-        .map((row) => row.outgoing),
-    ).toEqual([oldItem, newItem]);
-    expect(component['draft']()).toBe('');
-    expect(component['replyTo']()).toBeUndefined();
-    http.expectNone((req) => req.method === 'POST');
-    component['updateDraft']('第三条尚未发送');
-    component['startReply'](testMessage);
-    const open = vi.spyOn(component['conversation'], 'open');
-    if (result === 'success')
-      oldRequest.flush({
-        ...wireMessage,
-        id: '9007199254741005',
-        clientGeneratedId: oldRequest.request.body.clientGeneratedId,
-        message: oldRequest.request.body.message,
-      });
-    else oldRequest.flush('', { status: 503, statusText: 'Unavailable' });
-    await oldSending;
-    const newRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(newRequest.request.body.clientGeneratedId).toBe(newItem.clientGeneratedId);
-    expect(newRequest.request.body.message).toBe('再次进入的消息');
-    expect(newRequest.request.body.replyToId).toBe(wireMessage.id);
-    expect(oldItem.delivery()).toBe(result === 'success' ? MessageDelivery.Sent : MessageDelivery.Failed);
-    expect(component['draft']()).toBe('第三条尚未发送');
-    expect(component['replyTo']()).toBe(testMessage);
-    expect(component['sending']()).toBe(false);
-    expect(component['sendError']()).toBe(false);
-    expect(open).not.toHaveBeenCalled();
-    expect(accept).toHaveBeenCalledTimes(result === 'success' ? 1 : 0);
-    newRequest.flush('', { status: 503, statusText: 'Unavailable' });
-    await newSending;
-    await fixture.whenStable();
-    expect(newItem.delivery()).toBe(MessageDelivery.Failed);
-    expect(component['rows']().at(-1)?.outgoing).toBe(newItem);
-    expect(component['draft']()).toBe('第三条尚未发送');
-    expect(component['replyTo']()).toBe(testMessage);
-  });
+  it.each(['success', 'failure'])(
+    'preserves the next draft while resolving an earlier send %s across reentry',
+    async (result) => {
+      const accept = vi.spyOn(TestBed.inject(Connection), 'accept');
+      component['draft'].set('第一次进入的消息');
+      const oldSending = component['sendMessage']();
+      const oldRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+      const oldItem = component['outbox'].items()[0];
+      component.ionViewDidLeave();
+      expect(oldRequest.cancelled).toBe(false);
+      await reenter();
+      expect(component['draft']()).toBe('');
+      expect(component['rows']().at(-1)?.outgoing).toBe(oldItem);
+      component['draft'].set('再次进入的消息');
+      component['replyTo'].set(testMessage);
+      void component['sendMessage']();
+      const newItem = component['outbox'].items().at(-1)!;
+      expect(
+        component['rows']()
+          .slice(-2)
+          .map((row) => row.outgoing),
+      ).toEqual([oldItem, newItem]);
+      expect(component['draft']()).toBe('');
+      expect(component['replyTo']()).toBeUndefined();
+      http.expectNone((req) => req.method === 'POST');
+      component['updateDraft']('第三条尚未发送');
+      component['startReply'](testMessage);
+      const open = vi.spyOn(component['conversation'], 'open');
+      if (result === 'success')
+        oldRequest.flush({
+          ...wireMessage,
+          id: '9007199254741005',
+          clientGeneratedId: oldRequest.request.body.clientGeneratedId,
+          message: oldRequest.request.body.message,
+        });
+      else oldRequest.flush('', { status: 503, statusText: 'Unavailable' });
+      await oldSending;
+      expect(oldItem.delivery()).toBe(result === 'success' ? MessageDelivery.Sent : MessageDelivery.Failed);
+      const newRequest = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
+      expect(newRequest.request.body.clientGeneratedId).toBe(newItem.clientGeneratedId);
+      expect(newRequest.request.body.message).toBe('再次进入的消息');
+      expect(newRequest.request.body.replyToId).toBe(wireMessage.id);
+      expect(oldItem.delivery()).toBe(result === 'success' ? MessageDelivery.Sent : MessageDelivery.Failed);
+      expect(component['draft']()).toBe('第三条尚未发送');
+      expect(component['replyTo']()).toBe(testMessage);
+      expect(open).not.toHaveBeenCalled();
+      expect(accept).toHaveBeenCalledTimes(result === 'success' ? 1 : 0);
+      newRequest.flush('', { status: 503, statusText: 'Unavailable' });
+      await vi.waitFor(() => expect(newItem.delivery()).toBe(MessageDelivery.Failed));
+      await fixture.whenStable();
+      expect(newItem.delivery()).toBe(MessageDelivery.Failed);
+      expect(component['rows']().at(-1)?.outgoing).toBe(newItem);
+      expect(component['draft']()).toBe('第三条尚未发送');
+      expect(component['replyTo']()).toBe(testMessage);
+    },
+  );
 
   it('does not report a subscription failure from an earlier visit to the same topic', async () => {
     await enterThread();
@@ -1428,7 +1593,7 @@ describe('ConversationPage', () => {
     const firstSending = component['sendMessage']();
     const firstRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
     component['draft'].set('销毁前第二条');
-    const secondSending = component['sendMessage']();
+    void component['sendMessage']();
     const [first, second] = outbox.items();
     const oldConversation = component['conversation'];
     fixture.destroy();
@@ -1441,7 +1606,7 @@ describe('ConversationPage', () => {
       message: firstRequest.request.body.message,
     });
     await firstSending;
-    const secondRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const secondRequest = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
     expect(secondRequest.request.body.clientGeneratedId).toBe(second.clientGeneratedId);
     secondRequest.flush({
       ...wireMessage,
@@ -1449,7 +1614,7 @@ describe('ConversationPage', () => {
       clientGeneratedId: secondRequest.request.body.clientGeneratedId,
       message: secondRequest.request.body.message,
     });
-    await secondSending;
+    await vi.waitFor(() => expect(second.published()).toBe(true));
     expect(first.published()).toBe(true);
     expect(second.published()).toBe(true);
     expect(oldConversation.items()).toEqual([]);
@@ -1517,7 +1682,6 @@ describe('ConversationPage', () => {
     const nextReply = { ...testMessage, id: encodeId('999'), clientGeneratedId: 'next-reply-999' };
     component['startReply'](nextReply);
     expect(component['replyTo']()).toBe(nextReply);
-    expect(component['sending']()).toBe(false);
     expect(item.message().replyToMessage).toMatchObject(testMessage);
     expect(request.request.body.replyToId).toBe(wireMessage.id);
     request.flush('', { status: 503, statusText: 'Unavailable' });
@@ -1567,6 +1731,71 @@ describe('ConversationPage', () => {
     expect(component['conversation'].items()[0].message).toBe('更新后的正文');
     events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
     expect(component['conversation'].items()[0].isDeleted).toBe(true);
+    fixture.detectChanges();
+    expect(component['rows']()).toEqual([]);
+    expect(fixture.nativeElement.querySelector('app-message, .message-date')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.message-list').textContent).not.toContain('消息已删除');
+  });
+
+  it('omits deleted history and paging-time recalls before grouping dates and avatars', async () => {
+    const loading = component['conversation'].load(PageDirection.Older);
+    events.next({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: {
+        chatId: testChat.id,
+        messageIds: [encodeId('9007199254741001')],
+      },
+    });
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+      messages: [
+        {
+          ...wireMessage,
+          id: '9007199254740999',
+          clientGeneratedId: 'deleted-history',
+          isDeleted: true,
+          createdAt: '2026-09-04T12:00:00Z',
+        },
+        { ...wireMessage, id: '9007199254741000', clientGeneratedId: 'visible-history' },
+        {
+          ...wireMessage,
+          id: '9007199254741001',
+          clientGeneratedId: 'recalled-history',
+          sender: { uid: 2, name: '朋友', gender: 0 },
+        },
+      ],
+    });
+    await loading;
+    fixture.detectChanges();
+    expect(
+      component['rows']().map(({ message, first, last, dateBreak }) => ({ id: message.id, first, last, dateBreak })),
+    ).toEqual([
+      { id: encodeId('9007199254741000'), first: true, last: false, dateBreak: true },
+      { id: testMessage.id, first: false, last: true, dateBreak: false },
+    ]);
+    expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(2);
+    expect(fixture.nativeElement.querySelectorAll('.message-date')).toHaveLength(1);
+    expect(component['conversation'].page()?.olderCursor).toBeUndefined();
+  });
+
+  it('moves the unread separator to the next visible message after a recall', () => {
+    component['entryReadId'].set(encodeId('9007199254741000'));
+    component['conversation'].receive({
+      ...testMessage,
+      id: encodeId('9007199254741004'),
+      clientGeneratedId: 'next-message',
+    });
+    expect(component['firstUnreadId']()).toBe(testMessage.id);
+    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
+    expect(component['firstUnreadId']()).toBe(encodeId('9007199254741004'));
+  });
+
+  it('removes a recalled message when the local delete request succeeds', async () => {
+    const recalling = component['menu']()!['messageActions'].recall(testMessage);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`).flush(null);
+    await recalling;
+    fixture.detectChanges();
+    expect(component['rows']()).toEqual([]);
+    expect(fixture.nativeElement.querySelector('app-message, .message-date')).toBeNull();
   });
 
   it('does not submit a sixth personal reaction', async () => {
@@ -1589,7 +1818,10 @@ describe('ConversationPage', () => {
     expect(message.showAllAvatars()).toBe(true);
   });
 
-  it('resolves an ID-only menu selection against the latest message', () => {
+  it('resolves an ID-only menu selection against the latest message', async () => {
+    const details = TestBed.inject(ChatStore).ensureDetails(testChat.id);
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.member });
+    await details;
     component['menu']()!['selection'].set({
       messageId: testMessage.id,
       element: document.createElement('div'),
@@ -1603,22 +1835,464 @@ describe('ConversationPage', () => {
     expect(component['menu']()!['message']()?.message).toBe('编辑后的消息');
     expect(component['menu']()!['selection']()).not.toHaveProperty('message');
   });
-  it('edits the selected message without overwriting the separate unsent draft', async () => {
+  it('enqueues an edit and immediately restores the separate unsent draft and reply', async () => {
     component['updateDraft']('未发送的草稿');
+    component['startReply'](testMessage);
     component['startEdit'](testMessage);
     component['updateDraft']('编辑内容');
     const sending = component['sendMessage']({ messageType: MessageType.text, attachmentIds: [encodeId('100')] });
-    const request = http.expectOne((req) => req.method === 'PATCH');
+    const item = component['outbox'].items()[0];
+    expect(item.editId).toBe(testMessage.id);
+    expect(item.threadId).toBeUndefined();
+    expect(component['editing']()).toBeUndefined();
+    expect(component['draft']()).toBe('未发送的草稿');
+    expect(component['replyTo']()).toBe(testMessage);
+    expect(component['savedReplyId']()).toBeUndefined();
+    fixture.detectChanges();
+    expect(component['composer']()!.text()).toBe('未发送的草稿');
+    expect(component['rows']()).toHaveLength(1);
+    expect(component['rows']()[0].outgoing).toBe(item);
+    expect(component['rows']()[0].message.message).toBe('编辑内容');
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    expect(request.request.method).toBe('PATCH');
     expect(request.request.body).toEqual({ message: '编辑内容', attachmentIds: ['100'] });
-    expect(component['sending']()).toBe(true);
-    expect(component['outbox'].items()).toEqual([]);
+    http.expectNone((req) => req.method === 'POST');
     request.flush({ ...wireMessage, message: '编辑内容', isEdited: true });
     await sending;
+    await fixture.whenStable();
     expect(component['conversation'].items()[0].message).toBe('编辑内容');
+    expect(component['rows']()).toHaveLength(1);
     expect(component['draft']()).toBe('未发送的草稿');
-    expect(component['editing']()).toBeUndefined();
-    expect(component['sending']()).toBe(false);
+    expect(component['replyTo']()).toBe(testMessage);
+    expect(component['outbox'].items()).toEqual([]);
   });
+
+  it('edits a pending outgoing item in place and immediately restores the unsent draft and reply', async () => {
+    const outbox = TestBed.inject(MessageOutbox);
+    const media = pendingUpload();
+    const composition = { messageType: MessageType.text, attachmentIds: [], uploads: [media.upload] };
+    component['updateDraft']('原待发消息');
+    const sending = component['sendMessage'](composition);
+    const item = outbox.items()[0];
+    fixture.detectChanges();
+    const originalRows = fixture.debugElement.queryAll(By.directive(Message));
+    const local = originalRows.at(-1)!;
+    const rowKeys = component['rows']().map((row) => row.key);
+    expect(originalRows).toHaveLength(2);
+    expect(local.nativeElement.textContent).toContain('原待发消息');
+    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+
+    const edit = vi.spyOn(outbox, 'edit');
+    const enqueue = vi.spyOn(outbox, 'enqueue');
+    const enqueueEdit = vi.spyOn(outbox, 'enqueueEdit');
+    component['updateDraft']('未提交的下一条草稿');
+    component['startReply'](testMessage);
+    component['startEdit'](item);
+    fixture.detectChanges();
+    expect(component['editing']()?.message).toBe('原待发消息');
+    expect(component['composer']()!.text()).toBe('原待发消息');
+    typeText('  修改后的待发消息  ');
+    const editing = component['sendMessage'](composition);
+    const operation = item.operation;
+    expect(edit).toHaveBeenCalledExactlyOnceWith(item, '修改后的待发消息', composition);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(enqueueEdit).not.toHaveBeenCalled();
+    expect(outbox.items()).toEqual([item]);
+    expect(component['editing']()).toBeUndefined();
+    expect(component['draft']()).toBe('未提交的下一条草稿');
+    expect(component['replyTo']()).toBe(testMessage);
+    fixture.detectChanges();
+    expect(component['composer']()!.text()).toBe('未提交的下一条草稿');
+    expect(component['rows']().map((row) => row.key)).toEqual(rowKeys);
+    expect(component['rows']().at(-1)?.outgoing).toBe(item);
+    expect(fixture.debugElement.queryAll(By.directive(Message)).map((row) => row.nativeElement)).toEqual(
+      originalRows.map((row) => row.nativeElement),
+    );
+    expect((local.componentInstance as Message<MessageContent>).message().message).toBe('修改后的待发消息');
+    expect(local.nativeElement.textContent).toContain('修改后的待发消息');
+    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+    typeText('编辑退出后继续写草稿');
+
+    media.finish(encodeId('100'));
+    const request = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body.message).toBe('修改后的待发消息');
+    expect(request.request.body.attachmentIds).toEqual(['100']);
+    request.flush({
+      ...wireMessage,
+      id: '9007199254741005',
+      clientGeneratedId: request.request.body.clientGeneratedId,
+      message: '修改后的待发消息',
+      hasAttachments: true,
+      attachments: [{ id: '100', url: media.upload.url, fileName: 'edit.png', kind: 'image/png', size: 5 }],
+    });
+    await Promise.all([sending, editing, operation]);
+    await vi.waitFor(() => expect(item.delivery()).toBe(MessageDelivery.Sent));
+    await fixture.whenStable();
+    expect(component['rows']()).toHaveLength(2);
+    expect(fixture.debugElement.queryAll(By.directive(Message)).at(-1)!.nativeElement).toBe(local.nativeElement);
+    expect((local.componentInstance as Message<MessageContent>).message().message).toBe('修改后的待发消息');
+    expect(component['draft']()).toBe('编辑退出后继续写草稿');
+    expect(component['replyTo']()).toBe(testMessage);
+    expect(component['composer']()!.text()).toBe('编辑退出后继续写草稿');
+    expect(outbox.items()).toEqual([]);
+    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+  });
+
+  it('preserves an open outgoing edit through upload changes and create acknowledgement, then PATCHes the released item', async () => {
+    const outbox = TestBed.inject(MessageOutbox);
+    const retained = pendingUpload('retained.png');
+    const removed = pendingUpload('removed.png');
+    const added = pendingUpload('added.png');
+    component['updateDraft']('创建时的正文');
+    const sending = component['sendMessage']({
+      messageType: MessageType.text,
+      attachmentIds: [],
+      uploads: [retained.upload, removed.upload],
+    });
+    const item = outbox.items()[0];
+    component['updateDraft']('下一条未发送草稿');
+    component['startReply'](testMessage);
+    component['startEdit'](item);
+    fixture.detectChanges();
+    const local = fixture.debugElement.queryAll(By.directive(Message)).at(-1)!;
+    const composer = component['composer']()!;
+    expect(composer['selectedUploads']()).toEqual([retained.upload, removed.upload]);
+    composer['remove'](removed.upload);
+    composer['uploads'].set([added.upload]);
+    typeText('确认前已经改写的正文');
+    expect(composer['selectedUploads']()).toEqual([retained.upload, added.upload]);
+    expect(removed.upload.dispose).not.toHaveBeenCalled();
+
+    retained.progress(0.75);
+    added.progress(0.5);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(component['editing']()).toBeDefined();
+    expect(component['editText']()).toBe('确认前已经改写的正文');
+    expect(composer.text()).toBe('确认前已经改写的正文');
+    expect(composer['selectedUploads']()).toEqual([retained.upload, added.upload]);
+    expect(added.upload.dispose).not.toHaveBeenCalled();
+    const selected: HTMLElement = fixture.nativeElement.querySelector('app-message-composer .uploads');
+    expect(selected.textContent).toContain('retained.png');
+    expect(selected.textContent).toContain('added.png');
+    expect(selected.textContent).not.toContain('removed.png');
+
+    retained.finish(encodeId('100'));
+    removed.finish(encodeId('101'));
+    const create = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages`));
+    expect(create.request.method).toBe('POST');
+    expect(create.request.body.message).toBe('创建时的正文');
+    expect(create.request.body.attachmentIds).toEqual(['100', '101']);
+    fixture.detectChanges();
+    expect(composer.text()).toBe('确认前已经改写的正文');
+    expect(composer['selectedUploads']()).toEqual([retained.upload, added.upload]);
+    const attachment = (id: string, upload: AttachmentUpload) => ({
+      id,
+      url: upload.url,
+      fileName: upload.file.name,
+      kind: upload.file.type,
+      size: upload.file.size,
+    });
+    const created = {
+      ...wireMessage,
+      id: '9007199254741005',
+      clientGeneratedId: create.request.body.clientGeneratedId,
+      message: '创建时的正文',
+      hasAttachments: true,
+      attachments: [attachment('100', retained.upload), attachment('101', removed.upload)],
+    };
+    create.flush(structuredClone(created));
+    await sending;
+    await vi.waitFor(() => expect(item.delivery()).toBe(MessageDelivery.Sent));
+    await fixture.whenStable();
+    expect(item.confirmed()?.id).toBe(encodeId(created.id));
+    expect(item.disposed).toBe(true);
+    expect(outbox.items()).toEqual([]);
+    expect(component['rows']()).toHaveLength(2);
+    expect(fixture.debugElement.queryAll(By.directive(Message)).at(-1)!.nativeElement).toBe(local.nativeElement);
+    expect(component['editing']()).toBeDefined();
+    expect(component['editText']()).toBe('确认前已经改写的正文');
+    expect(composer.text()).toBe('确认前已经改写的正文');
+    expect(composer['selectedUploads']()).toEqual([retained.upload, added.upload]);
+    expect(added.upload.dispose).not.toHaveBeenCalled();
+    expect(selected.textContent).toContain('added.png');
+    expect(selected.textContent).not.toContain('removed.png');
+
+    const edit = vi.spyOn(outbox, 'edit');
+    const enqueue = vi.spyOn(outbox, 'enqueue');
+    typeText('确认前已经改写的正文，确认后继续补充');
+    const send: HTMLButtonElement = fixture.nativeElement.querySelector('.send-button');
+    expect(send.disabled).toBe(false);
+    send.click();
+    expect(edit).toHaveBeenCalledExactlyOnceWith(
+      item,
+      '确认前已经改写的正文，确认后继续补充',
+      expect.objectContaining({ messageType: MessageType.text, uploads: [retained.upload, added.upload] }),
+    );
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(component['editing']()).toBeUndefined();
+    expect(component['draft']()).toBe('下一条未发送草稿');
+    expect(component['replyTo']()).toBe(testMessage);
+    const patchItem = outbox.items()[0];
+    fixture.detectChanges();
+    expect(composer.text()).toBe('下一条未发送草稿');
+    expect(component['rows']()).toHaveLength(2);
+    expect(added.upload.dispose).not.toHaveBeenCalled();
+    http.expectNone((request) => request.method === 'POST');
+    added.finish(encodeId('102'));
+    const patch = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages/${created.id}`));
+    expect(patch.request.method).toBe('PATCH');
+    expect(patch.request.body).toEqual({
+      message: '确认前已经改写的正文，确认后继续补充',
+      attachmentIds: ['100', '102'],
+    });
+    patch.flush({
+      ...created,
+      message: '确认前已经改写的正文，确认后继续补充',
+      isEdited: true,
+      attachments: [attachment('100', retained.upload), attachment('102', added.upload)],
+    });
+    await vi.waitFor(() => expect(patchItem.delivery()).toBe(MessageDelivery.Sent));
+    await fixture.whenStable();
+    expect(component['rows']()).toHaveLength(2);
+    expect(fixture.debugElement.queryAll(By.directive(Message)).at(-1)!.nativeElement).toBe(local.nativeElement);
+    expect((local.componentInstance as Message<MessageContent>).message().message).toBe(
+      '确认前已经改写的正文，确认后继续补充',
+    );
+    expect(component['draft']()).toBe('下一条未发送草稿');
+    expect(component['replyTo']()).toBe(testMessage);
+    expect(outbox.items()).toEqual([]);
+    http.expectNone((request) => request.method === 'POST' || request.method === 'PATCH');
+  });
+
+  it('hands off unfinished edit uploads immediately, overlays the original row and PATCHes only after upload', async () => {
+    const newer = {
+      ...testMessage,
+      id: encodeId('9007199254741005'),
+      clientGeneratedId: 'newer-edit-neighbor',
+      message: '后面的消息',
+    };
+    incoming.next(newer);
+    fixture.detectChanges();
+    const originalRows = fixture.debugElement.queryAll(By.directive(Message));
+    const original = originalRows[0];
+    const message = original.componentInstance as Message<MessageContent>;
+    const neighbor = originalRows[1].componentInstance as Message<MessageContent>;
+    const media = pendingUpload();
+    component['updateDraft']('未发送的草稿');
+    component['startReply'](newer);
+    component['startEdit'](testMessage);
+    fixture.detectChanges();
+    const composer = component['composer']()!;
+    composer['uploads'].set([media.upload]);
+    typeText('带附件的编辑');
+    const send: HTMLButtonElement = fixture.nativeElement.querySelector('.send-button');
+    expect(send.disabled).toBe(false);
+    send.click();
+    const item = component['outbox'].items()[0];
+    const operation = item.operation;
+    expect(item.editId).toBe(testMessage.id);
+    expect(item.uploads).toEqual([media.upload]);
+    expect(component['editing']()).toBeUndefined();
+    expect(component['draft']()).toBe('未发送的草稿');
+    expect(component['replyTo']()).toBe(newer);
+    expect(component['savedReplyId']()).toBeUndefined();
+    expect(composer['uploads']()).toEqual([]);
+    expect(media.upload.retry).toHaveBeenCalledOnce();
+    http.expectNone((req) => req.method === 'PATCH' || req.method === 'POST');
+    fixture.detectChanges();
+    expect(composer.text()).toBe('未发送的草稿');
+    expect(media.upload.dispose).not.toHaveBeenCalled();
+    expect(component['outbox'].items()).toEqual([item]);
+    expect(component['rows']().map((row) => row.message.id)).toEqual([testMessage.id, newer.id]);
+    expect(fixture.debugElement.queryAll(By.directive(Message)).map((row) => row.nativeElement)).toEqual(
+      originalRows.map((row) => row.nativeElement),
+    );
+    expect(message.message()).toMatchObject({
+      id: testMessage.id,
+      message: '带附件的编辑',
+      createdAt: testMessage.createdAt,
+    });
+    expect(message.message().attachments).toEqual([
+      expect.objectContaining({ url: media.upload.url, fileName: 'edit.png' }),
+    ]);
+    expect(original.nativeElement.textContent).toContain('带附件的编辑');
+    expect(message.delivery()).toBe(MessageDelivery.Sending);
+    expect(neighbor.interactive()).toBe(true);
+    expect(neighbor.canReply()).toBe(true);
+    const openMenu = vi.spyOn(component['menu']()!, 'open').mockImplementation(() => {});
+    originalRows[1].query(By.css('.bubble')).triggerEventHandler('contextmenu', new MouseEvent('contextmenu'));
+    expect(openMenu).toHaveBeenCalledOnce();
+    expect(openMenu).toHaveBeenCalledWith(expect.objectContaining({ messageId: newer.id }));
+    expect((fixture.nativeElement.querySelector('.attach-button') as HTMLButtonElement).disabled).toBe(false);
+    expect((fixture.nativeElement.querySelector('.reply-close') as HTMLButtonElement).disabled).toBe(false);
+    typeText('上传期间的新草稿');
+    expect(component['draft']()).toBe('上传期间的新草稿');
+    expect((fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).disabled).toBe(false);
+
+    media.finish(encodeId('100'));
+    const request = await vi.waitFor(() => http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`));
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({ message: '带附件的编辑', attachmentIds: ['100'] });
+    request.flush({
+      ...wireMessage,
+      message: '带附件的编辑',
+      isEdited: true,
+      hasAttachments: true,
+      attachments: [{ id: '100', url: media.upload.url, fileName: 'edit.png', kind: 'image/png', size: 5 }],
+    });
+    await operation;
+    await vi.waitFor(() => expect(item.delivery()).toBe(MessageDelivery.Sent));
+    await fixture.whenStable();
+    expect(fixture.debugElement.queryAll(By.directive(Message)).map((row) => row.nativeElement)).toEqual(
+      originalRows.map((row) => row.nativeElement),
+    );
+    expect(message.message().message).toBe('带附件的编辑');
+    expect(message.interactive()).toBe(true);
+    expect(component['outbox'].items()).toEqual([]);
+    expect(media.upload.dispose).toHaveBeenCalledOnce();
+    expect(component['draft']()).toBe('上传期间的新草稿');
+    expect(component['replyTo']()).toBe(newer);
+  });
+
+  it('retries a failed edit from its original row without clearing the next draft or reply', async () => {
+    const newer = { ...testMessage, id: encodeId('9007199254741005'), clientGeneratedId: 'edit-retry-neighbor' };
+    incoming.next(newer);
+    component['startEdit'](testMessage);
+    component['updateDraft']('需要重试的编辑');
+    const sending = component['sendMessage']();
+    const item = component['outbox'].items()[0];
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    fixture.detectChanges();
+    const original = fixture.debugElement.queryAll(By.directive(Message))[0];
+    typeText('新的未发送草稿');
+    component['startReply'](newer);
+    request.flush('', { status: 503, statusText: 'Unavailable' });
+    await sending;
+    await fixture.whenStable();
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(component['editing']()).toBeUndefined();
+    expect(component['rows']().map((row) => row.message.id)).toEqual([testMessage.id, newer.id]);
+    expect(fixture.debugElement.queryAll(By.directive(Message))[0].nativeElement).toBe(original.nativeElement);
+    expect(original.nativeElement.textContent).toContain('需要重试的编辑');
+    expect(component['draft']()).toBe('新的未发送草稿');
+    expect(component['replyTo']()).toBe(newer);
+    const retry: HTMLButtonElement = original.nativeElement.querySelector('.retry-button');
+    expect(retry).not.toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.retry-button')).toHaveLength(1);
+    retry.click();
+    const operation = item.operation;
+    const retried = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    expect(retried.request.method).toBe('PATCH');
+    expect(retried.request.body).toEqual(request.request.body);
+    expect(component['outbox'].items()).toEqual([item]);
+    expect(item.delivery()).toBe(MessageDelivery.Sending);
+    fixture.detectChanges();
+    expect(original.nativeElement.querySelector('.retry-button')).toBeNull();
+    typeText('重试期间继续输入');
+    expect(component['replyTo']()).toBe(newer);
+    retried.flush({ ...wireMessage, message: '需要重试的编辑', isEdited: true });
+    await operation;
+    await fixture.whenStable();
+    expect(component['rows']()).toHaveLength(2);
+    expect(fixture.debugElement.queryAll(By.directive(Message))[0].nativeElement).toBe(original.nativeElement);
+    expect(original.nativeElement.textContent).toContain('需要重试的编辑');
+    expect(original.nativeElement.querySelector('.retry-button')).toBeNull();
+    expect((original.componentInstance as Message<MessageContent>).interactive()).toBe(true);
+    expect(component['outbox'].items()).toEqual([]);
+    expect(component['draft']()).toBe('重试期间继续输入');
+    expect(component['replyTo']()).toBe(newer);
+    expect(component['composer']()!.text()).toBe('重试期间继续输入');
+    http.expectNone((req) => req.method === 'POST');
+  });
+
+  it.each(['navigation', 'destroy'])(
+    'keeps an edit confirmation effective after %s and hands it to the returning page',
+    async (mode) => {
+      const outbox = TestBed.inject(MessageOutbox);
+      const acceptChange = vi.spyOn(TestBed.inject(Connection), 'acceptChange');
+      component['updateDraft']('原会话未发送草稿');
+      component['startEdit'](testMessage);
+      component['updateDraft']('离开后完成的编辑');
+      const sending = component['sendMessage']();
+      const item = outbox.items()[0];
+      const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+      const otherChatId = encodeId('9007199254740995');
+      const otherMessage = {
+        ...testMessage,
+        id: encodeId('9007199254741010'),
+        chatId: otherChatId,
+        clientGeneratedId: 'other-chat-message',
+        message: '另一个会话的消息',
+      };
+      TestBed.inject(ChatStore).remember([{ ...testChat, id: otherChatId }]);
+      if (mode === 'destroy') {
+        fixture.destroy();
+        fixture = TestBed.createComponent(ConversationPage);
+        component = fixture.componentInstance;
+      }
+      fixture.componentRef.setInput('id', decodeId(otherChatId));
+      fixture.detectChanges();
+      http.expectOne(`/_api/chats/${decodeId(otherChatId)}/messages?max=50`).flush({
+        messages: [{ ...otherMessage, id: decodeId(otherMessage.id), chatId: decodeId(otherChatId) }],
+      });
+      await fixture.whenStable();
+      expect(request.cancelled).toBe(false);
+      expect(outbox.items()).toContain(item);
+      expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('原会话未发送草稿');
+      typeText('另一个会话的新草稿');
+      component['startReply'](otherMessage);
+      component['startEdit'](otherMessage);
+      component['updateDraft']('另一个会话正在编辑');
+      request.flush({ ...wireMessage, message: '离开后完成的编辑', isEdited: true });
+      await sending;
+      await fixture.whenStable();
+      expect(item.delivery()).toBe(MessageDelivery.Sent);
+      expect(item.confirmed()).toMatchObject({ id: testMessage.id, message: '离开后完成的编辑', isEdited: true });
+      expect(acceptChange).toHaveBeenCalledWith({
+        type: ServerWsMessageType.messageUpdated,
+        payload: expect.objectContaining({ id: testMessage.id, message: '离开后完成的编辑' }),
+      });
+      expect(component['conversation'].items()).toEqual([otherMessage]);
+      expect(component['rows']()).toHaveLength(1);
+      expect(component['draft']()).toBe('另一个会话的新草稿');
+      expect(component['replyTo']()).toBe(otherMessage);
+      expect(component['editing']()).toBe(otherMessage);
+      expect(component['composer']()!.text()).toBe('另一个会话正在编辑');
+
+      fixture.componentRef.setInput('id', wireChat.id);
+      fixture.detectChanges();
+      // A stale initial GET must not erase a confirmation retained by the shared outbox.
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
+      await fixture.whenStable();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(component['outbox']).toBe(outbox);
+      expect(component['rows']()).toHaveLength(1);
+      expect(component['rows']()[0].message).toMatchObject({
+        id: testMessage.id,
+        message: '离开后完成的编辑',
+        isEdited: true,
+      });
+      expect(fixture.debugElement.queryAll(By.directive(Message))).toHaveLength(1);
+      const returned: HTMLElement = fixture.nativeElement.querySelector('app-message');
+      expect(returned.textContent).toContain('离开后完成的编辑');
+      expect(component['draft']()).toBe('原会话未发送草稿');
+      expect(component['editing']()).toBeUndefined();
+      expect(outbox.items()).toContain(item);
+      events.next({
+        type: ServerWsMessageType.messageUpdated,
+        payload: { ...testMessage, message: '离开后完成的编辑', isEdited: true },
+      });
+      await fixture.whenStable();
+      expect(component['conversation'].items()[0].message).toBe('离开后完成的编辑');
+      expect(fixture.nativeElement.querySelector('app-message')).toBe(returned);
+      expect(component['rows']()).toHaveLength(1);
+      expect(outbox.items()).toEqual([]);
+      http.expectNone((req) => req.method === 'PATCH' || req.method === 'POST');
+    },
+  );
 
   it.each([MessageType.file, MessageType.audio, MessageType.sticker])(
     'preserves unsent text while a %s submission clears its reply and retains a retryable row',
@@ -1651,7 +2325,6 @@ describe('ConversationPage', () => {
       expect(request.request.body.replyToId).toBe(wireMessage.id);
       expect(component['draft']()).toBe('稍后发送的文字');
       expect(component['replyTo']()).toBeUndefined();
-      expect(component['sending']()).toBe(false);
       expect(component['rows']().at(-1)?.outgoing).toBe(item);
       request.flush('', { status: 503, statusText: 'Unavailable' });
       await sending;
@@ -1659,7 +2332,6 @@ describe('ConversationPage', () => {
       expect(item.delivery()).toBe(MessageDelivery.Failed);
       expect(component['draft']()).toBe('稍后发送的文字');
       expect(component['replyTo']()).toBeUndefined();
-      expect(component['sendError']()).toBe(false);
       expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button')).not.toBeNull();
       const retrying = component['outbox'].retry(item);
       const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);

@@ -1,4 +1,4 @@
-import { effect, inject, Service } from '@angular/core';
+import { computed, effect, inject, Service, signal } from '@angular/core';
 import { filter, map, Subject } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../generated/endpoints/chahua.base-url';
 import { wsPayloadCodecs } from '../../generated/json-codecs';
@@ -30,6 +30,7 @@ const RECONNECT_MAX_DELAY_MS = 30_000;
 
 @Service()
 export class Connection {
+  readonly connected = signal(false);
   private readonly session = inject(SessionStore);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
   private readonly resync = new Subject<void>();
@@ -60,9 +61,10 @@ export class Connection {
   }
 
   constructor() {
+    const uid = computed(() => this.session.user()?.uid);
     effect((onCleanup) => {
       const token = this.session.token();
-      if (!this.session.user() || !token) return;
+      if (!uid() || !token) return;
       const url = new URL(`${this.baseUrl}/ws`, window.location.origin);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       let socket: WebSocket;
@@ -95,10 +97,12 @@ export class Connection {
             return;
           }
           if (!message) return;
+          if ('payload' in message) this.session.updateProfile(message.payload);
           if (message.type === WsControl.Pong || message.type === ServerWsMessageType.presenceUpdate)
             lastPong = Date.now();
           if (message.type === ServerWsMessageType.presenceUpdate && !connected) {
             connected = true;
+            this.connected.set(true);
             attempts = 0;
             this.resync.next();
           }
@@ -107,6 +111,7 @@ export class Connection {
         };
         socket.onclose = () => {
           connected = false;
+          this.connected.set(false);
           clearInterval(heartbeat);
           retry = setTimeout(
             connect,
@@ -126,6 +131,7 @@ export class Connection {
       connect();
       document.addEventListener(VISIBILITY_CHANGE, visibilityChanged);
       onCleanup(() => {
+        this.connected.set(false);
         this.acceptedIds.clear();
         clearTimeout(retry);
         clearInterval(heartbeat);

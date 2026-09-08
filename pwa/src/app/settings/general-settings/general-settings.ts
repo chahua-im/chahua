@@ -13,9 +13,9 @@ import {
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
-import { chevronBackOutline, chatbubblesOutline, personCircleOutline } from 'ionicons/icons';
+import { chatbubblesOutline, chevronBackOutline, personCircleOutline } from 'ionicons/icons';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { Preferences } from '../preferences';
-import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-general-settings',

@@ -1,19 +1,19 @@
-import { dismissChatOverlays } from '../dismiss-chat-overlays';
-import { Component, effect, inject, input, signal, untracked, computed } from '@angular/core';
+import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import { Router } from '@angular/router';
 import {
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonButtons,
+  IonAvatar,
   IonButton,
+  IonButtons,
   IonContent,
+  IonHeader,
   IonItem,
-  IonList,
   IonLabel,
-  IonSpinner,
+  IonList,
   IonSearchbar,
+  IonSpinner,
+  IonTitle,
+  IonToolbar,
   ModalController,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
@@ -21,26 +21,21 @@ import { GroupsService } from '../../../generated/endpoints/groups/groups.servic
 import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
 import { type InvitePreviewResponse } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
-import { DirectorySearch } from '../directory-search/directory-search';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { ChatListStore } from '../chat-list-store';
-import { ContentScrollbars } from '../../content-scrollbars';
+import { DirectorySearch } from '../directory-search/directory-search';
+import { dismissChatOverlays } from '../dismiss-chat-overlays';
+import { inviteCode, inviteStatus, InviteStatus } from '../invite';
 export enum StartChatKind {
   Create,
   Join,
   Friend,
 }
-export function inviteCode(value: string) {
-  try {
-    const url = new URL(value);
-    return url.searchParams.get('invite') || url.pathname.split('/').filter(Boolean).at(-1) || '';
-  } catch {
-    return value.trim();
-  }
-}
 @Component({
   selector: 'app-start-chat',
   templateUrl: './start-chat.html',
   imports: [
+    IonAvatar,
     ContentScrollbars,
     FormField,
     IonHeader,
@@ -62,6 +57,8 @@ export class StartChat {
   readonly kind = input(StartChatKind.Create);
   readonly code = input('');
   protected readonly Kind = StartChatKind;
+  protected readonly status = inviteStatus;
+  protected readonly Status = InviteStatus;
   protected readonly modals = inject(ModalController);
   private readonly groups = inject(GroupsService);
   private readonly invites = inject(InvitesService);
@@ -97,7 +94,10 @@ export class StartChat {
     }
   }
   protected readonly previewValid = computed(
-    () => !!this.preview() && this.preview()!.invite.code === inviteCode(this.values().code),
+    () =>
+      !!this.preview() &&
+      this.preview()!.invite.code === inviteCode(this.values().code) &&
+      (this.preview()!.alreadyMember || inviteStatus(this.preview()!.invite) === InviteStatus.Active),
   );
   protected async submit() {
     if (this.busy() || (this.kind() === StartChatKind.Join && !this.previewValid())) return;

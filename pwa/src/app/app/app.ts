@@ -3,6 +3,7 @@ import { Component, inject, linkedSignal, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router } from '@angular/router';
 import {
+  createAnimation,
   IonApp,
   IonButton,
   IonContent,
@@ -11,14 +12,14 @@ import {
   IonSpinner,
   IonSplitPane,
   iosTransitionAnimation,
-  createAnimation,
 } from '@ionic/angular';
 import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
+import { NotificationBanner } from '../pwa/notification-banner/notification-banner';
+import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
 import { SettingsModal } from '../settings/settings-modal/settings-modal';
-import { ContentScrollbars } from '../content-scrollbars';
 
 enum StartupError {
   Expired,
@@ -31,6 +32,7 @@ enum StartupError {
   styleUrl: './app.scss',
   host: { '(window:popstate)': 'browserTransition.set($event.hasUAVisualTransition)' },
   imports: [
+    NotificationBanner,
     ContentScrollbars,
     IonApp,
     IonButton,
@@ -45,6 +47,13 @@ enum StartupError {
 })
 export class App {
   private readonly router = inject(Router);
+  protected readonly landingPage = toSignal(
+    this.router.events.pipe(
+      filter((event) => event instanceof NavigationEnd),
+      map(() => /^\/landing(?:[?/#]|$)/.test(this.router.url)),
+    ),
+    { initialValue: /^\/landing(?:[?/#]|$)/.test(location.pathname) },
+  );
   private readonly routeSelection = toSignal(
     this.router.events.pipe(
       filter((event) => event instanceof NavigationEnd),

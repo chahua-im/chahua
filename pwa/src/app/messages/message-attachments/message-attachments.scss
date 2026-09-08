@@ -41,11 +41,14 @@
 
 .media-frame img,
 .media-frame video,
-.audio-frame audio {
+.audio-frame app-voice-player {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+}
+.media-frame img,
+.media-frame video {
   object-fit: contain;
 }
 
@@ -97,6 +100,7 @@
 }
 
 .upload-overlay {
+  pointer-events: none;
   position: absolute;
   inset: 0;
   display: grid;
@@ -107,4 +111,17 @@
 
 .file ion-spinner {
   flex-shrink: 0;
+}
+
+.video-open {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  background: transparent;
+  color: white;
+  font-size: 48px;
+  cursor: pointer;
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 45%));
 }

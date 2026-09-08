@@ -44,9 +44,23 @@ export function messageParts(text: string, mentions: readonly MentionInfo[] = []
 @Component({
   selector: 'app-message-text',
   templateUrl: './message-text.html',
-  styles: [
-    ':host {white-space:inherit;overflow-wrap:anywhere;} a,button {color:var(--message-link-color,var(--ion-color-primary));font:inherit;padding:0;background:none;text-decoration:none;} button {cursor:pointer;}',
-  ],
+  styles: `
+    :host {
+      white-space: inherit;
+      overflow-wrap: anywhere;
+    }
+    a,
+    button {
+      color: var(--message-link-color, var(--ion-color-primary));
+      font: inherit;
+      padding: 0;
+      background: none;
+      text-decoration: none;
+    }
+    button {
+      cursor: pointer;
+    }
+  `,
   imports: [],
 })
 export class MessageText {

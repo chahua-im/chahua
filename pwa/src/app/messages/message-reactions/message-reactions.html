@@ -1,13 +1,32 @@
 @for (reaction of reactions(); track reaction.emoji) {
+  <ng-template #content>
+    <span class="emoji">{{ reaction.emoji }}</span>
+    @if (reaction.reactors?.length) {
+      <span class="reactors">
+        @for (reactor of reaction.reactors!.slice(0, 5); track reactor.uid; let i = $index) {
+          <span class="reactor" [style.z-index]="5 - i">
+            @if (reactor.avatarUrl; as src) {
+              <img [src]="src" width="23" height="23" decoding="async" />
+            } @else {
+              {{ reactor.name?.slice(0, 1) }}
+            }
+          </span>
+        }
+        @if (reaction.count > 5) {
+          <span class="overflow">+{{ reaction.count - 5 }}</span>
+        }
+      </span>
+    } @else if (reaction.count > 1) {
+      <span class="count">{{ reaction.count }}</span>
+    }
+  </ng-template>
   @if (preview()) {
     <span class="reaction" [class.reacted]="reaction.reactedByMe">
-      <span class="emoji">{{ reaction.emoji }}</span>
-      <span class="count">{{ reaction.count }}</span>
+      <ng-container [ngTemplateOutlet]="content" />
     </span>
   } @else {
     <button type="button" class="reaction" [class.reacted]="reaction.reactedByMe" (click)="react.emit(reaction.emoji)">
-      <span class="emoji">{{ reaction.emoji }}</span>
-      <span class="count">{{ reaction.count }}</span>
+      <ng-container [ngTemplateOutlet]="content" />
     </button>
   }
 }

@@ -1,25 +1,164 @@
 :host {
-  --background: var(--ion-background-color);
+  background: rgb(0 0 0 / 94%);
+  color: white;
+  padding: 0 var(--ion-safe-area-right, 0px) var(--ion-safe-area-bottom, 0px) var(--ion-safe-area-left, 0px);
 }
-.viewer {
-  height: 100%;
+.viewer-controls {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  inset: var(--ion-safe-area-top, 0px) var(--ion-safe-area-right, 0px) auto var(--ion-safe-area-left, 0px);
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 4px 12px;
+  gap: 12px;
+}
+.counter {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.tools {
+  display: flex;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+.tools .icon-button {
+  pointer-events: auto;
+}
+.counter,
+.tools .icon-button {
+  background: rgb(0 0 0 / 45%);
+}
+.icon-button {
   display: grid;
   place-items: center;
-  touch-action: pinch-zoom;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 12%);
+  color: inherit;
+  font-size: 24px;
+  cursor: pointer;
+  text-decoration: none;
+  &:disabled {
+    opacity: 0.25;
+    cursor: default;
+  }
 }
-img {
-  max-height: 100%;
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.viewport {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+}
+.canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--media-scale, 1) * 100%);
+  height: calc(var(--media-scale, 1) * 100%);
+}
+.canvas img,
+.canvas video {
+  display: block;
   max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
+.canvas img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.canvas video {
+  width: 100%;
+  height: 100%;
+}
 .zoom {
-  display: block;
-  width: 200%;
-  height: auto;
-  touch-action: pan-x pan-y pinch-zoom;
+  overflow: auto;
+  cursor: grab;
 }
 .zoom img {
-  max-width: none;
   width: 100%;
-  height: auto;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+}
+.media-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.previous,
+.next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.previous {
+  left: 12px;
+}
+.next {
+  right: 12px;
+}
+.load-error {
+  color: inherit;
+}
+.gallery-viewport {
+  overflow-x: auto;
+  flex-shrink: 0;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.gallery-viewport::-webkit-scrollbar {
+  display: none;
+}
+.gallery {
+  display: flex;
+  gap: 8px;
+  width: max-content;
+  margin-inline: auto;
+  padding: 12px;
+}
+.thumbnail {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 12%);
+  opacity: 0.6;
+  cursor: pointer;
+  &.selected {
+    border-color: currentColor;
+    color: white;
+    opacity: 1;
+  }
+  img,
+  video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  ion-icon {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    color: white;
+    font-size: 20px;
+  }
 }

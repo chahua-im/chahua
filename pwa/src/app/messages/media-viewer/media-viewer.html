@@ -1,26 +1,88 @@
-<ion-header>
-  <ion-toolbar>
-    <ion-title>{{ index() + 1 }} / {{ images().length }}</ion-title>
-    <ion-buttons slot="start"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
-    <ion-buttons slot="end">
-      <ion-button [href]="current().url" target="_blank" rel="noopener">原图</ion-button>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
-<ion-content appScrollbars [scrollX]="zoom()" [scrollY]="zoom()">
+<div class="viewer-controls">
+  @if (media().length > 1) {
+    <span class="counter">{{ index() + 1 }} / {{ media().length }}</span>
+  }
+  <div class="tools">
+    <a class="icon-button" [href]="current().url" [attr.download]="current().fileName" target="_blank" rel="noopener">
+      <ion-icon [icon]="icons.downloadOutline" />
+    </a>
+    @if (current().kind === Kind.Image) {
+      <button class="icon-button" type="button" (click)="toggleZoom()">
+        <ion-icon [icon]="zoom() ? icons.contractOutline : icons.expandOutline" />
+      </button>
+    }
+    @if (canFullscreen) {
+      <button class="icon-button" type="button" (click)="fullscreen()"><ion-icon [icon]="icons.scanOutline" /></button>
+    }
+    <button class="icon-button close" type="button" (click)="modals.dismiss()">
+      <ion-icon [icon]="icons.closeOutline" />
+    </button>
+  </div>
+</div>
+<div class="stage">
   <div
-    class="viewer"
+    #viewport
+    class="viewport"
     [class.zoom]="zoom()"
+    (wheel)="wheel($event)"
+    (pointerdown)="drag($event)"
+    (pointermove)="dragging($event)"
+    (pointerup)="stopDrag()"
+    (pointercancel)="stopDrag()"
+    (touchmove)="touchMove($event)"
     (touchstart)="start($event)"
     (touchend)="end($event)"
-    (dblclick)="zoom.set(!zoom())">
-    <img [src]="current().url" />
+    (touchcancel)="end($event)">
+    <div class="canvas" (click)="background($event)">
+      @for (item of [current()]; track item.url) {
+        @if (failed()) {
+          <a class="load-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
+        } @else if (item.kind === Kind.Video) {
+          <video
+            #video
+            [src]="item.url"
+            controls
+            autoplay
+            playsinline
+            preload="metadata"
+            (loadedmetadata)="loading.set(false)"
+            (error)="failed.set(true)"></video>
+        } @else {
+          <img
+            [src]="item.url"
+            draggable="false"
+            (dblclick)="toggleZoom()"
+            (load)="loading.set(false)"
+            (error)="failed.set(true)" />
+        }
+      }
+    </div>
   </div>
-</ion-content>
-<ion-toolbar>
-  <ion-buttons slot="start"><ion-button [disabled]="index() === 0" (click)="move(-1)">上一张</ion-button></ion-buttons>
-  <ion-buttons slot="end">
-    <ion-button (click)="zoom.set(!zoom())">{{ zoom() ? '适应屏幕' : '放大' }}</ion-button>
-    <ion-button [disabled]="index() === images().length - 1" (click)="move(1)">下一张</ion-button>
-  </ion-buttons>
-</ion-toolbar>
+  @if (loading() && !failed()) {
+    <ion-spinner class="media-loading" />
+  }
+  @if (media().length > 1) {
+    <button class="icon-button previous" type="button" [disabled]="index() === 0" (click)="move(-1)">
+      <ion-icon [icon]="icons.chevronBackOutline" />
+    </button>
+    <button class="icon-button next" type="button" [disabled]="index() === media().length - 1" (click)="move(1)">
+      <ion-icon [icon]="icons.chevronForwardOutline" />
+    </button>
+  }
+</div>
+@if (media().length > 1) {
+  <div class="gallery-viewport">
+    <div #gallery class="gallery">
+      @for (item of media(); track $index; let index = $index) {
+        <button class="thumbnail" [class.selected]="index === this.index()" type="button" (click)="select(index)">
+          @if (item.kind === Kind.Video) {
+            <video [src]="item.url" muted playsinline preload="metadata"></video>
+            <ion-icon [icon]="icons.play" />
+          } @else {
+            <img [src]="item.url" loading="lazy" draggable="false" />
+          }
+        </button>
+      }
+    </div>
+  </div>
+}

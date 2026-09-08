@@ -35,7 +35,7 @@
         <ion-note slot="end" color="medium">不支持</ion-note>
       } @else {
         <ion-toggle
-          [checked]="notifications.subscribed()"
+          [checked]="notifications.enabled()"
           [disabled]="notifications.busy()"
           (ionChange)="setNotifications($event)">
           消息通知
@@ -49,13 +49,27 @@
               @case (PushError.PermissionDenied) {
                 通知权限已被拒绝
               }
+              @case (PushError.SubscribeFailed) {
+                后台推送注册失败
+              }
+              @case (PushError.BackendSubscribeFailed) {
+                后台推送注册失败
+              }
               @default {
                 请重试
               }
             }
           </ion-note>
-          @if (error === PushError.RefreshFailed) {
-            <ion-button slot="end" fill="clear" [disabled]="notifications.busy()" (click)="notifications.refresh()">
+          @if (
+            error === PushError.RefreshFailed ||
+            error === PushError.SubscribeFailed ||
+            error === PushError.BackendSubscribeFailed
+          ) {
+            <ion-button
+              slot="end"
+              fill="clear"
+              [disabled]="notifications.busy()"
+              (click)="error === PushError.RefreshFailed ? notifications.refresh() : notifications.setEnabled(true)">
               <ion-icon slot="icon-only" [icon]="updateIcon"></ion-icon>
             </ion-button>
           }

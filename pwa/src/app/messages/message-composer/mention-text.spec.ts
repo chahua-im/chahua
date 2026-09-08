@@ -1,5 +1,5 @@
-import { displayText, editText, wireText } from './mention-text';
 import { messageParts } from '../message-text/message-text';
+import { displayText, editText, wireText } from './mention-text';
 describe('Mention text', () => {
   it('renders the supplied name immediately and leaves a stable fallback without a name', () => {
     expect(

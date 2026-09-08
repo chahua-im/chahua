@@ -1,12 +1,12 @@
-<ion-segment [value]="kind()" (ionChange)="change($event.detail.value)">
-  <ion-segment-button [value]="Kind.image"><ion-label>图片</ion-label></ion-segment-button>
-  <ion-segment-button [value]="Kind.video"><ion-label>视频</ion-label></ion-segment-button>
-  <ion-segment-button [value]="Kind.other"><ion-label>文件</ion-label></ion-segment-button>
-</ion-segment>
 @if (kind() === Kind.image) {
   <div class="media">
-    @for (item of items(); track item.id; let index = $index) {
-      <button type="button" (click)="view(index)"><img [src]="item.url" loading="lazy" /></button>
+    @for (item of items(); track item.id) {
+      <button type="button" [disabled]="!!opening()" (click)="view(item)">
+        <img [src]="item.url" loading="lazy" />
+        @if (opening() === item.id) {
+          <div class="opening"><ion-spinner /></div>
+        }
+      </button>
     }
   </div>
 } @else {
@@ -14,7 +14,12 @@
     @for (item of items(); track item.id) {
       <ion-item>
         <ion-label>
-          <a [href]="item.url" target="_blank" rel="noopener">{{ item.fileName }}</a>
+          <a [href]="item.url" target="_blank" rel="noopener" (click)="kind() === Kind.video && view(item, $event)">
+            {{ item.fileName }}
+          </a>
+          @if (opening() === item.id) {
+            <ion-spinner />
+          }
           <p>{{ item.sender.name }}</p>
         </ion-label>
         <ion-button slot="end" fill="clear" [disabled]="!!locating()" (click)="locate(item)">
@@ -38,10 +43,17 @@
 } @else if (!items().length) {
   <p class="ion-padding ion-text-center">暂无内容</p>
 }
-@if (cursor()) {
-  <ion-button fill="clear" [disabled]="loading()" (click)="load(true)">加载更多</ion-button>
-}
+<ion-infinite-scroll
+  threshold="100px"
+  [disabled]="cursor() == null || loading() || error()"
+  (ionInfinite)="more($event)">
+  <ion-infinite-scroll-content />
+</ion-infinite-scroll>
 
 @if (locateFailed()) {
   <p class="ion-padding">无法定位原消息，请重试。</p>
+}
+
+@if (openFailed()) {
+  <p class="ion-padding">无法打开媒体，请重试。</p>
 }

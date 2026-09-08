@@ -3,11 +3,11 @@
     @if (selection(); as selection) {
       @if (message(); as message) {
         <div class="menu-surface" (click)="dismissBackdrop($event)">
-          @if (choosingEmoji()) {
+          @if (choosingEmoji() && serverMessage(); as serverMessage) {
             <div class="emoji-panel">
               <button type="button" class="picker-back" (click)="choosingEmoji.set(false)">返回消息操作</button>
               @defer {
-                <app-emoji-picker (chosen)="reactTo(message, $event)"></app-emoji-picker>
+                <app-emoji-picker (chosen)="reactTo(serverMessage, $event)"></app-emoji-picker>
               } @loading (after 100ms) {
                 <div class="loading-status">
                   <ion-spinner></ion-spinner>
@@ -17,35 +17,27 @@
               }
             </div>
           } @else {
-            <div
-              #stack
-              class="menu-stack"
-              [style.visibility]="placed() ? null : 'hidden'"
-              [class.own]="selection.own"
-              [style.left.px]="position().left"
-              [style.top.px]="position().top"
-              [style.width.px]="position().width">
-              @if (canReact()) {
+            <div #stack class="menu-stack" [style.visibility]="placed() ? null : 'hidden'" [class.own]="selection.own">
+              @if (canReact() && serverMessage(); as serverMessage) {
                 <div #reactionBar class="reactions panel">
                   @for (emoji of emojis(['👍', '❤️', '😂', '😮', '😢']); track emoji) {
-                    <button type="button" [class.selected]="selected(emoji)" (click)="reactTo(message, emoji)">
+                    <button type="button" [class.selected]="selected(emoji)" (click)="reactTo(serverMessage, emoji)">
                       {{ emoji }}
                     </button>
                   }
-                  @if (message.reactions.length < 50) {
+                  @if (serverMessage.reactions.length < 50) {
                     <button type="button" (click)="choosingEmoji.set(true)">
                       <ion-icon [icon]="icons.addOutline"></ion-icon>
                     </button>
                   }
                 </div>
               }
-              <div
-                class="preview"
-                [style.width.px]="selection.rect.width"
-                [style.max-height.px]="position().previewHeight">
+              <div class="preview" [style.width.px]="selection.rect.width">
                 <app-message
                   [showAllAvatars]="showAllAvatars()"
                   [message]="message"
+                  [delivery]="queued()?.delivery()"
+                  [uploads]="queued()?.uploads ?? []"
                   [own]="selection.own"
                   [first]="selection.first"
                   [last]="selection.last"
@@ -53,12 +45,20 @@
                   [preview]="true"></app-message>
               </div>
               <div #actions class="actions panel">
-                <button type="button" [disabled]="!canReply()" (click)="choose(Action.Reply)">
-                  <ion-icon [icon]="icons.arrowUndoOutline"></ion-icon>
-                  <span>回复</span>
-                </button>
+                @if (!queued() && message.reactions?.length) {
+                  <button type="button" (click)="choose(Action.Reactions)">
+                    <ion-icon [icon]="icons.peopleOutline" />
+                    <span>查看表态</span>
+                  </button>
+                }
+                @if (!queued()) {
+                  <button type="button" [disabled]="!canReply()" (click)="choose(Action.Reply)">
+                    <ion-icon [icon]="icons.arrowUndoOutline"></ion-icon>
+                    <span>回复</span>
+                  </button>
+                }
                 @if (canEdit()) {
-                  <button type="button" [disabled]="!canReply()" (click)="choose(Action.Edit)">
+                  <button type="button" [disabled]="!queued() && !canReply()" (click)="choose(Action.Edit)">
                     <ion-icon [icon]="icons.copyOutline" />
                     <span>编辑</span>
                   </button>
@@ -69,7 +69,11 @@
                     <span>话题</span>
                   </button>
                 }
-                @if (admin() && (pinned() || (!message.isDeleted && message.messageType !== MessageType.sticker))) {
+                @if (
+                  !queued() &&
+                  admin() &&
+                  (pinned() || (!message.isDeleted && message.messageType !== MessageType.sticker))
+                ) {
                   <button type="button" [disabled]="pins().loading() || busy()" (click)="choose(Action.Pin)">
                     <ion-icon [icon]="icons.pinOutline"></ion-icon>
                     <span>{{ pinned() ? '取消置顶' : '置顶' }}</span>
@@ -87,14 +91,14 @@
                     <span>收藏</span>
                   </button>
                 }
-                @if (message.messageType !== MessageType.invite) {
+                @if (!queued() && message.messageType !== MessageType.invite) {
                   <button type="button" (click)="choose(Action.Link)">
                     <ion-icon [icon]="icons.linkOutline"></ion-icon>
                     <span>链接</span>
                   </button>
                 }
                 @if (canRecall()) {
-                  <button type="button" (click)="choose(Action.Recall)">
+                  <button type="button" class="destructive" (click)="choose(Action.Recall)">
                     <ion-icon [icon]="icons.trashOutline"></ion-icon>
                     <span>撤回</span>
                   </button>

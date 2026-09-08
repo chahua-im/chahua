@@ -2,46 +2,100 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding-top: 6px;
+  padding-top: 4px;
 }
+
 .reaction {
+  --reaction-background: var(--ion-color-light-shade);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 28px;
+  min-height: 26px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--ion-color-primary) 10%, var(--ion-background-color, #fff));
-  color: var(--ion-color-primary-shade);
-  cursor: pointer;
+  background: var(--reaction-background);
+  color: var(--ion-color-light-contrast);
+  font-size: 21px;
   line-height: 1;
 }
-.emoji {
-  font-size: 18.5px;
-  margin: 0.5px 0 0.5px 6px;
+
+button.reaction {
+  cursor: pointer;
+  transition: transform 0.15s ease;
+
+  &:active {
+    transform: scale(0.95);
+  }
 }
-.count {
-  padding-right: 7px;
-  font-size: 12px;
-  font-weight: 600;
-}
-.reacted {
-  background: var(--ion-color-primary-shade);
+
+.reacted,
+:host(.own) .reaction {
+  --reaction-background: var(--ion-color-primary-tint);
   color: var(--ion-color-primary-contrast);
 }
-:host(.own:not(.external)) .reaction {
-  background: color-mix(in srgb, currentColor 6%, transparent);
-  color: inherit;
+
+:host(.own) .reacted {
+  --reaction-background: var(--ion-color-primary-shade);
 }
-:host(.own:not(.external)) .reacted {
-  border-color: currentColor;
+
+.emoji {
+  margin: 0.5px 0 0.5px 6px;
+  font-size: 18.5px;
+
+  &:last-child {
+    margin-right: 6px;
+  }
 }
-:host(.external) .reaction:not(.reacted) {
-  background: var(--ion-background-color, #fff);
+
+.count {
+  margin: 0 6px;
+  font-size: 12px;
+  opacity: 0.7;
 }
-@media (prefers-color-scheme: dark) {
-  .reaction:not(.reacted) {
-    color: var(--ion-color-primary-tint);
+
+.reactors {
+  display: inline-flex;
+  align-items: center;
+  margin: 1.5px;
+}
+
+.reactor {
+  display: grid;
+  place-items: center;
+  position: relative;
+  width: 23px;
+  height: 23px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--reactor-border, var(--reaction-background));
+  overflow: hidden;
+  background: var(--reaction-background);
+  font-size: 11px;
+
+  & + & {
+    margin-left: -9px;
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.overflow {
+  margin-left: 2px;
+  margin-right: 4px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+:host(.external) {
+  --reactor-border: currentColor;
+  padding-top: 0;
+  margin: 8px 0;
+
+  &.own {
+    justify-content: flex-end;
   }
 }

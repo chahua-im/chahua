@@ -4,10 +4,10 @@ import {
   Component,
   computed,
   DestroyRef,
-  inject,
-  signal,
-  input,
   effect,
+  inject,
+  input,
+  signal,
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -25,15 +25,14 @@ import {
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
-import { encodeId } from '../../api/snowflake-id';
 import { SavedMessagesService } from '../../../generated/endpoints/saved-messages/saved-messages.service';
 import type { SavedMessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
-import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { SessionStore } from '../../session/session-store';
+import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { Message } from '../../messages/message/message';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { SessionStore } from '../../session/session-store';
 import { savedMessageContent } from './saved-message-content';
-import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-saved-messages',

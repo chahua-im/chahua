@@ -26,6 +26,9 @@
       <h3>
         {{ entry().title }}
         <ng-content select="[slot=title]"></ng-content>
+        @if (entry().muted) {
+          <ion-icon class="muted-icon" [icon]="mutedIcon" [color]="active.isActive ? undefined : 'medium'" />
+        }
       </h3>
       <p>
         @if (entry().sender; as sender) {
@@ -42,7 +45,8 @@
           <span>{{ entry().time | chatDate }}</span>
         }
         @if (entry().unreadCount; as count) {
-          <ion-badge [color]="active.isActive ? 'light' : 'primary'">
+          <ion-badge
+            [color]="entry().unreadColor ?? (active.isActive ? 'light' : entry().muted ? 'medium' : 'primary')">
             {{ count >= 1000 ? '999+' : count }}
           </ion-badge>
         }
