@@ -1,15 +1,14 @@
-import { IonButton, IonContent, IonIcon, IonItem, IonList, IonModal, useIonAlert } from '@ionic/react';
+import { IonButton, IonContent, IonIcon, IonItem, IonList, IonModal } from '@ionic/react';
 import { chatbubbles } from 'ionicons/icons';
 import { useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { t } from '@lingui/core/macro';
 import type { RootState } from '@/store/index';
-import { useChatRole } from '@/components/chat/permissions/useChatRole';
 import { pinScopeKey, selectPinsForScope } from '@/store/pinsSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import type { PinResponse } from '@/api/pins';
-import { deletePin, deleteThreadPin } from '@/api/pins';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { usePinManagement } from './usePinManagement';
 import styles from './PinListModal.module.scss';
 import { useIsDesktop } from '@/hooks/platformHooks';
 
@@ -31,10 +30,8 @@ export function PinListModal({
   onSelectPin,
   onSelectThread,
 }: PinListModalProps) {
-  const [presentAlert] = useIonAlert();
   const isDesktop = useIsDesktop();
-  const { role } = useChatRole(chatId);
-  const isAdmin = role === 'admin';
+  const { canUnpin, confirmUnpin } = usePinManagement(chatId, threadRootId);
   const pins = useSelector((state: RootState) => selectPinsForScope(state, pinScopeKey(chatId, threadRootId)));
   const locale = useSelector(selectEffectiveLocale);
 
@@ -50,23 +47,9 @@ export function PinListModal({
     (e: React.MouseEvent, pin: PinResponse) => {
       e.preventDefault();
       e.stopPropagation();
-      presentAlert({
-        header: t`Unpin Message`,
-        message: t`Would you like to unpin this message?`,
-        buttons: [
-          { text: t`Cancel`, role: 'cancel' },
-          {
-            text: t`Unpin`,
-            role: 'destructive',
-            handler: () => {
-              const unpin = threadRootId ? deleteThreadPin(chatId, threadRootId, pin.id) : deletePin(chatId, pin.id);
-              unpin.catch(() => {});
-            },
-          },
-        ],
-      });
+      confirmUnpin(pin.id);
     },
-    [chatId, threadRootId, presentAlert],
+    [confirmUnpin],
   );
 
   const handleThreadClick = useCallback(
@@ -123,7 +106,7 @@ export function PinListModal({
                           <IonIcon icon={chatbubbles} slot="icon-only" className={styles.threadBadge} />
                         </IonButton>
                       )}
-                      {isAdmin && (
+                      {canUnpin && (
                         <IonButton
                           fill="clear"
                           size="small"
