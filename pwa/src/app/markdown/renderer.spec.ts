@@ -12,6 +12,8 @@ function toHtml(nodes: readonly MarkdownNode[]): string {
       switch (node.type) {
         case 'text':
           return node.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        case 'mention':
+          return `<${node.clickable ? 'button' : 'span'} class="mention">@${node.name}</${node.clickable ? 'button' : 'span'}>`;
         case 'widget':
           return toHtml([node.node]);
         default: {

@@ -13,7 +13,8 @@ import { containsPlaceholder, splitByPlaceholders } from './placeholder';
 export type MarkdownNode =
   | { type: 'text'; text: string }
   | { type: 'element'; tag: string; attrs?: Readonly<Record<string, string>>; children: MarkdownNode[] }
-  /** Caller-defined widget restored from a placeholder slot (e.g. a mention). */
+  | { type: 'mention'; uid: number; name: string; self: boolean; clickable: boolean }
+  /** Caller-defined widget restored from a placeholder slot. */
   | { type: 'widget'; index: number; node: MarkdownNode };
 
 export interface MarkdownRenderOptions {
