@@ -1,7 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { IonIcon } from '@ionic/react';
 import { t } from '@lingui/core/macro';
 import { happyOutline } from 'ionicons/icons';
+import { isFeatureEnabled } from '@/features';
+import {
+  applyLink,
+  shortcutFormatKind,
+  wrapBlockFormat,
+  wrapInlineFormat,
+  type BlockFormatKind,
+  type TextFormatKind,
+} from '@/utils/textFormat';
+import { FormatToolbar, type FormatToolbarAnchor } from './FormatToolbar';
 import type { EditingMessage, ReplyTo } from './types';
 import styles from './MessageComposeBar.module.scss';
 
@@ -37,6 +48,19 @@ function checkIsVirtualKeyboard(): boolean {
   return false;
 }
 
+/**
+ * Commit a new value into a React-controlled <textarea> exactly the way the
+ * mention autocomplete inserts text: use the native value setter and then fire
+ * an `input` event so React's onChange produces the parent's setState. The
+ * collapsed/new selection is restored on a macrotask so it always runs after
+ * React has re-rendered the committed value.
+ */
+function commitControlledValue(textarea: HTMLTextAreaElement, next: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  valueSetter?.call(textarea, next);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 interface ComposeInputProps {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   text: string;
@@ -53,6 +77,8 @@ interface ComposeInputProps {
   onStickerPress?: () => void;
   isStickerActive?: boolean;
   onMentionKeyDown?: (event: KeyboardEvent) => boolean;
+  /** Mention autocomplete popup open state — used to hide the format pill. */
+  isMentionMenuOpen?: boolean;
 }
 
 export function ComposeInput({
@@ -71,7 +97,67 @@ export function ComposeInput({
   onStickerPress,
   isStickerActive,
   onMentionKeyDown,
+  isMentionMenuOpen = false,
 }: ComposeInputProps) {
+  const [focused, setFocusedState] = useState(false);
+  const [hasSelection, setHasSelection] = useState(false);
+  const [isComposing, setComposing] = useState(false);
+  const [linkMode, setLinkMode] = useState(false);
+  const applyActionRef = useRef<((kind: TextFormatKind, url?: string) => void) | null>(null);
+
+  const measureSelection = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    const selected = end > start;
+    setHasSelection((prev) => (prev === selected ? prev : selected));
+  };
+
+  const applyAction = (kind: TextFormatKind, url?: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const selection = { start: textarea.selectionStart ?? 0, end: textarea.selectionEnd ?? 0 };
+    const result =
+      kind === 'link'
+        ? url
+          ? applyLink(text, selection, url)
+          : null
+        : kind === 'code' || kind === 'quote'
+          ? wrapBlockFormat(text, selection, kind as BlockFormatKind)
+          : wrapInlineFormat(text, selection, kind);
+    if (!result) return;
+
+    if (kind === 'link') {
+      setLinkMode(false);
+    }
+    commitControlledValue(textarea, result.text);
+    window.setTimeout(() => {
+      textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
+      textarea.focus();
+      measureSelection();
+    }, 0);
+  };
+  // Keep the latest formatter reachable from the keydown listener so shortcuts
+  // never act on a stale closure.
+  useEffect(() => {
+    applyActionRef.current = applyAction;
+  });
+
+  const requestLinkMode = (open: boolean) => {
+    setLinkMode(open);
+    if (!open) {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        textarea.focus();
+        measureSelection();
+      }
+    }
+  };
+
+  const formatEnabled = isFeatureEnabled('messageMarkdown');
+
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -86,6 +172,17 @@ export function ComposeInput({
 
       const isImeConfirm = event.isComposing || event.keyCode === 229 || event.which === 229;
       const isVirtualKbd = checkIsVirtualKeyboard();
+
+      // Ctrl/Cmd+B / I / D formatting shortcuts (never during IME composition).
+      if (formatEnabled && !isImeConfirm && !event.altKey && (event.ctrlKey || event.metaKey)) {
+        const kind = shortcutFormatKind(event);
+        if (kind) {
+          event.preventDefault();
+          applyActionRef.current?.(kind);
+          return;
+        }
+      }
+
       if (event.key === 'Enter' && !event.shiftKey && !isImeConfirm && !isVirtualKbd) {
         event.preventDefault();
         onSubmit();
@@ -149,32 +246,81 @@ export function ComposeInput({
     onRequestEditLastMessage,
     onSubmit,
     textareaRef,
+    formatEnabled,
   ]);
 
+  const toolbarVisible = (() => {
+    if (!formatEnabled) return false;
+    if (isMentionMenuOpen) return false;
+    if (linkMode) return true;
+    return focused && hasSelection && !isComposing;
+  })();
+
+  const [toolbarAnchor, setToolbarAnchor] = useState<FormatToolbarAnchor | null>(null);
+  // Re-measure the anchor after every commit; visibility stays derived from
+  // `toolbarVisible` in the render above, so a stale anchor is ignored while hidden.
+  useLayoutEffect(() => {
+    if (!toolbarVisible) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const rect = textarea.getBoundingClientRect();
+    const next = { top: rect.top - 8, left: rect.left + rect.width / 2 };
+    setToolbarAnchor((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
+  }, [toolbarVisible, text, textareaRef]);
+
   return (
-    <div className={styles.inputRow}>
-      <textarea
-        id="messageCompose"
-        ref={textareaRef}
-        className={styles.textarea}
-        placeholder={t`Message`}
-        value={text}
-        rows={1}
-        onChange={(event) => onTextChange(event.target.value)}
-        onFocus={() => onFocusChange?.(true)}
-        onBlur={() => onFocusChange?.(false)}
-        enterKeyHint="enter"
-      />
-      <button
-        type="button"
-        className={`${styles.stickerBtn}${isStickerActive ? ` ${styles.stickerBtnActive}` : ''}`}
-        aria-label={t`Sticker`}
-        aria-pressed={isStickerActive}
-        onClick={onStickerPress}
-        data-sticker-btn
-      >
-        <IonIcon icon={happyOutline} />
-      </button>
-    </div>
+    <>
+      <div className={styles.inputRow}>
+        <textarea
+          id="messageCompose"
+          ref={textareaRef}
+          className={styles.textarea}
+          placeholder={t`Message`}
+          value={text}
+          rows={1}
+          onChange={(event) => onTextChange(event.target.value)}
+          onFocus={() => {
+            setFocusedState(true);
+            measureSelection();
+            onFocusChange?.(true);
+          }}
+          onBlur={() => {
+            setFocusedState(false);
+            onFocusChange?.(false);
+          }}
+          onSelect={measureSelection}
+          onMouseUp={measureSelection}
+          onKeyUp={measureSelection}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => {
+            setComposing(false);
+            measureSelection();
+          }}
+          enterKeyHint="enter"
+        />
+        <button
+          type="button"
+          className={`${styles.stickerBtn}${isStickerActive ? ` ${styles.stickerBtnActive}` : ''}`}
+          aria-label={t`Sticker`}
+          aria-pressed={isStickerActive}
+          onClick={onStickerPress}
+          data-sticker-btn
+        >
+          <IonIcon icon={happyOutline} />
+        </button>
+      </div>
+      {toolbarVisible && toolbarAnchor && typeof document !== 'undefined'
+        ? createPortal(
+            <FormatToolbar
+              anchor={toolbarAnchor}
+              linkMode={linkMode}
+              onRequestLinkMode={requestLinkMode}
+              onFormat={(kind) => applyActionRef.current?.(kind)}
+              onSubmitLink={(url) => applyActionRef.current?.('link', url)}
+            />,
+            document.body,
+          )
+        : null}
+    </>
   );
 }

@@ -188,7 +188,8 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
     }, [resizeTextarea, text]);
 
     const handleSend = useCallback(() => {
-      const trimmed = toWireFormat(text.trim());
+      // Wire-format first: entry offsets index the untrimmed text.
+      const trimmed = toWireFormat(text).trim();
       const uploadedRecords = uploads.filter(
         (record) => record.state.status === 'uploaded' && Boolean(record.state.attachmentId),
       );
@@ -475,6 +476,7 @@ const MessageComposeBarInner = forwardRef<MessageComposeBarHandle, MessageCompos
                 onStickerPress={editing ? undefined : handleStickerPress}
                 isStickerActive={!editing && stickerPickerOpen}
                 onMentionKeyDown={handleMentionKeyDown}
+                isMentionMenuOpen={mentionState.isOpen}
               />
             )}
           </div>

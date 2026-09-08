@@ -63,6 +63,11 @@ export const FEATURES = {
     enabled: true,
     description: 'Blocklist (Chahua-side 「拉黑」) affecting DM and friend relationships only.',
   },
+  messageMarkdown: {
+    enabled: true,
+    description:
+      'Renders chat messages (and chat-list previews) as Markdown and shows a formatting toolbar when text is selected in the composer.',
+  },
 } as const;
 
 export type Feature = keyof typeof FEATURES;

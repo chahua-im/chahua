@@ -17,6 +17,7 @@ vi.mock('ionicons/icons', () => ({
 }));
 
 vi.mock('./MessageComposeBar.module.scss', () => ({ default: {} }));
+vi.mock('./FormatToolbar.module.scss', () => ({ default: {} }));
 
 const replyTarget: ReplyTo = {
   messageId: 'msg-1',

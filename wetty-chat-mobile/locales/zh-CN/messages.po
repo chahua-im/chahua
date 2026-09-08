@@ -161,6 +161,9 @@ msgstr "拉黑用户"
 msgid "Blocked"
 msgstr "已阻止"
 
+msgid "Bold (Ctrl+B)"
+msgstr "粗体 (Ctrl+B)"
+
 msgid "Cancel"
 msgstr "取消"
 
@@ -227,6 +230,9 @@ msgstr "关闭查看器"
 
 msgid "Code"
 msgstr "邀请码"
+
+msgid "Code block"
+msgstr "代码块"
 
 msgid "Compressing"
 msgstr "压缩中"
@@ -716,6 +722,9 @@ msgstr "邀请类型"
 msgid "Invite unavailable"
 msgstr "邀请不可用"
 
+msgid "Italic (Ctrl+I)"
+msgstr "斜体 (Ctrl+I)"
+
 msgid "Join chat"
 msgstr "加入聊天"
 
@@ -1089,6 +1098,9 @@ msgstr "问：{0} · 答：{1}"
 msgid "Question"
 msgstr "问题"
 
+msgid "Quote (Ctrl+Q)"
+msgstr "引用 (Ctrl+Q)"
+
 msgid "Reactions"
 msgstr "回应"
 
@@ -1343,6 +1355,9 @@ msgstr "个贴纸"
 msgid "Stickers must be an image or a WebM video."
 msgstr "贴纸必须是图片或 WebM 视频。"
 
+msgid "Strikethrough (Ctrl+D)"
+msgstr "删除线 (Ctrl+D)"
+
 msgid "Subscribe"
 msgstr "订阅"
 
@@ -1450,6 +1465,9 @@ msgstr "取消拉黑该用户？"
 
 msgid "Unblock User"
 msgstr "取消拉黑用户"
+
+msgid "Underline (Ctrl+U)"
+msgstr "下划线 (Ctrl+U)"
 
 msgid "Unfavorite"
 msgstr "取消收藏"

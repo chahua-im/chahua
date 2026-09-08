@@ -9,6 +9,7 @@ import { pinScopeKey, selectPinsForScope } from '@/store/pinsSlice';
 import { selectEffectiveLocale } from '@/store/settingsSlice';
 import { deletePin, deleteThreadPin } from '@/api/pins';
 import { formatMessagePreview, getNotificationPreviewLabels } from '@/utils/messagePreview';
+import { MarkdownSummaryText } from '@/components/chat/previews/MarkdownSummaryText';
 import styles from './PinBanner.module.scss';
 
 interface PinBannerProps {
@@ -98,7 +99,8 @@ export function PinBanner({
   if (!activePin) return null;
 
   const msg = activePin.message;
-  const previewText = formatMessagePreview(msg, getNotificationPreviewLabels(locale)) || t`Message`;
+  const previewText = formatMessagePreview(msg, getNotificationPreviewLabels(locale));
+  const preview = previewText ? <MarkdownSummaryText text={previewText} /> : t`Message`;
 
   return (
     <div className={styles.banner}>
@@ -114,7 +116,7 @@ export function PinBanner({
           <span className={styles.senderName} style={{ opacity: 0.85 }}>
             {msg.sender.name ?? `User ${msg.sender.uid}`}
           </span>
-          <span className={styles.messageText}>{previewText}</span>
+          <span className={styles.messageText}>{preview}</span>
         </div>
       </div>
 
