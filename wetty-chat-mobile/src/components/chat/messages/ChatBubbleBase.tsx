@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties, type HTMLAttributes, type Ref } 
 import { IonIcon } from '@ionic/react';
 import { chatbubbles, checkmarkCircle, checkmarkCircleOutline, femaleOutline, maleOutline } from 'ionicons/icons';
 import { t } from '@lingui/core/macro';
+import { isFeatureEnabled } from '@/features';
 import { useSelector } from 'react-redux';
 import styles from './ChatBubble.module.scss';
 import { HoverReplyButton } from './HoverReplyButton';
@@ -16,7 +17,7 @@ import { ReplyPreview } from './ReplyPreview';
 import { useIsDarkMode, useMouseDetected } from '@/hooks/platformHooks';
 import { colorForUser } from '@/utils/userColor';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
-import { renderMessageContent } from './messageContent';
+import { renderMessageContentLegacy, prepareMessageContent } from './messageContent';
 import { ReactionPill } from './ReactionPill';
 import { SingleMediaAttachment } from './media/SingleMediaAttachment';
 import { JustifiedMediaGallery } from './media/JustifiedMediaGallery';
@@ -122,8 +123,20 @@ export function ChatBubbleBase({
 
   const baseFont = getChatBaseFont(chatFontSizeStyle as string);
 
+  // Single-parse Markdown analysis, gated by the `messageMarkdown` feature flag.
+  const prepared = useMemo(() => {
+    if (messageType === 'text' && hasBottomContent && isFeatureEnabled('messageMarkdown')) {
+      return prepareMessageContent(message, mentions, currentUserUid, interactive ? onMentionClick : undefined);
+    }
+    return undefined;
+  }, [messageType, hasBottomContent, message, mentions, currentUserUid, interactive, onMentionClick]);
+
+  const markdownNodes = prepared?.isMarkdown ? prepared.nodes : null;
+  const markdownHasBlocks = prepared?.isMarkdown === true && prepared.hasBlocks === true;
+
   const layoutStats = useMemo(() => {
-    if (messageType === 'text' && hasBottomContent) {
+    // Char-width measurement only applies to legacy plain-text bodies.
+    if (messageType === 'text' && hasBottomContent && !prepared?.isMarkdown) {
       try {
         const items = parseChatBubbleContentToRichItems(message, mentions, baseFont);
         return getMessageLayoutStats(items, getChatBubbleMaxWidth());
@@ -132,7 +145,7 @@ export function ChatBubbleBase({
       }
     }
     return undefined;
-  }, [messageType, hasBottomContent, message, mentions, baseFont]);
+  }, [messageType, hasBottomContent, message, mentions, baseFont, prepared]);
 
   const mediaContainerClasses = [
     styles.attachmentsContainer,
@@ -305,11 +318,23 @@ export function ChatBubbleBase({
               : undefined
           }
         >
-          {hasBottomContent && (
-            <span className={styles.messageText}>
-              {renderMessageContent(message, mentions, currentUserUid, interactive ? onMentionClick : undefined)}
-            </span>
-          )}
+          {hasBottomContent &&
+            (markdownNodes ? (
+              <div
+                className={`${styles.markdownBody}${markdownHasBlocks ? ` ${styles.markdownBlocks}` : ''}`}
+              >
+                {markdownNodes}
+              </div>
+            ) : (
+              <span className={styles.messageText}>
+                {renderMessageContentLegacy(
+                  message,
+                  mentions,
+                  currentUserUid,
+                  interactive ? onMentionClick : undefined,
+                )}
+              </span>
+            ))}
           <span className={styles.timestampSpacer} />
           {timestamp && (
             <span className={styles.timestamp}>
