@@ -1,3 +1,105 @@
+import { signal } from '@angular/core';
+import { firstValueFrom, from, fromEvent, takeUntil } from 'rxjs';
+import { AttachmentsService } from '../../generated/endpoints/attachments/attachments.service';
+import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
+import { prepareMedia } from './media-processing/prepare-media';
+
+export enum UploadStatus {
+  Processing,
+  Uploading,
+  Ready,
+  Failed,
+}
+
+export class AttachmentUpload {
+  readonly url: string;
+  private readonly uploadState = signal<{
+    status: UploadStatus;
+    progress: number;
+    id?: SnowflakeID;
+    width?: number;
+    height?: number;
+  }>({ status: UploadStatus.Processing, progress: 0 });
+  readonly state = this.uploadState.asReadonly();
+  private readonly controller = new AbortController();
+  private prepared?: Awaited<ReturnType<typeof prepareMedia>>;
+  private pending?: Promise<SnowflakeID | undefined>;
+
+  constructor(
+    private readonly api: AttachmentsService,
+    readonly file: File,
+    readonly purpose: AttachmentUploadPurpose,
+  ) {
+    this.url = URL.createObjectURL(file);
+    void this.retry();
+  }
+
+  retry(): Promise<SnowflakeID | undefined> {
+    if (this.state().status === UploadStatus.Ready) return Promise.resolve(this.state().id);
+    if (this.pending) return this.pending;
+    if (this.controller.signal.aborted) return Promise.resolve(undefined);
+    this.pending = this.run().finally(() => (this.pending = undefined));
+    return this.pending;
+  }
+
+  dispose() {
+    if (this.controller.signal.aborted) return;
+    this.controller.abort();
+    if (this.state().status !== UploadStatus.Ready)
+      this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed }));
+    URL.revokeObjectURL(this.url);
+  }
+
+  private async run(): Promise<SnowflakeID | undefined> {
+    const signal = this.controller.signal;
+    const aborted = fromEvent(signal, 'abort');
+    const processing = this.purpose === AttachmentUploadPurpose.media && !this.prepared;
+    this.uploadState.update((state) => ({
+      ...state,
+      status: processing ? UploadStatus.Processing : UploadStatus.Uploading,
+      progress: 0,
+    }));
+    const progress = (progress: number) => {
+      if (!signal.aborted) this.uploadState.update((state) => ({ ...state, progress }));
+    };
+    try {
+      const config = await firstValueFrom(this.api.getConfig().pipe(takeUntil(aborted)));
+      signal.throwIfAborted();
+      if (processing) {
+        this.prepared = await firstValueFrom(from(prepareMedia(this.file, signal, progress)).pipe(takeUntil(aborted)));
+        signal.throwIfAborted();
+      }
+      const { file, dimensions } = this.prepared ?? { file: this.file, dimensions: undefined };
+      if (file.size > config.maxFileSizeBytes) throw new Error('文件过大');
+      this.uploadState.set({ ...dimensions, status: UploadStatus.Uploading, progress: 0 });
+      const response = await firstValueFrom(
+        this.api
+          .postUploadUrl({
+            filename: file.name,
+            contentType: file.type || 'application/octet-stream',
+            size: file.size,
+            purpose: this.purpose,
+            ...dimensions,
+          })
+          .pipe(takeUntil(aborted)),
+      );
+      signal.throwIfAborted();
+      await uploadBlob(response.uploadUrl, file, response.uploadHeaders, signal, progress);
+      signal.throwIfAborted();
+      this.uploadState.update((state) => ({
+        ...state,
+        id: response.attachmentId,
+        status: UploadStatus.Ready,
+        progress: 1,
+      }));
+      return response.attachmentId;
+    } catch {
+      if (!signal.aborted) this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed }));
+      return undefined;
+    }
+  }
+}
+
 export function uploadBlob(
   url: string,
   blob: Blob,

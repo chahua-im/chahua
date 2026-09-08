@@ -32,12 +32,14 @@ import { ChatStore } from '../../chats/chat-store';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { messageRows } from '../message-rows';
 import { Message } from '../../messages/message/message';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-pinned-messages',
   templateUrl: './pinned-messages.page.html',
   styleUrl: './pinned-messages.page.scss',
   imports: [
+    ContentScrollbars,
     DatePipe,
     IonBackButton,
     IonButton,

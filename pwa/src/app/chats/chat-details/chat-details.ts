@@ -68,6 +68,7 @@ import { UserProfile } from '../user-profile/user-profile';
 import { ChatSearch } from '../../conversations/chat-search/chat-search';
 import { ChatAttachments } from '../../conversations/chat-attachments/chat-attachments';
 import { mediaDimensions, uploadBlob } from '../../messages/upload';
+import { ContentScrollbars } from '../../content-scrollbars';
 enum DetailAction {
   Load,
   Mute,
@@ -89,6 +90,7 @@ enum DetailView {
   templateUrl: './chat-details.html',
   styleUrl: './chat-details.scss',
   imports: [
+    ContentScrollbars,
     FormField,
     IonButton,
     IonContent,

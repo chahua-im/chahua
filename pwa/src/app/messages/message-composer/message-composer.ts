@@ -1,6 +1,5 @@
 import { ElementRef } from '@angular/core';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
-import { prepareMedia } from '../media-processing/prepare-media';
 import { mayBeMediaFile } from '../media-processing/file-type';
 import { displayText, editText, wireText } from './mention-text';
 import {
@@ -27,37 +26,24 @@ import {
   UserSearchMode,
   type AttachmentResponse,
   type MemberResponse,
+  type MentionInfo,
   type MessageResponse,
   type SnowflakeID,
   type StickerSummary,
 } from '../../../generated/models';
-import { uploadBlob } from '../upload';
+import { AttachmentUpload, UploadStatus } from '../upload';
 import { StickerPicker } from '../sticker-picker/sticker-picker';
 export interface Composition {
   messageType: MessageType;
   attachmentIds: SnowflakeID[];
   sticker?: StickerSummary;
+  uploads?: AttachmentUpload[];
+  mentions?: MentionInfo[];
 }
 enum Panel {
   None,
   Attachments,
   Stickers,
-}
-enum UploadStatus {
-  Processing,
-  Uploading,
-  Ready,
-  Failed,
-}
-interface Upload {
-  file: File;
-  prepared?: Awaited<ReturnType<typeof prepareMedia>>;
-  url: string;
-  status: UploadStatus;
-  progress: number;
-  id?: SnowflakeID;
-  controller: AbortController;
-  purpose: AttachmentUploadPurpose;
 }
 @Component({
   selector: 'app-message-composer',
@@ -84,40 +70,37 @@ export class MessageComposer {
   readonly voiceActive = signal(false);
   private readonly destroy = inject(DestroyRef);
   private readonly textarea = viewChild(IonTextarea);
-  protected readonly uploads = signal<Upload[]>([]);
+  protected readonly uploads = signal<AttachmentUpload[]>([]);
   protected readonly existing = signal<AttachmentResponse[]>([]);
-  protected readonly error = signal(false);
+  protected readonly error = computed(() => this.uploads().some((u) => u.state().status === UploadStatus.Failed));
   protected readonly suggestions = signal<MemberResponse[]>([]);
   protected readonly tooMany = signal(false);
   protected readonly unsupported = signal(false);
   private mentionVersion = 0;
   private mentionRange?: { start: number; end: number };
-  private readonly mentionNames = signal(new Map<number, string>());
+  private readonly mentionInfos = signal(new Map<number, MentionInfo>());
   protected readonly display = computed(() =>
     displayText(
       this.text(),
       new Map([
-        ...this.mentionNames(),
+        ...[...this.mentionInfos().values()].map((m) => [m.uid, m.username!] as const),
         ...(this.editing()?.mentions ?? []).filter((m) => m.username).map((m) => [m.uid, m.username!] as const),
       ]),
     ),
   );
-  protected readonly uploading = computed(() => this.uploads().some((u) => u.status !== UploadStatus.Ready));
+  protected readonly uploading = computed(() => this.uploads().some((u) => u.state().status !== UploadStatus.Ready));
   protected readonly canSend = computed(
     () =>
       !this.disabled() &&
-      !this.uploading() &&
+      (!this.editing() || !this.uploading()) &&
       !this.voiceActive() &&
       (!!this.text().trim() || !!this.existing().length || !!this.uploads().length),
-  );
-  protected readonly pendingUpload = computed(() =>
-    this.uploads().some((u) => u.status === UploadStatus.Processing || u.status === UploadStatus.Uploading),
   );
   protected readonly visualUploads = computed(() =>
     this.uploads().filter((u) => u.purpose !== AttachmentUploadPurpose.voice),
   );
   protected readonly useVoice = computed(
-    () => !this.editing() && !this.text().trim() && !this.existing().length && !this.visualUploads().length,
+    () => !this.editing() && !this.text().trim() && !this.existing().length && !this.uploads().length,
   );
   protected async togglePanel(panel: Panel) {
     this.panel.set(this.panel() === panel ? Panel.None : panel);
@@ -147,10 +130,7 @@ export class MessageComposer {
     return this.textarea()?.setFocus();
   }
   reset() {
-    for (const upload of this.uploads()) {
-      upload.controller.abort();
-      URL.revokeObjectURL(upload.url);
-    }
+    for (const upload of this.uploads()) upload.dispose();
     this.uploads.set([]);
     this.existing.set([]);
     this.voice()?.reset();
@@ -158,7 +138,6 @@ export class MessageComposer {
     this.mentionVersion++;
     this.mentionRange = undefined;
     this.suggestions.set([]);
-    this.error.set(false);
     this.tooMany.set(false);
     this.unsupported.set(false);
   }
@@ -167,17 +146,17 @@ export class MessageComposer {
     const files = Array.from(input.files ?? []);
     input.value = '';
     this.panel.set(Panel.None);
-    for (const file of files) void this.addFile(file, purpose);
+    for (const file of files) this.addFile(file, purpose);
   }
 
-  protected async paste(event: ClipboardEvent) {
+  protected paste(event: ClipboardEvent) {
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!files.length) return;
     event.preventDefault();
     for (const file of files)
-      void this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
+      this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
   }
-  private async addFile(file: File, purpose: AttachmentUploadPurpose) {
+  private addFile(file: File, purpose: AttachmentUploadPurpose) {
     if (this.uploads().length + this.existing().length >= 20) {
       this.tooMany.set(true);
       return;
@@ -186,60 +165,12 @@ export class MessageComposer {
       this.unsupported.set(true);
       return;
     }
-    const upload: Upload = {
-      file,
-      purpose,
-      url: URL.createObjectURL(file),
-      status: UploadStatus.Uploading,
-      progress: 0,
-      controller: new AbortController(),
-    };
+    const upload = new AttachmentUpload(this.api, file, purpose);
     this.uploads.update((items) => [...items, upload]);
-    await this.retryUpload(upload);
     return upload;
   }
-  protected async retryUpload(upload: Upload) {
-    this.update(upload, { status: UploadStatus.Uploading, progress: 0 });
-    this.error.set(false);
-    try {
-      const config = await firstValueFrom(this.api.getConfig());
-      if (upload.purpose === AttachmentUploadPurpose.media && !upload.prepared) {
-        this.update(upload, { status: UploadStatus.Processing, progress: 0 });
-        upload.prepared = await prepareMedia(upload.file, upload.controller.signal, (progress) =>
-          this.update(upload, { progress }),
-        );
-      }
-      if (upload.controller.signal.aborted) return;
-      const { file, dimensions } = upload.prepared ?? { file: upload.file, dimensions: undefined };
-      if (file.size > config.maxFileSizeBytes) throw new Error('文件过大');
-      this.update(upload, { status: UploadStatus.Uploading, progress: 0 });
-      const response = await firstValueFrom(
-        this.api.postUploadUrl({
-          filename: file.name,
-          contentType: file.type || 'application/octet-stream',
-          size: file.size,
-          purpose: upload.purpose,
-          ...dimensions,
-        }),
-      );
-      await uploadBlob(response.uploadUrl, file, response.uploadHeaders, upload.controller.signal, (progress) =>
-        this.update(upload, { progress }),
-      );
-      this.update(upload, { id: response.attachmentId, status: UploadStatus.Ready, progress: 1 });
-    } catch {
-      if (!upload.controller.signal.aborted) {
-        this.update(upload, { status: UploadStatus.Failed });
-        this.error.set(true);
-      }
-    }
-  }
-  private update(upload: Upload, patch: Partial<Upload>) {
-    Object.assign(upload, patch);
-    this.uploads.update((items) => [...items]);
-  }
-  protected remove(upload: Upload) {
-    upload.controller.abort();
-    URL.revokeObjectURL(upload.url);
+  protected remove(upload: AttachmentUpload) {
+    upload.dispose();
     this.uploads.update((items) => items.filter((item) => item !== upload));
   }
   protected removeExisting(id: SnowflakeID) {
@@ -274,7 +205,10 @@ export class MessageComposer {
     const display = editText(old, old.text.slice(0, range.start) + token + old.text.slice(range.end));
     display.mentions.push({ uid: member.uid, start: range.start, end: range.start + token.length - 1 });
     display.mentions.sort((a, b) => a.start - b.start);
-    this.mentionNames.update((names) => new Map(names).set(member.uid, name));
+    const { uid, gender, avatarUrl, userGroup } = member;
+    this.mentionInfos.update((mentions) =>
+      new Map(mentions).set(uid, { uid, gender, avatarUrl, userGroup, username: name }),
+    );
     this.text.set(wireText(display));
     this.suggestions.set([]);
     this.mentionVersion++;
@@ -283,44 +217,75 @@ export class MessageComposer {
     input?.setSelectionRange(range.start + token.length, range.start + token.length);
   }
 
+  private mentionSnapshot(): MentionInfo[] {
+    const display = this.display();
+    const known = new Map([
+      ...this.mentionInfos(),
+      ...(this.editing()?.mentions ?? []).map((m) => [m.uid, m] as const),
+    ]);
+    return [
+      ...new Map(
+        display.mentions.map(({ uid, start, end }) => [
+          uid,
+          {
+            ...known.get(uid),
+            uid,
+            gender: known.get(uid)?.gender ?? 0,
+            username: display.text.slice(start + 1, end),
+          },
+        ]),
+      ).values(),
+    ];
+  }
   complete(ids: readonly SnowflakeID[]) {
-    for (const upload of [...this.uploads()])
-      if (upload.id && ids.includes(upload.id)) {
-        if (upload.purpose === AttachmentUploadPurpose.voice) this.voice()?.reset();
-        this.remove(upload);
-      }
+    if (!this.editing()) return;
+    for (const upload of this.uploads()) {
+      const id = upload.state().id;
+      if (id != null && ids.includes(id)) this.remove(upload);
+    }
     this.existing.update((items) => items.filter((item) => !ids.includes(item.id)));
+  }
+  private handoff(messageType: MessageType, uploads: AttachmentUpload[]) {
+    // Detach before emitting: the receiver may synchronously reset or destroy the composer.
+    this.uploads.update((items) => items.filter((item) => !uploads.includes(item)));
+    this.submitted.emit({
+      messageType,
+      attachmentIds: [],
+      uploads,
+      ...(messageType === MessageType.text ? { mentions: this.mentionSnapshot() } : {}),
+    });
   }
   protected submit() {
     if (!this.canSend()) return;
     const uploads = this.uploads();
-    const files = uploads.filter((u) => u.purpose === AttachmentUploadPurpose.file);
-    const voice = uploads.find((u) => u.purpose === AttachmentUploadPurpose.voice);
-    if (files.length) this.submitted.emit({ messageType: MessageType.file, attachmentIds: files.map((u) => u.id!) });
-    else if (voice) this.submitted.emit({ messageType: MessageType.audio, attachmentIds: [voice.id!] });
-    else
+    if (this.editing()) {
       this.submitted.emit({
         messageType: MessageType.text,
-        attachmentIds: [...this.existing().map((a) => a.id), ...uploads.map((u) => u.id!)],
+        attachmentIds: [...this.existing().map((a) => a.id), ...uploads.map((u) => u.state().id!)],
+        mentions: this.mentionSnapshot(),
       });
+      return;
+    }
+    const files = uploads.filter((u) => u.purpose === AttachmentUploadPurpose.file);
+    const voice = uploads.find((u) => u.purpose === AttachmentUploadPurpose.voice);
+    if (files.length) this.handoff(MessageType.file, files);
+    else if (voice) this.handoff(MessageType.audio, [voice]);
+    else this.handoff(MessageType.text, uploads);
   }
   protected sticker(sticker: StickerSummary) {
     if (this.disabled()) return;
     this.panel.set(Panel.None);
     this.submitted.emit({ messageType: MessageType.sticker, attachmentIds: [], sticker });
   }
-  protected async sendVoice(file: File) {
-    if (this.disabled() || this.pendingUpload()) return;
-    let upload = this.uploads().find((u) => u.purpose === AttachmentUploadPurpose.voice);
-    if (upload) {
-      if (upload.status === UploadStatus.Failed) await this.retryUpload(upload);
-    } else upload = await this.addFile(file, AttachmentUploadPurpose.voice);
-    if (upload?.status === UploadStatus.Ready && !upload.controller.signal.aborted)
-      this.submitted.emit({ messageType: MessageType.audio, attachmentIds: [upload.id!] });
+  protected sendVoice(file: File) {
+    if (this.disabled() || this.editing()) return;
+    const upload = this.addFile(file, AttachmentUploadPurpose.voice);
+    if (!upload) return;
+    this.handoff(MessageType.audio, [upload]);
+    this.voice()?.reset();
   }
   protected discardVoice() {
     for (const upload of this.uploads()) if (upload.purpose === AttachmentUploadPurpose.voice) this.remove(upload);
-    this.error.set(false);
   }
   protected key(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && window.matchMedia('(hover: hover)').matches) {

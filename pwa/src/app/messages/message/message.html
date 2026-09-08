@@ -1,7 +1,7 @@
 @if (message().messageType === system) {
   <p class="system-message"><app-message-preview [message]="message()"></app-message-preview></p>
 } @else {
-  @if (interactive() && !preview() && canReply() && !message().isDeleted) {
+  @if (canInteract() && canReply() && !message().isDeleted) {
     <div class="swipe-reply" [style.opacity]="swipe() / 60" [class.burst]="burst()" (animationend)="burst.set(false)">
       <svg viewBox="0 0 512 512">
         <path
@@ -51,16 +51,13 @@
         (contextmenu)="showMenu($event, bubble)"
         (pointerdown)="startPress($event, bubble)">
         @if (first() && !isSticker()) {
-          <app-message-author
-            class="sender"
-            [sender]="message().sender"
-            [own]="own()"></app-message-author>
+          <app-message-author class="sender" [sender]="message().sender" [own]="own()"></app-message-author>
         }
         @if (quoted(); as quote) {
           <button
             type="button"
             class="reply-preview"
-            [disabled]="jumpDisabled()"
+            [disabled]="jumpDisabled() || !canInteract()"
             [class.busy]="jumpingTo() === quote.id"
             (click)="jump.emit(quote.id)">
             <span class="reply-content">
@@ -74,7 +71,11 @@
         }
         @if (hasMedia()) {
           <div class="media-content" (click)="sticker($event)">
-            <app-message-attachments [message]="message()" [overlayTime]="mediaOverlay()"></app-message-attachments>
+            <app-message-attachments
+              [message]="message()"
+              [overlayTime]="mediaOverlay()"
+              [delivery]="status()"
+              [uploads]="uploads()"></app-message-attachments>
           </div>
         }
         @if (!mediaOverlay()) {
@@ -82,11 +83,7 @@
             @if (!hasMedia()) {
               <span class="message-text">
                 @if (message().messageType === Type.invite && !message().isDeleted) {
-                  <button
-                    type="button"
-                    class="invite-card"
-                    [disabled]="!interactive() || preview()"
-                    (click)="invite($event)">
+                  <button type="button" class="invite-card" [disabled]="!canInteract()" (click)="invite($event)">
                     群组邀请
                     <br />
                     <small>查看群资料并加入</small>
@@ -95,7 +92,7 @@
                   <app-message-text
                     [text]="message().message!"
                     [mentions]="message().mentions ?? []"
-                    [interactive]="interactive() && !preview()" />
+                    [interactive]="canInteract()" />
                 } @else {
                   <app-message-preview [message]="message()" />
                 }
@@ -105,7 +102,7 @@
                 <app-message-text
                   [text]="message().message!"
                   [mentions]="message().mentions ?? []"
-                  [interactive]="interactive() && !preview()" />
+                  [interactive]="canInteract()" />
               </span>
             }
             <span class="timestamp-spacer"></span>
@@ -115,6 +112,7 @@
                   <span>已编辑</span>
                 }
                 {{ message().createdAt | date: 'HH:mm' }}
+                <app-message-status [delivery]="status()" />
               </time>
             }
           </div>
@@ -123,34 +121,35 @@
               <app-message-reactions
                 [reactions]="message().reactions ?? []"
                 [own]="own()"
-                [preview]="preview()"
+                [preview]="!canInteract()"
                 (react)="react.emit($event)"></app-message-reactions>
               <time class="timestamp" [attr.datetime]="message().createdAt">
                 @if (message().isEdited) {
                   <span>已编辑</span>
                 }
                 {{ message().createdAt | date: 'HH:mm' }}
+                <app-message-status [delivery]="status()" />
               </time>
             </div>
           }
         }
         @if (threadInfo(); as info) {
-          <app-message-thread
-            [info]="info"
-            [preview]="preview()"
-            (open)="openThread.emit(message().id)"></app-message-thread>
+          <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
         }
       </div>
+      @if (status() === Delivery.Failed && !preview()) {
+        <button type="button" class="retry-button" (click)="retry.emit()">发送失败，点击重试</button>
+      }
       @if (mediaOverlay() && hasReactions()) {
         <app-message-reactions
           [reactions]="message().reactions ?? []"
           [own]="own()"
-          [preview]="preview()"
+          [preview]="!canInteract()"
           [external]="true"
           (react)="react.emit($event)"></app-message-reactions>
       }
     </div>
-    @if (interactive() && !preview() && !message().isDeleted) {
+    @if (canInteract() && !message().isDeleted) {
       <button type="button" class="reply-button" [disabled]="!canReply()" (click)="reply.emit(message())">
         <ion-icon [icon]="replyIcon"></ion-icon>
       </button>

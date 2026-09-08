@@ -6,7 +6,7 @@
       <ion-split-pane when="md" contentId="main" (ionSplitPaneVisible)="splitPaneVisible.set($event.detail.visible)">
         <ion-menu contentId="main" [swipeGesture]="false">
           @if (splitPaneVisible()) {
-            <app-chat-list [selection]="sidebarSelection()"></app-chat-list>
+            <app-chat-list [selection]="sidebarSelection()" (openList)="sidebarSelection.set($event)"></app-chat-list>
           }
         </ion-menu>
         <!-- Browser history owns the edge swipe; a second gesture would overlap Safari's transition. -->
@@ -19,7 +19,7 @@
       </ion-split-pane>
       <app-settings-modal />
     } @else {
-      <ion-content class="ion-text-center" [class.ion-padding]="!loading()">
+      <ion-content appScrollbars class="ion-text-center" [class.ion-padding]="!loading()">
         @if (loading()) {
           <div class="loading-status">
             <ion-spinner></ion-spinner>
