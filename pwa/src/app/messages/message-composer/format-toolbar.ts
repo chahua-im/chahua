@@ -26,23 +26,60 @@ export interface FormatToolbarAnchor {
       [style.top.px]="anchor().top"
       [style.left.px]="anchor().left"
       data-format-toolbar
-      (mousedown)="$event.preventDefault()">
-      <button type="button" class="button" title="{{ 'messages.composer.format.bold' | transloco }}" data-format-bold (click)="format.emit('bold')">
+      (mousedown)="$event.preventDefault()"
+    >
+      <button
+        type="button"
+        class="button"
+        title="{{ 'messages.composer.format.bold' | transloco }}"
+        data-format-bold
+        (click)="format.emit('bold')"
+      >
         <span class="bold-glyph">B</span>
       </button>
-      <button type="button" class="button" title="{{ 'messages.composer.format.italic' | transloco }}" data-format-italic (click)="format.emit('italic')">
+      <button
+        type="button"
+        class="button"
+        title="{{ 'messages.composer.format.italic' | transloco }}"
+        data-format-italic
+        (click)="format.emit('italic')"
+      >
         <span class="italic-glyph">I</span>
       </button>
-      <button type="button" class="button" title="{{ 'messages.composer.format.strike' | transloco }}" data-format-strike (click)="format.emit('strike')">
+      <button
+        type="button"
+        class="button"
+        title="{{ 'messages.composer.format.strike' | transloco }}"
+        data-format-strike
+        (click)="format.emit('strike')"
+      >
         <span class="strike-glyph">S</span>
       </button>
-      <button type="button" class="button" title="{{ 'messages.composer.format.underline' | transloco }}" data-format-underline (click)="format.emit('underline')">
+      <button
+        type="button"
+        class="button"
+        title="{{ 'messages.composer.format.underline' | transloco }}"
+        data-format-underline
+        (click)="format.emit('underline')"
+      >
         <span class="underline-glyph">U</span>
       </button>
-      <button type="button" class="button" title="{{ 'messages.composer.format.code' | transloco }}" data-format-code (click)="format.emit('code')">
+      <button
+        type="button"
+        class="button"
+        title="{{ 'messages.composer.format.code' | transloco }}"
+        data-format-code
+        (click)="format.emit('code')"
+      >
         <span class="code-glyph">{{ codeGlyph }}</span>
       </button>
-      <button type="button" class="button" title="{{ 'messages.composer.format.quote' | transloco }}" data-format-quote (click)="format.emit('quote')">
+      <button
+        type="button"
+        class="button"
+        title="{{ 'messages.composer.format.quote' | transloco }}"
+        data-format-quote
+        (click)="format.emit('quote')"
+      >
         <span class="quote-glyph">&quot;</span>
       </button>
       <button
@@ -51,7 +88,8 @@ export interface FormatToolbarAnchor {
         title="{{ 'messages.composer.format.link' | transloco }}"
         [class.selected]="linkMode()"
         data-format-link
-        (click)="openLinkMode()">
+        (click)="openLinkMode()"
+      >
         <ion-icon [icon]="icons.linkOutline" class="link-icon" />
       </button>
 
@@ -66,9 +104,14 @@ export interface FormatToolbarAnchor {
             [value]="draftUrl()"
             (input)="draftUrl.set(urlInput.value)"
             (keydown)="urlKey($event)"
-            data-format-url-input />
-          <button type="button" class="popup-btn" (click)="apply()" data-format-url-apply>{{ 'common.add' | transloco }}</button>
-          <button type="button" class="popup-cancel" (click)="linkMode.set(false)" data-format-url-cancel>{{ 'common.cancel' | transloco }}</button>
+            data-format-url-input
+          />
+          <button type="button" class="popup-btn" (click)="apply()" data-format-url-apply>
+            {{ 'common.add' | transloco }}
+          </button>
+          <button type="button" class="popup-cancel" (click)="linkMode.set(false)" data-format-url-cancel>
+            {{ 'common.cancel' | transloco }}
+          </button>
         </div>
       }
     </div>

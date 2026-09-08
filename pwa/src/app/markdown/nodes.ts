@@ -118,7 +118,13 @@ export function renderInlineTokens(tokens: readonly Token[], options: MarkdownRe
       case 'u_open': {
         const closeIndex = findMatchingTokenEnd(tokens, i);
         const tag =
-          token.type === 'em_open' ? 'em' : token.type === 'strong_open' ? 'strong' : token.type === 's_open' ? 's' : 'u';
+          token.type === 'em_open'
+            ? 'em'
+            : token.type === 'strong_open'
+              ? 'strong'
+              : token.type === 's_open'
+                ? 's'
+                : 'u';
         out.push({ type: 'element', tag, children: renderInlineTokens(tokens.slice(i + 1, closeIndex), options) });
         i = closeIndex + 1;
         break;
@@ -207,7 +213,7 @@ function renderList(tokens: readonly Token[], openIndex: number, options: Markdo
     const start = token.attrGet('start');
     const startNumber = start == null ? NaN : Number(start);
     // The default renderer only emits start when it differs from 1.
-    if (Number.isInteger(startNumber) && startNumber !== 1) attrs["start"] = String(startNumber);
+    if (Number.isInteger(startNumber) && startNumber !== 1) attrs['start'] = String(startNumber);
   }
 
   return {
@@ -263,7 +269,11 @@ function renderBlocks(tokens: readonly Token[], options: MarkdownRenderOptions):
       default: {
         if (token.type.endsWith('_open')) {
           const closeIndex = findMatchingTokenEnd(tokens, i);
-          out.push({ type: 'element', tag: token.tag, children: renderBlocks(tokens.slice(i + 1, closeIndex), options) });
+          out.push({
+            type: 'element',
+            tag: token.tag,
+            children: renderBlocks(tokens.slice(i + 1, closeIndex), options),
+          });
           i = closeIndex + 1;
         } else {
           pushTextNodes(out, token.content, options);

@@ -73,7 +73,9 @@ describe('renderMarkdownText — inline', () => {
 describe('renderMarkdownText — links and images', () => {
   it('renders explicit links with safe target and rel', () => {
     const html = renderText('[example](https://example.com/path?q=1)');
-    expect(html).toBe('<p><a href="https://example.com/path?q=1" target="_blank" rel="noopener noreferrer">example</a></p>');
+    expect(html).toBe(
+      '<p><a href="https://example.com/path?q=1" target="_blank" rel="noopener noreferrer">example</a></p>',
+    );
   });
 
   it('renders linkified bare URLs as links', () => {

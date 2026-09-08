@@ -48,13 +48,7 @@ import { UploadProgress } from '../upload-progress/upload-progress';
 import { VoicePlayer } from '../voice-player/voice-player';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { displayText, editText, wireText } from './mention-text';
-import {
-  applyLink,
-  shortcutFormatKind,
-  wrapBlockFormat,
-  wrapInlineFormat,
-  type TextFormatKind,
-} from './text-format';
+import { applyLink, shortcutFormatKind, wrapBlockFormat, wrapInlineFormat, type TextFormatKind } from './text-format';
 import { FormatToolbar, type FormatToolbarAnchor } from './format-toolbar';
 import { findCodeRegions } from '../../markdown/code-regions';
 export interface Composition {
@@ -216,8 +210,7 @@ export class MessageComposer {
       if (!textarea || this.nativeInput) return;
       void textarea.getInputElement().then((input) => {
         this.nativeInput = input;
-        for (const type of ['select', 'keyup', 'mouseup'] as const)
-          input.addEventListener(type, this.measureSelection);
+        for (const type of ['select', 'keyup', 'mouseup'] as const) input.addEventListener(type, this.measureSelection);
         input.addEventListener('focus', this.measureSelection);
         input.addEventListener('compositionstart', () => this.isComposing.set(true));
         input.addEventListener('compositionend', () => {
@@ -235,7 +228,14 @@ export class MessageComposer {
     if (!input) return;
     this.hasSelection.set((input.selectionEnd ?? 0) > (input.selectionStart ?? 0));
     const rect = input.getBoundingClientRect();
-    console.log('MEASURE', JSON.stringify({ sel: (input.selectionEnd ?? 0) > (input.selectionStart ?? 0), top: rect.top - 8, left: rect.left + rect.width / 2 }));
+    console.log(
+      'MEASURE',
+      JSON.stringify({
+        sel: (input.selectionEnd ?? 0) > (input.selectionStart ?? 0),
+        top: rect.top - 8,
+        left: rect.left + rect.width / 2,
+      }),
+    );
     this.toolbarAnchor.set({ top: rect.top - 8, left: rect.left + rect.width / 2 });
   };
 

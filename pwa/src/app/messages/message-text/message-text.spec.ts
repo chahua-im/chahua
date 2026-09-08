@@ -48,7 +48,8 @@ describe('prepareMessageContent', () => {
 
   it('keeps mentions inside code verbatim but restores mentions outside', () => {
     const html = toHtml(
-      prepareMessageContent('`keep @[uid:8]` and @[uid:9]', [mention(8, 'Bob'), mention(9, 'Carol')], null, true).nodes!,
+      prepareMessageContent('`keep @[uid:8]` and @[uid:9]', [mention(8, 'Bob'), mention(9, 'Carol')], null, true)
+        .nodes!,
     );
     expect(html).toContain('<code>keep @[uid:8]</code>');
     expect(html).not.toContain('@Bob');
@@ -73,14 +74,10 @@ describe('prepareMessageContent', () => {
   });
 
   it('keeps internal links as router targets and external links as new tabs', () => {
-    const internal = toHtml(
-      prepareMessageContent('[聊天](https://chahua.im/chats)', [], null, true).nodes!,
-    );
+    const internal = toHtml(prepareMessageContent('[聊天](https://chahua.im/chats)', [], null, true).nodes!);
     expect(internal).toContain('internal=""');
 
-    const external = toHtml(
-      prepareMessageContent('[例子](https://example.com/a)', [], null, true).nodes!,
-    );
+    const external = toHtml(prepareMessageContent('[例子](https://example.com/a)', [], null, true).nodes!);
     expect(external).toContain('target="_blank"');
     expect(external).toContain('rel="noopener noreferrer"');
   });

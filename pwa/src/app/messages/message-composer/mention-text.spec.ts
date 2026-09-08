@@ -53,7 +53,9 @@ describe('relocateMentions via editText', () => {
   });
 
   it('shifts a span forward when characters are inserted before it', () => {
-    expect(editText(previous('Hi @devuser2', 3, 12), 'Hi *@devuser2').mentions).toEqual([{ start: 4, end: 13, uid: 7 }]);
+    expect(editText(previous('Hi @devuser2', 3, 12), 'Hi *@devuser2').mentions).toEqual([
+      { start: 4, end: 13, uid: 7 },
+    ]);
   });
 
   it('shifts a span backward when text before it is deleted', () => {
