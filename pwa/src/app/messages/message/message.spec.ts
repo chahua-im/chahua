@@ -54,6 +54,24 @@ describe('Message', () => {
     return fixture;
   }
 
+  it('renders block-level Markdown bodies without headings and keeps plain text on the legacy path', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', { ...testMessage, message: '# 标题\n\nline two **bold**' });
+    fixture.detectChanges();
+    const text = fixture.nativeElement.querySelector('.message-text app-message-text') as HTMLElement;
+    expect(text.classList.contains('blocks')).toBe(true);
+    // Headings are out of the subset: '# 标题' renders as literal paragraph text.
+    expect(text.querySelector('p')?.textContent).toContain('# 标题');
+    expect(text.querySelector('h1')).toBeNull();
+    expect(text.querySelector('strong')?.textContent).toBe('bold');
+
+    fixture.componentRef.setInput('message', { ...testMessage, message: 'plain legacy text' });
+    fixture.detectChanges();
+    const plainText = fixture.nativeElement.querySelector('.message-text app-message-text') as HTMLElement;
+    expect(plainText.classList.contains('blocks')).toBe(false);
+    expect(plainText.querySelector('p')).toBeNull();
+  });
+
   it('replies after a left swipe starting on a mention and suppresses the following tap', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('message', {
