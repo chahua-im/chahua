@@ -1010,6 +1010,9 @@ msgstr "Pin"
 msgid "Pin Message"
 msgstr "Pin Message"
 
+msgid "Pin this message for both of you?"
+msgstr "Pin this message for both of you?"
+
 msgid "Pin this message in the group?"
 msgstr "Pin this message in the group?"
 

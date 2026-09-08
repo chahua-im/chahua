@@ -55,7 +55,7 @@ export function getOverlayActionPolicy(input: OverlayActionPolicyInput): Overlay
   }
 
   // 3. Pin
-  if (canWrite && !input.isDeleted && input.isAdmin) {
+  if (canWrite && !input.isDeleted && (input.isAdmin || input.isDm)) {
     actions.push({ key: 'pin', pinState: input.isPinned ? 'pinned' : 'unpinned' });
   }
 

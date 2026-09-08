@@ -239,7 +239,9 @@ export function useMessageOverlayActions({
                   ? t`Would you like to unpin this message?`
                   : threadId
                     ? t`Pin this message in the thread?`
-                    : t`Pin this message in the group?`,
+                    : isDm
+                      ? t`Pin this message for both of you?`
+                      : t`Pin this message in the group?`,
                 buttons: [
                   { text: t`Cancel`, role: 'cancel' },
                   {

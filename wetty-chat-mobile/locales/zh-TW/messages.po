@@ -1010,6 +1010,9 @@ msgstr "釘選"
 msgid "Pin Message"
 msgstr "釘選訊息"
 
+msgid "Pin this message for both of you?"
+msgstr "確定要為你們雙方釘選此訊息嗎？"
+
 msgid "Pin this message in the group?"
 msgstr "確定要釘選此訊息嗎？"
 

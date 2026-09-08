@@ -19,8 +19,8 @@ use crate::dto::{
 use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::handlers::members::{check_membership, require_admin_role};
-use crate::models::{Message, MessageType, NewPinnedMessage, PinnedMessage};
-use crate::schema::{group_membership, messages, pinned_messages};
+use crate::models::{GroupKind, Message, MessageType, NewPinnedMessage, PinnedMessage};
+use crate::schema::{group_membership, groups, messages, pinned_messages};
 use crate::services::messages::{attach_metadata, PreparedMessageSend, SendMessageOutcome};
 use crate::utils::auth::CurrentUid;
 use crate::utils::ids;
@@ -155,6 +155,21 @@ async fn list_pins_in_scope(
     })
 }
 
+/// Who may pin/unpin: DM participants may manage shared pins themselves;
+/// group chats stay admin-only. DM members are all `Member` (no admin exists),
+/// so this replaces the previous unconditional admin requirement.
+fn require_pin_permission(conn: &mut PgConnection, chat_id: i64, uid: i32) -> Result<(), AppError> {
+    let kind: GroupKind = groups::table
+        .find(chat_id)
+        .select(groups::kind)
+        .first(conn)?;
+    if kind == GroupKind::Dm {
+        check_membership(conn, chat_id, uid)
+    } else {
+        require_admin_role(conn, chat_id, uid)
+    }
+}
+
 async fn create_pin_in_scope(
     state: &AppState,
     conn: &mut PgConnection,
@@ -163,7 +178,7 @@ async fn create_pin_in_scope(
     scope: PinScope,
     message_id: i64,
 ) -> Result<PinResponse, AppError> {
-    require_admin_role(conn, chat_id, uid)?;
+    require_pin_permission(conn, chat_id, uid)?;
 
     // Verify message exists in this chat and is not deleted
     let msg: Message = messages::table
@@ -293,7 +308,7 @@ async fn delete_pin_in_scope(
     scope: PinScope,
     pin_id: i64,
 ) -> Result<(), AppError> {
-    require_admin_role(conn, chat_id, uid)?;
+    require_pin_permission(conn, chat_id, uid)?;
 
     let pin: PinnedMessage = pinned_messages::table
         .filter(

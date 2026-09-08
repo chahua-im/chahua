@@ -1010,6 +1010,9 @@ msgstr "置顶"
 msgid "Pin Message"
 msgstr "置顶消息"
 
+msgid "Pin this message for both of you?"
+msgstr "确定要为你们双方置顶此消息吗？"
+
 msgid "Pin this message in the group?"
 msgstr "确定要置顶此消息吗？"
 

@@ -81,9 +81,24 @@ describe('overlay action policy', () => {
     expect(keys({ isThreadView: true, isAdmin: false })).not.toContain('pin');
   });
 
+  it('offers pin to DM participants without admin role', () => {
+    expect(keys({ isDm: true })).toContain('pin');
+    expect(getOverlayActionPolicy({ ...baseInput, isDm: true, isPinned: true }).at(2)).toEqual({
+      key: 'pin',
+      pinState: 'pinned',
+    });
+  });
+
   it('omits copy-link in DM chats', () => {
     expect(keys({ isDm: true })).not.toContain('copy-link');
-    expect(keys({ isDm: true, hasReactions: true })).toEqual(['reply', 'thread', 'copy', 'save', 'reaction-details']);
+    expect(keys({ isDm: true, hasReactions: true })).toEqual([
+      'reply',
+      'thread',
+      'pin',
+      'copy',
+      'save',
+      'reaction-details',
+    ]);
   });
 
   it('reduces dead DM actions to read-only affordances', () => {
@@ -106,8 +121,8 @@ describe('overlay action policy', () => {
     ]);
   });
 
-  it('does not offer pin for non-admins', () => {
-    expect(keys({ isDm: true })).not.toContain('pin');
+  it('does not offer pin for non-admins in regular group chats', () => {
+    expect(keys({ isDm: false })).not.toContain('pin');
   });
 
   it('does not offer start thread when the message already has thread info', () => {
