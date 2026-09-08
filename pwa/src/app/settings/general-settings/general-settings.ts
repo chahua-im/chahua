@@ -15,12 +15,14 @@ import {
 } from '@ionic/angular';
 import { chevronBackOutline, chatbubblesOutline, personCircleOutline } from 'ionicons/icons';
 import { Preferences } from '../preferences';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-general-settings',
   templateUrl: './general-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    ContentScrollbars,
     IonButton,
     IonButtons,
     IonContent,

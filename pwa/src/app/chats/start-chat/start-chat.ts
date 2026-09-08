@@ -23,6 +23,7 @@ import { type InvitePreviewResponse } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { ChatListStore } from '../chat-list-store';
+import { ContentScrollbars } from '../../content-scrollbars';
 export enum StartChatKind {
   Create,
   Join,
@@ -40,6 +41,7 @@ export function inviteCode(value: string) {
   selector: 'app-start-chat',
   templateUrl: './start-chat.html',
   imports: [
+    ContentScrollbars,
     FormField,
     IonHeader,
     IonToolbar,

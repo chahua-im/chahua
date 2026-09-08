@@ -1,5 +1,6 @@
 import { Component, input, signal, computed, effect, inject } from '@angular/core';
 import { IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonContent, ModalController } from '@ionic/angular';
+import { ContentScrollbars } from '../../content-scrollbars';
 export interface ViewerImage {
   url: string;
   fileName?: string;
@@ -8,7 +9,7 @@ export interface ViewerImage {
   selector: 'app-media-viewer',
   templateUrl: './media-viewer.html',
   styleUrl: './media-viewer.scss',
-  imports: [IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonContent],
+  imports: [ContentScrollbars, IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonContent],
   host: { class: 'ion-page' },
 })
 export class MediaViewer {

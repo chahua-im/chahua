@@ -1,4 +1,5 @@
 @import '@ionic/angular/css/core.css';
+@import 'overlayscrollbars/overlayscrollbars.css';
 
 @import '@ionic/angular/css/normalize.css';
 @import '@ionic/angular/css/structure.css';
@@ -96,4 +97,20 @@ textarea.field {
   font: inherit;
   color: inherit;
   background: transparent;
+}
+
+// Ionic owns the shadow viewport's layout and overflow; only hide its native bars.
+ion-content.custom-scrollbars::part(scroll) {
+  scrollbar-width: none;
+}
+
+.os-scrollbar {
+  --os-size: 12px;
+  --os-padding-perpendicular: 3px;
+  --os-handle-perpendicular-size: 3px;
+  --os-handle-perpendicular-size-hover: 6px;
+  --os-handle-perpendicular-size-active: 6px;
+  --os-handle-bg: rgba(var(--ion-text-color-rgb, 0, 0, 0), 0.25);
+  --os-handle-bg-hover: rgba(var(--ion-text-color-rgb, 0, 0, 0), 0.5);
+  --os-handle-bg-active: rgba(var(--ion-text-color-rgb, 0, 0, 0), 0.65);
 }

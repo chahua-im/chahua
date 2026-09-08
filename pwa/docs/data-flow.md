@@ -13,6 +13,7 @@
 | DraftStore                     | 应用与 localStorage：按账号及 chatId/threadId 保存文字、回复目标 ID、保存时间        | 列表预览和对话输入                                |
 | Preferences                    | 应用与 localStorage：消息页话题开关、全部头像开关                                    | ChatList、页面、设置                              |
 | ConversationStore              | 每个 ConversationPage：连续消息区间、双向游标、加载状态、待应用补丁与请求上下文      | 所在页面                                          |
+| MessageOutbox                  | 应用内存：已提交消息、clientGeneratedId、上传任务、确认与失败状态；按会话顺序提交    | ConversationPage → Message / MessageAttachments   |
 | MessageActions                 | 每个 MessageMenu：收藏、撤回、表态的请求操作；不持有消息缓存                         | MessageMenu                                       |
 | ConversationNavigation         | 应用：即时导航指令流，不缓存页面数据                                                 | ChatList 发出，当前 ConversationPage 接收         |
 | AppUpdates / PushNotifications | 应用：更新与通知订阅状态                                                             | 设置页面                                          |
@@ -36,6 +37,11 @@ flowchart TD
   CHAT -->|资料、读位置、订阅、置顶| PAGE
   CHAT -->|置顶消息| PINS[PinnedMessagesPage]
   CHAT -->|本地操作成功：刷新查询与计数| LISTS
+  PAGE -->|提交文本、回复与上传任务| OUTBOX[MessageOutbox：待发队列]
+  OUTBOX -->|本地消息与发送状态| PAGE
+  OUTBOX -->|上传完成后创建消息| HTTP
+  CONNECTION -->|消息确认| OUTBOX
+  OUTBOX -->|HTTP确认的已发布消息| CONNECTION
   PAGE -->|打开、分页、新消息| STORE
   STORE -->|消息数组| PAGE
   PAGE -->|消息数组与选择| MENU[MessageMenu]
@@ -121,7 +127,7 @@ HTTP 和 WS 边界仅转换 ID。可选字段在 TypeScript 中声明为 `field?
 | 添加/取消表态          | MessageActions 立即发布个人选择，再 `PUT/DELETE /chats/{c}/messages/{m}/reactions/{emoji}`                                   |
 | 查看收藏/续页          | SavedMessagesPage：`GET /saved-messages?limit=50`，续页加 `before=游标`                                                      |
 | 取消收藏               | SavedMessagesPage：`DELETE /saved-messages/by-id/{savedId}`                                                                  |
-| 发送文字               | 页面：`POST /chats/{c}/messages` 或 `POST /chats/{c}/threads/{t}/messages`；成功结果进入 Connection                          |
+| 发送消息               | MessageOutbox：`POST /chats/{c}/messages` 或 `POST /chats/{c}/threads/{t}/messages`；成功结果进入 Connection                 |
 | 聊天归档/恢复          | ChatStore：`PUT/DELETE /chats/{c}/archive`；更新列表和计数                                                                   |
 | 聊天静音/恢复          | ChatStore：`PUT/DELETE /group/{c}/mute`；更新列表和计数                                                                      |
 | 话题订阅               | ChatStore：`PUT /chats/{c}/threads/{t}/subscribe`                                                                            |
@@ -170,13 +176,13 @@ Connection 维护一条认证连接，每 10 秒发送心跳。重连采用有�
 
 ## 页面生命周期
 
-App 解析路由并保留桌面侧栏的列表选择；ChatListPage 接收路由输入，向移动端 ChatList 传递 selection 和 active。桌面侧栏只在分栏可见时创建，宽屏下 ChatListPage 不创建移动列表。ChatList 不订阅路由变化。
+App 解析路由并保留桌面侧栏的列表选择；ChatListPage 接收路由输入，向移动端 ChatList 传递 selection 和 active。桌面侧栏只在分栏可见时创建，宽屏下 ChatListPage 不创建移动列表。ChatList 通过 openList 输出 tab、归档和好友请求列表的切换意图，不订阅路由变化。双栏下 App 只更新 sidebarSelection，不修改 URL 或历史记录，右侧会话和输入内容保持原位；单栏下 ChatListPage 将切换转换为列表路由，归档和好友请求的返回使用 Ionic 返回方向。设置弹窗等只改变查询参数的导航不会重置侧栏选择。
 
 Ionic 可以保留离开的页面实例。页面离开时重置 ConversationStore、取消消息或收藏读取、清空菜单与当前输入展示。列表页释放查询消费者；共享聊天、读位置和置顶缓存仍可复用，正在读取的共享置顶不因一个页面离开而取消。DraftStore 中的持久草稿保留。组件销毁也执行相应清理。[Ionic 页面生命周期](https://ionicframework.com/docs/angular/lifecycle)
 
 写操作不会因为页面离开而主动取消；组件销毁时由 DestroyRef 结束其请求。异步结果使用上下文或版本检查，防止旧页面操作覆盖新的 UI。MessageMenu.reset 清空菜单、确认和提示，正在结束的旧操作不会向新页面展示结果。
 
-输入和回复选择只保存在 ConversationPage。离开会话、切换聊天或话题、页面进入后台及 pagehide 时，将未发送文字和回复目标保存到 DraftStore；相同内容不重复写入，空内容移除已有草稿。输入过程中不更新聊天列表的草稿预览或排序时间。编辑已发送消息使用独立的 editText，离开时仍只保存未发送内容。发送成功只清除仍对应这条发送请求的草稿，包括请求期间离开或进入后台所保存的内容。列表用消息活动时间与草稿保存时间中的较新者排序，未加载的聊天不会因本地草稿而单独创建列表行。
+输入和回复选择只保存在 ConversationPage。离开会话、切换聊天或话题、页面进入后台及 pagehide 时，将未发送文字和回复目标保存到 DraftStore；相同内容不重复写入，空内容移除已有草稿。输入过程中不更新聊天列表的草稿预览或排序时间。编辑已发送消息使用独立的 editText，离开时仍只保存未发送内容。文字消息入队时立即清空已提交的输入与持久草稿，后续确认或失败只更新队列，不改动用户正在输入的新草稿。列表用消息活动时间与草稿保存时间中的较新者排序，未加载的聊天不会因本地草稿而单独创建列表行。
 
 ## 搜索与管理请求
 
@@ -189,13 +195,15 @@ Ionic 可以保留离开的页面实例。页面离开时重置 ConversationStor
 
 ## 消息输入与上传
 
-MessageComposer 拥有附件与上传任务，VoiceRecorder 子组件管理设备资源。照片先读取上传限制，检测文件类型、尺寸并压缩，再申请签名上传地址；文件入口保留原始字节，不经过照片压缩；PUT 上传直接使用存储返回的签名请求头，不携带聊天登录 token。图片和视频的尺寸在提交消息前确定。移除文件或离开聊天会中止上传并释放本地 URL。取消录音、离开聊天或销毁组件会释放麦克风，过期的授权响应不能重新启动录音。
+MessageComposer 拥有尚未提交的 AttachmentUpload 任务，VoiceRecorder 子组件管理设备资源。照片先读取上传限制，检测文件类型、尺寸并压缩，再申请签名上传地址；文件入口保留原始字节，不经过照片压缩；PUT 上传直接使用存储返回的签名请求头，不携带聊天登录 token。AttachmentUpload 自身持有进度、取消信号、本地 URL 和完成后的附件 ID；重试复用正在执行的任务或已成功上传的 ID。
 
-ConversationPage 接收附件 ID 和消息类型，负责提交与处理响应。文字消息可附带图片和视频；普通文件单独发送且不携带文字，语音消息只包含一个音频附件。发送文件或语音时，未发送的文本和其他类别附件仍保留在输入区。
+点击发送时，Composition 将已选中的上传任务和提及名字快照移交给 MessageOutbox，不必等处理或上传完成。文字消息可附带图片和视频；普通文件单独发送且不携带文字，语音消息只包含一个音频附件。发送文件、语音或贴纸时，未发送的文本和其他类别附件仍保留在输入区。输入区重置只取消仍由它持有的任务；入队后的上传与请求可跨会话页面继续。队列存在当前应用内存中，不跨整页刷新恢复；账号切换会清理队列和上传资源。
 
-发送中的预览属于页面局部状态，不加入 ConversationStore；服务器回声到达后隐藏对应预览。相同内容的失败重试复用 clientGeneratedId，改变文本、回复对象或附件会使用新值。HTTP 成功消息继续走 Connection.accept；编辑成功走 messageUpdated 同一更新路径。编辑不会覆盖原本的未发送草稿。
+ConversationPage 将本地消息追加到已加载消息之后，复用 Message、MessageAttachments 和日期／作者分组，不伪造 Snowflake ID。待发消息不参与服务器菜单操作、定位锚点或已读计算。点击发送立即显示本地内容、清空对应输入和回复，并定位最新一次；确认到达时不再强制滚动。时间后的空心圆圈勾表示待确认，实心圆圈勾表示服务器已接收；未完成的附件在自身位置显示 Ionic spinner，失败消息在原位置提供重试。
 
-## 测试边界
+MessageOutbox 等待附件任务完成后才调用创建消息接口；同一会话的请求按提交顺序执行，上传可并行，不同会话互不阻塞。失败重试复用该条消息的正文、回复、附件 ID 和 clientGeneratedId；输入栏再次发送相同文字是新消息。HTTP 与 WS 确认按 clientGeneratedId 匹配本地记录，WS 先到时迟到的 HTTP 错误不会回退成功状态；Connection 仍按服务器消息 ID 去重。已确认记录进入 ConversationStore 的实际区间后才移交并释放本地资源；历史区间中的未交接记录仍显示在底部。编辑仍由页面提交 PATCH，并沿 messageUpdated 更新路径处理，不覆盖未发送草稿。
+
+语音创建接口确认后，图标变为实心，但继续使用本地音频播放；发布 WS、列表 GET 或重连后按 ID 的 GET 获得已发布消息后才换成服务器附件。未发布语音的 GET 返回 404，保持接收成功状态，不重新创建消息。
 
 写操作只在 HTTP mock 或本地后端上测试。需要真实后端时使用本地服务器与开发数据库 `10.198.3.214`，不得对生产服务器执行消息发送、好友关系、邀请、已读或其他写操作。
 

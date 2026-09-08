@@ -1,11 +1,11 @@
 @if (!wide()) {
-  <app-chat-list [selection]="selection()" [active]="listActive()"></app-chat-list>
+  <app-chat-list [selection]="selection()" [active]="listActive()" (openList)="openList($event)"></app-chat-list>
 }
 <div class="ion-page ion-hide-md-down">
   <ion-header>
     <ion-toolbar><ion-title>茶话</ion-title></ion-toolbar>
   </ion-header>
-  <ion-content>
+  <ion-content appScrollbars>
     <div class="empty-state ion-padding ion-text-center">
       <ion-icon [icon]="chatIcon"></ion-icon>
       <h1>开始聊天</h1>

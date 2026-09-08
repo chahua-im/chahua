@@ -4,7 +4,7 @@
     <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">取消</ion-button></ion-buttons>
   </ion-toolbar>
 </ion-header>
-<ion-content>
+<ion-content appScrollbars>
   @if (kind() === Kind.Friend) {
     <ion-searchbar placeholder="搜索用户名或 UID" [debounce]="300" (ionInput)="query.set($event.detail.value || '')" />
     <app-directory-search [query]="query()" [usersOnly]="true" />

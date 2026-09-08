@@ -59,6 +59,7 @@ export interface ChatListAction {
 })
 export class ChatListItem {
   readonly entry = input.required<ChatListEntry>();
+  readonly button = input(false);
   readonly startActions = input<readonly ChatListAction[]>([]);
   readonly endActions = input<readonly ChatListAction[]>([]);
   readonly actionsAlwaysVisible = input(false);

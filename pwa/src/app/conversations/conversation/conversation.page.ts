@@ -48,13 +48,7 @@ import {
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
-import {
-  GroupKind,
-  MessageType,
-  ServerWsMessageType,
-  type CreateMessageBody,
-  type MessageResponse,
-} from '../../../generated/models';
+import { GroupKind, MessageType, ServerWsMessageType, type MessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { SessionStore } from '../../session/session-store';
@@ -64,11 +58,12 @@ import { ConversationNavigation, ConversationTargetKind, type ConversationTarget
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
-import { userColors } from '../../messages/user-colors';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { messageRows } from '../message-rows';
-import { Message } from '../../messages/message/message';
+import { Message, type MessageContent } from '../../messages/message/message';
+import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { scrollActivity } from '../scroll-activity';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 function queryMessageId(id: string | undefined) {
   return id && /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n ? encodeId(id) : undefined;
@@ -102,6 +97,7 @@ type ScrollPosition =
     '(window:pagehide)': 'saveDraft()',
   },
   imports: [
+    ContentScrollbars,
     DatePipe,
     ChatDetails,
     IonModal,
@@ -139,14 +135,6 @@ export class ConversationPage {
     this.entryKey();
     return undefined;
   });
-  protected readonly pendingSend = signal<{ text: string; id: string; failed: boolean } | undefined>(undefined);
-  protected readonly visiblePending = computed(() => {
-    const pending = this.pendingSend();
-    return pending && !this.conversation.items().some((message) => message.clientGeneratedId === pending.id)
-      ? pending
-      : undefined;
-  });
-  private lastSubmission?: { key: string; id: string };
   protected startEdit(message: MessageResponse) {
     this.editing.set(message);
     this.editText.set(message.message ?? '');
@@ -167,6 +155,7 @@ export class ConversationPage {
   private readonly chatInfo = inject(ChatStore);
   private readonly router = inject(Router);
   private readonly drafts = inject(DraftStore);
+  protected readonly outbox = inject(MessageOutbox);
   private readonly destroyRef = inject(DestroyRef);
   private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly api = inject(ChatsService);
@@ -235,7 +224,29 @@ export class ConversationPage {
     source: this.entryKey,
     computation: (): ThreadError | undefined => undefined,
   });
-  protected readonly rows = computed(() => messageRows(this.conversation.items()));
+  protected readonly outgoing = computed(() =>
+    this.outbox.items().filter((item) => item.chatId === this.id() && item.threadId === this.threadId()),
+  );
+  protected readonly rows = computed(() => {
+    const messages = this.conversation.items();
+    const known = new Set(messages.map((message) => message.clientGeneratedId));
+    const entries: { key: string; message: MessageContent; confirmed?: MessageResponse; outgoing?: OutgoingMessage }[] =
+      [
+        ...messages.map((message) => ({
+          key: message.clientGeneratedId || decodeId(message.id),
+          message,
+          confirmed: message,
+        })),
+        ...this.outgoing()
+          .filter((item) => !known.has(item.clientGeneratedId))
+          .map((item) => ({
+            key: item.clientGeneratedId,
+            message: item.message(),
+            outgoing: item,
+          })),
+      ];
+    return messageRows(entries.map((entry) => entry.message)).map((row, index) => ({ ...row, ...entries[index] }));
+  });
   protected readonly scrolling = scrollActivity();
   protected readonly active = signal(false);
   private entered = false;
@@ -268,10 +279,6 @@ export class ConversationPage {
   protected readonly replyTo = linkedSignal({
     source: this.entryVersion,
     computation: (): MessageResponse | undefined => undefined,
-  });
-  protected readonly replyColors = computed(() => {
-    const sender = this.replyTo()?.sender;
-    return sender ? userColors(sender.name ?? String(sender.uid)) : undefined;
   });
   protected readonly sendError = linkedSignal({ source: this.entryKey, computation: () => false });
   protected readonly sending = linkedSignal({ source: this.entryKey, computation: () => false });
@@ -381,6 +388,19 @@ export class ConversationPage {
     this.navigation.requests$.pipe(takeUntilDestroyed()).subscribe(({ chatId, target, threadId }) => {
       if (this.isCurrent() && chatId === this.id() && threadId === this.threadId()) void this.goTo(target);
     });
+    effect(() => {
+      const messages = this.conversation.items();
+      untracked(() => this.outbox.release(messages));
+    });
+    effect(() => {
+      if (!this.conversation.atLatest()) return;
+      const messages = this.outgoing()
+        .filter((item) => item.published())
+        .map((item) => item.confirmed()!);
+      untracked(() => {
+        for (const message of messages) this.conversation.receive(message);
+      });
+    });
     afterRenderEffect(() => {
       this.messageElements();
       this.position();
@@ -454,7 +474,6 @@ export class ConversationPage {
     this.rows();
     this.draft.set('');
     this.replyTo.set(undefined);
-    this.pendingSend.set(undefined);
     this.composer()?.reset();
   }
 
@@ -590,7 +609,8 @@ export class ConversationPage {
     if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
     this.atBottom.set(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40);
     if (!this.entered || this.document.hidden || this.conversation.loading() || this.position()) return;
-    const elements = this.messageElements();
+    const rows = this.rows();
+    const elements = this.messageElements().filter((_, index) => !!rows[index]?.confirmed);
     const viewport = scroll.getBoundingClientRect();
     // Message bottoms are ordered, so finding the last visible bottom needs only log(n) layout reads.
     let low = 0;
@@ -604,15 +624,16 @@ export class ConversationPage {
       } else high = mid - 1;
     }
     const element = elements[visible]?.nativeElement;
-    const messageId = this.messages()[visible]?.message().id;
-    if (element && messageId && element.getBoundingClientRect().bottom > viewport.top) {
-      if (this.returnMessageIds().some((id) => id <= messageId))
-        this.returnMessageIds.update((ids) => ids.filter((id) => id > messageId));
+    const messageId = element?.getAttribute('data-message-id');
+    const confirmedId = messageId ? encodeId(messageId) : undefined;
+    if (element && confirmedId && element.getBoundingClientRect().bottom > viewport.top) {
+      if (this.returnMessageIds().some((id) => id <= confirmedId))
+        this.returnMessageIds.update((ids) => ids.filter((id) => id > confirmedId));
       const threadId = this.threadId();
       void (
         threadId
-          ? this.chatInfo.markThreadRead(this.id(), threadId, messageId)
-          : this.chatInfo.markRead(this.id(), messageId)
+          ? this.chatInfo.markThreadRead(this.id(), threadId, confirmedId)
+          : this.chatInfo.markRead(this.id(), confirmedId)
       ).catch(() => {});
     }
   }
@@ -649,10 +670,11 @@ export class ConversationPage {
         ({ nativeElement }) => nativeElement.getBoundingClientRect().bottom > top,
       );
       const element = this.messageElements()[index]?.nativeElement;
-      if (element)
+      const messageId = this.messages()[index]?.message().id;
+      if (element && messageId)
         this.position.set({
           type: PositionKind.Anchor,
-          messageId: this.messages()[index].message().id,
+          messageId,
           // Prepending can remove this message's author header; preserve the content below it.
           offset: element.getBoundingClientRect().bottom - top,
         });
@@ -693,80 +715,47 @@ export class ConversationPage {
 
   protected async sendMessage(composition: Composition = { messageType: MessageType.text, attachmentIds: [] }) {
     const editing = this.editing();
-    const inputText = editing ? this.editText() : this.draft();
-    const text = inputText.trim();
-    if (this.sending() || (!text && !composition.attachmentIds.length && !composition.sticker)) return;
-    const chatId = this.id();
-    const threadId = this.threadId();
+    const text = (editing ? this.editText() : this.draft()).trim();
+    if (
+      this.sending() ||
+      (!text && !composition.attachmentIds.length && !composition.uploads?.length && !composition.sticker)
+    )
+      return;
     const entry = this.entryKey();
-    const savedDraft = this.drafts.get(chatId, threadId);
-    const key = JSON.stringify([
-      decodeId(chatId),
-      threadId && decodeId(threadId),
-      composition.messageType === MessageType.text || editing ? text : undefined,
-      composition.messageType,
-      composition.attachmentIds.map(decodeId),
-      composition.sticker?.id,
-      this.replyTo()?.id ?? this.savedReplyId(),
-      editing?.id,
-    ]);
-    const id = this.lastSubmission?.key === key ? this.lastSubmission.id : crypto.randomUUID();
-    this.lastSubmission = { key, id };
+    if (!editing) {
+      const item = this.outbox.enqueue(
+        this.id(),
+        this.threadId(),
+        text,
+        composition,
+        this.replyTo(),
+        this.replyTo()?.id ?? this.savedReplyId(),
+      );
+      if (composition.messageType === MessageType.text) {
+        this.draft.set('');
+        this.drafts.clear(this.id(), this.threadId());
+      }
+      this.cancelReply();
+      // Publish the local row first; only the explicit Send gesture moves to the latest messages.
+      this.position.set({ type: PositionKind.Bottom });
+      if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
+      return item.operation;
+    }
     this.sending.set(true);
     this.sendError.set(false);
-    const body: CreateMessageBody = {
-      message: composition.messageType === MessageType.text ? text : undefined,
-      messageType: composition.messageType,
-      attachmentIds: composition.attachmentIds,
-      stickerId: composition.sticker?.id,
-      clientGeneratedId: id,
-      replyToId: this.replyTo()?.id ?? this.savedReplyId(),
-    };
-    if (!editing)
-      this.pendingSend.set({
-        text:
-          composition.sticker?.emoji ||
-          (composition.messageType === MessageType.text ? text : '') ||
-          (composition.messageType === MessageType.audio ? '[语音]' : '[附件]'),
-        id,
-        failed: false,
-      });
     try {
-      if (!editing) void this.content()?.scrollToBottom(0);
       const message = await firstValueFrom(
-        (editing
-          ? this.api.patchMessage(chatId, editing.id, { message: text, attachmentIds: composition.attachmentIds })
-          : threadId
-            ? this.api.postThreadMessage(chatId, threadId, body)
-            : this.api.postMessage(chatId, body)
-        ).pipe(takeUntilDestroyed(this.destroyRef)),
+        this.api
+          .patchMessage(this.id(), editing.id, { message: text, attachmentIds: composition.attachmentIds })
+          .pipe(takeUntilDestroyed(this.destroyRef)),
       );
-      if (this.destroyRef.destroyed) return;
-      if (editing) this.realtime.acceptChange({ type: ServerWsMessageType.messageUpdated, payload: message });
-      else this.realtime.accept(message);
-      if (!editing && composition.messageType === MessageType.text) {
-        const saved = this.drafts.get(chatId, threadId);
-        const replyId = body.replyToId ? decodeId(body.replyToId) : undefined;
-        // Leaving or backgrounding during the request can persist this submission.
-        if (saved === savedDraft || (saved?.text === inputText && saved.replyTo === replyId))
-          this.drafts.clear(chatId, threadId);
-        if (entry.version === this.entryVersion()) {
-          this.draft.set('');
-          this.cancelReply();
-        }
-      }
+      this.realtime.acceptChange({ type: ServerWsMessageType.messageUpdated, payload: message });
       if (this.isCurrent(entry)) {
-        this.lastSubmission = undefined;
-        this.pendingSend.set(undefined);
-        if (editing) this.cancelEdit();
-        if (!composition.sticker) this.composer()?.complete(composition.attachmentIds);
-        if (!editing) await this.goTo({ type: ConversationTargetKind.Latest });
+        this.cancelEdit();
+        this.composer()?.complete(composition.attachmentIds);
       }
     } catch {
-      if (this.isCurrent(entry)) {
-        this.sendError.set(true);
-        this.pendingSend.update((p) => (p ? { ...p, failed: true } : undefined));
-      }
+      if (this.isCurrent(entry)) this.sendError.set(true);
     } finally {
       if (this.isCurrent(entry)) this.sending.set(false);
     }

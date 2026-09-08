@@ -29,7 +29,9 @@ import { ConversationError, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
-import { Message } from '../../messages/message/message';
+import { Message, type MessageContent } from '../../messages/message/message';
+import { MessageOutbox } from '../../messages/message-outbox';
+import { MessageDelivery } from '../../messages/message-status';
 import { ConversationPage, ThreadError } from './conversation.page';
 
 function deferred<T>() {
@@ -119,7 +121,11 @@ describe('ConversationPage', () => {
   async function enterThread(rootId = '100', read: { lastReadMessageId?: string } = { lastReadMessageId: '101' }) {
     fixture.componentRef.setInput('threadId', rootId);
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/${rootId}`).flush({ ...wireMessage, id: rootId });
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/${rootId}`).flush({
+      ...wireMessage,
+      id: rootId,
+      clientGeneratedId: `root-${rootId}`,
+    });
     expect(TestBed.inject(ChatStore).loadSubscription).toHaveBeenCalledWith(testChat.id, encodeId(rootId));
     subscriptions.update((statuses) => new Map(statuses).set(encodeId(rootId), { subscribed: false, archived: false }));
     http.expectOne(`/_api/chats/${wireChat.id}/threads/${rootId}/read-state`).flush({ ...read });
@@ -130,9 +136,9 @@ describe('ConversationPage', () => {
       )
       .flush({
         messages: [
-          { ...wireMessage, id: rootId },
-          { ...wireMessage, id: '101', replyRootId: rootId },
-          { ...wireMessage, id: '102', replyRootId: rootId },
+          { ...wireMessage, id: rootId, clientGeneratedId: `root-${rootId}` },
+          { ...wireMessage, id: '101', clientGeneratedId: `reply-${rootId}-101`, replyRootId: rootId },
+          { ...wireMessage, id: '102', clientGeneratedId: `reply-${rootId}-102`, replyRootId: rootId },
         ],
       });
     await fixture.whenStable();
@@ -454,7 +460,7 @@ describe('ConversationPage', () => {
     await Promise.resolve();
     http
       .expectOne((req) => req.url.endsWith('/messages') && req.params.has('before'))
-      .flush({ messages: [{ ...wireMessage, id: '100' }], olderCursor: '100' });
+      .flush({ messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older-100' }], olderCursor: '100' });
     await loading;
     await fixture.whenStable();
     expect(message.querySelector('.sender')).toBeNull();
@@ -620,13 +626,16 @@ describe('ConversationPage', () => {
   });
 
   it.each(['background', 'transition', 'left'])(
-    'clears a sent draft persisted during the request: %s',
+    'persists only the next draft while an earlier send finishes: %s',
     async (mode) => {
       const drafts = TestBed.inject(DraftStore);
       component['updateDraft']('正在发送');
       const sending = component['sendMessage']();
       const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
+      expect(component['draft']()).toBe('');
       expect(drafts.get(testChat.id)).toBeUndefined();
+      component['updateDraft']('下一条草稿');
+      component['startReply'](testMessage);
       if (mode === 'background') {
         vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
         document.dispatchEvent(new Event('visibilitychange'));
@@ -635,16 +644,26 @@ describe('ConversationPage', () => {
         vi.mocked(TestBed.inject(Router).isActive).mockReturnValue(false);
         if (mode === 'left') component.ionViewDidLeave();
       }
-      expect(drafts.get(testChat.id)?.text).toBe('正在发送');
-      request.flush({ ...wireMessage, message: '正在发送' });
+      const saved = drafts.get(testChat.id);
+      expect(saved).toMatchObject({ text: '下一条草稿', replyTo: wireMessage.id });
+      request.flush({
+        ...wireMessage,
+        id: '9007199254741005',
+        clientGeneratedId: request.request.body.clientGeneratedId,
+        message: '正在发送',
+      });
       await sending;
-      expect(drafts.get(testChat.id)).toBeUndefined();
+      expect(drafts.get(testChat.id)).toBe(saved);
+      if (mode !== 'left') {
+        expect(component['draft']()).toBe('下一条草稿');
+        expect(component['replyTo']()).toBe(testMessage);
+      }
       component.ionViewDidLeave();
-      expect(drafts.get(testChat.id)).toBeUndefined();
+      expect(drafts.get(testChat.id)).toBe(saved);
     },
   );
 
-  it('restores a draft after leaving and clears persisted text only after a successful send', async () => {
+  it('restores a draft after leaving and clears persisted text as soon as it is enqueued', async () => {
     component['updateDraft']('保留草稿');
     component.ionViewDidLeave();
     component.ionViewWillEnter();
@@ -656,9 +675,15 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     expect(component['draft']()).toBe('保留草稿');
     const sending = component['sendMessage']();
-    http
-      .expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'))
-      .flush({ ...wireMessage, message: '保留草稿' });
+    expect(component['draft']()).toBe('');
+    expect(TestBed.inject(DraftStore).get(testChat.id)).toBeUndefined();
+    const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
+    request.flush({
+      ...wireMessage,
+      id: '9007199254741005',
+      clientGeneratedId: request.request.body.clientGeneratedId,
+      message: '保留草稿',
+    });
     await sending;
     expect(TestBed.inject(DraftStore).get(testChat.id)).toBeUndefined();
   });
@@ -685,38 +710,148 @@ describe('ConversationPage', () => {
     expect(drafts.get(testChat.id)).toMatchObject({ text: '继续编辑', replyTo: undefined });
   });
 
-  it('keeps failed input locally and saves it when leaving', async () => {
+  it('keeps a failed row in the root outbox across leaving and reentry without restoring submitted input', async () => {
     component['updateDraft']('待重试');
     const sending = component['sendMessage']();
+    const item = component['outbox'].items()[0];
+    expect(component['draft']()).toBe('');
+    expect(component['rows']().at(-1)?.outgoing).toBe(item);
     http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush('', { status: 503, statusText: 'Unavailable' });
     await sending;
-    expect(component['draft']()).toBe('待重试');
-    expect(TestBed.inject(DraftStore).get(testChat.id)).toBeUndefined();
+    fixture.detectChanges();
+    const row: HTMLElement = fixture.nativeElement.querySelector('app-message:last-child');
+    expect(row.textContent).toContain('待重试');
+    expect(row.querySelector('.retry-button')).not.toBeNull();
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(component['draft']()).toBe('');
+    expect(component['sending']()).toBe(false);
+    expect(component['sendError']()).toBe(false);
     component.ionViewDidLeave();
-    expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('待重试');
+    expect(TestBed.inject(DraftStore).get(testChat.id)).toBeUndefined();
+    expect(TestBed.inject(MessageOutbox).items()).toEqual([item]);
+    await reenter();
+    expect(component['draft']()).toBe('');
+    expect(component['rows']().at(-1)?.outgoing).toBe(item);
+    expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button')).not.toBeNull();
   });
 
-  it('keeps the draft and idempotency key when retrying a failed text send', async () => {
-    component['draft'].set('  新消息  ');
-    let sending = component['sendMessage']();
-    const first = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(first.request.method).toBe('POST');
-    expect(first.request.body.message).toBe('新消息');
-    const key: string = first.request.body.clientGeneratedId;
-    first.flush('', { status: 503, statusText: 'Unavailable' });
-    await sending;
-    expect(component['draft']()).toBe('  新消息  ');
-    expect(component['sendError']()).toBe(true);
+  it.each(['http', 'websocket'])(
+    'retries the failed row with the same UUID and renders one confirmation when %s arrives first',
+    async (firstAcknowledgement) => {
+      component['draft'].set('  新消息  ');
+      const sending = component['sendMessage']();
+      const item = component['outbox'].items()[0];
+      const first = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+      expect(first.request.method).toBe('POST');
+      expect(first.request.body.message).toBe('新消息');
+      const body = structuredClone(first.request.body);
+      expect(body.clientGeneratedId).toBe(item.clientGeneratedId);
+      expect(component['draft']()).toBe('');
+      expect(component['sending']()).toBe(false);
+      fixture.detectChanges();
+      const local = fixture.debugElement.queryAll(By.directive(Message)).at(-1)!;
+      const message = local.componentInstance as Message<MessageContent>;
+      expect(message.message().id).toBeUndefined();
+      expect(message.delivery()).toBe(MessageDelivery.Sending);
+      expect(message.interactive()).toBe(false);
+      expect(local.nativeElement.textContent).toContain('新消息');
+      first.flush('', { status: 503, statusText: 'Unavailable' });
+      await sending;
+      fixture.detectChanges();
+      expect(component['draft']()).toBe('');
+      expect(component['sendError']()).toBe(false);
+      expect(message.delivery()).toBe(MessageDelivery.Failed);
+      expect(local.nativeElement.querySelector('.retry-button')).not.toBeNull();
+
+      component['updateDraft']('确认期间继续写');
+      component['startReply'](testMessage);
+      const retrying = component['outbox'].retry(item);
+      expect(component['outbox'].retry(item)).toBe(retrying);
+      const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+      expect(retry.request.body).toEqual(body);
+      const response = {
+        ...wireMessage,
+        id: '9007199254741005',
+        clientGeneratedId: retry.request.body.clientGeneratedId,
+        message: '新消息',
+      };
+      const echoed = { ...response, id: encodeId(response.id), chatId: testChat.id };
+      if (firstAcknowledgement === 'websocket') {
+        incoming.next(echoed);
+        fixture.detectChanges();
+        expect(fixture.debugElement.queryAll(By.directive(Message))).toHaveLength(2);
+      }
+      retry.flush(structuredClone(response));
+      await retrying;
+      if (firstAcknowledgement === 'http') incoming.next(echoed);
+      await fixture.whenStable();
+      expect(component['conversation'].items()).toHaveLength(2);
+      expect(component['rows']().filter((row) => row.key === item.clientGeneratedId)).toHaveLength(1);
+      expect(component['outbox'].items()).toEqual([]);
+      const confirmed = fixture.debugElement.queryAll(By.directive(Message));
+      expect(confirmed).toHaveLength(2);
+      expect(confirmed.at(-1)!.nativeElement).toBe(local.nativeElement);
+      expect(message.message().id).toBe(encodeId(response.id));
+      expect(message.interactive()).toBe(true);
+      expect(local.nativeElement.querySelector('.retry-button')).toBeNull();
+      expect(component['draft']()).toBe('确认期间继续写');
+      expect(component['replyTo']()).toBe(testMessage);
+      expect(component['composer']()!.text()).toBe('确认期间继续写');
+    },
+  );
+
+  it('appends local rows in submission order after confirmed messages regardless of createdAt', async () => {
+    const timestamp = vi.spyOn(Date.prototype, 'toISOString');
+    timestamp.mockReturnValueOnce('2000-01-02T00:00:00Z');
+    component['updateDraft']('第一条本地消息');
+    const firstSending = component['sendMessage']();
+    const firstRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    timestamp.mockReturnValueOnce('2000-01-01T00:00:00Z');
+    component['updateDraft']('第二条本地消息');
+    const secondSending = component['sendMessage']();
+    const [first, second] = component['outbox'].items();
+    expect(first.clientGeneratedId).not.toBe(second.clientGeneratedId);
+    expect(first.message().createdAt).toBe('2000-01-02T00:00:00Z');
+    expect(second.message().createdAt).toBe('2000-01-01T00:00:00Z');
+    http.expectNone((req) => req.method === 'POST');
+    incoming.next({
+      ...testMessage,
+      id: encodeId('9007199254741005'),
+      clientGeneratedId: 'live-between-submissions-and-confirmation',
+      message: '已确认的新消息',
+    });
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('发送失败');
-    sending = component['sendMessage']();
-    const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(retry.request.body.clientGeneratedId).toBe(key);
-    retry.flush({ ...wireMessage, id: '9007199254741005', clientGeneratedId: key, message: '新消息' });
-    await sending;
-    expect(component['conversation'].items()).toHaveLength(2);
+    const rendered = fixture.debugElement.queryAll(By.directive(Message));
+    expect(rendered.map((row) => (row.componentInstance as Message<MessageContent>).message().message)).toEqual([
+      '测试消息',
+      '已确认的新消息',
+      '第一条本地消息',
+      '第二条本地消息',
+    ]);
+    expect(
+      component['rows']()
+        .slice(-2)
+        .map((row) => row.outgoing),
+    ).toEqual([first, second]);
     expect(component['draft']()).toBe('');
+    expect(component['sending']()).toBe(false);
+    firstRequest.flush({
+      ...wireMessage,
+      id: '9007199254741007',
+      clientGeneratedId: firstRequest.request.body.clientGeneratedId,
+      message: '第一条本地消息',
+    });
+    await firstSending;
+    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush('', { status: 503, statusText: 'Unavailable' });
+    await secondSending;
+    await fixture.whenStable();
+    const rows = fixture.debugElement.queryAll(By.directive(Message));
+    expect(rows).toHaveLength(4);
+    expect(rows.at(-1)!.nativeElement).toBe(rendered.at(-1)!.nativeElement);
+    expect(component['rows']().at(-1)?.outgoing).toBe(second);
+    expect(second.delivery()).toBe(MessageDelivery.Failed);
   });
+
   it('retains live messages while older pages load and deduplicates echoed messages', async () => {
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
@@ -754,48 +889,54 @@ describe('ConversationPage', () => {
     expect(element.querySelector('[data-message-id="9007199254741005"] .chat-row.last')).not.toBeNull();
   });
 
-  it('sends the selected reply ID, preserves it on failure, and clears it after success or navigation', async () => {
+  it('moves the selected reply into the failed row and retries it without changing the next reply draft', async () => {
     vi.spyOn(IonTextarea.prototype, 'setFocus').mockResolvedValue();
     component['startReply'](testMessage);
     component['draft'].set('回复内容');
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('.reply-context').textContent).toContain('测试用户');
-    let sending = component['sendMessage']();
+    const sending = component['sendMessage']();
+    const item = component['outbox'].items()[0];
     const first = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
     expect(first.request.body.replyToId).toBe(wireMessage.id);
-    const key: string = first.request.body.clientGeneratedId;
+    expect(component['draft']()).toBe('');
+    expect(component['replyTo']()).toBeUndefined();
+    expect(component['savedReplyId']()).toBeUndefined();
+    expect(item.message().replyToMessage).toMatchObject(testMessage);
     first.flush('', { status: 503, statusText: 'Unavailable' });
     await sending;
-    expect(component['replyTo']()?.id).toBe(testMessage.id);
-
-    sending = component['sendMessage']();
-    const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(retry.request.body.clientGeneratedId).toBe(key);
-    expect(retry.request.body.replyToId).toBe(wireMessage.id);
-    retry.flush({ ...wireMessage, id: '9007199254741005', message: '回复内容' });
-    await sending;
-    expect(component['replyTo']()).toBeUndefined();
-
-    component['draft'].set('相同文本');
-    component['startReply'](testMessage);
-    sending = component['sendMessage']();
-    const previous = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    const previousKey = previous.request.body.clientGeneratedId;
-    previous.flush('', { status: 503, statusText: 'Unavailable' });
-    await sending;
-    component['startReply']({ ...testMessage, id: encodeId('9007199254741005') });
-    sending = component['sendMessage']();
-    const changed = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
-    expect(changed.request.body.clientGeneratedId).not.toBe(previousKey);
-    changed.flush('', { status: 503, statusText: 'Unavailable' });
-    await sending;
-    fixture.componentRef.setInput('id', '9007199254740995');
     fixture.detectChanges();
-    http.expectOne('/_api/group/9007199254740995').flush({ ...wireChat, id: '9007199254740995' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    http.expectOne('/_api/chats/9007199254740995/messages?max=50').flush({ messages: [] });
+    expect(fixture.nativeElement.querySelector('.reply-context')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message:last-child .reply-preview').textContent).toContain(
+      '测试消息',
+    );
+    const nextReply = { ...testMessage, id: encodeId('9007199254741009'), clientGeneratedId: 'next-reply' };
+    component['updateDraft']('下一条回复');
+    component['startReply'](nextReply);
+    const retrying = component['outbox'].retry(item);
+    const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    expect(retry.request.body).toEqual(first.request.body);
+    retry.flush({
+      ...wireMessage,
+      id: '9007199254741005',
+      clientGeneratedId: retry.request.body.clientGeneratedId,
+      message: '回复内容',
+      replyToMessage: structuredClone(wireMessage),
+    });
+    await retrying;
+    await fixture.whenStable();
+    expect(component['draft']()).toBe('下一条回复');
+    expect(component['replyTo']()).toBe(nextReply);
+    const nextSending = component['sendMessage']();
+    const next = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    expect(next.request.body.clientGeneratedId).not.toBe(item.clientGeneratedId);
+    expect(next.request.body.replyToId).toBe(decodeId(nextReply.id));
+    next.flush('', { status: 503, statusText: 'Unavailable' });
+    await nextSending;
     expect(component['replyTo']()).toBeUndefined();
+    expect(component['outbox'].items().at(-1)?.message().replyToMessage).toMatchObject(nextReply);
   });
+
   it('resumes around the frozen read boundary and a second chat click requests the latest directly', async () => {
     const data = TestBed.inject(ChatStore);
     const read = vi.mocked(data.cachedReadState);
@@ -1073,7 +1214,16 @@ describe('ConversationPage', () => {
     const sending = component['sendMessage']();
     const request = http.expectOne(`/_api/chats/${wireChat.id}/threads/100/messages`);
     expect(request.request.body.message).toBe('话题消息');
-    request.flush({ ...wireMessage, id: '103', replyRootId: '100' });
+    expect(component['draft']()).toBe('');
+    expect(component['rows']().at(-1)?.outgoing?.threadId).toBe(encodeId('100'));
+    expect(component['sending']()).toBe(false);
+    request.flush({
+      ...wireMessage,
+      id: '103',
+      replyRootId: '100',
+      clientGeneratedId: request.request.body.clientGeneratedId,
+      message: request.request.body.message,
+    });
     await sending;
     await fixture.whenStable();
     expect(component['conversation'].items().at(-1)?.id).toBe(encodeId('103'));
@@ -1105,11 +1255,25 @@ describe('ConversationPage', () => {
     component['draft'].set('第一话题消息');
     const sending = component['sendMessage']();
     const request = http.expectOne(`/_api/chats/${wireChat.id}/threads/100/messages`);
+    const item = component['outbox'].items()[0];
+    expect(component['draft']()).toBe('');
     await enterThread('99');
+    expect(request.cancelled).toBe(false);
+    expect(component['outbox'].items()).toContain(item);
+    expect(component['outgoing']()).toEqual([]);
     component['draft'].set('另一个话题草稿');
-    request.flush({ ...wireMessage, id: '103', replyRootId: '100' });
+    request.flush({
+      ...wireMessage,
+      id: '103',
+      replyRootId: '100',
+      clientGeneratedId: request.request.body.clientGeneratedId,
+      message: request.request.body.message,
+    });
     await sending;
     expect(component['draft']()).toBe('另一个话题草稿');
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+    expect(item.published()).toBe(true);
+    expect(component['outbox'].items()).toContain(item);
     expect(TestBed.inject(DraftStore).get(testChat.id, encodeId('100'))).toBeUndefined();
     expect(component['conversation'].items().map((item) => item.id)).toEqual([
       encodeId('99'),
@@ -1153,29 +1317,59 @@ describe('ConversationPage', () => {
     expect(component['pins']()).toBe(sharedPins);
   });
 
-  it.each(['success', 'failure'])('isolates an earlier send %s after reentering the same chat', async (result) => {
+  it.each(['success', 'failure'])('continues the queue after an earlier send %s across reentry', async (result) => {
     const accept = vi.spyOn(TestBed.inject(Connection), 'accept');
     component['draft'].set('第一次进入的消息');
     const oldSending = component['sendMessage']();
     const oldRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const oldItem = component['outbox'].items()[0];
     component.ionViewDidLeave();
+    expect(oldRequest.cancelled).toBe(false);
     await reenter();
+    expect(component['draft']()).toBe('');
+    expect(component['rows']().at(-1)?.outgoing).toBe(oldItem);
     component['draft'].set('再次进入的消息');
     component['replyTo'].set(testMessage);
     const newSending = component['sendMessage']();
-    const newRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const newItem = component['outbox'].items().at(-1)!;
+    expect(
+      component['rows']()
+        .slice(-2)
+        .map((row) => row.outgoing),
+    ).toEqual([oldItem, newItem]);
+    expect(component['draft']()).toBe('');
+    expect(component['replyTo']()).toBeUndefined();
+    http.expectNone((req) => req.method === 'POST');
+    component['updateDraft']('第三条尚未发送');
+    component['startReply'](testMessage);
     const open = vi.spyOn(component['conversation'], 'open');
-    if (result === 'success') oldRequest.flush({ ...wireMessage, id: '9007199254741005' });
+    if (result === 'success')
+      oldRequest.flush({
+        ...wireMessage,
+        id: '9007199254741005',
+        clientGeneratedId: oldRequest.request.body.clientGeneratedId,
+        message: oldRequest.request.body.message,
+      });
     else oldRequest.flush('', { status: 503, statusText: 'Unavailable' });
     await oldSending;
-    expect(component['draft']()).toBe('再次进入的消息');
+    const newRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    expect(newRequest.request.body.clientGeneratedId).toBe(newItem.clientGeneratedId);
+    expect(newRequest.request.body.message).toBe('再次进入的消息');
+    expect(newRequest.request.body.replyToId).toBe(wireMessage.id);
+    expect(oldItem.delivery()).toBe(result === 'success' ? MessageDelivery.Sent : MessageDelivery.Failed);
+    expect(component['draft']()).toBe('第三条尚未发送');
     expect(component['replyTo']()).toBe(testMessage);
-    expect(component['sending']()).toBe(true);
+    expect(component['sending']()).toBe(false);
     expect(component['sendError']()).toBe(false);
     expect(open).not.toHaveBeenCalled();
     expect(accept).toHaveBeenCalledTimes(result === 'success' ? 1 : 0);
     newRequest.flush('', { status: 503, statusText: 'Unavailable' });
     await newSending;
+    await fixture.whenStable();
+    expect(newItem.delivery()).toBe(MessageDelivery.Failed);
+    expect(component['rows']().at(-1)?.outgoing).toBe(newItem);
+    expect(component['draft']()).toBe('第三条尚未发送');
+    expect(component['replyTo']()).toBe(testMessage);
   });
 
   it('does not report a subscription failure from an earlier visit to the same topic', async () => {
@@ -1228,15 +1422,56 @@ describe('ConversationPage', () => {
     http.expectNone(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`);
   });
 
-  it('cancels an unfinished send when the page is destroyed', async () => {
-    const accept = vi.spyOn(TestBed.inject(Connection), 'accept');
-    component['draft'].set('正在发送');
-    const sending = component['sendMessage']();
-    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+  it('continues queued sends after page destruction and hands confirmations to the next page', async () => {
+    const outbox = TestBed.inject(MessageOutbox);
+    component['draft'].set('销毁前第一条');
+    const firstSending = component['sendMessage']();
+    const firstRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    component['draft'].set('销毁前第二条');
+    const secondSending = component['sendMessage']();
+    const [first, second] = outbox.items();
+    const oldConversation = component['conversation'];
     fixture.destroy();
-    expect(request.cancelled).toBe(true);
-    await sending;
-    expect(accept).not.toHaveBeenCalled();
+    expect(firstRequest.cancelled).toBe(false);
+    expect(outbox.items()).toEqual([first, second]);
+    firstRequest.flush({
+      ...wireMessage,
+      id: '9007199254741005',
+      clientGeneratedId: firstRequest.request.body.clientGeneratedId,
+      message: firstRequest.request.body.message,
+    });
+    await firstSending;
+    const secondRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    expect(secondRequest.request.body.clientGeneratedId).toBe(second.clientGeneratedId);
+    secondRequest.flush({
+      ...wireMessage,
+      id: '9007199254741007',
+      clientGeneratedId: secondRequest.request.body.clientGeneratedId,
+      message: secondRequest.request.body.message,
+    });
+    await secondSending;
+    expect(first.published()).toBe(true);
+    expect(second.published()).toBe(true);
+    expect(oldConversation.items()).toEqual([]);
+    expect(outbox.items()).toEqual([first, second]);
+
+    fixture = TestBed.createComponent(ConversationPage);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('id', wireChat.id);
+    fixture.detectChanges();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(component['outbox']).toBe(outbox);
+    expect(component['draft']()).toBe('');
+    expect(component['conversation'].items().map((message) => message.id)).toEqual([
+      testMessage.id,
+      encodeId('9007199254741005'),
+      encodeId('9007199254741007'),
+    ]);
+    expect(fixture.debugElement.queryAll(By.directive(Message))).toHaveLength(3);
+    expect(outbox.items()).toEqual([]);
   });
 
   it('cancels a topic read-state request when the page is destroyed', async () => {
@@ -1273,11 +1508,23 @@ describe('ConversationPage', () => {
     Reflect.deleteProperty(Element.prototype, 'animate');
   });
 
-  it('keeps the submitted reply unchanged when a reply is selected while sending', () => {
+  it('allows selecting the next reply while a submitted reply is still sending', async () => {
     component['replyTo'].set(testMessage);
-    component['sending'].set(true);
-    component['startReply']({ ...testMessage, id: encodeId('999') });
-    expect(component['replyTo']()).toBe(testMessage);
+    component['draft'].set('正在回复');
+    const sending = component['sendMessage']();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    const item = component['outbox'].items()[0];
+    const nextReply = { ...testMessage, id: encodeId('999'), clientGeneratedId: 'next-reply-999' };
+    component['startReply'](nextReply);
+    expect(component['replyTo']()).toBe(nextReply);
+    expect(component['sending']()).toBe(false);
+    expect(item.message().replyToMessage).toMatchObject(testMessage);
+    expect(request.request.body.replyToId).toBe(wireMessage.id);
+    request.flush('', { status: 503, statusText: 'Unavailable' });
+    await sending;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(component['draft']()).toBe('');
+    expect(component['replyTo']()).toBe(nextReply);
   });
 
   it.each([false, true])('selects the original reply on a fresh collection link, retrying: %s', async (retrying) => {
@@ -1363,22 +1610,71 @@ describe('ConversationPage', () => {
     const sending = component['sendMessage']({ messageType: MessageType.text, attachmentIds: [encodeId('100')] });
     const request = http.expectOne((req) => req.method === 'PATCH');
     expect(request.request.body).toEqual({ message: '编辑内容', attachmentIds: ['100'] });
+    expect(component['sending']()).toBe(true);
+    expect(component['outbox'].items()).toEqual([]);
     request.flush({ ...wireMessage, message: '编辑内容', isEdited: true });
     await sending;
     expect(component['conversation'].items()[0].message).toBe('编辑内容');
     expect(component['draft']()).toBe('未发送的草稿');
     expect(component['editing']()).toBeUndefined();
+    expect(component['sending']()).toBe(false);
   });
 
-  it('sends ordinary files without text and preserves text for a separate message', async () => {
-    component['updateDraft']('稍后发送的文字');
-    const sending = component['sendMessage']({ messageType: MessageType.file, attachmentIds: [encodeId('101')] });
-    const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
-    expect(request.request.body.messageType).toBe('file');
-    expect(request.request.body.message).toBeUndefined();
-    expect(request.request.body.attachmentIds).toEqual(['101']);
-    request.flush({ ...wireMessage, id: '9007199254741010', messageType: 'file', message: null });
-    await sending;
-    expect(component['draft']()).toBe('稍后发送的文字');
-  });
+  it.each([MessageType.file, MessageType.audio, MessageType.sticker])(
+    'preserves unsent text while a %s submission clears its reply and retains a retryable row',
+    async (messageType) => {
+      component['updateDraft']('稍后发送的文字');
+      component['startReply'](testMessage);
+      const sticker =
+        messageType === MessageType.sticker
+          ? {
+              id: encodeId('102'),
+              createdAt: testMessage.createdAt,
+              emoji: '🙂',
+              isFavorited: false,
+              media: {
+                id: encodeId('103'),
+                contentType: 'image/png',
+                size: 1,
+                url: 'data:image/png;base64,iVBORw0KGgo=',
+              },
+            }
+          : undefined;
+      const attachmentIds = sticker ? [] : [encodeId('101')];
+      const sending = component['sendMessage']({ messageType, attachmentIds, sticker });
+      const item = component['outbox'].items()[0];
+      const request = http.expectOne((req) => req.method === 'POST' && req.url.endsWith('/messages'));
+      expect(request.request.body.messageType).toBe(messageType);
+      expect(request.request.body.message).toBeUndefined();
+      expect(request.request.body.attachmentIds).toEqual(sticker ? [] : ['101']);
+      expect(request.request.body.stickerId).toBe(sticker ? '102' : undefined);
+      expect(request.request.body.replyToId).toBe(wireMessage.id);
+      expect(component['draft']()).toBe('稍后发送的文字');
+      expect(component['replyTo']()).toBeUndefined();
+      expect(component['sending']()).toBe(false);
+      expect(component['rows']().at(-1)?.outgoing).toBe(item);
+      request.flush('', { status: 503, statusText: 'Unavailable' });
+      await sending;
+      fixture.detectChanges();
+      expect(item.delivery()).toBe(MessageDelivery.Failed);
+      expect(component['draft']()).toBe('稍后发送的文字');
+      expect(component['replyTo']()).toBeUndefined();
+      expect(component['sendError']()).toBe(false);
+      expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button')).not.toBeNull();
+      const retrying = component['outbox'].retry(item);
+      const retry = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+      expect(retry.request.body).toEqual(request.request.body);
+      retry.flush({
+        ...wireMessage,
+        id: '9007199254741010',
+        messageType,
+        message: null,
+        clientGeneratedId: retry.request.body.clientGeneratedId,
+      });
+      await retrying;
+      expect(item.delivery()).toBe(MessageDelivery.Sent);
+      expect(component['draft']()).toBe('稍后发送的文字');
+      expect(component['replyTo']()).toBeUndefined();
+    },
+  );
 });

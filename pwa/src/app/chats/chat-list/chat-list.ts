@@ -1,8 +1,19 @@
 import { DirectorySearch } from '../directory-search/directory-search';
 import { StartChat, StartChatKind } from '../start-chat/start-chat';
 import { ModalController, IonSearchbar } from '@ionic/angular';
-import { Component, computed, effect, inject, input, linkedSignal, signal, untracked, viewChild } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  linkedSignal,
+  output,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
+import { Router } from '@angular/router';
 import {
   IonAvatar,
   IonButton,
@@ -19,7 +30,6 @@ import {
   IonPopover,
   IonRefresher,
   IonRefresherContent,
-  IonRouterLink,
   IonSegment,
   IonSegmentButton,
   IonSpinner,
@@ -51,8 +61,9 @@ import { ChatListError, ChatListStore, FriendRequestAction } from '../chat-list-
 import { ChatStore } from '../chat-store';
 import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
 import { DraftStore } from '../../conversations/draft-store';
-import { ListTab, type ListSelection } from '../list-tabs';
+import { isListTab, ListTab, type ListSelection } from '../list-tabs';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { ContentScrollbars } from '../../content-scrollbars';
 
 enum ListRowKind {
   Chat,
@@ -69,10 +80,9 @@ enum ListRowKind {
     '[attr.data-list-tab]': 'list().tab',
   },
   imports: [
+    ContentScrollbars,
     DirectorySearch,
     IonSearchbar,
-    RouterLink,
-    IonRouterLink,
     IonTitle,
     IonAvatar,
     IonButton,
@@ -117,6 +127,7 @@ export class ChatList {
   private readonly metadata = inject(ChatStore);
   private readonly router = inject(Router);
   readonly selection = input.required<ListSelection>();
+  readonly openList = output<ListSelection>();
   protected readonly list = this.selection;
   protected readonly chatQuery = computed(() => this.lists.chats(this.list().archived));
   protected readonly friendRequests = computed(() => this.lists.friendRequests(this.list().requestHistory));
@@ -391,6 +402,7 @@ export class ChatList {
   }
 
   protected selectTab(event: SegmentCustomEvent) {
-    void this.router.navigate(['/chats', event.detail.value]);
+    const tab = event.detail.value;
+    if (isListTab(tab)) this.openList.emit({ tab, archived: false, requestHistory: false });
   }
 }

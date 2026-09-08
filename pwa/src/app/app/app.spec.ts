@@ -7,6 +7,7 @@ import { IonRouterOutlet } from '@ionic/angular';
 import { afterAll, vi } from 'vitest';
 import { App } from './app';
 import { SessionStore } from '../session/session-store';
+import { ListTab } from '../chats/list-tabs';
 
 describe('App', () => {
   const session = { initialize: vi.fn<() => Promise<void>>(), user: signal(undefined) };
@@ -54,6 +55,32 @@ describe('App', () => {
       expect(animation?.getDuration()).toBe(duration);
       animation?.destroy();
     }
+  });
+
+  it('keeps sidebar selection across conversation and settings navigation until another list route is opened', async () => {
+    TestBed.overrideComponent(App, { set: { template: '' } });
+    const router = TestBed.inject(Router);
+    router.resetConfig([
+      { path: 'chats', data: { tab: ListTab.Messages }, children: [] },
+      { path: 'chats/:tab', children: [] },
+      { path: 'chats/chat/:id', children: [] },
+    ]);
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    await router.navigateByUrl('/chats');
+    const sidebar = fixture.componentInstance['sidebarSelection'];
+    expect(sidebar().tab).toBe(ListTab.Messages);
+    const archivedFriends = { tab: ListTab.Friends, archived: true, requestHistory: false };
+    sidebar.set(archivedFriends);
+    expect(router.url).toBe('/chats');
+    await router.navigateByUrl('/chats?settings=1');
+    expect(sidebar()).toEqual(archivedFriends);
+    await router.navigateByUrl('/chats');
+    expect(sidebar()).toEqual(archivedFriends);
+    await router.navigateByUrl('/chats/chat/9007199254740993');
+    expect(sidebar()).toEqual(archivedFriends);
+    await router.navigateByUrl('/chats/groups');
+    expect(sidebar()).toEqual({ tab: ListTab.Groups, archived: false, requestHistory: false });
   });
 
   it('shows a top-level teapot message without an application shell', async () => {

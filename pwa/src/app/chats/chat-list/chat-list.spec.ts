@@ -212,6 +212,42 @@ describe('ChatList', () => {
       .filter((option) => option.nativeElement.parentElement.getAttribute('side') === side);
   }
 
+  it('delegates tab, archive, history and back navigation without changing the conversation route or cached input', async () => {
+    const router = TestBed.inject(Router);
+    const url = '/chats/chat/9007199254740993';
+    await router.navigateByUrl(url);
+    const opened = vi.fn();
+    fixture.componentInstance.openList.subscribe(opened);
+    const segment: HTMLIonSegmentElement = fixture.nativeElement.querySelector('ion-segment');
+    segment.value = ListTab.Friends;
+    segment.dispatchEvent(new CustomEvent('ionChange', { detail: { value: ListTab.Friends } }));
+    const friends = { tab: ListTab.Friends, archived: false, requestHistory: false };
+    expect(opened).toHaveBeenLastCalledWith(friends);
+    expect(fixture.componentInstance.selection().tab).toBe(ListTab.Messages);
+    fixture.componentRef.setInput('selection', friends);
+    await fixture.whenStable();
+    for (const [title, selection] of [
+      ['已归档', { ...friends, archived: true }],
+      ['好友请求', { ...friends, requestHistory: true }],
+    ] as const) {
+      const row = fixture.debugElement
+        .queryAll(By.directive(ChatListItem))
+        .find((item) => (item.componentInstance as ChatListItem).entry().title === title)!;
+      const item: HTMLIonItemElement = row.nativeElement.querySelector('ion-item');
+      expect(item.button).toBe(true);
+      expect(item.getAttribute('href')).toBeNull();
+      item.click();
+      expect(opened).toHaveBeenLastCalledWith(selection);
+      fixture.componentRef.setInput('selection', selection);
+      await fixture.whenStable();
+      fixture.debugElement.query(By.css('ion-header ion-button')).triggerEventHandler('click');
+      expect(opened).toHaveBeenLastCalledWith(friends);
+      fixture.componentRef.setInput('selection', friends);
+      await fixture.whenStable();
+    }
+    expect(router.url).toBe(url);
+  });
+
   it('restores the cached segment selection after its user-selected value navigates away', async () => {
     const segment: HTMLIonSegmentElement = fixture.nativeElement.querySelector('ion-segment');
     expect(segment.value).toBe(ListTab.Messages);

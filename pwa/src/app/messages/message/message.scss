@@ -111,10 +111,25 @@ app-message-reactions {
 }
 
 .timestamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-left: 1.5ch;
   font-size: 12px;
   opacity: 0.7;
   white-space: nowrap;
+}
+
+.retry-button {
+  display: block;
+  margin: 4px 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--ion-color-danger);
+  color: var(--ion-color-danger-contrast);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .reply-preview {
