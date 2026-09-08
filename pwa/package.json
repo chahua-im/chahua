@@ -30,6 +30,7 @@
     "file-type": "^21.3.4",
     "heic-to": "^1.5.2",
     "ionicons": "^8.1.0",
+    "markdown-it": "^15.0.3",
     "mediabunny": "^1.55.7",
     "overlayscrollbars": "^2.16.0",
     "rxjs": "~7.8.2",
