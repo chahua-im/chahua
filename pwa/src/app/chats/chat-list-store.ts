@@ -10,12 +10,13 @@ import {
   type ChatListItem,
   type FriendRequestHistoryEntry,
   type MessageResponse,
+  type UnreadCountResponse,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { activeQuery, readPages } from '../api/query';
 import { type SnowflakeID } from '../api/snowflake-id';
-import { ChatChangeKind, ChatStore } from './chat-store';
 import { isMessageChange, type MessageChange } from '../messages/message-change';
+import { ChatChangeKind, ChatStore } from './chat-store';
 
 export enum ChatListError {
   Load = 1,
@@ -90,12 +91,9 @@ export class ChatListStore {
   private readonly historicalRequests = this.requestCache(true);
   private readonly activeThreads = this.threadCache(false);
   private readonly archivedThreads = this.threadCache(true);
-  private readonly archivedChatUnread = activeQuery(
+  readonly unread = activeQuery<UnreadCountResponse | undefined>(
     this.destroyRef,
-    async (cancel) => {
-      const counts = await this.response(this.api.getUnreadCount(), cancel);
-      return counts.archivedUnreadCount;
-    },
+    (cancel) => this.response(this.api.getUnreadCount({ timeout: 10000 }), cancel),
     undefined,
   );
   private readonly archivedThreadUnread = activeQuery(
@@ -107,10 +105,13 @@ export class ChatListStore {
     undefined,
   );
   readonly archivedUnread = {
-    chats: this.archivedChatUnread,
+    chats: {
+      ...this.unread,
+      value: computed(() => this.unread.value()?.archivedUnreadCount),
+    },
     threads: this.archivedThreadUnread,
     refresh: () => this.refreshArchivedUnread(),
-    refreshChats: () => this.refreshArchivedChats(),
+    refreshChats: () => this.refreshChatUnread(),
   };
 
   constructor() {
@@ -126,7 +127,7 @@ export class ChatListStore {
         void this.archivedThreadUnread.refresh();
         if (kind === ChatChangeKind.Membership) void this.invalidateThreads();
       } else {
-        this.refreshArchivedChats();
+        this.refreshChatUnread();
         if (kind === ChatChangeKind.Membership) this.refreshChats();
       }
     });
@@ -141,7 +142,7 @@ export class ChatListStore {
           if (event.payload.replyRootId) {
             void this.invalidateThreads();
             void this.archivedUnread.threads.refresh();
-          } else this.refreshArchivedChats();
+          } else this.refreshChatUnread();
           break;
         case ServerWsMessageType.friendRequestReceived:
         case ServerWsMessageType.friendRequestResolved:
@@ -159,15 +160,15 @@ export class ChatListStore {
           break;
         case ServerWsMessageType.chatArchiveStateChanged: {
           this.refreshChats();
-          this.refreshArchivedChats();
+          this.refreshChatUnread();
           break;
         }
         case ServerWsMessageType.friendshipRemoved:
-          this.refreshArchivedChats();
+          this.refreshChatUnread();
           break;
         case ServerWsMessageType.messageDeleted:
           if (event.payload.replyRootId) void this.archivedUnread.threads.refresh();
-          else this.refreshArchivedChats();
+          else this.refreshChatUnread();
           break;
         case ServerWsMessageType.messagesBulkDeleted:
           this.refreshArchivedUnread();
@@ -544,12 +545,12 @@ export class ChatListStore {
     return operation.promise;
   }
 
-  private refreshArchivedChats() {
-    void this.archivedChatUnread.refresh();
+  private refreshChatUnread() {
+    void this.unread.refresh();
   }
 
   private refreshArchivedUnread() {
-    this.refreshArchivedChats();
+    this.refreshChatUnread();
     void this.archivedThreadUnread.refresh();
   }
 }

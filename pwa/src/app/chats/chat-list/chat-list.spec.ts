@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
+import { IonActionSheet, IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
 import { vi } from 'vitest';
 import {
@@ -14,16 +14,17 @@ import {
   type FriendRequestHistoryEntry,
   type ThreadListItem as ThreadData,
 } from '../../../generated/models';
+import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { testChat, testMessage, testUser } from '../../api/testing';
+import { mockRealtime, testChat, testMessage, testUser } from '../../api/testing';
 import { routes } from '../../app.routes';
+import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
+import { DraftStore } from '../../conversations/draft-store';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
 import { ChatListStore, FriendRequestAction, type ChatListError } from '../chat-list-store';
 import { ChatStore, type ChatInfo } from '../chat-store';
-import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
-import { DraftStore } from '../../conversations/draft-store';
 import { listSelection, ListTab } from '../list-tabs';
 import { ChatList } from './chat-list';
 
@@ -90,7 +91,13 @@ describe('ChatList', () => {
   };
   const navigation = { goTo: vi.fn() };
   const chatInfo = signal<ChatInfo | undefined>(undefined);
-  const metadata = { get: () => chatInfo(), ensure: vi.fn().mockResolvedValue(undefined), invalidate: vi.fn() };
+  const metadata = {
+    isMuted: (id: SnowflakeID) =>
+      Date.parse(chats.items().find((chat) => chat.id === id)?.mutedUntil ?? '') > Date.now(),
+    get: () => chatInfo(),
+    ensure: vi.fn().mockResolvedValue(undefined),
+    invalidate: vi.fn(),
+  };
   function query<T>(items: T[]) {
     return {
       items: signal(items),
@@ -155,6 +162,8 @@ describe('ChatList', () => {
     vi.clearAllMocks();
     preferences.showThreadsInMessages.set(false);
     vi.spyOn(IonItemSliding.prototype, 'close').mockResolvedValue();
+    vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
+    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
     chats.items.set([{ ...testChat, lastMessage }]);
     chats.loading.set(false);
     chats.hasMore.set(false);
@@ -173,6 +182,7 @@ describe('ChatList', () => {
     await TestBed.configureTestingModule({
       imports: [ChatList],
       providers: [
+        { provide: Connection, useValue: mockRealtime() },
         provideRouter(routes),
         { provide: ChatListStore, useValue: { ...data, ...inbox, archivedUnread: counts } },
         { provide: ConversationNavigation, useValue: navigation },
@@ -263,7 +273,6 @@ describe('ChatList', () => {
   });
 
   it('derives list selection from routes and keeps it locally while a conversation is open', async () => {
-    const router = TestBed.inject(Router);
     await selectRoute('/chats/groups/archived');
     await fixture.whenStable();
     expect(fixture.componentInstance['list']()).toEqual({ tab: ListTab.Groups, archived: true, requestHistory: false });
@@ -300,7 +309,6 @@ describe('ChatList', () => {
     };
     chats.items.set([testChat, dm]);
     counts.chats.value.set(268);
-    const router = TestBed.inject(Router);
     await selectRoute('/chats/groups');
     await fixture.whenStable();
     expect(fixture.componentInstance['conversationRows']().map((row) => row.chat.id)).toEqual([testChat.id]);
@@ -324,7 +332,7 @@ describe('ChatList', () => {
     expect(data.markRead).toHaveBeenCalledWith(testChat.id, testMessage.id);
     options('end')[0].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
-    expect(data.setMuted).toHaveBeenCalledWith(testChat.id, true);
+    expect(data.setMuted).toHaveBeenCalledWith(testChat.id, true, 3600);
     options('end')[1].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
     expect(data.setArchived).toHaveBeenCalledWith(testChat.id, true);

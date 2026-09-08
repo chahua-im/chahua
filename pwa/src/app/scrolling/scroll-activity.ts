@@ -1,16 +1,19 @@
+import { signal } from '@angular/core';
+
 /** Native scrolling includes the inertia after the finger has lifted. */
 export function scrollActivity() {
   let touching = false;
-  let scrolling = false;
+  const moving = signal(false);
   let pending: Promise<void> | undefined;
   let release: (() => void) | undefined;
   const settle = () => {
-    if (touching || scrolling) return;
+    if (touching || moving()) return;
     release?.();
     release = undefined;
     pending = undefined;
   };
   return {
+    moving: moving.asReadonly(),
     touchStart: () => {
       touching = true;
     },
@@ -19,20 +22,21 @@ export function scrollActivity() {
       settle();
     },
     scrollStart: () => {
-      scrolling = true;
+      moving.set(true);
     },
     scrollEnd: () => {
-      scrolling = false;
+      moving.set(false);
       settle();
     },
     wait: () => {
-      if (!touching && !scrolling) return Promise.resolve();
+      if (!touching && !moving()) return Promise.resolve();
       return (pending ??= new Promise<void>((resolve) => {
         release = resolve;
       }));
     },
     reset: () => {
-      touching = scrolling = false;
+      touching = false;
+      moving.set(false);
       settle();
     },
   };

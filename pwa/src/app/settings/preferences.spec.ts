@@ -35,4 +35,10 @@ describe('Preferences', () => {
     expect(TestBed.inject(Preferences).showThreadsInMessages()).toBe(true);
     expect(TestBed.inject(Preferences).showAllAvatars()).toBe(false);
   });
+  it('remembers the last five distinct reactions across fresh service instances', () => {
+    const preferences = TestBed.inject(Preferences);
+    for (const emoji of ['👍', '❤️', '😂', '😮', '😢', '🍵', '❤️']) preferences.rememberReaction(emoji);
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).recentReactions()).toEqual(['❤️', '🍵', '😢', '😮', '😂']);
+  });
 });

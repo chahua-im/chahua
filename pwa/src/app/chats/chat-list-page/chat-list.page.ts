@@ -3,9 +3,9 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, NavController } from '@ionic/angular';
 import { chatbubblesOutline } from 'ionicons/icons';
 import { fromEvent, map } from 'rxjs';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { ChatList } from '../chat-list/chat-list';
 import { ListTab, type ListSelection } from '../list-tabs';
-import { ContentScrollbars } from '../../content-scrollbars';
 
 @Component({
   selector: 'app-chats',

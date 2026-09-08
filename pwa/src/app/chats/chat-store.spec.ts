@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
+import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { GroupKind, GroupRole, type ServerWsMessage } from '../../generated/models';
 import { Connection } from '../api/connection';
@@ -21,7 +22,7 @@ describe('ChatStore', () => {
     id: wireChat.id,
     kind: 'group',
     name: '小群',
-    description: '不需要缓存的介绍',
+    description: '群介绍',
     myRole: 'admin',
     visibility: 'private',
     createdAt: '2026-09-05T12:00:00Z',
@@ -47,6 +48,7 @@ describe('ChatStore', () => {
 
   afterEach(() => {
     scope.destroy();
+    vi.useRealTimers();
     http.verify();
   });
 
@@ -63,7 +65,7 @@ describe('ChatStore', () => {
     http.expectNone(url);
   });
 
-  it('deduplicates missing metadata and actually drops fields outside the display model', async () => {
+  it('deduplicates detail requests and retains the fields used by the info panel', async () => {
     const first = store.ensure(testChat.id);
     expect(store.ensure(testChat.id)).toBe(first);
     http.expectOne(url).flush(response);
@@ -74,6 +76,9 @@ describe('ChatStore', () => {
       avatar: undefined,
       peer: undefined,
       myRole: GroupRole.admin,
+      description: response.description,
+      visibility: response.visibility,
+      mutedUntil: undefined,
     });
     await store.ensure(testChat.id);
     http.expectNone(url);
@@ -125,6 +130,8 @@ describe('ChatStore', () => {
     expect(store.get(testChat.id)?.myRole).toBe(GroupRole.admin);
     store.remember([{ ...testChat, name: '新的列表名称' }]);
     expect(store.get(testChat.id)?.name).toBe('新的列表名称');
+    expect(store.get(testChat.id)?.description).toBe(response.description);
+    expect(store.get(testChat.id)?.visibility).toBe(response.visibility);
     expect(store.get(testChat.id)?.myRole).toBe(GroupRole.admin);
     await store.ensureDetails(testChat.id);
     http.expectNone(url);
@@ -156,5 +163,27 @@ describe('ChatStore', () => {
     await cancelled;
     scope = createEnvironmentInjector([ChatStore], TestBed.inject(EnvironmentInjector));
     expect(scope.get(ChatStore).get(testChat.id)).toBeUndefined();
+  });
+});
+
+describe('mute expiry', () => {
+  it('expires an active mute without discarding unread data or fetching message history', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-08T10:00:00Z'));
+    TestBed.configureTestingModule({
+      providers: [provideHttpClient(), provideHttpClientTesting(), { provide: Connection, useValue: mockRealtime() }],
+    });
+    const store = TestBed.inject(ChatStore);
+    const http = TestBed.inject(HttpTestingController);
+    store.acceptChats([{ ...testChat, mutedUntil: '2026-09-08T10:00:02Z' }], store.snapshot());
+    TestBed.tick();
+    expect(store.isMuted(testChat.id)).toBe(true);
+    await vi.advanceTimersByTimeAsync(2001);
+    TestBed.tick();
+    expect(store.isMuted(testChat.id)).toBe(false);
+    expect(store.chat(testChat.id).unreadCount).toBe(testChat.unreadCount);
+    http.expectNone(() => true);
+    TestBed.resetTestingModule();
+    vi.useRealTimers();
   });
 });

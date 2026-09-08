@@ -1,19 +1,20 @@
-import { messageParts } from '../message-text/message-text';
 import { DOCUMENT } from '@angular/common';
 import {
   afterRenderEffect,
   Component,
   computed,
   DestroyRef,
+  effect,
   ElementRef,
   inject,
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { IonAlert, IonIcon, IonModal, IonSpinner, IonToast } from '@ionic/angular';
+import { IonAlert, IonIcon, IonModal, IonSpinner, IonToast, ModalController } from '@ionic/angular';
 import {
   addOutline,
   arrowUndoOutline,
@@ -21,17 +22,22 @@ import {
   chatbubblesOutline,
   copyOutline,
   linkOutline,
+  peopleOutline,
   pinOutline,
   trashOutline,
 } from 'ionicons/icons';
 import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { SessionStore } from '../../session/session-store';
 import { ChatStore } from '../../chats/chat-store';
+import { SessionStore } from '../../session/session-store';
+import { Preferences } from '../../settings/preferences';
 import { EmojiPicker } from '../emoji-picker/emoji-picker';
 import { MessageActions } from '../message-actions';
 import { MessageNotice } from '../message-notice';
-import { Message, type MessageMenuSelection } from '../message/message';
+import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
+import { messageParts } from '../message-text/message-text';
+import { Message, type MessageContent, type MessageMenuSelection } from '../message/message';
+import { ReactionDetails } from '../reaction-details/reaction-details';
 import { exceedsReactionLimit } from '../reaction-state';
 
 export enum MessageAction {
@@ -43,6 +49,7 @@ export enum MessageAction {
   Link,
   Recall,
   Edit,
+  Reactions,
 }
 
 @Component({
@@ -59,12 +66,14 @@ export class MessageMenu {
   readonly showAllAvatars = input(false);
   readonly reply = output<MessageResponse>();
   readonly edit = output<MessageResponse>();
+  readonly editQueued = output<OutgoingMessage>();
   readonly openThread = output<SnowflakeID>();
   readonly messages = input.required<readonly MessageResponse[]>();
   protected readonly pins = computed(() => this.chatInfo.pins(this.chatId(), this.threadId()));
   private readonly chatInfo = inject(ChatStore);
   private readonly session = inject(SessionStore);
   private readonly messageActions = inject(MessageActions);
+  private readonly outbox = inject(MessageOutbox);
   private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
   private readonly modal = viewChild(IonModal);
@@ -72,16 +81,29 @@ export class MessageMenu {
   private readonly pending = signal(false);
   readonly busy = this.pending.asReadonly();
   protected readonly selection = signal<MessageMenuSelection | undefined>(undefined);
-  protected readonly message = computed(() => {
-    const id = this.selection()?.messageId;
-    return this.messages().find((message) => message.id === id);
+  protected readonly queued = computed(() => {
+    const id = this.selection()?.clientGeneratedId;
+    return this.outbox.items().find((item) => item.clientGeneratedId === id && !item.cancelled());
   });
+  protected readonly serverMessage = computed(() => {
+    const selection = this.selection();
+    if (!selection) return;
+    return (
+      this.messages().find((message) => message.id === selection.messageId) ??
+      this.messages().find((message) => message.clientGeneratedId === selection.clientGeneratedId)
+    );
+  });
+  protected readonly message = computed<MessageContent | undefined>(
+    () => this.queued()?.message() ?? this.serverMessage(),
+  );
   protected readonly admin = computed(() => this.chatInfo.get(this.chatId())?.myRole === GroupRole.admin);
   protected readonly pinned = computed(() => {
-    const message = this.message();
-    return !!message && !!this.pins().get(message.id);
+    const message = this.serverMessage();
+    return !this.queued() && !!message && !!this.pins().get(message.id);
   });
-  protected readonly recent = signal<readonly string[]>([]);
+  private readonly preferences = inject(Preferences);
+  private readonly modals = inject(ModalController);
+  protected readonly recent = this.preferences.recentReactions;
   protected readonly notice = signal<MessageNotice | undefined>(undefined);
   protected readonly Notice = MessageNotice;
   protected readonly confirmation = signal<
@@ -95,6 +117,7 @@ export class MessageMenu {
   protected readonly Action = MessageAction;
   protected readonly MessageType = MessageType;
   protected readonly icons = {
+    peopleOutline,
     addOutline,
     arrowUndoOutline,
     bookmarkOutline,
@@ -106,13 +129,13 @@ export class MessageMenu {
   };
   protected readonly choosingEmoji = signal(false);
   protected readonly placed = signal(false);
-  protected readonly position = signal({ left: 12, top: 12, width: 276, previewHeight: 300 });
   private readonly stack = viewChild<ElementRef<HTMLElement>>('stack');
   private readonly reactionBar = viewChild<ElementRef<HTMLElement>>('reactionBar');
   private readonly actions = viewChild<ElementRef<HTMLElement>>('actions');
   protected readonly canReact = computed(() => {
-    const message = this.message();
+    const message = this.serverMessage();
     return (
+      !this.queued() &&
       !!message &&
       !message.isDeleted &&
       message.messageType !== MessageType.sticker &&
@@ -120,8 +143,9 @@ export class MessageMenu {
     );
   });
   protected readonly canThread = computed(() => {
-    const message = this.message();
+    const message = this.serverMessage();
     return (
+      !this.queued() &&
       !!message &&
       !this.threadId() &&
       !message.isDeleted &&
@@ -141,8 +165,13 @@ export class MessageMenu {
     );
   });
   protected readonly canSave = computed(() => {
-    const message = this.message();
-    return !!message && !message.isDeleted && ![MessageType.sticker, MessageType.invite].includes(message.messageType);
+    const message = this.serverMessage();
+    return (
+      !this.queued() &&
+      !!message &&
+      !message.isDeleted &&
+      ![MessageType.sticker, MessageType.invite].includes(message.messageType)
+    );
   });
   protected readonly canEdit = computed(() => {
     const message = this.message();
@@ -150,16 +179,25 @@ export class MessageMenu {
       !!message &&
       !message.isDeleted &&
       message.messageType === MessageType.text &&
-      message.sender.uid === this.session.user()?.uid
+      (!!this.queued() || message.sender.uid === this.session.user()?.uid)
     );
   });
   protected readonly canRecall = computed(() => {
-    const message = this.message();
-    return !!message && !message.isDeleted && this.canRecallMessage(message);
+    const message = this.serverMessage();
+    return !!this.queued() || (!!message && !message.isDeleted && this.canRecallMessage(message));
   });
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.reset());
+    effect(() => {
+      if (this.queued() || !this.serverMessage()) return;
+      untracked(() => {
+        const version = this.version;
+        void Promise.all([this.chatInfo.ensureDetails(this.chatId()), this.pins().ensure()]).catch(() => {
+          if (version === this.version) this.notice.set(MessageNotice.MetadataFailed);
+        });
+      });
+    });
     afterRenderEffect((onCleanup) => {
       const stack = this.stack()?.nativeElement;
       if (!stack) return;
@@ -192,7 +230,6 @@ export class MessageMenu {
           left: Math.max(left, Math.min(own ? rect.right - width : rect.left, left + availableWidth - width)),
           top: Math.max(top, Math.min(rect.top - (bar ? bar.offsetHeight + 8 : 0), top + height - stack.offsetHeight)),
         };
-        this.position.set(position);
         stack.style.left = `${position.left}px`;
         stack.style.top = `${position.top}px`;
         this.placed.set(true);
@@ -217,7 +254,7 @@ export class MessageMenu {
   }
 
   protected selected(emoji: string) {
-    return !!this.message()?.reactions.find((reaction) => reaction.emoji === emoji)?.reactedByMe;
+    return !!this.serverMessage()?.reactions.find((reaction) => reaction.emoji === emoji)?.reactedByMe;
   }
 
   protected dismissBackdrop(event: MouseEvent) {
@@ -231,10 +268,6 @@ export class MessageMenu {
     this.choosingEmoji.set(false);
     this.placed.set(false);
     this.selection.set(selection);
-    const version = this.version;
-    void Promise.all([this.chatInfo.ensureDetails(this.chatId()), this.pins().ensure()]).catch(() => {
-      if (version === this.version) this.notice.set(MessageNotice.MetadataFailed);
-    });
   }
 
   reset() {
@@ -253,22 +286,38 @@ export class MessageMenu {
   }
 
   protected async choose(action: MessageAction) {
-    const message = this.message();
-    if (!message || this.busy()) return;
-    if (action === MessageAction.Pin && !this.admin()) return;
+    const content = this.message();
+    if (!content || this.busy()) return;
     const version = this.version;
     // Start clipboard writes in the click handler to retain Safari user activation.
-    if (action === MessageAction.Copy || action === MessageAction.Link) {
+    if (action === MessageAction.Copy) {
+      if (!this.canCopy()) return;
+      const text = messageParts(content.message!, content.mentions ?? [])
+        .map((part) => part.text)
+        .join('');
+      void this.close();
+      await this.perform(() => navigator.clipboard.writeText(text), MessageNotice.Copied);
+      return;
+    }
+    const queued = this.queued();
+    if (queued) {
+      if (action === MessageAction.Recall) {
+        void this.outbox.cancel(queued);
+        await this.close();
+      } else if (action === MessageAction.Edit && this.canEdit()) {
+        await this.close();
+        if (version === this.version && !queued.cancelled()) this.editQueued.emit(queued);
+      }
+      return;
+    }
+    const message = this.serverMessage();
+    if (!message || (action === MessageAction.Pin && !this.admin())) return;
+    if (action === MessageAction.Link) {
       const url = this.router.createUrlTree(
         ['/chats/chat', decodeId(this.chatId()), ...(this.threadId() ? ['thread', decodeId(this.threadId()!)] : [])],
         { queryParams: { message: decodeId(message.id) } },
       );
-      const text =
-        action === MessageAction.Copy
-          ? messageParts(message.message!, message.mentions)
-              .map((part) => part.text)
-              .join('')
-          : new URL(this.router.serializeUrl(url), this.document.baseURI).href;
+      const text = new URL(this.router.serializeUrl(url), this.document.baseURI).href;
       void this.close();
       await this.perform(() => navigator.clipboard.writeText(text), MessageNotice.Copied);
       return;
@@ -277,6 +326,14 @@ export class MessageMenu {
     await this.close();
     if (version !== this.version) return;
     switch (action) {
+      case MessageAction.Reactions: {
+        const modal = await this.modals.create({
+          component: ReactionDetails,
+          componentProps: { chatId: this.chatId(), messageId: message.id },
+        });
+        await modal.present();
+        break;
+      }
       case MessageAction.Edit:
         this.edit.emit(message);
         break;
@@ -311,7 +368,7 @@ export class MessageMenu {
   }
 
   async reactTo(message: MessageResponse, emoji: string) {
-    if (this.busy() || message.isDeleted) return;
+    if (this.queued() || this.busy() || message.isDeleted) return;
     if (exceedsReactionLimit(message, emoji)) {
       this.notice.set(MessageNotice.ReactionLimit);
       return;
@@ -320,8 +377,7 @@ export class MessageMenu {
     void this.close();
     await this.perform(async () => {
       await this.messageActions.toggleReaction(message, emoji);
-      if (version === this.version)
-        this.recent.update((recent) => [emoji, ...recent.filter((item) => item !== emoji)].slice(0, 5));
+      if (version === this.version) this.preferences.rememberReaction(emoji);
     });
   }
 

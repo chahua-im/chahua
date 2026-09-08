@@ -31,6 +31,9 @@
     <ion-button fill="clear" (click)="load()">刷新</ion-button>
   </p>
 }
-@if (cursor() != null) {
-  <ion-button fill="clear" [disabled]="loading()" (click)="load(true)">加载更多</ion-button>
-}
+<ion-infinite-scroll
+  threshold="100px"
+  [disabled]="cursor() == null || loading() || error()"
+  (ionInfinite)="more($event)">
+  <ion-infinite-scroll-content />
+</ion-infinite-scroll>

@@ -1,8 +1,10 @@
-@if (!loading() && !session.user() && error() === undefined) {
+@if (!landingPage() && !loading() && !session.user() && error() === undefined) {
   <h1>418 I'm a teapot</h1>
 } @else {
   <ion-app>
-    @if (session.user()) {
+    @if (landingPage()) {
+      <ion-router-outlet [swipeGesture]="false" />
+    } @else if (session.user()) {
       <ion-split-pane when="md" contentId="main" (ionSplitPaneVisible)="splitPaneVisible.set($event.detail.visible)">
         <ion-menu contentId="main" [swipeGesture]="false">
           @if (splitPaneVisible()) {
@@ -18,6 +20,7 @@
           (stackWillChange)="prepareTransition(outlet)"></ion-router-outlet>
       </ion-split-pane>
       <app-settings-modal />
+      <app-notification-banner [enabled]="!splitPaneVisible()" />
     } @else {
       <ion-content appScrollbars class="ion-text-center" [class.ion-padding]="!loading()">
         @if (loading()) {

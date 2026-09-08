@@ -159,4 +159,19 @@ describe('Generated API client', () => {
     expect(Object.hasOwn(value.entries, 0)).toBe(true);
     expect(encodeJsonIds(value)).toEqual(value);
   });
+  it('preserves binary multipart bodies while decoding the sticker response IDs', () => {
+    const body = new FormData();
+    const file = new File(['sticker-bytes'], 'tea.webp', { type: 'image/webp' });
+    body.append('file', file);
+    body.append('emoji', '🍵');
+    const received = vi.fn();
+    TestBed.inject(HttpClient).post('/_api/stickers/packs/9007199254740993/stickers', body).subscribe(received);
+    const http = TestBed.inject(HttpTestingController);
+    const request = http.expectOne('/_api/stickers/packs/9007199254740993/stickers');
+    expect(request.request.body).toBe(body);
+    expect(request.request.body.get('file').name).toBe('tea.webp');
+    request.flush({ id: '9007199254741003', media: { id: '9007199254741004' } });
+    expect(received.mock.calls[0][0].id).toBe(encodeId('9007199254741003'));
+    http.verify();
+  });
 });

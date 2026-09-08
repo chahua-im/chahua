@@ -11,7 +11,7 @@
   overflow: hidden;
 }
 .details-sidebar {
-  width: clamp(288px, 25vw, 360px);
+  width: 360px;
   height: 100%;
   flex-shrink: 0;
   border-inline-start: 1px solid var(--ion-color-light-shade);
@@ -58,7 +58,8 @@ ion-content::part(scroll) {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 4px 6px var(--composer-padding-start);
+  padding: 0 4px 0 var(--composer-padding-start);
+  background: var(--ion-background-color-step-100, #f0f0f0);
 }
 .reply-description {
   display: flex;
@@ -67,17 +68,17 @@ ion-content::part(scroll) {
   gap: 1px;
   flex: 1;
   min-width: 0;
-  height: 38px;
+  height: 29px;
   padding: 0 8px;
   border: 0;
   border-inline-start: 2px solid var(--ion-color-primary);
   border-radius: 0;
   background: none;
-  color: var(--ion-text-color);
+  color: var(--ion-text-color-step-600, #666);
   text-align: start;
   font: inherit;
-  font-size: 14px;
-  line-height: 17px;
+  font-size: 12px;
+  line-height: 14px;
 }
 .reply-description strong,
 .reply-description span {
@@ -102,24 +103,11 @@ ion-content::part(scroll) {
   color: var(--ion-color-medium);
   font-size: 22px;
 }
-.reply-close:disabled {
-  opacity: 0.45;
-}
 ion-title app-message-preview {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-ion-back-button {
-  --color: var(--ion-color-primary-shade);
-}
-
-@media (prefers-color-scheme: dark) {
-  ion-back-button {
-    --color: var(--ion-color-primary-tint);
-  }
 }
 
 .pagination-control {
@@ -174,4 +162,18 @@ ion-back-button {
   inset-inline-end: 4px;
   top: 50%;
   transform: translateY(-50%);
+}
+
+.floating-date {
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 12px;
+  padding: 4px 10px;
+  color: var(--ion-color-medium-contrast);
+  background: var(--ion-color-medium);
+  font-size: 12px;
+  white-space: nowrap;
 }

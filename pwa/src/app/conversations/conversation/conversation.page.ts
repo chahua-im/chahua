@@ -1,6 +1,3 @@
-import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
-import { ChatDetails } from '../../chats/chat-details/chat-details';
-import { IonModal } from '@ionic/angular';
 import { DatePipe, DOCUMENT } from '@angular/common';
 import {
   afterRenderEffect,
@@ -31,19 +28,19 @@ import {
   IonFooter,
   IonHeader,
   IonIcon,
+  IonModal,
   IonSpinner,
   IonTitle,
   IonToolbar,
 } from '@ionic/angular';
 import {
+  archive,
+  archiveOutline,
   chevronDown,
   closeCircleOutline,
-  listOutline,
-  send,
-  starOutline,
-  archiveOutline,
-  archive,
   informationCircleOutline,
+  listOutline,
+  starOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
@@ -51,19 +48,21 @@ import { ThreadsService } from '../../../generated/endpoints/threads/threads.ser
 import { GroupKind, MessageType, ServerWsMessageType, type MessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { ChatDetails } from '../../chats/chat-details/chat-details';
+import { ChatStore } from '../../chats/chat-store';
+import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
+import { MessageMenu } from '../../messages/message-menu/message-menu';
+import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
+import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { Message, type MessageContent } from '../../messages/message/message';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { ChatStore } from '../../chats/chat-store';
 import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
-import { MessageMenu } from '../../messages/message-menu/message-menu';
-import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { messageRows } from '../message-rows';
-import { Message, type MessageContent } from '../../messages/message/message';
-import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
-import { scrollActivity } from '../scroll-activity';
-import { ContentScrollbars } from '../../content-scrollbars';
 
 function queryMessageId(id: string | undefined) {
   return id && /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n ? encodeId(id) : undefined;
@@ -93,6 +92,8 @@ type ScrollPosition =
   styleUrl: './conversation.page.scss',
   providers: [ConversationStore],
   host: {
+    '(dragover)': 'composer()?.dragover($event)',
+    '(drop)': 'composer()?.drop($event)',
     '(document:visibilitychange)': 'document.hidden && saveDraft()',
     '(window:pagehide)': 'saveDraft()',
   },
@@ -122,7 +123,7 @@ type ScrollPosition =
   ],
 })
 export class ConversationPage {
-  private readonly wide = window.matchMedia('(min-width: 992px)');
+  private readonly wide = window.matchMedia('(min-width: 1200px)');
   protected readonly largeScreen = signal(this.wide.matches);
   protected readonly sidebarOpen = signal(true);
   protected readonly infoOpen = signal(false);
@@ -131,18 +132,42 @@ export class ConversationPage {
     if (this.largeScreen()) this.sidebarOpen.update((open) => !open);
     else this.infoOpen.set(true);
   }
-  protected readonly editing = linkedSignal<MessageResponse | undefined>(() => {
+  private readonly editTarget = linkedSignal<MessageResponse | OutgoingMessage | undefined>(() => {
     this.entryKey();
     return undefined;
   });
-  protected startEdit(message: MessageResponse) {
-    this.editing.set(message);
-    this.editText.set(message.message ?? '');
-    this.sendError.set(false);
+  protected readonly editing = computed(() => {
+    const target = this.editTarget();
+    return target && ('delivery' in target ? untracked(target.message) : target);
+  });
+  protected readonly editingUploads = computed(() => {
+    const target = this.editTarget();
+    return target && 'delivery' in target ? untracked(() => target.uploads) : [];
+  });
+  protected startEdit(message: MessageResponse | OutgoingMessage) {
+    this.editTarget.set(message);
+    this.editText.set(this.editing()?.message ?? '');
     void this.composer()?.setFocus();
   }
+  protected editLastMessage() {
+    const row = [...this.rows()]
+      .reverse()
+      .find(
+        (row) =>
+          row.message.sender.uid === this.session.user()?.uid &&
+          !row.message.isDeleted &&
+          row.message.messageType === MessageType.text,
+      );
+    const message = row?.outgoing ?? row?.confirmed;
+    if (message) this.startEdit(message);
+  }
+  protected escapeComposer() {
+    if (this.editing()) {
+      if (this.editText() === (this.editing()?.message ?? '')) this.cancelEdit();
+    } else this.cancelReply();
+  }
   protected cancelEdit() {
-    this.editing.set(undefined);
+    this.editTarget.set(undefined);
     this.editText.set('');
   }
   protected readonly PageDirection = PageDirection;
@@ -160,11 +185,11 @@ export class ConversationPage {
   private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly api = inject(ChatsService);
   private readonly threadsApi = inject(ThreadsService);
-  private readonly realtime = inject(Connection);
+  protected readonly realtime = inject(Connection);
   private readonly navigation = inject(ConversationNavigation);
   protected readonly document = inject(DOCUMENT);
   private readonly content = viewChild(IonContent);
-  private readonly composer = viewChild(MessageComposer);
+  protected readonly composer = viewChild(MessageComposer);
   private readonly unreadSeparator = viewChild<ElementRef<HTMLElement>>('unreadSeparator');
   protected readonly menu = viewChild(MessageMenu);
   private readonly messages = viewChildren(Message);
@@ -224,30 +249,53 @@ export class ConversationPage {
     source: this.entryKey,
     computation: (): ThreadError | undefined => undefined,
   });
-  protected readonly outgoing = computed(() =>
-    this.outbox.items().filter((item) => item.chatId === this.id() && item.threadId === this.threadId()),
-  );
+  protected readonly outgoing = computed(() => this.outbox.items().filter((item) => item.chatId === this.id()));
   protected readonly rows = computed(() => {
     const messages = this.conversation.items();
     const known = new Set(messages.map((message) => message.clientGeneratedId));
     const entries: { key: string; message: MessageContent; confirmed?: MessageResponse; outgoing?: OutgoingMessage }[] =
-      [
-        ...messages.map((message) => ({
-          key: message.clientGeneratedId || decodeId(message.id),
-          message,
-          confirmed: message,
-        })),
-        ...this.outgoing()
-          .filter((item) => !known.has(item.clientGeneratedId))
-          .map((item) => ({
-            key: item.clientGeneratedId,
-            message: item.message(),
-            outgoing: item,
-          })),
-      ];
+      [];
+    for (const message of messages) {
+      if (message.isDeleted) continue;
+      const outgoing = this.outgoing().find(
+        (item) => item.editId === message.id || item.clientGeneratedId === message.clientGeneratedId,
+      );
+      if (outgoing?.cancelled()) continue;
+      const preview = outgoing?.message();
+      entries.push({
+        key: message.clientGeneratedId || decodeId(message.id),
+        message: preview
+          ? {
+              ...message,
+              message: preview.message,
+              attachments: preview.attachments,
+              mentions: preview.mentions,
+              isEdited: preview.isEdited,
+            }
+          : message,
+        confirmed: message,
+        outgoing,
+      });
+    }
+    for (const outgoing of this.outgoing()) {
+      if (
+        outgoing.editId ||
+        outgoing.cancelled() ||
+        outgoing.threadId !== this.threadId() ||
+        known.has(outgoing.clientGeneratedId)
+      )
+        continue;
+      entries.push({ key: outgoing.clientGeneratedId, message: outgoing.message(), outgoing });
+    }
     return messageRows(entries.map((entry) => entry.message)).map((row, index) => ({ ...row, ...entries[index] }));
   });
+  private readonly peerUid = computed(() => this.chatInfo.get(this.id())?.peer?.uid);
+  protected readonly relationship = computed(() => {
+    const uid = this.peerUid();
+    return uid ? this.chatInfo.relationship(uid).value() : undefined;
+  });
   protected readonly scrolling = scrollActivity();
+  protected readonly visibleDate = signal<string | undefined>(undefined);
   protected readonly active = signal(false);
   private entered = false;
   private navigationVersion = 0;
@@ -257,7 +305,9 @@ export class ConversationPage {
   private readonly entryReadId = signal<SnowflakeID | undefined>(undefined);
   protected readonly firstUnreadId = computed(() => {
     const boundary = this.entryReadId();
-    return boundary ? this.conversation.items().find((message) => message.id > boundary)?.id : undefined;
+    return boundary
+      ? this.rows().find(({ confirmed }) => confirmed && confirmed.id > boundary)?.confirmed?.id
+      : undefined;
   });
   protected readonly atBottom = signal(true);
   private readonly returnMessageIds = linkedSignal({
@@ -280,9 +330,6 @@ export class ConversationPage {
     source: this.entryVersion,
     computation: (): MessageResponse | undefined => undefined,
   });
-  protected readonly sendError = linkedSignal({ source: this.entryKey, computation: () => false });
-  protected readonly sending = linkedSignal({ source: this.entryKey, computation: () => false });
-  protected readonly sendIcon = send;
   protected readonly closeIcon = closeCircleOutline;
   protected readonly downIcon = chevronDown;
   protected readonly listIcon = listOutline;
@@ -331,6 +378,11 @@ export class ConversationPage {
   );
 
   constructor() {
+    effect((onCleanup) => {
+      const uid = this.peerUid();
+      if (this.active() && uid && uid !== this.session.user()?.uid)
+        onCleanup(this.chatInfo.relationship(uid).activate());
+    });
     const resize = () => {
       this.largeScreen.set(this.wide.matches);
       if (this.wide.matches) this.infoOpen.set(false);
@@ -395,11 +447,15 @@ export class ConversationPage {
     effect(() => {
       if (!this.conversation.atLatest()) return;
       const messages = this.outgoing()
-        .filter((item) => item.published())
+        .filter((item) => !item.editId && !item.cancelled() && item.published())
         .map((item) => item.confirmed()!);
       untracked(() => {
         for (const message of messages) this.conversation.receive(message);
       });
+    });
+    effect(() => {
+      const target = this.editTarget();
+      if (target && 'delivery' in target && target.cancelled()) untracked(() => this.cancelEdit());
     });
     afterRenderEffect(() => {
       this.messageElements();
@@ -612,6 +668,15 @@ export class ConversationPage {
     const rows = this.rows();
     const elements = this.messageElements().filter((_, index) => !!rows[index]?.confirmed);
     const viewport = scroll.getBoundingClientRect();
+    const allElements = this.messageElements();
+    let first = 0,
+      last = allElements.length - 1;
+    while (first < last) {
+      const middle = (first + last) >>> 1;
+      if (allElements[middle].nativeElement.getBoundingClientRect().bottom <= viewport.top) first = middle + 1;
+      else last = middle;
+    }
+    this.visibleDate.set(rows[first]?.message.createdAt);
     // Message bottoms are ordered, so finding the last visible bottom needs only log(n) layout reads.
     let low = 0;
     let high = elements.length - 1;
@@ -701,7 +766,7 @@ export class ConversationPage {
       const message = await firstValueFrom(
         this.api.getMessage(entry.chatId, messageId).pipe(takeUntilDestroyed(this.destroyRef)),
       );
-      if (this.isCurrent(entry) && this.savedReplyId() === messageId && !this.replyTo() && !this.sending()) {
+      if (this.isCurrent(entry) && this.savedReplyId() === messageId && !this.replyTo()) {
         if (message.isDeleted) {
           this.cancelReply();
         } else {
@@ -714,51 +779,33 @@ export class ConversationPage {
   }
 
   protected async sendMessage(composition: Composition = { messageType: MessageType.text, attachmentIds: [] }) {
-    const editing = this.editing();
-    const text = (editing ? this.editText() : this.draft()).trim();
-    if (
-      this.sending() ||
-      (!text && !composition.attachmentIds.length && !composition.uploads?.length && !composition.sticker)
-    )
-      return;
-    const entry = this.entryKey();
-    if (!editing) {
-      const item = this.outbox.enqueue(
-        this.id(),
-        this.threadId(),
-        text,
-        composition,
-        this.replyTo(),
-        this.replyTo()?.id ?? this.savedReplyId(),
-      );
-      if (composition.messageType === MessageType.text) {
-        this.draft.set('');
-        this.drafts.clear(this.id(), this.threadId());
-      }
-      this.cancelReply();
-      // Publish the local row first; only the explicit Send gesture moves to the latest messages.
-      this.position.set({ type: PositionKind.Bottom });
-      if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
+    const target = this.editTarget();
+    const text = (target ? this.editText() : this.draft()).trim();
+    if (!text && !composition.attachmentIds.length && !composition.uploads?.length && !composition.sticker) return;
+    if (target) {
+      const item =
+        'delivery' in target
+          ? this.outbox.edit(target, text, composition)
+          : this.outbox.enqueueEdit(target, this.threadId(), text, composition);
+      this.cancelEdit();
       return item.operation;
     }
-    this.sending.set(true);
-    this.sendError.set(false);
-    try {
-      const message = await firstValueFrom(
-        this.api
-          .patchMessage(this.id(), editing.id, { message: text, attachmentIds: composition.attachmentIds })
-          .pipe(takeUntilDestroyed(this.destroyRef)),
-      );
-      this.realtime.acceptChange({ type: ServerWsMessageType.messageUpdated, payload: message });
-      if (this.isCurrent(entry)) {
-        this.cancelEdit();
-        this.composer()?.complete(composition.attachmentIds);
-      }
-    } catch {
-      if (this.isCurrent(entry)) this.sendError.set(true);
-    } finally {
-      if (this.isCurrent(entry)) this.sending.set(false);
+    const item = this.outbox.enqueue(
+      this.id(),
+      this.threadId(),
+      text,
+      composition,
+      this.replyTo(),
+      this.replyTo()?.id ?? this.savedReplyId(),
+    );
+    if (composition.messageType === MessageType.text) {
+      this.draft.set('');
+      this.drafts.clear(this.id(), this.threadId());
     }
+    this.cancelReply();
+    this.position.set({ type: PositionKind.Bottom });
+    if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
+    return item.operation;
   }
 
   private async refreshConversationMetadata() {
@@ -808,7 +855,6 @@ export class ConversationPage {
   }
 
   protected startReply(message: MessageResponse) {
-    if (this.sending()) return;
     this.replyTo.set(message);
     this.savedReplyId.set(undefined);
     if (this.atBottom()) this.position.set({ type: PositionKind.Bottom });

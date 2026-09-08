@@ -1,6 +1,7 @@
-import { Component, DestroyRef, computed, inject, input, model, output, signal } from '@angular/core';
-import { IonIcon, IonSpinner } from '@ionic/angular';
-import { mic, trash, arrowUp, send } from 'ionicons/icons';
+import { Component, DestroyRef, computed, inject, model, output, signal } from '@angular/core';
+import { IonAlert, IonIcon, IonSpinner } from '@ionic/angular';
+import { arrowUp, micOffOutline, micOutline, send, trash } from 'ionicons/icons';
+import { VoicePlayer } from '../voice-player/voice-player';
 
 enum Phase {
   Idle,
@@ -14,16 +15,20 @@ enum Target {
   Send,
 }
 
+enum Failure {
+  Unsupported,
+  Recording,
+}
+
 @Component({
   selector: 'app-voice-recorder',
   templateUrl: './voice-recorder.html',
   styleUrl: './voice-recorder.scss',
-  imports: [IonIcon, IonSpinner],
+  imports: [VoicePlayer, IonAlert, IonIcon, IonSpinner],
   host: { '[class.active]': 'active()' },
 })
 export class VoiceRecorder {
   readonly active = model(false);
-  readonly disabled = input(false);
   readonly submitted = output<File>();
   readonly discarded = output();
   protected discard() {
@@ -32,7 +37,8 @@ export class VoiceRecorder {
   }
   protected readonly Phase = Phase;
   protected readonly Target = Target;
-  protected readonly icons = { mic, trash, arrowUp, send };
+  protected readonly Failure = Failure;
+  protected readonly icons = { micOutline, micOffOutline, trash, arrowUp, send };
   protected readonly phase = signal(Phase.Idle);
   protected readonly target = signal(Target.Origin);
   protected readonly holding = signal(false);
@@ -41,9 +47,19 @@ export class VoiceRecorder {
     const seconds = Math.floor(this.duration() / 1000);
     return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
   });
-  protected readonly failed = signal(false);
+  protected readonly failure = signal<Failure | undefined>(undefined);
   protected readonly tooShort = signal(false);
-  protected readonly available = typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+  private readonly mimeType =
+    typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+      ? [
+          'audio/ogg;codecs=opus',
+          'audio/mp4;codecs=mp4a.40.2',
+          'audio/mp4; codecs="mp4a.40.2"',
+          'audio/mp4;codecs=aac',
+          'audio/mpeg',
+        ].find((type) => MediaRecorder.isTypeSupported(type))
+      : undefined;
+  protected readonly available = !!this.mimeType;
   protected readonly url = signal<string | undefined>(undefined);
   private file?: File;
   private pointer?: { id: number; x: number; y: number };
@@ -59,13 +75,13 @@ export class VoiceRecorder {
   }
 
   protected start(event: PointerEvent) {
-    if (!event.isPrimary || event.button !== 0 || this.disabled() || this.active() || !this.available) return;
+    if (!event.isPrimary || event.button !== 0 || this.active() || !this.mimeType) return;
     event.preventDefault();
     this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     this.holding.set(true);
     this.target.set(Target.Origin);
-    void this.record();
+    void this.record(this.mimeType);
   }
   private destination(event: PointerEvent) {
     if (!this.pointer) return Target.Origin;
@@ -90,9 +106,9 @@ export class VoiceRecorder {
     this.sendOnStop = destination === Target.Send;
     this.recorder?.stop();
   }
-  private async record() {
+  private async record(mimeType: string) {
     const version = ++this.version;
-    this.failed.set(false);
+    this.failure.set(undefined);
     this.tooShort.set(false);
     this.duration.set(0);
     this.phase.set(Phase.Requesting);
@@ -104,14 +120,6 @@ export class VoiceRecorder {
         return;
       }
       this.stream = stream;
-      const mimeType = [
-        'audio/ogg;codecs=opus',
-        'audio/mp4;codecs=mp4a.40.2',
-        'audio/mp4; codecs="mp4a.40.2"',
-        'audio/mp4;codecs=aac',
-        'audio/mpeg',
-      ].find((type) => MediaRecorder.isTypeSupported(type));
-      if (!mimeType) throw new Error('当前浏览器不支持录音格式');
       const recorder = (this.recorder = new MediaRecorder(stream, { mimeType }));
       const chunks: Blob[] = [];
       const started = Date.now();
@@ -120,7 +128,7 @@ export class VoiceRecorder {
       };
       recorder.onerror = () => {
         this.reset();
-        this.failed.set(true);
+        this.failure.set(Failure.Recording);
       };
       recorder.onstop = () => {
         clearInterval(this.timer);
@@ -148,12 +156,12 @@ export class VoiceRecorder {
     } catch {
       if (version === this.version) {
         this.reset();
-        this.failed.set(true);
+        this.failure.set(Failure.Recording);
       }
     }
   }
   protected send() {
-    if (this.file && !this.disabled()) this.submitted.emit(this.file);
+    if (this.file) this.submitted.emit(this.file);
   }
   reset() {
     this.version++;

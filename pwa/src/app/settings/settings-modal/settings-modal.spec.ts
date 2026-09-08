@@ -3,8 +3,8 @@ import { provideLocationMocks } from '@angular/common/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { routes } from '../../app.routes';
-import { SettingsModal } from './settings-modal';
 import { SettingsDismissRole } from '../settings/settings';
+import { SettingsModal } from './settings-modal';
 
 describe('SettingsModal history', () => {
   beforeEach(() => {

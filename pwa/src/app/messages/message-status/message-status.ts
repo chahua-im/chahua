@@ -1,23 +1,25 @@
 import { Component, input } from '@angular/core';
 import { IonIcon } from '@ionic/angular';
-import { checkmarkCircle, checkmarkCircleOutline } from 'ionicons/icons';
+import { alertCircleOutline, checkmarkOutline, cloudUploadOutline, timeOutline } from 'ionicons/icons';
 
-export enum MessageDelivery {
-  Sending,
-  Sent,
-  Failed,
-}
+import { MessageDelivery } from '../message-delivery';
 
 @Component({
   selector: 'app-message-status',
   imports: [IonIcon],
   template: `
     @switch (delivery()) {
+      @case (Delivery.Uploading) {
+        <ion-icon [icon]="icons.cloudUploadOutline" />
+      }
       @case (Delivery.Sending) {
-        <ion-icon [icon]="icons.checkmarkCircleOutline" />
+        <ion-icon [icon]="icons.timeOutline" />
       }
       @case (Delivery.Sent) {
-        <ion-icon [icon]="icons.checkmarkCircle" />
+        <ion-icon [icon]="icons.checkmarkOutline" />
+      }
+      @case (Delivery.Failed) {
+        <ion-icon [icon]="icons.alertCircleOutline" />
       }
     }
   `,
@@ -37,5 +39,5 @@ export enum MessageDelivery {
 export class MessageStatus {
   readonly delivery = input<MessageDelivery>();
   protected readonly Delivery = MessageDelivery;
-  protected readonly icons = { checkmarkCircle, checkmarkCircleOutline };
+  protected readonly icons = { cloudUploadOutline, timeOutline, checkmarkOutline, alertCircleOutline };
 }

@@ -12,11 +12,6 @@
   align-content: start;
   padding: 8px;
 }
-.embedded .sticker-grid {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
 :host(.embedded) .sticker-grid {
   flex: 1;
   min-height: 0;

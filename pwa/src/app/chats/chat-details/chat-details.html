@@ -6,46 +6,11 @@
     <ion-button fill="clear" (click)="view.set(View.Info)">返回</ion-button>
   }
   @switch (view()) {
-    @case (View.Members) {
-      <app-chat-members [chatId]="chatId()" />
-    }
     @case (View.Invites) {
       <app-chat-invites [chatId]="chatId()" />
     }
     @case (View.Search) {
       <app-chat-search [chatId]="chatId()" />
-    }
-    @case (View.More) {
-      @if (chat(); as chat) {
-        <ion-list [inset]="true">
-          @if (chat.kind === Kind.dm) {
-            <ion-item [button]="true" (click)="profile()">
-              <ion-icon slot="start" color="primary" [icon]="icons.personOutline" />
-              <ion-label>用户资料</ion-label>
-            </ion-item>
-          }
-          <ion-item [button]="true" (click)="saved()">
-            <ion-icon slot="start" color="primary" [icon]="icons.bookmarkOutline" />
-            <ion-label>本聊天收藏</ion-label>
-          </ion-item>
-          @if (chat.kind === Kind.group) {
-            <ion-item [button]="true" (click)="view.set(View.Members)">
-              <ion-icon slot="start" color="primary" [icon]="icons.peopleOutline" />
-              <ion-label>群成员</ion-label>
-            </ion-item>
-            @if (chat.myRole === Role.admin) {
-              <ion-item [button]="true" (click)="view.set(View.Invites)">
-                <ion-icon slot="start" color="primary" [icon]="icons.linkOutline" />
-                <ion-label>邀请链接</ion-label>
-              </ion-item>
-              <ion-item [button]="true" (click)="view.set(View.Edit)">
-                <ion-icon slot="start" color="primary" [icon]="icons.createOutline" />
-                <ion-label>编辑群资料</ion-label>
-              </ion-item>
-            }
-          }
-        </ion-list>
-      }
     }
     @case (View.Edit) {
       <ion-list [inset]="true">
@@ -91,16 +56,47 @@
               搜索
             </span>
           </ion-button>
-          <ion-button fill="solid" [disabled]="busy()" (click)="toggleMute()">
-            <span>
-              @if (pending() === Action.Mute) {
-                <ion-spinner />
-              } @else {
-                <ion-icon [icon]="muted() ? icons.notificationsOffOutline : icons.notificationsOutline" />
-              }
-              {{ muted() ? '取消静音' : threadId() ? '静音聊天' : '静音' }}
-            </span>
-          </ion-button>
+          @if (threadId()) {
+            <ion-button fill="solid" [disabled]="busy() || !subscription()" (click)="toggleSubscription()">
+              <span>
+                @if (pending() === Action.Subscription) {
+                  <ion-spinner />
+                } @else {
+                  <ion-icon [icon]="subscription()?.subscribed ? icons.star : icons.starOutline" />
+                }
+                {{ subscription()?.subscribed ? '取消订阅' : '订阅' }}
+              </span>
+            </ion-button>
+            @if (subscription()?.subscribed) {
+              <ion-button fill="solid" [disabled]="busy()" (click)="toggleThreadArchive()">
+                <span>
+                  @if (pending() === Action.Archive) {
+                    <ion-spinner />
+                  } @else {
+                    <ion-icon [icon]="icons.archiveOutline" />
+                  }
+                  {{ subscription()?.archived ? '取消归档' : '归档' }}
+                </span>
+              </ion-button>
+            }
+          } @else {
+            <ion-button fill="solid" [disabled]="busy()" (click)="toggleMute()">
+              <span>
+                @if (pending() === Action.Mute) {
+                  <ion-spinner />
+                } @else {
+                  <ion-icon [icon]="muted() ? icons.notificationsOffOutline : icons.notificationsOutline" />
+                }
+                @if (archived()) {
+                  取消归档并开启通知
+                } @else if (mutedUntil(); as until) {
+                  {{ permanentMute() ? '永久' : '至 ' + (until | date: 'short') }}
+                } @else {
+                  静音
+                }
+              </span>
+            </ion-button>
+          }
           @if (chat.kind === Kind.group || relationship()?.isFriend) {
             <ion-button fill="solid" [disabled]="busy()" (click)="leave()">
               <span class="destructive">
@@ -120,23 +116,44 @@
               </span>
             </ion-button>
           }
-          <ion-button fill="solid" (click)="view.set(View.More)">
+          <ion-button fill="solid" (click)="moreMenu.present($event)">
             <span>
               <ion-icon [icon]="icons.ellipsisHorizontal" />
               更多
             </span>
           </ion-button>
         </div>
-        <div class="attachments">
-          @if (threadId()) {
-            <p class="ion-padding-horizontal">所属聊天的媒体</p>
-          }
-          <app-chat-attachments [chatId]="chatId()" />
-        </div>
+      } @else if (loading()) {
+        <div class="loading-status"><ion-spinner /></div>
       }
+      <div class="attachments">
+        <ion-segment [value]="tab()" (ionChange)="changeTab($event.detail.value)">
+          @if (!threadId()) {
+            <ion-segment-button [value]="GroupTab.Threads"><ion-label>话题</ion-label></ion-segment-button>
+            @if (chat()?.kind === Kind.group) {
+              <ion-segment-button [value]="GroupTab.Members"><ion-label>成员</ion-label></ion-segment-button>
+            }
+          }
+          <ion-segment-button [value]="AttachmentKind.image"><ion-label>图片</ion-label></ion-segment-button>
+          <ion-segment-button [value]="AttachmentKind.video"><ion-label>视频</ion-label></ion-segment-button>
+          <ion-segment-button [value]="AttachmentKind.other"><ion-label>文件</ion-label></ion-segment-button>
+        </ion-segment>
+        @let selected = tab();
+        @switch (selected) {
+          @case (GroupTab.Threads) {
+            <app-chat-threads [chatId]="chatId()" />
+          }
+          @case (GroupTab.Members) {
+            <app-chat-members [chatId]="chatId()" />
+          }
+          @default {
+            <app-chat-attachments [chatId]="chatId()" [kind]="selected" />
+          }
+        }
+      </div>
     }
   }
-  @if (pending() === Action.Load || pending() === Action.Save || pending() === Action.Avatar) {
+  @if (pending() === Action.Save || pending() === Action.Avatar) {
     <div class="loading-status"><ion-spinner /></div>
   }
   @if (error()) {
@@ -146,3 +163,36 @@
     </p>
   }
 </ion-content>
+
+<ion-popover #moreMenu [dismissOnSelect]="true" side="bottom" alignment="end">
+  <ng-template>
+    @if (chat(); as chat) {
+      <ion-list>
+        @if (chat.kind === Kind.dm) {
+          <ion-item [button]="true" (click)="profile()">
+            <ion-icon slot="start" color="primary" [icon]="icons.personOutline" />
+            <ion-label>用户资料</ion-label>
+          </ion-item>
+        }
+        <ion-item [button]="true" (click)="saved()">
+          <ion-icon slot="start" color="primary" [icon]="icons.bookmarkOutline" />
+          <ion-label>本聊天收藏</ion-label>
+        </ion-item>
+        @if (chat.kind === Kind.group) {
+          @if (chat.myRole === Role.admin) {
+            <ion-item [button]="true" (click)="view.set(View.Invites)">
+              <ion-icon slot="start" color="primary" [icon]="icons.linkOutline" />
+              <ion-label>邀请链接</ion-label>
+            </ion-item>
+            <ion-item [button]="true" (click)="edit()">
+              <ion-icon slot="start" color="primary" [icon]="icons.createOutline" />
+              <ion-label>编辑群资料</ion-label>
+            </ion-item>
+          }
+        }
+      </ion-list>
+    }
+  </ng-template>
+</ion-popover>
+
+<app-chat-mute />

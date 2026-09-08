@@ -1,14 +1,14 @@
-import { MediaViewer } from '../media-viewer/media-viewer';
-import { ModalController } from '@ionic/angular';
-import { inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { Component, computed, input, linkedSignal } from '@angular/core';
-import { IonBadge, IonIcon, IonSpinner } from '@ionic/angular';
-import { documentAttachOutline, downloadOutline } from 'ionicons/icons';
+import { Component, computed, inject, input, linkedSignal } from '@angular/core';
+import { IonBadge, IonIcon, IonSpinner, ModalController } from '@ionic/angular';
+import { documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
 import { type MessageResponse, MessageType } from '../../../generated/models';
 import type { SnowflakeID } from '../../api/snowflake-id';
-import { MessageDelivery, MessageStatus } from '../message-status';
+import { openMediaViewer } from '../media-viewer/media-viewer';
+import { MessageDelivery } from '../message-delivery';
+import { MessageStatus } from '../message-status/message-status';
 import { type AttachmentUpload, UploadStatus } from '../upload';
+import { VoicePlayer } from '../voice-player/voice-player';
 
 import { attachmentKind, MediaKind } from './media-kind';
 
@@ -26,7 +26,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   selector: 'app-message-attachments',
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
-  imports: [DatePipe, IonBadge, IonIcon, IonSpinner, MessageStatus],
+  imports: [VoicePlayer, DatePipe, IonBadge, IonIcon, IonSpinner, MessageStatus],
   host: { '[class.overlay-time]': 'overlayTime()' },
 })
 export class MessageAttachments {
@@ -35,12 +35,12 @@ export class MessageAttachments {
     event.preventDefault();
     if (this.message().messageType === MessageType.sticker) return;
     event.stopPropagation();
-    const images = this.items().filter((item) => item.kind === MediaKind.Image);
-    const modal = await this.modals.create({
-      component: MediaViewer,
-      componentProps: { images, initial: images.findIndex((item) => (item.id ?? item.url) === key) },
-    });
-    await modal.present();
+    const media = this.items().filter((item) => item.kind === MediaKind.Image || item.kind === MediaKind.Video);
+    await openMediaViewer(
+      this.modals,
+      media,
+      media.findIndex((item) => (item.id ?? item.url) === key),
+    );
   }
   readonly message = input.required<MessageAttachmentSource>();
   readonly overlayTime = input(false);
@@ -82,6 +82,7 @@ export class MessageAttachments {
     this.message();
     return new Set<SnowflakeID | string>();
   });
+  protected readonly playIcon = playCircle;
   protected readonly fileIcon = documentAttachOutline;
   protected readonly downloadIcon = downloadOutline;
 

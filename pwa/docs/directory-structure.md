@@ -1,83 +1,102 @@
 # 目录结构
 
-工程按功能组织。功能目录容纳状态、操作和工具；每个组件独占一个子目录，组件的 TypeScript、HTML、SCSS 和测试文件放在一起。简单组件可使用内联模板或样式。
+工程按关注范围组织：`chats` 负责聊天关系和列表，`conversations` 负责连续消息页面，`messages` 负责单条消息、输入和媒体。每个组件独占子目录，模板、样式和测试随组件放置；很短的模板与样式可以内联。
 
 ```text
 src/
-├── main.ts                       Angular、Ionic、路由、HTTP 和 Service Worker 配置
-├── index.html                    HTML 入口、启动占位和系统主题色
-├── styles.scss                   Ionic 样式、公共消息布局与操作反馈样式
+├── main.ts                        Angular、Ionic、HTTP、路由与 Service Worker 配置
+├── index.html                     启动 spinner、系统主题和静态入口
+├── styles.scss                    框架入口、主题、公共消息布局与操作反馈
 ├── generated/
-│   ├── endpoints/                Orval 按标签生成的 HTTP 服务和 resource
-│   ├── models/                   按标签生成的模型，共用模型位于根目录
-│   └── json-codecs.ts            根据契约生成的 ID 编解码路径
+│   ├── endpoints/                 Orval 按标签生成的客户端与 resource
+│   ├── models/                    生成模型，共用模型位于根目录
+│   └── json-codecs.ts             ID 编解码路径
 └── app/
-    ├── app/                      App 组件：根布局、身份初始化与桌面列表选择
-    ├── app.routes.ts             应用路由配置
-    ├── app.routes.spec.ts        路由测试
-    ├── api/                      Connection、HTTP 拦截器、ID 边界、查询工具和测试辅助
-    ├── session/                  SessionStore
-    ├── chats/                    ChatStore、ChatPins、ChatListStore、分类与日期格式
-    │   ├── chat-list-page/        移动端路由页面与 Ionic 生命周期
-    │   ├── chat-list/             分类、混合排序与列表渲染
-    │   ├── chat-list-item/        通用列表项与局部操作反馈
-    │   ├── chat-avatar/           列表与资料共用的可缩放头像、话题角标
-    │   ├── start-chat/            创建、加入、添加好友入口
-    │   ├── directory-search/      群组与用户搜索
-    │   ├── user-profile/          用户资料与好友关系操作
-    │   ├── chat-details/          聊天资料及子视图
-    │   ├── chat-members/          成员搜索与管理
-    │   ├── chat-invites/          邀请管理与分享
-    │   └── chat-link/             链接解析和导航
-    ├── conversations/            ConversationStore、导航、草稿、消息分组与滚动工具
-    │   ├── conversation/         连续消息页面
-    │   ├── pinned-messages/       置顶消息页面
-    │   ├── saved-messages/        全部或单聊天收藏及快照展示
+    ├── app/                       App 根组件
+    ├── app.routes.ts              静态路由
+    ├── api/                       Connection、拦截器、ID 编码、查询工具与测试辅助
+    ├── session/                   SessionStore
+    ├── scrolling/                 悬浮滚动条、首屏补页、触摸与惯性状态
+    ├── chats/
+    │   ├── chat-store.ts          共享聊天资料、摘要、已读、好友关系与订阅
+    │   ├── chat-list-store.ts     列表成员、分页、好友请求与计数查询
+    │   ├── chat-pins.ts           ChatStore 内部的置顶集合
+    │   ├── invite.ts              邀请码解析与邀请状态
+    │   ├── list-tabs.ts           列表分类与路由选择
+    │   ├── chat-date.pipe.ts      聊天列表时间格式
+    │   ├── dismiss-chat-overlays.ts  导航前关闭资料弹窗
+    │   ├── chat-list-page/        单列路由页面与生命周期
+    │   ├── chat-list/             列表内容与混合排序
+    │   ├── chat-list-item/        通用列表行与操作反馈
+    │   ├── chat-avatar/           可缩放头像、话题角标与占位
+    │   ├── chat-details/          资料面板及子视图选择
+    │   ├── chat-threads/          聊天内的话题列表
+    │   ├── chat-members/          群成员搜索与管理
+    │   ├── chat-attachments/      聊天媒体汇总
     │   ├── chat-search/           聊天内消息搜索
-    │   └── chat-attachments/      聊天附件汇总
-    ├── messages/                 MessageActions、事件类型、合并、表态与媒体规则
-    │   ├── message/              消息气泡与手势
-    │   ├── message-text/         提及和链接展示
-    │   ├── message-composer/     输入、下方面板、附件及提及编辑工具
-    │   ├── voice-recorder/       录音手势、计时与本地预览
-    │   ├── media-processing/     图片／视频压缩、HEIC 转换和动图保护
-    │   ├── sticker-picker/       贴纸选择、收藏与订阅
-    │   ├── media-viewer/         图片查看器
-    │   ├── upload.ts             可移交的附件上传任务、媒体尺寸与签名上传
-    │   ├── message-outbox.ts      待发队列、服务器确认与失败重试
-    │   ├── message-status.ts      消息时间后的发送状态图标
-    │   ├── message-author/        作者展示
-    │   ├── message-attachments/   附件展示与媒体类型判断
-    │   ├── message-menu/          菜单、确认、操作反馈与权限展示
-    │   ├── message-preview/       消息摘要
-    │   ├── message-reactions/     表态按钮
-    │   ├── message-thread/        话题入口
-    │   └── emoji-picker/          按需加载的表情选择器
+    │   ├── chat-invites/          邀请管理
+    │   ├── chat-mute/             静音时长菜单
+    │   ├── user-profile/          用户资料与好友操作
+    │   ├── directory-search/      用户、群搜索与用户选择
+    │   ├── start-chat/            创建群、加入群和添加好友入口
+    │   └── chat-link/             消息、用户、贴纸与邀请链接入口
+    ├── conversations/
+    │   ├── conversation-store.ts  页面连续消息区间
+    │   ├── conversation-navigation.ts  同一会话的即时导航指令
+    │   ├── draft-store.ts         按账号、聊天和话题保存草稿
+    │   ├── message-rows.ts        日期与连续作者分组
+    │   ├── conversation/          连续消息页面、编辑与滚动锚点
+    │   ├── pinned-messages/       置顶消息页面
+    │   └── saved-messages/        收藏快照页面与字段映射
+    ├── messages/
+    │   ├── message-outbox.ts      待发、编辑、撤回与重试
+    │   ├── message-delivery.ts    发送状态枚举
+    │   ├── message-actions.ts     收藏、撤回与表态操作
+    │   ├── upload.ts              可移交、取消与重试的上传任务
+    │   ├── message-change.ts      消息变化协议
+    │   ├── message-merge.ts       消息区间合并
+    │   ├── media-overlay.ts       媒体时间戳样式规则
+    │   ├── user-colors.ts         UID 配色与用户组颜色
+    │   ├── reaction-state.ts      表态合并与限制
+    │   ├── message-notice.ts      操作结果枚举
+    │   ├── message/              气泡、消息手势与子组件装配
+    │   ├── message-author/       用户名、用户组与性别
+    │   ├── message-text/         提及和链接
+    │   ├── message-preview/      正文、媒体和系统消息摘要
+    │   ├── message-reactions/    表态按钮与头像
+    │   ├── message-thread/       讨论入口
+    │   ├── message-status/       发送状态图标
+    │   ├── message-attachments/  附件展示与类型判断
+    │   ├── message-menu/         长按菜单、确认与操作反馈
+    │   ├── message-composer/     输入、提及编辑与附件/贴纸面板
+    │   ├── voice-recorder/       录音设备与手势
+    │   ├── voice-player/         波形语音播放器
+    │   ├── sticker-picker/       贴纸浏览、收藏、订阅与上传
+    │   ├── reaction-details/     完整表态名单
+    │   ├── invite-card/          邀请预览
+    │   ├── media-viewer/         全屏图片与视频
+    │   ├── media-processing/     类型检测、尺寸读取与压缩
+    │   └── emoji-picker/         按需加载的表情选择器
     ├── settings/
-    │   ├── preferences.ts        本地展示偏好
-    │   ├── settings/             设置主页面
-    │   ├── settings-modal/        设置弹窗与浏览器历史
-    │   ├── general-settings/      通用设置
-    │   └── friend-verification-settings/ 好友验证表单
-    └── pwa/                      AppUpdates、PushNotifications
+    │   ├── preferences.ts        本地偏好与最近表情
+    │   ├── settings/             设置主页
+    │   ├── settings-modal/       弹窗和浏览器历史
+    │   ├── general-settings/     展示偏好
+    │   └── friend-verification-settings/  好友验证表单
+    └── pwa/
+        ├── app-updates.ts        应用更新
+        ├── push-notifications.ts 在线提醒、Push 注册、通知跳转与角标
+        ├── notification-policy.ts  提醒规则与通知纯文本
+        ├── notification-banner/ 单列布局的顶部通知
+        └── landing/             旧版安装指引
 ```
 
-## 文件边界
+`src/generated` 仅保存生成代码。`scripts/api-codegen.ts` 处理契约与生成规则，`api/snowflake-id.ts` 和 `api/json-ids.ts` 处理运行时 ID 边界；不转换 null/undefined。生成文件随仓库保存，普通构建无需运行后端。
 
-- `src/generated/` 是生成代码，`src/app/` 是手写应用代码。应用直接引用生成客户端与模型。
-- `api/snowflake-id.ts` 定义数值 ID 编码，`api/json-ids.ts` 按生成路径转换 JSON 中的 ID。`scripts/api-codegen.ts` 处理契约与生成规则，不做运行时空值转换。
-- `chats/` 关注聊天关系、共享资料和列表；`conversations/` 关注消息页面及连续消息区间；`messages/` 关注单条消息的展示、操作与内容规则。三个目录按关注范围组织，状态所有权由数据的消费者与生命周期决定。
-- `ChatPins` 位于 `chats/`，置顶页面位于 `conversations/`；`MessageActions`、表态规则和表情选择器位于 `messages/`。消息的日期分隔与连续作者分组由 `conversations/message-rows.ts` 处理。
-- `ChatStore` 持有共享聊天资料、摘要、已读、订阅与置顶；`ChatListStore` 持有列表成员、分页、好友请求及计数查询；`ConversationStore` 仅持有所在页面的连续消息区间。
-- `ChatPins` 是 `ChatStore` 内部按聊天/话题缓存的普通对象，封装一份置顶集合及其请求。它不提供独立注入作用域。
-- `MessageMenu` 接收页面的消息数组，使用 `ChatStore` 查询权限和置顶，使用自身提供的 `MessageActions` 执行收藏、撤回和表态。
-- `SavedMessagesPage` 自己持有分页快照，`savedMessageContent` 映射展示字段。`PinnedMessagesPage` 消费共享置顶集合。两个页面复用 `Message` 展示组件。
-- 页面直接渲染消息列表和日期，公共布局使用 `src/styles.scss` 中的 `.message-list`、`.message-date`；内容背景由页面设置。
-- `app/` 子目录只包含根组件的 TypeScript、HTML、SCSS 和测试；应用路由及其测试位于外层。所有路由页面静态导入，通过 `component` 配置，不启用路由懒加载或预加载；表情选择器使用独立的 `@defer`。
-- 测试随实现放置，组件和状态直接通过具体文件导入。
+`scrolling` 只包含 DOM 与滚动工具，不持有聊天数据。聊天资料的成员、话题、媒体、搜索和邀请组件与 `ChatDetails` 同在 `chats`；只有连续消息、收藏和置顶页面属于 `conversations`。
 
-根目录保存构建配置，`scripts/` 保存开发和生成脚本，`public/` 保存静态资源及推送 Worker，`docs/` 描述工程当前状态。服务的注入作用域见[数据流](data-flow.md)，组件间关系见[Components](components.md)。
+共享数据按生命周期放置，不按每个 API 拆服务。ChatPins 是普通对象；MessageActions 是操作集合；MessageDelivery 是纯枚举，队列不依赖状态图标组件。分页协议不同的组件直接持有局部游标，不使用通用分页框架或页面继承。
 
-资料表单、搜索结果、成员和邀请分页由消费它们的组件局部持有，不进入 ChatStore。会话资料使用内联 IonModal，其他弹窗由 Ionic ModalController 创建，`useSetInputAPI` 支持 signal inputs。所有页面和弹窗使用静态组件引用；既有 EmojiPicker 保留 `@defer`。
+根目录保存构建配置，`scripts` 保存开发与生成脚本，`public` 保存静态资源和推送 Worker。测试随实现放置，`src/test-providers.ts` 提供 HTTP、路由与弹窗替身。所有路由静态导入，非路由的表情和编解码资源可按需加载。
 
-`src/test-providers.ts` 提供测试用路由、HTTP mock 和弹窗替身；测试不会使用开发 token 或生产代理。
+状态所有权和请求时机见[数据流](data-flow.md)，父子传递和字段见[组件](components.md)。

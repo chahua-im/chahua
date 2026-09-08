@@ -7,7 +7,22 @@
     </ion-select>
   </ion-item>
   @if (type() === Type.targeted) {
-    <ion-item><input class="field" inputmode="numeric" placeholder="用户 UID" [formField]="fields.target" /></ion-item>
+    @if (target(); as person) {
+      <ion-item>
+        <ion-label>{{ person.username || person.uid }}</ion-label>
+        <ion-button fill="clear" (click)="target.set(undefined)">更改</ion-button>
+      </ion-item>
+    } @else {
+      <ion-searchbar
+        placeholder="搜索用户名或 UID"
+        [debounce]="300"
+        (ionInput)="targetQuery.set($event.detail.value || '')" />
+      <app-directory-search
+        [query]="targetQuery()"
+        [usersOnly]="true"
+        [selecting]="true"
+        (selected)="target.set($event)" />
+    }
   }
   @if (type() === Type.membership) {
     <ion-item>
@@ -24,11 +39,7 @@
   </ion-item>
   <ion-button
     class="ion-margin"
-    [disabled]="
-      busy() ||
-      (type() === Type.membership && !requiredGroup()) ||
-      (type() === Type.targeted && !values().target.trim())
-    "
+    [disabled]="busy() || (type() === Type.membership && !requiredGroup()) || (type() === Type.targeted && !target())"
     (click)="create()">
     创建邀请
   </ion-button>
@@ -50,11 +61,50 @@
     <ion-item>
       <ion-label>
         {{ invite.code }}
-        <p>{{ invite.expiresAt || '长期有效' }}</p>
+        <p>
+          @switch (invite.inviteType) {
+            @case (Type.generic) {
+              普通邀请
+            }
+            @case (Type.targeted) {
+              指定用户：{{ invite.targetUid }}
+            }
+            @case (Type.membership) {
+              限定 {{ groupName(invite.requiredChatId!) }} 的成员
+            }
+          }
+        </p>
+        <p>
+          @switch (status(invite)) {
+            @case (Status.Expired) {
+              已过期
+            }
+            @case (Status.Revoked) {
+              已撤销
+            }
+            @case (Status.Used) {
+              已使用
+            }
+            @default {
+              {{ invite.expiresAt ? (invite.expiresAt | date: 'short') : '长期有效' }}
+            }
+          }
+        </p>
       </ion-label>
-      <ion-button fill="clear" (click)="copy(invite)">复制</ion-button>
-      <ion-button fill="clear" [disabled]="busy() || !destination()" (click)="share(invite)">分享</ion-button>
-      <ion-button fill="clear" color="danger" [disabled]="busy()" (click)="revoke(invite)">撤销</ion-button>
+      <ion-button fill="clear" [disabled]="status(invite) !== Status.Active" (click)="copy(invite)">复制</ion-button>
+      <ion-button
+        fill="clear"
+        [disabled]="busy() || !destination() || status(invite) !== Status.Active"
+        (click)="share(invite)">
+        分享
+      </ion-button>
+      <ion-button
+        fill="clear"
+        color="danger"
+        [disabled]="busy() || status(invite) !== Status.Active"
+        (click)="revoke(invite)">
+        撤销
+      </ion-button>
     </ion-item>
   }
 </ion-list>

@@ -14,13 +14,17 @@
       } @else {
         <video
           [src]="item.url"
-          [controls]="!item.sticker"
           [autoplay]="item.sticker"
           [loop]="item.sticker"
           [muted]="item.sticker"
           playsinline
           preload="metadata"
           (error)="fail(item.id ?? item.url)"></video>
+        @if (!item.sticker) {
+          <button class="video-open" type="button" (click)="view(item.id ?? item.url, $event)">
+            <ion-icon [icon]="playIcon" />
+          </button>
+        }
       }
       @if (item.uploading) {
         <div class="upload-overlay"><ion-spinner /></div>
@@ -34,11 +38,7 @@
     </div>
   } @else if (item.kind === MediaKind.Audio) {
     <div class="audio-frame">
-      @if (failed().has(item.id ?? item.url)) {
-        <a class="media-error" [href]="item.url" target="_blank" rel="noopener">无法播放，打开语音文件</a>
-      } @else {
-        <audio [src]="item.url" controls preload="none" (error)="fail(item.id ?? item.url)"></audio>
-      }
+      <app-voice-player [src]="item.url" />
       @if (item.uploading) {
         <div class="upload-overlay"><ion-spinner /></div>
       }

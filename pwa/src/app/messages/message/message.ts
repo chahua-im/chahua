@@ -1,22 +1,23 @@
-import { StartChat, StartChatKind } from '../../chats/start-chat/start-chat';
-import { StickerPicker } from '../sticker-picker/sticker-picker';
-import { MessageText } from '../message-text/message-text';
-import { UserProfile } from '../../chats/user-profile/user-profile';
-import { ModalController } from '@ionic/angular';
 import { DatePipe } from '@angular/common';
 import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
-import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
+import { IonAvatar, IonIcon, IonSpinner, ModalController } from '@ionic/angular';
 import { arrowUndoOutline } from 'ionicons/icons';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { StartChat, StartChatKind } from '../../chats/start-chat/start-chat';
+import { UserProfile } from '../../chats/user-profile/user-profile';
+import { InviteCard } from '../invite-card/invite-card';
 import { mediaOverlay } from '../media-overlay';
 import { MessageAttachments, type MessageAttachmentSource } from '../message-attachments/message-attachments';
 import { MessageAuthor } from '../message-author/message-author';
+import { MessageDelivery } from '../message-delivery';
 import { MessagePreview } from '../message-preview/message-preview';
 import { MessageReactions } from '../message-reactions/message-reactions';
+import { MessageStatus } from '../message-status/message-status';
+import { MessageText } from '../message-text/message-text';
 import { MessageThread } from '../message-thread/message-thread';
-import { MessageDelivery, MessageStatus } from '../message-status';
-import type { AttachmentUpload } from '../upload';
+import { StickerPicker } from '../sticker-picker/sticker-picker';
+import { UploadStatus, type AttachmentUpload } from '../upload';
 import { userColors } from '../user-colors';
 
 export type MessageContent = MessageAttachmentSource &
@@ -29,7 +30,8 @@ export type MessageContent = MessageAttachmentSource &
   >;
 
 export interface MessageMenuSelection {
-  messageId: SnowflakeID;
+  messageId?: SnowflakeID;
+  clientGeneratedId?: string;
   element: HTMLElement;
   rect: DOMRect;
   first: boolean;
@@ -42,6 +44,7 @@ export interface MessageMenuSelection {
   templateUrl: './message.html',
   styleUrl: './message.scss',
   imports: [
+    InviteCard,
     DatePipe,
     IonAvatar,
     IonIcon,
@@ -105,14 +108,24 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly showAllAvatars = input(false);
   readonly preview = input(false);
   readonly interactive = input(true);
+  readonly outgoingId = input<string>();
   protected readonly canInteract = computed(() => this.interactive() && !this.preview() && this.message().id != null);
+  protected readonly canMenu = computed(() => !this.preview() && (this.canInteract() || !!this.outgoingId()));
   readonly delivery = input<MessageDelivery>();
   readonly uploads = input<readonly AttachmentUpload[]>([]);
   readonly retry = output<void>();
   protected readonly Delivery = MessageDelivery;
-  protected readonly status = computed(() =>
-    this.own() ? (this.delivery() ?? (this.message().id != null ? MessageDelivery.Sent : undefined)) : undefined,
-  );
+  protected readonly status = computed(() => {
+    if (!this.own()) return;
+    const delivery = this.delivery() ?? (this.message().id != null ? MessageDelivery.Sent : undefined);
+    if (delivery !== MessageDelivery.Sending) return delivery;
+    return this.uploads().some((upload) => {
+      const status = upload.state().status;
+      return status === UploadStatus.Processing || status === UploadStatus.Uploading;
+    })
+      ? MessageDelivery.Uploading
+      : MessageDelivery.Sending;
+  });
   readonly canReply = input(true);
   readonly canOpenThread = input(false);
   readonly reply = output<T>();
@@ -222,7 +235,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   }
 
   protected showMenu(event: Event, element: HTMLElement) {
-    if (!this.canInteract()) return;
+    if (!this.canMenu()) return;
     event.preventDefault();
     this.cancelPress();
     if (!this.longPressed) this.emitMenu(element);
@@ -231,7 +244,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected startPress(event: PointerEvent, element: HTMLElement) {
     this.cancelPress();
     this.longPressed = false;
-    if (!this.canInteract() || event.pointerType !== 'touch' || !event.isPrimary) return;
+    if (!this.canMenu() || event.pointerType !== 'touch' || !event.isPrimary) return;
     this.press = {
       pointerId: event.pointerId,
       x: event.clientX,
@@ -261,9 +274,10 @@ export class Message<T extends MessageContent = MessageResponse> {
 
   private emitMenu(element: HTMLElement) {
     const message = this.message();
-    if (!this.canInteract() || message.id == null || message.messageType === MessageType.system) return;
+    if (!this.canMenu() || message.messageType === MessageType.system) return;
     this.menu.emit({
       messageId: message.id,
+      clientGeneratedId: this.outgoingId(),
       element,
       rect: element.getBoundingClientRect(),
       first: this.first(),

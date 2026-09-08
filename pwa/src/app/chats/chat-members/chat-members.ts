@@ -1,24 +1,39 @@
-import { Component, effect, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  IonSearchbar,
-  IonList,
-  IonItem,
-  IonLabel,
+  AlertController,
   IonAvatar,
   IonButton,
+  IonInfiniteScroll,
+  IonInfiniteScrollContent,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonSearchbar,
   IonSpinner,
-  AlertController,
   ModalController,
+  type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
 import { GroupRole, UserSearchMode, type MemberResponse, type SnowflakeID } from '../../../generated/models';
+import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { SessionStore } from '../../session/session-store';
 import { UserProfile } from '../user-profile/user-profile';
 @Component({
   selector: 'app-chat-members',
   templateUrl: './chat-members.html',
-  imports: [IonSearchbar, IonList, IonItem, IonLabel, IonAvatar, IonButton, IonSpinner],
+  imports: [
+    IonInfiniteScroll,
+    IonInfiniteScrollContent,
+    IonSearchbar,
+    IonList,
+    IonItem,
+    IonLabel,
+    IonAvatar,
+    IonButton,
+    IonSpinner,
+  ],
 })
 export class ChatMembers {
   readonly chatId = input.required<SnowflakeID>();
@@ -27,6 +42,7 @@ export class ChatMembers {
   private readonly api = inject(MembersService);
   private readonly alerts = inject(AlertController);
   private readonly modals = inject(ModalController);
+  private readonly destroy = inject(DestroyRef);
   private version = 0;
   protected readonly q = signal('');
   protected readonly members = signal<MemberResponse[]>([]);
@@ -36,13 +52,22 @@ export class ChatMembers {
   protected readonly error = signal(false);
   protected readonly busy = signal<number | undefined>(undefined);
   constructor() {
+    fillScrollViewport(this.loading, this.error, this.cursor, () => this.load(true));
     effect(() => {
       this.chatId();
       this.q();
       void this.load();
     });
   }
+  protected async more(event: InfiniteScrollCustomEvent) {
+    try {
+      await this.load(true);
+    } finally {
+      await event.target.complete();
+    }
+  }
   protected async load(more = false) {
+    if (more && (this.loading() || this.cursor() == null)) return;
     const version = ++this.version;
     if (!more) {
       this.members.set([]);
@@ -52,12 +77,14 @@ export class ChatMembers {
     this.error.set(false);
     try {
       const page = await firstValueFrom(
-        this.api.getMembers(this.chatId(), {
-          q: this.q(),
-          mode: UserSearchMode.submitted,
-          limit: 40,
-          after: more ? this.cursor() : undefined,
-        }),
+        this.api
+          .getMembers(this.chatId(), {
+            q: this.q(),
+            mode: UserSearchMode.submitted,
+            limit: 40,
+            after: more ? this.cursor() : undefined,
+          })
+          .pipe(takeUntilDestroyed(this.destroy)),
       );
       if (version !== this.version) return;
       this.members.update((items) => (more ? [...items, ...page.members] : page.members));

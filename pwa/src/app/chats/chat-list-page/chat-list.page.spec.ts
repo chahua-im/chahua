@@ -2,14 +2,16 @@ import { Component, input, output, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { routes } from '../../app.routes';
-import { ListTab, type ListSelection } from '../list-tabs';
 import { vi } from 'vitest';
+import { Connection } from '../../api/connection';
+import { mockRealtime } from '../../api/testing';
+import { routes } from '../../app.routes';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { ChatListStore } from '../chat-list-store';
 import { ChatList } from '../chat-list/chat-list';
 import { ChatStore } from '../chat-store';
+import { ListTab, type ListSelection } from '../list-tabs';
 import { ChatListPage } from './chat-list.page';
 
 beforeEach(() => vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false })));
@@ -26,7 +28,10 @@ describe('ChatListPage', () => {
   it('passes route selection to the list with false defaults for missing flags', async () => {
     await TestBed.configureTestingModule({
       imports: [ChatListPage],
-      providers: [provideRouter(routes, withComponentInputBinding())],
+      providers: [
+        { provide: Connection, useValue: mockRealtime() },
+        provideRouter(routes, withComponentInputBinding()),
+      ],
     })
       .overrideComponent(ChatListPage, { remove: { imports: [ChatList] }, add: { imports: [ListStub] } })
       .compileComponents();
@@ -84,6 +89,7 @@ describe('ChatListPage query lifecycle', () => {
     await TestBed.configureTestingModule({
       imports: [ChatListPage],
       providers: [
+        { provide: Connection, useValue: mockRealtime() },
         provideRouter([]),
         {
           provide: ChatListStore,

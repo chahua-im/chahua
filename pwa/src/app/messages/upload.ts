@@ -1,8 +1,10 @@
 import { signal } from '@angular/core';
-import { firstValueFrom, from, fromEvent, takeUntil } from 'rxjs';
+import { firstValueFrom, from, fromEvent, takeUntil, timeout } from 'rxjs';
 import { AttachmentsService } from '../../generated/endpoints/attachments/attachments.service';
 import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
 import { prepareMedia } from './media-processing/prepare-media';
+
+const IDLE_TIMEOUT = 30_000;
 
 export enum UploadStatus {
   Processing,
@@ -24,6 +26,17 @@ export class AttachmentUpload {
   private readonly controller = new AbortController();
   private prepared?: Awaited<ReturnType<typeof prepareMedia>>;
   private pending?: Promise<SnowflakeID | undefined>;
+  private attempt?: AbortController;
+  private timer?: ReturnType<typeof setTimeout>;
+  private retryDelay = 1_000;
+  private reconnect = false;
+  retryable = true;
+  private readonly offline = () => this.attempt?.abort();
+  private readonly online = () => {
+    if (!this.retryable) return;
+    this.reconnect = !!this.pending;
+    void this.retry();
+  };
 
   constructor(
     private readonly api: AttachmentsService,
@@ -31,27 +44,48 @@ export class AttachmentUpload {
     readonly purpose: AttachmentUploadPurpose,
   ) {
     this.url = URL.createObjectURL(file);
+    window.addEventListener('offline', this.offline);
+    window.addEventListener('online', this.online);
     void this.retry();
   }
 
   retry(): Promise<SnowflakeID | undefined> {
+    if (this.controller.signal.aborted) return Promise.resolve(undefined);
     if (this.state().status === UploadStatus.Ready) return Promise.resolve(this.state().id);
     if (this.pending) return this.pending;
-    if (this.controller.signal.aborted) return Promise.resolve(undefined);
-    this.pending = this.run().finally(() => (this.pending = undefined));
+    clearTimeout(this.timer);
+    this.retryable = true;
+    this.attempt = new AbortController();
+    this.pending = this.run().finally(() => {
+      this.pending = undefined;
+      this.attempt = undefined;
+      if (
+        !this.controller.signal.aborted &&
+        this.state().status === UploadStatus.Failed &&
+        this.retryable &&
+        navigator.onLine !== false
+      ) {
+        this.timer = setTimeout(() => void this.retry(), this.reconnect ? 0 : this.retryDelay);
+        this.retryDelay = Math.min(this.retryDelay * 2, 30_000);
+      }
+      this.reconnect = false;
+    });
     return this.pending;
   }
 
   dispose() {
     if (this.controller.signal.aborted) return;
     this.controller.abort();
+    clearTimeout(this.timer);
+    window.removeEventListener('offline', this.offline);
+    window.removeEventListener('online', this.online);
     if (this.state().status !== UploadStatus.Ready)
       this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed }));
     URL.revokeObjectURL(this.url);
   }
 
   private async run(): Promise<SnowflakeID | undefined> {
-    const signal = this.controller.signal;
+    const signal = AbortSignal.any([this.controller.signal, this.attempt!.signal]);
     const aborted = fromEvent(signal, 'abort');
     const processing = this.purpose === AttachmentUploadPurpose.media && !this.prepared;
     this.uploadState.update((state) => ({
@@ -63,14 +97,18 @@ export class AttachmentUpload {
       if (!signal.aborted) this.uploadState.update((state) => ({ ...state, progress }));
     };
     try {
-      const config = await firstValueFrom(this.api.getConfig().pipe(takeUntil(aborted)));
+      if (navigator.onLine === false) throw new Error('Offline');
+      const config = await firstValueFrom(this.api.getConfig().pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)));
       signal.throwIfAborted();
       if (processing) {
         this.prepared = await firstValueFrom(from(prepareMedia(this.file, signal, progress)).pipe(takeUntil(aborted)));
         signal.throwIfAborted();
       }
       const { file, dimensions } = this.prepared ?? { file: this.file, dimensions: undefined };
-      if (file.size > config.maxFileSizeBytes) throw new Error('文件过大');
+      if (file.size > config.maxFileSizeBytes) {
+        this.retryable = false;
+        throw new Error('文件过大');
+      }
       this.uploadState.set({ ...dimensions, status: UploadStatus.Uploading, progress: 0 });
       const response = await firstValueFrom(
         this.api
@@ -81,7 +119,7 @@ export class AttachmentUpload {
             purpose: this.purpose,
             ...dimensions,
           })
-          .pipe(takeUntil(aborted)),
+          .pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)),
       );
       signal.throwIfAborted();
       await uploadBlob(response.uploadUrl, file, response.uploadHeaders, signal, progress);
@@ -92,9 +130,14 @@ export class AttachmentUpload {
         status: UploadStatus.Ready,
         progress: 1,
       }));
+      this.retryDelay = 1_000;
       return response.attachmentId;
-    } catch {
-      if (!signal.aborted) this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed }));
+    } catch (error) {
+      const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : undefined;
+      this.retryable =
+        this.retryable && (status == null || status === 0 || status === 408 || status === 429 || status >= 500);
+      if (!this.controller.signal.aborted)
+        this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed }));
       return undefined;
     }
   }
@@ -111,44 +154,53 @@ export function uploadBlob(
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url);
     for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value);
-    const abort = () => xhr.abort();
+    let timer: ReturnType<typeof setTimeout>;
+    let settled = false;
+    let loaded = 0;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      window.removeEventListener('offline', abort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const abort = () => {
+      finish(new DOMException('上传取消', 'AbortError'));
+      xhr.abort();
+    };
+    const activity = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        finish(new DOMException('上传无进度超时', 'TimeoutError'));
+        xhr.abort();
+      }, IDLE_TIMEOUT);
+    };
     xhr.upload.onprogress = (event) => {
+      if (settled) return;
+      // Repeated events reporting the same byte count do not extend a stalled attempt.
+      if (event.loaded > loaded) {
+        loaded = event.loaded;
+        activity();
+      }
       if (event.lengthComputable) progress?.(event.loaded / event.total);
     };
-    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('上传失败')));
-    xhr.onerror = () => reject(new Error('上传失败'));
-    xhr.onabort = () => reject(new DOMException('上传取消', 'AbortError'));
-    xhr.onloadend = () => signal?.removeEventListener('abort', abort);
-    if (signal?.aborted) {
-      reject(new DOMException('上传取消', 'AbortError'));
+    xhr.onload = () =>
+      finish(
+        xhr.status >= 200 && xhr.status < 300
+          ? undefined
+          : Object.assign(new Error('上传失败'), { status: xhr.status }),
+      );
+    xhr.onerror = () => finish(new Error('上传失败'));
+    xhr.onabort = () => finish(new DOMException('上传取消', 'AbortError'));
+    if (signal?.aborted || navigator.onLine === false) {
+      finish(new DOMException('上传取消', 'AbortError'));
       return;
     }
     signal?.addEventListener('abort', abort, { once: true });
+    window.addEventListener('offline', abort, { once: true });
+    activity();
     xhr.send(blob);
   });
-}
-export async function mediaDimensions(file: File): Promise<{ width?: number; height?: number }> {
-  if (!/^(image|video)\//.test(file.type)) return {};
-  const url = URL.createObjectURL(file);
-  try {
-    if (file.type.startsWith('image/')) {
-      const image = new Image();
-      image.src = url;
-      await image.decode();
-      return { width: image.naturalWidth, height: image.naturalHeight };
-    }
-    return await new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.onloadedmetadata = () => {
-        resolve({ width: video.videoWidth, height: video.videoHeight });
-        video.removeAttribute('src');
-        video.load();
-      };
-      video.onerror = () => reject(new Error('无法读取视频'));
-      video.src = url;
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
 }

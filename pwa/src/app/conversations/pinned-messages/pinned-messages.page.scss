@@ -1,15 +1,3 @@
 ion-content {
   --background: var(--ion-color-light);
 }
-
-ion-button:not([color]),
-ion-back-button {
-  --color: var(--ion-color-primary-shade);
-}
-
-@media (prefers-color-scheme: dark) {
-  ion-button:not([color]),
-  ion-back-button {
-    --color: color-mix(in srgb, var(--ion-color-primary-tint) 85%, var(--ion-text-color));
-  }
-}

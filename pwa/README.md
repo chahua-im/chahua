@@ -4,11 +4,13 @@
 
 ## 文档
 
+- [需求与边界](docs/requirements.md)：现有功能、交互要求与协议限制。
+- [外观](docs/appearance.md)：尺寸依据、Telegram 对照与样式归属。
 - [目录结构](docs/directory-structure.md)：文件归属与代码边界。
 - [数据流](docs/data-flow.md)：状态所有权、请求时机、实时事件与一致性范围。
 - [Components](docs/components.md)：组件树、输入输出、局部状态与服务依赖。
 - [加载与操作反馈](docs/loading-indicators.md)：各场景的加载标识和等待行为。
-- [代码约定](AGENTS.md)：模板、类型、Angular 和可访问性要求。
+- [代码约定](AGENTS.md)：模板、类型与 Angular/Ionic 约定。
 
 ## 开发
 
@@ -19,6 +21,8 @@ npm run build
 npm test -- --watch=false
 npm run test:pwa
 ```
+
+安装指引位于 `/landing`；已安装应用从该入口直接进入聊天。
 
 开发服务地址为 `http://localhost:4200`，生产构建输出位于 `dist/app`。HTTP 和 WebSocket 使用同源的 `/_api` 路径；开发服务代理到 `https://chahui.app/_api`。
 

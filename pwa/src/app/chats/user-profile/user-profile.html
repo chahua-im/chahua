@@ -11,6 +11,29 @@
     }
     <h1>{{ user().username || '用户 ' + user().uid }}</h1>
     <p>{{ user().uid }}</p>
+    <ion-button
+      fill="outline"
+      size="small"
+      [href]="'https://www.shireyishunjian.com/main/home.php?mod=space&uid=' + user().uid"
+      target="_blank">
+      个人空间
+    </ion-button>
+    @if (user().uid === session.user()?.uid) {
+      <ion-button
+        fill="outline"
+        size="small"
+        href="https://www.shireyishunjian.com/main/forum.php?mod=viewthread&tid=209934"
+        target="_blank">
+        修改用户名
+      </ion-button>
+      <ion-button
+        fill="outline"
+        size="small"
+        href="https://www.shireyishunjian.com/main/home.php?mod=spacecp&ac=avatar"
+        target="_blank">
+        修改头像
+      </ion-button>
+    }
     @if (user().userGroup; as group) {
       <p>{{ group.name }}</p>
     }

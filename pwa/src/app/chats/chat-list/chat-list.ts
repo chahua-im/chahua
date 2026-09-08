@@ -1,6 +1,3 @@
-import { DirectorySearch } from '../directory-search/directory-search';
-import { StartChat, StartChatKind } from '../start-chat/start-chat';
-import { ModalController, IonSearchbar } from '@ionic/angular';
 import {
   Component,
   computed,
@@ -30,12 +27,14 @@ import {
   IonPopover,
   IonRefresher,
   IonRefresherContent,
+  IonSearchbar,
   IonSegment,
   IonSegmentButton,
   IonSpinner,
   IonText,
   IonTitle,
   IonToolbar,
+  ModalController,
   type InfiniteScrollCustomEvent,
   type SegmentCustomEvent,
 } from '@ionic/angular';
@@ -53,17 +52,21 @@ import {
   personAddOutline,
 } from 'ionicons/icons';
 import { FriendRequestDirection, FriendRequestStatus, GroupKind, MessageType } from '../../../generated/models';
+import { Connection } from '../../api/connection';
 import { decodeId } from '../../api/snowflake-id';
+import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
+import { DraftStore } from '../../conversations/draft-store';
+import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { ChatListItem, type ChatListEntry } from '../chat-list-item/chat-list-item';
 import { ChatListError, ChatListStore, FriendRequestAction } from '../chat-list-store';
+import { ChatMute } from '../chat-mute/chat-mute';
 import { ChatStore } from '../chat-store';
-import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
-import { DraftStore } from '../../conversations/draft-store';
+import { DirectorySearch } from '../directory-search/directory-search';
 import { isListTab, ListTab, type ListSelection } from '../list-tabs';
-import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { ContentScrollbars } from '../../content-scrollbars';
+import { StartChat, StartChatKind } from '../start-chat/start-chat';
 
 enum ListRowKind {
   Chat,
@@ -80,6 +83,7 @@ enum ListRowKind {
     '[attr.data-list-tab]': 'list().tab',
   },
   imports: [
+    ChatMute,
     ContentScrollbars,
     DirectorySearch,
     IonSearchbar,
@@ -109,7 +113,9 @@ enum ListRowKind {
   ],
 })
 export class ChatList {
+  protected readonly realtime = inject(Connection);
   readonly active = input(true);
+  private readonly muteMenu = viewChild.required(ChatMute);
   private readonly modals = inject(ModalController);
   protected readonly StartKind = StartChatKind;
   protected readonly searching = signal(false);
@@ -155,7 +161,7 @@ export class ChatList {
     this.visibleConversations().map((chat) => {
       const last = chat.lastMessage;
       const draft = this.drafts.get(chat.id);
-      const muted = !!chat.mutedUntil && new Date(chat.mutedUntil).getTime() > Date.now();
+      const muted = this.metadata.isMuted(chat.id);
       return {
         kind: ListRowKind.Chat as const,
         key: chat.id,
@@ -176,11 +182,12 @@ export class ChatList {
               ? new Date(draft.savedAt).toISOString()
               : chat.lastMessageAt,
           unreadCount: chat.unreadCount,
+          muted,
         } satisfies ChatListEntry,
         toggleRead: last
           ? () => (chat.unreadCount > 0 ? this.metadata.markRead(chat.id, last.id) : this.metadata.markUnread(chat.id))
           : undefined,
-        toggleMuted: () => this.metadata.setMuted(chat.id, !muted),
+        toggleMuted: () => this.muteMenu().toggle(chat.id),
         toggleArchived: () => this.metadata.setArchived(chat.id, !chat.archived),
       };
     }),
@@ -221,6 +228,7 @@ export class ChatList {
                 ? new Date(draft.savedAt).toISOString()
                 : thread.lastReplyAt,
             unreadCount: thread.unreadCount,
+            muted: thread.archived,
             link: ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(root.id)],
           } satisfies ChatListEntry,
           markRead: () => this.metadata.markThreadRead(thread.chatId, root.id, last?.id ?? root.id),
