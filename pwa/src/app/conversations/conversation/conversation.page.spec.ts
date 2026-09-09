@@ -4,7 +4,7 @@ import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router, RouterLink } from '@angular/router';
-import { IonContent, IonModal, IonTextarea } from '@ionic/angular';
+import { IonContent, IonModal, IonTextarea, iosTransitionAnimation } from '@ionic/angular';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -55,8 +55,28 @@ describe('ConversationPage', () => {
   let resync: Subject<void>;
   let subscriptions: WritableSignal<Map<SnowflakeID, ThreadSubscriptionStatusResponse>>;
   let scroll: HTMLElement;
+  let resizes: Map<Element, () => void>;
   const avatars = signal(false);
   beforeEach(async () => {
+    resizes = new Map();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        private readonly targets = new Set<Element>();
+        constructor(private readonly callback: () => void) {}
+        observe(target: Element) {
+          this.targets.add(target);
+          resizes.set(target, this.callback);
+        }
+        unobserve(target: Element) {
+          this.targets.delete(target);
+          resizes.delete(target);
+        }
+        disconnect() {
+          for (const target of this.targets) resizes.delete(target);
+        }
+      },
+    );
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -119,6 +139,37 @@ describe('ConversationPage', () => {
     vi.restoreAllMocks();
     http.verify();
   });
+
+  it.each(['forward', 'back'] as const)(
+    'animates the toolbar separately from content when navigating %s',
+    (direction) => {
+      const page: HTMLElement = fixture.nativeElement;
+      page.classList.add('ion-page');
+      const content = page.querySelector<HTMLElement>(':scope > ion-content')!;
+      const title = page.querySelector<HTMLElement>(':scope > ion-header ion-title')!;
+      const back = page.querySelector<HTMLElement>(':scope > ion-header ion-back-button')!;
+      expect(content).not.toBeNull();
+      expect(title).not.toBeNull();
+      expect(back).not.toBeNull();
+      const other = document.createElement('div');
+      const animation = iosTransitionAnimation(document.createElement('div'), {
+        baseEl: document.createElement('div'),
+        enteringEl: direction === 'forward' ? page : other,
+        leavingEl: direction === 'forward' ? other : page,
+        direction,
+      });
+      const parts = [animation];
+      for (const part of parts) parts.push(...part.childAnimations);
+      const contentAnimation = parts.find((part) => part.elements.includes(content))!;
+      const titleAnimation = parts.find((part) => part.elements.includes(title))!;
+      const backAnimation = parts.find((part) => part.elements.includes(back))!;
+      expect(titleAnimation).not.toBe(contentAnimation);
+      expect(contentAnimation.getKeyframes().some((frame) => frame['transform'])).toBe(true);
+      expect(titleAnimation.getKeyframes().some((frame) => frame['transform'] && frame['opacity'] != null)).toBe(true);
+      expect(backAnimation.getKeyframes().some((frame) => frame['opacity'] != null)).toBe(true);
+      animation.destroy();
+    },
+  );
 
   function typeText(text: string) {
     const textarea = fixture.debugElement.query(By.directive(IonTextarea));
@@ -379,6 +430,90 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
   });
 
+  function unpinMessage(id: string) {
+    events.next({
+      type: component.threadId() ? ServerWsMessageType.threadPinRemoved : ServerWsMessageType.pinRemoved,
+      payload: {
+        chatId: testChat.id,
+        threadRootId: component.threadId(),
+        pinId: encodeId(id),
+        messageId: testMessage.id,
+      },
+    });
+  }
+
+  it.each(['touchEnd', 'scrollEnd'] as const)(
+    'defers pin bar appearance and removal until both touch and scrolling end: %s first',
+    async (firstEnd) => {
+      const scrolling = component['scrolling'];
+      const secondEnd = firstEnd === 'touchEnd' ? 'scrollEnd' : 'touchEnd';
+      for (const show of [true, false]) {
+        scrolling.touchStart();
+        scrolling.scrollStart();
+        if (show) pinMessage('201');
+        else unpinMessage('201');
+        await fixture.whenStable();
+        expect(component['pins']().items()).toHaveLength(show ? 1 : 0);
+        expect(!!fixture.nativeElement.querySelector('.pinned-bar')).toBe(!show);
+        scrolling[firstEnd]();
+        await fixture.whenStable();
+        expect(!!fixture.nativeElement.querySelector('.pinned-bar')).toBe(!show);
+        scrolling[secondEnd]();
+        await fixture.whenStable();
+        expect(!!fixture.nativeElement.querySelector('.pinned-bar')).toBe(show);
+      }
+    },
+  );
+
+  it.each([false, true])('coalesces pin changes while scrolling with an initially visible bar: %s', async (shown) => {
+    if (shown) pinMessage('201');
+    await fixture.whenStable();
+    const bar = fixture.nativeElement.querySelector('.pinned-bar');
+    component['scrolling'].scrollStart();
+    if (shown) unpinMessage('201');
+    else pinMessage('201');
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBe(bar);
+    if (shown) pinMessage('201');
+    else unpinMessage('201');
+    await fixture.whenStable();
+    component['scrolling'].scrollEnd();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBe(bar);
+  });
+
+  it('updates an existing pin preview during scrolling without replacing the bar', async () => {
+    pinMessage('201');
+    await fixture.whenStable();
+    const bar: HTMLElement = fixture.nativeElement.querySelector('.pinned-bar');
+    component['scrolling'].scrollStart();
+    pinMessage('201', { ...testMessage, message: '修改后的置顶内容' });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBe(bar);
+    expect(bar.textContent).toContain('修改后的置顶内容');
+  });
+
+  it('discards deferred pin visibility on topic changes and uses current pins on cached reentry', async () => {
+    component['scrolling'].touchStart();
+    component['scrolling'].scrollStart();
+    pinMessage('201');
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
+    await enterThread();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
+    component['scrolling'].scrollStart();
+    pinMessage('202');
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
+    component.ionViewDidLeave();
+    unpinMessage('202');
+    await reenter();
+    expect(fixture.nativeElement.querySelector('.pinned-bar')).toBeNull();
+    pinMessage('203');
+    await fixture.whenStable();
+    expect(component['selectedPin']()?.id).toBe(encodeId('203'));
+  });
+
   it('uses this topic pin collection and resets the selected preview on entry', async () => {
     pinMessage('201');
     await enterThread();
@@ -410,6 +545,26 @@ describe('ConversationPage', () => {
       expect(content.querySelector('ion-fab')).toBe(fab);
       expect(getComputedStyle(fab).visibility).toBe(top === 470 ? 'hidden' : 'visible');
       expect(scroll.scrollTop).toBe(top);
+    }
+  });
+
+  it('keeps the floating date and content slots mounted across scrolling starts, date changes and stops', async () => {
+    const content: HTMLElement = fixture.nativeElement.querySelector('ion-content');
+    const children = [...content.children];
+    const date = content.querySelector<HTMLElement>('.floating-date')!;
+    expect(date.style.visibility).toBe('hidden');
+    for (const day of ['2026-09-08', '2026-09-09']) {
+      component['visibleDate'].set(`${day}T00:00:00Z`);
+      content.dispatchEvent(new Event('ionScrollStart'));
+      await fixture.whenStable();
+      expect([...content.children]).toEqual(children);
+      expect(content.querySelector('.floating-date')).toBe(date);
+      expect(date.style.visibility).toBe('visible');
+      expect(date.textContent).toContain(day.endsWith('08') ? '2026年9月8日' : '2026年9月9日');
+      content.dispatchEvent(new Event('ionScrollEnd'));
+      await fixture.whenStable();
+      expect([...content.children]).toEqual(children);
+      expect(date.style.visibility).toBe('hidden');
     }
   });
 
@@ -1172,6 +1327,91 @@ describe('ConversationPage', () => {
     expect(scroll.scrollTop).toBe(expectedTop);
   });
 
+  it('keeps the latest messages at the bottom when pins or the composer reduce the viewport', async () => {
+    let height = 500;
+    let top = 500;
+    Object.defineProperties(scroll, {
+      clientHeight: { get: () => height },
+      scrollHeight: { value: 1000 },
+      scrollTop: {
+        get: () => top,
+        set: (value: number) => {
+          top = Math.min(value, 1000 - height);
+        },
+      },
+    });
+    await component['trackScroll']();
+    expect(component['atBottom']()).toBe(true);
+    height = 448;
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(top).toBe(552);
+    expect(component['atBottom']()).toBe(true);
+    expect(component['showDownButton']()).toBe(false);
+  });
+
+  it('preserves the reading position during size changes when the user has scrolled up', async () => {
+    let height = 500;
+    Object.defineProperties(scroll, {
+      clientHeight: { get: () => height },
+      scrollHeight: { value: 1000 },
+    });
+    scroll.scrollTop = 200;
+    await component['trackScroll']();
+    height = 448;
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(200);
+    expect(component['showDownButton']()).toBe(true);
+  });
+
+  it('keeps messages at their screen positions when the first pin appears or disappears while reading history', async () => {
+    Object.defineProperties(scroll, { clientHeight: { value: 448 }, scrollHeight: { value: 1000 } });
+    scroll.scrollTop = 200;
+    await component['trackScroll']();
+    const rect = vi.spyOn(scroll, 'getBoundingClientRect');
+    rect.mockReturnValue(new DOMRect(0, 52, 300, 448));
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(252);
+    rect.mockReturnValue(new DOMRect(0, 0, 300, 500));
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(200);
+  });
+
+  it('does not reuse the previous visit viewport offset when entering again', async () => {
+    const rect = vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 52, 300, 448));
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    component.ionViewDidLeave();
+    await reenter();
+    Object.defineProperties(scroll, { clientHeight: { value: 500 }, scrollHeight: { value: 1000 } });
+    scroll.scrollTop = 200;
+    await component['trackScroll']();
+    rect.mockReturnValue(new DOMRect(0, 0, 300, 500));
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(200);
+  });
+
+  it('does not pin a historical range to the bottom on resize and releases observation on destroy', async () => {
+    const opening = component['conversation'].open(encodeId('100'));
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      messages: [{ ...wireMessage }],
+      newerCursor: wireMessage.id,
+    });
+    await opening;
+    await fixture.whenStable();
+    scroll.scrollTop = 200;
+    component['atBottom'].set(true);
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(200);
+    fixture.destroy();
+    expect(resizes.has(scroll)).toBe(false);
+  });
+
   it('marks only a visible message bottom and stops tracking hidden or departed pages', async () => {
     const markRead = TestBed.inject(ChatStore).markRead;
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
@@ -1199,6 +1439,44 @@ describe('ConversationPage', () => {
     expect(component['conversation'].items()).toEqual([]);
     expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(0);
     expect(component['rows']()).toEqual([]);
+  });
+
+  it('updates the read boundary when a pending row is confirmed in place and then deleted', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    const first: HTMLElement = fixture.nativeElement.querySelector('app-message');
+    vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 60));
+    typeText('等待确认');
+    const sending = component['sendMessage']();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    await fixture.whenStable();
+    const local: HTMLElement = fixture.nativeElement.querySelector('.message-list > app-message:last-child');
+    vi.spyOn(local, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 60, 300, 60));
+    component.ionViewDidEnter();
+    await fixture.whenStable();
+    const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
+    markRead.mockClear();
+    await component['trackScroll']();
+    expect(markRead).toHaveBeenLastCalledWith(testChat.id, testMessage.id);
+
+    const confirmedId = encodeId('9007199254741010');
+    request.flush({
+      ...wireMessage,
+      id: decodeId(confirmedId),
+      clientGeneratedId: request.request.body.clientGeneratedId,
+    });
+    await sending;
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.message-list > app-message:last-child')).toBe(local);
+    markRead.mockClear();
+    await component['trackScroll']();
+    expect(markRead).toHaveBeenLastCalledWith(testChat.id, confirmedId);
+
+    component['conversation'].delete(confirmedId);
+    await fixture.whenStable();
+    markRead.mockClear();
+    await component['trackScroll']();
+    expect(markRead).toHaveBeenLastCalledWith(testChat.id, testMessage.id);
   });
 
   it('refreshes metadata and reports the visible read position through the unified resync event', async () => {

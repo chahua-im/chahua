@@ -11,6 +11,7 @@ ion-content {
 .saved-source {
   margin: 8px 12px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   color: var(--ion-color-medium);
 }

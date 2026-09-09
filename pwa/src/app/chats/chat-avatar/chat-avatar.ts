@@ -20,5 +20,5 @@ export interface ChatAvatarData {
 })
 export class ChatAvatar {
   readonly entry = input.required<ChatAvatarData>();
-  readonly size = input(48);
+  readonly size = input<number>();
 }

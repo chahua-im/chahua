@@ -1,6 +1,6 @@
 :host {
   display: block;
-  margin: 8px -12px -8px;
+  margin: 8px calc(-1 * var(--message-padding-inline)) calc(-1 * var(--message-padding-block));
   border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
 }
 .thread-entry {
@@ -8,12 +8,13 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 44px;
-  padding: 8px 12px;
+  min-height: var(--app-item-height);
+  padding: 8px var(--message-padding-inline);
   background: transparent;
   color: var(--thread-color, var(--ion-color-primary-shade));
   text-align: start;
-  font-size: 14px;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
   cursor: pointer;
 }
 .label {

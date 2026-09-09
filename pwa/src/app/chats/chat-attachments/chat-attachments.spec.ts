@@ -1,6 +1,8 @@
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
+import { ChatAttachmentKindFilter } from '../../../generated/models';
 import { ModalController } from '@ionic/angular';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -104,6 +106,20 @@ describe('ChatAttachments media viewer', () => {
     expect(create).toHaveBeenCalledOnce();
     expect(fixture.componentInstance['openFailed']()).toBe(false);
   });
+  it('does not navigate from a stale attachment after switching media tabs', async () => {
+    const fixture = await open();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const operation = fixture.componentInstance['locate'](fixture.componentInstance['items']()[0]);
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    fixture.componentRef.setInput('kind', ChatAttachmentKindFilter.video);
+    fixture.detectChanges();
+    http.expectOne((req) => req.url.endsWith('/attachments')).flush({ attachments: [] });
+    request.flush(structuredClone(wireMessage));
+    await operation;
+    expect(navigate).not.toHaveBeenCalled();
+    expect(fixture.componentInstance['locateFailed']()).toBe(false);
+  });
+
   it('does not open a viewer after its source component is destroyed', async () => {
     const fixture = await open();
     const operation = fixture.componentInstance['view'](fixture.componentInstance['items']()[0]);

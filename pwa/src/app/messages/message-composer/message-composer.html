@@ -81,6 +81,7 @@
         <button
           type="button"
           class="sticker-button"
+          [attr.title]="windows ? 'Emoji: Win + .' : macOS ? 'Emoji: fn + E' : null"
           [class.selected]="panel() === Panel.Stickers"
           (click)="togglePanel(Panel.Stickers)">
           <ion-icon [icon]="icons.happyOutline" />

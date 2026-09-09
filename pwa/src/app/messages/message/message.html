@@ -34,7 +34,7 @@
       @if (!preview() && showAvatar()) {
         <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
           @if (message().sender.avatarUrl; as src) {
-            <img [src]="src" width="36" height="36" decoding="async" />
+            <img [src]="src" width="34" height="34" decoding="async" />
           } @else {
             {{ name().slice(0, 2).toUpperCase() }}
           }
@@ -104,7 +104,6 @@
                     [interactive]="canInteract()" />
                 </span>
               }
-              <span class="timestamp-spacer"></span>
               @if (!hasReactions()) {
                 <time class="timestamp" [attr.datetime]="message().createdAt">
                   @if (message().isEdited) {

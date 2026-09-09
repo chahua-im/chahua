@@ -15,7 +15,7 @@
     </app-chat-list-item>
   }
 </ion-list>
-@if (loading() || opening()) {
+@if ((loading() && cursor() == null) || opening()) {
   <div class="loading-status"><ion-spinner /></div>
 } @else if (error()) {
   <p class="ion-padding">
@@ -25,10 +25,7 @@
 } @else if (!items().length) {
   <p class="ion-padding ion-text-center">{{ cursor() ? '暂无近期话题' : '暂无话题' }}</p>
 }
-<ion-infinite-scroll
-  threshold="100px"
-  [disabled]="cursor() == null || loading() || error()"
-  (ionInfinite)="more($event)">
+<ion-infinite-scroll threshold="100px" [disabled]="cursor() == null || error()" (ionInfinite)="more($event)">
   <ion-infinite-scroll-content />
 </ion-infinite-scroll>
 @if (openFailed()) {

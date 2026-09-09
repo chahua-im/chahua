@@ -8,7 +8,7 @@
 - [外观](docs/appearance.md)：尺寸依据、Telegram 对照与样式归属。
 - [目录结构](docs/directory-structure.md)：文件归属与代码边界。
 - [数据流](docs/data-flow.md)：状态所有权、请求时机、实时事件与一致性范围。
-- [Components](docs/components.md)：组件树、输入输出、局部状态与服务依赖。
+- [组件](docs/components.md)：组件树、输入输出、局部状态与服务依赖。
 - [加载与操作反馈](docs/loading-indicators.md)：各场景的加载标识和等待行为。
 - [代码约定](AGENTS.md)：模板、类型与 Angular/Ionic 约定。
 
@@ -28,6 +28,12 @@ npm run test:pwa
 
 登录 token 的优先级是 URL 的 `token` 参数、localStorage、开发预设。
 开发预设放在 Git 忽略的 `.env.local`，格式见 `.env.example`。`npm start` 通过编译常量注入 `CHAHUA_DEV_TOKEN`，修改后需要重启开发服务。生产构建不读取该文件。预设会随开发页面下发，能够访问开发服务的浏览器可以使用该身份；真实 token 不应提交到仓库。
+
+## 测试与行为约定
+
+修改前以[需求与边界](docs/requirements.md)为准；需求记录产品行为，其他文档分别描述尺寸、组件所有权与请求时机，避免同一规则多处维护。回归测试随实现放置，关键覆盖包括分页范围、导航生命周期、滚动锚点、队列顺序/撤回、媒体取消和通知去重。
+
+单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身；浏览器自动化同样必须拦截 HTTP、WebSocket 与上传。禁止向生产服写测试数据，禁止测试上传 S3。必须实测写入时使用本地后端及开发数据库 `10.198.3.214`，并以临时代理配置覆盖默认生产代理，例如 `npm start -- --proxy-config /tmp/chahua-local-proxy.json`。本地前端地址本身不意味着后端也是本地。
 
 ## API 生成
 

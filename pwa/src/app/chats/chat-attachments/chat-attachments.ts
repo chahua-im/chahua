@@ -112,17 +112,20 @@ export class ChatAttachments {
   }
   protected async locate(item: ChatAttachmentResponse) {
     if (this.locating()) return;
+    const chatId = this.chatId();
+    const kind = this.kind();
     this.locating.set(item.id);
     this.locateFailed.set(false);
     try {
       const message = await firstValueFrom(
-        this.api.getMessage(this.chatId(), item.messageId).pipe(takeUntilDestroyed(this.destroy)),
+        this.api.getMessage(chatId, item.messageId).pipe(takeUntilDestroyed(this.destroy)),
       );
+      if (this.destroy.destroyed || this.chatId() !== chatId || this.kind() !== kind) return;
       await dismissChatOverlays(this.modals);
       await this.router.navigate(
         [
           '/chats/chat',
-          decodeId(this.chatId()),
+          decodeId(message.chatId),
           ...(message.replyRootId ? ['thread', decodeId(message.replyRootId)] : []),
         ],
         {
@@ -130,7 +133,7 @@ export class ChatAttachments {
         },
       );
     } catch {
-      this.locateFailed.set(true);
+      if (!this.destroy.destroyed && this.chatId() === chatId && this.kind() === kind) this.locateFailed.set(true);
     } finally {
       this.locating.set(undefined);
     }
