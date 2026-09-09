@@ -11,6 +11,7 @@ pwa/
 ├── orval.config.ts            生成入口与 splitByTags 配置
 └── src/
     ├── main.ts                Angular、Ionic、HTTP、路由与 Worker 配置
+    ├── build.d.ts             构建时注入的版本常量声明
     ├── index.html             启动占位、系统主题和静态入口
     ├── styles.scss            框架入口、主题、文字层级与公共样式
     ├── generated/

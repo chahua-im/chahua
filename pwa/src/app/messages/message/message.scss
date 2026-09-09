@@ -101,18 +101,6 @@
   display: flow-root;
 }
 
-.message-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: flex-end;
-}
-
-app-message-reactions {
-  flex: 1;
-  min-width: 0;
-}
-
 .message-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

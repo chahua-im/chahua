@@ -2,7 +2,6 @@ import { TestBed } from '@angular/core/testing';
 import { SwUpdate, type VersionEvent } from '@angular/service-worker';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { version } from '../../../package.json';
 import { AppUpdates, UpdateCheckResult } from './app-updates';
 
 describe('AppUpdates', () => {
@@ -18,10 +17,10 @@ describe('AppUpdates', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows the package version and reports unavailable without a registered worker', async () => {
+  it('shows the default build version and reports unavailable without a registered worker', async () => {
     worker.isEnabled = false;
     const service = TestBed.inject(AppUpdates);
-    expect(service.version).toBe(version);
+    expect(service.version).toBe('PWA2-dev');
     expect(await service.check()).toBe(UpdateCheckResult.Unavailable);
     expect(worker.checkForUpdate).not.toHaveBeenCalled();
   });

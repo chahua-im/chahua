@@ -14,7 +14,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   return next(
     request.clone({
       setHeaders: {
-        'X-App-Version': 'angular-pwa/0.0.0',
+        'X-App-Version': CHAHUA_APP_VERSION,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     }),

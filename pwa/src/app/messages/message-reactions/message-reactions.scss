@@ -2,19 +2,22 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding-top: 4px;
+  margin: 8px 0;
+  position: relative;
+  z-index: 10;
+}
+
+:host(.own) {
+  justify-content: flex-end;
 }
 
 .reaction {
-  --reaction-background: var(--ion-color-light-shade);
   display: inline-flex;
   align-items: center;
-  min-height: var(--app-reaction-size);
-  padding: 0;
-  border: 0;
-  border-radius: calc(var(--app-reaction-size) / 2);
-  background: var(--reaction-background);
+  border-radius: 12px;
+  background: var(--ion-color-light-shade);
   color: var(--ion-color-light-contrast);
+  font-size: 21px;
   line-height: 1;
 }
 
@@ -29,51 +32,44 @@ button.reaction {
 
 .reacted,
 :host(.own) .reaction {
-  --reaction-background: var(--ion-color-primary-tint);
+  background: var(--ion-color-primary-tint);
   color: var(--ion-color-primary-contrast);
 }
 
 :host(.own) .reacted {
-  --reaction-background: var(--ion-color-primary-shade);
+  background: var(--ion-color-primary-shade);
 }
 
 .emoji {
-  margin-left: 11px;
-  font-size: calc(var(--app-reaction-size) - 10px);
+  margin: 0.5px 0 0.5px 6px;
+  font-size: 18.5px;
   line-height: 1;
-
-  &:last-child {
-    margin-right: 11px;
-  }
 }
 
 .count {
-  margin: 0 11px 0 2px;
-  font-size: var(--app-font-micro);
-  font-weight: 500;
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .reactors {
   display: inline-flex;
   align-items: center;
-  margin: 3px 11px 3px 4px;
+  margin: 1.5px;
 }
 
 .reactor {
   display: grid;
   place-items: center;
   position: relative;
-  width: calc(var(--app-reaction-size) - 6px);
-  height: calc(var(--app-reaction-size) - 6px);
-  flex-shrink: 0;
+  width: 23px;
+  height: 23px;
   border-radius: 50%;
-  border: 1px solid var(--reactor-border, var(--reaction-background));
+  border: 1px solid currentColor;
   overflow: hidden;
-  background: var(--reaction-background);
-  font-size: var(--app-font-micro);
+  font-size: 11px;
 
   & + & {
-    margin-left: calc((6px - var(--app-reaction-size)) / 2);
+    margin-left: -9px;
   }
 
   img {
@@ -84,18 +80,8 @@ button.reaction {
 }
 
 .overflow {
+  font-size: 11px;
   margin-left: 2px;
   margin-right: 4px;
-  font-size: var(--app-font-micro);
   opacity: 0.7;
-}
-
-:host(.external) {
-  --reactor-border: currentColor;
-  padding-top: 0;
-  margin: 8px 0;
-
-  &.own {
-    justify-content: flex-end;
-  }
 }
