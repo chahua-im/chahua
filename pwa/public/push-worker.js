@@ -31,13 +31,12 @@ importScripts('./ngsw-worker.js');
       console.error('Unable to update notification badge', error);
     }
   };
-  const receive = async (payload, foreground = false) => {
-    if (payload.type !== 'newMessage' || typeof payload.title !== 'string') return false;
+  const receive = async (payload, suppress = false) => {
+    if (payload.type !== 'newMessage' || typeof payload.title !== 'string') return;
     const { chatId, messageId, threadRootId } = payload.data;
     const readThrough = reads.get(scopeKey(payload.data));
-    if (seen.has(messageId) || (validId(messageId) && readThrough && BigInt(messageId) <= BigInt(readThrough)))
-      return false;
-    if (!foreground) {
+    if (seen.has(messageId) || (validId(messageId) && readThrough && BigInt(messageId) <= BigInt(readThrough))) return;
+    if (!suppress) {
       let target = 'chats';
       if (validId(chatId)) {
         target += `/chat/${chatId}`;
@@ -61,7 +60,6 @@ importScripts('./ngsw-worker.js');
     }
     remember(messageId);
     await badge(payload.unreadCount);
-    return true;
   };
   const close = async (data) => {
     if (data.readThrough && validId(data.readThrough)) {
@@ -93,10 +91,9 @@ importScripts('./ngsw-worker.js');
     if (!data?.type?.startsWith('CHAHUA_')) return;
     event.waitUntil(
       enqueue(async () => {
-        let accepted = true;
         switch (data.type) {
           case 'CHAHUA_NOTIFY':
-            accepted = await receive(data.payload, data.foreground);
+            await receive(data.payload, data.suppress);
             break;
           case 'CHAHUA_CLOSE':
             await close(data);
@@ -104,8 +101,7 @@ importScripts('./ngsw-worker.js');
           default:
             return;
         }
-        event.ports[0]?.postMessage(accepted);
-      }).catch(() => event.ports[0]?.postMessage(false)),
+      }).catch(() => {}),
     );
   });
 })();

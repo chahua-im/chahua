@@ -42,14 +42,16 @@
   max-width: min(85%, calc(100% - 74px));
 }
 
-.avatar,
-.avatar-spacer {
+.avatar-slot {
+  position: relative;
   width: 34px;
   flex-shrink: 0;
 }
 
 .avatar {
-  position: relative;
+  position: absolute;
+  bottom: 0;
+  width: 34px;
   height: 34px;
   display: grid;
   place-items: center;
