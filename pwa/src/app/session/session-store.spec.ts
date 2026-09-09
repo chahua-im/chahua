@@ -9,10 +9,13 @@ import { jsonInterceptor } from '../api/json.interceptor';
 import { testUser } from '../api/testing';
 import { SessionStore } from './session-store';
 
+const TOKEN_KEY = 'chahua.auth.token';
+
 describe('SessionStore', () => {
   let session: SessionStore;
   let http: HttpTestingController;
   beforeEach(() => {
+    document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0`;
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -31,6 +34,7 @@ describe('SessionStore', () => {
     http = TestBed.inject(HttpTestingController);
   });
   afterEach(() => {
+    document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0`;
     http.verify();
     vi.unstubAllGlobals();
     history.replaceState(null, '', '/');
@@ -57,7 +61,8 @@ describe('SessionStore', () => {
     await profile(userGroup);
     await login;
     expect(session.user()).toEqual({ ...testUser, userGroup });
-    expect(window.localStorage.getItem('chahua.auth.token')).toBe('test-refreshed-token');
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe('test-refreshed-token');
+    expect(document.cookie).toContain(`${TOKEN_KEY}=test-refreshed-token`);
     TestBed.inject(HttpClient).get('/assets/example.json').subscribe();
     const asset = http.expectOne('/assets/example.json');
     expect(asset.request.headers.has('Authorization')).toBe(false);
@@ -65,36 +70,50 @@ describe('SessionStore', () => {
   });
 
   it.each([
-    { urlToken: undefined, storedToken: undefined, expected: 'development-token' },
-    { urlToken: undefined, storedToken: 'stored-token', expected: 'stored-token' },
-    { urlToken: 'url-token', storedToken: 'stored-token', expected: 'url-token' },
-  ])('uses URL, storage, then the development fallback ($expected)', async ({ urlToken, storedToken, expected }) => {
-    vi.stubGlobal('CHAHUA_DEV_TOKEN', 'development-token');
-    history.replaceState(null, '', urlToken ? `/?token=${urlToken}` : '/chats');
-    if (storedToken) localStorage.setItem('chahua.auth.token', storedToken);
-    const startup = session.initialize();
-    const refresh = http.expectOne('/_api/auth/refresh');
-    expect(refresh.request.headers.get('Authorization')).toBe(`Bearer ${expected}`);
-    refresh.flush({ token: 'refreshed-token' });
-    await Promise.resolve();
-    http.expectOne('/_api/users/me').flush(testUser);
-    await profile();
-    await startup;
-    expect(session.user()).toEqual(testUser);
-    expect(localStorage.getItem('chahua.auth.token')).toBe('refreshed-token');
-  });
+    { urlToken: undefined, storedToken: undefined, cookieToken: undefined, expected: 'development-token' },
+    { urlToken: undefined, storedToken: undefined, cookieToken: 'cookie-token', expected: 'cookie-token' },
+    { urlToken: undefined, storedToken: 'stored-token', cookieToken: undefined, expected: 'stored-token' },
+    { urlToken: undefined, storedToken: 'stored-token', cookieToken: 'old-cookie-token', expected: 'stored-token' },
+    { urlToken: 'url-token', storedToken: 'stored-token', cookieToken: 'cookie-token', expected: 'url-token' },
+  ])(
+    'uses URL, localStorage, cookie, then the development fallback ($expected)',
+    async ({ urlToken, storedToken, cookieToken, expected }) => {
+      vi.stubGlobal('CHAHUA_DEV_TOKEN', 'development-token');
+      history.replaceState(null, '', urlToken ? `/?token=${urlToken}` : '/chats');
+      if (storedToken) localStorage.setItem(TOKEN_KEY, storedToken);
+      if (cookieToken) document.cookie = `${TOKEN_KEY}=${cookieToken}; Path=/`;
+      const startup = session.initialize();
+      const refresh = http.expectOne('/_api/auth/refresh');
+      expect(refresh.request.headers.get('Authorization')).toBe(`Bearer ${expected}`);
+      expect(localStorage.getItem(TOKEN_KEY)).toBe(expected);
+      expect(document.cookie).toContain(`${TOKEN_KEY}=${expected}`);
+      refresh.flush({ token: 'refreshed-token' });
+      await Promise.resolve();
+      http.expectOne('/_api/users/me').flush(testUser);
+      await profile();
+      await startup;
+      expect(session.user()).toEqual(testUser);
+      expect(localStorage.getItem(TOKEN_KEY)).toBe('refreshed-token');
+      expect(document.cookie).toContain(`${TOKEN_KEY}=refreshed-token`);
+    },
+  );
 
   it('retains a token for network retry and clears an expired token', async () => {
     let login = session.initialize();
     http.expectOne('/_api/auth/refresh').flush('', { status: 503, statusText: 'Unavailable' });
     await expect(login).rejects.toMatchObject({ status: 503 });
     expect(session.token()).toBe('test-link-token');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('test-link-token');
+    expect(document.cookie).toContain(`${TOKEN_KEY}=test-link-token`);
     login = session.initialize();
     http.expectOne('/_api/auth/refresh').flush('', { status: 401, statusText: 'Unauthorized' });
     await expect(login).rejects.toMatchObject({ status: 401 });
     expect(session.token()).toBeUndefined();
     expect(session.user()).toBeUndefined();
-    expect(window.localStorage.getItem('chahua.auth.token')).toBeNull();
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    await session.initialize();
+    http.expectNone(() => true);
   });
 
   it('keeps login usable when the optional group lookup fails', async () => {
@@ -186,17 +205,19 @@ describe('SessionStore', () => {
     expect(session.user()).toBeUndefined();
   });
 
-  it('starts from the stored token when the URL has none', async () => {
-    history.replaceState(null, '', '/chats');
-    localStorage.setItem('chahua.auth.token', 'stored-token');
-    const startup = session.initialize();
-    const refresh = http.expectOne('/_api/auth/refresh');
-    expect(refresh.request.headers.get('Authorization')).toBe('Bearer stored-token');
-    refresh.flush({ token: 'refreshed-token' });
+  it('clears both stores on logout so the cookie cannot sign the user back in', async () => {
+    const login = session.initialize();
+    http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
     await Promise.resolve();
     http.expectOne('/_api/users/me').flush(testUser);
     await profile();
-    await startup;
-    expect(session.user()).toEqual(testUser);
+    await login;
+    session.logout();
+    expect(session.token()).toBeUndefined();
+    expect(session.user()).toBeUndefined();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    await session.initialize();
+    http.expectNone(() => true);
   });
 });
