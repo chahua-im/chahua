@@ -64,7 +64,7 @@ describe('Settings', () => {
     };
     updates = {
       supported: true,
-      version: '0.0.0',
+      version: 'PWA2-1234',
       checking: signal(false),
       available: signal(false),
       check: vi.fn().mockResolvedValue(UpdateCheckResult.Current),
@@ -295,7 +295,10 @@ describe('Settings', () => {
   });
 
   it('shows the version and check result, then reloads only when the update button is chosen', async () => {
-    expect(page.textContent).toContain('PWA2-0.0.0');
+    const updateRow = Array.from(page.querySelectorAll('ion-item')).find((item) =>
+      item.textContent?.includes('检查更新'),
+    )!;
+    expect(updateRow.querySelector('ion-note')?.textContent?.trim()).toBe('PWA2-1234');
     await homePage()['checkUpdates']();
     await fixture.whenStable();
     expect(page.textContent).toContain('已是最新版本');

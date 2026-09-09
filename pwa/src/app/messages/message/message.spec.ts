@@ -224,38 +224,43 @@ describe('Message', () => {
     ['image/jpeg', MessageType.file, '', false],
     ['audio/ogg', MessageType.audio, '', false],
     ['application/pdf', MessageType.file, '', false],
-  ] as const)('shares the time and reaction placement for %s / %s / %j', async (kind, type, caption, overlay) => {
-    const fixture = await render();
-    fixture.componentRef.setInput('message', {
-      ...testMessage,
-      messageType: type,
-      message: caption,
-      attachments: [
-        {
-          id: encodeId('9007199254741101'),
-          kind,
-          url: 'https://example.com/media',
-          width: 1200,
-          height: 800,
-          size: 2048,
-          fileName: '附件',
-        },
-      ],
-      reactions: [{ emoji: '👍', count: 3 }],
-    });
-    fixture.detectChanges();
-    const element: HTMLElement = fixture.nativeElement;
-    expect(!!element.querySelector('.media-time time')).toBe(overlay);
-    expect(!!element.querySelector('.bubble .message-footer time')).toBe(!overlay);
-    expect(!!element.querySelector('.bubble app-message-reactions')).toBe(!overlay);
-    expect(!!element.querySelector('.message-stack > app-message-reactions.external')).toBe(overlay);
-    expect(element.querySelectorAll('time')).toHaveLength(1);
-    fixture.componentRef.setInput('own', true);
-    fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
-    fixture.detectChanges();
-    expect(element.querySelectorAll('app-message-status ion-icon')).toHaveLength(1);
-    expect(fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon).toBe(timeOutline);
-  });
+  ] as const)(
+    'keeps reactions below the bubble and time with the content for %s / %s / %j',
+    async (kind, type, caption, overlay) => {
+      const fixture = await render();
+      fixture.componentRef.setInput('message', {
+        ...testMessage,
+        messageType: type,
+        message: caption,
+        attachments: [
+          {
+            id: encodeId('9007199254741101'),
+            kind,
+            url: 'https://example.com/media',
+            width: 1200,
+            height: 800,
+            size: 2048,
+            fileName: '附件',
+          },
+        ],
+        reactions: [{ emoji: '👍', count: 3 }],
+      });
+      fixture.detectChanges();
+      const element: HTMLElement = fixture.nativeElement;
+      expect(!!element.querySelector('.media-time time')).toBe(overlay);
+      expect(!!element.querySelector('.bubble .message-body time')).toBe(!overlay);
+      expect(element.querySelector('.bubble app-message-reactions')).toBeNull();
+      expect(element.querySelector('.message-stack > app-message-reactions')).not.toBeNull();
+      expect(element.querySelectorAll('time')).toHaveLength(1);
+      fixture.componentRef.setInput('own', true);
+      fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
+      fixture.detectChanges();
+      expect(element.querySelectorAll('app-message-status ion-icon')).toHaveLength(1);
+      expect(fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon).toBe(
+        timeOutline,
+      );
+    },
+  );
 
   it('keeps sticker reactions outside the transparent media and its timestamp on the sticker', async () => {
     const fixture = await render();
@@ -282,7 +287,7 @@ describe('Message', () => {
     expect(element.querySelector('.bubble')).toBeNull();
     expect(element.querySelector('.sticker-content .media-time')).not.toBeNull();
     expect(element.querySelector('.sticker-content app-message-reactions')).toBeNull();
-    const reaction = element.querySelector<HTMLButtonElement>('.external .reaction')!;
+    const reaction = element.querySelector<HTMLButtonElement>('app-message-reactions .reaction')!;
     const react = vi.fn();
     fixture.componentInstance.react.subscribe(react);
     reaction.click();
@@ -611,7 +616,9 @@ describe('Message', () => {
     expect(element.querySelectorAll('time')).toHaveLength(1);
     expect(element.querySelector('time')?.textContent).toContain('已编辑');
     expect(element.querySelectorAll('time app-message-status ion-icon')).toHaveLength(1);
-    expect(!!element.querySelector('.message-footer time')).toBe(reactions);
+    expect(element.querySelector('.message-body time')).not.toBeNull();
+    expect(element.querySelector('.bubble app-message-reactions')).toBeNull();
+    expect(!!element.querySelector('.message-stack > app-message-reactions')).toBe(reactions);
   });
 
   it.each([

@@ -2,7 +2,6 @@ import { inject, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SwUpdate } from '@angular/service-worker';
 import { firstValueFrom, from, timeout } from 'rxjs';
-import { version } from '../../../package.json';
 
 export enum UpdateCheckResult {
   Updated = 'updated',
@@ -18,7 +17,7 @@ export class AppUpdates {
   private readonly availableState = signal(false);
   private pendingCheck?: Promise<UpdateCheckResult>;
   readonly supported = this.updates.isEnabled;
-  readonly version = version;
+  readonly version = CHAHUA_APP_VERSION;
   readonly checking = this.checkingState.asReadonly();
   readonly available = this.availableState.asReadonly();
 

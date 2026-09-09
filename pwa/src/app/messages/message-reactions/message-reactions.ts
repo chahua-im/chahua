@@ -9,14 +9,12 @@ import type { ReactionSummary } from '../../../generated/models';
   styleUrl: './message-reactions.scss',
   host: {
     class: 'reactions',
-    '[class.external]': 'external()',
     '[class.own]': 'own()',
   },
 })
 export class MessageReactions {
   readonly reactions = input.required<ReactionSummary[]>();
   readonly own = input(false);
-  readonly external = input(false);
   readonly preview = input(false);
   readonly react = output<string>();
 }

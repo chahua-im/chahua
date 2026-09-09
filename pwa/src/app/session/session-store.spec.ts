@@ -52,10 +52,12 @@ describe('SessionStore', () => {
     expect(location.search).toBe('');
     const refresh = http.expectOne('/_api/auth/refresh');
     expect(refresh.request.headers.get('Authorization')).toBe('Bearer test-link-token');
+    expect(refresh.request.headers.get('X-App-Version')).toBe('PWA2-dev');
     refresh.flush({ token: 'test-refreshed-token' });
     await Promise.resolve();
     const me = http.expectOne('/_api/users/me');
     expect(me.request.headers.get('Authorization')).toBe('Bearer test-refreshed-token');
+    expect(me.request.headers.get('X-App-Version')).toBe('PWA2-dev');
     me.flush(testUser);
     const userGroup = { groupId: 3, name: '三水', chatGroupColor: '#4087d2', chatGroupColorDark: '#72a7de' };
     await profile(userGroup);
@@ -66,6 +68,7 @@ describe('SessionStore', () => {
     TestBed.inject(HttpClient).get('/assets/example.json').subscribe();
     const asset = http.expectOne('/assets/example.json');
     expect(asset.request.headers.has('Authorization')).toBe(false);
+    expect(asset.request.headers.has('X-App-Version')).toBe(false);
     asset.flush({});
   });
 
