@@ -16,7 +16,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | Preferences            | 话题/头像显示偏好、最近表情                                             | localStorage                         |
 | MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                     |
 | ConversationNavigation | 即时导航指令，不保存消息或位置                                          | 应用；当前页面消费                   |
-| PushNotifications      | 本机通知意图、注册状态、当前横幅、去重记录                              | 应用；本机意图保存到 localStorage    |
+| PushNotifications      | 本机通知意图、注册状态、去重记录                              | 应用；本机意图保存到 localStorage    |
 | AppUpdates             | 检查更新和可更新状态                                                    | 应用                                 |
 
 ChatPins 是 ChatStore 内部的普通对象，不是额外服务。UserProfile、ChatDetails 和 ConversationPage 共享按 UID 的好友关系查询。收藏由 SavedMessagesPage 持有快照，不进入活消息缓存。组件字段见[组件](components.md)。
@@ -158,9 +158,9 @@ Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceU
 
 ## 通知与静音
 
-在线 WebSocket 优先；后台仍运行的页面直接让 Worker 展示系统通知，未运行时由 Web Push 兜底。前台正在阅读对应会话不提醒；单列其他页面显示顶部横幅，双列/三列不显示应用内横幅，均登记去重。
+App 在会话初始化并确认登录后启动 PushNotifications。在线 WebSocket 优先，前后台页面均直接让 Worker 展示系统通知，未运行时由 Web Push 兜底。各平台与分栏布局共用同一流程；前台正在阅读对应会话且未被设置或 modal 覆盖时，只登记去重，不展示通知。
 
-本机通知意图与 Push 注册分别保存。授权成功后，注册失败不阻止在线系统提醒；前台横幅不要求系统权限，显式关闭通知也关闭横幅。开启需浏览器授权、VAPID key 和 `/push/subscribe`；关闭调用 `/push/unsubscribe` 并取消浏览器订阅；进入设置、恢复前台、重连检查注册状态。
+本机通知意图与 Push 注册分别保存。所有在线通知都需要本机开启通知并获得浏览器授权；授权成功后，Push 注册失败不阻止在线系统提醒。开启需浏览器授权、VAPID key 和 `/push/subscribe`；关闭调用 `/push/unsubscribe` 并取消浏览器订阅；进入设置、恢复前台、重连检查注册状态。
 
 规则读取 ChatStore：自己、系统和已撤回消息不提醒；普通提及绕过静音，回复自己可绕过归档。话题按订阅/归档判断，提及是例外，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史。
 

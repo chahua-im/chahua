@@ -15,7 +15,7 @@ import {
 import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
-import { NotificationBanner } from '../pwa/notification-banner/notification-banner';
+import { PushNotifications } from '../pwa/push-notifications';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
 import { SettingsModal } from '../settings/settings-modal/settings-modal';
@@ -31,7 +31,6 @@ enum StartupError {
   styleUrl: './app.scss',
   host: { '(window:popstate)': 'browserTransition.set($event.hasUAVisualTransition)' },
   imports: [
-    NotificationBanner,
     ContentScrollbars,
     IonApp,
     IonButton,
@@ -46,6 +45,7 @@ enum StartupError {
 })
 export class App {
   private readonly router = inject(Router);
+  private readonly notifications = inject(PushNotifications);
   protected readonly landingPage = toSignal(
     this.router.events.pipe(
       filter((event) => event instanceof NavigationEnd),
@@ -93,6 +93,7 @@ export class App {
     this.error.set(undefined);
     try {
       await this.session.initialize();
+      if (this.session.user()) this.notifications.start();
     } catch (error) {
       this.error.set(
         error instanceof HttpErrorResponse && error.status === 401 ? StartupError.Expired : StartupError.Unavailable,
