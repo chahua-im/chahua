@@ -1,19 +1,15 @@
-:host {
-  flex-direction: row;
+:host:has(> .details-sidebar) {
+  padding-inline-end: 360px;
 }
-.conversation-main {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  overflow: hidden;
+ion-header > ion-toolbar:first-of-type {
+  --border-width: 0 0 0.55px;
 }
 .details-sidebar {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
   width: 360px;
   height: 100%;
-  flex-shrink: 0;
   border-inline-start: 1px solid var(--ion-color-light-shade);
 }
 .sidebar-icon {
@@ -32,7 +28,8 @@ ion-content::part(scroll) {
 
 .unread-separator {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   color: var(--ion-color-primary);
 }
 
@@ -68,7 +65,7 @@ ion-content::part(scroll) {
   gap: 1px;
   flex: 1;
   min-width: 0;
-  height: 29px;
+  height: calc(2 * var(--app-line-micro) + 1px);
   padding: 0 8px;
   border: 0;
   border-inline-start: 2px solid var(--ion-color-primary);
@@ -77,8 +74,8 @@ ion-content::part(scroll) {
   color: var(--ion-text-color-step-600, #666);
   text-align: start;
   font: inherit;
-  font-size: 12px;
-  line-height: 14px;
+  font-size: max(12px, var(--app-font-micro));
+  line-height: var(--app-line-micro);
 }
 .reply-description strong,
 .reply-description span {
@@ -96,7 +93,7 @@ ion-content::part(scroll) {
   place-items: center;
   flex-shrink: 0;
   width: 32px;
-  height: 36px;
+  height: calc(var(--composer-control-size) - 2px);
   padding: 0;
   border: 0;
   background: none;
@@ -123,7 +120,7 @@ ion-title app-message-preview {
 
 .pinned-bar {
   --background: var(--ion-background-color, #fff);
-  --min-height: 52px;
+  --min-height: 48px;
 }
 
 .pinned-preview {
@@ -140,7 +137,8 @@ ion-title app-message-preview {
   background: transparent;
   color: var(--ion-text-color);
   text-align: start;
-  font-size: 14px;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
 
   app-message-preview {
     display: block;
@@ -154,7 +152,6 @@ ion-title app-message-preview {
 .pinned-title {
   color: var(--ion-color-primary);
   font-weight: 600;
-  font-size: 13px;
 }
 
 .pin-loading {
@@ -174,6 +171,7 @@ ion-title app-message-preview {
   padding: 4px 10px;
   color: var(--ion-color-medium-contrast);
   background: var(--ion-color-medium);
-  font-size: 12px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   white-space: nowrap;
 }

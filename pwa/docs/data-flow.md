@@ -21,6 +21,8 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 
 ChatPins 是 ChatStore 内部的普通对象，不是额外服务。UserProfile、ChatDetails 和 ConversationPage 共享按 UID 的好友关系查询。收藏由 SavedMessagesPage 持有快照，不进入活消息缓存。组件字段见[组件](components.md)。
 
+同一对象被多处引用不构成数据副本，不为节省指针改成 ID。ID 用于查询成员、导航目标和需要回到共享状态查找最新内容的地方；不能从服务派生的表单、滚动与搜索状态由组件持有。
+
 ```mermaid
 flowchart TD
   API[生成 HTTP 客户端] --> LISTS[ChatListStore：查询成员与分页]
@@ -33,7 +35,7 @@ flowchart TD
   CONNECTION --> PAGE[ConversationPage]
   LISTS -->|接收列表数据| CHAT
   CHAT -->|根据成员 ID 派生行| LISTS
-  LISTS --> LIST[ChatList]
+  LISTS --> LIST[ChatListContent]
   CHAT --> PAGE
   PAGE -->|打开、分页、接收消息| RANGE
   RANGE -->|消息数组| PAGE
@@ -66,34 +68,34 @@ Service Worker 缓存应用资源和表情数据，不缓存业务 API。共享�
 
 下表省略 `/_api`，c/t/m 分别表示聊天、话题根和消息 ID。
 
-| 触发                          | 接口与参数                                                             | 消费路径                              |
-| ----------------------------- | ---------------------------------------------------------------------- | ------------------------------------- |
-| 激活聊天分类或续页            | `GET /chats?limit=50`，归档加 archived，续页加 after                   | ChatListStore → ChatStore → ChatList  |
-| 话题 tab，或消息 tab 开启话题 | `GET /threads?limit=20`，archived 与 before 时间游标                   | ChatListStore → ChatStore → ChatList  |
-| 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatList              |
-| 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                          |
-| 显示归档计数                  | `GET /chats/unread`；需要话题时读 `/threads/unread`                    | 查询由实际消费者激活                  |
-| 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限          |
-| 私聊或用户资料缺关系          | `GET /friends/{uid}`                                                   | ChatStore.relationship → 三处共用     |
-| 用户资料的验证方式            | `GET /friends/add-info/{uid}`                                          | UserProfile 局部保存                  |
-| 恢复普通对话，读状态无缓存    | `GET /chats/{c}/unread`                                                | 页面决定打开位置                      |
-| 恢复话题，读状态无缓存        | `GET /chats/{c}/threads/{t}/read-state`                                | 页面决定打开位置                      |
-| 话题缺订阅状态                | `GET /chats/{c}/threads/{t}/subscribe`                                 | ChatStore → 订阅/归档按钮             |
-| 打开、定位、双向分页          | `GET /chats/{c}/messages?max=50`，around/before/after；话题加 threadId | ConversationStore → 页面              |
-| 回复预览或话题根缺失          | `GET /chats/{c}/messages/{m}`                                          | 页面局部预览                          |
-| 活跃可见消息进入视口          | 普通/话题 read 的 POST，1 秒合并目标                                   | ChatStore 更新读状态和计数            |
-| 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                         |
-| 全局或单聊天收藏              | `GET /saved-messages` 或 `/chats/{c}/saved-messages`，limit=50、before | SavedMessagesPage 快照                |
-| 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标 |
-| 资料中的成员标签              | `GET /group/{c}/members`，q、limit、after                              | ChatMembers 局部分页                  |
-| 资料中的话题标签              | `GET /chats/{c}/messages?max=50`，before                               | ChatThreads 筛选 threadInfo 根消息    |
-| 资料中的媒体标签              | `GET /chats/{c}/attachments`，kind、limit、before                      | ChatAttachments 局部分页              |
-| 打开媒体或定位附件            | `GET /chats/{c}/messages/{m}`                                          | 当前消息的媒体集合，或所属话题路由    |
-| 聊天内消息搜索                | `GET /chats/{c}/messages/search`，q、sort、limit、offset               | ChatSearch 局部分页                   |
-| 邀请预览与管理                | `GET /invites/invite?inviteCode=...`、`GET /invites`                   | InviteCard、StartChat、ChatInvites    |
-| 查看完整表态                  | `GET /chats/{c}/messages/{m}/reactions`                                | ReactionDetails；按表情本地过滤       |
-| 打开贴纸库                    | 收藏、已订阅包、自有包三个 GET                                         | StickerPicker；切包读取该包详情       |
-| 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                              |
+| 触发                          | 接口与参数                                                             | 消费路径                                    |
+| ----------------------------- | ---------------------------------------------------------------------- | ------------------------------------------- |
+| 激活聊天分类或续页            | `GET /chats?limit=50`，归档加 archived，续页加 after                   | ChatListStore → ChatStore → ChatListContent |
+| 话题 tab，或消息 tab 开启话题 | `GET /threads?limit=20`，archived 与 before 时间游标                   | ChatListStore → ChatStore → ChatListContent |
+| 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatListContent             |
+| 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                                |
+| 显示归档计数                  | `GET /chats/unread`；需要话题时读 `/threads/unread`                    | 查询由实际消费者激活                        |
+| 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限                |
+| 私聊或用户资料缺关系          | `GET /friends/{uid}`                                                   | ChatStore.relationship → 三处共用           |
+| 用户资料的验证方式            | `GET /friends/add-info/{uid}`                                          | UserProfile 局部保存                        |
+| 恢复普通对话，读状态无缓存    | `GET /chats/{c}/unread`                                                | 页面决定打开位置                            |
+| 恢复话题，读状态无缓存        | `GET /chats/{c}/threads/{t}/read-state`                                | 页面决定打开位置                            |
+| 话题缺订阅状态                | `GET /chats/{c}/threads/{t}/subscribe`                                 | ChatStore → 订阅/归档按钮                   |
+| 打开、定位、双向分页          | `GET /chats/{c}/messages?max=50`，around/before/after；话题加 threadId | ConversationStore → 页面                    |
+| 回复预览或话题根缺失          | `GET /chats/{c}/messages/{m}`                                          | 页面局部预览                                |
+| 活跃可见消息进入视口          | 普通/话题 read 的 POST，1 秒合并目标                                   | ChatStore 更新读状态和计数                  |
+| 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                               |
+| 全局或单聊天收藏              | `GET /saved-messages` 或 `/chats/{c}/saved-messages`，limit=50、before | SavedMessagesPage 快照                      |
+| 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标       |
+| 资料中的成员标签              | `GET /group/{c}/members`，limit、after                                 | ChatMembers 局部分页                        |
+| 资料中的话题标签              | `GET /chats/{c}/messages?max=50`，before                               | ChatThreads 筛选 threadInfo 根消息          |
+| 资料中的媒体标签              | `GET /chats/{c}/attachments`，kind、limit、before                      | ChatAttachments 局部分页                    |
+| 打开媒体或定位附件            | `GET /chats/{c}/messages/{m}`                                          | 当前消息的媒体集合，或所属话题路由          |
+| 聊天内消息搜索                | `GET /chats/{c}/messages/search`，q、sort、limit、offset               | ChatSearch 局部分页                         |
+| 邀请预览与管理                | `GET /invites/invite?inviteCode=...`、`GET /invites`                   | InviteCard、StartChat、ChatInvites          |
+| 查看完整表态                  | `GET /chats/{c}/messages/{m}/reactions`                                | ReactionDetails；按表情本地过滤             |
+| 打开贴纸库                    | 收藏、已订阅包、自有包三个 GET                                         | StickerPicker；切包读取该包详情             |
+| 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                                    |
 
 创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。请求期间的具体反馈见[加载标识](loading-indicators.md)。
 
@@ -103,13 +105,13 @@ Service Worker 缓存应用资源和表情数据，不缓存业务 API。共享�
 
 只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
 
-资料列表的游标与请求属于各组件，切换标签后释放；使用 Ionic infinite-scroll，首屏不足一屏时 fillScrollViewport 继续补页。ChatThreads 的游标来自原始消息响应，不从筛选结果推算，因此空话题页仍能续读；结果不限订阅状态。搜索与媒体汇总作用于所属聊天。
+资料列表的游标与请求属于各组件，切换标签后释放；使用 Ionic infinite-scroll；成员、媒体和搜索首屏不足一屏时 fillScrollViewport 继续补页。ChatThreads 的游标来自原始消息响应，不从筛选结果推算；只由触底触发续页，空话题页不连续扫描历史，结果不限订阅状态。搜索与媒体汇总作用于所属聊天。
 
 连续消息每页最多 50 条，使用普通 DOM。接近边缘 1.5 个视口时预取，一次一个方向；手指离开且惯性结束后才合并历史，以首条可见消息底部为锚。媒体预留尺寸。浮动日期复用同一滚动状态和可见消息测量。
 
-Ionic 会缓存页面实例。完成离开时清理连续区间、局部输入、菜单和读取；仅在真正离开后执行，允许取消 iOS 返回手势。列表释放查询消费者，共享资料/置顶仍可复用。写操作不因路由离开而主动取消；组件销毁结束组件请求，MessageOutbox 跨页面继续。异步结果使用请求版本或进入上下文，旧结果不能覆盖新页面。[Ionic 生命周期](https://ionicframework.com/docs/angular/lifecycle)
+Ionic 会缓存页面实例。完成离开时清理连续区间、局部输入、菜单和读取；仅在真正离开后执行，允许取消 iOS 返回手势。列表释放查询消费者，共享资料/置顶仍可复用。局部读取和查询消费者随页面释放。已发出的资料写操作仍可更新原聊天的共享数据，界面收尾只作用于原范围；菜单等使用 takeUntilDestroyed 的请求随组件销毁结束订阅，MessageOutbox 则跨页面继续。异步结果使用请求版本或进入上下文，旧结果不能覆盖新页面。[Ionic 生命周期](https://ionicframework.com/docs/angular/lifecycle)
 
-分栏下 App 持有 sidebarSelection，分类切换不改路由；单列由 ChatListPage 转换为路由。设置沿用 `/settings` 浏览器地址，内部保留底层聊天路由。ConversationNavigation 只用于已打开会话的即时定位，不保存第二份导航状态。
+分栏下 App 持有 sidebarSelection，分类切换不改路由；单列分类共用 ChatListPage，通过无组件的子路由保留分类地址与浏览器历史。ChatList 使用原生 segment-view 切换 ChatListContent，各分类保留自己的滚动位置，只有当前分类激活查询和续页。设置沿用 `/settings` 浏览器地址，内部保留底层聊天路由。ConversationNavigation 只用于已打开会话的即时定位，不保存第二份导航状态。
 
 ## 实时事件与未推送的数据
 
@@ -136,7 +138,7 @@ Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceU
 
 附件选择后立刻处理和上传；发送时把任务引用移交 MessageOutbox，立即上屏并释放输入区。编辑借用原任务，取消编辑不取消队列上传。文件、语音、贴纸单独发送时保留其他输入内容。已知私聊不可发送时，点击提交说明原因并保留文本、附件和录音；关系未知时交给服务器最终判断。
 
-附件准备不占发送顺序；准备好后与文字共用每聊天的串行发送。前一条等待确认时暂停后续提交，失败后放行下一条；不同聊天独立。创建请求发出后冻结正文、附件 ID 与 clientGeneratedId，重试使用原请求。编辑已发请求需先取得 ID，再 PATCH；未发请求的编辑直接修改待发内容。
+附件准备不占发送顺序；准备好后与文字共用每会话（chatId + threadId）的串行发送。前一条等待确认时暂停后续提交，失败后放行下一条；不同聊天/话题独立。创建请求发出后冻结正文、附件 ID 与 clientGeneratedId，重试使用原请求。编辑已发请求需先取得 ID，再 PATCH；未发请求的编辑直接修改待发内容。
 
 撤回立即隐藏并停止创建重试，dispose 附件任务；尚未发请求可直接删除。已发请求保留撤回意图，迟到响应、WS 或正常加载取得对应 ID 后补 DELETE。协议不能按 clientGeneratedId 查询/撤回，不扫历史兜底。队列关闭或整页刷新不持久化。
 

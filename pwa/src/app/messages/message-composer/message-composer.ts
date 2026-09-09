@@ -13,7 +13,17 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { IonAlert, IonButton, IonIcon, IonItem, IonLabel, IonList, IonSpinner, IonTextarea } from '@ionic/angular';
+import {
+  IonAlert,
+  IonButton,
+  IonIcon,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonSpinner,
+  IonTextarea,
+  isPlatform,
+} from '@ionic/angular';
 import { addCircleOutline, closeOutline, documentOutline, happyOutline, imageOutline, send } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
@@ -83,6 +93,9 @@ export class MessageComposer {
   readonly editLast = output<void>();
   readonly escape = output<void>();
   protected readonly icons = { addCircleOutline, happyOutline, send, closeOutline, imageOutline, documentOutline };
+  private readonly mobile = isPlatform('ios') || isPlatform('android');
+  protected readonly windows = navigator.userAgent.includes('Windows');
+  protected readonly macOS = !isPlatform('ios') && navigator.userAgent.includes('Macintosh');
   protected readonly Status = UploadStatus;
   private readonly api = inject(AttachmentsService);
   private readonly members = inject(MembersService);
@@ -346,7 +359,7 @@ export class MessageComposer {
       this.editLast.emit();
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && window.matchMedia('(hover: hover)').matches) {
+    if (event.key === 'Enter' && !event.shiftKey && !this.mobile) {
       event.preventDefault();
       this.submit();
     }

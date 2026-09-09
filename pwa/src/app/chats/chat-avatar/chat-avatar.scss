@@ -1,4 +1,5 @@
 :host {
+  --avatar-size: var(--app-chat-avatar-size);
   position: relative;
   display: block;
   width: var(--avatar-size);
@@ -13,7 +14,7 @@ ion-avatar {
   place-items: center;
   color: var(--ion-color-light-contrast);
   font-weight: 600;
-  font-size: calc(var(--avatar-size) / 3);
+  font-size: round(var(--avatar-size) / 3, 1px);
 }
 .placeholder {
   background: var(--ion-color-light);
@@ -21,18 +22,18 @@ ion-avatar {
 .icon-avatar {
   background: var(--ion-color-primary);
   color: var(--ion-color-primary-contrast);
-  font-size: calc(var(--avatar-size) * 26 / 48);
+  font-size: round(var(--avatar-size) * 26 / 48, 1px);
 }
 .avatar-badge {
   position: absolute;
-  top: calc(var(--avatar-size) / -24);
-  right: calc(var(--avatar-size) / -24);
-  width: calc(var(--avatar-size) * 26 / 48);
-  height: calc(var(--avatar-size) * 26 / 48);
+  top: round(var(--avatar-size) / -24, 1px);
+  right: round(var(--avatar-size) / -24, 1px);
+  width: round(var(--avatar-size) * 26 / 48, 1px);
+  height: round(var(--avatar-size) * 26 / 48, 1px);
   border: 2px solid var(--avatar-badge-border, var(--ion-background-color, #fff));
-  font-size: calc(var(--avatar-size) / 4);
+  font-size: round(var(--avatar-size) / 4, 1px);
 
   ion-icon {
-    font-size: calc(var(--avatar-size) / 3);
+    font-size: round(var(--avatar-size) / 3, 1px);
   }
 }

@@ -1,5 +1,6 @@
 import { DatePipe, DOCUMENT } from '@angular/common';
 import {
+  afterNextRender,
   afterRenderEffect,
   ChangeDetectorRef,
   Component,
@@ -45,7 +46,13 @@ import {
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
-import { GroupKind, MessageType, ServerWsMessageType, type MessageResponse } from '../../../generated/models';
+import {
+  GroupKind,
+  MessageType,
+  ServerWsMessageType,
+  type MessageResponse,
+  type PinResponse,
+} from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatDetails } from '../../chats/chat-details/chat-details';
@@ -189,6 +196,7 @@ export class ConversationPage {
   private readonly navigation = inject(ConversationNavigation);
   protected readonly document = inject(DOCUMENT);
   private readonly content = viewChild(IonContent);
+  private readonly messageContent = viewChild.required<ElementRef<HTMLElement>>('messageContent');
   protected readonly composer = viewChild(MessageComposer);
   private readonly unreadSeparator = viewChild<ElementRef<HTMLElement>>('unreadSeparator');
   protected readonly menu = viewChild(MessageMenu);
@@ -289,6 +297,10 @@ export class ConversationPage {
     }
     return messageRows(entries.map((entry) => entry.message)).map((row, index) => ({ ...row, ...entries[index] }));
   });
+  private readonly confirmedElements = computed(() => {
+    const rows = this.rows();
+    return this.messageElements().filter((_, index) => !!rows[index]?.confirmed);
+  });
   private readonly peerUid = computed(() => this.chatInfo.get(this.id())?.peer?.uid);
   protected readonly relationship = computed(() => {
     const uid = this.peerUid();
@@ -335,12 +347,21 @@ export class ConversationPage {
   protected readonly listIcon = listOutline;
   protected readonly threadIcons = { starOutline, archiveOutline, archive, informationCircleOutline };
   protected readonly pins = computed(() => this.chatInfo.pins(this.id(), this.threadId()));
-  protected readonly visiblePins = computed(() =>
-    this.pins()
-      .items()
-      .filter((pin) => !pin.message.isDeleted)
-      .sort((a, b) => b.message.id - a.message.id),
-  );
+  protected readonly visiblePins = linkedSignal({
+    source: () => ({
+      entry: this.entryKey(),
+      idle: this.scrolling.idle(),
+      pins: this.pins()
+        .items()
+        .filter((pin) => !pin.message.isDeleted)
+        .sort((a, b) => b.message.id - a.message.id),
+    }),
+    computation: ({ entry, idle, pins }, previous): PinResponse[] =>
+      // Only adding/removing the bar changes the viewport during native scrolling.
+      !previous || entry !== previous.source.entry || idle || !!pins.length === !!previous.value.length
+        ? pins
+        : previous.value,
+  });
   protected readonly selectedPinId = linkedSignal({
     source: this.visiblePins,
     computation: (pins, previous): SnowflakeID | undefined =>
@@ -457,6 +478,7 @@ export class ConversationPage {
       const target = this.editTarget();
       if (target && 'delivery' in target && target.cancelled()) untracked(() => this.cancelEdit());
     });
+    afterNextRender(() => void this.observeResize());
     afterRenderEffect(() => {
       this.messageElements();
       this.position();
@@ -620,6 +642,31 @@ export class ConversationPage {
     this.retryAction();
   }
 
+  private async observeResize() {
+    const scroll = await this.content()?.getScrollElement();
+    if (!scroll || this.destroyRef.destroyed) return;
+    let entry = this.entryKey();
+    let top = scroll.getBoundingClientRect().top;
+    const resize = new ResizeObserver(() => {
+      if (!this.isCurrent()) return;
+      const nextTop = scroll.getBoundingClientRect().top;
+      const offset = entry === this.entryKey() ? nextTop - top : 0;
+      entry = this.entryKey();
+      top = nextTop;
+      if (this.position()) return;
+      if (this.atBottom() && this.conversation.atLatest()) {
+        scroll.scrollTop = scroll.scrollHeight;
+      } else if (offset) {
+        // A changing header moves the viewport; keep messages at their screen positions.
+        scroll.scrollTop += offset;
+      }
+      void this.trackScroll();
+    });
+    resize.observe(scroll);
+    resize.observe(this.messageContent().nativeElement);
+    this.destroyRef.onDestroy(() => resize.disconnect());
+  }
+
   private async positionAndRead() {
     const entry = this.entryKey();
     const version = this.navigationVersion;
@@ -663,10 +710,17 @@ export class ConversationPage {
     const version = this.navigationVersion;
     const scroll = await this.content()?.getScrollElement();
     if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
-    this.atBottom.set(scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40);
-    if (!this.entered || this.document.hidden || this.conversation.loading() || this.position()) return;
+    const height = scroll.clientHeight;
+    const top = scroll.scrollTop;
+    const bounds = {
+      height,
+      above: Math.max(0, top),
+      below: Math.max(0, scroll.scrollHeight - top - height),
+    };
+    this.atBottom.set(bounds.below < 40);
+    if (!this.entered || this.document.hidden || this.conversation.loading() || this.position()) return bounds;
     const rows = this.rows();
-    const elements = this.messageElements().filter((_, index) => !!rows[index]?.confirmed);
+    const elements = this.confirmedElements();
     const viewport = scroll.getBoundingClientRect();
     const allElements = this.messageElements();
     let first = 0,
@@ -701,18 +755,17 @@ export class ConversationPage {
           : this.chatInfo.markRead(this.id(), confirmedId)
       ).catch(() => {});
     }
+    return bounds;
   }
 
   protected async onScroll() {
     const entry = this.entryKey();
     const version = this.navigationVersion;
-    await this.trackScroll();
-    if (!this.isCurrent(entry) || version !== this.navigationVersion || !this.entered || this.position()) return;
-    const scroll = await this.content()?.getScrollElement();
-    if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
-    const threshold = scroll.clientHeight * 1.5;
-    const above = Math.max(0, scroll.scrollTop);
-    const below = Math.max(0, scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight);
+    const bounds = await this.trackScroll();
+    if (!bounds || !this.isCurrent(entry) || version !== this.navigationVersion || !this.entered || this.position())
+      return;
+    const { height, above, below } = bounds;
+    const threshold = height * 1.5;
     const older = this.conversation.canLoad(PageDirection.Older) && above < threshold;
     const newer = this.conversation.canLoad(PageDirection.Newer) && below < threshold;
     if (older && (!newer || above < below)) void this.loadPage(PageDirection.Older);

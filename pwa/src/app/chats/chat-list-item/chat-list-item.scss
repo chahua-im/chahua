@@ -1,20 +1,13 @@
 ion-item {
-  --min-height: 60px;
+  --min-height: var(--app-chat-row-height);
 
   &.selected ion-label p {
     color: inherit;
   }
 }
 
-ion-label h3 {
-  font-weight: 500;
-}
-
-ion-label p {
-  font-size: 13px;
-}
-
 ion-item:not(.selected) ion-label p {
+  color: var(--ion-color-step-400, var(--ion-text-color-step-600, #999));
   --message-action-color: var(--ion-color-primary);
 }
 
@@ -30,8 +23,9 @@ ion-item:not(.selected) .meta > span {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
-  font-size: 13px;
+  gap: 6px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
 }
 
 ion-item.selected app-chat-avatar {

@@ -58,19 +58,28 @@ describe('ChatThreads', () => {
     http.expectNone((req) => req.url.includes('/threads') || req.url.includes('/subscribe'));
   });
 
-  it('retains a message cursor across empty pages without scanning history automatically', async () => {
+  it('retains the message cursor without filling a tall sidebar with automatic history scans', async () => {
     const fixture = open();
+    const scroll = document.createElement('div');
+    Object.defineProperties(scroll, { clientHeight: { value: 900 }, scrollHeight: { value: 900 } });
+    const content = document.createElement('ion-content');
+    content.getScrollElement = () => Promise.resolve(scroll);
+    vi.spyOn(fixture.nativeElement, 'closest').mockReturnValue(content);
     http.expectOne((req) => req.url === path).flush({ messages: [{ ...wireMessage }], olderCursor: '100' });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('暂无近期话题');
     expect(fixture.nativeElement.querySelector('ion-infinite-scroll')).not.toBeNull();
     http.expectNone((req) => req.url === path);
-    const next = fixture.componentInstance['load'](true);
+    expect(fixture.nativeElement.querySelector('ion-infinite-scroll ion-button')).toBeNull();
+    const complete = vi.fn().mockResolvedValue(undefined);
+    fixture.nativeElement.querySelector('ion-infinite-scroll').complete = complete;
+    fixture.nativeElement.querySelector('ion-infinite-scroll').dispatchEvent(new CustomEvent('ionInfinite'));
     const request = http.expectOne((req) => req.url === path);
     expect(request.request.params.get('before')).toBe('100');
     request.flush({ messages: [{ ...topic, id: '99' }] });
-    await next;
+    await fixture.whenStable();
+    expect(complete).toHaveBeenCalledOnce();
     expect(fixture.componentInstance['items']()).toHaveLength(1);
     expect(fixture.componentInstance['cursor']()).toBeUndefined();
   });

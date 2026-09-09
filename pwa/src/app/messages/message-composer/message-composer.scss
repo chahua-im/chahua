@@ -1,6 +1,6 @@
 :host {
   --composer-padding-start: 12px;
-  --composer-control-size: 36px;
+  --composer-control-size: var(--app-composer-size);
   display: block;
   padding-bottom: var(--ion-safe-area-bottom, 0px);
   background: var(--ion-background-color, #fff);
@@ -53,9 +53,10 @@
   padding: 0;
   background: none;
   flex-shrink: 0;
-  height: var(--composer-control-size);
+  height: calc(var(--composer-control-size) - 2px);
 }
 .attach-button {
+  height: var(--composer-control-size);
   width: var(--composer-control-size);
   font-size: 28px;
   color: var(--ion-color-primary);
@@ -84,11 +85,11 @@
 ion-textarea {
   flex: 1;
   min-width: 0;
-  min-height: var(--composer-control-size);
+  min-height: calc(var(--composer-control-size) - 2px);
   max-height: 33vh;
-  font-size: 16px;
-  --padding-top: 7px;
-  --padding-bottom: 7px;
+  font-size: var(--app-font-body);
+  --padding-top: calc((var(--composer-control-size) - 2px - var(--app-line-body)) / 2);
+  --padding-bottom: var(--padding-top);
   --padding-start: var(--composer-padding-start);
   --padding-end: 4px;
 }
@@ -108,6 +109,9 @@ ion-textarea {
   align-items: center;
   justify-content: center;
   font-size: 18px;
+}
+.send-button ion-icon {
+  transform: translateX(1.5px);
 }
 button:disabled {
   opacity: 0.45;
@@ -129,7 +133,8 @@ button:disabled {
   background: none;
   padding: 0;
   color: var(--ion-color-primary);
-  font-size: 14px;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
   font-weight: 600;
 }
 .attachment-panel span {
