@@ -783,8 +783,6 @@ describe('ConversationPage', () => {
         element: document.createElement('div'),
         rect: new DOMRect(),
         own: false,
-        first: true,
-        last: true,
       });
     select();
     await component['menu']()!['choose'](MessageAction.Pin);
@@ -812,8 +810,6 @@ describe('ConversationPage', () => {
       element: document.createElement('div'),
       rect: new DOMRect(),
       own: false,
-      first: true,
-      last: true,
     });
     await component['menu']()!['choose'](MessageAction.Pin);
     expect(component['menu']()!['confirmation']()).toBeUndefined();
@@ -2138,8 +2134,6 @@ describe('ConversationPage', () => {
       element: document.createElement('div'),
       rect: new DOMRect(),
       own: false,
-      first: true,
-      last: true,
     });
     events.next({ type: ServerWsMessageType.messageUpdated, payload: { ...testMessage, message: '编辑后的消息' } });
     fixture.detectChanges();

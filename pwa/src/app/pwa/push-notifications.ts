@@ -231,8 +231,12 @@ export class PushNotifications {
     if (this.busy()) return;
     this.failure.set(undefined);
     if (!this.canUsePush()) return;
-    this.working.set(true);
     this.permissionState.set(Notification.permission);
+    if (this.permission() !== 'granted') {
+      this.subscriptionState.set(false);
+      return;
+    }
+    this.working.set(true);
     try {
       const subscription = await this.currentSubscription();
       const status = subscription
@@ -251,7 +255,20 @@ export class PushNotifications {
     }
   }
 
-  // Call directly from the toggle event so permission is requested within the user gesture.
+  shouldPrompt(): boolean {
+    return (
+      this.supported &&
+      this.push.isEnabled &&
+      Notification.permission === 'default' &&
+      window.localStorage.getItem(ENABLED_KEY) === null
+    );
+  }
+
+  declinePermission(): void {
+    this.setDeviceEnabled(false);
+  }
+
+  // Call directly from a button or toggle event to retain the browser's user gesture.
   async setEnabled(enabled: boolean): Promise<boolean> {
     if (this.busy()) return false;
     this.failure.set(undefined);

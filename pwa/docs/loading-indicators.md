@@ -1,6 +1,6 @@
 # 加载与操作反馈
 
-加载图标不搭配文字。错误提示和重试入口显示文字。应用内使用 Ionic 默认 spinner；加载状态不等同于禁用整个输入区或页面，具体提交规则见[需求](requirements.md#输入草稿与待发队列)。
+加载图标不搭配文字。需要展示的错误提示和重试入口使用文字；归档计数与好友请求加载失败保持静默，见[聊天列表约定](requirements.md#聊天列表)。应用内使用 Ionic 默认 spinner；加载状态不等同于禁用整个输入区或页面，具体提交规则见[需求](requirements.md#输入草稿与待发队列)。
 
 ## 数据加载
 
@@ -36,6 +36,7 @@
 | 取消收藏                         | 对应收藏的取消按钮 | removingSavedId 标识当前行，其他取消按钮禁用；失败由收藏页提示                                                                |
 | 话题订阅/归档                    | 话题 toolbar 按钮  | threadBusy 为真时显示 spinner 并禁用重复操作                                                                                  |
 | 保存好友验证设置                 | 保存按钮           | 保留文案占位，spinner 叠放；表单暂时禁用                                                                                      |
+| 首次允许通知                     | alert 的允许按钮   | 文案保留占位、spinner 叠放；授权期间阻止重复操作，失败 toast 后可重试                                                        |
 | 通知订阅                         | 通知设置行右侧     | PushNotifications.busy；开关显示本机通知意图，后台 Push 注册失败单独提示并可重试                                              |
 | 检查更新                         | 检查更新行图标位置 | AppUpdates.checking；结果在设置页展示                                                                                         |
 | 发送消息                         | 消息时间之后       | 立即上屏；上传 cloud-upload-outline，排队／发送 time-outline，确认 checkmark-outline，失败 alert-circle-outline；失败原位重试 |

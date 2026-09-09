@@ -1,0 +1,15 @@
+<ion-alert
+  cssClass="notification-prompt"
+  [class.requesting]="requesting()"
+  [isOpen]="open()"
+  [backdropDismiss]="false"
+  header="允许“茶话”发送通知吗"
+  message="以后可以在设置内修改"
+  [buttons]="[
+    { text: '不允许', handler: decline, htmlAttributes: { disabled: requesting() } },
+    { text: '允许', cssClass: 'notification-allow', handler: allow, htmlAttributes: { disabled: requesting() } },
+  ]"
+  (didPresent)="attachSpinner($event)"
+  (didDismiss)="open.set(false)" />
+<ng-template #spinner><ion-spinner /></ng-template>
+<ion-toast message="授权失败，请再试一次" [duration]="2500" />

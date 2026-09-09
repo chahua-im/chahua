@@ -16,6 +16,7 @@ import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
 import { PushNotifications } from '../pwa/push-notifications';
+import { NotificationPrompt } from '../pwa/notification-prompt/notification-prompt';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
 import { SettingsModal } from '../settings/settings-modal/settings-modal';
@@ -41,6 +42,7 @@ enum StartupError {
     IonSplitPane,
     ChatList,
     SettingsModal,
+    NotificationPrompt,
   ],
 })
 export class App {

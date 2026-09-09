@@ -140,7 +140,7 @@ describe('Message', () => {
     expect(element.querySelector('.reply-preview')).toBeNull();
   });
 
-  it('shows every message avatar immediately when the preference changes and keeps menu previews hidden', async () => {
+  it('shows every message avatar immediately when the preference changes', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('last', false);
     fixture.detectChanges();
@@ -149,9 +149,6 @@ describe('Message', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.avatar img')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.chat-row.last')).not.toBeNull();
-    fixture.componentRef.setInput('preview', true);
-    fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.avatar')).toBeNull();
     fixture.componentRef.setInput('showAllAvatars', false);
   });
 
@@ -297,9 +294,14 @@ describe('Message', () => {
     expect(fixture.debugElement.query(By.css('.media-time app-message-status ion-icon')).componentInstance.icon).toBe(
       checkmarkOutline,
     );
+    fixture.componentRef.setInput('preview', true);
+    fixture.detectChanges();
+    expect(element.querySelector('.bubble .sender')).not.toBeNull();
+    expect(element.querySelector('.avatar')).not.toBeNull();
+    expect(element.querySelector('.sticker-content')).toBeNull();
   });
 
-  it('opens the message menu by right click with the measured bubble and group position', async () => {
+  it('opens the message menu with the measured bubble and click position', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('first', false);
     fixture.componentRef.setInput('own', true);
@@ -309,7 +311,7 @@ describe('Message', () => {
     vi.spyOn(bubble, 'getBoundingClientRect').mockReturnValue(rect);
     const menu = vi.fn();
     fixture.componentInstance.menu.subscribe(menu);
-    const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 110, clientY: 150 });
     bubble.dispatchEvent(context);
     expect(context.defaultPrevented).toBe(true);
     expect(menu).toHaveBeenLastCalledWith({
@@ -317,8 +319,7 @@ describe('Message', () => {
       clientGeneratedId: undefined,
       element: bubble,
       rect,
-      first: false,
-      last: true,
+      point: { x: 110, y: 150 },
       own: true,
     });
     expect(menu).toHaveBeenCalledTimes(1);
@@ -381,7 +382,7 @@ describe('Message', () => {
     pointer(bubble, 'pointerdown', { clientX: 150 });
     vi.advanceTimersByTime(350);
     expect(menu).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ clientGeneratedId: 'queued-message', messageId: undefined }),
+      expect.objectContaining({ clientGeneratedId: 'queued-message', messageId: undefined, point: { x: 150, y: 50 } }),
     );
     bubble.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     expect(menu).toHaveBeenCalledOnce();
@@ -553,7 +554,7 @@ describe('Message', () => {
     },
   );
 
-  it('renders an inert preview without avatars or actions while preserving quotes and reaction counts', async () => {
+  it('renders a full preview without actions while preserving quotes and reaction counts', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('preview', true);
     fixture.componentRef.setInput('canOpenThread', true);
@@ -566,7 +567,8 @@ describe('Message', () => {
     const element = fixture.nativeElement as HTMLElement;
     const bubble = element.querySelector('.bubble') as HTMLElement;
     expect(bubble.hasAttribute('inert')).toBe(true);
-    expect(element.querySelector('ion-avatar, .avatar-slot, .reply-button, ion-button')).toBeNull();
+    expect(element.querySelector('ion-avatar')).not.toBeNull();
+    expect(element.querySelector('.reply-button, ion-button')).toBeNull();
     expect(element.querySelector('.reaction')?.textContent).toMatch(/❤️\s*2/);
     expect(element.querySelector('button.reaction')).toBeNull();
     const menu = vi.fn();

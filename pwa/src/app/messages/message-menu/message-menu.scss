@@ -1,6 +1,7 @@
 .menu-surface {
   display: block;
   height: 100%;
+  overflow: clip;
   position: relative;
   padding: var(--ion-safe-area-top, 0px) var(--ion-safe-area-right, 0px) var(--ion-safe-area-bottom, 0px)
     var(--ion-safe-area-left, 0px);
@@ -11,6 +12,16 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+  pointer-events: none;
+  isolation: isolate;
+
+  > * {
+    pointer-events: auto;
+  }
+}
+.anchored .preview {
+  position: absolute;
+  max-width: none;
 }
 .own {
   align-items: flex-end;
@@ -29,6 +40,8 @@
   color: var(--ion-color-primary-shade);
 }
 .panel {
+  position: relative;
+  z-index: 1;
   width: 276px;
   max-width: 100%;
   padding: 6px;
@@ -69,7 +82,8 @@ button:disabled {
   max-width: min(276px, 100%);
 }
 .actions button {
-  flex: 0 0 calc((276px - 12px) / 5);
+  flex: none;
+  width: calc((276px - 12px) / 5);
   height: 63px;
   display: flex;
   flex-direction: column;
@@ -90,8 +104,6 @@ button:disabled {
 }
 .preview {
   max-width: 100%;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 .emoji-panel {
   position: absolute;

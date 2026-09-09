@@ -27,7 +27,7 @@
   padding: 0;
 
   > .message-stack {
-    width: 100%;
+    flex: 1;
     max-width: none;
   }
 }
@@ -81,7 +81,8 @@
   border-top-left-radius: 8px;
 }
 
-.last .bubble:where(:not(.media-only), .has-thread) {
+.last .bubble:where(:not(.media-only), .has-thread),
+.last:where(.preview) .bubble {
   border-bottom-left-radius: 0;
 
   &::after {
