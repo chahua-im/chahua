@@ -1,265 +1,266 @@
-<div class="conversation-main">
-  <ion-header>
-    <ion-toolbar>
-      @if (!realtime.connected()) {
-        <ion-spinner slot="end" />
-      }
-      <ion-buttons slot="start" class="ion-hide-md-up">
-        <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
-      </ion-buttons>
-      <ion-title (click)="details()">
-        @if (threadId()) {
-          @if (threadRoot(); as root) {
-            <app-message-preview [message]="root" />
-          } @else {
-            话题
-          }
+<ion-header>
+  <ion-toolbar>
+    @if (!realtime.connected()) {
+      <ion-spinner slot="end" />
+    }
+    <ion-buttons slot="start" class="ion-hide-md-up">
+      <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
+    </ion-buttons>
+    <ion-title (click)="details()">
+      @if (threadId()) {
+        @if (threadRoot(); as root) {
+          <app-message-preview [message]="root" />
         } @else {
-          {{ chatTitle().name ?? (chatTitle().isDm ? '私聊' : '会话') }}
+          话题
         }
-      </ion-title>
-      @if (threadBusy() && !subscription()) {
-        <ion-spinner slot="end"></ion-spinner>
+      } @else {
+        {{ chatTitle().name ?? (chatTitle().isDm ? '私聊' : '会话') }}
       }
-      @if (menu()?.busy()) {
-        <ion-spinner slot="end"></ion-spinner>
-      }
-      @if (threadId() && subscription(); as status) {
-        <ion-buttons slot="end">
-          <ion-button [disabled]="threadBusy()" (click)="updateThread()">
-            @if (threadBusy()) {
-              <ion-spinner />
-            } @else {
-              <ion-icon
-                slot="icon-only"
-                [icon]="
-                  !status.subscribed
-                    ? threadIcons.starOutline
-                    : status.archived
-                      ? threadIcons.archive
-                      : threadIcons.archiveOutline
-                " />
-            }
-          </ion-button>
-        </ion-buttons>
-      }
+    </ion-title>
+    @if (threadBusy() && !subscription()) {
+      <ion-spinner slot="end"></ion-spinner>
+    }
+    @if (menu()?.busy()) {
+      <ion-spinner slot="end"></ion-spinner>
+    }
+    @if (threadId() && subscription(); as status) {
       <ion-buttons slot="end">
-        <ion-button class="info-button" (click)="details()">
-          @if (largeScreen()) {
-            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="3" y="4" width="18" height="16" rx="2" />
-              <path d="M15 4v16" />
-              @if (sidebarOpen()) {
-                <path d="M17 7h2v10h-2z" fill="currentColor" stroke="none" />
-              }
-            </svg>
+        <ion-button [disabled]="threadBusy()" (click)="updateThread()">
+          @if (threadBusy()) {
+            <ion-spinner />
           } @else {
-            <ion-icon slot="icon-only" [icon]="infoIcon" />
+            <ion-icon
+              slot="icon-only"
+              [icon]="
+                !status.subscribed
+                  ? threadIcons.starOutline
+                  : status.archived
+                    ? threadIcons.archive
+                    : threadIcons.archiveOutline
+              " />
           }
         </ion-button>
       </ion-buttons>
-    </ion-toolbar>
-    @if (selectedPin(); as pin) {
-      <ion-toolbar class="pinned-bar">
-        <button type="button" class="pinned-preview" [disabled]="!!pendingNavigation()" (click)="locatePin()">
-          @if (jumpingTo() === pin.message.id) {
-            <ion-spinner class="pin-loading"></ion-spinner>
-          }
-          <span class="pinned-title">
-            置顶消息
-            @if (visiblePins().length > 1) {
-              · {{ selectedPinIndex() + 1 }}/{{ visiblePins().length }}
+    }
+    <ion-buttons slot="end">
+      <ion-button class="info-button" (click)="details()">
+        @if (largeScreen()) {
+          <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M15 4v16" />
+            @if (sidebarOpen()) {
+              <path d="M17 7h2v10h-2z" fill="currentColor" stroke="none" />
             }
-          </span>
-          <app-message-preview [message]="pin.message"></app-message-preview>
-        </button>
-        <ion-buttons slot="end">
-          <ion-button [routerLink]="pinsHref()">
-            <ion-icon slot="icon-only" [icon]="listIcon"></ion-icon>
-          </ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    } @else if (pinsFailed()) {
-      <ion-toolbar>
-        @if (pins().loading()) {
-          <ion-spinner></ion-spinner>
+          </svg>
         } @else {
-          <ion-button fill="clear" (click)="loadPins()">置顶消息加载失败，重试</ion-button>
+          <ion-icon slot="icon-only" [icon]="infoIcon" />
         }
-      </ion-toolbar>
-    }
-  </ion-header>
-  <ion-content
-    appScrollbars
-    [scrollEvents]="true"
-    (ionScroll)="onScroll()"
-    (ionScrollStart)="scrolling.scrollStart()"
-    (ionScrollEnd)="scrolling.scrollEnd()"
-    (touchstart)="scrolling.touchStart()"
-    (touchend)="scrolling.touchEnd()"
-    (touchcancel)="scrolling.touchEnd()">
-    @if (scrolling.moving() && visibleDate(); as date) {
-      <span slot="fixed" class="floating-date">{{ date | date: 'yyyy年M月d日' }}</span>
-    }
-    <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
-    <div>
-      @if (threadError()) {
-        <div class="ion-text-center">
-          <p>
-            @if (threadError() === ThreadError.Load) {
-              话题状态加载失败，请重试。
-            } @else {
-              话题更新失败，请重试。
-            }
-          </p>
-          <ion-button fill="clear" (click)="loadSubscription()">重新加载话题状态</ion-button>
-        </div>
-      }
-      @if (conversation.page()?.olderCursor) {
-        <div class="ion-text-center">
-          <button
-            type="button"
-            class="pagination-control"
-            [disabled]="!conversation.canLoad(PageDirection.Older)"
-            (click)="loadPage(PageDirection.Older)">
-            <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Older"></ion-spinner>
-          </button>
-        </div>
-      }
-      <div class="message-list">
-        @for (row of rows(); track row.key) {
-          @if (row.dateBreak) {
-            <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
-          }
-          @if (firstUnreadId() && row.message.id === firstUnreadId()) {
-            <p #unreadSeparator class="unread-separator">以下是未读消息</p>
-          }
-          <app-message
-            [showAllAvatars]="preferences.showAllAvatars()"
-            [message]="row.message"
-            [interactive]="!!row.confirmed && !row.outgoing"
-            [outgoingId]="row.outgoing?.clientGeneratedId"
-            [delivery]="row.outgoing?.delivery()"
-            [uploads]="row.outgoing?.uploads ?? []"
-            (retry)="row.outgoing && outbox.retry(row.outgoing)"
-            [own]="row.message.sender.uid === session.user()?.uid"
-            [first]="row.first"
-            [last]="row.last"
-            [canReply]="!editing()"
-            [jumpingTo]="jumpingTo()"
-            [jumpDisabled]="!!pendingNavigation()"
-            [canOpenThread]="!threadId()"
-            (reply)="row.confirmed && startReply(row.confirmed)"
-            (menu)="menu()?.open($event)"
-            (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
-            (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
-            (openThread)="openThread($event)"></app-message>
-        } @empty {
-          @if (conversation.page()) {
-            <p class="ion-text-center">暂无消息</p>
-          }
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+  @if (selectedPin(); as pin) {
+    <ion-toolbar class="pinned-bar">
+      <button type="button" class="pinned-preview" [disabled]="!!pendingNavigation()" (click)="locatePin()">
+        @if (jumpingTo() === pin.message.id) {
+          <ion-spinner class="pin-loading"></ion-spinner>
         }
+        <span class="pinned-title">
+          置顶消息
+          @if (visiblePins().length > 1) {
+            · {{ selectedPinIndex() + 1 }}/{{ visiblePins().length }}
+          }
+        </span>
+        <app-message-preview [message]="pin.message"></app-message-preview>
+      </button>
+      <ion-buttons slot="end">
+        <ion-button [routerLink]="pinsHref()">
+          <ion-icon slot="icon-only" [icon]="listIcon"></ion-icon>
+        </ion-button>
+      </ion-buttons>
+    </ion-toolbar>
+  } @else if (pinsFailed()) {
+    <ion-toolbar>
+      @if (pins().loading()) {
+        <ion-spinner></ion-spinner>
+      } @else {
+        <ion-button fill="clear" (click)="loadPins()">置顶消息加载失败，重试</ion-button>
+      }
+    </ion-toolbar>
+  }
+</ion-header>
+<ion-content
+  appScrollbars
+  [scrollEvents]="true"
+  (ionScroll)="onScroll()"
+  (ionScrollStart)="scrolling.scrollStart()"
+  (ionScrollEnd)="scrolling.scrollEnd()"
+  (touchstart)="scrolling.touchStart()"
+  (touchend)="scrolling.touchEnd()"
+  (touchcancel)="scrolling.touchEnd()">
+  <span
+    slot="fixed"
+    class="floating-date"
+    [style.visibility]="scrolling.moving() && visibleDate() ? 'visible' : 'hidden'">
+    {{ visibleDate() | date: 'yyyy年M月d日' }}
+  </span>
+  <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
+  <div #messageContent>
+    @if (threadError()) {
+      <div class="ion-text-center">
+        <p>
+          @if (threadError() === ThreadError.Load) {
+            话题状态加载失败，请重试。
+          } @else {
+            话题更新失败，请重试。
+          }
+        </p>
+        <ion-button fill="clear" (click)="loadSubscription()">重新加载话题状态</ion-button>
       </div>
-      @if (conversation.page()?.newerCursor) {
-        <div class="ion-text-center">
-          <button
-            type="button"
-            class="pagination-control"
-            [disabled]="!conversation.canLoad(PageDirection.Newer)"
-            (click)="loadPage(PageDirection.Newer)">
-            <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Newer"></ion-spinner>
-          </button>
-        </div>
-      }
-      @if (!conversation.page() && conversation.loading()) {
-        <div class="loading-status">
-          <ion-spinner></ion-spinner>
-        </div>
-      }
-      @if (conversation.error()) {
-        <div class="ion-text-center">
-          <p>
-            @switch (conversation.error()) {
-              @case (ConversationError.Missing) {
-                这条消息已删除或无法查看。
-              }
-              @case (ConversationError.Open) {
-                消息加载失败，请重试。
-              }
-              @default {
-                加载消息失败，请重试。
-              }
-            }
-          </p>
-          <ion-button fill="clear" (click)="retry()">重试</ion-button>
-        </div>
+    }
+    @if (conversation.page()?.olderCursor) {
+      <div class="ion-text-center">
+        <button
+          type="button"
+          class="pagination-control"
+          [disabled]="!conversation.canLoad(PageDirection.Older)"
+          (click)="loadPage(PageDirection.Older)">
+          <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Older"></ion-spinner>
+        </button>
+      </div>
+    }
+    <div class="message-list">
+      @for (row of rows(); track row.key) {
+        @if (row.dateBreak) {
+          <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
+        }
+        @if (firstUnreadId() && row.message.id === firstUnreadId()) {
+          <p #unreadSeparator class="unread-separator">以下是未读消息</p>
+        }
+        <app-message
+          [showAllAvatars]="preferences.showAllAvatars()"
+          [message]="row.message"
+          [interactive]="!!row.confirmed && !row.outgoing"
+          [outgoingId]="row.outgoing?.clientGeneratedId"
+          [delivery]="row.outgoing?.delivery()"
+          [uploads]="row.outgoing?.uploads ?? []"
+          (retry)="row.outgoing && outbox.retry(row.outgoing)"
+          [own]="row.message.sender.uid === session.user()?.uid"
+          [first]="row.first"
+          [last]="row.last"
+          [canReply]="!editing()"
+          [jumpingTo]="jumpingTo()"
+          [jumpDisabled]="!!pendingNavigation()"
+          [canOpenThread]="!threadId()"
+          (reply)="row.confirmed && startReply(row.confirmed)"
+          (menu)="menu()?.open($event)"
+          (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
+          (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
+          (openThread)="openThread($event)"></app-message>
+      } @empty {
+        @if (conversation.page()) {
+          <p class="ion-text-center">暂无消息</p>
+        }
       }
     </div>
-    @if (conversation.page(); as page) {
-      <!-- Keep the fixed slot mounted: changing its nodes interrupts Safari's momentum scrolling. -->
-      <ion-fab
-        class="history-navigation"
-        slot="fixed"
-        vertical="bottom"
-        horizontal="end"
-        [style.visibility]="showDownButton() ? 'visible' : 'hidden'">
-        <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="navigateDown()">
-          @if (navigatingDown() || pendingNavigation()?.type === ConversationTargetKind.Latest) {
-            <ion-spinner></ion-spinner>
-          } @else {
-            <ion-icon [icon]="downIcon"></ion-icon>
-          }
-        </ion-fab-button>
-        <ion-badge [style.opacity]="unreadCount() ? 1 : 0">{{ unreadCount() }}</ion-badge>
-      </ion-fab>
+    @if (conversation.page()?.newerCursor) {
+      <div class="ion-text-center">
+        <button
+          type="button"
+          class="pagination-control"
+          [disabled]="!conversation.canLoad(PageDirection.Newer)"
+          (click)="loadPage(PageDirection.Newer)">
+          <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Newer"></ion-spinner>
+        </button>
+      </div>
     }
-  </ion-content>
-  <ion-footer>
-    <app-message-composer
-      [relationship]="relationship()"
-      [chatId]="id()"
-      [text]="editing() ? editText() : draft()"
-      (textChange)="updateDraft($event)"
-      [editing]="editing()"
-      [editingUploads]="editingUploads()"
-      (submitted)="sendMessage($event)"
-      (editLast)="editLastMessage()"
-      (escape)="escapeComposer()">
-      @if (editing(); as edit) {
-        <div class="reply-context">
-          <div class="reply-description">
-            <strong>编辑消息</strong>
-            <span><app-message-preview [message]="edit" /></span>
-          </div>
-          <button type="button" class="reply-close" (click)="cancelEdit()">
-            <ion-icon [icon]="closeIcon" />
-          </button>
+    @if (!conversation.page() && conversation.loading()) {
+      <div class="loading-status">
+        <ion-spinner></ion-spinner>
+      </div>
+    }
+    @if (conversation.error()) {
+      <div class="ion-text-center">
+        <p>
+          @switch (conversation.error()) {
+            @case (ConversationError.Missing) {
+              这条消息已删除或无法查看。
+            }
+            @case (ConversationError.Open) {
+              消息加载失败，请重试。
+            }
+            @default {
+              加载消息失败，请重试。
+            }
+          }
+        </p>
+        <ion-button fill="clear" (click)="retry()">重试</ion-button>
+      </div>
+    }
+  </div>
+  @if (conversation.page(); as page) {
+    <!-- Keep the fixed slot mounted: changing its nodes interrupts Safari's momentum scrolling. -->
+    <ion-fab
+      class="history-navigation"
+      slot="fixed"
+      vertical="bottom"
+      horizontal="end"
+      [style.visibility]="showDownButton() ? 'visible' : 'hidden'">
+      <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="navigateDown()">
+        @if (navigatingDown() || pendingNavigation()?.type === ConversationTargetKind.Latest) {
+          <ion-spinner></ion-spinner>
+        } @else {
+          <ion-icon [icon]="downIcon"></ion-icon>
+        }
+      </ion-fab-button>
+      <ion-badge [style.opacity]="unreadCount() ? 1 : 0">{{ unreadCount() }}</ion-badge>
+    </ion-fab>
+  }
+</ion-content>
+<ion-footer>
+  <app-message-composer
+    [relationship]="relationship()"
+    [chatId]="id()"
+    [text]="editing() ? editText() : draft()"
+    (textChange)="updateDraft($event)"
+    [editing]="editing()"
+    [editingUploads]="editingUploads()"
+    (submitted)="sendMessage($event)"
+    (editLast)="editLastMessage()"
+    (escape)="escapeComposer()">
+    @if (editing(); as edit) {
+      <div class="reply-context">
+        <div class="reply-description">
+          <strong>编辑消息</strong>
+          <span><app-message-preview [message]="edit" /></span>
         </div>
-      } @else if (replyTo(); as message) {
-        <div class="reply-context">
-          <button
-            type="button"
-            class="reply-description"
-            [disabled]="!!pendingNavigation()"
-            (click)="goTo({ type: ConversationTargetKind.Message, messageId: message.id })">
-            <strong>正在回复 {{ message.sender.name ?? message.sender.uid }}</strong>
-            <span><app-message-preview [message]="message" /></span>
-          </button>
-          <button type="button" class="reply-close" (click)="cancelReply()">
-            <ion-icon [icon]="closeIcon" />
-          </button>
-        </div>
-      } @else if (savedReplyId()) {
-        <div class="reply-context">
-          <div class="reply-description"><strong>回复消息</strong></div>
-          <button type="button" class="reply-close" (click)="cancelReply()">
-            <ion-icon [icon]="closeIcon" />
-          </button>
-        </div>
-      }
-    </app-message-composer>
-  </ion-footer>
-</div>
+        <button type="button" class="reply-close" (click)="cancelEdit()">
+          <ion-icon [icon]="closeIcon" />
+        </button>
+      </div>
+    } @else if (replyTo(); as message) {
+      <div class="reply-context">
+        <button
+          type="button"
+          class="reply-description"
+          [disabled]="!!pendingNavigation()"
+          (click)="goTo({ type: ConversationTargetKind.Message, messageId: message.id })">
+          <strong>正在回复 {{ message.sender.name ?? message.sender.uid }}</strong>
+          <span><app-message-preview [message]="message" /></span>
+        </button>
+        <button type="button" class="reply-close" (click)="cancelReply()">
+          <ion-icon [icon]="closeIcon" />
+        </button>
+      </div>
+    } @else if (savedReplyId()) {
+      <div class="reply-context">
+        <div class="reply-description"><strong>回复消息</strong></div>
+        <button type="button" class="reply-close" (click)="cancelReply()">
+          <ion-icon [icon]="closeIcon" />
+        </button>
+      </div>
+    }
+  </app-message-composer>
+</ion-footer>
 @if (largeScreen() && sidebarOpen() && active()) {
   <aside class="details-sidebar">
     @for (chatId of [id()]; track chatId) {

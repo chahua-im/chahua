@@ -13,6 +13,9 @@ flowchart TD
   APP --> NOTIFY[NotificationBanner]
   OUTLET --> LISTPAGE[ChatListPage]
   LISTPAGE --> MOBILE[ChatList：单列内容]
+  LIST --> CONTENT[ChatListContent：分类列表与分页]
+  MOBILE --> CONTENT
+  CONTENT --> ROW[ChatListItem]
   OUTLET --> PAGE[ConversationPage]
   OUTLET --> PINS[PinnedMessagesPage]
   OUTLET --> SAVED[SavedMessagesPage]
@@ -51,17 +54,18 @@ MediaViewer、UserProfile、StartChat 和 StickerPicker 的独立模式由 Modal
 
 ## 根布局与聊天列表
 
-| 组件            | 输入、输出与局部字段                                                                    | 数据依赖                                                                    |
-| --------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| App             | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                    |
-| ChatListPage    | 路由分类/归档范围；active；接收 openList 并导航                                         | 将 selection 和 active 传给单列 ChatList                                    |
-| ChatList        | selection、active → openList；搜索词、刷新状态、查询消费者、显示准备状态、派生列表行    | ChatListStore、ChatStore、DraftStore、Preferences、SessionStore、Connection |
-| ChatListItem    | entry、selected、actions 等 → open；pendingAction、操作失败与滑动引用                   | 接收行数据和回调，不自行读取聊天数据                                        |
-| ChatAvatar      | entry、size                                                                             | 由输入派生头像、占位和话题角标，无请求                                      |
-| DirectorySearch | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                   | GroupsService、UsersService；选择用户或打开资料                             |
-| ChatLink        | 路由参数；failed                                                                        | 解析旧链接、按需查询消息/用户，打开目标页面或弹窗                           |
+| 组件            | 输入、输出与局部字段                                                                    | 数据依赖                                                        |
+| --------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| App             | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件        |
+| ChatListPage    | 路由分类/归档范围；active；接收 openList 并导航                                         | 将 selection 和 active 传给单列 ChatList                        |
+| ChatList        | selection、active → openList；搜索词、原生 segment 与内容 ID                            | SessionStore、Connection；控制分类面板与菜单                    |
+| ChatListContent | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行            | ChatListStore、ChatStore、DraftStore、Preferences、SessionStore |
+| ChatListItem    | entry、selected、actions 等 → open；pendingAction、操作失败与滑动引用                   | 接收行数据和回调，不自行读取聊天数据                            |
+| ChatAvatar      | entry、size                                                                             | 由输入派生头像、占位和话题角标，无请求                          |
+| DirectorySearch | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                   | GroupsService、UsersService；选择用户或打开资料                 |
+| ChatLink        | 路由参数；failed                                                                        | 解析旧链接、按需查询消息/用户，打开目标页面或弹窗               |
 
-ChatList 的行是共享资料、查询成员和草稿的派生结果。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。
+ChatListContent 的行是共享资料、查询成员和草稿的派生结果。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。
 
 ## 消息页面
 
@@ -73,9 +77,9 @@ ChatList 的行是共享资料、查询成员和草稿的派生结果。tab、�
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图和已删除消息。日期与连续作者分组从最终可见行派生。
 
-输入文字、回复对象与编辑目标由页面持有；Composer 通过 model 和输出传递变化。引用来源栈、当前置顶选择等只保留需要重新查找的 ID；已有同一对象引用无需转成 ID。未读数字直接消费 ChatStore。
+输入文字、回复对象与编辑目标由页面持有；Composer 通过 model 和输出传递变化。引用来源栈、当前置顶选择等只保留需要重新查找的 ID；已有同一对象引用无需转成 ID。未读数字直接消费 ChatStore。滚动中的已读与分页判断共用一次滚动尺寸读取；已确认消息的元素集合随消息行和视图变化派生，不在每次滚动时重新过滤。置顶栏持有当前显示的置顶对象引用，仅在栏位出现或消失时等待触摸与惯性结束；共享的置顶数据仍即时更新。
 
-滚动等待与浮动日期共用 scrollActivity.moving；visibleDate 来自已有视口测量。Ionic 缓存页面离开时释放区间和组件资源，DraftStore 与 MessageOutbox 的生命周期独立于页面。
+scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯性，用于分页合并和置顶栏显隐；visibleDate 来自已有视口测量。Ionic 缓存页面离开时释放区间和组件资源，DraftStore 与 MessageOutbox 的生命周期独立于页面。
 
 ## 消息展示与操作
 
@@ -118,7 +122,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 | --------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | ChatDetails     | chatId、threadId、threadRoot → closed；view、tab、编辑表单、pending/error、详情 loading | ChatStore 的头像、标题、详情、静音、订阅与好友关系；静音复用 ChatMute |
 | ChatThreads     | chatId；items、cursor、loading/error、打开状态                                          | 从聊天消息页提取话题根，点击导航                                      |
-| ChatMembers     | chatId；搜索词、members、cursor、manageable、loading/error、busy UID                    | MembersService；角色和移除结果更新当前列表                            |
+| ChatMembers     | chatId；members、cursor、loading/error                                                  | MembersService；行点击打开资料，仅管理员显示右侧身份                  |
 | ChatAttachments | chatId、kind；items、cursor、loading/error、打开/定位状态                               | 列表归组件，打开原消息媒体或定位上下文                                |
 | ChatSearch      | chatId；query、sort、messages、cursor、loading/error                                    | 聊天消息搜索，点击定位原消息                                          |
 | UserProfile     | user；验证方式、验证文字、发送结果、操作状态                                            | 从 ChatStore.relationship 读取同一好友关系；仅添加验证方式为本地数据  |
@@ -126,7 +130,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 | StartChat       | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                 | 点击提交才创建或加入；改邀请码会使旧预览不可提交                      |
 | ChatMute        | 公开 toggle(chatId)；菜单选择                                                           | 调用 ChatStore.setMuted，原调用按钮持有等待状态                       |
 
-ChatDetails 的侧栏和 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取。群：话题、成员、图片、视频、文件；私聊：话题、图片、视频、文件；话题：图片、视频、文件。
+ChatDetails 的侧栏和 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
 
 UserProfile、ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资料中的添加/删除/拉黑成功后刷新它；所有消费者随共享值变化，不各自请求并维护副本。
 

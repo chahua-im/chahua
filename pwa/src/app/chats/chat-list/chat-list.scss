@@ -23,3 +23,12 @@ ion-segment-button {
   --padding-end: initial;
   min-width: 0;
 }
+
+ion-segment-view {
+  min-height: 0;
+}
+
+ion-segment-content {
+  display: flex;
+  overflow: hidden;
+}

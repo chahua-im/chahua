@@ -43,11 +43,6 @@ export const routes: Routes = [
     component: PinnedMessagesPage,
   },
   {
-    path: 'chats',
-    data: { tab: ListTab.Messages },
-    component: ChatListPage,
-  },
-  {
     path: 'chats/chat/:id',
     component: ConversationPage,
   },
@@ -67,9 +62,12 @@ export const routes: Routes = [
     component: ChatListPage,
   },
   {
-    path: 'chats/:tab',
-    canMatch: [matchListTab],
+    path: 'chats',
     component: ChatListPage,
+    children: [
+      { path: '', pathMatch: 'full', data: { tab: ListTab.Messages }, children: [] },
+      { path: ':tab', canMatch: [(_route, segments) => isListTab(segments[0].path)], children: [] },
+    ],
   },
   { path: '', redirectTo: 'chats', pathMatch: 'full' },
   { path: '**', redirectTo: 'chats' },

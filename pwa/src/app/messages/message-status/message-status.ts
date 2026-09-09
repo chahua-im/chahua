@@ -32,7 +32,7 @@ import { MessageDelivery } from '../message-delivery';
       display: none;
     }
     ion-icon {
-      font-size: 14px;
+      font-size: 13px;
     }
   `,
 })

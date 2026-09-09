@@ -20,12 +20,14 @@
   border-radius: 20px;
 }
 .timer {
-  font-size: 15px;
+  font-size: var(--app-font-body);
+  line-height: var(--app-line-body);
   font-variant-numeric: tabular-nums;
 }
 .hint {
   color: var(--ion-color-medium);
-  font-size: 13px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   white-space: nowrap;
 }
 app-voice-player {
@@ -119,7 +121,8 @@ app-voice-player {
   right: 0;
   width: max-content;
   max-width: 260px;
-  font-size: 13px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   padding: 8px;
   border-radius: 8px;
   background: var(--ion-background-color, #fff);
@@ -128,4 +131,8 @@ app-voice-player {
 ion-spinner {
   width: 20px;
   height: 20px;
+}
+
+.send ion-icon {
+  transform: translateX(1.5px);
 }

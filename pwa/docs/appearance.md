@@ -1,64 +1,98 @@
 # 外观与样式边界
 
-Ionic iOS 模式负责 toolbar、列表、按钮、modal、popover、segment 和 spinner。应用 CSS 负责聊天特有的内容形状与布局，不为每个页面重新定义同类 Ionic 控件的颜色。
+Ionic iOS 模式负责 toolbar、列表、按钮、modal、popover、segment 和 spinner。应用统一定义文字层级与信息密度，组件 CSS 负责聊天特有的形状与布局；同类控件共用主题颜色。
 
-## 尺寸与 Telegram 参考
+## 导航动画
 
-比较单位是 CSS px 与 iOS 布局点，不能直接用截图物理像素相减。设备缩放、系统字体和字形栅格化会产生细小差异；校准的是元素几何与基线关系，不是特定设备的字形像素。
+单列的会话进入和返回使用 Ionic 默认 iOS 页面动画。会话页面直接包含 `ion-header`、`ion-content` 和 `ion-footer`，标题、返回按钮及其文字、正文分别由 Ionic 默认转场处理；分栏切换会话不播放页面动画。Safari 已提供可视返回转场时，Ionic 只完成页面显示状态清理。
 
-| 部位       | 本应用                                                                              | 参考与取舍                                                                                                  |
-| ---------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 气泡内引用 | 14px 字号；3px 作者色竖边；4px/8px 内边距                                           | TG 按基础字号乘 14/17 并取整，默认得到 14pt。保持单行作者和单行省略摘要。                                   |
-| 回复输入栏 | 36px 高，与单行输入一致；12px/14px 字号和行高；29px 高、2px 宽的直线                | TG ReplyAccessoryPanel 为 45pt 高、15pt 字号、35pt 竖线。本应用采用明确的紧凑版本，不把高度差当作渲染误差。 |
-| 回复对齐   | 竖线起点与 textarea 文字起点共用 composer-padding-start                             | 取消按钮与贴纸按钮对齐。以文字区域的实际起点校验，不增加某一台 iPhone 专用的 1px 平移。                     |
-| 消息密度   | 正文 14px，作者 12px；连续消息间距较小，换作者增加间隔                              | 与 TG 常用的较大正文字号不同，维持当前紧凑密度；字号、行高和气泡内边距作为整体设计。                        |
-| 原生控件   | Ionic 默认主题字号、图标和按钮颜色                                                  | 不为返回、设置、收藏和置顶按钮分别混合稍微不同的蓝色。                                                      |
-| 发送气泡   | 应用蓝色与白色文字                                                                  | 保留应用配色，不复制 TG 某个主题的绿色气泡或壁纸。                                                          |
-| 表态头像   | 23px 头像、26px 气泡高度、头像重叠；少量半像素间距                                  | 采用旧版经过调整的紧凑几何，半像素并非自动判定为错误。                                                      |
-| 应用内通知 | 仅单列；顶部安全区内浮动，24px 圆角、半透明表面、44px 头像、15px 文字、最多两行摘要 | 采用 iOS 通知卡片的视觉关系。TG 自己的通知也有 64/74pt 等多种尺寸，不以一个固定截图覆盖全部环境。           |
-| 媒体预览   | 图片/视频从顶部开始；按钮悬浮，底部同消息 gallery                                   | 悬浮控件需要遮罩、层级与命中控制；这部分不能由普通内容 modal 的默认留白代替。                               |
+聊天列表使用 `ion-segment`、`ion-segment-view` 和 `ion-segment-content` 的默认内容滑动及选中指示器联动，不自定义位移、时长或曲线。toolbar 保持固定。四个分类共用列表页面，各自保留滚动位置，只有当前分类激活读取和续页；归档与好友请求历史使用独立列表内容。单列保留分类路由和浏览器历史，分栏切分类不改变右侧会话。归档与好友请求历史的顶栏使用 Ionic iOS 返回按钮；单列返回导航栈中的上一页，无历史时回到对应分类，分栏仅恢复左侧分类。
 
-来源为 [Telegram iOS 引用布局](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageReplyInfoNode/Sources/ChatMessageReplyInfoNode.swift)、[回复输入栏](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ReplyAccessoryPanelNode/Sources/ReplyAccessoryPanelNode.swift)、[应用内通知](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageNotificationItem/Sources/ChatMessageNotificationItem.swift)。这些参数属于该源码版本，不代表所有主题、字体设置与系统版本都逐像素一致。
+已知限制：Chrome 的 iPhone 模拟模式直接打开非首分类时，首次内容定位可能偏约 2px；后续分类切换正常，WebKit 未复现。
+
+会话的消息与置顶独立加载。置顶数据即时更新；置顶栏的出现与消失等待手指松开且惯性滚动结束，期间多次变更只展示最终状态。已显示的置顶栏更新内容无需等待。消息区与可视区域的尺寸由 ResizeObserver 监听：最新区间在底部时保持贴底；阅读历史时按可视区域顶部的位移补偿滚动，使置顶栏出现或消失时消息保持原屏幕位置。仅输入栏高度改变时，历史阅读位置保持不变。监听不在每次滚动中运行，不使用定时补滚动。悬浮日期和右下角按钮保持节点常驻，只切换可见性，滚动开始与结束不增删内容槽节点。
+
+## 字体与密度
+
+`src/styles.scss` 集中定义正文、列表标题、预览、紧凑文字、辅助文字和资料标题。组件使用这些角色，不自行判断平台。Ionic 的 `plt-ios`、`plt-android` 选择移动端尺寸，其余操作系统使用桌面尺寸；iPadOS 与 iOS 相同，Windows 接入触屏仍使用桌面尺寸。窗口宽度只决定单栏、双栏和三栏布局。
+
+保留 Ionic 的根字号：桌面浏览器与 Android 默认 16px，iOS 使用系统 Body，默认 17px。文字角色采用 rem，根字号与正文不是同一个概念。移动端按各系统的默认根字号换算，使默认字号和行高为整数，同时保留根字号变化时的文字缩放。下表为默认设置下的实际 CSS px。
+
+| 内容                         | iPhone / iPad | Android      | 桌面         |
+| ---------------------------- | ------------- | ------------ | ------------ |
+| 消息正文、普通列表项、表单   | 17 / 22       | 16 / 22      | 14 / 20      |
+| 聊天列表标题                 | 16 / 22       | 16 / 22      | 14 / 20      |
+| 列表预览、资料描述           | 15 / 20       | 15 / 20      | 13 / 18      |
+| 消息作者、气泡引用、置顶预览 | 14 / 17       | 14 / 17      | 13 / 17      |
+| 列表时间、辅助说明           | 13 / 17       | 13 / 17      | 12 / 16      |
+| 消息时间、发送状态           | 11 / 14       | 11 / 14      | 11 / 14      |
+| 资料标题                     | 22 / 28       | 22 / 28      | 20 / 26      |
+| 聊天列表最小行高 / 头像      | 72 / 52       | 72 / 52      | 64 / 48      |
+| 普通列表最小行高             | 44            | 44           | 40           |
+| 输入与发送控件高度           | 40            | 40           | 36           |
+| 表态胶囊 / 头像 / 表情       | 30 / 24 / 20  | 30 / 24 / 20 | 26 / 20 / 16 |
+
+字号、行高与控件密度分别选择，头像、按钮和边距不按正文比例整体缩放。显式指定的资料头像保持 88px，消息头像保持 34px。聊天头像的占位字号、角标尺寸和偏移随头像缩放，并取最近的整数 CSS px。媒体占位和右侧 360px 信息栏保持稳定。资料区上下留白为移动端 32px/24px、桌面 24px/20px；横排操作最小高度为 64px/56px，长标签可以换行。
+
+消息的手机正文参考 TG iOS，桌面采用 14px 正文以兼顾密度和中文阅读。其组织方式参考 [Signal 桌面字体](https://github.com/signalapp/Signal-Desktop/blob/aee156c662c64dc6cbe5e363325565f5cbd7203a/stylesheets/_mixins.scss)和 [Discord 字号与密度的区分](https://support.discord.com/hc/en-us/articles/207260127-How-to-Change-Discord-Color-Themes-and-Customize-Appearance-Settings)。应用没有额外的字体或密度设置项。
+
+布局不统一取整：百分比宽度、文字测量和滚动锚点保留浏览器精度。Ionic 细分隔线及发送图标的视觉偏移允许小数 CSS px。
+
+## 消息布局与 Telegram 参考
+
+作者色使用旧版用户名 hash，用户组颜色直接使用后端字段；不把用户组色与作者色混为一项。
+
+同一台 iPhone、viewport 为 device-width 且无额外页面缩放时，UIKit 的布局点与 CSS px 按 1:1 对应；UIKit pt 不是 CSS 的排版单位 pt。桌面截图还受浏览器缩放与 iPhone 镜像窗口缩放影响，不能直接据此推导字号。
+
+- 气泡引用使用作者半粗、摘要常规；3px 作者色竖边、3px/6px 内边距、4px 圆角，双行默认高度 40px，摘要单行省略。
+- 气泡内边距为 6px/11px，连续消息间隔 2px、换作者 5px；消息组上方 2px、下方 3px。时间在末行有空间时靠右，空间不足时另起一行；其向下偏移由正文与时间行高之差决定。
+- 回复输入栏的上下两部分使用相同的内部控件高度。引用文字默认 12px/14px，2px 竖线默认 29px 高；竖线与 textarea 文字共用起点，取消按钮与贴纸按钮对齐。它是紧凑附件栏，不照搬气泡引用的高度。
+- 输入框文字使用正文角色，文字区域与 Ionic 自动增高镜像共用行高。上下留白由控件高度、边框和行高计算；文字和语音发送飞机均向右偏移 1.5px。
+- 回复按钮按操作系统选择：iOS、iPadOS 与 Android 隐藏按钮，使用左滑回复；桌面系统在消息旁边预留按钮位置，仅整行 hover 时显示。平台规则与字号一起在全局样式定义，切换触摸模拟或连接触屏不改变按钮占位。
+- 应用内通知只在单列出现，使用顶部安全区内的半透明卡片、44px 头像与最多两行摘要。卡片文字使用预览角色。
+- 发送气泡保留应用蓝色与白色文字。媒体预览从顶部开始，按钮悬浮，底部为同消息 gallery。
+
+引用形状、气泡内边距和消息分组参考 [TG iOS 引用布局](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageReplyInfoNode/Sources/ChatMessageReplyInfoNode.swift)与[消息布局常量](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageItemCommon/Sources/ChatMessageItemCommon.swift)。参数表达应用的外观选择，不意味着在所有主题和系统字体设置下与 TG 逐像素一致。
 
 ## 样式归属
 
 下表覆盖手写 SCSS 和内联样式。每一组样式对应可见需求或布局约束，框架及库内部样式不在应用中复制。
 
-| 文件/组件                              | 保留的用途                                                                                                               |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| styles.scss                            | Ionic 与滚动条库入口、应用主色、系统顶部背景、全屏遮罩共同边界、消息日期、统一加载/操作反馈、原生输入与 Windows 滚动条。 |
-| index.html                             | Angular 尚未启动时的居中占位和八辐 spinner；尺寸、线宽和动画对应 Ionic spinner。                                         |
-| App                                    | 384px 聊天列表侧栏与启动内容居中。                                                                                       |
-| ChatListPage                           | 空会话提示的居中布局。                                                                                                   |
-| ChatList                               | 顶栏 26px 头像和小屏可容纳的分类标签。                                                                                   |
-| ChatListItem                           | 列表行密度、选中态、时间/未读布局、系统预览色与静音标记。                                                                |
-| ChatAvatar                             | 同一头像按 48/88 等尺寸缩放；话题角标、边框及占位。                                                                      |
-| ChatDetails                            | 内容容器、安全区、居中资料、横排操作及五个等分标签。                                                                     |
-| ConversationPage                       | 360px 信息栏、手动锚点下关闭浏览器二次锚定、未读线、下箭头与置顶/回复栏。                                                |
-| SavedMessagesPage / PinnedMessagesPage | 消息背景；收藏来源与快照操作排列。                                                                                       |
-| Message                                | 气泡、尾巴、作者分组、媒体贴边、时间、引用、桌面 hover 与手机回复手势反馈。                                              |
-| MessageAuthor                          | 用户名、用户组和性别在同一行的颜色及密度。                                                                               |
-| MessageReactions                       | 表情、计数、重叠用户头像与气泡内外两种排布。                                                                             |
-| MessageThread                          | 气泡下的讨论入口分隔与可点击区域。                                                                                       |
-| MessageAttachments                     | 资源未加载时的尺寸框、媒体时间、文件行、上传遮罩和视频打开按钮。                                                         |
-| MessageComposer                        | 输入/附件/发送的布局、面板、提及列表及待发送附件；36px 控件尺寸通过 CSS 变量传入录音组件。                               |
-| VoiceRecorder                          | 录音、计时、取消/发送拖动目标与短录音提示。                                                                              |
-| StickerPicker                          | 固定面板高度、可滚动贴纸网格、包分类和按下反馈。                                                                         |
-| MessageMenu                            | 消息预览、表态条、操作网格与遮罩命中；菜单几何由 DOM 测量负责。                                                          |
-| MediaViewer                            | 全屏画布、悬浮控制、缩放、加载状态、翻页与 gallery。                                                                     |
-| ChatAttachments                        | 三列正方形媒体摘要与打开时的反馈。                                                                                       |
-| VoicePlayer                            | 固定高度的播放、波形、时间与倍速；波形库 shadow part 由全局入口设置。                                                    |
-| InviteCard                             | 230px × 66px 固定卡片、44px 头像和单行摘要；外层消息只负责点击。                                                         |
-| Landing                                | 旧版五平台安装指引的布局与样式。                                                                                         |
-| Settings                               | 88px 居中头像及占位图标。                                                                                                |
-| NotificationBanner                     | 顶部卡片、安全区、亮暗色、两行省略与入场动画。                                                                           |
-| MessageText（内联）                    | 提及与链接的继承字号和链接色，长词换行。                                                                                 |
-| MessagePreview（内联）                 | 系统行为摘要继承调用位置指定的颜色。                                                                                     |
-| MessageStatus（内联）                  | 时间旁的状态图标对齐。                                                                                                   |
-| EmojiPicker（内联）                    | 第三方表情选择器的尺寸和主题变量。                                                                                       |
+| 文件/组件                              | 保留的用途                                                                                                                               |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| styles.scss                            | Ionic 与滚动条库入口、统一字体与密度、应用主色、系统顶部背景、全屏遮罩共同边界、消息日期、统一加载/操作反馈、原生输入与 Windows 滚动条。 |
+| index.html                             | Angular 尚未启动时的居中占位和八辐 spinner；尺寸、线宽和动画对应 Ionic spinner。                                                         |
+| App                                    | 384px 聊天列表侧栏与启动内容居中。                                                                                                       |
+| ChatListPage                           | 空会话提示的居中布局。                                                                                                                   |
+| ChatList                               | 顶栏 26px 头像和小屏可容纳的分类标签。                                                                                                   |
+| ChatListItem                           | 列表行密度、选中态、时间/未读布局、系统预览色与静音标记。                                                                                |
+| ChatAvatar                             | 默认列表头像使用平台尺寸；显式 88px 等尺寸用于资料；话题角标、边框及占位。                                                               |
+| ChatDetails                            | 内容容器、安全区、居中资料、横排操作及五个等分标签。                                                                                     |
+| ConversationPage                       | 360px 信息栏、手动锚点下关闭浏览器二次锚定、未读线、下箭头与置顶/回复栏；主 toolbar 保留底边，置顶栏有自己的底边。                       |
+| SavedMessagesPage / PinnedMessagesPage | 消息背景；收藏来源与快照操作排列。                                                                                                       |
+| Message                                | 气泡、尾巴、作者分组、媒体贴边、时间、引用、桌面 hover 与手机回复手势反馈。                                                              |
+| MessageAuthor                          | 用户名、用户组和性别在同一行的颜色及密度。                                                                                               |
+| MessageReactions                       | 表情、计数、重叠用户头像与气泡内外两种排布。                                                                                             |
+| MessageThread                          | 气泡下的讨论入口分隔与可点击区域。                                                                                                       |
+| MessageAttachments                     | 资源未加载时的尺寸框、媒体时间、文件行、上传遮罩和视频打开按钮。                                                                         |
+| MessageComposer                        | 输入/附件/发送的布局、面板、提及列表及待发送附件；输入控件尺寸通过 CSS 变量传入录音组件。                                                |
+| VoiceRecorder                          | 录音、计时、取消/发送拖动目标与短录音提示。                                                                                              |
+| StickerPicker                          | 固定面板高度、可滚动贴纸网格、包分类和按下反馈。                                                                                         |
+| MessageMenu                            | 消息预览、表态条、操作网格与遮罩命中；菜单几何由 DOM 测量负责。                                                                          |
+| MediaViewer                            | 全屏画布、悬浮控制、缩放、加载状态、翻页与 gallery。                                                                                     |
+| ChatAttachments                        | 三列正方形媒体摘要与打开时的反馈。                                                                                                       |
+| VoicePlayer                            | 固定高度的播放、波形、时间与倍速；波形库 shadow part 由全局入口设置。                                                                    |
+| InviteCard                             | 230px 宽、默认 66px 高的卡片、44px 头像和单行摘要；高度同时预留文字行高；外层消息只负责点击。                                            |
+| Landing                                | 旧版五平台安装指引的布局与样式。                                                                                                         |
+| Settings                               | 88px 居中头像及占位图标。                                                                                                                |
+| NotificationBanner                     | 顶部卡片、安全区、亮暗色、两行省略与入场动画。                                                                                           |
+| MessageText（内联）                    | 提及与链接的继承字号和链接色，长词换行。                                                                                                 |
+| MessagePreview（内联）                 | 系统行为摘要继承调用位置指定的颜色。                                                                                                     |
+| MessageStatus（内联）                  | 时间旁的状态图标对齐。                                                                                                                   |
+| EmojiPicker（内联）                    | 第三方表情选择器的尺寸和主题变量。                                                                                                       |
 
 资源占位、Safari 惯性期间的稳定布局、安全区、隐藏控件与预览禁用命中属于功能需求。它们和装饰样式一起审查，但不因默认截图里没有出现就判定为无效。外观验证覆盖亮暗色、单列/多列、长文字、回复、媒体、贴纸和菜单。
 
-VoicePlayer 采用圆形播放按钮、条状真实波形、时长和倍速的横排布局；自己的蓝色气泡使用白色波形，其余位置使用 primary 色。波形未读取前保持相同尺寸。Landing 的五个平台指引和 SCSS 来自旧版，Ionic 组件负责相同的页头、分段和卡片。信息栏头像区域上下内边距为 32px/24px，操作区底部保留 24px 背景色区域，标签上方没有额外白色分隔块。
+VoicePlayer 采用圆形播放按钮、条状真实波形、时长和倍速的横排布局；自己的蓝色气泡使用白色波形，其余位置使用 primary 色。波形未读取前保持相同尺寸。Landing 的五个平台指引和 SCSS 来自旧版，Ionic 组件负责相同的页头、分段和卡片。信息栏头像区域按平台留白，操作区底部保留 24px 背景色区域，标签上方没有额外白色分隔块。
 
 Safari 顶部染色使用 body 末尾的空背景元素，保留 12px 采样区域并以 background-clip: text 避免绘制覆盖层；颜色跟随 toolbar 与深浅主题。媒体画布缩放尺寸仅由 --media-scale 定义，邀请卡片几何仅由 InviteCard 定义。

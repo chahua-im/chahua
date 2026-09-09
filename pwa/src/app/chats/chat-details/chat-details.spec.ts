@@ -232,6 +232,46 @@ describe('ChatDetails', () => {
     expect(fixture.componentInstance['chat']()?.name).toBe('当前群');
   });
 
+  it('refreshes the saved chat without closing the current chat edit form', async () => {
+    const fixture = await open();
+    const component = fixture.componentInstance;
+    component['edit']();
+    const saving = component['save']();
+    await component['save']();
+    const patch = http.expectOne({ method: 'PATCH', url: `/_api/group/${wireChat.id}` });
+    const nextId = encodeId('9007199254741993');
+    fixture.componentRef.setInput('chatId', nextId);
+    fixture.detectChanges();
+    http.expectOne(`/_api/group/${decodeId(nextId)}`).flush({ ...wireChat, id: decodeId(nextId), name: '当前群' });
+    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    await fixture.whenStable();
+    component['edit']();
+    const currentView = component['view']();
+    expect(component['busy']()).toBe(false);
+
+    patch.flush(null);
+    await Promise.resolve();
+    http.expectOne(`/_api/group/${wireChat.id}`).flush(structuredClone(wireChat));
+    await saving;
+    expect(component['view']()).toBe(currentView);
+    expect(component['values']().name).toBe('当前群');
+    expect(component['error']()).toBe(false);
+  });
+
+  it('does not navigate away when a leave request finishes after the panel was closed', async () => {
+    const fixture = await open();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    alert.onDidDismiss.mockResolvedValue({ role: 'confirm' });
+    const leaving = fixture.componentInstance['leave']();
+    await vi.waitFor(() => expect(fixture.componentInstance['busy']()).toBe(true));
+    const request = http.expectOne((req) => req.method === 'DELETE');
+    fixture.destroy();
+    request.flush(null);
+    await leaving;
+    expect(TestBed.inject(ChatListStore).refreshChats).toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('shows the thread author badge and title without fetching the root again', async () => {
     const fixture = await open();
     fixture.componentRef.setInput('threadId', testMessage.id);

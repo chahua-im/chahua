@@ -86,11 +86,11 @@ enum DetailAction {
   Leave,
 }
 
-enum GroupTab {
+enum InfoTab {
   Threads = 'threads',
   Members = 'members',
 }
-type ContentTab = ChatAttachmentKindFilter | GroupTab;
+type ContentTab = ChatAttachmentKindFilter | InfoTab;
 
 enum DetailView {
   Info,
@@ -169,27 +169,27 @@ export class ChatDetails {
   protected readonly chat = computed(() => this.store.get(this.chatId()));
   protected readonly loading = signal(false);
   protected readonly Action = DetailAction;
-  protected readonly pending = signal<DetailAction | undefined>(undefined);
+  private readonly scope = computed(() => ({ chatId: this.chatId(), threadId: this.threadId() }));
+  protected readonly pending = linkedSignal({
+    source: this.scope,
+    computation: (): DetailAction | undefined => undefined,
+  });
   protected readonly busy = computed(() => this.pending() != null);
-  protected readonly error = signal(false);
+  protected readonly error = linkedSignal({ source: this.scope, computation: () => false });
   protected readonly View = DetailView;
   protected readonly Kind = GroupKind;
   protected readonly Role = GroupRole;
   protected readonly Visibility = GroupVisibility;
-  protected readonly view = linkedSignal(() => {
-    this.chatId();
-    this.threadId();
-    return DetailView.Info;
-  });
-  protected readonly GroupTab = GroupTab;
+  protected readonly view = linkedSignal({ source: this.scope, computation: () => DetailView.Info });
+  protected readonly InfoTab = InfoTab;
   protected readonly AttachmentKind = ChatAttachmentKindFilter;
   protected readonly tab = linkedSignal<ContentTab>(() => {
     this.chatId();
-    return this.threadId() ? ChatAttachmentKindFilter.image : GroupTab.Threads;
+    return this.threadId() ? ChatAttachmentKindFilter.image : InfoTab.Threads;
   });
   protected changeTab(value: unknown) {
     if (
-      Object.values(GroupTab).includes(value as GroupTab) ||
+      Object.values(InfoTab).includes(value as InfoTab) ||
       Object.values(ChatAttachmentKindFilter).includes(value as ChatAttachmentKindFilter)
     )
       this.tab.set(value as ContentTab);
@@ -223,9 +223,15 @@ export class ChatDetails {
       if (uid && uid !== this.session.user()?.uid) onCleanup(this.store.relationship(uid).activate());
     });
     effect(() => {
-      const root = this.threadId();
+      const scope = this.scope();
+      const root = scope.threadId;
       if (root && !this.subscription())
-        untracked(() => void this.store.loadSubscription(this.chatId(), root).catch(() => this.error.set(true)));
+        untracked(
+          () =>
+            void this.store.loadSubscription(scope.chatId, root).catch(() => {
+              if (this.isCurrent(scope)) this.error.set(true);
+            }),
+        );
     });
     effect(() => {
       this.chatId();
@@ -254,67 +260,67 @@ export class ChatDetails {
     });
     this.view.set(DetailView.Edit);
   }
-  protected async toggleMute() {
-    if (this.busy()) return;
-    this.pending.set(DetailAction.Mute);
+  private isCurrent(scope: ReturnType<typeof this.scope>) {
+    return !this.destroy.destroyed && scope === this.scope();
+  }
+
+  private async perform(action: DetailAction, operation: () => Promise<unknown>) {
+    if (this.busy()) return false;
+    const scope = this.scope();
+    this.pending.set(action);
     this.error.set(false);
     try {
-      await this.muteMenu().toggle(this.chatId());
+      await operation();
+      return this.isCurrent(scope);
     } catch {
-      this.error.set(true);
+      if (this.isCurrent(scope)) this.error.set(true);
+      return false;
     } finally {
-      this.pending.set(undefined);
+      if (this.isCurrent(scope)) this.pending.set(undefined);
     }
   }
-  protected async toggleSubscription() {
-    if (this.busy() || !this.subscription()) return;
-    this.pending.set(DetailAction.Subscription);
-    this.error.set(false);
-    try {
-      if (this.subscription()!.subscribed) await this.store.unsubscribeThread(this.chatId(), this.threadId()!);
-      else await this.store.subscribeThread(this.chatId(), this.threadId()!);
-    } catch {
-      this.error.set(true);
-    } finally {
-      this.pending.set(undefined);
-    }
+
+  protected toggleMute() {
+    return this.perform(DetailAction.Mute, () => this.muteMenu().toggle(this.chatId()));
   }
-  protected async toggleThreadArchive() {
-    if (this.busy() || !this.subscription()) return;
-    this.pending.set(DetailAction.Archive);
-    this.error.set(false);
-    try {
-      await this.store.setThreadArchived(this.chatId(), this.threadId()!, !this.subscription()!.archived);
-    } catch {
-      this.error.set(true);
-    } finally {
-      this.pending.set(undefined);
-    }
+  protected toggleSubscription() {
+    const status = this.subscription();
+    if (!status) return;
+    return this.perform(DetailAction.Subscription, () =>
+      status.subscribed
+        ? this.store.unsubscribeThread(this.chatId(), this.threadId()!)
+        : this.store.subscribeThread(this.chatId(), this.threadId()!),
+    );
+  }
+  protected toggleThreadArchive() {
+    const status = this.subscription();
+    if (!status) return;
+    return this.perform(DetailAction.Archive, () =>
+      this.store.setThreadArchived(this.chatId(), this.threadId()!, !status.archived),
+    );
+  }
+  private async refreshDetails(chatId: SnowflakeID) {
+    this.store.invalidate();
+    await this.store.ensureDetails(chatId);
+    this.lists.refreshChats();
   }
   protected async save() {
-    this.pending.set(DetailAction.Save);
-    this.error.set(false);
-    try {
-      await firstValueFrom(this.api.patchGroup(this.chatId(), this.values()));
-      this.store.invalidate();
-      await this.store.ensureDetails(this.chatId());
-      this.lists.refreshChats();
+    const chatId = this.chatId();
+    if (
+      await this.perform(DetailAction.Save, async () => {
+        await firstValueFrom(this.api.patchGroup(chatId, this.values()));
+        await this.refreshDetails(chatId);
+      })
+    )
       this.view.set(DetailView.Info);
-    } catch {
-      this.error.set(true);
-    } finally {
-      this.pending.set(undefined);
-    }
   }
-  protected async avatar(event: Event) {
+  protected avatar(event: Event) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
     const chatId = this.chatId();
-    this.pending.set(DetailAction.Avatar);
-    this.error.set(false);
-    try {
+    return this.perform(DetailAction.Avatar, async () => {
       const dimensions = await mediaDimensions(file);
       const upload = await firstValueFrom(
         this.api.postAvatarUploadUrl(chatId, {
@@ -326,16 +332,12 @@ export class ChatDetails {
       );
       await uploadBlob(upload.uploadUrl, file, upload.uploadHeaders);
       await firstValueFrom(this.api.patchGroup(chatId, { avatarImageId: upload.imageId }));
-      this.store.invalidate();
-      await this.store.ensureDetails(this.chatId());
-      this.lists.refreshChats();
-    } catch {
-      this.error.set(true);
-    } finally {
-      this.pending.set(undefined);
-    }
+      await this.refreshDetails(chatId);
+    });
   }
   protected async leave() {
+    if (this.busy()) return;
+    const scope = this.scope();
     const chat = this.chat()!;
     const chatId = this.chatId();
     const isDm = chat.kind === GroupKind.dm;
@@ -347,21 +349,19 @@ export class ChatDetails {
       ],
     });
     await alert.present();
-    if ((await alert.onDidDismiss()).role !== 'confirm') return;
-    this.pending.set(DetailAction.Leave);
-    try {
-      await firstValueFrom(
-        isDm
-          ? this.friends.deleteFriend(chat.peer!.uid)
-          : this.members.deleteRemoveMember(chatId, this.session.user()!.uid),
-      );
-      this.lists.refreshChats();
+    if ((await alert.onDidDismiss()).role !== 'confirm' || !this.isCurrent(scope)) return;
+    if (
+      await this.perform(DetailAction.Leave, async () => {
+        await firstValueFrom(
+          isDm
+            ? this.friends.deleteFriend(chat.peer!.uid)
+            : this.members.deleteRemoveMember(chatId, this.session.user()!.uid),
+        );
+        this.lists.refreshChats();
+      })
+    ) {
       await dismissChatOverlays(this.modals);
       await this.router.navigate(['/chats']);
-    } catch {
-      this.error.set(true);
-    } finally {
-      this.pending.set(undefined);
     }
   }
   protected async profile() {
@@ -371,7 +371,8 @@ export class ChatDetails {
     await modal.present();
   }
   protected async saved() {
+    const chatId = this.chatId();
     await dismissChatOverlays(this.modals);
-    await this.router.navigate(['/chats/chat', decodeId(this.chatId()), 'saved']);
+    await this.router.navigate(['/chats/chat', decodeId(chatId), 'saved']);
   }
 }

@@ -2,6 +2,8 @@
   display: block;
   position: relative;
   touch-action: pan-y pinch-zoom;
+  --message-padding-inline: 11px;
+  --message-padding-block: 6px;
   --sender-color: var(--sender-light);
   --reply-color: var(--reply-light);
 }
@@ -10,14 +12,14 @@
   transition: transform 160ms ease-out;
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 1px 12px;
+  gap: 10px;
+  padding: 1px 3px;
 
   &.group-start {
-    padding-top: 4px;
+    padding-top: 2px;
   }
   &.group-end {
-    padding-bottom: 4px;
+    padding-bottom: 3px;
   }
 }
 
@@ -37,18 +39,18 @@
 
 .message-stack {
   min-width: 0;
-  max-width: 75%;
+  max-width: min(85%, calc(100% - 74px));
 }
 
 .avatar,
 .avatar-spacer {
-  width: 36px;
+  width: 34px;
   flex-shrink: 0;
 }
 
 .avatar {
   position: relative;
-  height: 36px;
+  height: 34px;
   display: grid;
   place-items: center;
   color: var(--ion-color-primary-contrast);
@@ -64,12 +66,17 @@
   position: relative;
   isolation: isolate;
   min-width: 0;
-  padding: 8px 12px;
-  line-height: 1.4;
-  font-size: 14px;
+  min-height: calc(var(--app-line-body) + 2 * var(--message-padding-block));
+  padding: var(--message-padding-block) var(--message-padding-inline);
+  line-height: var(--app-line-body);
+  font-size: var(--app-font-body);
   background: var(--ion-background-color, #fff);
   color: var(--ion-text-color);
-  border-radius: 18px 18px 18px 4px;
+  border-radius: 16px 16px 16px 8px;
+}
+
+.chat-row:not(.group-start) .bubble {
+  border-top-left-radius: 8px;
 }
 
 .last .bubble:where(:not(.media-only), .has-thread) {
@@ -88,7 +95,10 @@
   }
 }
 
-.message-body,
+.message-body {
+  display: flow-root;
+}
+
 .message-footer {
   display: flex;
   flex-wrap: wrap;
@@ -106,18 +116,20 @@ app-message-reactions {
   overflow-wrap: anywhere;
 }
 
-.timestamp-spacer {
-  flex-grow: 1;
-}
-
 .timestamp {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: 1.5ch;
-  font-size: 12px;
+  gap: 3px;
+  margin-left: 8px;
+  font-size: var(--app-font-micro);
+  line-height: var(--app-line-micro);
   opacity: 0.7;
   white-space: nowrap;
+}
+
+.message-body > .timestamp {
+  float: inline-end;
+  margin-top: calc(var(--app-line-body) - var(--app-line-micro));
 }
 
 .retry-button {
@@ -128,7 +140,7 @@ app-message-reactions {
   background: var(--ion-color-danger);
   color: var(--ion-color-danger-contrast);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-font-caption);
   cursor: pointer;
 }
 
@@ -140,6 +152,8 @@ app-message-reactions {
   width: 100%;
   text-align: start;
   font: inherit;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
   color: inherit;
   cursor: pointer;
   border: 0;
@@ -147,8 +161,8 @@ app-message-reactions {
   min-width: 0;
   overflow: hidden;
   background: color-mix(in srgb, var(--reply-color) 10%, transparent);
-  padding: 4px 8px;
-  border-radius: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
   margin-bottom: 6px;
 
   &.busy .reply-content {
@@ -177,7 +191,8 @@ app-message-reactions {
 }
 
 .reply-button {
-  display: grid;
+  display: var(--app-reply-button-display);
+  opacity: 0;
   place-items: center;
   flex-shrink: 0;
   width: 28px;
@@ -204,7 +219,12 @@ app-message-reactions {
     --voice-play-color: var(--ion-color-primary-shade);
     background: var(--ion-color-primary-shade);
     color: var(--ion-color-primary-contrast);
-    border-radius: 18px 18px 4px 18px;
+    border-radius: 16px 16px 8px 16px;
+  }
+
+  &:not(.group-start) .bubble {
+    border-top-left-radius: 16px;
+    border-top-right-radius: 8px;
   }
 
   &.last .bubble {
@@ -241,7 +261,7 @@ app-message-reactions {
   overflow: hidden;
 }
 .bubble.media-only .media-content {
-  margin-inline: -12px;
+  margin-inline: calc(-1 * var(--message-padding-inline));
 }
 .media-only app-message-thread {
   margin-top: 0;
@@ -252,18 +272,13 @@ app-message-reactions {
 .system-message {
   margin: 8px 12px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   color: var(--ion-color-medium);
 }
 
-@media (hover: hover) {
-  .reply-button {
-    opacity: 0;
-  }
-
-  .chat-row:hover .reply-button {
-    opacity: 1;
-  }
+.chat-row:hover .reply-button {
+  opacity: 1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -296,11 +311,6 @@ app-message-reactions {
 @keyframes reply-burst {
   50% {
     transform: scale(1.3);
-  }
-}
-@media (hover: none) {
-  .reply-button {
-    display: none;
   }
 }
 

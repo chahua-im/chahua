@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { routes } from './app.routes';
+import { listSelection, ListTab } from './chats/list-tabs';
 
 describe('App routes', () => {
   let router: Router;
@@ -12,7 +13,7 @@ describe('App routes', () => {
   it('redirects the root and unknown tabs to the chat list', async () => {
     await router.navigateByUrl('/');
     expect(router.url).toBe('/chats');
-    expect(router.routerState.snapshot.root.firstChild?.data['tab']).toBe('messages');
+    expect(listSelection(router.routerState.snapshot.root)?.tab).toBe(ListTab.Messages);
     await router.navigateByUrl('/chats/unknown');
     expect(router.url).toBe('/chats');
   });
@@ -21,7 +22,7 @@ describe('App routes', () => {
     for (const tab of ['messages', 'groups', 'friends', 'threads']) {
       await router.navigateByUrl(`/chats/${tab}`);
       expect(router.url).toBe(`/chats/${tab}`);
-      expect(router.routerState.snapshot.root.firstChild?.params['tab']).toBe(tab);
+      expect(listSelection(router.routerState.snapshot.root)).toEqual({ tab, archived: false, requestHistory: false });
     }
   });
 

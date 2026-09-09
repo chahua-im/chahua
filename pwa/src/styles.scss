@@ -20,6 +20,166 @@
   --ion-color-primary-tint: #4087d2;
 }
 
+// Font roles follow Ionic's root size: 16px on desktop, system Body on iOS.
+// Ionic platform classes distinguish mobile operating systems from desktop OSes, independently of input and width.
+:root {
+  --app-font-body: 0.875rem;
+  --app-line-body: 1.25rem;
+  --app-font-title: 0.875rem;
+  --app-font-secondary: 0.8125rem;
+  --app-line-secondary: 1.125rem;
+  --app-font-compact: 0.8125rem;
+  --app-line-compact: 1.0625rem;
+  --app-font-caption: 0.75rem;
+  --app-line-caption: 1rem;
+  --app-font-micro: 0.6875rem;
+  --app-line-micro: 0.875rem;
+  --app-font-heading: 1.25rem;
+  --app-line-heading: 1.625rem;
+  --app-item-height: 40px;
+  --app-item-spacing: 8px;
+  --app-chat-row-height: 64px;
+  --app-chat-avatar-size: 48px;
+  --app-reply-button-display: grid;
+  --app-composer-size: 36px;
+  --app-reaction-size: 26px;
+  --app-profile-padding: 24px 20px;
+  --app-quick-action-height: 56px;
+}
+
+:root:is(.plt-ios, .plt-android) {
+  --app-font-base: 17;
+  --app-font-body: 1rem;
+  --app-line-body: calc(22rem / var(--app-font-base));
+  --app-font-title: calc(16rem / var(--app-font-base));
+  --app-font-secondary: calc(15rem / var(--app-font-base));
+  --app-line-secondary: calc(20rem / var(--app-font-base));
+  --app-font-compact: calc(14rem / var(--app-font-base));
+  --app-line-compact: calc(17rem / var(--app-font-base));
+  --app-font-caption: calc(13rem / var(--app-font-base));
+  --app-line-caption: calc(17rem / var(--app-font-base));
+  --app-font-micro: calc(11rem / var(--app-font-base));
+  --app-line-micro: calc(14rem / var(--app-font-base));
+  --app-font-heading: calc(22rem / var(--app-font-base));
+  --app-line-heading: calc(28rem / var(--app-font-base));
+  --app-item-height: 44px;
+  --app-item-spacing: 10px;
+  --app-chat-row-height: 72px;
+  --app-chat-avatar-size: 52px;
+  --app-reply-button-display: none;
+  --app-composer-size: 40px;
+  --app-reaction-size: 30px;
+  --app-profile-padding: 32px 24px;
+  --app-quick-action-height: 64px;
+}
+:root.plt-android {
+  --app-font-base: 16;
+}
+
+body,
+ion-content,
+ion-item,
+ion-input,
+ion-textarea,
+ion-select,
+ion-toggle,
+ion-checkbox,
+ion-radio {
+  font-size: var(--app-font-body);
+  line-height: var(--app-line-body);
+}
+
+ion-title,
+ion-button,
+ion-back-button {
+  font-size: var(--app-font-body);
+}
+
+ion-button[size='small'],
+ion-segment-button {
+  font-size: var(--app-font-caption);
+}
+
+ion-item {
+  --min-height: var(--app-item-height);
+}
+
+ion-item > ion-label {
+  margin-block: var(--app-item-spacing);
+}
+
+ion-label.ios :is(h2, h3, h4, h5, h6) {
+  margin-block: 0 2px;
+  font-size: var(--app-font-title);
+  line-height: var(--app-line-body);
+  font-weight: 500;
+}
+
+ion-label.ios p {
+  font-size: var(--app-font-secondary);
+  line-height: var(--app-line-secondary);
+}
+
+ion-label.ios.ion-text-wrap {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+ion-toggle::part(label),
+ion-radio::part(label),
+ion-checkbox::part(label) {
+  margin-block: var(--app-item-spacing);
+}
+
+ion-badge {
+  font-size: var(--app-font-micro);
+}
+
+ion-note {
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
+}
+
+ion-list-header {
+  font-size: var(--app-font-title);
+}
+
+ion-searchbar.ios .searchbar-input,
+ion-searchbar.ios .searchbar-cancel-button {
+  font-size: var(--app-font-body);
+}
+
+ion-alert.ios :is(.alert-title, .alert-button, .alert-radio-label, .alert-input) {
+  font-size: var(--app-font-body);
+  line-height: var(--app-line-body);
+}
+
+ion-alert.ios .alert-message {
+  font-size: var(--app-font-secondary);
+  line-height: var(--app-line-secondary);
+}
+
+ion-action-sheet.ios .action-sheet-button {
+  min-height: var(--app-item-height);
+  padding-block: var(--app-item-spacing);
+  font-size: var(--app-font-body);
+  line-height: var(--app-line-body);
+}
+
+// Profile headings share the same hierarchy across settings and chat/user information.
+.profile :is(h1, h2) {
+  margin-block: 12px 0;
+  font-size: var(--app-font-heading);
+  line-height: var(--app-line-heading);
+  font-weight: 600;
+}
+
+.profile p {
+  margin-block: 8px 0;
+  font-size: var(--app-font-secondary);
+  line-height: var(--app-line-secondary);
+}
+
 .browser-toolbar-background {
   // Safari samples boxes taller than 10px. Keep this element empty so text clipping paints nothing.
   position: fixed;
@@ -68,7 +228,9 @@ ion-modal.media-viewer-overlay {
 
 .message-date {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
+  font-weight: 500;
   color: var(--ion-color-medium);
 }
 
@@ -92,13 +254,18 @@ ion-modal.media-viewer-overlay {
 input.field,
 textarea.field {
   width: 100%;
-  min-height: 44px;
-  padding: 10px 0;
+  min-height: var(--app-item-height);
+  padding: var(--app-item-spacing) 0;
   border: 0;
   outline: 0;
   font: inherit;
   color: inherit;
   background: transparent;
+}
+
+// Ionic resets line-height inside its scoped textarea; the input and auto-grow mirror must agree.
+app-message-composer .input-wrapper .textarea-wrapper {
+  line-height: var(--app-line-body);
 }
 
 // Ionic owns the shadow viewport's layout and overflow; only hide its native bars.

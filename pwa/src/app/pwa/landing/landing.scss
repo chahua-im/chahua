@@ -16,7 +16,7 @@
 }
 
 .landing-hero__copy p {
-  font-size: 17px;
+  font-size: var(--app-font-body);
   color: var(--ion-color-medium);
   margin: 0;
   line-height: 1.5;
@@ -34,7 +34,7 @@
   min-width: initial;
   --padding-start: 0;
   --padding-end: 0;
-  font-size: 15px;
+  font-size: var(--app-font-secondary);
   letter-spacing: 0;
 }
 
@@ -76,7 +76,7 @@
   padding-left: 28px;
   margin-bottom: 12px;
   color: var(--ion-text-color);
-  font-size: 16px;
+  font-size: var(--app-font-body);
 }
 
 .landing-steps li::before {
@@ -90,7 +90,7 @@
 
 .landing-note {
   margin-bottom: 0;
-  font-size: 15px;
+  font-size: var(--app-font-secondary);
   line-height: 1.6;
 }
 

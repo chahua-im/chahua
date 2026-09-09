@@ -15,7 +15,6 @@ import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import type { MessageResponse, SnowflakeID } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
 import { dismissChatOverlays } from '../dismiss-chat-overlays';
 
@@ -39,7 +38,6 @@ export class ChatThreads {
   private version = 0;
 
   constructor() {
-    fillScrollViewport(this.loading, this.error, this.cursor, () => this.load(true));
     effect(() => {
       this.chatId();
       void this.load();
