@@ -230,8 +230,16 @@ export class MessageMenu {
         stack.classList.toggle('anchored', anchored);
         const clampX = (x: number, width: number) => Math.max(left, Math.min(x, left + availableWidth - width));
         const clampY = (y: number, height: number) => Math.max(top, Math.min(y, top + availableHeight - height));
+        // Adding the sender row must expand upward from the original content.
+        const contentSelector = '.reply-preview, .media-content, .message-body';
+        const sourceContent = selection.element.querySelector(contentSelector);
+        const previewContent = preview.querySelector(contentSelector)!;
+        const contentOffset = previewContent.getBoundingClientRect().top - preview.getBoundingClientRect().top;
+        const previewTop = (sourceContent?.getBoundingClientRect().top ?? rect.top) - contentOffset;
         let x: number;
         let y: number;
+        let fromX = 0;
+        let fromY = 0;
         if (anchored) {
           // Keep the original message content in place; only the two panels follow the press.
           const width = Math.min(276, availableWidth);
@@ -239,22 +247,22 @@ export class MessageMenu {
           const point = selection.point ?? { x: own ? rect.right : rect.left, y: top + availableHeight / 2 };
           x = clampX(own ? point.x - width : point.x, width);
           y = clampY(point.y - (bar ? barHeight + 8 : 0), barHeight + actionsHeight + (bar ? 8 : 0));
-          const contentSelector = '.reply-preview, .media-content, .message-body';
-          const sourceContent = selection.element.querySelector(contentSelector);
-          const previewContent = preview.querySelector(contentSelector)!;
-          const contentOffset = previewContent.getBoundingClientRect().top - preview.getBoundingClientRect().top;
-          const contentTop = sourceContent?.getBoundingClientRect().top ?? rect.top;
           preview.style.left = `${rect.left - (own ? 0 : avatarSpace) - x}px`;
-          preview.style.top = `${contentTop - contentOffset - y}px`;
+          preview.style.top = `${previewTop - y}px`;
         } else {
           const width = stack.offsetWidth;
-          x = clampX(own ? rect.right + avatarSpace - width : rect.left - avatarSpace, width);
-          y = clampY(rect.top - (bar ? barHeight + 8 : 0), totalHeight);
+          const originX = own ? rect.right + avatarSpace - width : rect.left - avatarSpace;
+          const originY = previewTop - (bar ? barHeight + 8 : 0);
+          x = clampX(originX, width);
+          y = clampY(originY, totalHeight);
+          fromX = originX - x;
+          fromY = originY - y;
           preview.style.removeProperty('left');
           preview.style.removeProperty('top');
         }
         stack.style.left = `${x}px`;
         stack.style.top = `${y}px`;
+        stack.style.setProperty('--menu-from', `translate(${fromX}px, ${fromY}px)`);
         this.placed.set(true);
       };
       const observer = new ResizeObserver(place);
@@ -280,7 +288,7 @@ export class MessageMenu {
   private animate(element: HTMLElement, entering: boolean) {
     const from = entering ? '0' : '1';
     const to = entering ? '1' : '0';
-    return createAnimation()
+    const animation = createAnimation()
       .duration(entering ? 180 : 120)
       .easing('cubic-bezier(0.2, 0.8, 0.2, 1)')
       .addAnimation([
@@ -293,6 +301,14 @@ export class MessageMenu {
           .addElement(element.querySelectorAll('.panel'))
           .fromTo('transform', entering ? 'scale(0.96)' : 'scale(1)', entering ? 'scale(1)' : 'scale(0.96)'),
       ]);
+    if (entering) {
+      animation.addAnimation(
+        createAnimation()
+          .addElement(element.querySelector('.menu-stack')!)
+          .fromTo('transform', 'var(--menu-from, translate(0px, 0px))', 'translate(0px, 0px)'),
+      );
+    }
+    return animation;
   }
 
   protected emojis(defaults: readonly string[]) {
