@@ -49,8 +49,6 @@ describe('MessageMenu', () => {
     messageId: testMessage.id,
     element: document.createElement('div'),
     rect: new DOMRect(100, 200, 180, 70),
-    first: true,
-    last: true,
     own: false,
   });
   const labels = () =>
@@ -369,6 +367,7 @@ describe('MessageMenu', () => {
   it('keeps the menu inside a narrow viewport and dismisses only backdrop clicks', async () => {
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(276);
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
+    fixture.nativeElement.querySelector('.chat-row').style.gap = '10px';
     menu['selection'].set({ ...selection(), rect: new DOMRect(-50, -100, 1500, 70), own: true });
     fixture.detectChanges();
     TestBed.tick();
@@ -383,12 +382,15 @@ describe('MessageMenu', () => {
     expect(menu['selection']()).toBeUndefined();
   });
 
-  it('passes avatar preferences to its message preview', () => {
-    fixture.componentRef.setInput('showAllAvatars', true);
+  it('shows complete identity in the overlay independently of the message group', () => {
     fixture.detectChanges();
     const preview = fixture.debugElement.query(By.directive(Message)).componentInstance as Message;
-    expect(preview.showAllAvatars()).toBe(true);
+    expect(preview.first()).toBe(true);
+    expect(preview.last()).toBe(true);
     expect(preview.preview()).toBe(true);
+    expect(fixture.nativeElement.querySelector('.preview .sender')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.preview .avatar')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.preview .chat-row.last')).not.toBeNull();
   });
 
   it('runs only the confirmed pin action and retains its intended state', async () => {

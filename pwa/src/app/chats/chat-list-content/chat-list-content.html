@@ -27,23 +27,11 @@
             icon: requestsIcon,
           }"></app-chat-list-item>
       }
-      @if (countError()) {
-        <ion-item lines="none">
-          <ion-label color="danger">归档信息加载失败，请重试。</ion-label>
-          <ion-button slot="end" (click)="refreshCounts()">重试</ion-button>
-        </ion-item>
-      }
     </ion-list>
   }
   @if (ready()) {
-    @if (showRequests() && (requestRows().length || friendRequests().error())) {
+    @if (showRequests() && requestRows().length) {
       <ion-list class="friend-requests">
-        @if (friendRequests().error()) {
-          <ion-item lines="none">
-            <ion-label color="danger">好友请求加载失败，请刷新重试。</ion-label>
-            <ion-button slot="end" fill="clear" (click)="friendRequests().refresh()">重试</ion-button>
-          </ion-item>
-        }
         @for (row of requestRows(); track row.request.id) {
           @let name = row.peer.username ?? '用户 ' + row.peer.uid;
           <app-chat-list-item

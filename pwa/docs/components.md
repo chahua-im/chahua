@@ -10,6 +10,7 @@ flowchart TD
   APP --> OUTLET[IonRouterOutlet]
   APP --> LIST[ChatList：分栏侧栏]
   APP --> SETTINGS[SettingsModal]
+  APP --> NOTIFICATIONS[NotificationPrompt]
   OUTLET --> LISTPAGE[ChatListPage]
   LISTPAGE --> MOBILE[ChatList：单列内容]
   LIST --> CONTENT[ChatListContent：分类列表与分页]
@@ -56,6 +57,7 @@ MediaViewer、UserProfile、StartChat 和 StickerPicker 的独立模式由 Modal
 | 组件            | 输入、输出与局部字段                                                                    | 数据依赖                                                        |
 | --------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | App             | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件        |
+| NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用 | PushNotifications |
 | ChatListPage    | 路由分类/归档范围；active；接收 openList 并导航                                         | 将 selection 和 active 传给单列 ChatList                        |
 | ChatList        | selection、active → openList；搜索词、原生 segment 与内容 ID                            | SessionStore、Connection；控制分类面板与菜单                    |
 | ChatListContent | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行            | ChatListStore、ChatStore、DraftStore、Preferences、SessionStore |
@@ -93,11 +95,11 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                              |
 | MessageThread      | info、preview → open                                                                                                                         |
 | InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                               |
-| MessageMenu        | messages、chatId、threadId、canReply、showAllAvatars → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy                  |
+| MessageMenu        | messages、chatId、threadId、canReply → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy                  |
 | ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                     |
 | EmojiPicker        | chosen 输出；封装第三方选择器的尺寸、中文数据与加载状态                                                                                      |
 
-MessageMenu 的 selection 保存消息标识和定位锚点，从页面数组或 MessageOutbox 解析当前内容。确认意图、操作提示、选择表情和弹窗状态属于菜单；菜单直接以 DOM 测量结果定位。
+MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。确认意图、操作提示、选择表情和弹窗状态属于菜单；菜单测量完整预览与面板的尺寸，能容纳时整体定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
 
 MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执行置顶。菜单关闭后的 busy 由页面 toolbar 消费。复制在点击处理内发起，以保留 Safari 用户激活。菜单 reset 使旧操作的界面反馈失效，最近表情保存到 Preferences。
 

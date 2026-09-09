@@ -1,0 +1,22 @@
+ion-alert.notification-prompt {
+  .notification-allow {
+    position: relative;
+  }
+
+  .notification-allow ion-spinner {
+    display: none;
+    position: absolute;
+    inset: 0;
+    margin: auto;
+  }
+
+  &.requesting {
+    .notification-allow .alert-button-inner {
+      visibility: hidden;
+    }
+
+    .notification-allow ion-spinner {
+      display: block;
+    }
+  }
+}

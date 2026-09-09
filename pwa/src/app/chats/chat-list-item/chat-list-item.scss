@@ -2,6 +2,7 @@
 // Match the rendered palette so foreground and background change together.
 ion-item {
   --min-height: var(--app-chat-row-height);
+  --app-item-spacing: 6px;
 
   &.ion-color ion-label p {
     color: inherit;

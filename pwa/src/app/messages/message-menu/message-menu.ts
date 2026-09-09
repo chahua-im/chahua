@@ -14,7 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { IonAlert, IonIcon, IonModal, IonSpinner, IonToast, ModalController } from '@ionic/angular';
+import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, ModalController } from '@ionic/angular';
 import {
   addOutline,
   arrowUndoOutline,
@@ -63,7 +63,6 @@ export class MessageMenu {
   readonly chatId = input.required<SnowflakeID>();
   readonly threadId = input<SnowflakeID>();
   readonly canReply = input(true);
-  readonly showAllAvatars = input(false);
   readonly reply = output<MessageResponse>();
   readonly edit = output<MessageResponse>();
   readonly editQueued = output<OutgoingMessage>();
@@ -77,6 +76,7 @@ export class MessageMenu {
   private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
   private readonly modal = viewChild(IonModal);
+  private readonly preview = viewChild<ElementRef<HTMLElement>>('preview');
   private version = 0;
   private readonly pending = signal(false);
   readonly busy = this.pending.asReadonly();
@@ -205,6 +205,8 @@ export class MessageMenu {
       const own = selection.own;
       const bar = this.reactionBar()?.nativeElement;
       const actions = this.actions()?.nativeElement;
+      const preview = this.preview()!.nativeElement;
+      const row = preview.querySelector<HTMLElement>('.chat-row')!;
       const place = () => {
         if (!stack.offsetWidth) return;
         const rect = selection.element.isConnected ? selection.element.getBoundingClientRect() : selection.rect;
@@ -215,25 +217,50 @@ export class MessageMenu {
         const left = (viewport?.offsetLeft ?? 0) + parseFloat(style.paddingLeft) + 12;
         const top = (viewport?.offsetTop ?? 0) + parseFloat(style.paddingTop) + 12;
         const availableWidth = (viewport?.width ?? window.innerWidth) - horizontalInset - 24;
-        const width = Math.min(Math.max(rect.width, 276), availableWidth);
-        stack.style.width = `${width}px`;
-        const height = (viewport?.height ?? window.innerHeight) - verticalInset - 24;
-        const previewHeight = Math.max(
-          0,
-          height - (bar?.offsetHeight ?? 0) - (actions?.offsetHeight ?? 0) - (bar ? 16 : 8),
-        );
-        const preview = stack.querySelector<HTMLElement>('.preview');
-        if (preview) preview.style.maxHeight = `${previewHeight}px`;
-        const position = {
-          left: Math.max(left, Math.min(own ? rect.right - width : rect.left, left + availableWidth - width)),
-          top: Math.max(top, Math.min(rect.top - (bar ? bar.offsetHeight + 8 : 0), top + height - stack.offsetHeight)),
-        };
-        stack.style.left = `${position.left}px`;
-        stack.style.top = `${position.top}px`;
+        const availableHeight = (viewport?.height ?? window.innerHeight) - verticalInset - 24;
+        const avatarSpace =
+          row.querySelector<HTMLElement>('.avatar-slot')!.offsetWidth + parseFloat(getComputedStyle(row).gap);
+        const previewWidth = Math.min(rect.width + avatarSpace, availableWidth);
+        preview.style.width = `${previewWidth}px`;
+        stack.style.width = `${Math.min(Math.max(previewWidth, 276), availableWidth)}px`;
+        const barHeight = bar?.offsetHeight ?? 0;
+        const actionsHeight = actions?.offsetHeight ?? 0;
+        const totalHeight = preview.offsetHeight + barHeight + actionsHeight + (bar ? 16 : 8);
+        const anchored = totalHeight > availableHeight;
+        stack.classList.toggle('anchored', anchored);
+        const clampX = (x: number, width: number) => Math.max(left, Math.min(x, left + availableWidth - width));
+        const clampY = (y: number, height: number) => Math.max(top, Math.min(y, top + availableHeight - height));
+        let x: number;
+        let y: number;
+        if (anchored) {
+          // Keep the original message content in place; only the two panels follow the press.
+          const width = Math.min(276, availableWidth);
+          stack.style.width = `${width}px`;
+          const point = selection.point ?? { x: own ? rect.right : rect.left, y: top + availableHeight / 2 };
+          x = clampX(own ? point.x - width : point.x, width);
+          y = clampY(point.y - (bar ? barHeight + 8 : 0), barHeight + actionsHeight + (bar ? 8 : 0));
+          const contentSelector = '.reply-preview, .media-content, .message-body';
+          const sourceContent = selection.element.querySelector(contentSelector);
+          const previewContent = preview.querySelector(contentSelector)!;
+          const contentOffset = previewContent.getBoundingClientRect().top - preview.getBoundingClientRect().top;
+          const contentTop = sourceContent?.getBoundingClientRect().top ?? rect.top;
+          preview.style.left = `${rect.left - (own ? 0 : avatarSpace) - x}px`;
+          preview.style.top = `${contentTop - contentOffset - y}px`;
+        } else {
+          const width = stack.offsetWidth;
+          x = clampX(own ? rect.right + avatarSpace - width : rect.left - avatarSpace, width);
+          y = clampY(rect.top - (bar ? barHeight + 8 : 0), totalHeight);
+          preview.style.removeProperty('left');
+          preview.style.removeProperty('top');
+        }
+        stack.style.left = `${x}px`;
+        stack.style.top = `${y}px`;
         this.placed.set(true);
       };
       const observer = new ResizeObserver(place);
-      observer.observe(stack);
+      observer.observe(preview);
+      observer.observe(actions!);
+      if (bar) observer.observe(bar);
       window.addEventListener('resize', place);
       window.visualViewport?.addEventListener('resize', place);
       window.visualViewport?.addEventListener('scroll', place);
@@ -245,6 +272,27 @@ export class MessageMenu {
         window.visualViewport?.removeEventListener('scroll', place);
       });
     });
+  }
+
+  protected readonly enterAnimation = (element: HTMLElement) => this.animate(element, true);
+  protected readonly leaveAnimation = (element: HTMLElement) => this.animate(element, false);
+
+  private animate(element: HTMLElement, entering: boolean) {
+    const from = entering ? '0' : '1';
+    const to = entering ? '1' : '0';
+    return createAnimation()
+      .duration(entering ? 180 : 120)
+      .easing('cubic-bezier(0.2, 0.8, 0.2, 1)')
+      .addAnimation([
+        createAnimation().addElement(element.shadowRoot!.querySelector('ion-backdrop')!).fromTo('opacity', from, to),
+        createAnimation()
+          .addElement(element.shadowRoot!.querySelector('.modal-wrapper')!)
+          .beforeStyles({ transform: 'none' })
+          .fromTo('opacity', from, to),
+        createAnimation()
+          .addElement(element.querySelectorAll('.panel'))
+          .fromTo('transform', entering ? 'scale(0.96)' : 'scale(1)', entering ? 'scale(1)' : 'scale(0.96)'),
+      ]);
   }
 
   protected emojis(defaults: readonly string[]) {

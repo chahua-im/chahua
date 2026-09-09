@@ -1,4 +1,9 @@
-<ion-modal class="message-menu-modal" [animated]="false" [isOpen]="!!message()" (didDismiss)="selection.set(undefined)">
+<ion-modal
+  class="message-menu-modal"
+  [enterAnimation]="enterAnimation"
+  [leaveAnimation]="leaveAnimation"
+  [isOpen]="!!message()"
+  (didDismiss)="selection.set(undefined)">
   <ng-template>
     @if (selection(); as selection) {
       @if (message(); as message) {
@@ -32,15 +37,12 @@
                   }
                 </div>
               }
-              <div class="preview" [style.width.px]="selection.rect.width">
+              <div #preview class="preview">
                 <app-message
-                  [showAllAvatars]="showAllAvatars()"
                   [message]="message"
                   [delivery]="queued()?.delivery()"
                   [uploads]="queued()?.uploads ?? []"
                   [own]="selection.own"
-                  [first]="selection.first"
-                  [last]="selection.last"
                   [canOpenThread]="!threadId()"
                   [preview]="true"></app-message>
               </div>

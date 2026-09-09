@@ -31,29 +31,27 @@
       (pointermove)="moveSwipe($event)"
       (pointerup)="endSwipe()"
       (pointercancel)="endSwipe(true)">
-      @if (!preview()) {
-        <span class="avatar-slot">
-          @if (showAvatar()) {
-            <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
-              @if (message().sender.avatarUrl; as src) {
-                <img [src]="src" width="34" height="34" decoding="async" />
-              } @else {
-                {{ name().slice(0, 2).toUpperCase() }}
-              }
-            </ion-avatar>
-          }
-        </span>
-      }
+      <span class="avatar-slot">
+        @if (showAvatar()) {
+          <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
+            @if (message().sender.avatarUrl; as src) {
+              <img [src]="src" width="34" height="34" decoding="async" />
+            } @else {
+              {{ name().slice(0, 2).toUpperCase() }}
+            }
+          </ion-avatar>
+        }
+      </span>
       <div class="message-stack">
         <div
           #bubble
-          [class]="isSticker() ? 'sticker-content' : 'bubble'"
+          [class]="isSticker() && !preview() ? 'sticker-content' : 'bubble'"
           [class.media-only]="mediaOverlay()"
           [class.has-thread]="!!threadInfo()"
           [attr.inert]="preview() ? '' : null"
           (contextmenu)="showMenu($event, bubble)"
           (pointerdown)="startPress($event, bubble)">
-          @if (first() && !isSticker()) {
+          @if (first() && (!isSticker() || preview())) {
             <app-message-author class="sender" [sender]="message().sender" [own]="own()"></app-message-author>
           }
           @if (quoted(); as quote) {

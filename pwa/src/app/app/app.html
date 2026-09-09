@@ -20,6 +20,7 @@
           (stackWillChange)="prepareTransition(outlet)"></ion-router-outlet>
       </ion-split-pane>
       <app-settings-modal />
+      <app-notification-prompt />
     } @else {
       <ion-content appScrollbars class="ion-text-center" [class.ion-padding]="!loading()">
         @if (loading()) {
