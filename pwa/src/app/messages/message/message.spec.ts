@@ -561,7 +561,7 @@ describe('Message', () => {
     const element = fixture.nativeElement as HTMLElement;
     const bubble = element.querySelector('.bubble') as HTMLElement;
     expect(bubble.hasAttribute('inert')).toBe(true);
-    expect(element.querySelector('ion-avatar, .avatar-spacer, .reply-button, ion-button')).toBeNull();
+    expect(element.querySelector('ion-avatar, .avatar-slot, .reply-button, ion-button')).toBeNull();
     expect(element.querySelector('.reaction')?.textContent).toMatch(/❤️\s*2/);
     expect(element.querySelector('button.reaction')).toBeNull();
     const menu = vi.fn();

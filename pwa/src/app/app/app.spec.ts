@@ -5,21 +5,23 @@ import { By } from '@angular/platform-browser';
 import { Navigation, Router, provideRouter } from '@angular/router';
 import { IonRouterOutlet } from '@ionic/angular';
 import { afterAll, vi } from 'vitest';
+import { testUser } from '../api/testing';
 import { ListTab } from '../chats/list-tabs';
 import { PushNotifications } from '../pwa/push-notifications';
 import { SessionStore } from '../session/session-store';
 import { App } from './app';
 
 describe('App', () => {
-  const session = { initialize: vi.fn<() => Promise<void>>(), user: signal(undefined) };
+  const session = { initialize: vi.fn<() => Promise<void>>(), user: signal<typeof testUser | undefined>(undefined) };
 
   beforeEach(async () => {
     session.initialize.mockReset().mockResolvedValue();
+    session.user.set(undefined);
     vi.stubGlobal('matchMedia', () => ({ matches: false, addListener() {}, removeListener() {} }));
     await TestBed.configureTestingModule({
       imports: [App],
       providers: [
-        { provide: PushNotifications, useValue: { start: vi.fn(), banner: signal(undefined) } },
+        { provide: PushNotifications, useValue: { start: vi.fn() } },
         provideRouter([]),
         { provide: SessionStore, useValue: session },
       ],
@@ -27,6 +29,19 @@ describe('App', () => {
   });
 
   afterAll(() => vi.unstubAllGlobals());
+
+  it('starts notifications after an authenticated session is ready', async () => {
+    TestBed.overrideComponent(App, { set: { template: '' } });
+    let finish!: () => void;
+    session.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+    const fixture = TestBed.createComponent(App);
+    const notifications = TestBed.inject(PushNotifications);
+    expect(notifications.start).not.toHaveBeenCalled();
+    session.user.set(testUser);
+    finish();
+    await fixture.whenStable();
+    expect(notifications.start).toHaveBeenCalledOnce();
+  });
 
   it('finishes native history transitions instantly and restores other navigation animations', async () => {
     TestBed.overrideComponent(App, {
@@ -96,6 +111,7 @@ describe('App', () => {
     expect(element.querySelector('ion-app, ion-header, ion-content')).toBeNull();
     expect(element.querySelector('ion-split-pane')).toBeNull();
     expect(element.querySelector('app-chat-list')).toBeNull();
+    expect(TestBed.inject(PushNotifications).start).not.toHaveBeenCalled();
   });
 
   it('owns startup loading and clears a transient error when retrying', async () => {

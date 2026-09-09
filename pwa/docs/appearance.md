@@ -45,11 +45,10 @@ Ionic iOS 模式负责 toolbar、列表、按钮、modal、popover、segment 和
 同一台 iPhone、viewport 为 device-width 且无额外页面缩放时，UIKit 的布局点与 CSS px 按 1:1 对应；UIKit pt 不是 CSS 的排版单位 pt。桌面截图还受浏览器缩放与 iPhone 镜像窗口缩放影响，不能直接据此推导字号。
 
 - 气泡引用使用作者半粗、摘要常规；3px 作者色竖边、3px/6px 内边距、4px 圆角，双行默认高度 40px，摘要单行省略。
-- 气泡内边距为 6px/11px，连续消息间隔 2px、换作者 5px；消息组上方 2px、下方 3px。时间在末行有空间时靠右，空间不足时另起一行；其向下偏移由正文与时间行高之差决定。
+- 气泡内边距为 6px/11px，连续消息间隔 2px、换作者 5px；消息组上方 2px、下方 3px。头像保留横向槽位并底部对齐，不参与消息行高计算。时间在末行有空间时靠右，空间不足时另起一行；其向下偏移由正文与时间行高之差决定。
 - 回复输入栏的上下两部分使用相同的内部控件高度。引用文字默认 12px/14px，2px 竖线默认 29px 高；竖线与 textarea 文字共用起点，取消按钮与贴纸按钮对齐。它是紧凑附件栏，不照搬气泡引用的高度。
 - 输入框文字使用正文角色，文字区域与 Ionic 自动增高镜像共用行高。上下留白由控件高度、边框和行高计算；文字和语音发送飞机均向右偏移 1.5px。
 - 回复按钮按操作系统选择：iOS、iPadOS 与 Android 隐藏按钮，使用左滑回复；桌面系统在消息旁边预留按钮位置，仅整行 hover 时显示。平台规则与字号一起在全局样式定义，切换触摸模拟或连接触屏不改变按钮占位。
-- 应用内通知只在单列出现，使用顶部安全区内的半透明卡片、44px 头像与最多两行摘要。卡片文字使用预览角色。
 - 发送气泡保留应用蓝色与白色文字。媒体预览从顶部开始，按钮悬浮，底部为同消息 gallery。
 
 引用形状、气泡内边距和消息分组参考 [TG iOS 引用布局](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageReplyInfoNode/Sources/ChatMessageReplyInfoNode.swift)与[消息布局常量](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageItemCommon/Sources/ChatMessageItemCommon.swift)。参数表达应用的外观选择，不意味着在所有主题和系统字体设置下与 TG 逐像素一致。
@@ -85,7 +84,6 @@ Ionic iOS 模式负责 toolbar、列表、按钮、modal、popover、segment 和
 | InviteCard                             | 230px 宽、默认 66px 高的卡片、44px 头像和单行摘要；高度同时预留文字行高；外层消息只负责点击。                                            |
 | Landing                                | 旧版五平台安装指引的布局与样式。                                                                                                         |
 | Settings                               | 88px 居中头像及占位图标。                                                                                                                |
-| NotificationBanner                     | 顶部卡片、安全区、亮暗色、两行省略与入场动画。                                                                                           |
 | MessageText（内联）                    | 提及与链接的继承字号和链接色，长词换行。                                                                                                 |
 | MessagePreview（内联）                 | 系统行为摘要继承调用位置指定的颜色。                                                                                                     |
 | MessageStatus（内联）                  | 时间旁的状态图标对齐。                                                                                                                   |

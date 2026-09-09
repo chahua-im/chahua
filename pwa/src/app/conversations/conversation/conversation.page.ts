@@ -317,8 +317,10 @@ export class ConversationPage {
   private readonly entryReadId = signal<SnowflakeID | undefined>(undefined);
   protected readonly firstUnreadId = computed(() => {
     const boundary = this.entryReadId();
+    const uid = this.session.user()?.uid;
     return boundary
-      ? this.rows().find(({ confirmed }) => confirmed && confirmed.id > boundary)?.confirmed?.id
+      ? this.rows().find(({ confirmed }) => confirmed && confirmed.id > boundary && confirmed.sender.uid !== uid)
+          ?.confirmed?.id
       : undefined;
   });
   protected readonly atBottom = signal(true);

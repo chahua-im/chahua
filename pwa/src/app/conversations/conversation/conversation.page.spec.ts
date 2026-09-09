@@ -36,6 +36,8 @@ import { ConversationError, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
 import { ConversationPage, ThreadError } from './conversation.page';
 
+const otherSender = { uid: 2, name: '朋友', gender: 0 };
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -224,8 +226,20 @@ describe('ConversationPage', () => {
       .flush({
         messages: [
           { ...wireMessage, id: rootId, clientGeneratedId: `root-${rootId}` },
-          { ...wireMessage, id: '101', clientGeneratedId: `reply-${rootId}-101`, replyRootId: rootId },
-          { ...wireMessage, id: '102', clientGeneratedId: `reply-${rootId}-102`, replyRootId: rootId },
+          {
+            ...wireMessage,
+            id: '101',
+            clientGeneratedId: `reply-${rootId}-101`,
+            replyRootId: rootId,
+            sender: otherSender,
+          },
+          {
+            ...wireMessage,
+            id: '102',
+            clientGeneratedId: `reply-${rootId}-102`,
+            replyRootId: rootId,
+            sender: otherSender,
+          },
         ],
       });
     await fixture.whenStable();
@@ -1268,7 +1282,7 @@ describe('ConversationPage', () => {
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
       messages: [
         { ...wireMessage, id: '100' },
-        { ...wireMessage, id: '101' },
+        { ...wireMessage, id: '101', sender: otherSender },
       ],
       olderCursor: '100',
       newerCursor: '101',
@@ -1303,7 +1317,7 @@ describe('ConversationPage', () => {
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
       messages: [
         { ...wireMessage, id: '100' },
-        { ...wireMessage, id: '101' },
+        { ...wireMessage, id: '101', sender: otherSender },
       ],
     });
     Object.defineProperties(scroll, {
@@ -1622,7 +1636,7 @@ describe('ConversationPage', () => {
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100&threadId=100`).flush({
       messages: [
         { ...wireMessage, id: '100' },
-        { ...wireMessage, id: '101', replyRootId: '100' },
+        { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
       ],
     });
     await fixture.whenStable();
@@ -1639,8 +1653,8 @@ describe('ConversationPage', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101&threadId=100`).flush({
       messages: [
-        { ...wireMessage, id: '101', replyRootId: '100' },
-        { ...wireMessage, id: '102', replyRootId: '100' },
+        { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
+        { ...wireMessage, id: '102', replyRootId: '100', sender: otherSender },
       ],
     });
     await fixture.whenStable();
@@ -1649,8 +1663,10 @@ describe('ConversationPage', () => {
     expect(component['firstUnreadId']()).toBe(encodeId('102'));
   });
 
-  it('publishes accepted topic replies through the shared message stream', async () => {
-    await enterThread();
+  it('publishes accepted topic replies without turning the sender’s own message into an unread divider', async () => {
+    await enterThread('100', { lastReadMessageId: '102' });
+    expect(component['firstUnreadId']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('.unread-separator')).toBeNull();
     const accept = vi.spyOn(TestBed.inject(Connection), 'accept');
     component['draft'].set('话题消息');
     const sending = component['sendMessage']();
@@ -1658,6 +1674,8 @@ describe('ConversationPage', () => {
     expect(request.request.body.message).toBe('话题消息');
     expect(component['draft']()).toBe('');
     expect(component['rows']().at(-1)?.outgoing?.threadId).toBe(encodeId('100'));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.unread-separator')).toBeNull();
     request.flush({
       ...wireMessage,
       id: '103',
@@ -1670,6 +1688,8 @@ describe('ConversationPage', () => {
     expect(component['conversation'].items().at(-1)?.id).toBe(encodeId('103'));
     expect(component['draft']()).toBe('');
     expect(accept).toHaveBeenCalledWith(expect.objectContaining({ id: encodeId('103'), replyRootId: encodeId('100') }));
+    expect(component['firstUnreadId']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('.unread-separator')).toBeNull();
   });
 
   it('uses the inbox subscription as the only state for following, archiving and restoring a topic', async () => {
@@ -2055,16 +2075,29 @@ describe('ConversationPage', () => {
     expect(component['conversation'].page()?.olderCursor).toBeUndefined();
   });
 
-  it('moves the unread separator to the next visible message after a recall', () => {
+  it('skips own messages when finding the unread divider, including after a recall', async () => {
     component['entryReadId'].set(encodeId('9007199254741000'));
-    component['conversation'].receive({
+    expect(component['firstUnreadId']()).toBeUndefined();
+    const first = {
       ...testMessage,
       id: encodeId('9007199254741004'),
-      clientGeneratedId: 'next-message',
-    });
-    expect(component['firstUnreadId']()).toBe(testMessage.id);
-    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
-    expect(component['firstUnreadId']()).toBe(encodeId('9007199254741004'));
+      clientGeneratedId: 'first-unread',
+      sender: otherSender,
+    };
+    incoming.next(first);
+    incoming.next({ ...testMessage, id: encodeId('9007199254741005'), clientGeneratedId: 'own-reply' });
+    expect(component['firstUnreadId']()).toBe(first.id);
+    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...first, isDeleted: true } });
+    await fixture.whenStable();
+    expect(component['firstUnreadId']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('.unread-separator')).toBeNull();
+    const second = { ...first, id: encodeId('9007199254741006'), clientGeneratedId: 'second-unread' };
+    const third = { ...first, id: encodeId('9007199254741007'), clientGeneratedId: 'third-unread' };
+    incoming.next(second);
+    incoming.next(third);
+    expect(component['firstUnreadId']()).toBe(second.id);
+    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...second, isDeleted: true } });
+    expect(component['firstUnreadId']()).toBe(third.id);
   });
 
   it('removes a recalled message when the local delete request succeeds', async () => {
