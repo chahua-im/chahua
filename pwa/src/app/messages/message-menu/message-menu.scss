@@ -63,11 +63,13 @@ button:disabled {
   vertical-align: middle;
 }
 .actions {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  grid-auto-rows: 63px;
+  display: flex;
+  flex-wrap: wrap;
+  width: max-content;
+  max-width: min(276px, 100%);
 }
 .actions button {
+  flex: 0 0 calc((276px - 12px) / 5);
   height: 63px;
   display: flex;
   flex-direction: column;

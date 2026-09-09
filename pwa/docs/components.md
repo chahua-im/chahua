@@ -90,7 +90,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | MessagePreview     | 消息摘要字段；派生正文/媒体分类和系统短语枚举                                                                                                |
 | MessageAttachments | message、overlayTime、uploads；派生媒体框、时间及上传反馈，局部记录资源加载失败                                                              |
 | MessageStatus      | delivery；把 MessageDelivery 枚举显示为图标                                                                                                  |
-| MessageReactions   | reactions、own、external、preview → react；头像与数量由输入派生                                                                              |
+| MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                              |
 | MessageThread      | info、preview → open                                                                                                                         |
 | InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                               |
 | MessageMenu        | messages、chatId、threadId、canReply、showAllAvatars → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy                  |
