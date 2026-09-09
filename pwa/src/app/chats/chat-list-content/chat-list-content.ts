@@ -251,7 +251,6 @@ export class ChatListContent {
     },
     { equal: (a, b) => a.length === b.length && a.every((query, index) => query === b[index]) },
   );
-  protected readonly countError = computed(() => this.countQueries().some((query) => query.error()));
   protected readonly archivedUnreadCount = computed(() =>
     this.countQueries().reduce((total, query) => total + (query.value() ?? 0), 0),
   );
@@ -316,17 +315,13 @@ export class ChatListContent {
   }
 
   protected refresh() {
-    this.refreshCounts();
+    for (const query of this.countQueries()) query.refresh();
     if (this.showThreads()) {
       this.metadata.invalidate();
       void this.threads().refresh();
     }
     if (this.showChats()) this.chatQuery().refresh();
     if (this.showRequests()) void this.friendRequests().refresh();
-  }
-
-  protected refreshCounts() {
-    for (const query of this.countQueries()) query.refresh();
   }
 
   protected async loadMore(event: InfiniteScrollCustomEvent) {

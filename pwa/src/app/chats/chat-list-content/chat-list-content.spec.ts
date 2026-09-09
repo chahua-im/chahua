@@ -153,8 +153,9 @@ describe('ChatListContent', () => {
       setItem: (key: string, value: string) => storage.set(key, value),
     });
     counts.chats.loading.set(false);
-    counts.chats.loading.set(false);
     counts.threads.loading.set(false);
+    counts.chats.error.set(false);
+    counts.threads.error.set(false);
     history.loading.set(false);
     history.error.set(false);
     chats.loadedThrough.set(-Infinity);
@@ -647,23 +648,36 @@ describe('ChatListContent', () => {
       expect(fixture.nativeElement.querySelector('ion-label[color="danger"]')).toBeNull();
     });
 
-    it('keeps empty request lists silent and allows retry after loading fails', async () => {
+    it('keeps auxiliary load failures silent until the next normal update', async () => {
+      counts.chats.value.set(12);
+      counts.chats.error.set(true);
+      requests.error.set(true);
+      fixture.detectChanges();
+      expect(fixture.componentInstance['archivedUnreadCount']()).toBe(12);
+      expect(requestList().nativeElement.textContent).toContain('小李');
+      expect(fixture.nativeElement.querySelector('ion-label[color="danger"]')).toBeNull();
+      expect(fixture.nativeElement.textContent).not.toContain('重试');
+
       requests.items.set([]);
       fixture.detectChanges();
       expect(requestList()).toBeNull();
-      requests.error.set(true);
-      fixture.detectChanges();
-      await expect
-        .poll(() => fixture.nativeElement.querySelector('ion-label[color="danger"]')?.textContent)
-        .toContain('好友请求加载失败');
-      button('重试').triggerEventHandler('click', new Event('click'));
+
+      fixture.debugElement.query(By.css('ion-refresher')).triggerEventHandler('ionRefresh', new Event('ionRefresh'));
       expect(requests.refresh).toHaveBeenCalledOnce();
+      expect(counts.chats.refresh).toHaveBeenCalledOnce();
+      counts.chats.value.set(15);
+      counts.chats.error.set(false);
+      requests.items.set([incoming]);
       requests.error.set(false);
       fixture.detectChanges();
-      await expect.poll(() => requestList()).toBeNull();
+      expect(fixture.componentInstance['archivedUnreadCount']()).toBe(15);
+      expect(requestList().nativeElement.textContent).toContain('小李');
+
+      history.error.set(true);
       fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), requestHistory: true });
-      fixture.detectChanges();
+      await fixture.whenStable();
       expect(requestList()).toBeNull();
+      expect(fixture.nativeElement.querySelector('ion-label[color="danger"]')).toBeNull();
     });
   });
 

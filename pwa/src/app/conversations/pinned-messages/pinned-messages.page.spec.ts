@@ -90,8 +90,6 @@ describe('PinnedMessagesPage', () => {
       element: document.createElement('div'),
       rect: new DOMRect(),
       own: true,
-      first: true,
-      last: true,
     });
   }
 
