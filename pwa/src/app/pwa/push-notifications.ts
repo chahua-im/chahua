@@ -1,9 +1,9 @@
 import { DestroyRef, effect, inject, Injector, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NavigationEnd, Router } from '@angular/router';
+import { Router } from '@angular/router';
 import { SwPush } from '@angular/service-worker';
 import { ModalController } from '@ionic/angular';
-import { filter, firstValueFrom, timeout } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { PushService } from '../../generated/endpoints/push/push.service';
 import {
   ApiPushProvider,
@@ -61,12 +61,7 @@ export class PushNotifications {
   private readonly modals = inject(ModalController);
   private readonly navigation = inject(ConversationNavigation);
   private readonly seen = new Set<SnowflakeID>();
-  private readonly currentBanner = signal<MessageResponse | undefined>(undefined);
-  readonly banner = this.currentBanner.asReadonly();
-  private bannerTimer?: ReturnType<typeof setTimeout>;
   private started = false;
-  private incomingVersion = 0;
-  private shownVersion = 0;
 
   start() {
     if (this.started) return;
@@ -114,7 +109,7 @@ export class PushNotifications {
       if (!this.session.user()) return;
       switch (event.type) {
         case ServerWsMessageType.message:
-          void this.notify(event.payload, ++this.incomingVersion).catch(() => {});
+          void this.notify(event.payload).catch(() => {});
           break;
         case ServerWsMessageType.messageDeleted:
           this.closeMessages([event.payload.id]);
@@ -126,8 +121,6 @@ export class PushNotifications {
     });
     this.chats.changes$.pipe(takeUntilDestroyed(this.destroy)).subscribe(({ chatId, threadId, readThrough }) => {
       if (!readThrough) return;
-      const banner = this.banner();
-      if (banner?.chatId === chatId && banner.replyRootId == threadId && banner.id <= readThrough) this.dismiss();
       void this.workerCommand({
         type: 'CHAHUA_CLOSE',
         chatId: decodeId(chatId),
@@ -135,15 +128,6 @@ export class PushNotifications {
         readThrough: decodeId(readThrough),
       });
     });
-    this.router.events
-      .pipe(
-        filter((event) => event instanceof NavigationEnd),
-        takeUntilDestroyed(this.destroy),
-      )
-      .subscribe(() => {
-        const banner = this.banner();
-        if (banner && this.currentConversation(banner)) this.dismiss();
-      });
     this.push.notificationClicks.pipe(takeUntilDestroyed(this.destroy)).subscribe(({ notification }) => {
       if (document.hidden) return;
       const data = notification.data;
@@ -155,17 +139,10 @@ export class PushNotifications {
         valid(data.threadRootId) ? encodeId(data.threadRootId) : undefined,
       );
     });
-    this.destroy.onDestroy(() => clearTimeout(this.bannerTimer));
     void this.refresh();
   }
 
-  dismiss() {
-    clearTimeout(this.bannerTimer);
-    this.currentBanner.set(undefined);
-  }
-
-  async open(chatId: SnowflakeID, messageId: SnowflakeID, threadId?: SnowflakeID) {
-    this.dismiss();
+  private async open(chatId: SnowflakeID, messageId: SnowflakeID, threadId?: SnowflakeID) {
     await dismissChatOverlays(this.modals);
     const path = ['/chats/chat', decodeId(chatId), ...(threadId ? ['thread', decodeId(threadId)] : [])];
     await this.router.navigate(path, { queryParams: { message: decodeId(messageId) } });
@@ -181,7 +158,7 @@ export class PushNotifications {
     return path === target && url.queryParams['settings'] !== '1';
   }
 
-  private async notify(message: MessageResponse, version: number) {
+  private async notify(message: MessageResponse) {
     const uid = this.session.user()?.uid;
     if (
       !uid ||
@@ -189,32 +166,36 @@ export class PushNotifications {
       message.isDeleted ||
       message.messageType === MessageType.system ||
       this.seen.has(message.id) ||
-      window.localStorage.getItem(ENABLED_KEY) === 'false'
+      window.localStorage.getItem(ENABLED_KEY) === 'false' ||
+      !this.enabled() ||
+      this.permission() !== 'granted'
     )
       return;
     await this.chats.ensureDetails(message.chatId).catch(() => {});
     if (message.replyRootId) await this.chats.loadSubscription(message.chatId, message.replyRootId).catch(() => {});
+    const modal = await this.modals.getTop();
     if (
+      this.destroy.destroyed ||
       this.session.user()?.uid !== uid ||
       this.seen.has(message.id) ||
-      window.localStorage.getItem(ENABLED_KEY) === 'false'
+      window.localStorage.getItem(ENABLED_KEY) === 'false' ||
+      !this.enabled() ||
+      this.permission() !== 'granted'
     )
       return;
     const chat = this.chats.get(message.chatId);
     const state = this.chats.chatState(message.chatId) ?? chat;
     const thread = message.replyRootId ? this.chats.subscription(message.chatId, message.replyRootId) : undefined;
     if (!shouldNotify(message, uid, state, thread)) return;
-    const foreground = !document.hidden;
-    if (!foreground && (!this.enabled() || this.permission() !== 'granted')) return;
     const title =
       (chat?.kind === GroupKind.dm ? chat.peer?.username : chat?.name) ??
       message.sender.name ??
       String(message.sender.uid);
     const text = notificationText(message);
     this.remember(message.id);
-    const accepted = await this.workerCommand({
+    await this.workerCommand({
       type: 'CHAHUA_NOTIFY',
-      foreground,
+      suppress: !document.hidden && this.currentConversation(message) && !modal,
       payload: {
         type: 'newMessage',
         title,
@@ -226,21 +207,6 @@ export class PushNotifications {
         },
       },
     });
-    if (
-      !accepted ||
-      !foreground ||
-      document.hidden ||
-      this.destroy.destroyed ||
-      this.session.user()?.uid !== uid ||
-      window.localStorage.getItem(ENABLED_KEY) === 'false' ||
-      (this.currentConversation(message) && !(await this.modals.getTop())) ||
-      version < this.shownVersion
-    )
-      return;
-    this.shownVersion = version;
-    this.dismiss();
-    this.currentBanner.set(message);
-    this.bannerTimer = setTimeout(() => this.dismiss(), 5000);
   }
 
   private remember(id: SnowflakeID) {
@@ -250,29 +216,15 @@ export class PushNotifications {
 
   private closeMessages(ids: readonly SnowflakeID[]) {
     for (const id of ids) this.remember(id);
-    if (this.banner() && ids.includes(this.banner()!.id)) this.dismiss();
     void this.workerCommand({ type: 'CHAHUA_CLOSE', messageIds: ids.map(decodeId) });
   }
 
-  private async workerCommand(data: object): Promise<boolean> {
-    if (!this.push.isEnabled || !('serviceWorker' in navigator)) return true;
+  private async workerCommand(data: object): Promise<void> {
+    if (!this.push.isEnabled || !('serviceWorker' in navigator)) return;
     try {
       const registration = await navigator.serviceWorker.getRegistration();
-      if (!registration?.active) return true;
-      return await new Promise<boolean>((resolve) => {
-        const channel = new MessageChannel();
-        const finish = (accepted: boolean) => {
-          clearTimeout(timer);
-          channel.port1.close();
-          resolve(accepted);
-        };
-        const timer = setTimeout(() => finish(true), 1500);
-        channel.port1.onmessage = (event) => finish(event.data === true);
-        registration.active!.postMessage(data, [channel.port2]);
-      });
-    } catch {
-      return true;
-    }
+      registration?.active?.postMessage(data);
+    } catch {}
   }
 
   async refresh(): Promise<void> {
@@ -319,7 +271,6 @@ export class PushNotifications {
       this.subscriptionState.set(enabled);
       this.setDeviceEnabled(enabled);
       if (!enabled) {
-        this.dismiss();
         void this.workerCommand({ type: 'CHAHUA_CLOSE', all: true });
       }
       return true;
@@ -398,7 +349,6 @@ export class PushNotifications {
     // Backend deletion already stops delivery, even if the browser cannot remove its endpoint.
     this.subscriptionState.set(false);
     this.setDeviceEnabled(false);
-    this.dismiss();
     void this.workerCommand({ type: 'CHAHUA_CLOSE', all: true });
     await this.push.unsubscribe();
   }

@@ -10,7 +10,6 @@ flowchart TD
   APP --> OUTLET[IonRouterOutlet]
   APP --> LIST[ChatList：分栏侧栏]
   APP --> SETTINGS[SettingsModal]
-  APP --> NOTIFY[NotificationBanner]
   OUTLET --> LISTPAGE[ChatListPage]
   LISTPAGE --> MOBILE[ChatList：单列内容]
   LIST --> CONTENT[ChatListContent：分类列表与分页]
@@ -143,6 +142,5 @@ UserProfile、ChatDetails 和 ConversationPage 激活同一个好友关系查询
 | GeneralSettings            | 直接编辑 Preferences，无额外状态副本                                   |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                       |
 | Landing                    | 检测平台与选中平台；公开安装指引，复用 SessionStore 提取 URL token     |
-| NotificationBanner         | enabled；消费 PushNotifications.banner；派生头像和标题，无额外消息状态 |
 
-SettingsModal 保留底层聊天路由；关闭恢复历史。NotificationBanner 的 enabled 由 App 分栏结果传入，无独立布局服务。Landing 只提供安装指引，已安装应用直接进入聊天或邀请预览。
+SettingsModal 保留底层聊天路由；关闭恢复历史。Landing 只提供安装指引，已安装应用直接进入聊天或邀请预览。

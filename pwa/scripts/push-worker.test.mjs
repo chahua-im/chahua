@@ -43,13 +43,11 @@ function worker(existing = []) {
     notifications,
     command: (data) => {
       let pending;
-      const response = [];
       listeners.get('message')({
         data,
-        ports: [{ postMessage: (value) => response.push(value) }],
         waitUntil: (value) => (pending = value),
       });
-      return pending.then(() => response[0]);
+      return pending;
     },
     push: (payload) => {
       let pending;
@@ -110,29 +108,38 @@ test('contains malformed payload failures without rejecting the service worker e
   assert.equal(instance.shown.length, 0);
 });
 
+test('a page message displays a system notification without waiting for Push', async () => {
+  const instance = worker();
+  await instance.command({ type: 'CHAHUA_NOTIFY', payload, suppress: false });
+  assert.equal(instance.shown.length, 1);
+  assert.equal(instance.shown[0][0], payload.title);
+  assert.equal(instance.shown[0][1].body, payload.body);
+});
+
 test('deduplicates concurrent local notification and Push delivery in either order', async () => {
   for (const pushFirst of [false, true]) {
     const instance = worker();
-    const local = () => instance.command({ type: 'CHAHUA_NOTIFY', payload, foreground: false });
+    const local = () => instance.command({ type: 'CHAHUA_NOTIFY', payload, suppress: false });
     const push = () => instance.push(payload);
     await Promise.all(pushFirst ? [push(), local()] : [local(), push()]);
     assert.equal(instance.shown.length, 1);
   }
 });
 
-test('foreground claims suppress a delayed Push without suppressing other older message IDs', async () => {
+test('reading the current conversation suppresses its delayed Push without suppressing older message IDs', async () => {
   const instance = worker();
-  assert.equal(await instance.command({ type: 'CHAHUA_NOTIFY', payload, foreground: true }), true);
+  await instance.command({ type: 'CHAHUA_NOTIFY', payload, suppress: true });
   await instance.push(payload);
   assert.equal(instance.shown.length, 0);
   await instance.push({ ...payload, data: { ...payload.data, messageId: '90071992547409930' } });
   assert.equal(instance.shown.length, 1);
 });
 
-test('a Push shown first prevents a duplicate foreground banner', async () => {
+test('a Push shown first prevents a duplicate online system notification', async () => {
   const instance = worker();
   await instance.push(payload);
-  assert.equal(await instance.command({ type: 'CHAHUA_NOTIFY', payload, foreground: true }), false);
+  await instance.command({ type: 'CHAHUA_NOTIFY', payload, suppress: false });
+  assert.equal(instance.shown.length, 1);
 });
 
 test('restores deduplication from notifications still visible after a worker restart', async () => {

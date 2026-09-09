@@ -35,7 +35,12 @@ describe('online notifications', () => {
   let clicks: Subject<{ notification: { data: object } }>;
   let state: { archived?: boolean; mutedUntil?: string };
   let subscription: ThreadSubscriptionStatusResponse;
-  const commands: { type: string; foreground?: boolean; payload?: { data: object }; readThrough?: string }[] = [];
+  const commands: {
+    type: string;
+    suppress?: boolean;
+    payload?: { title: string; body: string; data: object };
+    readThrough?: string;
+  }[] = [];
   const total = signal<{ unreadCount: number; archivedUnreadCount: number } | undefined>(undefined);
   const release = vi.fn();
   const unread = { value: total, activate: vi.fn(() => release) };
@@ -66,21 +71,13 @@ describe('online notifications', () => {
     modals.dismiss.mockReset().mockResolvedValue(true);
     vi.stubGlobal('Notification', { permission: 'granted' });
     vi.stubGlobal('PushManager', class {});
-    vi.stubGlobal(
-      'MessageChannel',
-      class {
-        port1 = { onmessage: null as ((event: { data: boolean }) => void) | null, close() {} };
-        port2 = { postMessage: (data: boolean) => Promise.resolve().then(() => this.port1.onmessage?.({ data })) };
-      },
-    );
     vi.stubGlobal('navigator', {
       ...badges,
       serviceWorker: {
         getRegistration: async () => ({
           active: {
-            postMessage: (data: (typeof commands)[number], ports: MessagePort[]) => {
+            postMessage: (data: (typeof commands)[number]) => {
               commands.push(data);
-              ports[0].postMessage(true);
             },
           },
         }),
@@ -133,17 +130,18 @@ describe('online notifications', () => {
     vi.useRealTimers();
   });
 
-  it('shows other conversations once, shares the server badge total, and expires the banner', async () => {
+  it('sends foreground messages to the system notification worker once and shares the server badge total', async () => {
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     await settle();
-    expect(service.banner()).toBe(incoming);
+    expect(commands[0]).toMatchObject({
+      type: 'CHAHUA_NOTIFY',
+      suppress: false,
+      payload: { title: testChat.name, body: `朋友: ${incoming.message}`, data: { messageId: decodeId(incoming.id) } },
+    });
     expect(commands.filter((command) => command.type === 'CHAHUA_NOTIFY')).toHaveLength(1);
-    expect(commands[0].foreground).toBe(true);
     expect(unread.activate).toHaveBeenCalledOnce();
     expect(badges.setAppBadge).toHaveBeenLastCalledWith(7);
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(service.banner()).toBeUndefined();
   });
 
   it('does not activate badge counts when the browser cannot display them', async () => {
@@ -178,31 +176,56 @@ describe('online notifications', () => {
     expect(badges.clearAppBadge).toHaveBeenCalledOnce();
   });
 
-  it('claims messages in the current visible conversation without a banner', async () => {
+  it('claims messages in the current visible conversation without a system notification', async () => {
     await router.navigateByUrl(chatPath);
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     await settle();
-    expect(service.banner()).toBeUndefined();
-    expect(commands[0].foreground).toBe(true);
+    expect(commands[0]).toMatchObject({ type: 'CHAHUA_NOTIFY', suppress: true });
   });
 
-  it('still shows a banner when settings covers the conversation', async () => {
+  it('still requests a system notification when settings covers the conversation', async () => {
     await router.navigateByUrl(chatPath + '?settings=1');
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     await settle();
-    expect(service.banner()).toBe(incoming);
+    expect(commands[0]).toMatchObject({ type: 'CHAHUA_NOTIFY', suppress: false });
   });
 
-  it('uses local system notifications while the page is hidden and honors the device switch', async () => {
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  it.each([false, true])('uses system notifications and honors the device switch (hidden=%s)', async (hidden) => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(hidden);
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     await settle();
-    expect(commands[0].foreground).toBe(false);
-    expect(service.banner()).toBeUndefined();
+    expect(commands[0]).toMatchObject({ type: 'CHAHUA_NOTIFY', suppress: false });
     window.localStorage.setItem('chahua.notifications.enabled', 'false');
     events.next({ type: ServerWsMessageType.message, payload: { ...incoming, id: encodeId('9007199254741010') } });
     await settle();
     expect(commands.filter((command) => command.type === 'CHAHUA_NOTIFY')).toHaveLength(1);
+  });
+
+  it.each(['default', 'denied'] as const)(
+    'does not request foreground notifications with %s permission',
+    async (permission) => {
+      vi.stubGlobal('Notification', { permission });
+      await service.refresh();
+      events.next({ type: ServerWsMessageType.message, payload: incoming });
+      await settle();
+      expect(commands).toHaveLength(0);
+    },
+  );
+
+  it('requests a system notification when a modal covers the current conversation', async () => {
+    await router.navigateByUrl(chatPath);
+    modals.getTop.mockResolvedValue({});
+    events.next({ type: ServerWsMessageType.message, payload: incoming });
+    await settle();
+    expect(commands[0]).toMatchObject({ type: 'CHAHUA_NOTIFY', suppress: false });
+  });
+
+  it('requests a system notification for the current conversation while the page is hidden', async () => {
+    await router.navigateByUrl(chatPath);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    events.next({ type: ServerWsMessageType.message, payload: incoming });
+    await settle();
+    expect(commands[0]).toMatchObject({ type: 'CHAHUA_NOTIFY', suppress: false });
   });
 
   it('filters muted messages, outgoing messages and system events, while allowing mentions', async () => {
@@ -216,7 +239,8 @@ describe('online notifications', () => {
       payload: { ...incoming, mentions: [{ uid: 1, username: '我', gender: 0 }] },
     });
     await settle();
-    expect(service.banner()?.mentions?.[0].uid).toBe(1);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ type: 'CHAHUA_NOTIFY', suppress: false });
   });
 
   it('allows an active topic through parent mute, and reads close only the matching scope', async () => {
@@ -224,22 +248,35 @@ describe('online notifications', () => {
     const topic = { ...incoming, replyRootId: encodeId('9007199254740999') };
     events.next({ type: ServerWsMessageType.message, payload: topic });
     await settle();
-    expect(service.banner()).toBe(topic);
+    expect(commands[0]).toMatchObject({
+      type: 'CHAHUA_NOTIFY',
+      suppress: false,
+      payload: { data: { threadRootId: decodeId(topic.replyRootId) } },
+    });
     reads.next({ chatId: topic.chatId, readThrough: topic.id });
-    expect(service.banner()).toBe(topic);
+    await settle();
+    expect(commands.at(-1)).toMatchObject({
+      type: 'CHAHUA_CLOSE',
+      chatId: decodeId(topic.chatId),
+      threadRootId: undefined,
+      readThrough: decodeId(topic.id),
+    });
     reads.next({ chatId: topic.chatId, threadId: topic.replyRootId, readThrough: topic.id });
     await settle();
-    expect(service.banner()).toBeUndefined();
-    expect(commands.at(-1)?.readThrough).toBe(decodeId(topic.id));
+    expect(commands.at(-1)).toMatchObject({
+      type: 'CHAHUA_CLOSE',
+      chatId: decodeId(topic.chatId),
+      threadRootId: decodeId(topic.replyRootId),
+      readThrough: decodeId(topic.id),
+    });
   });
 
-  it('recall clears a banner and closes its system notification', async () => {
+  it('recall closes its system notification', async () => {
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     await settle();
     events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...incoming, isDeleted: true } });
     await settle();
-    expect(service.banner()).toBeUndefined();
-    expect(commands.at(-1)?.type).toBe('CHAHUA_CLOSE');
+    expect(commands.at(-1)).toEqual({ type: 'CHAHUA_CLOSE', messageIds: [decodeId(incoming.id)] });
   });
 
   it('opens a notification through the router, keeping the page and local outbox alive', async () => {
