@@ -1,12 +1,14 @@
+// RouterLinkActive can update before the cached page renders Ionic's color input.
+// Match the rendered palette so foreground and background change together.
 ion-item {
   --min-height: var(--app-chat-row-height);
 
-  &.selected ion-label p {
+  &.ion-color ion-label p {
     color: inherit;
   }
 }
 
-ion-item:not(.selected) ion-label p {
+ion-item:not(.ion-color) ion-label p {
   color: var(--ion-color-step-400, var(--ion-text-color-step-600, #999));
   --message-action-color: var(--ion-color-primary);
 }
@@ -15,7 +17,7 @@ ion-label ion-text {
   font-weight: 500;
 }
 
-ion-item:not(.selected) .meta > span {
+ion-item:not(.ion-color) .meta > span {
   color: var(--ion-text-color-step-250, #404040);
 }
 
@@ -28,7 +30,7 @@ ion-item:not(.selected) .meta > span {
   line-height: var(--app-line-caption);
 }
 
-ion-item.selected app-chat-avatar {
+ion-item.ion-color app-chat-avatar {
   --avatar-badge-border: var(--ion-color-primary);
 }
 
