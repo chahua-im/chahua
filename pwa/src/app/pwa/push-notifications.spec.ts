@@ -85,6 +85,38 @@ describe('PushNotifications', () => {
     vi.unstubAllGlobals();
   });
 
+  it('offers the first permission choice only when supported, undecided, and without a saved preference', () => {
+    notification.permission = 'default';
+    const service = TestBed.inject(PushNotifications);
+    expect(service.shouldPrompt()).toBe(true);
+    browser.isEnabled = false;
+    expect(service.shouldPrompt()).toBe(false);
+    browser.isEnabled = true;
+    notification.permission = 'granted';
+    expect(service.shouldPrompt()).toBe(false);
+    notification.permission = 'denied';
+    expect(service.shouldPrompt()).toBe(false);
+    notification.permission = 'default';
+    service.declinePermission();
+    expect(service.shouldPrompt()).toBe(false);
+    expect(localStorage.getItem('chahua.notifications.enabled')).toBe('false');
+    expect(notification.requestPermission).not.toHaveBeenCalled();
+    expect(api.postSubscribe).not.toHaveBeenCalled();
+  });
+
+  it('leaves the initial permission click available while startup refresh has no permission', async () => {
+    notification.permission = 'default';
+    browser.subscription = NEVER;
+    const service = TestBed.inject(PushNotifications);
+    await service.refresh();
+    expect(service.busy()).toBe(false);
+    expect(api.getSubscriptionStatus).not.toHaveBeenCalled();
+    browser.subscription = current;
+    const request = service.setEnabled(true);
+    expect(notification.requestPermission).toHaveBeenCalledOnce();
+    expect(await request).toBe(true);
+  });
+
   it('requests permission synchronously from the toggle, then registers VAPID and backend keys', async () => {
     notification.permission = 'default';
     const service = TestBed.inject(PushNotifications);

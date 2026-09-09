@@ -34,8 +34,7 @@ export interface MessageMenuSelection {
   clientGeneratedId?: string;
   element: HTMLElement;
   rect: DOMRect;
-  first: boolean;
-  last: boolean;
+  point?: { x: number; y: number };
   own: boolean;
 }
 
@@ -238,7 +237,7 @@ export class Message<T extends MessageContent = MessageResponse> {
     if (!this.canMenu()) return;
     event.preventDefault();
     this.cancelPress();
-    if (!this.longPressed) this.emitMenu(element);
+    if (!this.longPressed) this.emitMenu(element, event instanceof MouseEvent ? event : undefined);
   }
 
   protected startPress(event: PointerEvent, element: HTMLElement) {
@@ -252,7 +251,7 @@ export class Message<T extends MessageContent = MessageResponse> {
       timer: setTimeout(() => {
         this.press = undefined;
         this.longPressed = true;
-        this.emitMenu(element);
+        this.emitMenu(element, event);
       }, 350),
     };
   }
@@ -272,7 +271,7 @@ export class Message<T extends MessageContent = MessageResponse> {
     this.press = undefined;
   }
 
-  private emitMenu(element: HTMLElement) {
+  private emitMenu(element: HTMLElement, event?: MouseEvent) {
     const message = this.message();
     if (!this.canMenu() || message.messageType === MessageType.system) return;
     this.menu.emit({
@@ -280,8 +279,7 @@ export class Message<T extends MessageContent = MessageResponse> {
       clientGeneratedId: this.outgoingId(),
       element,
       rect: element.getBoundingClientRect(),
-      first: this.first(),
-      last: this.last(),
+      point: event ? { x: event.clientX, y: event.clientY } : undefined,
       own: this.own(),
     });
   }
