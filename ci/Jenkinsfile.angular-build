@@ -64,7 +64,7 @@ spec:
 set -euo pipefail
 
 npm ci
-npm run build
+npm run build -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"
               '''
             }
           }

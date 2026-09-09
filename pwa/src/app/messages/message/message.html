@@ -106,32 +106,14 @@
                     [interactive]="canInteract()" />
                 </span>
               }
-              @if (!hasReactions()) {
-                <time class="timestamp" [attr.datetime]="message().createdAt">
-                  @if (message().isEdited) {
-                    <span>已编辑</span>
-                  }
-                  {{ message().createdAt | date: 'HH:mm' }}
-                  <app-message-status [delivery]="status()" />
-                </time>
-              }
+              <time class="timestamp" [attr.datetime]="message().createdAt">
+                @if (message().isEdited) {
+                  <span>已编辑</span>
+                }
+                {{ message().createdAt | date: 'HH:mm' }}
+                <app-message-status [delivery]="status()" />
+              </time>
             </div>
-            @if (hasReactions()) {
-              <div class="message-footer">
-                <app-message-reactions
-                  [reactions]="message().reactions ?? []"
-                  [own]="own()"
-                  [preview]="!canInteract()"
-                  (react)="react.emit($event)"></app-message-reactions>
-                <time class="timestamp" [attr.datetime]="message().createdAt">
-                  @if (message().isEdited) {
-                    <span>已编辑</span>
-                  }
-                  {{ message().createdAt | date: 'HH:mm' }}
-                  <app-message-status [delivery]="status()" />
-                </time>
-              </div>
-            }
           }
           @if (threadInfo(); as info) {
             <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
@@ -140,12 +122,11 @@
         @if (status() === Delivery.Failed && !preview()) {
           <button type="button" class="retry-button" (click)="retry.emit()">发送失败，点击重试</button>
         }
-        @if (mediaOverlay() && hasReactions()) {
+        @if (hasReactions()) {
           <app-message-reactions
             [reactions]="message().reactions ?? []"
             [own]="own()"
             [preview]="!canInteract()"
-            [external]="true"
             (react)="react.emit($event)"></app-message-reactions>
         }
       </div>
