@@ -1,28 +1,39 @@
-import { booleanAttribute, ChangeDetectorRef, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectorRef, Component, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, NavController } from '@ionic/angular';
 import { chatbubblesOutline } from 'ionicons/icons';
-import { fromEvent, map } from 'rxjs';
+import { filter, fromEvent, map } from 'rxjs';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { ChatList } from '../chat-list/chat-list';
-import { ListTab, type ListSelection } from '../list-tabs';
+import { listSelection, ListTab, type ListSelection } from '../list-tabs';
 
 @Component({
   selector: 'app-chats',
   templateUrl: './chat-list.page.html',
   styleUrl: './chat-list.page.scss',
-  imports: [ContentScrollbars, ChatList, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar],
+  imports: [ContentScrollbars, ChatList, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, RouterOutlet],
 })
 export class ChatListPage {
   private readonly nav = inject(NavController);
-  readonly tab = input(ListTab.Messages);
-  readonly archived = input(false, { transform: booleanAttribute });
-  readonly requestHistory = input(false, { transform: booleanAttribute });
-  protected readonly selection = computed(() => ({
-    tab: this.tab(),
-    archived: this.archived(),
-    requestHistory: this.requestHistory(),
-  }));
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+  protected readonly selection = toSignal(
+    this.router.events.pipe(
+      filter((event) => event instanceof NavigationEnd),
+      // Ionic's cached ActivatedRoute proxy does not refresh its snapshot for child-only navigation.
+      map(() => this.router.routerState.snapshot.root.firstChild),
+      filter((route) => route?.routeConfig === this.route.snapshot.routeConfig),
+      map((route) => listSelection(route!)!),
+    ),
+    {
+      initialValue: listSelection(this.router.routerState.snapshot.root) ?? {
+        tab: ListTab.Messages,
+        archived: false,
+        requestHistory: false,
+      },
+    },
+  );
   private readonly desktop = window.matchMedia('(min-width: 768px)');
   protected readonly wide = toSignal(
     fromEvent<MediaQueryListEvent>(this.desktop, 'change').pipe(map((event) => event.matches)),
@@ -36,7 +47,9 @@ export class ChatListPage {
     const url = ['/chats', selection.tab];
     if (selection.archived) url.push('archived');
     if (selection.requestHistory) url.push('archived-requests');
-    return this.archived() || this.requestHistory() ? this.nav.navigateBack(url) : this.nav.navigateForward(url);
+    return this.selection().archived || this.selection().requestHistory
+      ? this.nav.navigateBack(url)
+      : this.nav.navigateForward(url);
   }
 
   ionViewDidEnter() {

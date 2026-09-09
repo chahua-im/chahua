@@ -1,6 +1,6 @@
 # 加载与操作反馈
 
-加载图标不搭配文字。错误提示和重试入口显示文字。应用内使用 Ionic 默认 spinner。
+加载图标不搭配文字。错误提示和重试入口显示文字。应用内使用 Ionic 默认 spinner；加载状态不等同于禁用整个输入区或页面，具体提交规则见[需求](requirements.md#输入草稿与待发队列)。
 
 ## 数据加载
 
@@ -8,8 +8,8 @@
 | -------------------------------- | ---------------------------------------------------- | ------------------------------------------------------ |
 | Angular 挂载前                   | index.html 的内联 SVG 短线菊花，屏幕居中；适应深浅色 | 静态 HTML                                              |
 | 登录初始化                       | 居中 spinner                                         | App.loading                                            |
-| 列表首次加载、切换分类、点击重试 | 内容区 spinner                                       | 当前分类查询 loading 汇总与 ChatList.ready             |
-| 列表下拉刷新                     | Ionic refresher；不同时显示内容区加载图标            | ChatList.refreshing 与查询 loading                     |
+| 列表首次加载、切换分类、点击重试 | 内容区 spinner                                       | 当前分类查询 loading 汇总与 ChatListContent.ready      |
+| 列表下拉刷新                     | Ionic refresher；不同时显示内容区加载图标            | ChatListContent.refreshing 与查询 loading              |
 | 列表续页                         | Ionic infinite-scroll spinner                        | 查询 loadingMore                                       |
 | 对话首次加载                     | 内容区居中 spinner                                   | ConversationStore.loading                              |
 | 对话历史/后续消息分页            | 顶部/底部固定尺寸菊花控件                            | ConversationStore.pagingDirection                      |
@@ -43,13 +43,13 @@
 
 操作按钮通过 `.action-content` 和 `.action-label` 保留原有尺寸，spinner 绝对定位叠放。`.busy` 控制原内容的隐藏，spinner 显示等待状态。
 
-消息菜单确认框、Toast 与菜单开关属于 MessageMenu；页面读取其 busy 用于 toolbar。页面离开会清理提示并使旧操作的 UI 收尾失效。数据请求时机见[数据流](data-flow.md)，组件边界见[Components](components.md)。
+消息菜单确认框、Toast 与菜单开关属于 MessageMenu；页面读取其 busy 用于 toolbar。页面离开会清理提示并使旧操作的 UI 收尾失效。数据请求时机见[数据流](data-flow.md)，组件边界见[组件](components.md)。
 
 输入区不因消息读取、发送或编辑请求进入忙碌状态。编辑保存后在原消息上显示队列状态，失败原位重试；尚未发出的消息编辑直接更新该行。撤回立即隐藏消息，网络请求由队列继续处理。录音能力不足时显示 mic-off-outline，点击展示 Ionic alert，不使用禁用按钮。
 
 静音时长菜单等待用户选择；确认后由原列表项或资料按钮保持操作反馈，取消菜单不发送请求。静音到期只更新标记和计数，不显示全屏 loading。通知横幅不改变页面加载状态，点击后复用会话页面已有的消息定位反馈。
 
-资料的成员、话题、媒体与聊天搜索使用 IonInfiniteScroll，加载标识与 ChatList 一致，不提供“加载更多”文字按钮；不足一屏时继续补页。Connection.connected 为假时，列表与会话 toolbar 显示 Ionic spinner，不附“连接中”文字。
+资料的成员、话题、媒体与聊天搜索使用 IonInfiniteScroll，加载标识与 ChatList 一致，不提供可点击的加载控件。成员、媒体和聊天搜索不足一屏时继续补页；话题只在触底时续页，不自动扫描普通消息填满侧栏。Connection.connected 为假时，聊天列表加号按钮用 spinner 替换图标，点击仍打开原菜单；会话 toolbar 单独显示 spinner。
 
 VoicePlayer 首次播放与缓冲时在圆形按钮内显示 spinner，波形读取失败不阻止可用的音频播放。贴纸上传的等待留在贴纸面板；邀请卡片的加载保持固定高度。私聊关系不可发送时点击提交显示原因，输入内容保持可编辑。
 

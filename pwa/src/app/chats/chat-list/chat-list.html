@@ -1,8 +1,5 @@
 <ion-header>
   <ion-toolbar>
-    @if (!realtime.connected()) {
-      <ion-spinner slot="end" />
-    }
     @if (searching()) {
       <ion-searchbar
         placeholder="搜索群组和用户"
@@ -12,9 +9,11 @@
         (ionCancel)="searching.set(false); search.set('')" />
     } @else if (list().archived || list().requestHistory) {
       <ion-buttons slot="start">
-        <ion-button (click)="openList.emit({ tab: list().tab, archived: false, requestHistory: false })">
-          <ion-icon slot="icon-only" [icon]="backIcon"></ion-icon>
-        </ion-button>
+        <ion-back-button
+          class="show-back-button"
+          text="返回"
+          [defaultHref]="outlet ? '/chats/' + list().tab : undefined"
+          (click)="back()"></ion-back-button>
       </ion-buttons>
       <ion-title>{{ list().requestHistory ? '好友请求' : '已归档' }}</ion-title>
     } @else {
@@ -30,239 +29,47 @@
         </ion-button>
       </ion-buttons>
       <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)" [swipeGesture]="false">
-        <ion-segment-button [value]="ListTab.Messages"><ion-label>消息</ion-label></ion-segment-button>
-        <ion-segment-button [value]="ListTab.Groups"><ion-label>群组</ion-label></ion-segment-button>
-        <ion-segment-button [value]="ListTab.Friends"><ion-label>好友</ion-label></ion-segment-button>
-        <ion-segment-button [value]="ListTab.Threads"><ion-label>话题</ion-label></ion-segment-button>
+        <ion-segment-button [value]="ListTab.Messages" [contentId]="contentPrefix + ListTab.Messages">
+          <ion-label>消息</ion-label>
+        </ion-segment-button>
+        <ion-segment-button [value]="ListTab.Groups" [contentId]="contentPrefix + ListTab.Groups">
+          <ion-label>群组</ion-label>
+        </ion-segment-button>
+        <ion-segment-button [value]="ListTab.Friends" [contentId]="contentPrefix + ListTab.Friends">
+          <ion-label>好友</ion-label>
+        </ion-segment-button>
+        <ion-segment-button [value]="ListTab.Threads" [contentId]="contentPrefix + ListTab.Threads">
+          <ion-label>话题</ion-label>
+        </ion-segment-button>
       </ion-segment>
       <ion-buttons slot="end">
         <ion-button (click)="addMenu.present($event)">
-          <ion-icon slot="icon-only" [icon]="addIcon"></ion-icon>
+          @if (realtime.connected()) {
+            <ion-icon slot="icon-only" [icon]="addIcon"></ion-icon>
+          } @else {
+            <ion-spinner slot="icon-only" />
+          }
         </ion-button>
       </ion-buttons>
     }
   </ion-toolbar>
 </ion-header>
-<ion-content appScrollbars>
-  @if (searching()) {
-    <app-directory-search [query]="search()" />
-  } @else {
-    <ion-refresher
-      slot="fixed"
-      [disabled]="chatQuery().loadingMore() || threads().loadingMore()"
-      (ionRefresh)="refreshing.set(true); refresh()">
-      <ion-refresher-content></ion-refresher-content>
-    </ion-refresher>
-    @if (!list().archived && !list().requestHistory) {
-      <ion-list>
-        <app-chat-list-item
-          [button]="true"
-          (selected)="openList.emit({ tab: list().tab, archived: true, requestHistory: false })"
-          [entry]="{
-            title: '已归档',
-            subtitle: '查看已归档的对话',
-            icon: archiveIcon,
-            unreadCount: archivedUnreadCount(),
-            unreadColor: 'medium',
-          }"></app-chat-list-item>
-        @if (showHistoryEntry()) {
-          <app-chat-list-item
-            [button]="true"
-            (selected)="openList.emit({ tab: ListTab.Friends, archived: false, requestHistory: true })"
-            [entry]="{
-              title: '好友请求',
-              subtitle: '查看好友请求记录',
-              icon: requestsIcon,
-            }"></app-chat-list-item>
-        }
-        @if (countError()) {
-          <ion-item lines="none">
-            <ion-label color="danger">归档信息加载失败，请重试。</ion-label>
-            <ion-button slot="end" (click)="refreshCounts()">重试</ion-button>
-          </ion-item>
-        }
-      </ion-list>
+@if (searching()) {
+  <ion-content appScrollbars><app-directory-search [query]="search()" /></ion-content>
+} @else if (list().archived || list().requestHistory) {
+  <app-chat-list-content [selection]="list()" [active]="active()" (openList)="openList.emit($event)" />
+} @else {
+  <ion-segment-view>
+    @for (tab of [ListTab.Messages, ListTab.Groups, ListTab.Friends, ListTab.Threads]; track tab) {
+      <ion-segment-content [id]="contentPrefix + tab">
+        <app-chat-list-content
+          [selection]="{ tab, archived: false, requestHistory: false }"
+          [active]="active() && list().tab === tab"
+          (openList)="openList.emit($event)" />
+      </ion-segment-content>
     }
-    @if (ready()) {
-      @if (showRequests() && (requestRows().length || friendRequests().error())) {
-        <ion-list class="friend-requests">
-          @if (friendRequests().error()) {
-            <ion-item lines="none">
-              <ion-label color="danger">好友请求加载失败，请刷新重试。</ion-label>
-              <ion-button slot="end" fill="clear" (click)="friendRequests().refresh()">重试</ion-button>
-            </ion-item>
-          }
-          @for (row of requestRows(); track row.request.id) {
-            @let name = row.peer.username ?? '用户 ' + row.peer.uid;
-            <app-chat-list-item
-              [entry]="{
-                title: name,
-                subtitle: row.request.question
-                  ? 'Q: ' + row.request.question + ' · A: ' + (row.request.message ?? '')
-                  : row.request.message || (row.incoming ? '好友请求' : '好友请求已发送'),
-                avatar: row.peer.avatarUrl,
-              }"
-              [endActions]="
-                row.canDecide
-                  ? [
-                      { label: '接受来自 ' + name + ' 的好友请求', icon: acceptIcon, run: row.accept },
-                      { label: '拒绝来自 ' + name + ' 的好友请求', icon: rejectIcon, color: 'danger', run: row.reject },
-                      ...(row.request.status === FriendRequestStatus.pending
-                        ? [{ label: '归档来自 ' + name + ' 的好友请求', icon: archiveIcon, run: row.archive }]
-                        : []),
-                    ]
-                  : []
-              "
-              [actionsAlwaysVisible]="true">
-              @if (!row.canDecide) {
-                <ion-note slot="end" class="ion-text-nowrap">
-                  @switch (row.request.status) {
-                    @case (FriendRequestStatus.accepted) {
-                      已接受
-                    }
-                    @case (FriendRequestStatus.rejected) {
-                      已拒绝
-                    }
-                    @default {
-                      等待通过
-                    }
-                  }
-                </ion-note>
-              }
-            </app-chat-list-item>
-          }
-        </ion-list>
-      }
-      @if (!list().requestHistory && (rows().length || !loading())) {
-        <ion-list class="conversations">
-          @for (row of rows(); track row.key) {
-            @switch (row.kind) {
-              @case (ListRowKind.Thread) {
-                <app-chat-list-item
-                  [entry]="row.entry"
-                  [startActions]="
-                    row.thread.unreadCount > 0 ? [{ label: '标为已读', icon: readIcon, run: row.markRead }] : []
-                  "
-                  [endActions]="[
-                    { label: row.thread.archived ? '取消归档' : '归档', icon: archiveIcon, run: row.toggleArchived },
-                  ]"
-                  (selected)="
-                    navigation.goTo(row.thread.chatId, { type: latestTarget }, row.thread.threadRootMessage.id)
-                  ">
-                  <app-message-preview slot="title" [message]="row.thread.threadRootMessage"></app-message-preview>
-                  <span slot="preview">
-                    @if (row.draft; as draft) {
-                      <ion-text color="danger">草稿：</ion-text>
-                      {{ draft.text }}
-                    } @else if (row.thread.lastReply; as last) {
-                      <app-message-preview [message]="last"></app-message-preview>
-                    } @else {
-                      暂无回复
-                    }
-                  </span>
-                </app-chat-list-item>
-              }
-              @case (ListRowKind.Chat) {
-                <app-chat-list-item
-                  [entry]="{
-                    ...row.entry,
-                    title: row.isDm ? (row.chat.peer?.username ?? '私聊') : (row.chat.name ?? '未命名群聊'),
-                  }"
-                  [startActions]="
-                    row.toggleRead
-                      ? [
-                          {
-                            label: row.chat.unreadCount > 0 ? '标为已读' : '标为未读',
-                            icon: row.chat.unreadCount > 0 ? readIcon : unreadIcon,
-                            run: row.toggleRead,
-                          },
-                        ]
-                      : []
-                  "
-                  [endActions]="[
-                    ...(row.chat.archived
-                      ? []
-                      : [
-                          {
-                            label: row.muted ? '取消静音' : '静音',
-                            icon: row.muted ? unmutedIcon : mutedIcon,
-                            color: 'medium',
-                            run: row.toggleMuted,
-                          },
-                        ]),
-                    { label: row.chat.archived ? '取消归档' : '归档', icon: archiveIcon, run: row.toggleArchived },
-                  ]"
-                  (selected)="navigation.goTo(row.chat.id, { type: latestTarget })">
-                  <span slot="preview">
-                    @if (row.draft; as draft) {
-                      <ion-text color="danger">草稿：</ion-text>
-                      {{ draft.text }}
-                    } @else if (row.chat.lastMessage; as last) {
-                      <app-message-preview [message]="last"></app-message-preview>
-                    } @else {
-                      暂无消息
-                    }
-                  </span>
-                </app-chat-list-item>
-              }
-            }
-          } @empty {
-            @if (
-              !loading() &&
-              !(showChats() && chatQuery().error()) &&
-              !(showThreads() && threads().error()) &&
-              (!showRequests() || !friendRequests().items().length)
-            ) {
-              <ion-item lines="none">
-                <ion-label>{{ list().tab === ListTab.Threads ? '暂无话题' : '暂无会话' }}</ion-label>
-              </ion-item>
-            }
-          }
-          @if (showThreads() && threads().error()) {
-            <ion-item lines="none">
-              <ion-label color="danger">话题加载失败，请刷新重试。</ion-label>
-              <ion-button slot="end" (click)="refresh()">重试</ion-button>
-            </ion-item>
-          }
-          @if (showChats()) {
-            @if (chatQuery().error(); as error) {
-              <ion-item lines="none">
-                <ion-label color="danger">
-                  @switch (error) {
-                    @case (ChatListError.Load) {
-                      会话加载失败，请刷新重试。
-                    }
-                    @case (ChatListError.Unread) {
-                      更新未读数量失败，请刷新重试。
-                    }
-                    @case (ChatListError.Recent) {
-                      更新会话失败，请下拉刷新重试。
-                    }
-                    @case (ChatListError.More) {
-                      加载更多会话失败，请重试。
-                    }
-                  }
-                </ion-label>
-                <ion-button slot="end" (click)="refresh()">重试</ion-button>
-              </ion-item>
-            }
-          }
-        </ion-list>
-      }
-    }
-    @if ((!ready() || loading()) && !refreshing()) {
-      <div class="loading-status">
-        <ion-spinner></ion-spinner>
-      </div>
-    }
-    <ion-infinite-scroll
-      threshold="100px"
-      [disabled]="!ready() || !hasMore() || loading()"
-      (ionInfinite)="loadMore($event)">
-      <ion-infinite-scroll-content></ion-infinite-scroll-content>
-    </ion-infinite-scroll>
-  }
-</ion-content>
+  </ion-segment-view>
+}
 <ion-popover #addMenu [dismissOnSelect]="true">
   <ng-template>
     <ion-list>
@@ -273,5 +80,3 @@
     </ion-list>
   </ng-template>
 </ion-popover>
-
-<app-chat-mute />

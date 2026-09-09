@@ -1,3 +1,10 @@
+## 产品约定与文档
+
+- 修改前阅读 [需求与边界](docs/requirements.md)，按改动范围查阅 [数据流](docs/data-flow.md)、[组件](docs/components.md)、[外观](docs/appearance.md) 和 [加载反馈](docs/loading-indicators.md)。简化必须保留已有交互和协议边界。
+- 文档只描述当前状态与约定，不写“本次修改”“迁移过程”等过程记录；产品行为、请求时机、组件字段和尺寸各有单一归属，通过链接引用。
+- 不因对象有多个引用就改成 ID；只为避免过期副本、导航定位或查询成员关系使用 ID。不为局部状态增加共享服务或通用框架。
+- 测试拦截 HTTP、WebSocket 和上传；禁止生产写入和 S3 测试上传。必要的写入实测使用本地后端和开发数据库 `10.198.3.214`。开发默认代理指向生产，不能直接用于写入测试。
+
 固定界面文案和静态展示配置写在 HTML 模板中；TypeScript 保存数据、状态和操作。业务判别值使用枚举，优先由 Orval 根据 OpenAPI 生成；普通枚举即可。数值编码的 Snowflake ID 使用 SnowflakeID 品牌类型，与普通 number 区分；这是有意的性能选择，保留无损 number 编码。
 
 API 可选字段在 TypeScript 中使用 `field?: T`，运行时允许后端返回 `null`，不做 null/undefined 转换。无特殊业务语义时用 `?.`、`??` 或适当的真值判断；需要同时判断 null 和 undefined 时用 `== null` / `!= null`，不要用 `=== undefined` 区分空值，也不要把有效的 0、false 或空字符串当成缺失。仅 UpdateChatBody.avatarImageId 与 PatchInviteBody.expiresAt 显式保留 `null` 类型，分别表达清除头像和邀请过期时间；请求省略字段表示保持原值。

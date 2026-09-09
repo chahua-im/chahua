@@ -4,7 +4,7 @@
   gap: 12px;
   width: 230px;
   max-width: 100%;
-  height: 66px;
+  height: max(66px, calc(var(--app-line-body) + var(--app-line-secondary)));
 }
 ion-avatar {
   flex-shrink: 0;
@@ -23,11 +23,12 @@ small {
   white-space: nowrap;
 }
 strong {
-  font-size: 15px;
+  font-size: var(--app-font-title);
+  line-height: var(--app-line-body);
 }
 small {
-  font-size: 12px;
-  line-height: 24px;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-secondary);
   opacity: 0.7;
 }
 ion-spinner {

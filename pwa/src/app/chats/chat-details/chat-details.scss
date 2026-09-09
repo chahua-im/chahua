@@ -12,7 +12,7 @@ ion-content {
   inset-inline-end: 4px;
 }
 .profile {
-  padding-block: 32px 24px;
+  padding-block: var(--app-profile-padding);
 }
 .profile app-chat-avatar {
   margin-inline: auto;
@@ -33,9 +33,13 @@ ion-content {
   flex: 1;
   min-width: 0;
   margin: 0;
-  height: 64px;
+  height: auto;
+  min-height: var(--app-quick-action-height);
+  white-space: normal;
   --padding-start: 4px;
   --padding-end: 4px;
+  --padding-top: 0;
+  --padding-bottom: 0;
   --border-radius: 12px;
   --box-shadow: none;
   --background: var(--ion-background-color, #fff);
@@ -48,7 +52,10 @@ ion-content {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  padding-block: 4px;
+  overflow-wrap: anywhere;
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
 }
 .quick-actions ion-icon {
   font-size: 24px;
@@ -67,4 +74,6 @@ ion-content {
 
 .attachments ion-segment-button {
   min-width: 0;
+  --padding-start: 4px;
+  --padding-end: 4px;
 }

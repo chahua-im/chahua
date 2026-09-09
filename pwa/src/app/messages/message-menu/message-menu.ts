@@ -225,8 +225,6 @@ export class MessageMenu {
         const preview = stack.querySelector<HTMLElement>('.preview');
         if (preview) preview.style.maxHeight = `${previewHeight}px`;
         const position = {
-          width,
-          previewHeight,
           left: Math.max(left, Math.min(own ? rect.right - width : rect.left, left + availableWidth - width)),
           top: Math.max(top, Math.min(rect.top - (bar ? bar.offsetHeight + 8 : 0), top + height - stack.offsetHeight)),
         };

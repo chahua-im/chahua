@@ -1,6 +1,7 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { getPlatforms } from '@ionic/angular';
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { vi } from 'vitest';
 import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
@@ -707,5 +708,43 @@ describe('Message composer upload ownership', () => {
     expect(submitted).not.toHaveBeenCalled();
     composer['key'](new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(composer['suggestions']()).toEqual([]);
+  });
+});
+
+describe('Message composer keyboard', () => {
+  it.each([
+    ['desktop', ['desktop'], true],
+    ['iOS', ['ios', 'mobile'], false],
+    ['iPadOS', ['ios', 'ipad'], false],
+    ['Android', ['android', 'mobile'], false],
+  ] as const)('uses the operating system on %s even when hover capability changes', (_name, system, sends) => {
+    const platforms = getPlatforms();
+    const original = [...platforms];
+    platforms.splice(0, platforms.length, ...system);
+    const fixture = TestBed.createComponent(MessageComposer);
+    fixture.componentRef.setInput('chatId', testChat.id);
+    fixture.detectChanges();
+    const composer = fixture.componentInstance;
+    const submit = vi.spyOn(composer as unknown as { submit(): void }, 'submit').mockImplementation(() => {});
+    try {
+      for (const hover of [false, true]) {
+        vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: hover }));
+        const key = (options: KeyboardEventInit = {}) => {
+          const event = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true, ...options });
+          composer['key'](event);
+          return event.defaultPrevented;
+        };
+        expect(key({ shiftKey: true })).toBe(false);
+        expect(key({ isComposing: true })).toBe(false);
+        expect(key({ keyCode: 229 })).toBe(false);
+        expect(key()).toBe(sends);
+      }
+      expect(submit).toHaveBeenCalledTimes(sends ? 2 : 0);
+    } finally {
+      fixture.destroy();
+      platforms.splice(0, platforms.length, ...original);
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 });

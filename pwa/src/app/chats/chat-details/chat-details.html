@@ -129,9 +129,9 @@
       <div class="attachments">
         <ion-segment [value]="tab()" (ionChange)="changeTab($event.detail.value)">
           @if (!threadId()) {
-            <ion-segment-button [value]="GroupTab.Threads"><ion-label>话题</ion-label></ion-segment-button>
+            <ion-segment-button [value]="InfoTab.Threads"><ion-label>话题</ion-label></ion-segment-button>
             @if (chat()?.kind === Kind.group) {
-              <ion-segment-button [value]="GroupTab.Members"><ion-label>成员</ion-label></ion-segment-button>
+              <ion-segment-button [value]="InfoTab.Members"><ion-label>成员</ion-label></ion-segment-button>
             }
           }
           <ion-segment-button [value]="AttachmentKind.image"><ion-label>图片</ion-label></ion-segment-button>
@@ -140,10 +140,10 @@
         </ion-segment>
         @let selected = tab();
         @switch (selected) {
-          @case (GroupTab.Threads) {
+          @case (InfoTab.Threads) {
             <app-chat-threads [chatId]="chatId()" />
           }
-          @case (GroupTab.Members) {
+          @case (InfoTab.Members) {
             <app-chat-members [chatId]="chatId()" />
           }
           @default {

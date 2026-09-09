@@ -1,18 +1,24 @@
 import { Component, input, output, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter, withComponentInputBinding } from '@angular/router';
+import { ActivatedRoute, provideRouter, Router, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { vi } from 'vitest';
+import { beforeAll, afterAll, vi } from 'vitest';
 import { Connection } from '../../api/connection';
 import { mockRealtime } from '../../api/testing';
 import { routes } from '../../app.routes';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { ChatListStore } from '../chat-list-store';
+import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { ChatList } from '../chat-list/chat-list';
 import { ChatStore } from '../chat-store';
 import { ListTab, type ListSelection } from '../list-tabs';
 import { ChatListPage } from './chat-list.page';
+
+beforeAll(() => {
+  Element.prototype.scrollTo = vi.fn();
+});
+afterAll(() => Reflect.deleteProperty(Element.prototype, 'scrollTo'));
 
 beforeEach(() => vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false })));
 afterEach(() => vi.unstubAllGlobals());
@@ -38,6 +44,8 @@ describe('ChatListPage', () => {
     const harness = await RouterTestingHarness.create();
     for (const [url, selection] of [
       ['/chats', { tab: ListTab.Messages, archived: false, requestHistory: false }],
+      ['/chats/threads', { tab: ListTab.Threads, archived: false, requestHistory: false }],
+      ['/chats/groups', { tab: ListTab.Groups, archived: false, requestHistory: false }],
       ['/chats/groups/archived', { tab: ListTab.Groups, archived: true, requestHistory: false }],
       ['/chats/friends/archived-requests', { tab: ListTab.Friends, archived: false, requestHistory: true }],
     ] as const) {
@@ -45,6 +53,35 @@ describe('ChatListPage', () => {
       expect(page['selection']()).toEqual(selection);
     }
   });
+  it('reads current child selection even when Ionic retains an older route snapshot', async () => {
+    const proxy = { snapshot: {} as ActivatedRoute['snapshot'] };
+    await TestBed.configureTestingModule({
+      imports: [ChatListPage],
+      providers: [provideRouter(routes), { provide: ActivatedRoute, useValue: proxy }],
+    })
+      .overrideComponent(ChatListPage, { set: { template: '' } })
+      .compileComponents();
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/chats/groups');
+    proxy.snapshot = router.routerState.snapshot.root.firstChild!;
+    const fixture = TestBed.createComponent(ChatListPage);
+    await fixture.whenStable();
+    expect(fixture.componentInstance['selection']().tab).toBe(ListTab.Groups);
+    await router.navigateByUrl('/chats/friends');
+    await fixture.whenStable();
+    expect(fixture.componentInstance['selection']().tab).toBe(ListTab.Friends);
+    await router.navigateByUrl('/chats/groups');
+    await fixture.whenStable();
+    expect(fixture.componentInstance['selection']().tab).toBe(ListTab.Groups);
+    await router.navigateByUrl('/chats/friends/archived-requests');
+    await fixture.whenStable();
+    expect(fixture.componentInstance['selection']()).toEqual({
+      tab: ListTab.Groups,
+      archived: false,
+      requestHistory: false,
+    });
+  });
+
   it('creates the mobile list only while the viewport is narrow', async () => {
     const media = Object.assign(new EventTarget(), { matches: true });
     vi.stubGlobal('matchMedia', () => media);
@@ -105,7 +142,7 @@ describe('ChatListPage query lifecycle', () => {
         { provide: Preferences, useValue: { showThreadsInMessages: () => true } },
       ],
     })
-      .overrideComponent(ChatList, { set: { template: '' } })
+      .overrideComponent(ChatListContent, { set: { template: '' } })
       .compileComponents();
     const fixture = TestBed.createComponent(ChatListPage);
     await fixture.whenStable();

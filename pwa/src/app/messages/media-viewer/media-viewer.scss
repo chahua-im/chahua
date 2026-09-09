@@ -17,7 +17,8 @@
 .counter {
   padding: 4px 8px;
   border-radius: 12px;
-  font-size: 14px;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
   font-variant-numeric: tabular-nums;
 }
 .tools {
