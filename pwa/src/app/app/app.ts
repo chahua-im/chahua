@@ -101,8 +101,11 @@ export class App {
       }
       style.height = `${viewport.height}px`;
       style.top = `${viewport.offsetTop}px`;
-      // Ignore browser-toolbar resizing; Ionic uses the same 150px keyboard threshold.
-      style.setProperty('--ion-safe-area-bottom', window.innerHeight - viewport.height > 150 ? '0px' : '');
+      // iOS also shrinks innerHeight with the keyboard; clientHeight retains the layout viewport.
+      style.setProperty(
+        '--ion-safe-area-bottom',
+        document.documentElement.clientHeight - viewport.height > 150 ? '0px' : '',
+      );
     };
     viewport.addEventListener('resize', update);
     viewport.addEventListener('scroll', update);

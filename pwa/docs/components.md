@@ -140,7 +140,7 @@ UserProfile、ChatDetails 和 ConversationPage 激活同一个好友关系查询
 | 组件                       | 状态与职责                                                             |
 | -------------------------- | ---------------------------------------------------------------------- |
 | SettingsModal              | 路由派生 open；管理 `/settings` 的浏览器历史和内部 IonNav              |
-| Settings                   | 当前用户、通知和更新状态；局部保存更新结果，打开设置子页和收藏         |
+| Settings                   | 当前用户、通知和更新状态；持有权限拒绝 toast、局部更新结果，打开设置子页和收藏         |
 | GeneralSettings            | 直接编辑 Preferences，无额外状态副本                                   |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                       |
 | Landing                    | 检测平台与选中平台；公开安装指引，复用 SessionStore 提取 URL token     |

@@ -28,7 +28,7 @@
           </ion-avatar>
         </ion-button>
       </ion-buttons>
-      <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)" [swipeGesture]="false">
+      <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)">
         <ion-segment-button [value]="ListTab.Messages" [contentId]="contentPrefix + ListTab.Messages">
           <ion-label>消息</ion-label>
         </ion-segment-button>
@@ -59,7 +59,7 @@
 } @else if (list().archived || list().requestHistory) {
   <app-chat-list-content [selection]="list()" [active]="active()" (openList)="openList.emit($event)" />
 } @else {
-  <ion-segment-view>
+  <ion-segment-view [swipeGesture]="false">
     @for (tab of [ListTab.Messages, ListTab.Groups, ListTab.Friends, ListTab.Threads]; track tab) {
       <ion-segment-content [id]="contentPrefix + tab">
         <app-chat-list-content
