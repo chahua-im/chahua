@@ -13,7 +13,10 @@ use crate::schema::push_subscriptions;
 use crate::services::ws_registry::ConnectionRegistry;
 
 use super::delivery::{DeliveryFailure, DeliveryFailureAction};
-use super::payload::{build_apns_notification, build_push_payload, format_push_body};
+use super::payload::{
+    build_apns_notification, build_push_payload, format_push_body, format_reply_push_body,
+    payload_type_for, PushPayloadType,
+};
 use super::policy::{
     should_send_push, PushDecision, PushRecipientContext, PushSkipReason, ThreadPushState,
 };
@@ -315,18 +318,26 @@ async fn process_push_job(
             std::collections::HashMap::new()
         });
 
-    // 4. Build the push payload base text.
-    let body_text = format_push_body(&job.sender_username, job.body_preview.as_deref());
-
-    // 5. Send concurrently with bounded parallelism.
+    // 4. Send concurrently with bounded parallelism.
     let delivery_results: Vec<DeliveryAttemptResult> = stream::iter(subs)
         .map(|sub| {
             let service = service.clone();
 
             let unread = unread_counts.get(&sub.user_id).copied().unwrap_or(0);
-            let web_payload = serde_json::to_vec(&build_push_payload(job, unread, &body_text))
-                .unwrap_or_default();
-            let apns_notification = build_apns_notification(job, unread);
+            // Reply targets get their own body copy; mentions and generic
+            // messages share the standard one.
+            let body_text = match payload_type_for(job, sub.user_id) {
+                PushPayloadType::Reply => {
+                    format_reply_push_body(&job.sender_username, job.body_preview.as_deref())
+                }
+                PushPayloadType::Mention | PushPayloadType::NewMessage => {
+                    format_push_body(&job.sender_username, job.body_preview.as_deref())
+                }
+            };
+            let web_payload =
+                serde_json::to_vec(&build_push_payload(job, unread, &body_text, sub.user_id))
+                    .unwrap_or_default();
+            let apns_notification = build_apns_notification(job, unread, sub.user_id);
 
             async move {
                 match service

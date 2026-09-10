@@ -219,6 +219,17 @@ pub fn mark_thread_as_read(
     )
     .set(thread_user_states::last_read_message_id.eq(Some(message_id)))
     .execute(conn)?;
+    // Advancing the read position also acknowledges unread reactions: they are
+    // derived from a reaction-timestamp cursor (see UnreadService), which only
+    // moves forward.
+    diesel::update(
+        thread_user_states::table
+            .filter(thread_user_states::chat_id.eq(chat_id))
+            .filter(thread_user_states::thread_root_id.eq(thread_root_id))
+            .filter(thread_user_states::uid.eq(uid)),
+    )
+    .set(thread_user_states::last_reactions_read_at.eq(Utc::now()))
+    .execute(conn)?;
     Ok(updated > 0)
 }
 
@@ -724,6 +735,75 @@ pub fn enrich_thread_list(
         .map(|r| (r.thread_root_id, r.unread_count))
         .collect();
 
+    // 0b. Batch query: unread @mention counts per thread (for the returned page)
+    #[derive(QueryableByName)]
+    struct UnreadMentionRow {
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        thread_root_id: i64,
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        mention_count: i64,
+    }
+    let mention_rows: Vec<UnreadMentionRow> = sql_query(
+        "SELECT mm.thread_root_id,
+                COUNT(*)::bigint AS mention_count
+         FROM message_mentions mm
+         JOIN thread_user_states tus
+           ON tus.chat_id = mm.chat_id
+          AND tus.thread_root_id = mm.thread_root_id
+          AND tus.uid = mm.mentioned_uid
+         WHERE mm.mentioned_uid = $1
+           AND mm.thread_root_id = ANY($2)
+           AND mm.message_id > COALESCE(tus.last_read_message_id, 0)
+         GROUP BY mm.thread_root_id",
+    )
+    .bind::<diesel::sql_types::Integer, _>(uid)
+    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
+    .load(conn)?;
+    let mention_map: HashMap<i64, i64> = mention_rows
+        .into_iter()
+        .map(|r| (r.thread_root_id, r.mention_count.min(MAX_UNREAD_COUNT)))
+        .collect();
+
+    // 0c. Batch query: unread-reaction counts per thread (reactions on the
+    // user's messages in each thread, aggregated per message; cursor is the
+    // per-(thread, user) reaction timestamp). Rows without a thread_user_states
+    // row produce no count, mirroring the mention join semantics.
+    #[derive(QueryableByName)]
+    struct UnreadReactionRow {
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        thread_root_id: i64,
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        reaction_count: i64,
+    }
+    let reaction_rows: Vec<UnreadReactionRow> = sql_query(
+        "SELECT my_msgs.thread_root_id,
+                COUNT(DISTINCT mr.message_id)::bigint AS reaction_count
+         FROM (
+             SELECT m.id AS message_id, m.chat_id AS chat_id, m.reply_root_id AS thread_root_id, m.sender_uid
+             FROM messages m
+             WHERE m.reply_root_id = ANY($2)
+               AND m.deleted_at IS NULL
+               AND m.is_published = TRUE
+               AND m.sender_uid = $1
+         ) my_msgs
+         JOIN thread_user_states tus
+           ON tus.chat_id = my_msgs.chat_id
+          AND tus.thread_root_id = my_msgs.thread_root_id
+          AND tus.uid = my_msgs.sender_uid
+         JOIN message_reactions mr
+           ON mr.message_id = my_msgs.message_id
+          AND mr.user_uid <> my_msgs.sender_uid
+          AND mr.created_at > tus.last_reactions_read_at
+         GROUP BY my_msgs.thread_root_id",
+    )
+    .bind::<diesel::sql_types::Integer, _>(uid)
+    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
+    .load(conn)?;
+    let reaction_map: HashMap<i64, i64> = reaction_rows
+        .into_iter()
+        .map(|r| (r.thread_root_id, r.reaction_count.min(MAX_UNREAD_COUNT)))
+        .collect();
+
     // 1. Batch query: distinct participants per thread (replies + root message author)
     let participant_rows: Vec<ParticipantRow> = sql_query(
         "SELECT DISTINCT reply_root_id, sender_uid FROM (
@@ -967,6 +1047,8 @@ pub fn enrich_thread_list(
                 reply_count: row.reply_count,
                 last_reply_at: row.last_reply_at,
                 unread_count: unread_map.get(&row.thread_root_id).copied().unwrap_or(0),
+                unread_mentions: mention_map.get(&row.thread_root_id).copied().unwrap_or(0),
+                unread_reactions: reaction_map.get(&row.thread_root_id).copied().unwrap_or(0),
                 last_read_message_id: row.last_read_message_id,
                 subscribed_at: row.subscribed_at,
                 archived: row.archived,
