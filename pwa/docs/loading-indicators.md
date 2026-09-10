@@ -37,8 +37,8 @@
 | 话题订阅/归档                    | 话题 toolbar 按钮  | threadBusy 为真时显示 spinner 并禁用重复操作                                                                                  |
 | 保存好友验证设置                 | 保存按钮           | 保留文案占位，spinner 叠放；表单暂时禁用                                                                                      |
 | 首次允许通知                     | alert 的允许按钮   | 文案保留占位、spinner 叠放；授权期间阻止重复操作，失败 toast 后可重试                                                        |
-| 通知订阅                         | 通知设置行右侧     | PushNotifications.busy 仅用于用户主动授权或开关；后台订阅同步无 spinner、失败静默，开关同步显示本机意图与权限                                              |
-| 检查更新                         | 检查更新行图标位置 | AppUpdates.checking；结果在设置页展示                                                                                         |
+| 通知订阅                         | 通知设置行右侧     | PushNotifications.busy 仅用于用户主动授权或开关；spinner 替换 toggle，权限拒绝使用 toast；后台订阅同步无 spinner、失败静默，开关同步显示本机意图与权限                                              |
+| 检查更新                         | 检查更新行右侧     | AppUpdates.checking 时 spinner 替换右侧版本、结果或更新按钮，左侧图标保留；结果在设置页展示                                                                                         |
 | 发送消息                         | 消息时间之后       | 立即上屏；上传 cloud-upload-outline，排队／发送 time-outline，确认 checkmark-outline，失败 alert-circle-outline；失败原位重试 |
 | 附件上传                         | 附件自身           | 本地图片、视频、语音或文件显示 Ionic spinner；上传未完成也可发送                                                              |
 
