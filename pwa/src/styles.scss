@@ -20,6 +20,10 @@
   --ion-color-primary-tint: #4087d2;
 }
 
+html.plt-ios {
+  overflow: hidden;
+}
+
 // Font roles follow Ionic's root size: 16px on desktop, system Body on iOS.
 // Ionic platform classes distinguish mobile operating systems from desktop OSes, independently of input and width.
 :root {

@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Navigation, Router, provideRouter } from '@angular/router';
-import { IonRouterOutlet } from '@ionic/angular';
+import { getPlatforms, IonRouterOutlet } from '@ionic/angular';
 import { afterAll, vi } from 'vitest';
 import { testUser } from '../api/testing';
 import { ListTab } from '../chats/list-tabs';
@@ -29,6 +29,88 @@ describe('App', () => {
   });
 
   afterAll(() => vi.unstubAllGlobals());
+
+  describe('iOS visual viewport', () => {
+    const platforms = getPlatforms();
+    const originalPlatforms = [...platforms];
+    let viewport: EventTarget & { height: number; offsetTop: number; scale: number };
+
+    beforeEach(() => {
+      platforms.splice(0, platforms.length, 'ios');
+      viewport = Object.assign(new EventTarget(), { height: window.innerHeight, offsetTop: 0, scale: 1 });
+      vi.stubGlobal('visualViewport', viewport);
+      TestBed.overrideComponent(App, { set: { template: '' } });
+    });
+
+    afterEach(() => {
+      TestBed.resetTestingModule();
+      platforms.splice(0, platforms.length, ...originalPlatforms);
+      vi.unstubAllGlobals();
+    });
+
+    it('fits keyboard opening, viewport panning and closing without scrolling the document', () => {
+      const scroll = vi.spyOn(window, 'scrollTo');
+      TestBed.createComponent(App);
+      expect(document.body.style.height).toBe(`${window.innerHeight}px`);
+      viewport.height = 420;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.height).toBe('420px');
+      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('0px');
+      viewport.offsetTop = 80;
+      viewport.dispatchEvent(new Event('scroll'));
+      expect(document.body.style.top).toBe('80px');
+      viewport.height = 390;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.height).toBe('390px');
+      viewport.height = window.innerHeight;
+      viewport.offsetTop = 0;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.height).toBe(`${window.innerHeight}px`);
+      expect(document.body.style.top).toBe('0px');
+      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('');
+      expect(scroll).not.toHaveBeenCalled();
+      scroll.mockRestore();
+    });
+
+    it('preserves browser pinch zoom and restores sizing when zoom ends', () => {
+      TestBed.createComponent(App);
+      viewport.scale = 2;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.height).toBe('');
+      expect(document.body.style.top).toBe('');
+      viewport.scale = 1;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.height).toBe(`${window.innerHeight}px`);
+    });
+
+    it('cleans up sizing and viewport listeners when the app is destroyed', () => {
+      const fixture = TestBed.createComponent(App);
+      fixture.destroy();
+      viewport.height = 420;
+      viewport.offsetTop = 50;
+      viewport.dispatchEvent(new Event('resize'));
+      viewport.dispatchEvent(new Event('scroll'));
+      window.dispatchEvent(new Event('resize'));
+      expect(document.body.style.height).toBe('');
+      expect(document.body.style.top).toBe('');
+    });
+
+    it('keeps the safe area for browser chrome and hardware keyboards', () => {
+      TestBed.createComponent(App);
+      viewport.height = window.innerHeight - 80;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('');
+    });
+
+    it('keeps desktop layout under browser control', () => {
+      platforms.splice(0, platforms.length, 'desktop');
+      TestBed.createComponent(App);
+      viewport.height = 420;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.height).toBe('');
+      expect(document.body.style.top).toBe('');
+    });
+  });
 
   it('starts notifications after an authenticated session is ready', async () => {
     TestBed.overrideComponent(App, { set: { template: '' } });
