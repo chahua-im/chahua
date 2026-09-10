@@ -31,18 +31,18 @@
       (pointermove)="moveSwipe($event)"
       (pointerup)="endSwipe()"
       (pointercancel)="endSwipe(true)">
-      <span class="avatar-slot">
-        @if (showAvatar()) {
-          <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
-            @if (message().sender.avatarUrl; as src) {
-              <img [src]="src" width="34" height="34" decoding="async" />
-            } @else {
-              {{ (name() | avatarText: 2).toUpperCase() }}
-            }
-          </ion-avatar>
-        }
-      </span>
       <div class="message-stack">
+        <span class="avatar-slot">
+          @if (showAvatar()) {
+            <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
+              @if (message().sender.avatarUrl; as src) {
+                <img [src]="src" width="34" height="34" decoding="async" />
+              } @else {
+                {{ (name() | avatarText: 2).toUpperCase() }}
+              }
+            </ion-avatar>
+          }
+        </span>
         <div
           #bubble
           [class]="isSticker() && !preview() ? 'sticker-content' : 'bubble'"

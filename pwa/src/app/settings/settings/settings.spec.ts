@@ -267,6 +267,7 @@ describe('Settings', () => {
   it('refreshes notification status without requesting permission and rolls back a denied toggle', async () => {
     expect(notifications.refresh).toHaveBeenCalledOnce();
     expect(notifications.setEnabled).not.toHaveBeenCalled();
+    const toast = vi.spyOn(homePage()['permissionToast'](), 'present').mockResolvedValue();
     notifications.setEnabled.mockImplementation(async () => {
       notifications.error.set(PushNotificationError.PermissionDenied);
       return false;
@@ -277,7 +278,8 @@ describe('Settings', () => {
     expect(notifications.setEnabled).toHaveBeenCalledWith(true);
     await fixture.whenStable();
     expect(toggle.checked).toBe(false);
-    expect(page.textContent).toContain('通知权限已被拒绝');
+    expect(toast).toHaveBeenCalledOnce();
+    expect(page.querySelector('ion-list')!.textContent).not.toContain('通知权限已被拒绝');
   });
 
   it('replaces unsupported notifications with a note and disables the update row', async () => {

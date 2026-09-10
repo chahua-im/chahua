@@ -37,6 +37,7 @@ describe('App', () => {
 
     beforeEach(() => {
       platforms.splice(0, platforms.length, 'ios');
+      vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(window.innerHeight);
       viewport = Object.assign(new EventTarget(), { height: window.innerHeight, offsetTop: 0, scale: 1 });
       vi.stubGlobal('visualViewport', viewport);
       TestBed.overrideComponent(App, { set: { template: '' } });
@@ -46,6 +47,7 @@ describe('App', () => {
       TestBed.resetTestingModule();
       platforms.splice(0, platforms.length, ...originalPlatforms);
       vi.unstubAllGlobals();
+      vi.restoreAllMocks();
     });
 
     it('fits keyboard opening, viewport panning and closing without scrolling the document', () => {
@@ -70,6 +72,23 @@ describe('App', () => {
       expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('');
       expect(scroll).not.toHaveBeenCalled();
       scroll.mockRestore();
+    });
+
+    it('removes the PWA safe area when iOS shrinks innerHeight along with the visual viewport', () => {
+      // Measured on iOS 26.6.1: layout 797px, both visible heights 393px, safe area 34px.
+      vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(797);
+      TestBed.createComponent(App);
+      vi.stubGlobal('innerHeight', 393);
+      viewport.height = 393;
+      viewport.offsetTop = 404;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('0px');
+      expect(document.body.style.height).toBe('393px');
+      vi.stubGlobal('innerHeight', 797);
+      viewport.height = 797;
+      viewport.offsetTop = 0;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('');
     });
 
     it('preserves browser pinch zoom and restores sizing when zoom ends', () => {
