@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { afterRenderEffect, Component, inject, signal, viewChild } from '@angular/core';
 import {
   IonAvatar,
   IonButton,
@@ -13,6 +13,7 @@ import {
   IonNote,
   IonSpinner,
   IonTitle,
+  IonToast,
   IonToggle,
   IonToolbar,
   ModalController,
@@ -54,6 +55,7 @@ export enum SettingsDismissRole {
     IonList,
     IonNote,
     IonTitle,
+    IonToast,
     IonToggle,
     IonSpinner,
     IonToolbar,
@@ -62,6 +64,7 @@ export enum SettingsDismissRole {
 })
 export class Settings {
   private readonly modals = inject(ModalController);
+  private readonly permissionToast = viewChild.required(IonToast);
   protected readonly nav = inject(IonNav);
   protected readonly session = inject(SessionStore);
   protected readonly notifications = inject(PushNotifications);
@@ -80,6 +83,9 @@ export class Settings {
 
   constructor() {
     void this.notifications.refresh();
+    afterRenderEffect(() => {
+      if (this.notifications.error() === PushNotificationError.PermissionDenied) void this.permissionToast().present();
+    });
   }
 
   protected close() {

@@ -1,6 +1,6 @@
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
+import { createEnvironmentInjector, EnvironmentInjector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
@@ -13,6 +13,10 @@ import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../a
 import type { ChatPins } from '../chats/chat-pins';
 import { ChatStore } from '../chats/chat-store';
 import { MessageActions } from './message-actions';
+import { SessionStore } from '../session/session-store';
+
+const currentUser = { ...testUser, avatarUrl: 'https://example.com/me.jpg' };
+const ownReactor = { uid: currentUser.uid, name: currentUser.username, avatarUrl: currentUser.avatarUrl };
 
 const chatUrl = `/_api/chats/${decodeId(testChat.id)}`;
 const messageUrl = `${chatUrl}/messages/${decodeId(testMessage.id)}`;
@@ -47,6 +51,7 @@ describe('MessageActions', () => {
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
         { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
+        { provide: SessionStore, useValue: { user: signal(currentUser) } },
       ],
     });
     scope = createEnvironmentInjector([ChatStore, MessageActions], TestBed.inject(EnvironmentInjector));
@@ -86,11 +91,13 @@ describe('MessageActions', () => {
   });
 
   it.each(['👍', '#️⃣'])(
-    'updates %s immediately and removes the last reaction without reading details',
+    'shows the current user avatar immediately for %s and removes the last reaction without reading details',
     async (emoji) => {
       await loadPins([wirePin]);
       const adding = actions.toggleReaction(testMessage, emoji);
-      expect(conversation.get(testMessage.id)?.message.reactions).toEqual([{ emoji, count: 1, reactedByMe: true }]);
+      expect(conversation.get(testMessage.id)?.message.reactions).toEqual([
+        { emoji, count: 1, reactedByMe: true, reactors: [ownReactor] },
+      ]);
       const put = http.expectOne(`${messageUrl}/reactions/${encodeURIComponent(emoji)}`);
       expect(put.request.method).toBe('PUT');
       put.flush(null);
@@ -106,15 +113,52 @@ describe('MessageActions', () => {
     },
   );
 
+  it('uses the latest profile and removes only the current user from an existing reaction', async () => {
+    const other = { uid: 2, name: '朋友', avatarUrl: 'https://example.com/friend.jpg' };
+    await loadPins([
+      { ...wirePin, message: { ...wireMessage, reactions: [{ emoji: '👍', count: 1, reactors: [other] }] } },
+    ]);
+    const latest = { ...currentUser, username: '新的名字', avatarUrl: 'https://example.com/new.jpg' };
+    TestBed.inject(SessionStore).user.set(latest);
+    const original = conversation.get(testMessage.id)!.message;
+    const adding = actions.toggleReaction(original, '👍');
+    expect(conversation.get(testMessage.id)?.message.reactions).toEqual([
+      {
+        emoji: '👍',
+        count: 2,
+        reactedByMe: true,
+        reactors: [other, { uid: latest.uid, name: latest.username, avatarUrl: latest.avatarUrl }],
+      },
+    ]);
+    expect(original.reactions[0].reactors).toEqual([other]);
+    http.expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`).flush(null);
+    await adding;
+
+    const removing = actions.toggleReaction(conversation.get(testMessage.id)!.message, '👍');
+    expect(conversation.get(testMessage.id)?.message.reactions).toEqual([
+      { emoji: '👍', count: 1, reactedByMe: false, reactors: [other] },
+    ]);
+    http.expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`).flush(null);
+    await removing;
+    http.expectNone(() => true);
+  });
+
   it('keeps WebSocket totals and personal selections when the mutation finishes later', async () => {
     await loadPins([wirePin]);
     const adding = actions.toggleReaction(testMessage, '👍');
     const mutation = http.expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`);
+    const serverReactors = [ownReactor, { uid: 2, name: '另一位用户' }];
     events.next({
       type: ServerWsMessageType.reactionUpdated,
-      payload: { chatId: testChat.id, messageId: testMessage.id, reactions: [{ emoji: '👍', count: 4 }] },
+      payload: {
+        chatId: testChat.id,
+        messageId: testMessage.id,
+        reactions: [{ emoji: '👍', count: 4, reactors: serverReactors }],
+      },
     });
-    expect(conversation.get(testMessage.id)?.message.reactions).toEqual([{ emoji: '👍', count: 4, reactedByMe: true }]);
+    expect(conversation.get(testMessage.id)?.message.reactions).toEqual([
+      { emoji: '👍', count: 4, reactedByMe: true, reactors: serverReactors },
+    ]);
     mutation.flush(null);
     await adding;
     expect(conversation.get(testMessage.id)?.message.reactions[0].count).toBe(4);

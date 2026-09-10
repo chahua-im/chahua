@@ -33,22 +33,15 @@
       @if (!notifications.supported) {
         <ion-label>消息通知</ion-label>
         <ion-note slot="end" color="medium">不支持</ion-note>
+      } @else if (notifications.busy()) {
+        <ion-label>消息通知</ion-label>
+        <ion-spinner slot="end"></ion-spinner>
       } @else {
-        <ion-toggle
-          [checked]="notifications.enabled()"
-          [disabled]="notifications.busy()"
-          (ionChange)="setNotifications($event)">
-          消息通知
-        </ion-toggle>
-        @if (notifications.busy()) {
-          <ion-spinner slot="end"></ion-spinner>
-        }
-        @if (notifications.error(); as error) {
+        <ion-toggle [checked]="notifications.enabled()" (ionChange)="setNotifications($event)">消息通知</ion-toggle>
+        @let error = notifications.error();
+        @if (error && error !== PushError.PermissionDenied) {
           <ion-note slot="end" color="danger">
             @switch (error) {
-              @case (PushError.PermissionDenied) {
-                通知权限已被拒绝
-              }
               @case (PushError.SubscribeFailed) {
                 后台推送注册失败
               }
@@ -84,13 +77,11 @@
       [disabled]="!updates.supported || updates.checking()"
       lines="none"
       (click)="checkUpdates()">
-      @if (updates.checking()) {
-        <ion-spinner slot="start"></ion-spinner>
-      } @else {
-        <ion-icon slot="start" [icon]="updateIcon" color="primary"></ion-icon>
-      }
+      <ion-icon slot="start" [icon]="updateIcon" color="primary"></ion-icon>
       <ion-label>检查更新</ion-label>
-      @if (updates.available()) {
+      @if (updates.checking()) {
+        <ion-spinner slot="end"></ion-spinner>
+      } @else if (updates.available()) {
         <ion-button slot="end" fill="clear" (click)="$event.stopPropagation(); updates.reload()">立即更新</ion-button>
       } @else {
         <ion-note slot="end" color="medium">
@@ -110,3 +101,5 @@
     </ion-item>
   </ion-list>
 </ion-content>
+
+<ion-toast message="通知权限已被拒绝" [duration]="2500" />

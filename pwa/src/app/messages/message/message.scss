@@ -34,18 +34,29 @@
 
 .bubble,
 .sticker-content {
+  grid-row: 1;
   -webkit-touch-callout: none;
 }
 
 .message-stack {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  column-gap: 10px;
   min-width: 0;
-  max-width: min(85%, calc(100% - 74px));
+  // Include the avatar and its gap in the existing bubble width limit.
+  max-width: min(calc(85% + 44px), calc(100% - 30px));
+
+  > :not(.avatar-slot) {
+    grid-column: 2;
+  }
 }
 
 .avatar-slot {
   position: relative;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: end;
   width: 34px;
-  flex-shrink: 0;
 }
 
 .avatar {
@@ -114,7 +125,7 @@
   margin-left: 8px;
   font-size: var(--app-font-micro);
   line-height: var(--app-line-micro);
-  opacity: 0.7;
+  color: color-mix(in srgb, currentColor 60%, transparent);
   white-space: nowrap;
 }
 
@@ -204,6 +215,18 @@
   --message-link-color: var(--ion-color-primary-contrast);
   flex-direction: row-reverse;
 
+  .message-stack {
+    grid-template-columns: minmax(0, 1fr) 34px;
+
+    > :not(.avatar-slot) {
+      grid-column: 1;
+    }
+  }
+
+  .avatar-slot {
+    grid-column: 2;
+  }
+
   .bubble {
     --thread-color: var(--ion-color-primary-contrast);
     --voice-color: var(--ion-color-primary-contrast);
@@ -230,10 +253,6 @@
 
   .reply-name {
     color: inherit;
-  }
-
-  .timestamp {
-    opacity: 1;
   }
 
   .reply-preview {
