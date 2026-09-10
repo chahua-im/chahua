@@ -37,7 +37,7 @@
             @if (message().sender.avatarUrl; as src) {
               <img [src]="src" width="34" height="34" decoding="async" />
             } @else {
-              {{ name().slice(0, 2).toUpperCase() }}
+              {{ (name() | avatarText: 2).toUpperCase() }}
             }
           </ion-avatar>
         }

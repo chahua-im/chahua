@@ -4,6 +4,7 @@ import { IonAvatar, IonIcon, IonSpinner, ModalController } from '@ionic/angular'
 import { arrowUndoOutline } from 'ionicons/icons';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { AvatarTextPipe } from '../../chats/avatar-text.pipe';
 import { StartChat, StartChatKind } from '../../chats/start-chat/start-chat';
 import { UserProfile } from '../../chats/user-profile/user-profile';
 import { InviteCard } from '../invite-card/invite-card';
@@ -43,6 +44,7 @@ export interface MessageMenuSelection {
   templateUrl: './message.html',
   styleUrl: './message.scss',
   imports: [
+    AvatarTextPipe,
     InviteCard,
     DatePipe,
     IonAvatar,

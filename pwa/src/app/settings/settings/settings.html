@@ -30,7 +30,7 @@
     </ion-item>
     <ion-item lines="none">
       <ion-icon slot="start" [icon]="notificationIcon" color="primary"></ion-icon>
-      @if (!notifications.supported || notifications.error() === PushError.ServiceWorkerUnavailable) {
+      @if (!notifications.supported) {
         <ion-label>消息通知</ion-label>
         <ion-note slot="end" color="medium">不支持</ion-note>
       } @else {
@@ -61,15 +61,15 @@
             }
           </ion-note>
           @if (
-            error === PushError.RefreshFailed ||
             error === PushError.SubscribeFailed ||
-            error === PushError.BackendSubscribeFailed
+            error === PushError.BackendSubscribeFailed ||
+            error === PushError.UnsubscribeFailed
           ) {
             <ion-button
               slot="end"
               fill="clear"
               [disabled]="notifications.busy()"
-              (click)="error === PushError.RefreshFailed ? notifications.refresh() : notifications.setEnabled(true)">
+              (click)="notifications.setEnabled(error !== PushError.UnsubscribeFailed)">
               <ion-icon slot="icon-only" [icon]="updateIcon"></ion-icon>
             </ion-button>
           }

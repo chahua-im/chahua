@@ -364,7 +364,7 @@ describe('MessageMenu', () => {
     expect(labels()).toContain('取消置顶');
   });
 
-  it('keeps the menu inside a narrow viewport and dismisses only backdrop clicks', async () => {
+  it('keeps panels inside a narrow viewport and dismisses only backdrop clicks', async () => {
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(276);
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
     fixture.nativeElement.querySelector('.chat-row').style.gap = '10px';
@@ -372,7 +372,11 @@ describe('MessageMenu', () => {
     fixture.detectChanges();
     TestBed.tick();
     const stack: HTMLElement = fixture.nativeElement.querySelector('.menu-stack');
-    expect(parseFloat(stack.style.left)).toBeGreaterThanOrEqual(12);
+    for (const panel of fixture.nativeElement.querySelectorAll('.panel') as NodeListOf<HTMLElement>) {
+      const left = parseFloat(stack.style.left) + parseFloat(panel.style.left);
+      expect(left).toBeGreaterThanOrEqual(12);
+      expect(left + panel.offsetWidth).toBeLessThanOrEqual(window.innerWidth - 12);
+    }
     expect(parseFloat(stack.style.top)).toBeGreaterThanOrEqual(12);
     expect(parseFloat(stack.style.width)).toBeLessThanOrEqual(window.innerWidth - 24);
     fixture.nativeElement.querySelector('.preview').click();

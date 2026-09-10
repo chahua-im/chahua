@@ -56,10 +56,10 @@ MediaViewer、UserProfile、StartChat 和 StickerPicker 的独立模式由 Modal
 
 | 组件            | 输入、输出与局部字段                                                                    | 数据依赖                                                        |
 | --------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| App             | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件        |
+| App             | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态；iOS 可见视口监听与清理 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件        |
 | NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用 | PushNotifications |
 | ChatListPage    | 路由分类/归档范围；active；接收 openList 并导航                                         | 将 selection 和 active 传给单列 ChatList                        |
-| ChatList        | selection、active → openList；搜索词、原生 segment 与内容 ID                            | SessionStore、Connection；控制分类面板与菜单                    |
+| ChatList        | selection、active → openList；搜索词、原生 segment 与内容 ID                            | SessionStore、Connection、PushNotifications；控制分类面板与菜单，设置入口保留授权手势                    |
 | ChatListContent | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行            | ChatListStore、ChatStore、DraftStore、Preferences、SessionStore |
 | ChatListItem    | entry、selected、actions 等 → open；pendingAction、操作失败与滑动引用                   | 接收行数据和回调，不自行读取聊天数据                            |
 | ChatAvatar      | entry、size                                                                             | 由输入派生头像、占位和话题角标，无请求                          |
@@ -99,7 +99,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                     |
 | EmojiPicker        | chosen 输出；封装第三方选择器的尺寸、中文数据与加载状态                                                                                      |
 
-MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。确认意图、操作提示、选择表情和弹窗状态属于菜单；菜单测量完整预览与面板的尺寸，能容纳时整体定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
+MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。确认意图、操作提示、选择表情和弹窗状态属于菜单；菜单测量完整预览与面板的尺寸，预览保留原横向位置与宽度，面板各自避让左右边缘；高度能容纳时整体竖向定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
 
 MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执行置顶。菜单关闭后的 busy 由页面 toolbar 消费。复制在点击处理内发起，以保留 Safari 用户激活。菜单 reset 使旧操作的界面反馈失效，最近表情保存到 Preferences。
 

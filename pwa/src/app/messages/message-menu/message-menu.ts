@@ -220,7 +220,7 @@ export class MessageMenu {
         const availableHeight = (viewport?.height ?? window.innerHeight) - verticalInset - 24;
         const avatarSpace =
           row.querySelector<HTMLElement>('.avatar-slot')!.offsetWidth + parseFloat(getComputedStyle(row).gap);
-        const previewWidth = Math.min(rect.width + avatarSpace, availableWidth);
+        const previewWidth = rect.width + avatarSpace;
         preview.style.width = `${previewWidth}px`;
         stack.style.width = `${Math.min(Math.max(previewWidth, 276), availableWidth)}px`;
         const barHeight = bar?.offsetHeight ?? 0;
@@ -238,7 +238,6 @@ export class MessageMenu {
         const previewTop = (sourceContent?.getBoundingClientRect().top ?? rect.top) - contentOffset;
         let x: number;
         let y: number;
-        let fromX = 0;
         let fromY = 0;
         if (anchored) {
           // Keep the original message content in place; only the two panels follow the press.
@@ -253,16 +252,23 @@ export class MessageMenu {
           const width = stack.offsetWidth;
           const originX = own ? rect.right + avatarSpace - width : rect.left - avatarSpace;
           const originY = previewTop - (bar ? barHeight + 8 : 0);
-          x = clampX(originX, width);
+          x = originX;
           y = clampY(originY, totalHeight);
-          fromX = originX - x;
           fromY = originY - y;
           preview.style.removeProperty('left');
           preview.style.removeProperty('top');
         }
-        stack.style.left = `${x}px`;
-        stack.style.top = `${y}px`;
-        stack.style.setProperty('--menu-from', `translate(${fromX}px, ${fromY}px)`);
+        const surface = stack.parentElement!.getBoundingClientRect();
+        stack.style.left = `${x - surface.left}px`;
+        stack.style.top = `${y - surface.top}px`;
+        // Preserve the message's horizontal position; each panel avoids the edges independently.
+        const stackWidth = stack.offsetWidth;
+        for (const panel of [bar, actions]) {
+          if (!panel) continue;
+          const panelX = own ? x + stackWidth - panel.offsetWidth : x;
+          panel.style.left = `${clampX(panelX, panel.offsetWidth) - panelX}px`;
+        }
+        stack.style.setProperty('--menu-from', `translate(0px, ${fromY}px)`);
         this.placed.set(true);
       };
       const observer = new ResizeObserver(place);

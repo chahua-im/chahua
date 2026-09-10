@@ -1,5 +1,6 @@
 import { Component, input } from '@angular/core';
 import { IonAvatar, IonIcon } from '@ionic/angular';
+import { AvatarTextPipe } from '../avatar-text.pipe';
 
 export interface ChatAvatarData {
   title?: string;
@@ -15,7 +16,7 @@ export interface ChatAvatarData {
   selector: 'app-chat-avatar',
   templateUrl: './chat-avatar.html',
   styleUrl: './chat-avatar.scss',
-  imports: [IonAvatar, IonIcon],
+  imports: [AvatarTextPipe, IonAvatar, IonIcon],
   host: { '[style.--avatar-size.px]': 'size()' },
 })
 export class ChatAvatar {
