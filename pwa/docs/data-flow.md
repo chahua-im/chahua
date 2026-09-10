@@ -16,7 +16,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | Preferences            | 话题/头像显示偏好、最近表情                                             | localStorage                         |
 | MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                     |
 | ConversationNavigation | 即时导航指令，不保存消息或位置                                          | 应用；当前页面消费                   |
-| PushNotifications      | 本机通知意图、注册状态、去重记录                              | 应用；本机意图保存到 localStorage    |
+| PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                              | 应用；本机意图保存到 localStorage    |
 | AppUpdates             | 检查更新和可更新状态                                                    | 应用                                 |
 
 ChatPins 是 ChatStore 内部的普通对象，不是额外服务。UserProfile、ChatDetails 和 ConversationPage 共享按 UID 的好友关系查询。收藏由 SavedMessagesPage 持有快照，不进入活消息缓存。组件字段见[组件](components.md)。
@@ -160,9 +160,13 @@ Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceU
 
 App 在会话初始化并确认登录后启动 PushNotifications。在线 WebSocket 优先，前后台页面均直接让 Worker 展示系统通知，未运行时由 Web Push 兜底。各平台与分栏布局共用同一流程；前台正在阅读对应会话且未被设置或 modal 覆盖时，只登记去重，不展示通知。
 
-NotificationPrompt 在登录后的应用壳内检查首次授权条件，弹窗等待状态由组件持有。拒绝保存本机通知关闭意图，不调用系统权限或推送接口；允许直接在点击事件中调用 PushNotifications，保留浏览器用户激活。未授权时 refresh 只读取权限，不查询订阅，以免启动刷新占用授权操作。
+NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持通知且选择不存在时显示 Ionic alert，不根据已有的浏览器授权推断用户选择。拒绝立即保存关闭并结束弹窗；允许在点击事件内调用 PushNotifications，授权和推送登记成功后结束，失败保留重试。弹窗等待状态由组件持有。
 
-本机通知意图与 Push 注册分别保存。所有在线通知都需要本机开启通知并获得浏览器授权；授权成功后，Push 注册失败不阻止在线系统提醒。开启需浏览器授权、VAPID key 和 `/push/subscribe`；关闭调用 `/push/unsubscribe` 并取消浏览器订阅；进入设置、恢复前台、重连检查注册状态。
+设置行不等待异步请求。PushNotifications 同步检查浏览器 API 与 Worker 配置，读取 `chahua.notifications.enabled` 和 `Notification.permission`；本机关闭直接显示关，开启且已授权显示开。ChatList 在头像点击事件内调用 requestSettingsPermission，在导航之前为本机已开启但权限为 default 的场景申请权限。拒绝、关闭权限弹窗或无手势直接进入设置且缺授权时，保存关闭选择；Settings 的 refresh 不打断已开始的授权。
+
+启动、进入设置，以及 Connection 在重连或恢复前台时发出的 resync，通过 refresh 在后台同步订阅；没有本机选择或环境不支持时不继续。开启且已授权时，读取浏览器当前订阅，缺少则取得 VAPID key 并创建订阅，再直接调用 `/push/subscribe` 更新当前 endpoint 的登记，不额外查询后端登记状态。后台检查无等待标识、失败静默；权限仍为 granted 时保留本机开启选择和已创建的 endpoint，下一次 refresh 重试，在线系统提醒不受登记失败影响。
+
+关闭立即保存本机意图并清除已显示的通知，再调用 `/push/unsubscribe` 和浏览器取消订阅；后端请求失败仍尝试浏览器取消。订阅操作按顺序执行并读取最新选择，后台登记进行中关闭会在该请求结束后清理。未增加持久重试队列；浏览器取消成功但后端未删除的过期 endpoint，由后端投递失败时清理。用户主动开关才设置 busy 并展示错误；后台操作不占用开关。
 
 规则读取 ChatStore：自己、系统和已撤回消息不提醒；普通提及绕过静音，回复自己可绕过归档。话题按订阅/归档判断，提及是例外，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史。
 

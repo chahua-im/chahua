@@ -4,7 +4,7 @@
   } @else if (entry().avatar; as src) {
     <img [src]="src" width="48" height="48" decoding="async" />
   } @else {
-    {{ entry().avatarName?.slice(0, 1) ?? entry().title?.slice(0, 1) }}
+    {{ entry().avatarName ?? entry().title | avatarText }}
   }
 </ion-avatar>
 @if (entry().badgeIcon || entry().badgeAvatar || entry().badgeName) {
@@ -14,7 +14,7 @@
     } @else if (entry().badgeAvatar; as src) {
       <img [src]="src" width="26" height="26" decoding="async" />
     } @else {
-      {{ entry().badgeName?.slice(0, 1) }}
+      {{ entry().badgeName | avatarText }}
     }
   </ion-avatar>
 }

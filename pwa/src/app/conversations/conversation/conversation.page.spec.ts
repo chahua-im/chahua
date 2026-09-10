@@ -1390,6 +1390,26 @@ describe('ConversationPage', () => {
     expect(scroll.scrollTop).toBe(200);
   });
 
+  it('ignores app-shell panning when resizing the viewport while reading history', async () => {
+    Object.defineProperties(scroll, { clientHeight: { value: 448 }, scrollHeight: { value: 1000 } });
+    scroll.scrollTop = 200;
+    await component['trackScroll']();
+    const bodyRect = vi.spyOn(document.body, 'getBoundingClientRect');
+    const scrollRect = vi.spyOn(scroll, 'getBoundingClientRect');
+    bodyRect.mockReturnValue(new DOMRect(0, 80, 300, 500));
+    scrollRect.mockReturnValue(new DOMRect(0, 80, 300, 448));
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(200);
+    // A pin appearing within the resized app still needs normal compensation.
+    scrollRect.mockReturnValue(new DOMRect(0, 132, 300, 396));
+    resizes.get(scroll)!();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(252);
+    bodyRect.mockRestore();
+    scrollRect.mockRestore();
+  });
+
   it('does not reuse the previous visit viewport offset when entering again', async () => {
     const rect = vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 52, 300, 448));
     resizes.get(scroll)!();

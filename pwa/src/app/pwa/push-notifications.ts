@@ -30,7 +30,6 @@ export enum PushNotificationError {
   SubscribeFailed = 'subscribe_failed',
   BackendSubscribeFailed = 'backend_subscribe_failed',
   UnsubscribeFailed = 'unsubscribe_failed',
-  RefreshFailed = 'refresh_failed',
 }
 
 @Service()
@@ -40,16 +39,16 @@ export class PushNotifications {
   private readonly permissionState = signal<NotificationPermission>(
     'Notification' in window ? Notification.permission : 'default',
   );
-  private readonly subscriptionState = signal(false);
   private readonly enabledState = signal(window.localStorage.getItem(ENABLED_KEY) === 'true');
   readonly enabled = this.enabledState.asReadonly();
   private readonly working = signal(false);
   private readonly failure = signal<PushNotificationError | undefined>(undefined);
   readonly permission = this.permissionState.asReadonly();
-  readonly subscribed = this.subscriptionState.asReadonly();
   readonly busy = this.working.asReadonly();
   readonly error = this.failure.asReadonly();
-  readonly supported = 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator;
+  readonly supported =
+    'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator && this.push.isEnabled;
+  private syncing: Promise<void> = Promise.resolve();
 
   private readonly destroy = inject(DestroyRef);
   private readonly connection = inject(Connection);
@@ -228,51 +227,49 @@ export class PushNotifications {
   }
 
   async refresh(): Promise<void> {
-    if (this.busy()) return;
+    if (this.busy() || !this.supported) return;
     this.failure.set(undefined);
-    if (!this.canUsePush()) return;
     this.permissionState.set(Notification.permission);
-    if (this.permission() !== 'granted') {
-      this.subscriptionState.set(false);
-      return;
-    }
-    this.working.set(true);
+    const preference = window.localStorage.getItem(ENABLED_KEY);
+    if (preference === null) return;
+    this.enabledState.set(preference === 'true');
+    if (this.enabled() && this.permission() !== 'granted') this.setDeviceEnabled(false);
     try {
-      const subscription = await this.currentSubscription();
-      const status = subscription
-        ? await firstValueFrom(this.api.getSubscriptionStatus({ endpoint: subscription.endpoint }, { timeout: 10000 }))
-        : undefined;
-      if (window.localStorage.getItem(ENABLED_KEY) !== 'false') {
-        this.subscriptionState.set(Notification.permission === 'granted' && status?.hasMatchingEndpoint === true);
-        if (this.subscribed()) this.setDeviceEnabled(true);
-      }
-    } catch (error) {
-      this.failure.set(
-        error === PushNotificationError.ServiceWorkerUnavailable ? error : PushNotificationError.RefreshFailed,
-      );
-    } finally {
-      this.working.set(false);
+      await this.synchronize();
+    } catch {
+      // A network failure does not change the user's choice. Retry on the next refresh.
+      this.checkPermission();
     }
   }
 
   shouldPrompt(): boolean {
-    return (
-      this.supported &&
-      this.push.isEnabled &&
-      Notification.permission === 'default' &&
-      window.localStorage.getItem(ENABLED_KEY) === null
-    );
+    return this.supported && window.localStorage.getItem(ENABLED_KEY) === null;
   }
 
   declinePermission(): void {
     this.setDeviceEnabled(false);
+    void this.refresh();
+  }
+
+  // Run in the avatar's click handler, before routing can lose user activation.
+  requestSettingsPermission(): void {
+    if (
+      this.supported &&
+      window.localStorage.getItem(ENABLED_KEY) === 'true' &&
+      Notification.permission === 'default'
+    ) {
+      void this.setEnabled(true);
+    }
   }
 
   // Call directly from a button or toggle event to retain the browser's user gesture.
   async setEnabled(enabled: boolean): Promise<boolean> {
     if (this.busy()) return false;
     this.failure.set(undefined);
-    if (!this.canUsePush()) return false;
+    if (!this.supported) {
+      this.failure.set(PushNotificationError.UnsupportedBrowser);
+      return false;
+    }
     this.working.set(true);
     try {
       if (enabled) {
@@ -281,17 +278,13 @@ export class PushNotifications {
         this.permissionState.set(permission);
         if (permission !== 'granted') throw PushNotificationError.PermissionDenied;
         this.setDeviceEnabled(true);
-        await this.subscribe();
       } else {
-        await this.unsubscribe();
+        this.setDeviceEnabled(false);
       }
-      this.subscriptionState.set(enabled);
-      this.setDeviceEnabled(enabled);
-      if (!enabled) {
-        void this.workerCommand({ type: 'CHAHUA_CLOSE', all: true });
-      }
+      await this.synchronize();
       return true;
     } catch (error) {
+      this.checkPermission();
       this.failure.set(
         Object.values(PushNotificationError).includes(error as PushNotificationError)
           ? (error as PushNotificationError)
@@ -308,13 +301,22 @@ export class PushNotifications {
   private setDeviceEnabled(enabled: boolean) {
     this.enabledState.set(enabled);
     window.localStorage.setItem(ENABLED_KEY, String(enabled));
+    if (!enabled) void this.workerCommand({ type: 'CHAHUA_CLOSE', all: true });
   }
 
-  private canUsePush(): boolean {
-    if (!this.supported) this.failure.set(PushNotificationError.UnsupportedBrowser);
-    else if (!this.push.isEnabled) this.failure.set(PushNotificationError.ServiceWorkerUnavailable);
-    else return true;
-    return false;
+  private checkPermission() {
+    this.permissionState.set(Notification.permission);
+    if (this.permission() !== 'granted') {
+      this.setDeviceEnabled(false);
+      void this.synchronize().catch(() => {});
+    }
+  }
+
+  private synchronize(): Promise<void> {
+    // A toggle can change while a background registration is pending. Cleanup runs after it,
+    // reads the latest choice, and cannot be undone by that older registration completing.
+    this.syncing = this.syncing.catch(() => {}).then(() => (this.enabled() ? this.subscribe() : this.unsubscribe()));
+    return this.syncing;
   }
 
   private async currentSubscription(): Promise<PushSubscription | null> {
@@ -327,7 +329,6 @@ export class PushNotifications {
 
   private async subscribe(): Promise<void> {
     let subscription = await this.currentSubscription();
-    const existing = subscription !== null;
     if (!subscription) {
       const { publicKey } = await firstValueFrom(this.api.getVapidPublicKey({ timeout: 10000 }));
       subscription = await this.push.requestSubscription({ serverPublicKey: publicKey });
@@ -345,8 +346,6 @@ export class PushNotifications {
         ),
       );
     } catch {
-      // A new browser endpoint is only useful after the authenticated backend accepts it.
-      if (!existing) await this.push.unsubscribe().catch(() => undefined);
       throw PushNotificationError.BackendSubscribeFailed;
     }
   }
@@ -354,19 +353,16 @@ export class PushNotifications {
   private async unsubscribe(): Promise<void> {
     const subscription = await this.currentSubscription();
     if (!subscription) return;
-    await firstValueFrom(
-      this.api.postUnsubscribe(
-        {
-          provider: ApiPushProvider.webPush,
-          endpoint: subscription.endpoint,
-        },
-        { timeout: 10000 },
-      ),
-    );
-    // Backend deletion already stops delivery, even if the browser cannot remove its endpoint.
-    this.subscriptionState.set(false);
-    this.setDeviceEnabled(false);
-    void this.workerCommand({ type: 'CHAHUA_CLOSE', all: true });
-    await this.push.unsubscribe();
+    try {
+      await firstValueFrom(
+        this.api.postUnsubscribe(
+          { provider: ApiPushProvider.webPush, endpoint: subscription.endpoint },
+          { timeout: 10000 },
+        ),
+      );
+    } finally {
+      // Stop browser delivery even if the backend is temporarily unreachable.
+      await this.push.unsubscribe();
+    }
   }
 }

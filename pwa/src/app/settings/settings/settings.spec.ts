@@ -29,7 +29,6 @@ describe('Settings', () => {
   let dismiss: ReturnType<typeof vi.fn>;
   let notifications: {
     supported: boolean;
-    subscribed: ReturnType<typeof signal<boolean>>;
     enabled: ReturnType<typeof signal<boolean>>;
     busy: ReturnType<typeof signal<boolean>>;
     error: ReturnType<typeof signal<PushNotificationError | undefined>>;
@@ -55,7 +54,6 @@ describe('Settings', () => {
     dismiss = vi.fn().mockResolvedValue(true);
     notifications = {
       supported: true,
-      subscribed: signal(false),
       enabled: signal(false),
       busy: signal(false),
       error: signal<PushNotificationError | undefined>(undefined),

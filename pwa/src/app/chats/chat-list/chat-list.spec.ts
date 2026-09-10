@@ -6,6 +6,7 @@ import { IonPopover, NavController } from '@ionic/angular';
 import { beforeAll, afterAll, vi } from 'vitest';
 import { Connection } from '../../api/connection';
 import { mockRealtime, testUser } from '../../api/testing';
+import { PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { ListTab, type ListSelection } from '../list-tabs';
@@ -31,6 +32,7 @@ describe('ChatList', () => {
       providers: [
         provideRouter([{ path: 'chats/chat/:id', children: [] }]),
         { provide: Connection, useValue: mockRealtime() },
+        { provide: PushNotifications, useValue: { requestSettingsPermission: vi.fn() } },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
       ],
     })
@@ -45,6 +47,17 @@ describe('ChatList', () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  it('requests settings permission in the avatar click before navigation', () => {
+    const notifications = TestBed.inject(PushNotifications);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockImplementation(async () => {
+      expect(notifications.requestSettingsPermission).toHaveBeenCalledOnce();
+      return true;
+    });
+    fixture.debugElement.query(By.css('ion-buttons[slot="start"] ion-button')).triggerEventHandler('click');
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(navigate.mock.calls[0][1]).toEqual({ browserUrl: '/settings', state: { settingsEntry: true } });
+  });
 
   it('keeps the add menu available while its icon indicates a pending connection', async () => {
     const connection = TestBed.inject(Connection);

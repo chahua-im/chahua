@@ -21,7 +21,6 @@
 }
 .anchored .preview {
   position: absolute;
-  max-width: none;
 }
 .own {
   align-items: flex-end;
@@ -103,7 +102,7 @@ button:disabled {
   white-space: nowrap;
 }
 .preview {
-  max-width: 100%;
+  position: relative;
 }
 .emoji-panel {
   position: absolute;
