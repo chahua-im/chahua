@@ -23,7 +23,7 @@
             @if (session.user()?.avatarUrl; as src) {
               <img [src]="src" width="26" height="26" decoding="async" />
             } @else {
-              {{ session.user()?.username?.slice(0, 1) }}
+              {{ session.user()?.username | avatarText }}
             }
           </ion-avatar>
         </ion-button>

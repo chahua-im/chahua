@@ -6,6 +6,7 @@ import { beforeAll, afterAll, vi } from 'vitest';
 import { Connection } from '../../api/connection';
 import { mockRealtime } from '../../api/testing';
 import { routes } from '../../app.routes';
+import { PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { ChatListStore } from '../chat-list-store';
@@ -128,6 +129,7 @@ describe('ChatListPage query lifecycle', () => {
       providers: [
         { provide: Connection, useValue: mockRealtime() },
         provideRouter([]),
+        { provide: PushNotifications, useValue: { requestSettingsPermission: vi.fn() } },
         {
           provide: ChatListStore,
           useValue: {

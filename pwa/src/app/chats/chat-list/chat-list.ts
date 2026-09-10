@@ -26,8 +26,10 @@ import {
 } from '@ionic/angular';
 import { addCircleOutline } from 'ionicons/icons';
 import { Connection } from '../../api/connection';
+import { PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
+import { AvatarTextPipe } from '../avatar-text.pipe';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { isListTab, ListTab, type ListSelection } from '../list-tabs';
@@ -41,6 +43,7 @@ let nextContentId = 0;
   styleUrl: './chat-list.scss',
   host: { class: 'ion-page' },
   imports: [
+    AvatarTextPipe,
     ChatListContent,
     ContentScrollbars,
     DirectorySearch,
@@ -81,6 +84,7 @@ export class ChatList {
   protected readonly outlet = inject(IonRouterOutlet, { optional: true });
   protected readonly addIcon = addCircleOutline;
   private readonly router = inject(Router);
+  private readonly notifications = inject(PushNotifications);
   private readonly modals = inject(ModalController);
   private readonly addMenu = viewChild<IonPopover>('addMenu');
 
@@ -98,6 +102,7 @@ export class ChatList {
   }
 
   protected openSettings() {
+    this.notifications.requestSettingsPermission();
     const url = this.router.parseUrl(this.router.url);
     url.queryParams['settings'] = '1';
     return this.router.navigateByUrl(url, { browserUrl: '/settings', state: { settingsEntry: true } });

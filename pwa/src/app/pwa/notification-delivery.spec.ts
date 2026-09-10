@@ -103,14 +103,21 @@ describe('online notifications', () => {
           },
         },
         { provide: ChatListStore, useValue: { unread } },
-        { provide: PushService, useValue: { getSubscriptionStatus: () => of({ hasMatchingEndpoint: true }) } },
+        {
+          provide: PushService,
+          useValue: { postSubscribe: () => of(undefined), postUnsubscribe: () => of(undefined) },
+        },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         { provide: ModalController, useValue: modals },
         {
           provide: SwPush,
           useValue: {
             isEnabled: true,
-            subscription: new BehaviorSubject({ endpoint: 'mock-endpoint' }),
+            subscription: new BehaviorSubject({
+              endpoint: 'mock-endpoint',
+              toJSON: () => ({ keys: { p256dh: 'key', auth: 'auth' } }),
+            }),
+            unsubscribe: async () => {},
             notificationClicks: clicks,
           },
         },
@@ -208,7 +215,7 @@ describe('online notifications', () => {
       await service.refresh();
       events.next({ type: ServerWsMessageType.message, payload: incoming });
       await settle();
-      expect(commands).toHaveLength(0);
+      expect(commands.filter((command) => command.type === 'CHAHUA_NOTIFY')).toHaveLength(0);
     },
   );
 

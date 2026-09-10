@@ -648,10 +648,11 @@ export class ConversationPage {
     const scroll = await this.content()?.getScrollElement();
     if (!scroll || this.destroyRef.destroyed) return;
     let entry = this.entryKey();
-    let top = scroll.getBoundingClientRect().top;
+    const contentTop = () => scroll.getBoundingClientRect().top - document.body.getBoundingClientRect().top;
+    let top = contentTop();
     const resize = new ResizeObserver(() => {
       if (!this.isCurrent()) return;
-      const nextTop = scroll.getBoundingClientRect().top;
+      const nextTop = contentTop();
       const offset = entry === this.entryKey() ? nextTop - top : 0;
       entry = this.entryKey();
       top = nextTop;
