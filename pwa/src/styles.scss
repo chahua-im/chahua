@@ -218,6 +218,11 @@ ion-modal.media-viewer-overlay {
   --backdrop-opacity: 0;
 }
 
+// Ionic needs a nonzero height to detect the next page; don't reserve an empty loading row.
+app-chat-details ion-infinite-scroll:not(.infinite-scroll-loading) ion-infinite-scroll-content {
+  min-height: 1px;
+}
+
 .loading-status {
   padding: 16px;
   text-align: center;

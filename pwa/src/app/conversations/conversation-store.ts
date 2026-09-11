@@ -66,12 +66,16 @@ export class ConversationStore {
 
   reset(chatId?: SnowflakeID, threadId?: SnowflakeID) {
     this.context = chatId ? { chatId, threadId } : undefined;
-    this.version++;
-    this.cancel.next();
+    this.cancelLoading();
     this.latestSeenId = undefined;
     this.needsResync = false;
-    this.pendingUpdates.clear();
     this.currentPage.set(undefined);
+  }
+
+  cancelLoading() {
+    this.version++;
+    this.cancel.next();
+    this.pendingUpdates.clear();
     this.isLoading.set(false);
     this.pageDirection.set(undefined);
     this.currentError.set(undefined);
