@@ -11,6 +11,11 @@
     </ion-item>
   }
 </ion-list>
+@if (cursor() != null && !error()) {
+  <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+    <ion-infinite-scroll-content />
+  </ion-infinite-scroll>
+}
 @if (loading()) {
   <div class="loading-status"><ion-spinner /></div>
 }
@@ -20,9 +25,3 @@
     <ion-button fill="clear" (click)="load()">刷新</ion-button>
   </p>
 }
-<ion-infinite-scroll
-  threshold="100px"
-  [disabled]="cursor() == null || loading() || error()"
-  (ionInfinite)="more($event)">
-  <ion-infinite-scroll-content />
-</ion-infinite-scroll>

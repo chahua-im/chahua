@@ -1,4 +1,4 @@
-import { Component, computed, input } from '@angular/core';
+import { Component, forwardRef, computed, input } from '@angular/core';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { MediaKind, mediaKind } from '../message-attachments/media-kind';
 import { MessageText } from '../message-text/message-text';
@@ -23,7 +23,7 @@ enum SystemMessageKind {
 @Component({
   selector: 'app-message-preview',
   templateUrl: './message-preview.html',
-  imports: [MessageText],
+  imports: [forwardRef(() => MessageText)],
   host: {
     '[class.action]':
       'message().isDeleted || message().messageType === MessageType.system || message().messageType === MessageType.invite || !message().message?.trim()',

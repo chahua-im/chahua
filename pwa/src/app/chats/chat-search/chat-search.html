@@ -8,6 +8,11 @@
 @for (message of messages(); track message.id) {
   <div (click)="locate(message)"><app-message [message]="message" [own]="false" [interactive]="false" inert /></div>
 }
+@if (cursor() != null && !error()) {
+  <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+    <ion-infinite-scroll-content />
+  </ion-infinite-scroll>
+}
 @if (loading()) {
   <div class="loading-status"><ion-spinner /></div>
 } @else if (error()) {
@@ -18,9 +23,3 @@
 } @else if (query().trim() && !messages().length) {
   <p class="ion-padding ion-text-center">没有找到消息</p>
 }
-<ion-infinite-scroll
-  threshold="100px"
-  [disabled]="cursor() == null || loading() || error()"
-  (ionInfinite)="more($event)">
-  <ion-infinite-scroll-content />
-</ion-infinite-scroll>

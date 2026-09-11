@@ -82,6 +82,7 @@ describe('ChatThreads', () => {
     expect(complete).toHaveBeenCalledOnce();
     expect(fixture.componentInstance['items']()).toHaveLength(1);
     expect(fixture.componentInstance['cursor']()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('ion-infinite-scroll')).toBeNull();
   });
 
   it('keeps loaded topics and the cursor after a failed continuation', async () => {

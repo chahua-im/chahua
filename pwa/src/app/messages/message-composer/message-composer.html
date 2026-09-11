@@ -57,12 +57,7 @@
   (change)="files($event, Purpose.media)" />
 <input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
 <div class="bar">
-  <button
-    type="button"
-    class="attach-button"
-    [disabled]="voiceActive()"
-    [class.selected]="panel() === Panel.Attachments"
-    (click)="togglePanel(Panel.Attachments)">
+  <button type="button" class="attach-button" [disabled]="voiceActive()" (click)="togglePanel(Panel.Attachments)">
     <ion-icon [icon]="icons.addCircleOutline" />
   </button>
   <div class="input-wrapper" [hidden]="voiceActive()">

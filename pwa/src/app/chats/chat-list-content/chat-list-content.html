@@ -5,8 +5,8 @@
     (ionRefresh)="refreshing.set(true); refresh()">
     <ion-refresher-content></ion-refresher-content>
   </ion-refresher>
-  @if (!list().archived && !list().requestHistory) {
-    <ion-list>
+  <ion-list>
+    @if (!list().archived && !list().requestHistory) {
       <app-chat-list-item
         [button]="true"
         (selected)="openList.emit({ tab: list().tab, archived: true, requestHistory: false })"
@@ -27,11 +27,9 @@
             icon: requestsIcon,
           }"></app-chat-list-item>
       }
-    </ion-list>
-  }
-  @if (ready()) {
-    @if (showRequests() && requestRows().length) {
-      <ion-list class="friend-requests">
+    }
+    @if (ready()) {
+      @if (showRequests() && requestRows().length) {
         @for (row of requestRows(); track row.request.id) {
           @let name = row.peer.username ?? '用户 ' + row.peer.uid;
           <app-chat-list-item
@@ -71,10 +69,8 @@
             }
           </app-chat-list-item>
         }
-      </ion-list>
-    }
-    @if (!list().requestHistory && (rows().length || !loading())) {
-      <ion-list class="conversations">
+      }
+      @if (!list().requestHistory && (rows().length || !loading())) {
         @for (row of rows(); track row.key) {
           @switch (row.kind) {
             @case (ListRowKind.Thread) {
@@ -187,19 +183,19 @@
             </ion-item>
           }
         }
-      </ion-list>
+      }
     }
-  }
+  </ion-list>
+  <ion-infinite-scroll
+    threshold="100px"
+    [disabled]="!active() || loading() || !ready() || !hasMore()"
+    (ionInfinite)="loadMore($event)">
+    <ion-infinite-scroll-content></ion-infinite-scroll-content>
+  </ion-infinite-scroll>
   @if ((!ready() || loading()) && !refreshing()) {
     <div class="loading-status">
       <ion-spinner></ion-spinner>
     </div>
   }
-  <ion-infinite-scroll
-    threshold="100px"
-    [disabled]="!active() || !ready() || !hasMore() || loading()"
-    (ionInfinite)="loadMore($event)">
-    <ion-infinite-scroll-content></ion-infinite-scroll-content>
-  </ion-infinite-scroll>
 </ion-content>
 <app-chat-mute />

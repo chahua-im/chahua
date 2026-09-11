@@ -2,7 +2,7 @@ import { Component, computed, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
 import { ModalController } from '@ionic/angular';
 import { type MentionInfo } from '../../../generated/models';
-import { UserProfile } from '../../chats/user-profile/user-profile';
+import { ChatDetails } from '../../chats/chat-details/chat-details';
 
 export interface TextPart {
   text: string;
@@ -46,7 +46,6 @@ export function messageParts(text: string, mentions: readonly MentionInfo[] = []
   templateUrl: './message-text.html',
   styles: `
     :host {
-      white-space: inherit;
       overflow-wrap: anywhere;
     }
     a,
@@ -55,10 +54,6 @@ export function messageParts(text: string, mentions: readonly MentionInfo[] = []
       font: inherit;
       padding: 0;
       background: none;
-      text-decoration: none;
-    }
-    button {
-      cursor: pointer;
     }
   `,
   imports: [],
@@ -80,7 +75,7 @@ export class MessageText {
     event.stopPropagation();
     const mention = this.mentions().find((m) => m.uid === uid);
     const modal = await this.modals.create({
-      component: UserProfile,
+      component: ChatDetails,
       componentProps: { user: mention ?? { uid, gender: 0 } },
     });
     await modal.present();

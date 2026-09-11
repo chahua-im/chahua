@@ -7,15 +7,20 @@
       <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
     </ion-buttons>
     <ion-title (click)="details()">
-      @if (threadId()) {
-        @if (threadRoot(); as root) {
-          <app-message-preview [message]="root" />
-        } @else {
-          话题
-        }
-      } @else {
-        {{ chatTitle().name ?? (chatTitle().isDm ? '私聊' : '会话') }}
-      }
+      <span class="conversation-title">
+        <app-chat-avatar [entry]="chatTitle().avatar" [size]="32" />
+        <span>
+          @if (threadId()) {
+            @if (threadRoot(); as root) {
+              <app-message-preview [message]="root" />
+            } @else {
+              话题
+            }
+          } @else {
+            {{ chatTitle().name ?? (chatTitle().isDm ? '私聊' : '会话') }}
+          }
+        </span>
+      </span>
     </ion-title>
     @if (threadBusy() && !subscription()) {
       <ion-spinner slot="end"></ion-spinner>
@@ -265,6 +270,7 @@
   <aside class="details-sidebar">
     @for (chatId of [id()]; track chatId) {
       <app-chat-details
+        [currentConversation]="true"
         [chatId]="chatId"
         [threadId]="threadId()"
         [threadRoot]="threadRoot()"
@@ -276,6 +282,7 @@
 <ion-modal [isOpen]="infoOpen() && active()" (didDismiss)="infoOpen.set(false)">
   <ng-template>
     <app-chat-details
+      [currentConversation]="true"
       [chatId]="id()"
       [threadId]="threadId()"
       [threadRoot]="threadRoot()"
