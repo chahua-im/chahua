@@ -16,8 +16,7 @@ import { Connection } from '../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
-import { dismissChatOverlays } from '../chats/dismiss-chat-overlays';
-import { ConversationNavigation, ConversationTargetKind } from '../conversations/conversation-navigation';
+import { ConversationNavigation } from '../conversations/conversation-navigation';
 import { SessionStore } from '../session/session-store';
 import { notificationText, shouldNotify } from './notification-policy';
 
@@ -132,20 +131,13 @@ export class PushNotifications {
       const data = notification.data;
       const valid = (id: unknown): id is string => typeof id === 'string' && /^\d+$/.test(id);
       if (!valid(data?.chatId) || !valid(data?.messageId)) return;
-      void this.open(
+      void this.navigation.open(
         encodeId(data.chatId),
-        encodeId(data.messageId),
         valid(data.threadRootId) ? encodeId(data.threadRootId) : undefined,
+        encodeId(data.messageId),
       );
     });
     void this.refresh();
-  }
-
-  private async open(chatId: SnowflakeID, messageId: SnowflakeID, threadId?: SnowflakeID) {
-    await dismissChatOverlays(this.modals);
-    const path = ['/chats/chat', decodeId(chatId), ...(threadId ? ['thread', decodeId(threadId)] : [])];
-    await this.router.navigate(path, { queryParams: { message: decodeId(messageId) } });
-    this.navigation.goTo(chatId, { type: ConversationTargetKind.Message, messageId }, threadId);
   }
 
   private currentConversation(message: MessageResponse) {

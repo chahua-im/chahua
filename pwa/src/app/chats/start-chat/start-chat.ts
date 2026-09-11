@@ -1,6 +1,5 @@
-import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { Component, computed, effect, forwardRef, inject, input, signal, untracked } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
-import { Router } from '@angular/router';
 import {
   IonAvatar,
   IonButton,
@@ -20,11 +19,10 @@ import { firstValueFrom } from 'rxjs';
 import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
 import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
 import { type InvitePreviewResponse } from '../../../generated/models';
-import { decodeId } from '../../api/snowflake-id';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { ChatListStore } from '../chat-list-store';
 import { DirectorySearch } from '../directory-search/directory-search';
-import { dismissChatOverlays } from '../dismiss-chat-overlays';
 import { inviteCode, inviteStatus, InviteStatus } from '../invite';
 export enum StartChatKind {
   Create,
@@ -49,7 +47,7 @@ export enum StartChatKind {
     IonLabel,
     IonSpinner,
     IonSearchbar,
-    DirectorySearch,
+    forwardRef(() => DirectorySearch),
   ],
   host: { class: 'ion-page' },
 })
@@ -62,7 +60,7 @@ export class StartChat {
   protected readonly modals = inject(ModalController);
   private readonly groups = inject(GroupsService);
   private readonly invites = inject(InvitesService);
-  private readonly router = inject(Router);
+  private readonly navigation = inject(ConversationNavigation);
   private readonly lists = inject(ChatListStore);
   protected readonly values = signal({ name: '', code: '' });
   protected readonly fields = form(this.values);
@@ -111,8 +109,7 @@ export class StartChat {
             ? this.preview()!.chat
             : (await firstValueFrom(this.invites.postRedeemInvite({ code: inviteCode(this.values().code) }))).chat;
       this.lists.refreshChats();
-      await dismissChatOverlays(this.modals);
-      await this.router.navigate(['/chats/chat', decodeId(chat.id)]);
+      await this.navigation.open(chat.id);
     } catch {
       this.error.set(true);
     } finally {

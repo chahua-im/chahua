@@ -2,7 +2,7 @@ import { Component, computed, inject, input } from '@angular/core';
 import { IonAvatar, IonItem, IonLabel, IonList, ModalController } from '@ionic/angular';
 import type { MessagePreview, MessageResponse, SnowflakeID, User } from '../../../generated/models';
 import { ChatStore } from '../chat-store';
-import { UserProfile } from '../user-profile/user-profile';
+import { ChatDetails } from '../chat-details/chat-details';
 
 @Component({
   selector: 'app-thread-participants',
@@ -29,7 +29,7 @@ export class ThreadParticipants {
 
   protected async profile(user: User) {
     const modal = await this.modals.create({
-      component: UserProfile,
+      component: ChatDetails,
       componentProps: { user: { ...user, username: user.name } },
     });
     await modal.present();

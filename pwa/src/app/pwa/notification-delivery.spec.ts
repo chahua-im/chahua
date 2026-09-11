@@ -291,6 +291,10 @@ describe('online notifications', () => {
     clicks.next({ notification: { data: { chatId: decodeId(incoming.chatId), messageId: decodeId(incoming.id) } } });
     await settle();
     expect(router.url).toBe(chatPath + '?message=' + decodeId(incoming.id));
+    expect(goTo).not.toHaveBeenCalled();
+    // Repeated clicks still locate the message even when Angular ignores the identical URL.
+    clicks.next({ notification: { data: { chatId: decodeId(incoming.chatId), messageId: decodeId(incoming.id) } } });
+    await settle();
     expect(goTo).toHaveBeenCalledOnce();
   });
   it('shows the shared unread total only while the browser tab is hidden', () => {

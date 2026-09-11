@@ -67,9 +67,7 @@ ion-content::part(scroll) {
   min-width: 0;
   height: calc(2 * var(--app-line-micro) + 1px);
   padding: 0 8px;
-  border: 0;
   border-inline-start: 2px solid var(--ion-color-primary);
-  border-radius: 0;
   background: none;
   color: var(--ion-text-color-step-600, #666);
   text-align: start;
@@ -94,8 +92,6 @@ ion-content::part(scroll) {
   flex-shrink: 0;
   width: 32px;
   height: calc(var(--composer-control-size) - 2px);
-  padding: 0;
-  border: 0;
   background: none;
   color: var(--ion-color-medium);
   font-size: 22px;
@@ -112,8 +108,6 @@ ion-title app-message-preview {
   place-items: center;
   width: 48px;
   height: 44px;
-  padding: 0;
-  border: 0;
   background: transparent;
   color: var(--ion-text-color);
 }
@@ -132,7 +126,6 @@ ion-title app-message-preview {
   margin: 6px 12px;
   padding-block: 0;
   padding-inline: 10px 38px;
-  border: 0;
   border-inline-start: 3px solid var(--ion-color-primary);
   background: transparent;
   color: var(--ion-text-color);
@@ -174,4 +167,17 @@ ion-title app-message-preview {
   font-size: var(--app-font-caption);
   line-height: var(--app-line-caption);
   white-space: nowrap;
+}
+
+.conversation-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  vertical-align: middle;
+  > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }

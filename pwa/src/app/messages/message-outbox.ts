@@ -353,7 +353,7 @@ export class MessageOutbox {
       if (item.disposed || item.cancelled() || item.delivery() === MessageDelivery.Failed) continue;
       const task = this.tasks.get(item)!;
       const intent = task.intent();
-      if (this.needsSend(item) && !task.create && task.ready?.revision !== intent.revision) {
+      if (this.needsSend(item) && (item.confirmed() || !task.create) && task.ready?.revision !== intent.revision) {
         if (intent.uploads.every((upload) => upload.state().status === UploadStatus.Ready)) {
           task.ready = submission(
             intent,
@@ -372,17 +372,6 @@ export class MessageOutbox {
         heads.set(key, item);
       }
       if (!this.needsSend(item) || item.operation || item.delivery() === MessageDelivery.Failed) continue;
-      if (item.confirmed() && task.ready?.revision !== intent.revision) {
-        if (intent.uploads.every((upload) => upload.state().status === UploadStatus.Ready)) {
-          task.ready = submission(
-            intent,
-            intent.uploads.map((upload) => upload.state().id!),
-          );
-        } else {
-          this.run(item, this.prepare(item));
-          continue;
-        }
-      }
       this.run(item, this.send(item));
     }
   }
@@ -480,8 +469,7 @@ export class MessageOutbox {
     const task = this.tasks.get(item)!;
     if (submission.revision < task.acknowledged() || (submission.revision === task.acknowledged() && item.published()))
       return false;
-    if (submission.revision > task.acknowledged() || !item.published())
-      item.confirmed.set(item.cancelled() ? tombstone(message) : message);
+    item.confirmed.set(item.cancelled() ? tombstone(message) : message);
     task.acknowledged.set(submission.revision);
     if (published) item.published.set(true);
     if (!this.needsSend(item)) item.delivery.set(MessageDelivery.Sent);
@@ -596,11 +584,15 @@ export class MessageOutbox {
 
   private cleanUploads(item: OutgoingMessage) {
     const task = this.tasks.get(item)!;
-    const keep = new Set([
-      ...(!item.cancelled() && !item.disposed ? item.uploads : []),
-      ...(!item.disposed && !item.cancelled() ? (task.inflight?.uploads ?? []) : []),
-      ...(!item.disposed && !item.cancelled() && !item.confirmed() ? (task.create?.uploads ?? []) : []),
-    ]);
+    const keep = new Set(
+      item.cancelled() || item.disposed
+        ? []
+        : [
+            ...item.uploads,
+            ...(task.inflight?.uploads ?? []),
+            ...(!item.confirmed() ? (task.create?.uploads ?? []) : []),
+          ],
+    );
     for (const upload of task.owned) {
       if (keep.has(upload)) continue;
       upload.dispose();

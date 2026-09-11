@@ -69,8 +69,6 @@
   min-width: 0;
   min-height: calc(var(--app-line-body) + 2 * var(--message-padding-block));
   padding: var(--message-padding-block) var(--message-padding-inline);
-  line-height: var(--app-line-body);
-  font-size: var(--app-font-body);
   background: var(--ion-background-color, #fff);
   color: var(--ion-text-color);
   border-radius: 16px 16px 16px 8px;
@@ -131,7 +129,6 @@
   color: var(--ion-color-danger-contrast);
   font: inherit;
   font-size: var(--app-font-caption);
-  cursor: pointer;
 }
 
 .reply-preview {
@@ -145,8 +142,6 @@
   font-size: var(--app-font-compact);
   line-height: var(--app-line-compact);
   color: inherit;
-  cursor: pointer;
-  border: 0;
   border-inline-start: 3px solid var(--reply-color);
   min-width: 0;
   overflow: hidden;
@@ -189,12 +184,10 @@
   margin-inline-start: 10px;
   width: 28px;
   height: 28px;
-  padding: 0;
   border-radius: 50%;
   background: rgba(var(--ion-text-color-rgb), 0.06);
   color: var(--ion-color-medium);
   font-size: 16px;
-  cursor: pointer;
 
   &:hover {
     color: var(--ion-color-primary);
@@ -324,10 +317,8 @@
 .invite-card {
   display: block;
   max-width: 100%;
-  padding: 0;
   text-align: start;
   background: transparent;
   color: inherit;
   font: inherit;
-  cursor: pointer;
 }

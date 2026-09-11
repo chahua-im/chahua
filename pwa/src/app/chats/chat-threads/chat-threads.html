@@ -25,9 +25,11 @@
 } @else if (!items().length) {
   <p class="ion-padding ion-text-center">{{ cursor() ? '暂无近期话题' : '暂无话题' }}</p>
 }
-<ion-infinite-scroll threshold="100px" [disabled]="cursor() == null || error()" (ionInfinite)="more($event)">
-  <ion-infinite-scroll-content />
-</ion-infinite-scroll>
+@if (cursor() != null && !error()) {
+  <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+    <ion-infinite-scroll-content />
+  </ion-infinite-scroll>
+}
 @if (openFailed()) {
   <p class="ion-padding">无法打开话题，请重试。</p>
 }

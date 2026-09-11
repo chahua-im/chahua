@@ -33,6 +33,11 @@
     }
   </ion-list>
 }
+@if (cursor() != null && !error()) {
+  <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+    <ion-infinite-scroll-content />
+  </ion-infinite-scroll>
+}
 @if (loading()) {
   <div class="loading-status"><ion-spinner /></div>
 } @else if (error()) {
@@ -43,12 +48,6 @@
 } @else if (!items().length) {
   <p class="ion-padding ion-text-center">暂无内容</p>
 }
-<ion-infinite-scroll
-  threshold="100px"
-  [disabled]="cursor() == null || loading() || error()"
-  (ionInfinite)="more($event)">
-  <ion-infinite-scroll-content />
-</ion-infinite-scroll>
 
 @if (locateFailed()) {
   <p class="ion-padding">无法定位原消息，请重试。</p>

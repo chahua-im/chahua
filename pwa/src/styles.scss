@@ -18,15 +18,8 @@
   --ion-color-primary-contrast-rgb: 255, 255, 255;
   --ion-color-primary-shade: #266bb4;
   --ion-color-primary-tint: #4087d2;
-}
 
-html.plt-ios {
-  overflow: hidden;
-}
-
-// Font roles follow Ionic's root size: 16px on desktop, system Body on iOS.
-// Ionic platform classes distinguish mobile operating systems from desktop OSes, independently of input and width.
-:root {
+  // Font roles follow Ionic's root size: 16px on desktop, system Body on iOS.
   --app-font-body: 0.875rem;
   --app-line-body: 1.25rem;
   --app-font-title: 0.875rem;
@@ -50,6 +43,11 @@ html.plt-ios {
   --app-quick-action-height: 56px;
 }
 
+html.plt-ios {
+  overflow: hidden;
+}
+
+// Operating system selects density; viewport width only selects columns.
 :root:is(.plt-ios, .plt-android) {
   --app-font-base: 17;
   --app-font-body: 1rem;
@@ -218,9 +216,18 @@ ion-modal.media-viewer-overlay {
   --backdrop-opacity: 0;
 }
 
-// Ionic needs a nonzero height to detect the next page; don't reserve an empty loading row.
-app-chat-details ion-infinite-scroll:not(.infinite-scroll-loading) ion-infinite-scroll-content {
-  min-height: 1px;
+// Retain Ionic's loading geometry; switching display interrupts native momentum with a layout.
+ion-infinite-scroll-content > .infinite-loading {
+  display: block;
+  visibility: hidden;
+}
+.infinite-scroll-loading ion-infinite-scroll-content > .infinite-loading {
+  visibility: visible;
+}
+
+// First-page and viewport-fill feedback yields to Ionic during scroll-triggered paging.
+ion-infinite-scroll.infinite-scroll-loading + .loading-status {
+  display: none;
 }
 
 .loading-status {
@@ -293,4 +300,12 @@ ion-content.custom-scrollbars::part(scroll) {
 // WaveSurfer renders its waveform in a library-owned shadow root.
 app-voice-player ::part(canvases) {
   opacity: 0.35;
+}
+
+// Ionic's item line belongs between rows, including rows wrapped by our shared component.
+ion-list > ion-item:last-child,
+ion-list > ion-item-sliding:last-child ion-item,
+ion-list > app-chat-list-item:last-child ion-item {
+  --inner-border-width: 0;
+  --border-width: 0;
 }

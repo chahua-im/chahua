@@ -1,12 +1,12 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
+import { Component, forwardRef, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
 import { IonAvatar, IonIcon, IonSpinner, ModalController } from '@ionic/angular';
 import { arrowUndoOutline } from 'ionicons/icons';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { AvatarTextPipe } from '../../chats/avatar-text.pipe';
 import { StartChat, StartChatKind } from '../../chats/start-chat/start-chat';
-import { UserProfile } from '../../chats/user-profile/user-profile';
+import { ChatDetails } from '../../chats/chat-details/chat-details';
 import { InviteCard } from '../invite-card/invite-card';
 import { mediaOverlay } from '../media-overlay';
 import { MessageAttachments, type MessageAttachmentSource } from '../message-attachments/message-attachments';
@@ -51,9 +51,9 @@ export interface MessageMenuSelection {
     IonIcon,
     IonSpinner,
     MessageAttachments,
-    MessageText,
+    forwardRef(() => MessageText),
     MessageAuthor,
-    MessagePreview,
+    forwardRef(() => MessagePreview),
     MessageReactions,
     MessageThread,
     MessageStatus,
@@ -72,7 +72,7 @@ export class Message<T extends MessageContent = MessageResponse> {
     if (!this.canInteract()) return;
     const sender = this.message().sender;
     const modal = await this.modals.create({
-      component: UserProfile,
+      component: ChatDetails,
       componentProps: { user: { ...sender, username: sender.name } },
     });
     await modal.present();
