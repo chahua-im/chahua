@@ -556,8 +556,12 @@ export class ChatStore {
   }
   private readonly staleSubscriptions = new Set<SnowflakeID>();
   subscription(chatId: SnowflakeID, rootId: SnowflakeID) {
+    const status = this.cachedSubscription(chatId, rootId);
+    return this.staleSubscriptions.has(rootId) ? undefined : status;
+  }
+  cachedSubscription(chatId: SnowflakeID, rootId: SnowflakeID) {
     const entry = this.subscriptions().get(rootId);
-    return entry?.chatId === chatId && !this.staleSubscriptions.has(rootId) ? entry.status : undefined;
+    return entry?.chatId === chatId ? entry.status : undefined;
   }
   private setSubscription(
     chatId: SnowflakeID,

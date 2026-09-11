@@ -31,6 +31,7 @@ import {
   ModalController,
 } from '@ionic/angular';
 import {
+  archive,
   archiveOutline,
   bookmarkOutline,
   chatbubbles,
@@ -44,7 +45,6 @@ import {
   personOutline,
   personRemoveOutline,
   searchOutline,
-  star,
   starOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
@@ -60,9 +60,10 @@ import {
   type MessageResponse,
   type SnowflakeID,
 } from '../../../generated/models';
-import { decodeId } from '../../api/snowflake-id';
 import { mediaDimensions } from '../../messages/media-processing/prepare-media';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { SavedMessageList } from '../../messages/saved-message-list/saved-message-list';
+import { ThreadParticipants } from '../thread-participants/thread-participants';
 import { uploadBlob } from '../../messages/upload';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
@@ -79,8 +80,7 @@ import { dismissChatOverlays } from '../dismiss-chat-overlays';
 import { UserProfile } from '../user-profile/user-profile';
 enum DetailAction {
   Mute,
-  Subscription,
-  Archive,
+  Thread,
   Save,
   Avatar,
   Leave,
@@ -89,6 +89,7 @@ enum DetailAction {
 enum InfoTab {
   Threads = 'threads',
   Members = 'members',
+  Saved = 'saved',
 }
 type ContentTab = ChatAttachmentKindFilter | InfoTab;
 
@@ -122,6 +123,8 @@ enum DetailView {
     ChatAvatar,
     MessagePreview,
     ChatMembers,
+    ThreadParticipants,
+    SavedMessageList,
     ChatThreads,
     ChatInvites,
     ChatSearch,
@@ -133,11 +136,12 @@ export class ChatDetails {
   readonly chatId = input.required<SnowflakeID>();
   readonly threadId = input<SnowflakeID>();
   readonly threadRoot = input<MessageResponse | MessagePreviewData>();
+  readonly messages = input<readonly MessageResponse[]>([]);
   readonly closed = output<void>();
   protected readonly icons = {
+    archive,
     archiveOutline,
     starOutline,
-    star,
     searchOutline,
     notificationsOffOutline,
     notificationsOutline,
@@ -185,7 +189,7 @@ export class ChatDetails {
   protected readonly AttachmentKind = ChatAttachmentKindFilter;
   protected readonly tab = linkedSignal<ContentTab>(() => {
     this.chatId();
-    return this.threadId() ? ChatAttachmentKindFilter.image : InfoTab.Threads;
+    return this.threadId() ? InfoTab.Members : InfoTab.Threads;
   });
   protected changeTab(value: unknown) {
     if (
@@ -202,6 +206,10 @@ export class ChatDetails {
   protected readonly subscription = computed(() => {
     const root = this.threadId();
     return root ? this.store.subscription(this.chatId(), root) : undefined;
+  });
+  protected readonly cachedSubscription = computed(() => {
+    const root = this.threadId();
+    return root ? this.store.cachedSubscription(this.chatId(), root) : undefined;
   });
   protected readonly avatarEntry = computed(() => {
     const chat = this.chat();
@@ -283,20 +291,13 @@ export class ChatDetails {
   protected toggleMute() {
     return this.perform(DetailAction.Mute, () => this.muteMenu().toggle(this.chatId()));
   }
-  protected toggleSubscription() {
+  protected updateThread() {
     const status = this.subscription();
     if (!status) return;
-    return this.perform(DetailAction.Subscription, () =>
+    return this.perform(DetailAction.Thread, () =>
       status.subscribed
-        ? this.store.unsubscribeThread(this.chatId(), this.threadId()!)
+        ? this.store.setThreadArchived(this.chatId(), this.threadId()!, !status.archived)
         : this.store.subscribeThread(this.chatId(), this.threadId()!),
-    );
-  }
-  protected toggleThreadArchive() {
-    const status = this.subscription();
-    if (!status) return;
-    return this.perform(DetailAction.Archive, () =>
-      this.store.setThreadArchived(this.chatId(), this.threadId()!, !status.archived),
     );
   }
   private async refreshDetails(chatId: SnowflakeID) {
@@ -369,10 +370,5 @@ export class ChatDetails {
     if (!user) return;
     const modal = await this.modals.create({ component: UserProfile, componentProps: { user } });
     await modal.present();
-  }
-  protected async saved() {
-    const chatId = this.chatId();
-    await dismissChatOverlays(this.modals);
-    await this.router.navigate(['/chats/chat', decodeId(chatId), 'saved']);
   }
 }

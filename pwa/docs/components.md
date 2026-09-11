@@ -44,6 +44,9 @@ flowchart TD
   MENU --> EMOJI[EmojiPicker]
   DETAILS --> TOPICS[ChatThreads]
   DETAILS --> MEMBERS[ChatMembers]
+  DETAILS --> PARTICIPANTS[ThreadParticipants]
+  DETAILS --> SAVEDLIST[SavedMessageList]
+  SAVED --> SAVEDLIST
   DETAILS --> MEDIA[ChatAttachments]
   DETAILS --> SEARCH[ChatSearch]
   DETAILS --> INVITES[ChatInvites]
@@ -74,7 +77,8 @@ ChatListContent 的行是共享资料、查询成员和草稿的派生结果。�
 | ------------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer、ChatDetails 传值 |
 | PinnedMessagesPage | id、threadId；活跃版本、loading/failed                                                                       | 从共享 ChatPins 派生消息，复用 Message 和 MessageMenu；无需 ConversationStore                                                                         |
-| SavedMessagesPage  | 可选 id；saved、nextCursor、loading/failed、取消收藏状态                                                     | 全局或单聊天收藏接口；savedMessageContent 映射快照，交给非交互 Message                                                                                |
+| SavedMessagesPage | 可选 id、active | 路由及 toolbar；离开时销毁 SavedMessageList，重新进入时重新创建 |
+| SavedMessageList | 可选 chatId；saved、nextCursor、loading/failed、取消收藏状态 | 全局或单聊天收藏接口；快照映射给非交互 Message，分页与操作由页面及信息标签共用 |
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图和已删除消息。日期与连续作者分组从最终可见行派生。
 
@@ -121,9 +125,10 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 | 组件            | 输入与局部字段                                                                          | 共享数据/输出                                                         |
 | --------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| ChatDetails     | chatId、threadId、threadRoot → closed；view、tab、编辑表单、pending/error、详情 loading | ChatStore 的头像、标题、详情、静音、订阅与好友关系；静音复用 ChatMute |
+| ChatDetails     | chatId、threadId、threadRoot、messages → closed；view、tab、编辑表单、pending/error、详情 loading | ChatStore 的头像、标题、详情、静音、订阅与好友关系；静音复用 ChatMute |
 | ChatThreads     | chatId；items、cursor、loading/error、打开状态                                          | 从聊天消息页提取话题根，点击导航                                      |
 | ChatMembers     | chatId；members、cursor、loading/error                                                  | MembersService；行点击打开资料，仅管理员显示右侧身份                  |
+| ThreadParticipants | rootId、root、messages；派生参与者与名单范围 | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料 |
 | ChatAttachments | chatId、kind；items、cursor、loading/error、打开/定位状态                               | 列表归组件，打开原消息媒体或定位上下文                                |
 | ChatSearch      | chatId；query、sort、messages、cursor、loading/error                                    | 聊天消息搜索，点击定位原消息                                          |
 | UserProfile     | user；验证方式、验证文字、发送结果、操作状态                                            | 从 ChatStore.relationship 读取同一好友关系；仅添加验证方式为本地数据  |

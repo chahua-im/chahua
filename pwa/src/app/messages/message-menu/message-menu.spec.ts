@@ -367,7 +367,6 @@ describe('MessageMenu', () => {
   it('keeps panels inside a narrow viewport and dismisses only backdrop clicks', async () => {
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(276);
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
-    fixture.nativeElement.querySelector('.chat-row').style.gap = '10px';
     menu['selection'].set({ ...selection(), rect: new DOMRect(-50, -100, 1500, 70), own: true });
     fixture.detectChanges();
     TestBed.tick();

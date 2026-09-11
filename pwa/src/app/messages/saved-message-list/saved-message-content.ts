@@ -1,5 +1,5 @@
 import type { SavedMessageResponse } from '../../../generated/models';
-import type { MessageContent } from '../../messages/message/message';
+import type { MessageContent } from '../message/message';
 
 export function savedMessageContent(saved: SavedMessageResponse): MessageContent {
   const sticker = saved.sticker;
