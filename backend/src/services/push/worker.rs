@@ -185,18 +185,30 @@ fn load_recipient_candidates(
             );
         }
 
-        if !job.mentioned_uids.is_empty() {
+        if !job.mentioned_uids.is_empty() || job.reply_target_uid.is_some() {
             let rows: Vec<(i32, Option<chrono::DateTime<chrono::Utc>>, bool)> =
                 group_membership::table
                     .filter(gm_dsl::chat_id.eq(job.chat_id))
-                    .filter(gm_dsl::uid.eq_any(&job.mentioned_uids))
+                    .filter(
+                        gm_dsl::uid.eq_any(
+                            job.mentioned_uids
+                                .iter()
+                                .copied()
+                                .chain(job.reply_target_uid),
+                        ),
+                    )
                     .select((
                         group_membership::uid,
                         group_membership::muted_until,
                         group_membership::archived,
                     ))
                     .load(conn)
-                    .map_err(|e| format!("Failed to load mentioned member candidates: {:?}", e))?;
+                    .map_err(|e| {
+                        format!(
+                            "Failed to load directly addressed member candidates: {:?}",
+                            e
+                        )
+                    })?;
 
             for (uid, muted_until, chat_archived) in rows {
                 candidates.entry(uid).or_insert(RecipientCandidate {

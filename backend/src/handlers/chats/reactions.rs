@@ -49,7 +49,7 @@ fn broadcast_reaction_update(
     state: &AppState,
     chat_id: i64,
     message_id: i64,
-) {
+) -> Vec<i32> {
     let counts: Vec<(String, i64)> = message_reactions::table
         .filter(message_reactions::message_id.eq(message_id))
         .group_by(message_reactions::emoji)
@@ -117,6 +117,7 @@ fn broadcast_reaction_update(
         reactions,
     }));
     state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
+    member_uids
 }
 
 #[utoipa::path(
@@ -255,12 +256,12 @@ async fn put_reaction(
         .set(messages::has_reactions.eq(true))
         .execute(conn)?;
 
-    broadcast_reaction_update(conn, &state, chat_id, message_id);
+    let member_uids = broadcast_reaction_update(conn, &state, chat_id, message_id);
 
     // Directed unread-reaction notification to the message author. Only on a
     // genuinely new row (re-putting the same emoji is a no-op) and never for
-    // self-reactions; the unread count is derived from the same rows.
-    if inserted > 0 && message.sender_uid != uid {
+    // self-reactions or authors who are no longer chat members.
+    if inserted > 0 && message.sender_uid != uid && member_uids.contains(&message.sender_uid) {
         let actor_name = load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
         let payload = NotificationPayload {
             notification_type: NotificationType::Reaction,
@@ -335,7 +336,7 @@ async fn delete_reaction(
                 .execute(conn)?;
         }
 
-        broadcast_reaction_update(conn, &state, chat_id, message_id);
+        let _ = broadcast_reaction_update(conn, &state, chat_id, message_id);
     }
 
     Ok(StatusCode::NO_CONTENT)
