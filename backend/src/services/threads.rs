@@ -121,6 +121,25 @@ pub fn unsubscribe_from_thread(
     .execute(conn)?;
     Ok(updated > 0)
 }
+
+/// Remove every active thread subscription for a user who no longer belongs to
+/// a chat. Read state remains available if they rejoin and subscribe again.
+pub fn unsubscribe_user_from_chat(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    uid: i32,
+) -> Result<usize, diesel::result::Error> {
+    diesel::update(
+        thread_user_states::table.filter(
+            thread_user_states::chat_id
+                .eq(chat_id)
+                .and(thread_user_states::uid.eq(uid))
+                .and(thread_user_states::subscribed.eq(true)),
+        ),
+    )
+    .set(thread_user_states::subscribed.eq(false))
+    .execute(conn)
+}
 /// Returns `(archived, subscribed)` for the given user/thread, or `None` if no row exists.
 pub fn get_subscription_state(
     conn: &mut PgConnection,

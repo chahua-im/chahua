@@ -1,0 +1,2 @@
+-- Intentionally irreversible: memberships removed before this migration cannot
+-- distinguish stale subscriptions from subscriptions a user explicitly ended.
