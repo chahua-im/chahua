@@ -229,8 +229,8 @@ diesel::table! {
         mentioned_uid -> Int4,
         chat_id -> Int8,
         thread_root_id -> Nullable<Int8>,
-        created_at -> Timestamptz,
         kind -> MentionKind,
+        created_at -> Timestamptz,
     }
 }
 
@@ -481,6 +481,7 @@ diesel::table! {
 diesel::joinable!(attachments -> messages (message_id));
 diesel::joinable!(group_membership -> groups (chat_id));
 diesel::joinable!(groups -> media (avatar_image_id));
+diesel::joinable!(message_mentions -> groups (chat_id));
 diesel::joinable!(message_mentions -> messages (message_id));
 diesel::joinable!(message_reactions -> messages (message_id));
 diesel::joinable!(messages -> stickers (sticker_id));
