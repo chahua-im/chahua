@@ -8,7 +8,7 @@ import { decodeId, encodeId } from '../../api/snowflake-id';
 import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { StartChat, StartChatKind } from '../start-chat/start-chat';
-import { UserProfile } from '../user-profile/user-profile';
+import { ChatDetails } from '../chat-details/chat-details';
 export function decodePermalink(encoded: string) {
   const bytes = Uint8Array.from(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
   if (bytes.length !== 16) throw new Error('无效消息链接');
@@ -63,7 +63,7 @@ export class ChatLink {
         const response = await firstValueFrom(this.users.getUserSearch({ q: String(uid), limit: 20 }));
         const user = response.members.find((user) => user.uid === uid);
         if (!user) throw new Error('用户不存在');
-        modal = await this.modals.create({ component: UserProfile, componentProps: { user } });
+        modal = await this.modals.create({ component: ChatDetails, componentProps: { user } });
       } else if (route.paramMap.get('packId')) {
         modal = await this.modals.create({
           component: StickerPicker,

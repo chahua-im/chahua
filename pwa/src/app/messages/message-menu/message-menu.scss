@@ -54,7 +54,6 @@ button {
   background: transparent;
   color: inherit;
   border-radius: 10px;
-  cursor: pointer;
 }
 button:hover,
 button.selected {
@@ -67,7 +66,6 @@ button:disabled {
   width: 44px;
   height: 44px;
   font-size: 28px;
-  padding: 0;
 }
 .reactions ion-icon {
   color: var(--ion-color-medium-shade);
@@ -89,7 +87,6 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 0;
 }
 .actions .destructive {
   color: var(--ion-color-danger);

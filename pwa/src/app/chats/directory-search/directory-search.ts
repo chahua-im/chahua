@@ -22,7 +22,7 @@ import {
   type SnowflakeID,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
-import { UserProfile } from '../user-profile/user-profile';
+import { ChatDetails } from '../chat-details/chat-details';
 @Component({
   selector: 'app-directory-search',
   templateUrl: './directory-search.html',
@@ -59,12 +59,9 @@ export class DirectorySearch {
       this.people.set([]);
       this.cursor.set(undefined);
     }
-    if (!q) {
-      this.loading.set(false);
-      return;
-    }
-    this.loading.set(true);
     this.error.set(false);
+    this.loading.set(!!q);
+    if (!q) return;
     try {
       const [groups, people] = await Promise.all([
         this.usersOnly()
@@ -104,7 +101,7 @@ export class DirectorySearch {
       this.selected.emit(user);
       return;
     }
-    const modal = await this.modals.create({ component: UserProfile, componentProps: { user } });
+    const modal = await this.modals.create({ component: ChatDetails, componentProps: { user } });
     await modal.present();
   }
 }

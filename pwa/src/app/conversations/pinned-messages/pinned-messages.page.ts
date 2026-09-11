@@ -37,7 +37,6 @@ import { messageRows } from '../message-rows';
 @Component({
   selector: 'app-pinned-messages',
   templateUrl: './pinned-messages.page.html',
-  styleUrl: './pinned-messages.page.scss',
   imports: [
     ContentScrollbars,
     DatePipe,

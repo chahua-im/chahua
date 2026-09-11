@@ -1,23 +1,20 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
 import {
   IonButton,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
   IonSpinner,
   IonToast,
-  ModalController,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { SavedMessagesService } from '../../../generated/endpoints/saved-messages/saved-messages.service';
 import type { SavedMessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
-import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { dismissChatOverlays } from '../../chats/dismiss-chat-overlays';
+import type { SnowflakeID } from '../../api/snowflake-id';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { SessionStore } from '../../session/session-store';
 import { Message } from '../message/message';
@@ -30,13 +27,10 @@ import { savedMessageContent } from './saved-message-content';
   imports: [DatePipe, IonButton, IonInfiniteScroll, IonInfiniteScrollContent, IonSpinner, IonToast, Message],
 })
 export class SavedMessageList {
-  readonly chatId = input<SnowflakeID>();
-  private readonly chatsApi = inject(ChatsService);
   protected readonly session = inject(SessionStore);
   private readonly savedApi = inject(SavedMessagesService);
-  private readonly router = inject(Router);
+  private readonly navigation = inject(ConversationNavigation);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly modals = inject(ModalController);
   private version = 0;
   private readonly cancelReads = new Subject<void>();
   protected readonly saved = signal<SavedMessageResponse[]>([]);
@@ -51,7 +45,6 @@ export class SavedMessageList {
   constructor() {
     fillScrollViewport(this.loading, this.failed, this.nextCursor, () => this.load(true));
     effect(() => {
-      this.chatId();
       untracked(() => this.reset());
     });
 
@@ -85,13 +78,9 @@ export class SavedMessageList {
     this.failed.set(false);
     try {
       const page = await firstValueFrom(
-        (this.chatId()
-          ? this.chatsApi.listChatSavedMessages(this.chatId()!, {
-              limit: 50,
-              before: more ? this.nextCursor() : undefined,
-            })
-          : this.savedApi.listSavedMessages({ limit: 50, ...(more ? { before: this.nextCursor()! } : {}) })
-        ).pipe(takeUntil(this.cancelReads), takeUntilDestroyed(this.destroyRef)),
+        this.savedApi
+          .listSavedMessages({ limit: 50, ...(more ? { before: this.nextCursor()! } : {}) })
+          .pipe(takeUntil(this.cancelReads), takeUntilDestroyed(this.destroyRef)),
       );
       if (version !== this.version) return;
       this.saved.update((items) => [
@@ -106,15 +95,7 @@ export class SavedMessageList {
   }
   protected async locateSaved(saved: SavedMessageResponse) {
     if (!saved.canLocateContext) return;
-    await dismissChatOverlays(this.modals);
-    await this.router.navigate(
-      [
-        '/chats/chat',
-        decodeId(saved.originalChatId),
-        ...(saved.originalThreadRootId ? ['thread', decodeId(saved.originalThreadRootId)] : []),
-      ],
-      { queryParams: { message: decodeId(saved.originalMessageId) } },
-    );
+    await this.navigation.open(saved.originalChatId, saved.originalThreadRootId, saved.originalMessageId);
   }
   protected async removeSaved(saved: SavedMessageResponse) {
     if (this.removingSavedId()) return;

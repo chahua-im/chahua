@@ -55,6 +55,7 @@ import {
 } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { ChatAvatar, conversationAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { ChatDetails } from '../../chats/chat-details/chat-details';
 import { ChatStore } from '../../chats/chat-store';
 import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
@@ -109,6 +110,7 @@ type ScrollPosition =
     ContentScrollbars,
     DatePipe,
     ChatDetails,
+    ChatAvatar,
     IonModal,
     RouterLink,
     Message,
@@ -222,7 +224,11 @@ export class ConversationPage {
   protected readonly chatTitle = computed(() => {
     const chat = this.chatInfo.get(this.id());
     const isDm = chat?.kind === GroupKind.dm;
-    return { name: isDm ? chat.peer?.username : chat?.name, isDm };
+    return {
+      name: isDm ? chat.peer?.username : chat?.name,
+      isDm,
+      avatar: conversationAvatar(chat, this.threadRoot(), !!this.threadId()),
+    };
   });
   private readonly loadedThreadRoot = linkedSignal({
     source: this.entryKey,
@@ -542,22 +548,8 @@ export class ConversationPage {
   }
 
   ionViewDidLeave() {
-    // A topic covers its parent chat: preserve its DOM and scroll position for the back transition.
-    if (this.coveredByThread() && this.conversation.page()) {
-      this.active.set(false);
-      this.entered = false;
-      this.navigationVersion++;
-      this.position.set(undefined);
-      this.scrolling.reset();
-      this.conversation.cancelLoading();
-      this.menu()?.reset();
-      this.cancelEdit();
-      this.composer()?.reset();
-      pauseVoicePlayback();
-    } else {
-      // Only release after a completed transition: an iOS back gesture can be cancelled.
-      this.leave();
-    }
+    // A topic retains its parent range for back navigation. A cancelled gesture never reaches this hook.
+    this.leave(this.coveredByThread() && !!this.conversation.page());
     // Ionic detaches cached pages; apply resource cleanup after the transition.
     this.changeDetector.detectChanges();
   }
@@ -580,19 +572,25 @@ export class ConversationPage {
     );
   }
 
-  private leave() {
+  private leave(retainRange = false) {
     this.saveDraft();
     this.scrolling.reset();
     this.active.set(false);
-    this.entryVersion.update((version) => version + 1);
     this.entered = false;
     this.navigationVersion++;
     this.position.set(undefined);
-    this.conversation.reset();
+    if (retainRange) {
+      this.conversation.cancelLoading();
+      this.cancelEdit();
+      pauseVoicePlayback();
+    } else {
+      this.entryVersion.update((version) => version + 1);
+      this.conversation.reset();
+      this.rows();
+      this.draft.set('');
+      this.replyTo.set(undefined);
+    }
     this.menu()?.reset();
-    this.rows();
-    this.draft.set('');
-    this.replyTo.set(undefined);
     this.composer()?.reset();
   }
 

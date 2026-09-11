@@ -1,27 +1,32 @@
-import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { Component, forwardRef, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
 import {
   IonButton,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
   IonList,
   IonSpinner,
-  ModalController,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import type { MessageResponse, SnowflakeID } from '../../../generated/models';
-import { decodeId } from '../../api/snowflake-id';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
-import { dismissChatOverlays } from '../dismiss-chat-overlays';
 
 @Component({
   selector: 'app-chat-threads',
   templateUrl: './chat-threads.html',
-  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonButton, IonList, IonSpinner, ChatListItem, MessagePreview],
+  imports: [
+    IonInfiniteScroll,
+    IonInfiniteScrollContent,
+    IonButton,
+    IonList,
+    IonSpinner,
+    ChatListItem,
+    forwardRef(() => MessagePreview),
+  ],
 })
 export class ChatThreads {
   readonly chatId = input.required<SnowflakeID>();
@@ -32,8 +37,7 @@ export class ChatThreads {
   protected readonly opening = signal(false);
   protected readonly openFailed = signal(false);
   private readonly api = inject(ChatsService);
-  private readonly router = inject(Router);
-  private readonly modals = inject(ModalController);
+  private readonly navigation = inject(ConversationNavigation);
   private readonly destroy = inject(DestroyRef);
   private version = 0;
 
@@ -86,8 +90,7 @@ export class ChatThreads {
     this.opening.set(true);
     this.openFailed.set(false);
     try {
-      await dismissChatOverlays(this.modals);
-      await this.router.navigate(['/chats/chat', decodeId(root.chatId), 'thread', decodeId(root.id)]);
+      await this.navigation.open(root.chatId, root.id);
     } catch {
       if (!this.destroy.destroyed) this.openFailed.set(true);
     } finally {

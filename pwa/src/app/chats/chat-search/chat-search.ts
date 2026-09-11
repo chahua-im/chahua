@@ -1,6 +1,5 @@
-import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { Component, forwardRef, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
 import {
   IonButton,
   IonInfiniteScroll,
@@ -10,16 +9,14 @@ import {
   IonSegment,
   IonSegmentButton,
   IonSpinner,
-  ModalController,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { MessageSearchSort, type MessageResponse, type SnowflakeID } from '../../../generated/models';
-import { decodeId } from '../../api/snowflake-id';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { Message } from '../../messages/message/message';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
-import { dismissChatOverlays } from '../dismiss-chat-overlays';
 @Component({
   selector: 'app-chat-search',
   templateUrl: './chat-search.html',
@@ -32,7 +29,7 @@ import { dismissChatOverlays } from '../dismiss-chat-overlays';
     IonLabel,
     IonButton,
     IonSpinner,
-    Message,
+    forwardRef(() => Message),
   ],
 })
 export class ChatSearch {
@@ -45,8 +42,7 @@ export class ChatSearch {
   protected readonly error = signal(false);
   protected readonly cursor = signal<number | undefined>(undefined);
   private readonly api = inject(ChatsService);
-  private readonly router = inject(Router);
-  private readonly modals = inject(ModalController);
+  private readonly navigation = inject(ConversationNavigation);
   private readonly destroy = inject(DestroyRef);
   private version = 0;
   constructor() {
@@ -73,12 +69,9 @@ export class ChatSearch {
       this.messages.set([]);
       this.cursor.set(undefined);
     }
-    if (!q) {
-      this.loading.set(false);
-      return;
-    }
-    this.loading.set(true);
     this.error.set(false);
+    this.loading.set(!!q);
+    if (!q) return;
     try {
       const page = await firstValueFrom(
         this.api
@@ -95,14 +88,6 @@ export class ChatSearch {
     }
   }
   protected async locate(message: MessageResponse) {
-    await dismissChatOverlays(this.modals);
-    await this.router.navigate(
-      [
-        '/chats/chat',
-        decodeId(message.chatId),
-        ...(message.replyRootId ? ['thread', decodeId(message.replyRootId)] : []),
-      ],
-      { queryParams: { message: decodeId(message.id) } },
-    );
+    await this.navigation.open(message.chatId, message.replyRootId, message.id);
   }
 }

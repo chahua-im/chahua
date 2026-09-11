@@ -29,7 +29,6 @@ export const routes: Routes = [
     ],
     children: [],
   },
-  { path: 'chats/chat/:id/saved', component: SavedMessagesPage },
   {
     path: 'chats/saved',
     component: SavedMessagesPage,

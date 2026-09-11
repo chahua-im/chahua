@@ -26,11 +26,11 @@ ion-avatar {
 }
 .avatar-badge {
   position: absolute;
-  top: round(var(--avatar-size) / -24, 1px);
-  right: round(var(--avatar-size) / -24, 1px);
-  width: round(var(--avatar-size) * 26 / 48, 1px);
-  height: round(var(--avatar-size) * 26 / 48, 1px);
-  border: 2px solid var(--avatar-badge-border, var(--ion-background-color, #fff));
+  top: -2px;
+  right: -2px;
+  width: max(16px, round(var(--avatar-size) * 0.55, 1px));
+  height: max(16px, round(var(--avatar-size) * 0.55, 1px));
+  box-shadow: 0 0 0 2px var(--avatar-badge-border, var(--ion-background-color, #fff));
   font-size: round(var(--avatar-size) / 4, 1px);
 
   ion-icon {
