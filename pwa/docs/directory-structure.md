@@ -36,7 +36,7 @@ pwa/
 | 目录          | 共享逻辑                                                                                                | 组件范围                                                                                                                                  |
 | ------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | chats         | ChatStore、ChatListStore、ChatPins；分类、日期、邀请与弹窗关闭工具                                      | ChatListPage → ChatList → ChatListContent → ChatListItem；头像、资料、群话题/成员/附件、搜索、邀请、静音、好友资料、创建/加入与旧链接入口 |
-| conversations | ConversationStore、DraftStore、ConversationNavigation；messageRows 分组                                 | ConversationPage、PinnedMessagesPage、SavedMessagesPage；收藏快照转换放在收藏组件旁                                                       |
+| conversations | ConversationStore、DraftStore、ConversationNavigation；messageRows 分组                                 | ConversationPage、PinnedMessagesPage、SavedMessagesPage；共享收藏列表与快照转换在 messages/saved-message-list                                                       |
 | messages      | MessageOutbox、MessageActions、AttachmentUpload；发送状态、变化协议、区间合并、表态、作者配色与媒体规则 | Message 及作者/正文/预览/附件/表态等子组件；Composer、菜单、贴纸、录音/播放、全屏媒体与压缩                                               |
 
 信息页的成员、话题、媒体、搜索和邀请组件属于 `chats`；显示一组搜索结果不等于管理连续的消息区间。收藏与置顶页面复用 Message，不继承 ConversationPage。组件详细树与字段见[组件](components.md)。

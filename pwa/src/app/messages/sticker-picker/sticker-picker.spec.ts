@@ -6,7 +6,6 @@ import { StickersService } from '../../../generated/endpoints/stickers/stickers.
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
-import { MessageAttachments } from '../message-attachments/message-attachments';
 import { StickerPicker } from './sticker-picker';
 
 const sticker: StickerSummary = {
@@ -68,9 +67,7 @@ describe('StickerPicker selection during requests', () => {
           },
         },
       ],
-    })
-      .overrideComponent(StickerPicker, { remove: { imports: [ContentScrollbars] } })
-      .overrideComponent(MessageAttachments, { set: { template: '' } });
+    }).overrideComponent(StickerPicker, { remove: { imports: [ContentScrollbars] } });
   });
   afterEach(() => vi.useRealTimers());
 

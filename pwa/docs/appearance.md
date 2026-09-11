@@ -48,12 +48,13 @@ iOS 根布局以 VisualViewport 的高度和顶部偏移设置 Ionic 已固定�
 同一台 iPhone、viewport 为 device-width 且无额外页面缩放时，UIKit 的布局点与 CSS px 按 1:1 对应；UIKit pt 不是 CSS 的排版单位 pt。桌面截图还受浏览器缩放与 iPhone 镜像窗口缩放影响，不能直接据此推导字号。
 
 - 气泡引用使用作者半粗、摘要常规；3px 作者色竖边、3px/6px 内边距、4px 圆角，双行默认高度 40px，摘要单行省略。
-- 气泡内边距为 6px/11px，连续消息间隔 2px、换作者 5px；消息组上方 2px、下方 3px。头像距消息区域左右边缘均为 7px，与气泡占用同一网格行并底部对齐，不参与消息行高计算；下方表态及重试按钮占用独立行，不改变头像与尖角的对齐。时间在末行有空间时靠右，空间不足时另起一行；其向下偏移由正文与时间行高之差决定。“已编辑”、时间与发送状态使用气泡文字颜色的 60% 不透明度，随亮暗主题及收发气泡配色变化。
-- 表态统一位于气泡下方，沿用 main 的 `ReactionPill.module.scss`：上下外边距 8px、胶囊间距 4px、圆角 12px；表情 18.5px，外边距 0.5px/0/0.5px/6px；头像 23px、1px currentColor 边框、重叠 9px，头像组外边距 1.5px。手机与桌面共用这些尺寸，胶囊高度随内容决定；配色使用 Ionic 的 light-shade、primary-tint 和 primary-shade。
+- 气泡内边距为 6px/11px，连续消息间隔 2px、换作者 5px；消息组上方 2px、下方 3px。头像距消息区域左右边缘均为 7px，与气泡、桌面回复按钮占用同一网格行并底部对齐，不参与消息行高计算；下方表态及重试按钮占用独立行，不改变头像、尖角和回复按钮的对齐。时间在末行有空间时靠右，空间不足时另起一行；其向下偏移由正文与时间行高之差决定。“已编辑”、时间与发送状态统一使用气泡文字颜色的 70% 不透明度，随亮暗主题及收发气泡配色变化。
+- 表态独立位于消息主体下方，上下外边距 4px。胶囊造型沿用 main 的 `ReactionPill.module.scss`：胶囊间距 4px、圆角 12px；表情 18.5px，外边距 0.5px/0/0.5px/6px；头像 23px、1px currentColor 边框、重叠 9px，头像组外边距 1.5px。手机与桌面共用这些尺寸，胶囊高度随内容决定；配色使用 Ionic 的 light-shade、primary-tint 和 primary-shade。
 - 消息操作面板最大宽度 276px，内边距 6px，每行最多 5 项、按钮高 63px；不足 5 项时保持按钮宽度并随内容收窄。表态条与消息预览独立定宽，预览包含 34px 头像和原有 10px 间距。遮罩和内容以 180ms 淡入、120ms 淡出，菜单同时在 0.96 与 1 之间缩放；使用 Ionic 动画，消息本身不缩放。预览保留原消息横向位置与宽度，以原内容顶部对齐，新增作者行向上展开；表态和操作面板各自保留距屏幕安全区域边缘至少 12px 的空间，不带动头像横移。竖向避让的位移与 180ms 入场动画同步。
 - 回复输入栏的上下两部分使用相同的内部控件高度。引用文字默认 12px/14px，2px 竖线默认 29px 高；竖线与 textarea 文字共用起点，取消按钮与贴纸按钮对齐。它是紧凑附件栏，不照搬气泡引用的高度。
+- 贴纸面板高 260px，网格行高随正方形按钮自然展开，超出面板后纵向滚动；底部包栏固定可见。图片与视频缩略图在 72px 方框内等比居中显示，不裁切。
 - 输入框文字使用正文角色，文字区域与 Ionic 自动增高镜像共用行高。上下留白由控件高度、边框和行高计算；文字和语音发送飞机均向右偏移 1.5px。
-- 回复按钮按操作系统选择：iOS、iPadOS 与 Android 隐藏按钮，使用左滑回复；桌面系统在消息旁边预留按钮位置，仅整行 hover 时显示。平台规则与字号一起在全局样式定义，切换触摸模拟或连接触屏不改变按钮占位。
+- 回复按钮按操作系统选择：iOS、iPadOS 与 Android 隐藏按钮，使用左滑回复，图标相对气泡竖直居中，不计下方表态高度；桌面系统在消息旁边预留按钮位置，仅整行 hover 时显示。平台规则与字号一起在全局样式定义，切换触摸模拟或连接触屏不改变按钮占位。
 - 发送气泡保留应用蓝色与白色文字。媒体预览从顶部开始，按钮悬浮，底部为同消息 gallery。
 
 引用形状、气泡内边距和消息分组参考 [TG iOS 引用布局](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageReplyInfoNode/Sources/ChatMessageReplyInfoNode.swift)与[消息布局常量](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageItemCommon/Sources/ChatMessageItemCommon.swift)。参数表达应用的外观选择，不意味着在所有主题和系统字体设置下与 TG 逐像素一致。
@@ -73,7 +74,8 @@ iOS 根布局以 VisualViewport 的高度和顶部偏移设置 Ionic 已固定�
 | ChatAvatar                             | 默认列表头像使用平台尺寸；显式 88px 等尺寸用于资料；话题角标、边框及占位。                                                               |
 | ChatDetails                            | 内容容器、安全区、居中资料、横排操作及五个等分标签。                                                                                     |
 | ConversationPage                       | 360px 信息栏、手动锚点下关闭浏览器二次锚定、未读线、下箭头与置顶/回复栏；主 toolbar 保留底边，置顶栏有自己的底边。                       |
-| SavedMessagesPage / PinnedMessagesPage | 消息背景；收藏来源与快照操作排列。                                                                                                       |
+| SavedMessagesPage / PinnedMessagesPage | 消息页面背景。                                                                                                       |
+| SavedMessageList                       | 收藏消息背景、来源与快照操作排列；供页面及信息标签共用。 |
 | Message                                | 气泡、尾巴、作者分组、媒体贴边、时间、引用、桌面 hover 与手机回复手势反馈。                                                              |
 | MessageAuthor                          | 用户名、用户组和性别在同一行的颜色及密度。                                                                                               |
 | MessageReactions                       | 气泡下方的表情、计数和重叠用户头像。                                                                                             |

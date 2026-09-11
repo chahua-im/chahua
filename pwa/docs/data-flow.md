@@ -19,7 +19,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                              | 应用；本机意图保存到 localStorage    |
 | AppUpdates             | 检查更新和可更新状态                                                    | 应用                                 |
 
-ChatPins 是 ChatStore 内部的普通对象，不是额外服务。UserProfile、ChatDetails 和 ConversationPage 共享按 UID 的好友关系查询。收藏由 SavedMessagesPage 持有快照，不进入活消息缓存。组件字段见[组件](components.md)。
+ChatPins 是 ChatStore 内部的普通对象，不是额外服务。UserProfile、ChatDetails 和 ConversationPage 共享按 UID 的好友关系查询。收藏由 SavedMessageList 持有快照，不进入活消息缓存。组件字段见[组件](components.md)。
 
 同一对象被多处引用不构成数据副本，不为节省指针改成 ID。ID 用于查询成员、导航目标和需要回到共享状态查找最新内容的地方；不能从服务派生的表单、滚动与搜索状态由组件持有。
 
@@ -89,9 +89,9 @@ Service Worker 缓存应用资源和表情数据，不缓存业务 API。共享�
 | 回复预览或话题根缺失          | `GET /chats/{c}/messages/{m}`                                          | 页面局部预览                                |
 | 活跃可见消息进入视口          | 普通/话题 read 的 POST，1 秒合并目标                                   | ChatStore 更新读状态和计数                  |
 | 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                               |
-| 全局或单聊天收藏              | `GET /saved-messages` 或 `/chats/{c}/saved-messages`，limit=50、before | SavedMessagesPage 快照                      |
+| 全局或单聊天收藏              | `GET /saved-messages` 或 `/chats/{c}/saved-messages`，limit=50、before | SavedMessageList 快照                      |
 | 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标       |
-| 资料中的成员标签              | `GET /group/{c}/members`，limit、after                                 | ChatMembers 局部分页                        |
+| 群资料中的成员标签              | `GET /group/{c}/members`，limit、after                                 | ChatMembers 局部分页                        |
 | 资料中的话题标签              | `GET /chats/{c}/messages?max=50`，before                               | ChatThreads 筛选 threadInfo 根消息          |
 | 资料中的媒体标签              | `GET /chats/{c}/attachments`，kind、limit、before                      | ChatAttachments 局部分页                    |
 | 打开媒体或定位附件            | `GET /chats/{c}/messages/{m}`                                          | 当前消息的媒体集合，或所属话题路由          |
@@ -108,6 +108,8 @@ Service Worker 缓存应用资源和表情数据，不缓存业务 API。共享�
 列表查询按普通/归档范围共享成员和进行中的请求；记录成员 ID、游标和覆盖边界，字段从 ChatStore 派生。刷新读取到已加载条目数或末尾，齐备后替换，期间保留现有内容。初次显示或切分类等待当前分类的列表查询，固定入口和归档角标不参与等待。
 
 只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
+
+ThreadParticipants 优先读取 ChatStore 的话题参与者缓存，并合并 ConversationPage 经 ChatDetails 传入的已加载话题消息作者；缺少缓存时标明名单仅覆盖已加载范围，不额外读取历史。SavedMessagesPage 与 ChatDetails 共用 SavedMessageList，收藏范围是整个所属聊天；独立页面离开时销毁列表，重新进入时重新读取。
 
 资料列表的游标与请求属于各组件，切换标签后释放；使用 Ionic infinite-scroll；成员、媒体和搜索首屏不足一屏时 fillScrollViewport 继续补页。ChatThreads 的游标来自原始消息响应，不从筛选结果推算；只由触底触发续页，空话题页不连续扫描历史，结果不限订阅状态。搜索与媒体汇总作用于所属聊天。
 

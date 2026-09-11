@@ -1,0 +1,53 @@
+<div class="message-list">
+  @for (row of savedRows(); track row.item.id) {
+    @let item = row.item;
+    <div>
+      <p class="saved-source">{{ item.chat.name }} · {{ item.originalCreatedAt | date: 'yyyy年M月d日' }}</p>
+      <app-message
+        [message]="row.content"
+        [interactive]="false"
+        [own]="item.originalSenderUid === session.user()?.uid"></app-message>
+      <div class="collection-actions">
+        <ion-button fill="clear" [disabled]="!item.canLocateContext" (click)="locateSaved(item)">查看原消息</ion-button>
+        <ion-button
+          fill="clear"
+          color="danger"
+          [disabled]="!!removingSavedId() || loading()"
+          (click)="removeSaved(item)">
+          <span class="action-content" [class.busy]="removingSavedId() === item.id">
+            <span class="action-label">取消收藏</span>
+            @if (removingSavedId() === item.id) {
+              <ion-spinner></ion-spinner>
+            }
+          </span>
+        </ion-button>
+      </div>
+    </div>
+  } @empty {
+    @if (!loading() && !failed()) {
+      <p class="ion-text-center">暂无收藏</p>
+    }
+  }
+</div>
+<ion-infinite-scroll
+  threshold="100px"
+  [disabled]="nextCursor() == null || loading() || failed()"
+  (ionInfinite)="more($event)">
+  <ion-infinite-scroll-content />
+</ion-infinite-scroll>
+@if (loading()) {
+  <div class="loading-status">
+    <ion-spinner></ion-spinner>
+  </div>
+}
+@if (failed()) {
+  <div class="ion-text-center">
+    <p>消息加载失败，请重试。</p>
+    <ion-button fill="clear" (click)="load(!!nextCursor())">重试</ion-button>
+  </div>
+}
+<ion-toast
+  [isOpen]="removeFailed()"
+  message="操作失败，请重试。"
+  [duration]="2500"
+  (didDismiss)="removeFailed.set(false)"></ion-toast>

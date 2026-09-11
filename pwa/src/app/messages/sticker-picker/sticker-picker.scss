@@ -8,6 +8,7 @@
 .sticker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  grid-auto-rows: max-content;
   gap: 4px;
   align-content: start;
   padding: 8px;
@@ -34,11 +35,11 @@
   background: var(--ion-background-color-step-100, var(--ion-color-light));
   transform: scale(0.88);
 }
-.sticker-item app-message-attachments {
-  display: block;
+.sticker-item img,
+.sticker-item video {
   height: 72px;
   width: 72px;
-  overflow: hidden;
+  object-fit: contain;
   pointer-events: none;
 }
 .pack-bar {

@@ -2,22 +2,6 @@
   @if (message().messageType === system) {
     <p class="system-message"><app-message-preview [message]="message()"></app-message-preview></p>
   } @else {
-    @if (canInteract() && canReply()) {
-      <div class="swipe-reply" [style.opacity]="swipe() / 60" [class.burst]="burst()" (animationend)="burst.set(false)">
-        <svg viewBox="0 0 512 512">
-          <path
-            d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="35"
-            stroke-linejoin="round" />
-          <path
-            d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
-            fill="currentColor"
-            [style.clip-path]="'inset(' + (100 - (swipe() > 30 ? ((swipe() - 30) / 30) * 100 : 0)) + '% 0 0)'" />
-        </svg>
-      </div>
-    }
     <div
       class="chat-row"
       [class.sent]="own()"
@@ -31,103 +15,122 @@
       (pointermove)="moveSwipe($event)"
       (pointerup)="endSwipe()"
       (pointercancel)="endSwipe(true)">
-      <div class="message-stack">
-        <span class="avatar-slot">
-          @if (showAvatar()) {
-            <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
-              @if (message().sender.avatarUrl; as src) {
-                <img [src]="src" width="34" height="34" decoding="async" />
-              } @else {
-                {{ (name() | avatarText: 2).toUpperCase() }}
-              }
-            </ion-avatar>
-          }
-        </span>
+      @if (canInteract() && canReply()) {
         <div
-          #bubble
-          [class]="isSticker() && !preview() ? 'sticker-content' : 'bubble'"
-          [class.media-only]="mediaOverlay()"
-          [class.has-thread]="!!threadInfo()"
-          [attr.inert]="preview() ? '' : null"
-          (contextmenu)="showMenu($event, bubble)"
-          (pointerdown)="startPress($event, bubble)">
-          @if (first() && (!isSticker() || preview())) {
-            <app-message-author class="sender" [sender]="message().sender" [own]="own()"></app-message-author>
-          }
-          @if (quoted(); as quote) {
-            <button
-              type="button"
-              class="reply-preview"
-              [disabled]="jumpDisabled() || !canInteract()"
-              [class.busy]="jumpingTo() === quote.id"
-              (click)="jump.emit(quote.id)">
-              <span class="reply-content">
-                <span class="reply-name">{{ quoteName() }}</span>
-                <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
-              </span>
-              @if (jumpingTo() === quote.id) {
-                <ion-spinner></ion-spinner>
-              }
-            </button>
-          }
-          @if (hasMedia()) {
-            <div class="media-content" (click)="sticker($event)">
-              <app-message-attachments
-                [message]="message()"
-                [overlayTime]="mediaOverlay()"
-                [delivery]="status()"
-                [uploads]="uploads()"></app-message-attachments>
-            </div>
-          }
-          @if (!mediaOverlay()) {
-            <div class="message-body">
-              @if (!hasMedia()) {
-                <span class="message-text">
-                  @if (message().messageType === Type.invite) {
-                    <button type="button" class="invite-card" [disabled]="!canInteract()" (click)="invite($event)">
-                      <app-invite-card [code]="message().message ?? ''" />
-                    </button>
-                  } @else if (message().message) {
-                    <app-message-text
-                      [text]="message().message!"
-                      [mentions]="message().mentions ?? []"
-                      [interactive]="canInteract()" />
-                  } @else {
-                    <app-message-preview [message]="message()" />
-                  }
-                </span>
-              } @else if (message().message) {
-                <span class="message-text">
+          class="swipe-reply"
+          [style.translate]="swipe() + 'px -50%'"
+          [style.opacity]="swipe() / 60"
+          [class.burst]="burst()"
+          (animationend)="burst.set(false)">
+          <svg viewBox="0 0 512 512">
+            <path
+              d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="35"
+              stroke-linejoin="round" />
+            <path
+              d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
+              fill="currentColor"
+              [style.clip-path]="'inset(' + (100 - (swipe() > 30 ? ((swipe() - 30) / 30) * 100 : 0)) + '% 0 0)'" />
+          </svg>
+        </div>
+      }
+      <span class="avatar-slot">
+        @if (showAvatar()) {
+          <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
+            @if (message().sender.avatarUrl; as src) {
+              <img [src]="src" width="34" height="34" decoding="async" />
+            } @else {
+              {{ (name() | avatarText: 2).toUpperCase() }}
+            }
+          </ion-avatar>
+        }
+      </span>
+      <div
+        #bubble
+        [class]="isSticker() && !preview() ? 'sticker-content' : 'bubble'"
+        [class.media-only]="mediaOverlay()"
+        [class.has-thread]="!!threadInfo()"
+        [attr.inert]="preview() ? '' : null"
+        (contextmenu)="showMenu($event, bubble)"
+        (pointerdown)="startPress($event, bubble)">
+        @if (first() && (!isSticker() || preview())) {
+          <app-message-author class="sender" [sender]="message().sender" [own]="own()"></app-message-author>
+        }
+        @if (quoted(); as quote) {
+          <button
+            type="button"
+            class="reply-preview"
+            [disabled]="jumpDisabled() || !canInteract()"
+            [class.busy]="jumpingTo() === quote.id"
+            (click)="jump.emit(quote.id)">
+            <span class="reply-content">
+              <span class="reply-name">{{ quoteName() }}</span>
+              <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
+            </span>
+            @if (jumpingTo() === quote.id) {
+              <ion-spinner></ion-spinner>
+            }
+          </button>
+        }
+        @if (hasMedia()) {
+          <div class="media-content" (click)="sticker($event)">
+            <app-message-attachments
+              [message]="message()"
+              [overlayTime]="mediaOverlay()"
+              [delivery]="status()"
+              [uploads]="uploads()"></app-message-attachments>
+          </div>
+        }
+        @if (!mediaOverlay()) {
+          <div class="message-body">
+            @if (!hasMedia()) {
+              <span class="message-text">
+                @if (message().messageType === Type.invite) {
+                  <button type="button" class="invite-card" [disabled]="!canInteract()" (click)="invite($event)">
+                    <app-invite-card [code]="message().message ?? ''" />
+                  </button>
+                } @else if (message().message) {
                   <app-message-text
                     [text]="message().message!"
                     [mentions]="message().mentions ?? []"
                     [interactive]="canInteract()" />
-                </span>
-              }
-              <time class="timestamp" [attr.datetime]="message().createdAt">
-                @if (message().isEdited) {
-                  <span>已编辑</span>
+                } @else {
+                  <app-message-preview [message]="message()" />
                 }
-                {{ message().createdAt | date: 'HH:mm' }}
-                <app-message-status [delivery]="status()" />
-              </time>
-            </div>
-          }
-          @if (threadInfo(); as info) {
-            <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
-          }
-        </div>
-        @if (status() === Delivery.Failed && !preview()) {
-          <button type="button" class="retry-button" (click)="retry.emit()">发送失败，点击重试</button>
+              </span>
+            } @else if (message().message) {
+              <span class="message-text">
+                <app-message-text
+                  [text]="message().message!"
+                  [mentions]="message().mentions ?? []"
+                  [interactive]="canInteract()" />
+              </span>
+            }
+            <time class="timestamp" [attr.datetime]="message().createdAt">
+              @if (message().isEdited) {
+                <span>已编辑</span>
+              }
+              {{ message().createdAt | date: 'HH:mm' }}
+              <app-message-status [delivery]="status()" />
+            </time>
+          </div>
         }
-        @if (hasReactions()) {
-          <app-message-reactions
-            [reactions]="message().reactions ?? []"
-            [own]="own()"
-            [preview]="!canInteract()"
-            (react)="react.emit($event)"></app-message-reactions>
+        @if (threadInfo(); as info) {
+          <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
         }
       </div>
+      @if (status() === Delivery.Failed && !preview()) {
+        <button type="button" class="retry-button" (click)="retry.emit()">发送失败，点击重试</button>
+      }
+      @if (hasReactions()) {
+        <app-message-reactions
+          [reactions]="message().reactions ?? []"
+          [own]="own()"
+          [preview]="!canInteract()"
+          (react)="react.emit($event)"></app-message-reactions>
+      }
       @if (canInteract()) {
         <button type="button" class="reply-button" [disabled]="!canReply()" (click)="reply.emit(message())">
           <ion-icon [icon]="replyIcon"></ion-icon>

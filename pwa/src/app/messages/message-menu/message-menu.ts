@@ -23,6 +23,7 @@ import {
   copyOutline,
   linkOutline,
   peopleOutline,
+  pencilOutline,
   pinOutline,
   trashOutline,
 } from 'ionicons/icons';
@@ -124,6 +125,7 @@ export class MessageMenu {
     chatbubblesOutline,
     copyOutline,
     linkOutline,
+    pencilOutline,
     pinOutline,
     trashOutline,
   };
@@ -218,8 +220,7 @@ export class MessageMenu {
         const top = (viewport?.offsetTop ?? 0) + parseFloat(style.paddingTop) + 12;
         const availableWidth = (viewport?.width ?? window.innerWidth) - horizontalInset - 24;
         const availableHeight = (viewport?.height ?? window.innerHeight) - verticalInset - 24;
-        const avatarSpace =
-          row.querySelector<HTMLElement>('.avatar-slot')!.offsetWidth + parseFloat(getComputedStyle(row).gap);
+        const avatarSpace = row.querySelector<HTMLElement>('.avatar-slot')!.offsetWidth;
         const previewWidth = rect.width + avatarSpace;
         preview.style.width = `${previewWidth}px`;
         stack.style.width = `${Math.min(Math.max(previewWidth, 276), availableWidth)}px`;
