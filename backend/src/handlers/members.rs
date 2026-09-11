@@ -416,10 +416,15 @@ async fn delete_remove_member(
         }
     }
 
-    diesel::delete(
-        group_membership::table.filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(target_uid))),
-    )
-    .execute(conn)?;
+    conn.transaction(|conn| {
+        diesel::delete(
+            group_membership::table
+                .filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(target_uid))),
+        )
+        .execute(conn)?;
+        crate::services::threads::unsubscribe_user_from_chat(conn, chat_id, target_uid)?;
+        Ok::<(), diesel::result::Error>(())
+    })?;
 
     let (sys_sender_uid, sys_msg) = if is_admin_removing_other {
         (uid, format!("removed {}", target_username))

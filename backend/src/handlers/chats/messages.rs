@@ -692,7 +692,7 @@ pub(super) async fn post_thread_message(
 
         // Ensure the root author has an initial participant row without
         // overriding any existing subscription or archive preference.
-        if root_msg.sender_uid != uid {
+        if root_msg.sender_uid != uid && send_result.member_uids.contains(&root_msg.sender_uid) {
             crate::services::threads::ensure_thread_user_state(
                 conn,
                 chat_id,
@@ -705,7 +705,7 @@ pub(super) async fn post_thread_message(
         // Auto-subscribe mentioned users
         if let Some(ref text) = response.message {
             for mentioned_uid in extract_mention_uids(text) {
-                if mentioned_uid != uid {
+                if mentioned_uid != uid && send_result.member_uids.contains(&mentioned_uid) {
                     crate::services::threads::ensure_thread_subscription(
                         conn,
                         chat_id,
