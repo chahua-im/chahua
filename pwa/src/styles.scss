@@ -264,6 +264,18 @@ ion-infinite-scroll.infinite-scroll-loading + .loading-status {
   }
 }
 
+// Use the same box and Ionic slot for an action icon and its loading indicator.
+.action-icon {
+  width: 24px;
+  height: 24px;
+  font-size: 24px;
+  flex-shrink: 0;
+}
+.action-content.icon-content > :is(ion-icon, ion-spinner) {
+  width: 1em;
+  height: 1em;
+}
+
 input.field,
 textarea.field {
   width: 100%;
@@ -308,4 +320,8 @@ ion-list > ion-item-sliding:last-child ion-item,
 ion-list > app-chat-list-item:last-child ion-item {
   --inner-border-width: 0;
   --border-width: 0;
+}
+
+.action-sheet-button.mute-permanent {
+  color: var(--ion-color-danger);
 }

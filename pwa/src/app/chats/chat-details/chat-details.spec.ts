@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { AlertController, IonActionSheet, IonToast } from '@ionic/angular';
+import { AlertController, IonToast } from '@ionic/angular';
 import { archive, archiveOutline, starOutline } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -25,8 +25,6 @@ describe('ChatDetails', () => {
   const alert = { present: vi.fn(), onDidDismiss: vi.fn() };
   beforeEach(() => {
     vi.spyOn(IonToast.prototype, 'present').mockResolvedValue();
-    vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
-    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(withInterceptors([jsonInterceptor])),
@@ -56,6 +54,12 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     return fixture;
   }
+
+  it('keeps search and mute out of the profile and places invites before leaving', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const buttons = [...fixture.nativeElement.querySelectorAll('.quick-actions ion-button')];
+    expect(buttons.map((button: Element) => button.textContent?.trim())).toEqual(['邀请', '退群']);
+  });
 
   it('has no chat-specific saved messages tab or menu entry', async () => {
     const fixture = await open();
@@ -112,7 +116,6 @@ describe('ChatDetails', () => {
     expect(fixture.nativeElement.querySelector('.profile h2').textContent.trim()).toBe(testChat.name);
     expect(fixture.componentInstance['chat']()).toBe(store.get(testChat.id));
     expect(fixture.componentInstance['busy']()).toBe(false);
-    expect(fixture.nativeElement.querySelectorAll('.quick-actions ion-button')[1].textContent.trim()).toBe('永久');
     expect(fixture.nativeElement.querySelector('ion-content > .loading-status')).toBeNull();
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
     details.flush({ ...wireChat, description: '群介绍' });
@@ -195,37 +198,6 @@ describe('ChatDetails', () => {
     http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true });
     await fixture.whenStable();
     fixture.detectChanges();
-  });
-
-  it('shares mute updates with the list and reflects websocket changes without another detail request', async () => {
-    const fixture = await open();
-    const component = fixture.componentInstance;
-    const muting = component['toggleMute']();
-    await component['toggleMute'](); // A second tap while busy must not submit a duplicate.
-    await vi.waitFor(() => {
-      const request = http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/mute` });
-      expect(request.request.body).toEqual({ durationSeconds: 3600 });
-      request.flush({ mutedUntil: '9999-12-31T23:59:59Z', archived: false });
-    });
-    await muting;
-    expect(component['muted']()).toBe(true);
-    expect(TestBed.inject(ChatStore).chatState(testChat.id)?.mutedUntil).toBe('9999-12-31T23:59:59Z');
-    events.next({
-      type: ServerWsMessageType.chatArchiveStateChanged,
-      payload: { chatId: testChat.id, archived: false },
-    });
-    expect(component['muted']()).toBe(false);
-  });
-
-  it('uses detail mute state when opening a chat missing from the list', async () => {
-    const fixture = await open({ ...wireChat, mutedUntil: '9999-12-31T23:59:59Z' });
-    expect(fixture.componentInstance['muted']()).toBe(true);
-    realtime.accept(testMessage); // A message preview does not provide mute state.
-    expect(fixture.componentInstance['muted']()).toBe(true);
-    const unmuting = fixture.componentInstance['toggleMute']();
-    http.expectOne({ method: 'DELETE', url: `/_api/group/${wireChat.id}/mute` }).flush(null);
-    await unmuting;
-    expect(fixture.componentInstance['muted']()).toBe(false);
   });
 
   it('keeps the newest chat when a previous detail request completes later', async () => {
@@ -412,18 +384,18 @@ describe('ChatDetails', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     const buttons = () => [...fixture.nativeElement.querySelectorAll('.quick-actions ion-button')] as HTMLElement[];
-    expect(buttons().map((button) => button.textContent?.trim())).toEqual(['搜索', '订阅']);
-    expect(buttons()[1].querySelector('ion-icon')?.icon).toBe(starOutline);
+    expect(buttons().map((button) => button.textContent?.trim())).toEqual(['订阅']);
+    expect(buttons()[0].querySelector('ion-icon')?.icon).toBe(starOutline);
     expect(fixture.nativeElement.querySelector('.profile p').textContent.trim()).toBe(`${testChat.name} 中的话题`);
     for (const [method, endpoint, label, icon] of [
       ['PUT', 'subscribe', '归档', archiveOutline],
       ['PUT', 'archive', '已归档', archive],
       ['DELETE', 'archive', '归档', archiveOutline],
     ]) {
-      const previousLabel = buttons()[1].textContent?.trim();
-      buttons()[1].click();
+      const previousLabel = buttons()[0].textContent?.trim();
+      buttons()[0].click();
       fixture.detectChanges();
-      expect(buttons()[1].querySelector('ion-spinner')).not.toBeNull();
+      expect(buttons()[0].querySelector('ion-spinner')).not.toBeNull();
       const write = http.expectOne({
         method,
         url: `/_api/chats/${wireChat.id}/threads/${decodeId(testMessage.id)}/${endpoint}`,
@@ -439,15 +411,15 @@ describe('ChatDetails', () => {
         method: 'GET',
         url: `/_api/chats/${wireChat.id}/threads/${decodeId(testMessage.id)}/subscribe`,
       });
-      const loadingLabel = buttons()[1].textContent?.trim();
+      const loadingLabel = buttons()[0].textContent?.trim();
       refresh.flush({ subscribed: true, archived: label === '已归档' });
       await fixture.whenStable();
       write.flush(null);
       expect(loadingLabel).toBe(previousLabel);
       await fixture.whenStable();
       fixture.detectChanges();
-      expect(buttons().map((button) => button.textContent?.trim())).toEqual(['搜索', label]);
-      await vi.waitFor(() => expect(buttons()[1].querySelector('ion-icon')?.icon).toBe(icon));
+      expect(buttons().map((button) => button.textContent?.trim())).toEqual([label]);
+      await vi.waitFor(() => expect(buttons()[0].querySelector('ion-icon')?.icon).toBe(icon));
     }
     expect(fixture.nativeElement.querySelector('.avatar-badge').textContent.trim()).toBe('测');
     expect(fixture.nativeElement.querySelector('app-chat-avatar').style.getPropertyValue('--avatar-size')).toBe('88px');
