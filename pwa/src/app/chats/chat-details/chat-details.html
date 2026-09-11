@@ -13,35 +13,54 @@
     @case (View.Search) {
       <app-chat-search [chatId]="chatId" />
     }
-    @case (View.Edit) {
-      <ion-list [inset]="true">
-        <ion-item><input class="field" [formField]="fields.name" placeholder="群名称" /></ion-item>
-        <ion-item><textarea class="field" [formField]="fields.description" placeholder="群简介"></textarea></ion-item>
-        <ion-item>
-          <ion-select label="群可见性" [formField]="fields.visibility">
-            <ion-select-option [value]="Visibility.private">私密</ion-select-option>
-            <ion-select-option [value]="Visibility.semi_public">半公开</ion-select-option>
-            <ion-select-option [value]="Visibility.public">公开</ion-select-option>
-          </ion-select>
-        </ion-item>
-      </ion-list>
-      <input #avatarInput type="file" accept="image/*" hidden (change)="avatar($event)" />
-      <ion-button fill="clear" [disabled]="busy()" (click)="avatarInput.click()">更换头像</ion-button>
-      <ion-button [disabled]="busy() || !values().name.trim()" (click)="save()">保存</ion-button>
-    }
     @default {
       @if (chat() || person()) {
         <div class="profile ion-text-center ion-padding">
-          <app-chat-avatar [entry]="avatarEntry()" [size]="88" />
-          <h2>
-            @if (threadId()) {
-              @if (threadRoot(); as root) {
-                <app-message-preview [message]="root" />
-              } @else {
-                话题
-              }
+          <div class="profile-avatar">
+            <app-chat-avatar [entry]="avatarEntry()" [size]="88" />
+            @if (canManage()) {
+              <input #avatarInput type="file" accept="image/*" hidden (change)="avatar($event)" />
+              <button type="button" class="avatar-edit" [disabled]="busy()" (click)="avatarInput.click()">
+                @if (pending() === Action.Avatar) {
+                  <span class="avatar-upload"><app-upload-progress [value]="avatarProgress()" /></span>
+                } @else {
+                  <ion-icon [icon]="icons.cameraOutline" />
+                }
+              </button>
+            }
+          </div>
+          <h2 [class.editable]="canManage()">
+            @if (canManage() && edits().name != null) {
+              <input
+                class="profile-input"
+                [formField]="fields.name!.value"
+                [readOnly]="pending() === Action.Name"
+                (keydown)="editKeydown($event, Field.Name)" />
             } @else {
-              {{ person()?.username ?? chat()?.name ?? '用户' }}
+              <span class="profile-title">
+                @if (threadId()) {
+                  @if (threadRoot(); as root) {
+                    <app-message-preview [message]="root" />
+                  } @else {
+                    话题
+                  }
+                } @else {
+                  {{ person()?.username ?? chat()?.name ?? '用户' }}
+                }
+              </span>
+            }
+            @if (canManage()) {
+              <button
+                type="button"
+                class="field-edit"
+                [disabled]="busy() || (edits().name != null && !edits().name?.value?.trim())"
+                (click)="edits().name == null ? edit(Field.Name) : save(Field.Name)">
+                @if (pending() === Action.Name) {
+                  <ion-spinner />
+                } @else {
+                  <ion-icon [icon]="edits().name == null ? icons.createOutline : icons.checkmarkOutline" />
+                }
+              </button>
             }
           </h2>
           @if (threadId()) {
@@ -50,8 +69,32 @@
             @if (user.userGroup; as group) {
               <p>{{ group.name }}</p>
             }
-          } @else if (chat()?.description) {
-            <p>{{ chat()?.description }}</p>
+          } @else if (chat()?.description || canManage()) {
+            <p [class.editable]="canManage()">
+              @if (canManage() && edits().description != null) {
+                <textarea
+                  class="profile-input"
+                  rows="3"
+                  [formField]="fields.description!.value"
+                  [readOnly]="pending() === Action.Description"
+                  (keydown)="editKeydown($event, Field.Description)"></textarea>
+              } @else {
+                <span>{{ chat()?.description || '添加群简介' }}</span>
+              }
+              @if (canManage()) {
+                <button
+                  type="button"
+                  class="field-edit"
+                  [disabled]="busy()"
+                  (click)="edits().description == null ? edit(Field.Description) : save(Field.Description)">
+                  @if (pending() === Action.Description) {
+                    <ion-spinner />
+                  } @else {
+                    <ion-icon [icon]="edits().description == null ? icons.createOutline : icons.checkmarkOutline" />
+                  }
+                </button>
+              }
+            </p>
           }
         </div>
         <div class="quick-actions ion-padding-horizontal" [class.user-actions]="!!person()">
@@ -158,17 +201,11 @@
               </span>
             </ion-button>
           }
-          @if (!threadId() && chat()?.kind === Kind.group && chat()?.myRole === Role.admin) {
+          @if (canManage()) {
             <ion-button fill="solid" (click)="view.set(View.Invites)">
               <span>
                 <ion-icon [icon]="icons.linkOutline" />
                 邀请
-              </span>
-            </ion-button>
-            <ion-button fill="solid" (click)="moreMenu.present($event)">
-              <span>
-                <ion-icon [icon]="icons.ellipsisHorizontal" />
-                更多
               </span>
             </ion-button>
           }
@@ -211,9 +248,6 @@
       }
     }
   }
-  @if (pending() === Action.Save || pending() === Action.Avatar) {
-    <div class="loading-status"><ion-spinner /></div>
-  }
   @if (error() || relationshipQuery()?.error()) {
     <p class="ion-padding">
       操作失败，请重试。
@@ -221,16 +255,5 @@
     </p>
   }
 </ion-content>
-<ion-popover #moreMenu [dismissOnSelect]="true" side="bottom" alignment="end">
-  <ng-template>
-    @if (!threadId() && chat()?.kind === Kind.group && chat()?.myRole === Role.admin) {
-      <ion-list>
-        <ion-item [button]="true" (click)="edit()">
-          <ion-icon slot="start" color="primary" [icon]="icons.createOutline" />
-          <ion-label>编辑群资料</ion-label>
-        </ion-item>
-      </ion-list>
-    }
-  </ng-template>
-</ion-popover>
 <app-chat-mute />
+<ion-toast #saveError message="保存失败，请重试。" [duration]="3000" />

@@ -166,18 +166,21 @@ describe('MessageAttachments', () => {
           ? (fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer).src()
           : node.getAttribute(attribute),
       ).toBe(local.url);
-      expect(element.querySelectorAll(`${frame} ion-spinner`)).toHaveLength(1);
+      expect(element.querySelectorAll(`${frame} app-upload-progress`)).toHaveLength(1);
+      const ring = element.querySelector(`${frame} app-upload-progress`)!;
+      expect(ring.querySelector('.progress')?.getAttribute('stroke-dashoffset')).toBe('100');
       expect(element.textContent).not.toMatch(/加载中|上传中|处理中/);
       local.state.set({ status: UploadStatus.Uploading, progress: 0.4, width: 600, height: 1200 });
       await fixture.whenStable();
-      expect(element.querySelector(`${frame} ion-spinner`)).not.toBeNull();
+      expect(element.querySelector(`${frame} app-upload-progress`)).toBe(ring);
+      expect(ring.querySelector('.progress')?.getAttribute('stroke-dashoffset')).toBe('60');
       expect(element.querySelector(media)).toBe(node);
       if (frame === '.media-frame') {
         expect(element.querySelector<HTMLElement>(frame)?.style.aspectRatio).toBe('600 / 1200');
       }
       local.state.set({ status: UploadStatus.Failed, progress: 0.4 });
       await fixture.whenStable();
-      expect(element.querySelector('ion-spinner')).toBeNull();
+      expect(element.querySelector('app-upload-progress')).toBeNull();
       expect(
         media === 'app-voice-player'
           ? (fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer).src()
@@ -185,10 +188,10 @@ describe('MessageAttachments', () => {
       ).toBe(local.url);
       local.state.set({ status: UploadStatus.Uploading, progress: 0 });
       await fixture.whenStable();
-      expect(element.querySelector(`${frame} ion-spinner`)).not.toBeNull();
+      expect(element.querySelector(`${frame} app-upload-progress`)).not.toBeNull();
       local.state.set({ status: UploadStatus.Ready, progress: 1, id: image.id });
       await fixture.whenStable();
-      expect(element.querySelector('ion-spinner')).toBeNull();
+      expect(element.querySelector('app-upload-progress')).toBeNull();
       expect(
         media === 'app-voice-player'
           ? (fixture.debugElement.query(By.directive(VoicePlayer)).componentInstance as VoicePlayer).src()
@@ -218,10 +221,10 @@ describe('MessageAttachments', () => {
     first.state.set({ status: UploadStatus.Ready, progress: 1, id: image.id });
     second.state.set({ status: UploadStatus.Uploading, progress: 0.6 });
     await fixture.whenStable();
-    expect(frames[0].querySelector('ion-spinner')).toBeNull();
+    expect(frames[0].querySelector('app-upload-progress')).toBeNull();
     expect(frames[0].querySelector('.media-error')).not.toBeNull();
     expect(frames[0].querySelector('.media-error')?.getAttribute('href')).toBe(first.url);
-    expect(frames[1].querySelector('ion-spinner')).not.toBeNull();
+    expect(frames[1].querySelector('app-upload-progress')).not.toBeNull();
     expect(frames[1].querySelector('img')?.getAttribute('src')).toBe(second.url);
   });
 

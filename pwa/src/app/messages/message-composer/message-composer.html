@@ -7,34 +7,48 @@
     }
   </ion-list>
 }
+<ng-template #attachmentPreview let-kind let-url="url">
+  @if (kind.startsWith('image/')) {
+    <img [src]="url" />
+  } @else if (kind.startsWith('video/')) {
+    <video [src]="url" muted playsinline preload="metadata"></video>
+    <ion-icon class="video-icon" [icon]="icons.videocamOutline" />
+  } @else if (kind.startsWith('audio/')) {
+    <app-voice-player class="compact" [src]="url" />
+  } @else {
+    <ion-icon class="file-icon" [icon]="icons.documentOutline" />
+  }
+</ng-template>
 @if (existing().length || visualUploads().length) {
   <div class="uploads">
     @for (item of existing(); track item.id) {
       <div class="upload">
-        <span>{{ item.fileName }}</span>
-        <ion-button fill="clear" (click)="removeExisting(item.id)">
+        <ng-container
+          [ngTemplateOutlet]="attachmentPreview"
+          [ngTemplateOutletContext]="{ $implicit: item.kind, url: item.url }" />
+        <button type="button" class="upload-remove" (click)="removeExisting(item.id)">
           <ion-icon [icon]="icons.closeOutline" />
-        </ion-button>
+        </button>
       </div>
     }
     @for (upload of visualUploads(); track upload) {
       @let state = upload.state();
       <div class="upload">
-        @if (upload.file.type.startsWith('image/')) {
-          <img [src]="upload.url" />
-        } @else if (upload.file.type.startsWith('audio/')) {
-          <app-voice-player [src]="upload.url" />
+        <ng-container
+          [ngTemplateOutlet]="attachmentPreview"
+          [ngTemplateOutletContext]="{ $implicit: upload.file.type, url: upload.url }" />
+        @if (state.status !== Status.Ready) {
+          <div class="upload-status">
+            @if (state.status === Status.Failed) {
+              <ion-button size="small" (click)="upload.retry()">重试</ion-button>
+            } @else {
+              <app-upload-progress [value]="state.progress" />
+            }
+          </div>
         }
-        <span>{{ upload.file.name }}</span>
-        @if (state.status === Status.Uploading || state.status === Status.Processing) {
-          <ion-spinner />
-          <span>{{ (state.progress * 100).toFixed(0) }}%</span>
-        } @else if (state.status === Status.Failed) {
-          <ion-button fill="clear" (click)="upload.retry()">重试</ion-button>
-        }
-        <ion-button fill="clear" (click)="remove(upload)">
+        <button type="button" class="upload-remove" (click)="remove(upload)">
           <ion-icon [icon]="icons.closeOutline" />
-        </ion-button>
+        </button>
       </div>
     }
   </div>

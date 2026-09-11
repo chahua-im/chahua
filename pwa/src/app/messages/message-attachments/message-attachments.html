@@ -26,8 +26,8 @@
           </button>
         }
       }
-      @if (item.uploading) {
-        <div class="upload-overlay"><ion-spinner /></div>
+      @if (item.progress != null) {
+        <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
       }
       @if (last && overlayTime()) {
         <ion-badge class="media-time" color="medium">
@@ -39,8 +39,8 @@
   } @else if (item.kind === MediaKind.Audio) {
     <div class="audio-frame">
       <app-voice-player [src]="item.url" />
-      @if (item.uploading) {
-        <div class="upload-overlay"><ion-spinner /></div>
+      @if (item.progress != null) {
+        <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
       }
     </div>
   } @else {
@@ -60,8 +60,8 @@
           </small>
         }
       </span>
-      @if (item.uploading) {
-        <ion-spinner />
+      @if (item.progress != null) {
+        <app-upload-progress [value]="item.progress" />
       } @else {
         <ion-icon [icon]="downloadIcon"></ion-icon>
       }

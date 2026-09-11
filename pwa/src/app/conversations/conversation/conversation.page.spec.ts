@@ -2352,9 +2352,10 @@ describe('ConversationPage', () => {
     expect(composer['selectedUploads']()).toEqual([retained.upload, added.upload]);
     expect(added.upload.dispose).not.toHaveBeenCalled();
     const selected: HTMLElement = fixture.nativeElement.querySelector('app-message-composer .uploads');
-    expect(selected.textContent).toContain('retained.png');
-    expect(selected.textContent).toContain('added.png');
-    expect(selected.textContent).not.toContain('removed.png');
+    expect([...selected.querySelectorAll('img')].map((image) => image.src)).toEqual([
+      retained.upload.url,
+      added.upload.url,
+    ]);
 
     retained.finish(encodeId('100'));
     removed.finish(encodeId('101'));
@@ -2394,8 +2395,10 @@ describe('ConversationPage', () => {
     expect(composer.text()).toBe('确认前已经改写的正文');
     expect(composer['selectedUploads']()).toEqual([retained.upload, added.upload]);
     expect(added.upload.dispose).not.toHaveBeenCalled();
-    expect(selected.textContent).toContain('added.png');
-    expect(selected.textContent).not.toContain('removed.png');
+    expect([...selected.querySelectorAll('img')].map((image) => image.src)).toEqual([
+      retained.upload.url,
+      added.upload.url,
+    ]);
 
     const edit = vi.spyOn(outbox, 'edit');
     const enqueue = vi.spyOn(outbox, 'enqueue');

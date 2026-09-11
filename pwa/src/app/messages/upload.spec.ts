@@ -234,14 +234,14 @@ describe('Attachment upload tasks', () => {
     },
   );
 
-  it('compresses media before checking size and exposes dimensions and both progress phases', async () => {
+  it('maps compression to the first half and upload to the second half without resetting progress', async () => {
     let compressed!: (blob: Blob) => void;
     convertToBlob.mockReturnValue(new Promise<Blob>((resolve) => (compressed = resolve)));
     const task = create(AttachmentUploadPurpose.media, photo());
     const pending = task.retry();
     http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 10 });
     await vi.waitFor(() => expect(convertToBlob).toHaveBeenCalledOnce());
-    expect(task.state()).toEqual({ status: UploadStatus.Processing, progress: 0.5 });
+    expect(task.state()).toEqual({ status: UploadStatus.Processing, progress: 0.25 });
     expect(task.retry()).toBe(pending);
     http.expectNone('/_api/attachments/upload-url');
     compressed(new Blob(['small'], { type: 'image/avif' }));
@@ -258,9 +258,9 @@ describe('Attachment upload tasks', () => {
       request.flush({ attachmentId: encodeId('100'), uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
     });
     await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(1));
-    expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0, width: 1920, height: 1440 });
+    expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0.5, width: 1920, height: 1440 });
     FakeUpload.requests[0].progress(1, 2);
-    expect(task.state().progress).toBe(0.5);
+    expect(task.state().progress).toBe(0.75);
     FakeUpload.requests[0].finish();
     await expect(pending).resolves.toBe(encodeId('100'));
     expect(task.state()).toMatchObject({ status: UploadStatus.Ready, width: 1920, height: 1440 });
@@ -277,6 +277,7 @@ describe('Attachment upload tasks', () => {
     expect(task.state()).toMatchObject({ status: UploadStatus.Failed, width: 1920, height: 1440 });
     expect(task.state().id).toBeUndefined();
     const retry = task.retry();
+    expect(task.state().progress).toBe(0.5);
     expect(task.retry()).toBe(retry);
     http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
     await sign(encodeId('101'));

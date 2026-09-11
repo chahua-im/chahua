@@ -2,8 +2,24 @@
   --composer-padding-start: 12px;
   --composer-control-size: var(--app-composer-size);
   display: block;
+  position: relative;
   padding-bottom: var(--ion-safe-area-bottom, 0px);
   background: var(--ion-background-color, #fff);
+}
+:host::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  z-index: 1;
+  border: 2px dashed var(--ion-color-primary);
+  border-radius: 12px;
+  background: rgba(var(--ion-color-primary-rgb), 0.08);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+:host(.drag-over)::after {
+  opacity: 1;
 }
 .uploads {
   display: flex;
@@ -12,26 +28,58 @@
   padding: 8px;
 }
 .upload {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 100px;
-  max-width: 280px;
-  flex-shrink: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 88px;
+  height: 88px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--ion-color-light);
+  color: var(--ion-color-primary);
 }
-.upload img {
-  width: 48px;
-  height: 48px;
+.upload img,
+.upload video {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
 }
-.upload app-voice-player {
-  width: 180px;
-  height: 44px;
+.file-icon {
+  font-size: 32px;
 }
-.upload span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.video-icon {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  color: #fff;
+  filter: drop-shadow(0 1px 2px #000);
+  font-size: 20px;
+}
+.upload-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+.upload-status ion-button {
+  --color: inherit;
+  margin: 0;
+}
+.upload-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 20px;
 }
 .mentions {
   max-height: 200px;

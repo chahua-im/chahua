@@ -1,58 +1,62 @@
 <ion-header>
-  <ion-toolbar>
-    @if (searching()) {
+  @if (searching()) {
+    <ion-toolbar>
       <ion-searchbar
         placeholder="搜索群组和用户"
         [debounce]="300"
         showCancelButton="always"
         (ionInput)="search.set($event.detail.value || '')"
         (ionCancel)="searching.set(false); search.set('')" />
-    } @else if (list().archived || list().requestHistory) {
-      <ion-buttons slot="start">
-        <ion-back-button
-          class="show-back-button"
-          text="返回"
-          [defaultHref]="outlet ? '/chats/' + list().tab : undefined"
-          (click)="back()"></ion-back-button>
-      </ion-buttons>
-      <ion-title>{{ list().requestHistory ? '好友请求' : '已归档' }}</ion-title>
-    } @else {
-      <ion-buttons slot="start">
-        <ion-button (click)="openSettings()">
-          <ion-avatar [class.placeholder]="!session.user()?.avatarUrl">
-            @if (session.user()?.avatarUrl; as src) {
-              <img [src]="src" width="26" height="26" decoding="async" />
+    </ion-toolbar>
+  } @else {
+    <ion-toolbar>
+      @if (list().archived || list().requestHistory) {
+        <ion-buttons slot="start">
+          <ion-back-button
+            class="show-back-button"
+            text="返回"
+            [defaultHref]="outlet ? '/chats/' + list().tab : undefined"
+            (click)="back()"></ion-back-button>
+        </ion-buttons>
+        <ion-title>{{ list().requestHistory ? '好友请求' : '已归档' }}</ion-title>
+      } @else {
+        <ion-buttons slot="start">
+          <ion-button (click)="openSettings()">
+            <ion-avatar [class.placeholder]="!session.user()?.avatarUrl">
+              @if (session.user()?.avatarUrl; as src) {
+                <img [src]="src" width="26" height="26" decoding="async" />
+              } @else {
+                {{ session.user()?.username | avatarText }}
+              }
+            </ion-avatar>
+          </ion-button>
+        </ion-buttons>
+        <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)">
+          <ion-segment-button [value]="ListTab.Messages" [contentId]="contentPrefix + ListTab.Messages">
+            <ion-label>消息</ion-label>
+          </ion-segment-button>
+          <ion-segment-button [value]="ListTab.Groups" [contentId]="contentPrefix + ListTab.Groups">
+            <ion-label>群组</ion-label>
+          </ion-segment-button>
+          <ion-segment-button [value]="ListTab.Friends" [contentId]="contentPrefix + ListTab.Friends">
+            <ion-label>好友</ion-label>
+          </ion-segment-button>
+          <ion-segment-button [value]="ListTab.Threads" [contentId]="contentPrefix + ListTab.Threads">
+            <ion-label>话题</ion-label>
+          </ion-segment-button>
+        </ion-segment>
+        <ion-buttons slot="end">
+          <ion-button (click)="addMenu.present($event)">
+            @if (realtime.connected()) {
+              <ion-icon slot="icon-only" [icon]="addIcon"></ion-icon>
             } @else {
-              {{ session.user()?.username | avatarText }}
+              <ion-spinner slot="icon-only" />
             }
-          </ion-avatar>
-        </ion-button>
-      </ion-buttons>
-      <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)">
-        <ion-segment-button [value]="ListTab.Messages" [contentId]="contentPrefix + ListTab.Messages">
-          <ion-label>消息</ion-label>
-        </ion-segment-button>
-        <ion-segment-button [value]="ListTab.Groups" [contentId]="contentPrefix + ListTab.Groups">
-          <ion-label>群组</ion-label>
-        </ion-segment-button>
-        <ion-segment-button [value]="ListTab.Friends" [contentId]="contentPrefix + ListTab.Friends">
-          <ion-label>好友</ion-label>
-        </ion-segment-button>
-        <ion-segment-button [value]="ListTab.Threads" [contentId]="contentPrefix + ListTab.Threads">
-          <ion-label>话题</ion-label>
-        </ion-segment-button>
-      </ion-segment>
-      <ion-buttons slot="end">
-        <ion-button (click)="addMenu.present($event)">
-          @if (realtime.connected()) {
-            <ion-icon slot="icon-only" [icon]="addIcon"></ion-icon>
-          } @else {
-            <ion-spinner slot="icon-only" />
-          }
-        </ion-button>
-      </ion-buttons>
-    }
-  </ion-toolbar>
+          </ion-button>
+        </ion-buttons>
+      }
+    </ion-toolbar>
+  }
 </ion-header>
 @if (searching()) {
   <ion-content appScrollbars><app-directory-search [query]="search()" /></ion-content>
