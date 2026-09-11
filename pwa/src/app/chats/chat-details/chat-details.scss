@@ -8,8 +8,16 @@ ion-content {
   --padding-bottom: var(--ion-safe-area-bottom, 0px);
 }
 .close-button {
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  --padding-start: 0;
+  --padding-end: 0;
   top: calc(var(--ion-safe-area-top, 0px) + 4px);
   inset-inline-end: 4px;
+}
+.close-button ion-icon {
+  font-size: 28px;
 }
 .profile {
   padding-block: var(--app-profile-padding);
@@ -18,9 +26,15 @@ ion-content {
   margin-inline: auto;
 }
 .profile h2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   overflow-wrap: anywhere;
 }
 .profile p {
+  font-size: var(--app-font-caption);
+  line-height: var(--app-line-caption);
   color: var(--ion-color-medium);
   white-space: pre-wrap;
 }
@@ -76,4 +90,9 @@ ion-content {
   min-width: 0;
   --padding-start: 4px;
   --padding-end: 4px;
+}
+
+.quick-actions.user-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }

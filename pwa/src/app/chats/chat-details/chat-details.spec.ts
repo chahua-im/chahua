@@ -54,26 +54,15 @@ describe('ChatDetails', () => {
     return fixture;
   }
 
-  it('loads chat saved messages only on selection and cancels reads when switching away', async () => {
+  it('has no chat-specific saved messages tab or menu entry', async () => {
     const fixture = await open();
-    const component = fixture.componentInstance;
+    const previous = fixture.componentInstance['tab']();
+    fixture.componentInstance['changeTab']('saved');
+    fixture.detectChanges();
+    expect(fixture.componentInstance['tab']()).toBe(previous);
+    expect(fixture.nativeElement.textContent).not.toContain('本聊天收藏');
+    expect(fixture.nativeElement.querySelector('app-saved-message-list')).toBeNull();
     http.expectNone((req) => req.url.includes('/saved-messages'));
-    component['changeTab']('saved');
-    fixture.detectChanges();
-    const initial = http.expectOne(`/_api/chats/${wireChat.id}/saved-messages?limit=50`);
-    expect(fixture.nativeElement.querySelector('app-saved-message-list')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('app-saved-message-list ion-header')).toBeNull();
-    component['changeTab']('image');
-    fixture.detectChanges();
-    expect(initial.cancelled).toBe(true);
-    http.expectOne((req) => req.url.endsWith('/attachments')).flush({ attachments: [] });
-    component['changeTab']('saved');
-    fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/saved-messages?limit=50`).flush({ savedMessages: [] });
-    await fixture.whenStable();
-    fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('app-saved-message-list').textContent).toContain('暂无收藏');
-    expect(fixture.nativeElement.querySelector('app-saved-message-list ion-infinite-scroll')).not.toBeNull();
   });
 
   it('places topics and members before media and loads only the selected content', async () => {
@@ -81,7 +70,7 @@ describe('ChatDetails', () => {
     const component = fixture.componentInstance;
     const labels = () =>
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim());
-    expect(labels()).toEqual(['话题', '成员', '收藏', '图片', '视频', '文件']);
+    expect(labels()).toEqual(['话题', '成员', '图片', '视频', '文件']);
     http.expectNone((req) => req.url.endsWith('/members') || req.url.endsWith('/messages'));
     component['changeTab']('members');
     fixture.detectChanges();
@@ -180,10 +169,10 @@ describe('ChatDetails', () => {
     relationship.flush({ peerUid: 2, isFriend: true });
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('删除好友');
+    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('解除好友');
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim()),
-    ).toEqual(['话题', '收藏', '图片', '视频', '文件']);
+    ).toEqual(['话题', '图片', '视频', '文件']);
   });
 
   it('shows an uncached profile before its friend relationship arrives', async () => {
@@ -303,7 +292,7 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim()),
-    ).toEqual(['成员', '收藏', '图片', '视频', '文件']);
+    ).toEqual(['成员', '图片', '视频', '文件']);
     expect(fixture.nativeElement.querySelector('app-thread-participants').textContent).toContain(
       testMessage.sender.name,
     );
@@ -317,7 +306,7 @@ describe('ChatDetails', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     const buttons = () => [...fixture.nativeElement.querySelectorAll('.quick-actions ion-button')] as HTMLElement[];
-    expect(buttons().map((button) => button.textContent?.trim())).toEqual(['搜索', '订阅', '更多']);
+    expect(buttons().map((button) => button.textContent?.trim())).toEqual(['搜索', '订阅']);
     expect(buttons()[1].querySelector('ion-icon')?.icon).toBe(starOutline);
     expect(fixture.nativeElement.querySelector('.profile p').textContent.trim()).toBe(`${testChat.name} 中的话题`);
     for (const [method, endpoint, label, icon] of [
@@ -351,7 +340,7 @@ describe('ChatDetails', () => {
       expect(loadingLabel).toBe(previousLabel);
       await fixture.whenStable();
       fixture.detectChanges();
-      expect(buttons().map((button) => button.textContent?.trim())).toEqual(['搜索', label, '更多']);
+      expect(buttons().map((button) => button.textContent?.trim())).toEqual(['搜索', label]);
       await vi.waitFor(() => expect(buttons()[1].querySelector('ion-icon')?.icon).toBe(icon));
     }
     expect(fixture.nativeElement.querySelector('.avatar-badge').textContent.trim()).toBe('测');
@@ -373,16 +362,17 @@ describe('ChatDetails', () => {
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('删除好友');
+    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('解除好友');
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim()),
-    ).toEqual(['话题', '收藏', '图片', '视频', '文件']);
+    ).toEqual(['话题', '图片', '视频', '文件']);
     alert.onDidDismiss.mockResolvedValue({ role: 'confirm' });
     const deleting = fixture.componentInstance['leave']();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     http.expectOne({ method: 'DELETE', url: '/_api/friends/2' }).flush(null);
+    await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: false }));
     await deleting;
     expect(navigate).toHaveBeenCalledWith(['/chats']);
     expect(fixture.componentInstance['error']()).toBe(false);

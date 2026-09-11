@@ -47,10 +47,8 @@
 }
 .attach-button,
 .sticker-button {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 0;
+  display: grid;
+  place-items: center;
   background: none;
   flex-shrink: 0;
   height: calc(var(--composer-control-size) - 2px);
@@ -87,7 +85,6 @@ ion-textarea {
   min-width: 0;
   min-height: calc(var(--composer-control-size) - 2px);
   max-height: 33vh;
-  font-size: var(--app-font-body);
   --padding-top: calc((var(--composer-control-size) - 2px - var(--app-line-body)) / 2);
   --padding-bottom: var(--padding-top);
   --padding-start: var(--composer-padding-start);
@@ -105,9 +102,8 @@ ion-textarea {
   border-radius: 50%;
   background: var(--ion-color-primary);
   color: var(--ion-color-primary-contrast);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   font-size: 18px;
 }
 .send-button ion-icon {
@@ -131,7 +127,6 @@ button:disabled {
   align-items: center;
   gap: 6px;
   background: none;
-  padding: 0;
   color: var(--ion-color-primary);
   font-size: var(--app-font-compact);
   line-height: var(--app-line-compact);
@@ -140,9 +135,8 @@ button:disabled {
 .attachment-panel span {
   width: 88px;
   height: 88px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   border-radius: 24px;
   background: rgba(var(--ion-color-primary-rgb), 0.08);
   font-size: 28px;
@@ -152,7 +146,6 @@ button:disabled {
   display: flex;
   align-items: flex-end;
   min-width: 0;
-  width: 100%;
   padding-right: 4px;
 }
 

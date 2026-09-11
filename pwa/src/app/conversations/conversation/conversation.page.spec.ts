@@ -1264,7 +1264,7 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     const element: HTMLElement = fixture.nativeElement;
     expect(element.querySelectorAll('.sender')).toHaveLength(1);
-    expect(element.querySelectorAll('ion-avatar')).toHaveLength(1);
+    expect(element.querySelectorAll('app-message ion-avatar')).toHaveLength(1);
     expect(element.querySelectorAll('.message-date')).toHaveLength(1);
     expect(element.querySelector(`[data-message-id="${wireMessage.id}"] .chat-row.last`)).toBeNull();
     expect(element.querySelector('[data-message-id="9007199254741005"] .sender')).toBeNull();
@@ -1583,7 +1583,7 @@ describe('ConversationPage', () => {
     expect(data.getReadState).toHaveBeenCalledOnce();
     expect(data.getReadState).toHaveBeenCalledWith(testChat.id);
     expect(data.markRead).toHaveBeenLastCalledWith(testChat.id, testMessage.id);
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('重连后的群名称');
+    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('重连后的群名称');
   });
 
   it('refreshes deep-linked topic subscription state on resync without reloading the topic list', async () => {
@@ -1652,7 +1652,7 @@ describe('ConversationPage', () => {
     expect(TestBed.inject(DraftStore).get(testChat.id, encodeId('100'))).toBeUndefined();
     expect(component['draft']()).toBe('');
     expect(component['firstUnreadId']()).toBe(encodeId('102'));
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
     expect(component['backHref']()).toBe(`/chats/chat/${wireChat.id}`);
     component['draft'].set('话题草稿');
     await enterThread('99', {});
@@ -1817,14 +1817,14 @@ describe('ConversationPage', () => {
     chatInfo.remember([{ ...testChat, name: '话题所属群' }]);
     vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue(undefined);
     await enterThread();
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: true }));
     await component['updateThread']();
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
     chatInfo.remember([{ ...testChat, name: '群名称更新' }]);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
   });
 
   it('loads a missing canonical subscription after the owner invalidates it', async () => {

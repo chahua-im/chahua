@@ -29,12 +29,11 @@
     }
   }
 </div>
-<ion-infinite-scroll
-  threshold="100px"
-  [disabled]="nextCursor() == null || loading() || failed()"
-  (ionInfinite)="more($event)">
-  <ion-infinite-scroll-content />
-</ion-infinite-scroll>
+@if (nextCursor() != null && !failed()) {
+  <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+    <ion-infinite-scroll-content />
+  </ion-infinite-scroll>
+}
 @if (loading()) {
   <div class="loading-status">
     <ion-spinner></ion-spinner>

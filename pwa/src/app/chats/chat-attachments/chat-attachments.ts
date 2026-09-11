@@ -1,6 +1,5 @@
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
 import {
   IonButton,
   IonInfiniteScroll,
@@ -15,11 +14,10 @@ import {
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { ChatAttachmentKindFilter, type ChatAttachmentResponse, type SnowflakeID } from '../../../generated/models';
-import { decodeId } from '../../api/snowflake-id';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { openMediaViewer } from '../../messages/media-viewer/media-viewer';
 import { mediaKind, MediaKind } from '../../messages/message-attachments/media-kind';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
-import { dismissChatOverlays } from '../dismiss-chat-overlays';
 @Component({
   selector: 'app-chat-attachments',
   templateUrl: './chat-attachments.html',
@@ -39,7 +37,7 @@ export class ChatAttachments {
   protected readonly openFailed = signal(false);
   protected readonly error = signal(false);
   private readonly api = inject(ChatsService);
-  private readonly router = inject(Router);
+  private readonly navigation = inject(ConversationNavigation);
   private readonly modals = inject(ModalController);
   private readonly destroy = inject(DestroyRef);
   private version = 0;
@@ -121,17 +119,7 @@ export class ChatAttachments {
         this.api.getMessage(chatId, item.messageId).pipe(takeUntilDestroyed(this.destroy)),
       );
       if (this.destroy.destroyed || this.chatId() !== chatId || this.kind() !== kind) return;
-      await dismissChatOverlays(this.modals);
-      await this.router.navigate(
-        [
-          '/chats/chat',
-          decodeId(message.chatId),
-          ...(message.replyRootId ? ['thread', decodeId(message.replyRootId)] : []),
-        ],
-        {
-          queryParams: { message: decodeId(item.messageId) },
-        },
-      );
+      await this.navigation.open(message.chatId, message.replyRootId, item.messageId);
     } catch {
       if (!this.destroy.destroyed && this.chatId() === chatId && this.kind() === kind) this.locateFailed.set(true);
     } finally {

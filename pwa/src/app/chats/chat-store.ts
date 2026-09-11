@@ -34,7 +34,7 @@ interface ChatReadOperation {
   read?: { messageId: SnowflakeID; promise: Promise<void>; sent: boolean };
   rewind?: Promise<void>;
 }
-type Subscription = { chatId: SnowflakeID; status?: ThreadSubscriptionStatusResponse; version: number };
+type Subscription = { chatId: SnowflakeID; status?: ThreadSubscriptionStatusResponse; version: number; dirty: boolean };
 export enum ChatChangeKind {
   Read,
   Membership,
@@ -554,10 +554,9 @@ export class ChatStore {
   subscriptionSnapshot() {
     return ++this.subscriptionVersion;
   }
-  private readonly staleSubscriptions = new Set<SnowflakeID>();
   subscription(chatId: SnowflakeID, rootId: SnowflakeID) {
-    const status = this.cachedSubscription(chatId, rootId);
-    return this.staleSubscriptions.has(rootId) ? undefined : status;
+    const entry = this.subscriptions().get(rootId);
+    return entry?.chatId === chatId && !entry.dirty ? entry.status : undefined;
   }
   cachedSubscription(chatId: SnowflakeID, rootId: SnowflakeID) {
     const entry = this.subscriptions().get(rootId);
@@ -569,12 +568,11 @@ export class ChatStore {
     status: ThreadSubscriptionStatusResponse | undefined,
     version = ++this.subscriptionVersion,
   ) {
-    if (status) this.staleSubscriptions.delete(rootId);
-    else this.staleSubscriptions.add(rootId);
     this.subscriptions.update((entries) =>
       new Map(entries).set(rootId, {
         chatId,
         status: status ?? entries.get(rootId)?.status,
+        dirty: !status,
         version,
       }),
     );

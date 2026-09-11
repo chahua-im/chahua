@@ -4,8 +4,8 @@
     <ion-title>收藏</ion-title>
   </ion-toolbar>
 </ion-header>
-<ion-content appScrollbars>
+<ion-content appScrollbars color="light">
   @if (active()) {
-    <app-saved-message-list [chatId]="chatId()" />
+    <app-saved-message-list />
   }
 </ion-content>

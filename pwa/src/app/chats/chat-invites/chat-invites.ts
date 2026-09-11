@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, effect, inject, input, signal } from '@angular/core';
+import { Component, forwardRef, effect, inject, input, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import {
   AlertController,
@@ -31,7 +31,7 @@ import { inviteStatus, InviteStatus } from '../invite';
   templateUrl: './chat-invites.html',
   imports: [
     DatePipe,
-    DirectorySearch,
+    forwardRef(() => DirectorySearch),
     FormField,
     IonList,
     IonItem,

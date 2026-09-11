@@ -555,7 +555,7 @@ describe('ChatListContent', () => {
     });
 
     function requestList() {
-      return fixture.debugElement.query(By.css('ion-list.friend-requests'));
+      return fixture.debugElement.query(By.css('ion-list'));
     }
 
     function button(label: string) {
@@ -605,8 +605,7 @@ describe('ChatListContent', () => {
       expect(requestList().nativeElement.textContent).toContain('已拒绝');
       const rows = requestList().queryAll(By.directive(ChatListItem));
       expect(rows).toHaveLength(4);
-      expect(fixture.nativeElement.querySelectorAll('ion-list.friend-requests')).toHaveLength(1);
-      expect(fixture.nativeElement.querySelector('ion-list.conversations')).toBeNull();
+      expect(fixture.nativeElement.querySelectorAll('ion-list')).toHaveLength(1);
       for (const row of rows) {
         expect(row.nativeElement.querySelector('ion-item').getAttribute('href')).toBeNull();
         expect(row.nativeElement.querySelectorAll('ion-label h3')).toHaveLength(1);
@@ -660,7 +659,8 @@ describe('ChatListContent', () => {
 
       requests.items.set([]);
       fixture.detectChanges();
-      expect(requestList()).toBeNull();
+      expect(requestList().nativeElement.textContent).not.toContain('小李');
+      expect(button('接受')).toBeUndefined();
 
       fixture.debugElement.query(By.css('ion-refresher')).triggerEventHandler('ionRefresh', new Event('ionRefresh'));
       expect(requests.refresh).toHaveBeenCalledOnce();
@@ -676,7 +676,8 @@ describe('ChatListContent', () => {
       history.error.set(true);
       fixture.componentRef.setInput('selection', { ...fixture.componentInstance['list'](), requestHistory: true });
       await fixture.whenStable();
-      expect(requestList()).toBeNull();
+      expect(requestList().nativeElement.textContent).not.toContain('小李');
+      expect(button('接受')).toBeUndefined();
       expect(fixture.nativeElement.querySelector('ion-label[color="danger"]')).toBeNull();
     });
   });

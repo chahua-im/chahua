@@ -4,6 +4,7 @@ import {
   computed,
   DestroyRef,
   effect,
+  forwardRef,
   inject,
   input,
   linkedSignal,
@@ -12,6 +13,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { form, FormField } from '@angular/forms/signals';
 import { Router } from '@angular/router';
 import {
@@ -33,8 +35,6 @@ import {
 import {
   archive,
   archiveOutline,
-  bookmarkOutline,
-  chatbubbles,
   closeOutline,
   createOutline,
   ellipsisHorizontal,
@@ -42,17 +42,23 @@ import {
   linkOutline,
   notificationsOffOutline,
   notificationsOutline,
-  personOutline,
+  personAddOutline,
+  chatbubbleOutline,
+  globeOutline,
+  banOutline,
   personRemoveOutline,
   searchOutline,
   starOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
+import { BlocksService } from '../../../generated/endpoints/blocks/blocks.service';
 import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
 import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
 import {
   ChatAttachmentKindFilter,
+  FriendAddVerificationMode,
+  type MemberSummary,
   GroupKind,
   GroupRole,
   GroupVisibility,
@@ -62,13 +68,13 @@ import {
 } from '../../../generated/models';
 import { mediaDimensions } from '../../messages/media-processing/prepare-media';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { SavedMessageList } from '../../messages/saved-message-list/saved-message-list';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { ThreadParticipants } from '../thread-participants/thread-participants';
 import { uploadBlob } from '../../messages/upload';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { ChatAttachments } from '../chat-attachments/chat-attachments';
-import { ChatAvatar } from '../chat-avatar/chat-avatar';
+import { ChatAvatar, conversationAvatar } from '../chat-avatar/chat-avatar';
 import { ChatInvites } from '../chat-invites/chat-invites';
 import { ChatListStore } from '../chat-list-store';
 import { ChatMembers } from '../chat-members/chat-members';
@@ -77,19 +83,19 @@ import { ChatSearch } from '../chat-search/chat-search';
 import { ChatStore } from '../chat-store';
 import { ChatThreads } from '../chat-threads/chat-threads';
 import { dismissChatOverlays } from '../dismiss-chat-overlays';
-import { UserProfile } from '../user-profile/user-profile';
 enum DetailAction {
   Mute,
   Thread,
   Save,
   Avatar,
   Leave,
+  AddFriend,
+  Block,
 }
 
 enum InfoTab {
   Threads = 'threads',
   Members = 'members',
-  Saved = 'saved',
 }
 type ContentTab = ChatAttachmentKindFilter | InfoTab;
 
@@ -103,6 +109,7 @@ enum DetailView {
   selector: 'app-chat-details',
   templateUrl: './chat-details.html',
   styleUrl: './chat-details.scss',
+  // Nested messages and member lists can open these same details again.
   imports: [
     DatePipe,
     ChatMute,
@@ -121,19 +128,20 @@ enum DetailView {
     IonSegmentButton,
     IonSelectOption,
     ChatAvatar,
-    MessagePreview,
-    ChatMembers,
-    ThreadParticipants,
-    SavedMessageList,
-    ChatThreads,
-    ChatInvites,
-    ChatSearch,
+    forwardRef(() => MessagePreview),
+    forwardRef(() => ChatMembers),
+    forwardRef(() => ThreadParticipants),
+    forwardRef(() => ChatThreads),
+    forwardRef(() => ChatInvites),
+    forwardRef(() => ChatSearch),
     ChatAttachments,
   ],
   host: { class: 'ion-page' },
 })
 export class ChatDetails {
-  readonly chatId = input.required<SnowflakeID>();
+  readonly chatId = input<SnowflakeID>();
+  readonly user = input<MemberSummary>();
+  readonly currentConversation = input(false);
   readonly threadId = input<SnowflakeID>();
   readonly threadRoot = input<MessageResponse | MessagePreviewData>();
   readonly messages = input<readonly MessageResponse[]>([]);
@@ -147,21 +155,32 @@ export class ChatDetails {
     notificationsOutline,
     exitOutline,
     personRemoveOutline,
-    bookmarkOutline,
     linkOutline,
     createOutline,
-    personOutline,
+    personAddOutline,
+    chatbubbleOutline,
+    globeOutline,
+    banOutline,
     closeOutline,
     ellipsisHorizontal,
   };
   private readonly friends = inject(FriendsService);
   private readonly destroy = inject(DestroyRef);
   private loadVersion = 0;
-  private readonly peerUid = computed(() => this.chat()?.peer?.uid);
-  protected readonly relationship = computed(() => {
-    const uid = this.peerUid();
-    return uid ? this.store.relationship(uid).value() : undefined;
+  private readonly peer = computed(() => {
+    const chat = this.chatId() ? this.store.get(this.chatId()!) : undefined;
+    return this.user() ?? (chat?.kind === GroupKind.dm ? chat.peer : undefined);
   });
+  protected readonly relationshipQuery = computed(() => {
+    const uid = this.peer()?.uid;
+    return uid && uid !== this.session.user()?.uid ? this.store.relationship(uid) : undefined;
+  });
+  protected readonly relationship = computed(() => this.relationshipQuery()?.value());
+  protected readonly id = computed(() => this.chatId() ?? this.relationship()?.dmChatId);
+  protected readonly person = computed(() => (!this.threadId() ? this.peer() : undefined));
+  protected readonly otherUser = computed(() => this.person() && this.person()!.uid !== this.session.user()?.uid);
+  private readonly blocks = inject(BlocksService);
+  private readonly navigation = inject(ConversationNavigation);
   protected readonly modals = inject(ModalController);
   private readonly router = inject(Router);
   private readonly api = inject(GroupsService);
@@ -170,10 +189,14 @@ export class ChatDetails {
   private readonly store = inject(ChatStore);
   private readonly lists = inject(ChatListStore);
   private readonly alerts = inject(AlertController);
-  protected readonly chat = computed(() => this.store.get(this.chatId()));
+  protected readonly chat = computed(() => (this.id() ? this.store.get(this.id()!) : undefined));
   protected readonly loading = signal(false);
   protected readonly Action = DetailAction;
-  private readonly scope = computed(() => ({ chatId: this.chatId(), threadId: this.threadId() }));
+  private readonly scope = computed(() => ({
+    chatId: this.chatId(),
+    threadId: this.threadId(),
+    uid: this.user()?.uid,
+  }));
   protected readonly pending = linkedSignal({
     source: this.scope,
     computation: (): DetailAction | undefined => undefined,
@@ -199,36 +222,33 @@ export class ChatDetails {
       this.tab.set(value as ContentTab);
   }
   private readonly muteMenu = viewChild.required(ChatMute);
-  protected readonly muted = computed(() => this.store.isMuted(this.chatId()));
-  protected readonly mutedUntil = computed(() => (this.muted() ? this.store.mutedUntil(this.chatId()) : undefined));
+  protected readonly muted = computed(() => !!this.id() && this.store.isMuted(this.id()!));
+  protected readonly mutedUntil = computed(() => (this.muted() ? this.store.mutedUntil(this.id()!) : undefined));
   protected readonly permanentMute = computed(() => (this.mutedUntil() ?? '').startsWith('9999'));
-  protected readonly archived = computed(() => this.store.chatState(this.chatId())?.archived ?? false);
+  protected readonly archived = computed(() =>
+    this.id() ? (this.store.chatState(this.id()!)?.archived ?? false) : false,
+  );
   protected readonly subscription = computed(() => {
     const root = this.threadId();
-    return root ? this.store.subscription(this.chatId(), root) : undefined;
+    return root ? this.store.subscription(this.id()!, root) : undefined;
   });
   protected readonly cachedSubscription = computed(() => {
     const root = this.threadId();
-    return root ? this.store.cachedSubscription(this.chatId(), root) : undefined;
+    return root ? this.store.cachedSubscription(this.id()!, root) : undefined;
   });
-  protected readonly avatarEntry = computed(() => {
-    const chat = this.chat();
-    const root = this.threadRoot();
-    const isDm = chat?.kind === GroupKind.dm;
-    return {
-      avatar: isDm ? chat.peer?.avatarUrl : chat?.avatar,
-      avatarName: isDm ? chat.peer?.username : chat?.name,
-      badgeName: this.threadId() && !isDm && root ? (root.sender.name ?? String(root.sender.uid)) : undefined,
-      badgeAvatar: this.threadId() && !isDm ? root?.sender.avatarUrl : undefined,
-      badgeIcon: this.threadId() && isDm ? chatbubbles : undefined,
-    };
-  });
+  protected readonly avatarEntry = computed(() =>
+    conversationAvatar(
+      this.chat() ?? (this.person() ? { kind: GroupKind.dm, peer: this.person() } : undefined),
+      this.threadRoot(),
+      !!this.threadId(),
+    ),
+  );
   protected readonly values = signal({ name: '', description: '', visibility: GroupVisibility.private });
   protected readonly fields = form(this.values);
   constructor() {
     effect((onCleanup) => {
-      const uid = this.peerUid();
-      if (uid && uid !== this.session.user()?.uid) onCleanup(this.store.relationship(uid).activate());
+      const query = this.relationshipQuery();
+      if (query) onCleanup(query.activate());
     });
     effect(() => {
       const scope = this.scope();
@@ -236,19 +256,20 @@ export class ChatDetails {
       if (root && !this.subscription())
         untracked(
           () =>
-            void this.store.loadSubscription(scope.chatId, root).catch(() => {
+            void this.store.loadSubscription(scope.chatId!, root).catch(() => {
               if (this.isCurrent(scope)) this.error.set(true);
             }),
         );
     });
     effect(() => {
-      this.chatId();
+      this.id();
       untracked(() => void this.load());
     });
   }
   protected async load() {
     const version = ++this.loadVersion;
-    const id = this.chatId();
+    const id = this.id();
+    if (!id) return;
     this.loading.set(true);
     this.error.set(false);
     try {
@@ -289,15 +310,15 @@ export class ChatDetails {
   }
 
   protected toggleMute() {
-    return this.perform(DetailAction.Mute, () => this.muteMenu().toggle(this.chatId()));
+    return this.perform(DetailAction.Mute, () => this.muteMenu().toggle(this.id()!));
   }
   protected updateThread() {
     const status = this.subscription();
     if (!status) return;
     return this.perform(DetailAction.Thread, () =>
       status.subscribed
-        ? this.store.setThreadArchived(this.chatId(), this.threadId()!, !status.archived)
-        : this.store.subscribeThread(this.chatId(), this.threadId()!),
+        ? this.store.setThreadArchived(this.id()!, this.threadId()!, !status.archived)
+        : this.store.subscribeThread(this.id()!, this.threadId()!),
     );
   }
   private async refreshDetails(chatId: SnowflakeID) {
@@ -306,7 +327,7 @@ export class ChatDetails {
     this.lists.refreshChats();
   }
   protected async save() {
-    const chatId = this.chatId();
+    const chatId = this.id()!;
     if (
       await this.perform(DetailAction.Save, async () => {
         await firstValueFrom(this.api.patchGroup(chatId, this.values()));
@@ -320,7 +341,7 @@ export class ChatDetails {
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
-    const chatId = this.chatId();
+    const chatId = this.id()!;
     return this.perform(DetailAction.Avatar, async () => {
       const dimensions = await mediaDimensions(file);
       const upload = await firstValueFrom(
@@ -339,11 +360,11 @@ export class ChatDetails {
   protected async leave() {
     if (this.busy()) return;
     const scope = this.scope();
-    const chat = this.chat()!;
-    const chatId = this.chatId();
-    const isDm = chat.kind === GroupKind.dm;
+    const chatId = this.id()!;
+    const person = this.person();
+    const isDm = !!person;
     const alert = await this.alerts.create({
-      header: isDm ? '删除好友' : '退出群组',
+      header: isDm ? '解除好友' : '退出群组',
       buttons: [
         { text: '取消', role: 'cancel' },
         { text: isDm ? '删除' : '退出', role: 'confirm' },
@@ -355,20 +376,88 @@ export class ChatDetails {
       await this.perform(DetailAction.Leave, async () => {
         await firstValueFrom(
           isDm
-            ? this.friends.deleteFriend(chat.peer!.uid)
+            ? this.friends.deleteFriend(person!.uid)
             : this.members.deleteRemoveMember(chatId, this.session.user()!.uid),
         );
         this.lists.refreshChats();
+        if (person) await this.store.relationship(person.uid).refresh();
       })
     ) {
-      await dismissChatOverlays(this.modals);
-      await this.router.navigate(['/chats']);
+      if (!this.user()) {
+        await dismissChatOverlays(this.modals);
+        await this.router.navigate(['/chats']);
+      }
     }
   }
-  protected async profile() {
-    const user = this.chat()?.peer;
-    if (!user) return;
-    const modal = await this.modals.create({ component: UserProfile, componentProps: { user } });
-    await modal.present();
+  protected close() {
+    this.closed.emit();
+    if (this.user()) void this.modals.dismiss();
+  }
+  protected messageUser() {
+    const id = this.id();
+    if (id) return this.navigation.open(id);
+    return Promise.resolve();
+  }
+  protected async addFriend() {
+    const user = this.person();
+    if (!user || !this.relationship() || this.busy()) return;
+    const scope = this.scope();
+    await this.perform(DetailAction.AddFriend, async () => {
+      const relation = this.relationship()!;
+      const info = await firstValueFrom(
+        this.friends.getUserFriendAddInfo(user.uid).pipe(takeUntilDestroyed(this.destroy)),
+      );
+      if (!this.isCurrent(scope)) return;
+      const unavailable = relation.hasPendingOutgoingRequest
+        ? '好友请求已发送'
+        : relation.blocking
+          ? '请先解除拉黑'
+          : relation.blockedBy || info.mode === FriendAddVerificationMode.forbid
+            ? '对方暂不接受好友请求'
+            : undefined;
+      const needsMessage = !unavailable && info.mode !== FriendAddVerificationMode.direct;
+      const alert = await this.alerts.create({
+        header: unavailable ?? '添加好友',
+        message: needsMessage ? (info.question ?? '发送验证信息') : undefined,
+        inputs: needsMessage ? [{ name: 'message', type: 'text', placeholder: '验证信息' }] : [],
+        buttons: unavailable
+          ? [{ text: '好', role: 'cancel' }]
+          : [
+              { text: '取消', role: 'cancel' },
+              { text: '添加', role: 'confirm' },
+            ],
+      });
+      await alert.present();
+      const result = await alert.onDidDismiss<{ values?: { message?: string } }>();
+      if (result.role !== 'confirm' || !this.isCurrent(scope)) return;
+      await firstValueFrom(
+        this.friends.createFriendRequest({
+          toUid: user.uid,
+          message: result.data?.values?.message?.trim() || undefined,
+        }),
+      );
+      this.lists.refreshChats();
+      await this.store.relationship(user.uid).refresh();
+    });
+  }
+  protected async blockUser() {
+    const user = this.person();
+    if (!user || !this.relationship() || this.busy()) return;
+    const scope = this.scope();
+    const blocking = this.relationship()!.blocking;
+    const alert = await this.alerts.create({
+      header: blocking ? '解除拉黑' : '拉黑用户',
+      buttons: [
+        { text: '取消', role: 'cancel' },
+        { text: '确定', role: 'confirm' },
+      ],
+    });
+    await alert.present();
+    if ((await alert.onDidDismiss()).role !== 'confirm' || !this.isCurrent(scope)) return;
+    await this.perform(DetailAction.Block, async () => {
+      await firstValueFrom(blocking ? this.blocks.unblockUser(user.uid) : this.blocks.blockUser({ uid: user.uid }));
+      this.lists.refreshChats();
+      await this.store.relationship(user.uid).refresh();
+    });
   }
 }

@@ -17,7 +17,7 @@ import { firstValueFrom } from 'rxjs';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
 import { GroupRole, type MemberResponse, type SnowflakeID } from '../../../generated/models';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
-import { UserProfile } from '../user-profile/user-profile';
+import { ChatDetails } from '../chat-details/chat-details';
 @Component({
   selector: 'app-chat-members',
   templateUrl: './chat-members.html',
@@ -86,7 +86,7 @@ export class ChatMembers {
     }
   }
   protected async profile(user: MemberResponse) {
-    const modal = await this.modals.create({ component: UserProfile, componentProps: { user } });
+    const modal = await this.modals.create({ component: ChatDetails, componentProps: { user } });
     await modal.present();
   }
 }

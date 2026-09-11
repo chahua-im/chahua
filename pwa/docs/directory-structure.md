@@ -36,7 +36,7 @@ pwa/
 | 目录          | 共享逻辑                                                                                                | 组件范围                                                                                                                                  |
 | ------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | chats         | ChatStore、ChatListStore、ChatPins；分类、日期、邀请与弹窗关闭工具                                      | ChatListPage → ChatList → ChatListContent → ChatListItem；头像、资料、群话题/成员/附件、搜索、邀请、静音、好友资料、创建/加入与旧链接入口 |
-| conversations | ConversationStore、DraftStore、ConversationNavigation；messageRows 分组                                 | ConversationPage、PinnedMessagesPage、SavedMessagesPage；共享收藏列表与快照转换在 messages/saved-message-list                                                       |
+| conversations | ConversationStore、DraftStore、ConversationNavigation；messageRows 分组                                 | ConversationPage、PinnedMessagesPage、SavedMessagesPage；共享收藏列表与快照转换在 messages/saved-message-list                             |
 | messages      | MessageOutbox、MessageActions、AttachmentUpload；发送状态、变化协议、区间合并、表态、作者配色与媒体规则 | Message 及作者/正文/预览/附件/表态等子组件；Composer、菜单、贴纸、录音/播放、全屏媒体与压缩                                               |
 
 信息页的成员、话题、媒体、搜索和邀请组件属于 `chats`；显示一组搜索结果不等于管理连续的消息区间。收藏与置顶页面复用 Message，不继承 ConversationPage。组件详细树与字段见[组件](components.md)。
@@ -45,6 +45,7 @@ pwa/
 
 - 每个组件独占子目录；HTML、SCSS、测试随组件放置。短模板/样式可以内联，不为满足文件数量拆分。
 - 应用共享资料、列表查询、页面连续消息是不同生命周期，不合并成一个总 Store；具体所有权见[数据流](data-flow.md)。
+- ConversationNavigation 负责关闭入口弹层、会话路由及已打开会话的即时定位；调用方只传聊天、话题和消息 ID。
 - ChatPins 是 ChatStore 内部的普通对象，MessageActions 是菜单提供的操作集合；无跨组件状态的逻辑用函数，不为每个 API 单独增加手写服务。
 - 用户显示色在 `messages/user-colors.ts`，沿用旧版用户名 hash；用户组色由 MessageAuthor 直接消费后端字段。发送状态是纯枚举，队列不依赖图标组件。
 - 不同协议的分页由对应组件持有游标，仅共享 `fillScrollViewport` 这种 DOM 行为；不使用通用分页页面、继承层级或全局搜索结果 Store。
