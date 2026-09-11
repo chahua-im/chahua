@@ -4,7 +4,7 @@ import { markMessagesAsRead } from '@/api/messages';
 import { markThreadAsRead as apiMarkThreadAsRead } from '@/api/threads';
 import { READ_REQUEST_COOLDOWN_MS } from '@/constants/chatTiming';
 import { usePageVisible } from '@/hooks/usePageVisible';
-import { setChatLastReadMessageId, setChatUnreadCount } from '@/store/chatsSlice';
+import { setChatReadState } from '@/store/chatsSlice';
 import { setThreadReadState } from '@/store/threadsSlice';
 import { syncAppBadgeCount } from '@/utils/badges';
 import { isPageHidden } from '@/utils/dom';
@@ -83,8 +83,7 @@ export function useChatReadTracking({
 
     markMessagesAsRead(chatId, targetMessageId)
       .then((res) => {
-        dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: res.data.lastReadMessageId }));
-        dispatch(setChatUnreadCount({ chatId, unreadCount: res.data.unreadCount }));
+        dispatch(setChatReadState({ chatId, ...res.data }));
         void syncAppBadgeCount();
       })
       .catch((err) => {
@@ -107,6 +106,8 @@ export function useChatReadTracking({
             threadRootId: threadId,
             lastReadMessageId: res.data.lastReadMessageId,
             unreadCount: res.data.unreadCount,
+            unreadMentions: res.data.unreadMentions ?? 0,
+            unreadReactions: res.data.unreadReactions ?? 0,
           }),
         );
       })

@@ -63,6 +63,33 @@ export function roundScrollValue(value: number): number {
   return Math.round(value);
 }
 
+/**
+ * Scroll offset that positions a row according to `align` (`top` puts the row
+ * at the viewport top, `bottom` at the bottom, `custom` at `offsetRatio`
+ * — 0=top, 0.5=center, 1=bottom — clamped to [0, 1]), clamped to the
+ * scrollable range and rounded for pixel-stable comparisons.
+ */
+export function computeAlignedScrollTarget(
+  containerClientHeight: number,
+  containerScrollHeight: number,
+  offsetTop: number,
+  offsetHeight: number,
+  align: 'top' | 'bottom' | 'custom',
+  offsetRatio: number,
+): number {
+  const maxScroll = containerScrollHeight - containerClientHeight;
+  let rawTarget: number;
+  if (align === 'bottom') {
+    rawTarget = offsetTop + offsetHeight - containerClientHeight;
+  } else if (align === 'custom') {
+    const ratio = Math.max(0, Math.min(1, offsetRatio));
+    rawTarget = offsetTop - containerClientHeight * ratio;
+  } else {
+    rawTarget = offsetTop;
+  }
+  return roundScrollValue(Math.max(0, Math.min(rawTarget, maxScroll)));
+}
+
 export function hasMeaningfulScrollDelta(current: number, next: number): boolean {
   return Math.abs(next - current) >= 1;
 }

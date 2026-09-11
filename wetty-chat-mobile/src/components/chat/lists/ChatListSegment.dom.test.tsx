@@ -23,9 +23,13 @@ vi.mock('@ionic/react', () => ({
 function renderSegment({
   archivedMode,
   pendingIncomingCount,
+  friendsHasMention,
+  friendsUnreadCount = 2,
 }: {
   archivedMode: boolean;
   pendingIncomingCount: number;
+  friendsHasMention?: boolean;
+  friendsUnreadCount?: number;
 }) {
   const pendingRequests: FriendRequestHistoryEntry[] = Array.from({ length: pendingIncomingCount }, (_, index) => ({
     id: String(index),
@@ -57,7 +61,8 @@ function renderSegment({
         onChange={() => undefined}
         messagesUnreadCount={0}
         groupsUnreadCount={0}
-        friendsUnreadCount={2}
+        friendsUnreadCount={friendsUnreadCount}
+        friendsHasMention={friendsHasMention}
         threadsUnreadCount={0}
         archivedMode={archivedMode}
         friendsEnabled
@@ -100,5 +105,31 @@ describe('ChatListSegment archived Friends tab', () => {
 
     expect(container.querySelector('[data-tab="friends"]')?.textContent).toBe('Friends9');
     expect(container.querySelector('[data-tab="friends"]')?.textContent).not.toContain('Friends2');
+  });
+
+  it('shows @ instead of the numeric badge when the segment has unread mentions', () => {
+    act(() => {
+      root.render(renderSegment({ archivedMode: false, pendingIncomingCount: 0, friendsHasMention: true }));
+    });
+
+    expect(container.querySelector('[data-tab="friends"]')?.textContent).toBe('Friends@');
+  });
+
+  it('keeps @ over the numeric badge when both mentions and unreads exist', () => {
+    act(() => {
+      root.render(
+        renderSegment({ archivedMode: false, pendingIncomingCount: 0, friendsHasMention: true, friendsUnreadCount: 4 }),
+      );
+    });
+
+    expect(container.querySelector('[data-tab="friends"]')?.textContent).toBe('Friends@');
+  });
+
+  it('prioritizes pending friend requests over the mention badge', () => {
+    act(() => {
+      root.render(renderSegment({ archivedMode: false, pendingIncomingCount: 9, friendsHasMention: true }));
+    });
+
+    expect(container.querySelector('[data-tab="friends"]')?.textContent).toBe('Friends9');
   });
 });

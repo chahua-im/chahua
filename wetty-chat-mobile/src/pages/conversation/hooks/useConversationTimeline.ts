@@ -4,6 +4,11 @@ import { useDispatch, useSelector } from 'react-redux';
 import { selectShowAllAvatars } from '@/store/settingsSlice';
 import { getMessages } from '@/api/messages';
 import { getThreadReadState } from '@/api/threads';
+import {
+  selectThreadLastReadMessageId,
+  selectThreadUnreadCount,
+  setThreadLastReadMessageId,
+} from '@/store/threadsSlice';
 import type { VirtualScrollAnchor, VirtualScrollHandle } from '@/components/chat/virtualScroll/types';
 import { DEFAULT_OFFSET_RATIO } from '@/components/chat/virtualScroll/types';
 import { useChatRows } from '@/components/chat/virtualScroll/useChatRows';
@@ -67,14 +72,16 @@ export function useConversationTimeline({
     if (initialResumeMessageId) {
       return { type: 'message', messageId: initialResumeMessageId, token: 0, align: 'top' };
     }
-    if (!threadId && lastReadMessageId) {
+    if (lastReadMessageId) {
       return { type: 'message', messageId: lastReadMessageId, token: 0, align: 'top' };
     }
     return { type: threadId ? 'top' : 'bottom', token: 0 } as VirtualScrollAnchor;
   });
 
   // Update initial anchor when lastReadMessageId loads asynchronously.
-  // This effect runs at most once (null → value), so cascading renders are not a concern.
+  // For chats this fires when the chat read state arrives; for threads the
+  // read position seeds the ref before fetchLatestWindow resets the anchor,
+  // so threads keep their 'top' default here.
   useEffect(() => {
     if (initialResumeMessageId) return;
     if (threadId) return;
@@ -381,11 +388,25 @@ export function useConversationTimeline({
         getThreadReadState(chatId, threadId)
           .then((res) => {
             threadLastReadMessageIdRef.current = res.data.lastReadMessageId;
+            // Record the read position for jump-to-first-unread without
+            // touching the unread counts (they arrive via list load / WS).
+            dispatch(
+              setThreadLastReadMessageId({ threadRootId: threadId, lastReadMessageId: res.data.lastReadMessageId }),
+            );
+            // With unread replies, open the window around the read boundary so
+            // the timeline starts where the user stopped reading. Anchoring the
+            // latest window instead strands the boundary outside the loaded
+            // range: the view falls to the bottom and read tracking immediately
+            // marks the unseen tail as read, zeroing the unread badge.
+            const unreadCount = selectThreadUnreadCount(store.getState(), threadId);
+            if (unreadCount > 0 && res.data.lastReadMessageId) {
+              setPendingResumeMessageId(res.data.lastReadMessageId);
+            } else {
+              fetchLatestWindow();
+            }
           })
           .catch((err) => {
             console.debug('[Conversation] getThreadReadState failed, falling back', err);
-          })
-          .finally(() => {
             fetchLatestWindow();
           });
       } else {
@@ -543,16 +564,21 @@ export function useConversationTimeline({
   }, [canLoadNewer, dispatch, fetchLatestWindow, pendingLiveCount, storeChatId]);
 
   const handleScrollToBottomClick = useCallback(() => {
+    // Threads keep their read position in threadsSlice (advanced by read
+    // tracking); chats use the chat-level read state prop. The thread ref only
+    // serves the initial anchor, so read from the store for the live boundary.
+    const readBoundaryMessageId = threadId
+      ? selectThreadLastReadMessageId(store.getState(), threadId)
+      : lastReadMessageId;
     const hasUnreadReadBoundary =
-      !threadId &&
       scrollToBottomUnreadCount > 0 &&
-      lastReadMessageId != null &&
-      parseComparableMessageId(lastReadMessageId) != null;
+      readBoundaryMessageId != null &&
+      parseComparableMessageId(readBoundaryMessageId) != null;
     const alreadyAtReadBoundary =
-      lastReadMessageId != null && isMessageAtOrAfter(lastFullyVisibleMessageId, lastReadMessageId);
+      readBoundaryMessageId != null && isMessageAtOrAfter(lastFullyVisibleMessageId, readBoundaryMessageId);
 
     if (hasUnreadReadBoundary && !alreadyAtReadBoundary) {
-      void jumpToMessage(lastReadMessageId, { silent: true, align: 'bottom' }).then((found) => {
+      void jumpToMessage(readBoundaryMessageId, { silent: true, align: 'bottom' }).then((found) => {
         if (!found) {
           scrollToAbsoluteBottom();
         }
