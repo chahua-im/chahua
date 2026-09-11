@@ -358,6 +358,10 @@ export const selectThreadsWithUnreadCount = createSelector(
   [selectThreads],
   (threads) => threads.filter((t) => !t.archived && (t.unreadCount ?? 0) > 0).length,
 );
+// Mentions pierce mute, so muted threads still count; archived threads do not.
+export const selectHasThreadsWithUnreadMentions = createSelector([selectThreads], (threads) =>
+  threads.some((t) => !t.archived && (t.unreadMentions ?? 0) > 0),
+);
 export const selectArchivedThreadsWithUnreadCount = createSelector(
   [selectThreads],
   (threads) => threads.filter((t) => t.archived && (t.unreadCount ?? 0) > 0).length,

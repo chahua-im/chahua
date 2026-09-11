@@ -237,6 +237,16 @@ export function ChatList({
   );
   const groupChatsWithUnread = groupChats.filter(countsTowardTabBadge).length;
   const friendChatsWithUnread = friendChats.filter(countsTowardTabBadge).length;
+  // Mentions pierce mute, so muted chats still light the "@" segment badge
+  // (archived lists never do — the @ scope excludes archived chats).
+  const mentionEnabled = isFeatureEnabled('mentionNotifications');
+  const groupsHasMention = !archivedMode && mentionEnabled && groupChats.some((c) => (c.unreadMentions ?? 0) > 0);
+  const friendsHasMention = !archivedMode && mentionEnabled && friendChats.some((c) => (c.unreadMentions ?? 0) > 0);
+  const threadsHasMention = !archivedMode && mentionEnabled && threads.some((t) => (t.unreadMentions ?? 0) > 0);
+  const messagesHasMention =
+    !archivedMode &&
+    mentionEnabled &&
+    (chats.some((c) => (c.unreadMentions ?? 0) > 0) || (showThreadsInMessages && threadsHasMention));
 
   const updateAppBadge = useCallback(async () => {
     if (!archivedMode) {
@@ -617,7 +627,7 @@ export function ChatList({
           <div className={styles.chatsListTime}>{formatLastActivity(chat.lastMessageAt, locale)}</div>
           <div className={styles.chatsListBadge}>
             {isFeatureEnabled('mentionNotifications') && chat.unreadMentions > 0 && (
-              <MentionBadge muted={isChatMuted(chat)} />
+              <MentionBadge muted={chat.archived} />
             )}
             {isFeatureEnabled('reactionNotifications') && (chat.unreadReactions ?? 0) > 0 && (
               <ReactionBadge muted={isChatMuted(chat)} />
@@ -811,6 +821,10 @@ export function ChatList({
         groupsUnreadCount={groupChatsWithUnread}
         friendsUnreadCount={friendChatsWithUnread}
         threadsUnreadCount={archivedMode ? archivedThreadsWithUnread : threadsWithUnread}
+        messagesHasMention={messagesHasMention}
+        groupsHasMention={groupsHasMention}
+        friendsHasMention={friendsHasMention}
+        threadsHasMention={threadsHasMention}
         archivedMode={archivedMode}
         friendsEnabled={friendsEnabled}
       />

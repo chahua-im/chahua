@@ -6,6 +6,8 @@ import chatsReducer, {
   setChatReadState,
   selectChatUnreadMentions,
   selectChatUnreadReactions,
+  selectChatsWithUnreadCount,
+  selectHasChatsWithUnreadMentions,
   setChatUnreadMentionIds,
   setChatUnreadMentionIdsStatus,
   setChatUnreadMentions,
@@ -22,6 +24,7 @@ import threadsReducer, {
   selectThreadLastReadMessageId,
   selectThreadUnreadMentions,
   selectThreadUnreadReactions,
+  selectHasThreadsWithUnreadMentions,
   setThreadsList,
 } from './threadsSlice';
 import type { ChatListEntry } from '@/api/chats';
@@ -275,5 +278,74 @@ describe('threadsSlice unread mentions', () => {
     expect(selectThreadUnreadMentions(asRootState(chatsReducer(undefined, { type: '@@init' }), state), 't9')).toBe(0);
     expect(state.unreadMentionIdsByThread['t9']).toBeUndefined();
     expect(state.unreadMentionIdsStatusByThread['t9']).toBeUndefined();
+  });
+});
+
+describe('unread-mention presence selectors', () => {
+  it('mentions in muted chats light the presence selector; archived chats do not', () => {
+    let state = chatsReducer(
+      undefined,
+      setChatsList({
+        chats: [
+          chatEntry({ id: 'c-muted', unreadMentions: 1, mutedUntil: '9999-12-31T23:59:59Z' }),
+          chatEntry({ id: 'c-archived', unreadMentions: 5, archived: true, mutedUntil: '9999-12-31T23:59:59Z' }),
+        ],
+        nextCursor: null,
+      }),
+    );
+
+    expect(selectHasChatsWithUnreadMentions(asRootState(state, threadsReducer(undefined, { type: '@@init' })))).toBe(
+      true,
+    );
+    // Archived mentions stay out of the "@" scope even without any active chat.
+    state = chatsReducer(
+      state,
+      setChatsList({
+        chats: [chatEntry({ id: 'c-archived', unreadMentions: 5, archived: true, mutedUntil: '9999-12-31T23:59:59Z' })],
+        nextCursor: null,
+      }),
+    );
+    expect(selectHasChatsWithUnreadMentions(asRootState(state, threadsReducer(undefined, { type: '@@init' })))).toBe(
+      false,
+    );
+  });
+
+  it('the numeric tab badge keeps excluding muted chats', () => {
+    const state = chatsReducer(
+      undefined,
+      setChatsList({
+        chats: [chatEntry({ unreadCount: 3, mutedUntil: '9999-12-31T23:59:59Z' })],
+        nextCursor: null,
+      }),
+    );
+
+    expect(selectChatsWithUnreadCount(asRootState(state, threadsReducer(undefined, { type: '@@init' })))).toBe(0);
+  });
+
+  it('threads: mentions count for active threads only', () => {
+    const threadsState = threadsReducer(
+      undefined,
+      setThreadsList({
+        threads: [
+          { ...thread, unreadMentions: 1 },
+          { ...thread, chatId: 'c2', archived: true, unreadMentions: 5 },
+        ],
+        nextCursor: null,
+      }),
+    );
+
+    expect(
+      selectHasThreadsWithUnreadMentions(asRootState(chatsReducer(undefined, { type: '@@init' }), threadsState)),
+    ).toBe(true);
+    const archivedOnly = threadsReducer(
+      undefined,
+      setThreadsList({
+        threads: [{ ...thread, chatId: 'c2', archived: true, unreadMentions: 5 }],
+        nextCursor: null,
+      }),
+    );
+    expect(
+      selectHasThreadsWithUnreadMentions(asRootState(chatsReducer(undefined, { type: '@@init' }), archivedOnly)),
+    ).toBe(false);
   });
 });

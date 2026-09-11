@@ -501,7 +501,7 @@ msgid "Failed to load newer messages"
 msgstr "載入新訊息失敗"
 
 msgid "Failed to load reactions"
-msgstr "載入 reaction 失敗"
+msgstr "載入回應失敗"
 
 msgid "Failed to load saved messages"
 msgstr "載入收藏訊息失敗"
@@ -738,7 +738,7 @@ msgid "Jump to mention or reply"
 msgstr "跳轉到提及或回覆"
 
 msgid "Jump to reaction"
-msgstr "跳轉到 reaction"
+msgstr "跳轉到回應"
 
 msgid "Keep messages"
 msgstr "保留訊息"
@@ -1491,7 +1491,7 @@ msgid "Unread mentions and replies"
 msgstr "未讀提及和回覆"
 
 msgid "Unread reactions"
-msgstr "未讀 reaction"
+msgstr "未讀回應"
 
 msgid "Unsave"
 msgstr "取消收藏"

@@ -14,13 +14,26 @@ interface ChatListSegmentProps {
   groupsUnreadCount: number;
   friendsUnreadCount: number;
   threadsUnreadCount: number;
+  /** Whether any chat/thread in the segment's scope has unread mentions (overrides the numeric badge). */
+  messagesHasMention?: boolean;
+  groupsHasMention?: boolean;
+  friendsHasMention?: boolean;
+  threadsHasMention?: boolean;
   /** Whether this segment controls an archived chat list. */
   archivedMode: boolean;
   /** Feature gate for the Friends tab. */
   friendsEnabled: boolean;
 }
 
-function UnreadBadge({ count }: { count: number }) {
+/** Numeric (or @) badge on a segment button; distinct from the row-level UnreadBadge icon badge. */
+function SegmentBadge({ count, hasMention = false }: { count: number; hasMention?: boolean }) {
+  if (hasMention) {
+    return (
+      <IonBadge mode="ios" color="primary" className={styles.badge}>
+        @
+      </IonBadge>
+    );
+  }
   if (count <= 0) return null;
   return (
     <IonBadge mode="ios" color="primary" className={styles.badge}>
@@ -41,6 +54,10 @@ export function ChatListSegment({
   groupsUnreadCount,
   friendsUnreadCount,
   threadsUnreadCount,
+  messagesHasMention,
+  groupsHasMention,
+  friendsHasMention,
+  threadsHasMention,
   archivedMode,
   friendsEnabled,
 }: ChatListSegmentProps) {
@@ -59,13 +76,13 @@ export function ChatListSegment({
         <IonSegmentButton value="messages">
           <IonLabel>
             <Trans>Messages</Trans>
-            <UnreadBadge count={messagesUnreadCount} />
+            <SegmentBadge count={messagesUnreadCount} hasMention={messagesHasMention} />
           </IonLabel>
         </IonSegmentButton>
         <IonSegmentButton value="groups">
           <IonLabel>
             <Trans>Groups</Trans>
-            <UnreadBadge count={groupsUnreadCount} />
+            <SegmentBadge count={groupsUnreadCount} hasMention={groupsHasMention} />
           </IonLabel>
         </IonSegmentButton>
         {friendsEnabled && (
@@ -77,7 +94,7 @@ export function ChatListSegment({
                   {formatUnreadBadge(incomingRequestCount)}
                 </IonBadge>
               ) : (
-                <UnreadBadge count={friendsUnreadCount} />
+                <SegmentBadge count={friendsUnreadCount} hasMention={friendsHasMention} />
               )}
             </IonLabel>
           </IonSegmentButton>
@@ -85,7 +102,7 @@ export function ChatListSegment({
         <IonSegmentButton value="threads">
           <IonLabel>
             <Trans>Threads</Trans>
-            <UnreadBadge count={threadsUnreadCount} />
+            <SegmentBadge count={threadsUnreadCount} hasMention={threadsHasMention} />
           </IonLabel>
         </IonSegmentButton>
       </IonSegment>

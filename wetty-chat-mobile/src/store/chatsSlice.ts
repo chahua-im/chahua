@@ -642,12 +642,13 @@ function reduceChatEntries(
   byId: Record<string, ChatStateEntry>,
   archived: boolean,
   transform: (meta: ChatListMeta, entry: ChatStateEntry) => number,
+  options: { includeMuted?: boolean } = {},
 ): number {
   let total = 0;
   for (const entry of Object.values(byId)) {
     const meta = getEffectiveListMeta(entry);
     if (!meta.inList || meta.archived !== archived) continue;
-    if (!archived) {
+    if (!archived && !options.includeMuted) {
       const mutedUntil = resolveMutedUntil(entry?.listSnapshot, entry?.liveProjection);
       if (mutedUntil && new Date(mutedUntil) > new Date()) continue;
     }
@@ -713,6 +714,13 @@ export const selectChatsWithUnreadCount = createSelector([selectChatsById], (byI
 
 export const selectArchivedChatsWithUnreadCount = createSelector([selectChatsById], (byId): number =>
   reduceChatEntries(byId, true, (meta) => ((meta.unreadCount ?? 0) > 0 ? 1 : 0)),
+);
+
+// Mentions pierce mute, so muted chats still count; archived chats do not.
+export const selectHasChatsWithUnreadMentions = createSelector(
+  [selectChatsById],
+  (byId): boolean =>
+    reduceChatEntries(byId, false, (meta) => ((meta.unreadMentions ?? 0) > 0 ? 1 : 0), { includeMuted: true }) > 0,
 );
 
 export default chatsSlice.reducer;
