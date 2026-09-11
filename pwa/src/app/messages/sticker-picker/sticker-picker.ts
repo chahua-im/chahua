@@ -21,18 +21,16 @@ import { addOutline, cloudUploadOutline, cubeOutline, heart } from 'ionicons/ico
 import { firstValueFrom } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
-import {
-  MessageType,
-  type SnowflakeID,
-  type StickerPackDetailResponse,
-  type StickerPackSummary,
-  type StickerSummary,
+import type {
+  SnowflakeID,
+  StickerPackDetailResponse,
+  StickerPackSummary,
+  StickerSummary,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../media-processing/file-type';
-import { MessageAttachments } from '../message-attachments/message-attachments';
 @Component({
   selector: 'app-sticker-picker',
   templateUrl: './sticker-picker.html',
@@ -52,7 +50,6 @@ import { MessageAttachments } from '../message-attachments/message-attachments';
     IonItem,
     IonLabel,
     IonSpinner,
-    MessageAttachments,
   ],
   host: { '[class.ion-page]': '!embedded()', '[class.embedded]': 'embedded()' },
 })
@@ -81,7 +78,6 @@ export class StickerPicker {
   protected readonly stickers = computed(() => this.content().stickers);
   protected readonly busy = signal(false);
   protected readonly error = signal(false);
-  protected readonly Type = MessageType;
   constructor() {
     inject(DestroyRef).onDestroy(() => this.cancelHold());
     effect(() => {

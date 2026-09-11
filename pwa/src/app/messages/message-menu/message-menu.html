@@ -61,7 +61,7 @@
                 }
                 @if (canEdit()) {
                   <button type="button" [disabled]="!queued() && !canReply()" (click)="choose(Action.Edit)">
-                    <ion-icon [icon]="icons.copyOutline" />
+                    <ion-icon [icon]="icons.pencilOutline" />
                     <span>编辑</span>
                   </button>
                 }

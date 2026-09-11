@@ -1,0 +1,15 @@
+@if (!complete()) {
+  <p class="ion-padding-horizontal">仅显示已加载消息中的参与者</p>
+}
+<ion-list>
+  @for (user of participants(); track user.uid) {
+    <ion-item [button]="true" [detail]="false" (click)="profile(user)">
+      @if (user.avatarUrl) {
+        <ion-avatar slot="start"><img [src]="user.avatarUrl" /></ion-avatar>
+      }
+      <ion-label>{{ user.name || user.uid }}</ion-label>
+    </ion-item>
+  } @empty {
+    <p class="ion-padding ion-text-center">暂无参与者信息</p>
+  }
+</ion-list>
