@@ -127,7 +127,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 | 组件               | 输入与局部字段                                                                                                                                   | 共享数据/输出                                                         |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| ChatDetails        | chatId 或 user、currentConversation、threadId、threadRoot、messages → closed；view、tab、字段编辑草稿、头像上传进度、pending/error、详情 loading | ChatStore 的头像、标题、详情、静音、订阅与好友关系；静音复用 ChatMute |
+| ChatDetails        | chatId 或 user、currentConversation、threadId、threadRoot、messages → closed；view、tab、字段编辑草稿、头像上传进度、pending/error、详情 loading | ChatStore 的头像、标题、详情、订阅与好友关系 |
 | ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                   | 从聊天消息页提取话题根，点击导航                                      |
 | ChatMembers        | chatId；members、cursor、loading/error                                                                                                           | MembersService；行点击打开资料，仅管理员显示右侧身份                  |
 | ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                     | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料       |
@@ -154,3 +154,5 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 SettingsModal 保留底层聊天路由；关闭恢复历史。Landing 只提供安装指引，已安装应用直接进入聊天或邀请预览。
 
 消息、提及、成员和目录结果可再次打开 ChatDetails；递归模板依赖使用 Angular forwardRef，避免组件定义依赖模块加载顺序。
+
+会话标题栏提供搜索与静音入口：搜索弹窗复用 ChatSearch，静音复用 ChatMute，读取 ChatStore 的共享静音状态。

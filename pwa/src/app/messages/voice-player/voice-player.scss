@@ -54,3 +54,8 @@
 :host(.compact) .speed {
   display: none;
 }
+
+.play :is(ion-icon, ion-spinner) {
+  width: 24px;
+  height: 24px;
+}

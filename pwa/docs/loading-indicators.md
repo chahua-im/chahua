@@ -42,13 +42,15 @@
 | 发送消息                         | 消息时间之后       | 立即上屏；上传 cloud-upload-outline，排队／发送 time-outline，确认 checkmark-outline，失败 alert-circle-outline；失败原位重试                          |
 | 附件上传                         | 附件自身           | 本地图片、视频、语音或文件显示 UploadProgress 圆形进度环，不配百分比文字；上传未完成也可发送                                                                                       |
 
+图标切换为 spinner 时，两者使用相同宽高；Ionic 纯图标按钮在两种状态下都保留 `icon-only` 槽位，避免按钮尺寸变化。
+
 操作按钮通过 `.action-content` 和 `.action-label` 保留原有尺寸，spinner 绝对定位叠放。`.busy` 控制原内容的隐藏，spinner 显示等待状态。
 
 消息菜单确认框、Toast 与菜单开关属于 MessageMenu；页面读取其 busy 用于 toolbar。页面离开会清理提示并使旧操作的 UI 收尾失效。数据请求时机见[数据流](data-flow.md)，组件边界见[组件](components.md)。
 
 输入区不因消息读取、发送或编辑请求进入忙碌状态。编辑保存后在原消息上显示队列状态，失败原位重试；尚未发出的消息编辑直接更新该行。撤回立即隐藏消息，网络请求由队列继续处理。录音能力不足时显示 mic-off-outline，点击展示 Ionic alert，不使用禁用按钮。
 
-静音时长菜单等待用户选择；确认后由原列表项或资料按钮保持操作反馈，取消菜单不发送请求。静音到期只更新标记和计数，不显示全屏 loading。通知横幅不改变页面加载状态，点击后复用会话页面已有的消息定位反馈。
+静音时长菜单等待用户选择；确认后由原列表项或会话标题栏按钮保持操作反馈，取消菜单不发送请求。静音到期只更新标记和计数，不显示全屏 loading。通知横幅不改变页面加载状态，点击后复用会话页面已有的消息定位反馈。
 
 资料的成员、话题、媒体与聊天搜索使用 IonInfiniteScroll，加载标识与 ChatList 一致，不提供可点击的加载控件。有下一页时保留 Ionic 默认 84px 加载区域与 spinner 节点，空闲时仅隐藏 spinner；末页或出错时收起加载区域。首次读取和自动补页使用局部 spinner；触底时只显示 Ionic 的 spinner，不同时显示局部 spinner。续页请求结束后调用 complete；错误重试重新挂载控件，不沿用失败前的触底状态。成员、媒体和聊天搜索不足一屏时继续补页；话题只在触底时续页，不自动扫描普通消息填满侧栏。Connection.connected 为假时，聊天列表加号按钮用 spinner 替换图标，点击仍打开原菜单；会话 toolbar 单独显示 spinner。
 

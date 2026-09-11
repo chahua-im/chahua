@@ -1,4 +1,3 @@
-import { DatePipe } from '@angular/common';
 import {
   afterNextRender,
   Component,
@@ -39,14 +38,11 @@ import {
   checkmarkOutline,
   exitOutline,
   linkOutline,
-  notificationsOffOutline,
-  notificationsOutline,
   personAddOutline,
   chatbubbleOutline,
   globeOutline,
   banOutline,
   personRemoveOutline,
-  searchOutline,
   starOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
@@ -77,13 +73,10 @@ import { ChatAvatar, conversationAvatar } from '../chat-avatar/chat-avatar';
 import { ChatInvites } from '../chat-invites/chat-invites';
 import { ChatListStore } from '../chat-list-store';
 import { ChatMembers } from '../chat-members/chat-members';
-import { ChatMute } from '../chat-mute/chat-mute';
-import { ChatSearch } from '../chat-search/chat-search';
 import { ChatStore } from '../chat-store';
 import { ChatThreads } from '../chat-threads/chat-threads';
 import { dismissChatOverlays } from '../dismiss-chat-overlays';
 enum DetailAction {
-  Mute,
   Thread,
   Name,
   Description,
@@ -107,7 +100,6 @@ type ContentTab = ChatAttachmentKindFilter | InfoTab;
 enum DetailView {
   Info,
   Invites,
-  Search,
 }
 @Component({
   selector: 'app-chat-details',
@@ -115,8 +107,6 @@ enum DetailView {
   styleUrl: './chat-details.scss',
   // Nested messages and member lists can open these same details again.
   imports: [
-    DatePipe,
-    ChatMute,
     ContentScrollbars,
     FormField,
     IonButton,
@@ -134,7 +124,6 @@ enum DetailView {
     forwardRef(() => ThreadParticipants),
     forwardRef(() => ChatThreads),
     forwardRef(() => ChatInvites),
-    forwardRef(() => ChatSearch),
     ChatAttachments,
   ],
   host: { class: 'ion-page' },
@@ -151,9 +140,6 @@ export class ChatDetails {
     archive,
     archiveOutline,
     starOutline,
-    searchOutline,
-    notificationsOffOutline,
-    notificationsOutline,
     exitOutline,
     personRemoveOutline,
     linkOutline,
@@ -226,14 +212,7 @@ export class ChatDetails {
     )
       this.tab.set(value as ContentTab);
   }
-  private readonly muteMenu = viewChild.required(ChatMute);
   private readonly saveError = viewChild.required<IonToast>('saveError');
-  protected readonly muted = computed(() => !!this.id() && this.store.isMuted(this.id()!));
-  protected readonly mutedUntil = computed(() => (this.muted() ? this.store.mutedUntil(this.id()!) : undefined));
-  protected readonly permanentMute = computed(() => (this.mutedUntil() ?? '').startsWith('9999'));
-  protected readonly archived = computed(() =>
-    this.id() ? (this.store.chatState(this.id()!)?.archived ?? false) : false,
-  );
   protected readonly subscription = computed(() => {
     const root = this.threadId();
     return root ? this.store.subscription(this.id()!, root) : undefined;
@@ -329,9 +308,6 @@ export class ChatDetails {
     }
   }
 
-  protected toggleMute() {
-    return this.perform(DetailAction.Mute, () => this.muteMenu().toggle(this.id()!));
-  }
   protected updateThread() {
     const status = this.subscription();
     if (!status) return;
