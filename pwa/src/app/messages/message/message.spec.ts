@@ -247,7 +247,7 @@ describe('Message', () => {
       expect(!!element.querySelector('.media-time time')).toBe(overlay);
       expect(!!element.querySelector('.bubble .message-body time')).toBe(!overlay);
       expect(element.querySelector('.bubble app-message-reactions')).toBeNull();
-      expect(element.querySelector('.message-stack > app-message-reactions')).not.toBeNull();
+      expect(element.querySelector('.chat-row > app-message-reactions')).not.toBeNull();
       expect(element.querySelectorAll('time')).toHaveLength(1);
       fixture.componentRef.setInput('own', true);
       fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
@@ -620,7 +620,7 @@ describe('Message', () => {
     expect(element.querySelectorAll('time app-message-status ion-icon')).toHaveLength(1);
     expect(element.querySelector('.message-body time')).not.toBeNull();
     expect(element.querySelector('.bubble app-message-reactions')).toBeNull();
-    expect(!!element.querySelector('.message-stack > app-message-reactions')).toBe(reactions);
+    expect(!!element.querySelector('.chat-row > app-message-reactions')).toBe(reactions);
   });
 
   it.each([

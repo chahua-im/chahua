@@ -1,62 +1,11 @@
 <ion-header>
   <ion-toolbar>
-    <ion-buttons slot="start"><ion-back-button text="返回" defaultHref="/chats"></ion-back-button></ion-buttons>
+    <ion-buttons slot="start"><ion-back-button text="返回" defaultHref="/chats" /></ion-buttons>
     <ion-title>收藏</ion-title>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars>
-  <div class="message-list">
-    @for (row of savedRows(); track row.item.id) {
-      @let item = row.item;
-      <div>
-        <p class="saved-source">{{ item.chat.name }} · {{ item.originalCreatedAt | date: 'yyyy年M月d日' }}</p>
-        <app-message
-          [message]="row.content"
-          [interactive]="false"
-          [own]="item.originalSenderUid === session.user()?.uid"></app-message>
-        <div class="collection-actions">
-          <ion-button fill="clear" [disabled]="!item.canLocateContext" (click)="locateSaved(item)">
-            查看原消息
-          </ion-button>
-          <ion-button
-            fill="clear"
-            color="danger"
-            [disabled]="!!removingSavedId() || loading()"
-            (click)="removeSaved(item)">
-            <span class="action-content" [class.busy]="removingSavedId() === item.id">
-              <span class="action-label">取消收藏</span>
-              @if (removingSavedId() === item.id) {
-                <ion-spinner></ion-spinner>
-              }
-            </span>
-          </ion-button>
-        </div>
-      </div>
-    } @empty {
-      @if (!loading() && !failed()) {
-        <p class="ion-text-center">暂无收藏</p>
-      }
-    }
-  </div>
-  @if (nextCursor()) {
-    <div class="ion-text-center">
-      <ion-button fill="clear" [disabled]="loading()" (click)="load(true)">加载更多</ion-button>
-    </div>
-  }
-  @if (loading()) {
-    <div class="loading-status">
-      <ion-spinner></ion-spinner>
-    </div>
-  }
-  @if (failed()) {
-    <div class="ion-text-center">
-      <p>消息加载失败，请重试。</p>
-      <ion-button fill="clear" (click)="load(!!nextCursor())">重试</ion-button>
-    </div>
+  @if (active()) {
+    <app-saved-message-list [chatId]="chatId()" />
   }
 </ion-content>
-<ion-toast
-  [isOpen]="removeFailed()"
-  message="操作失败，请重试。"
-  [duration]="2500"
-  (didDismiss)="removeFailed.set(false)"></ion-toast>

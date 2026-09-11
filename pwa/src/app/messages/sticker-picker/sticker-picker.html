@@ -26,8 +26,11 @@
         (pointerup)="cancelHold()"
         (pointercancel)="cancelHold()"
         (contextmenu)="showMenu(sticker, $event)">
-        <app-message-attachments
-          [message]="{ messageType: Type.sticker, createdAt: sticker.createdAt, attachments: [], sticker }" />
+        @if (sticker.media.contentType.startsWith('video/')) {
+          <video [src]="sticker.media.url" autoplay loop [muted]="true" playsinline preload="metadata"></video>
+        } @else {
+          <img [src]="sticker.media.url" loading="lazy" decoding="async" />
+        }
       </button>
     }
     @if (busy()) {

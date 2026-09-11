@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
+import { By } from '@angular/platform-browser';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -11,6 +12,7 @@ import { Connection } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { encodeId } from '../../api/snowflake-id';
 import { mockRealtime, testUser, wireChat, wireMessage } from '../../api/testing';
+import { SavedMessageList } from '../../messages/saved-message-list/saved-message-list';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { SavedMessagesPage } from './saved-messages.page';
@@ -60,6 +62,10 @@ describe('SavedMessagesPage', () => {
     vi.restoreAllMocks();
   });
 
+  function list(): SavedMessageList {
+    return fixture.debugElement.query(By.directive(SavedMessageList)).componentInstance;
+  }
+
   async function saved() {
     fixture.detectChanges();
     http.expectOne('/_api/saved-messages?limit=50').flush({ savedMessages: [savedSnapshot()], nextCursor: '499' });
@@ -75,29 +81,33 @@ describe('SavedMessagesPage', () => {
     expect(fixture.nativeElement.querySelector('app-message')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.reply-button')).toBeNull();
     expect(fixture.nativeElement.querySelector('ion-textarea')).toBeNull();
-    expect(page['saved']()[0]).not.toHaveProperty('clientGeneratedId');
-    const loading = page['load'](true);
+    expect(list()['saved']()[0]).not.toHaveProperty('clientGeneratedId');
+    const loading = list()['load'](true);
     http
       .expectOne('/_api/saved-messages?limit=50&before=499')
       .flush({ savedMessages: [savedSnapshot(), { ...savedSnapshot(), id: '499' }] });
     await loading;
-    expect(page['saved']().map((item) => item.id)).toEqual([encodeId('500'), encodeId('499')]);
-    expect(page['nextCursor']()).toBeUndefined();
+    expect(
+      list()
+        ['saved']()
+        .map((item) => item.id),
+    ).toEqual([encodeId('500'), encodeId('499')]);
+    expect(list()['nextCursor']()).toBeUndefined();
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    page['locateSaved'](page['saved']()[0]);
+    await list()['locateSaved'](list()['saved']()[0]);
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], {
       queryParams: { message: wireMessage.id },
     });
-    page['locateSaved']({ ...page['saved']()[0], canLocateContext: false });
+    await list()['locateSaved']({ ...list()['saved']()[0], canLocateContext: false });
     expect(navigate).toHaveBeenCalledOnce();
   });
 
   it('removes a saved entry by snapshot ID rather than original message ID', async () => {
     await saved();
-    const removing = page['removeSaved'](page['saved']()[0]);
+    const removing = list()['removeSaved'](list()['saved']()[0]);
     http.expectOne('/_api/saved-messages/by-id/500').flush(null);
     await removing;
-    expect(page['saved']()).toEqual([]);
+    expect(list()['saved']()).toEqual([]);
   });
 
   it('ignores an old saved page after leaving and reentering the virtual conversation', async () => {
@@ -108,8 +118,12 @@ describe('SavedMessagesPage', () => {
     http.expectOne('/_api/saved-messages?limit=50').flush({ savedMessages: [{ ...savedSnapshot(), id: '501' }] });
     expect(old.cancelled).toBe(true);
     await fixture.whenStable();
-    expect(page['saved']().map((item) => item.id)).toEqual([encodeId('501')]);
-    expect(page['nextCursor']()).toBeUndefined();
+    expect(
+      list()
+        ['saved']()
+        .map((item) => item.id),
+    ).toEqual([encodeId('501')]);
+    expect(list()['nextCursor']()).toBeUndefined();
   });
 
   it('cancels collection HTTP when the page is destroyed', async () => {

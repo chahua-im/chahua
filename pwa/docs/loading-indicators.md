@@ -13,7 +13,7 @@
 | 列表续页                         | Ionic infinite-scroll spinner                        | 查询 loadingMore                                       |
 | 对话首次加载                     | 内容区居中 spinner                                   | ConversationStore.loading                              |
 | 对话历史/后续消息分页            | 顶部/底部固定尺寸菊花控件                            | ConversationStore.pagingDirection                      |
-| 收藏/置顶页面加载                | 内容区 spinner                                       | SavedMessagesPage.loading / PinnedMessagesPage.loading |
+| 收藏/置顶页面加载                | 内容区 spinner                                       | SavedMessageList.loading / PinnedMessagesPage.loading |
 | 好友验证设置加载                 | 列表内 spinner                                       | FriendVerificationSettings.loading                     |
 | 表情组件代码加载                 | @loading 延迟 100ms 展示 spinner                     | @defer 的加载状态                                      |
 
@@ -33,7 +33,7 @@
 | 点击引用                         | 引用区域           | 原内容保留尺寸，spinner 叠放，跳转按钮暂时禁用                                                                                |
 | 回到最新消息                     | 底部按钮           | 按钮节点常驻，等待导航时显示 spinner                                                                                          |
 | 菜单中的收藏/撤回/置顶/表态/复制 | 当前页面 toolbar   | Menu.busy 为真；菜单关闭，操作完成后由菜单显示 Toast                                                                          |
-| 取消收藏                         | 对应收藏的取消按钮 | removingSavedId 标识当前行，其他取消按钮禁用；失败由收藏页提示                                                                |
+| 取消收藏                         | 对应收藏的取消按钮 | removingSavedId 标识当前行，其他取消按钮禁用；失败由收藏列表提示                                                                |
 | 话题订阅/归档                    | 话题 toolbar 按钮  | threadBusy 为真时显示 spinner 并禁用重复操作                                                                                  |
 | 保存好友验证设置                 | 保存按钮           | 保留文案占位，spinner 叠放；表单暂时禁用                                                                                      |
 | 首次允许通知                     | alert 的允许按钮   | 文案保留占位、spinner 叠放；授权期间阻止重复操作，失败 toast 后可重试                                                        |

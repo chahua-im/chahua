@@ -9,11 +9,17 @@
 }
 
 .chat-row {
+  position: relative;
   transition: transform 160ms ease-out;
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 44px fit-content(min(85%, calc(100% - 74px))) auto;
+  align-items: end;
+  justify-content: start;
   padding: 1px 7px;
+
+  > :not(.avatar-slot, .reply-button, .swipe-reply) {
+    grid-column: 2;
+  }
 
   &.group-start {
     padding-top: 2px;
@@ -25,11 +31,7 @@
 
 .chat-row.preview {
   padding: 0;
-
-  > .message-stack {
-    flex: 1;
-    max-width: none;
-  }
+  grid-template-columns: 44px minmax(0, 1fr) auto;
 }
 
 .bubble,
@@ -38,25 +40,11 @@
   -webkit-touch-callout: none;
 }
 
-.message-stack {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  column-gap: 10px;
-  min-width: 0;
-  // Include the avatar and its gap in the existing bubble width limit.
-  max-width: min(calc(85% + 44px), calc(100% - 30px));
-
-  > :not(.avatar-slot) {
-    grid-column: 2;
-  }
-}
-
 .avatar-slot {
   position: relative;
   grid-column: 1;
   grid-row: 1;
-  align-self: end;
-  width: 34px;
+  width: 44px;
 }
 
 .avatar {
@@ -125,7 +113,7 @@
   margin-left: 8px;
   font-size: var(--app-font-micro);
   line-height: var(--app-line-micro);
-  color: color-mix(in srgb, currentColor 60%, transparent);
+  color: color-mix(in srgb, currentColor 70%, transparent);
   white-space: nowrap;
 }
 
@@ -196,7 +184,9 @@
   display: var(--app-reply-button-display);
   opacity: 0;
   place-items: center;
-  flex-shrink: 0;
+  grid-row: 1;
+  grid-column: 3;
+  margin-inline-start: 10px;
   width: 28px;
   height: 28px;
   padding: 0;
@@ -213,18 +203,24 @@
 
 .sent {
   --message-link-color: var(--ion-color-primary-contrast);
-  flex-direction: row-reverse;
+  grid-template-columns: auto fit-content(min(85%, calc(100% - 74px))) 44px;
+  justify-content: end;
 
-  .message-stack {
-    grid-template-columns: minmax(0, 1fr) 34px;
-
-    > :not(.avatar-slot) {
-      grid-column: 1;
-    }
+  &.preview {
+    grid-template-columns: auto minmax(0, 1fr) 44px;
   }
 
   .avatar-slot {
-    grid-column: 2;
+    grid-column: 3;
+  }
+
+  .avatar {
+    right: 0;
+  }
+
+  .reply-button {
+    grid-column: 1;
+    margin-inline: 0 10px;
   }
 
   .bubble {
@@ -303,8 +299,9 @@
 }
 .swipe-reply {
   position: absolute;
+  grid-row: 1 / 2;
   right: 16px;
-  bottom: 8px;
+  top: 50%;
   width: 28px;
   height: 28px;
   color: var(--ion-color-primary);

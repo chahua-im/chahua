@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { MessageType, type SavedMessageResponse } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
-import { Message } from '../../messages/message/message';
+import { Message } from '../message/message';
 import { savedMessageContent } from './saved-message-content';
 
 const snapshot: SavedMessageResponse = {
