@@ -1,11 +1,13 @@
 import { DatePipe } from '@angular/common';
 import {
+  afterNextRender,
   Component,
   computed,
   DestroyRef,
   effect,
   forwardRef,
   inject,
+  Injector,
   input,
   linkedSignal,
   output,
@@ -21,23 +23,20 @@ import {
   IonButton,
   IonContent,
   IonIcon,
-  IonItem,
   IonLabel,
-  IonList,
-  IonPopover,
   IonSegment,
   IonSegmentButton,
-  IonSelect,
-  IonSelectOption,
   IonSpinner,
   ModalController,
+  IonToast,
 } from '@ionic/angular';
 import {
   archive,
   archiveOutline,
   closeOutline,
   createOutline,
-  ellipsisHorizontal,
+  cameraOutline,
+  checkmarkOutline,
   exitOutline,
   linkOutline,
   notificationsOffOutline,
@@ -61,7 +60,6 @@ import {
   type MemberSummary,
   GroupKind,
   GroupRole,
-  GroupVisibility,
   type MessagePreview as MessagePreviewData,
   type MessageResponse,
   type SnowflakeID,
@@ -71,6 +69,7 @@ import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { ThreadParticipants } from '../thread-participants/thread-participants';
 import { uploadBlob } from '../../messages/upload';
+import { UploadProgress } from '../../messages/upload-progress/upload-progress';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { ChatAttachments } from '../chat-attachments/chat-attachments';
@@ -86,11 +85,17 @@ import { dismissChatOverlays } from '../dismiss-chat-overlays';
 enum DetailAction {
   Mute,
   Thread,
-  Save,
+  Name,
+  Description,
   Avatar,
   Leave,
   AddFriend,
   Block,
+}
+
+enum GroupField {
+  Name = 'name',
+  Description = 'description',
 }
 
 enum InfoTab {
@@ -103,7 +108,6 @@ enum DetailView {
   Info,
   Invites,
   Search,
-  Edit,
 }
 @Component({
   selector: 'app-chat-details',
@@ -117,17 +121,14 @@ enum DetailView {
     FormField,
     IonButton,
     IonContent,
-    IonList,
-    IonItem,
     IonLabel,
     IonIcon,
     IonSpinner,
-    IonPopover,
-    IonSelect,
+    IonToast,
     IonSegment,
     IonSegmentButton,
-    IonSelectOption,
     ChatAvatar,
+    UploadProgress,
     forwardRef(() => MessagePreview),
     forwardRef(() => ChatMembers),
     forwardRef(() => ThreadParticipants),
@@ -162,7 +163,8 @@ export class ChatDetails {
     globeOutline,
     banOutline,
     closeOutline,
-    ellipsisHorizontal,
+    cameraOutline,
+    checkmarkOutline,
   };
   private readonly friends = inject(FriendsService);
   private readonly destroy = inject(DestroyRef);
@@ -189,6 +191,7 @@ export class ChatDetails {
   private readonly store = inject(ChatStore);
   private readonly lists = inject(ChatListStore);
   private readonly alerts = inject(AlertController);
+  private readonly injector = inject(Injector);
   protected readonly chat = computed(() => (this.id() ? this.store.get(this.id()!) : undefined));
   protected readonly loading = signal(false);
   protected readonly Action = DetailAction;
@@ -205,8 +208,10 @@ export class ChatDetails {
   protected readonly error = linkedSignal({ source: this.scope, computation: () => false });
   protected readonly View = DetailView;
   protected readonly Kind = GroupKind;
-  protected readonly Role = GroupRole;
-  protected readonly Visibility = GroupVisibility;
+  protected readonly Field = GroupField;
+  protected readonly canManage = computed(
+    () => !this.threadId() && this.chat()?.kind === GroupKind.group && this.chat()?.myRole === GroupRole.admin,
+  );
   protected readonly view = linkedSignal({ source: this.scope, computation: () => DetailView.Info });
   protected readonly InfoTab = InfoTab;
   protected readonly AttachmentKind = ChatAttachmentKindFilter;
@@ -222,6 +227,7 @@ export class ChatDetails {
       this.tab.set(value as ContentTab);
   }
   private readonly muteMenu = viewChild.required(ChatMute);
+  private readonly saveError = viewChild.required<IonToast>('saveError');
   protected readonly muted = computed(() => !!this.id() && this.store.isMuted(this.id()!));
   protected readonly mutedUntil = computed(() => (this.muted() ? this.store.mutedUntil(this.id()!) : undefined));
   protected readonly permanentMute = computed(() => (this.mutedUntil() ?? '').startsWith('9999'));
@@ -243,8 +249,12 @@ export class ChatDetails {
       !!this.threadId(),
     ),
   );
-  protected readonly values = signal({ name: '', description: '', visibility: GroupVisibility.private });
-  protected readonly fields = form(this.values);
+  protected readonly edits = linkedSignal({
+    source: this.scope,
+    computation: (): Record<GroupField, { value: string } | undefined> => ({ name: undefined, description: undefined }),
+  });
+  protected readonly fields = form(this.edits);
+  protected readonly avatarProgress = linkedSignal({ source: this.scope, computation: () => 0 });
   constructor() {
     effect((onCleanup) => {
       const query = this.relationshipQuery();
@@ -280,20 +290,27 @@ export class ChatDetails {
       if (version === this.loadVersion) this.loading.set(false);
     }
   }
-  protected edit() {
-    const chat = this.chat()!;
-    this.values.set({
-      name: chat.name ?? '',
-      description: chat.description ?? '',
-      visibility: chat.visibility ?? GroupVisibility.private,
-    });
-    this.view.set(DetailView.Edit);
+  protected edit(field: GroupField) {
+    if (!this.canManage() || this.busy()) return;
+    this.edits.update((edits) => ({ ...edits, [field]: { value: this.chat()?.[field] ?? '' } }));
+    afterNextRender(() => this.fields[field]?.value().focusBoundControl(), { injector: this.injector });
+  }
+  protected cancelEdit(field: GroupField) {
+    this.edits.update((edits) => ({ ...edits, [field]: undefined }));
+  }
+  protected editKeydown(event: KeyboardEvent, field: GroupField) {
+    if (event.isComposing || this.busy()) return;
+    if (event.key === 'Escape') this.cancelEdit(field);
+    else if (event.key === 'Enter' && field === GroupField.Name) {
+      event.preventDefault();
+      void this.save(field);
+    }
   }
   private isCurrent(scope: ReturnType<typeof this.scope>) {
     return !this.destroy.destroyed && scope === this.scope();
   }
 
-  private async perform(action: DetailAction, operation: () => Promise<unknown>) {
+  private async perform(action: DetailAction, operation: () => Promise<unknown>, notifyError = false) {
     if (this.busy()) return false;
     const scope = this.scope();
     this.pending.set(action);
@@ -302,7 +319,10 @@ export class ChatDetails {
       await operation();
       return this.isCurrent(scope);
     } catch {
-      if (this.isCurrent(scope)) this.error.set(true);
+      if (this.isCurrent(scope)) {
+        if (notifyError) await this.saveError().present();
+        else this.error.set(true);
+      }
       return false;
     } finally {
       if (this.isCurrent(scope)) this.pending.set(undefined);
@@ -326,36 +346,55 @@ export class ChatDetails {
     await this.store.ensureDetails(chatId);
     this.lists.refreshChats();
   }
-  protected async save() {
+  protected async save(field: GroupField) {
+    if (!this.canManage() || this.busy()) return;
+    const value = this.edits()[field]?.value;
+    if (value == null || (field === GroupField.Name && !value.trim())) return;
     const chatId = this.id()!;
+    if (value === (this.chat()?.[field] ?? '')) {
+      this.cancelEdit(field);
+      return;
+    }
     if (
-      await this.perform(DetailAction.Save, async () => {
-        await firstValueFrom(this.api.patchGroup(chatId, this.values()));
-        await this.refreshDetails(chatId);
-      })
+      await this.perform(
+        field === GroupField.Name ? DetailAction.Name : DetailAction.Description,
+        async () => {
+          await firstValueFrom(this.api.patchGroup(chatId, { [field]: value }));
+          await this.refreshDetails(chatId);
+        },
+        true,
+      )
     )
-      this.view.set(DetailView.Info);
+      this.cancelEdit(field);
   }
   protected avatar(event: Event) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    if (!file) return;
+    if (!file || !this.canManage() || this.busy()) return;
     const chatId = this.id()!;
-    return this.perform(DetailAction.Avatar, async () => {
-      const dimensions = await mediaDimensions(file);
-      const upload = await firstValueFrom(
-        this.api.postAvatarUploadUrl(chatId, {
-          filename: file.name,
-          contentType: file.type,
-          size: file.size,
-          ...dimensions,
-        }),
-      );
-      await uploadBlob(upload.uploadUrl, file, upload.uploadHeaders);
-      await firstValueFrom(this.api.patchGroup(chatId, { avatarImageId: upload.imageId }));
-      await this.refreshDetails(chatId);
-    });
+    const scope = this.scope();
+    this.avatarProgress.set(0);
+    return this.perform(
+      DetailAction.Avatar,
+      async () => {
+        const dimensions = await mediaDimensions(file);
+        const upload = await firstValueFrom(
+          this.api.postAvatarUploadUrl(chatId, {
+            filename: file.name,
+            contentType: file.type,
+            size: file.size,
+            ...dimensions,
+          }),
+        );
+        await uploadBlob(upload.uploadUrl, file, upload.uploadHeaders, undefined, (value) => {
+          if (this.isCurrent(scope)) this.avatarProgress.set(value);
+        });
+        await firstValueFrom(this.api.patchGroup(chatId, { avatarImageId: upload.imageId }));
+        await this.refreshDetails(chatId);
+      },
+      true,
+    );
   }
   protected async leave() {
     if (this.busy()) return;

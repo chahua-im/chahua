@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   Component,
   computed,
@@ -13,18 +14,16 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { IonAlert, IonButton, IonIcon, IonItem, IonLabel, IonList, IonTextarea, isPlatform } from '@ionic/angular';
 import {
-  IonAlert,
-  IonButton,
-  IonIcon,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonSpinner,
-  IonTextarea,
-  isPlatform,
-} from '@ionic/angular';
-import { addCircleOutline, closeOutline, documentOutline, happyOutline, imageOutline, send } from 'ionicons/icons';
+  addCircleOutline,
+  closeOutline,
+  documentOutline,
+  happyOutline,
+  imageOutline,
+  send,
+  videocamOutline,
+} from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
@@ -43,6 +42,7 @@ import { mayBeMediaFile } from '../media-processing/file-type';
 import type { MessageContent } from '../message/message';
 import { StickerPicker } from '../sticker-picker/sticker-picker';
 import { AttachmentUpload, UploadStatus } from '../upload';
+import { UploadProgress } from '../upload-progress/upload-progress';
 import { VoicePlayer } from '../voice-player/voice-player';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { displayText, editText, wireText } from './mention-text';
@@ -63,19 +63,28 @@ enum Panel {
   templateUrl: './message-composer.html',
   styleUrl: './message-composer.scss',
   imports: [
+    NgTemplateOutlet,
     IonAlert,
     VoicePlayer,
     IonButton,
     IonIcon,
     IonTextarea,
-    IonSpinner,
+    UploadProgress,
     IonList,
     IonItem,
     IonLabel,
     StickerPicker,
     VoiceRecorder,
   ],
-  host: { '(document:click)': 'outside($event)', '(dragover)': 'dragover($event)', '(drop)': 'drop($event)' },
+  host: {
+    '(document:click)': 'outside($event)',
+    '[class.drag-over]': 'dragDepth() > 0',
+    '(dragenter)': 'dragenter($event)',
+    '(dragover)': 'dragover($event)',
+    '(dragleave)': 'dragleave()',
+    '(drop)': 'drop($event)',
+    '(document:dragend)': 'dragDepth.set(0)',
+  },
 })
 export class MessageComposer {
   readonly text = model('');
@@ -92,7 +101,15 @@ export class MessageComposer {
   readonly submitted = output<Composition>();
   readonly editLast = output<void>();
   readonly escape = output<void>();
-  protected readonly icons = { addCircleOutline, happyOutline, send, closeOutline, imageOutline, documentOutline };
+  protected readonly icons = {
+    addCircleOutline,
+    happyOutline,
+    send,
+    closeOutline,
+    imageOutline,
+    documentOutline,
+    videocamOutline,
+  };
   private readonly mobile = isPlatform('ios') || isPlatform('android');
   protected readonly windows = navigator.userAgent.includes('Windows');
   protected readonly macOS = !isPlatform('ios') && navigator.userAgent.includes('Macintosh');
@@ -104,6 +121,7 @@ export class MessageComposer {
   protected readonly Panel = Panel;
   protected readonly Purpose = AttachmentUploadPurpose;
   protected readonly panel = signal(Panel.None);
+  protected readonly dragDepth = signal(0);
   readonly voiceActive = signal(false);
   private readonly destroy = inject(DestroyRef);
   private readonly textarea = viewChild(IonTextarea);
@@ -179,6 +197,7 @@ export class MessageComposer {
     this.existing.set([]);
     this.voice()?.reset();
     this.panel.set(Panel.None);
+    this.dragDepth.set(0);
     this.mentionVersion++;
     this.mentionRange = undefined;
     this.suggestions.set([]);
@@ -193,10 +212,20 @@ export class MessageComposer {
     for (const file of files) this.addFile(file, purpose);
   }
 
+  protected dragenter(event: DragEvent) {
+    if (event.dataTransfer?.types.includes('Files')) this.dragDepth.update((depth) => depth + 1);
+  }
   dragover(event: DragEvent) {
-    if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) event.preventDefault();
+    const transfer = event.dataTransfer;
+    if (!transfer?.types.includes('Files')) return;
+    event.preventDefault();
+    transfer.dropEffect = 'copy';
+  }
+  protected dragleave() {
+    this.dragDepth.update((depth) => Math.max(0, depth - 1));
   }
   drop(event: DragEvent) {
+    this.dragDepth.set(0);
     if (!event.dataTransfer?.files.length) return;
     event.preventDefault();
     event.stopPropagation();

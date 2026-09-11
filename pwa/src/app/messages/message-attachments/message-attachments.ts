@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, input, linkedSignal } from '@angular/core';
-import { IonBadge, IonIcon, IonSpinner, ModalController } from '@ionic/angular';
+import { IonBadge, IonIcon, ModalController } from '@ionic/angular';
 import { documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
 import { type MessageResponse, MessageType } from '../../../generated/models';
 import type { SnowflakeID } from '../../api/snowflake-id';
@@ -8,6 +8,7 @@ import { openMediaViewer } from '../media-viewer/media-viewer';
 import { MessageDelivery } from '../message-delivery';
 import { MessageStatus } from '../message-status/message-status';
 import { type AttachmentUpload, UploadStatus } from '../upload';
+import { UploadProgress } from '../upload-progress/upload-progress';
 import { VoicePlayer } from '../voice-player/voice-player';
 
 import { attachmentKind, MediaKind } from './media-kind';
@@ -26,7 +27,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   selector: 'app-message-attachments',
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
-  imports: [VoicePlayer, DatePipe, IonBadge, IonIcon, IonSpinner, MessageStatus],
+  imports: [VoicePlayer, DatePipe, IonBadge, IonIcon, UploadProgress, MessageStatus],
   host: { '[class.overlay-time]': 'overlayTime()' },
 })
 export class MessageAttachments {
@@ -72,7 +73,10 @@ export class MessageAttachments {
         ...attachment,
         kind: attachmentKind(message.messageType, attachment.kind),
         sticker: !!sticker,
-        uploading: state?.status === UploadStatus.Processing || state?.status === UploadStatus.Uploading,
+        progress:
+          state?.status === UploadStatus.Processing || state?.status === UploadStatus.Uploading
+            ? state.progress
+            : undefined,
         ...dimensions,
         displayWidth: Math.min(dimensions.width, limit, (limit * dimensions.width) / dimensions.height),
       };

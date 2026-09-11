@@ -3,12 +3,12 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { AlertController, IonActionSheet } from '@ionic/angular';
+import { AlertController, IonActionSheet, IonToast } from '@ionic/angular';
 import { archive, archiveOutline, starOutline } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { GroupKind, ServerWsMessageType, type ServerWsMessage } from '../../../generated/models';
+import { GroupKind, GroupRole, ServerWsMessageType, type ServerWsMessage } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId } from '../../api/snowflake-id';
@@ -24,6 +24,7 @@ describe('ChatDetails', () => {
   const realtime = mockRealtime({ events$: events });
   const alert = { present: vi.fn(), onDidDismiss: vi.fn() };
   beforeEach(() => {
+    vi.spyOn(IonToast.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
     TestBed.configureTestingModule({
@@ -41,7 +42,9 @@ describe('ChatDetails', () => {
   });
   afterEach(() => http.verify());
 
-  async function open(chat = { ...wireChat, mutedUntil: undefined as string | undefined }) {
+  async function open(
+    chat: typeof wireChat & { mutedUntil?: string; myRole?: GroupRole; description?: string } = { ...wireChat },
+  ) {
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
@@ -244,29 +247,132 @@ describe('ChatDetails', () => {
     expect(fixture.componentInstance['chat']()?.name).toBe('当前群');
   });
 
-  it('refreshes the saved chat without closing the current chat edit form', async () => {
-    const fixture = await open();
+  it('edits fields in place and saves only the chosen field, preserving another draft', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin, description: '原简介' });
     const component = fixture.componentInstance;
-    component['edit']();
-    const saving = component['save']();
-    await component['save']();
+    const { Name, Description } = component['Field'];
+    expect(fixture.nativeElement.querySelectorAll('.field-edit')).toHaveLength(2);
+    expect(fixture.nativeElement.querySelector('.avatar-edit')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-popover')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).not.toContain('更多');
+    component['edit'](Name);
+    component['edit'](Description);
+    fixture.detectChanges();
+    const name = fixture.nativeElement.querySelector('input.profile-input') as HTMLInputElement;
+    const description = fixture.nativeElement.querySelector('textarea') as HTMLTextAreaElement;
+    expect(name.value).toBe(wireChat.name);
+    expect(description.value).toBe('原简介');
+    name.value = '新群名';
+    name.dispatchEvent(new Event('input'));
+    description.value = '尚未保存的简介';
+    description.dispatchEvent(new Event('input'));
+    const saving = component['save'](Name);
+    await component['save'](Name);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('h2 .field-edit ion-spinner')).not.toBeNull();
+    const patch = http.expectOne({ method: 'PATCH', url: `/_api/group/${wireChat.id}` });
+    expect(patch.request.body).toEqual({ name: '新群名' });
+    patch.flush(null);
+    await Promise.resolve();
+    http
+      .expectOne(`/_api/group/${wireChat.id}`)
+      .flush({ ...wireChat, name: '新群名', myRole: GroupRole.admin, description: '原简介' });
+    await saving;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('h2').textContent.trim()).toBe('新群名');
+    expect(fixture.nativeElement.querySelector('input.profile-input')).toBeNull();
+    expect(description.value).toBe('尚未保存的简介');
+    expect(component['edits']().description?.value).toBe('尚未保存的简介');
+  });
+
+  it('keeps a failed field open for retry and permits clearing the description', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin, description: '原简介' });
+    const component = fixture.componentInstance;
+    const field = component['Field'].Description;
+    component['edit'](field);
+    component['fields'].description!.value().value.set('');
+    const saving = component['save'](field);
+    const patch = http.expectOne({ method: 'PATCH', url: `/_api/group/${wireChat.id}` });
+    expect(patch.request.body).toEqual({ description: '' });
+    patch.flush({}, { status: 503, statusText: 'Unavailable' });
+    await saving;
+    expect(component['busy']()).toBe(false);
+    expect(component['edits']().description?.value).toBe('');
+    expect(IonToast.prototype.present).toHaveBeenCalled();
+    const retry = component['save'](field);
+    http.expectOne({ method: 'PATCH', url: `/_api/group/${wireChat.id}` }).flush(null);
+    await Promise.resolve();
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, myRole: GroupRole.admin, description: '' });
+    await retry;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('textarea')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.profile p').textContent).toContain('添加群简介');
+  });
+
+  it('does not save an empty name or unchanged text and ignores Enter during composition', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    const field = component['Field'].Name;
+    component['edit'](field);
+    await component['save'](field);
+    expect(component['edits']().name).toBeUndefined();
+    component['edit'](field);
+    component['fields'].name!.value().value.set('   ');
+    await component['save'](field);
+    expect(component['edits']().name?.value).toBe('   ');
+    component['fields'].name!.value().value.set('候选群名');
+    component['editKeydown'](new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }), field);
+    expect(component['edits']().name?.value).toBe('候选群名');
+    component['editKeydown'](new KeyboardEvent('keydown', { key: 'Escape' }), field);
+    expect(component['edits']().name).toBeUndefined();
+    http.expectNone((req) => req.method === 'PATCH');
+  });
+
+  it.each([
+    [GroupKind.group, GroupRole.member, false],
+    [GroupKind.dm, GroupRole.admin, false],
+    [GroupKind.group, GroupRole.admin, true],
+  ])('does not allow editing for kind %s, role %s, topic %s', async (kind, myRole, thread) => {
+    const fixture = await open({ ...wireChat, kind, myRole });
+    const component = fixture.componentInstance;
+    if (thread) {
+      fixture.componentRef.setInput('threadId', testMessage.id);
+      fixture.detectChanges();
+      http
+        .expectOne(`/_api/chats/${wireChat.id}/threads/${decodeId(testMessage.id)}/subscribe`)
+        .flush({ subscribed: false, archived: false });
+    }
+    fixture.detectChanges();
+    component['edit'](component['Field'].Name);
+    expect(component['canManage']()).toBe(false);
+    expect(component['edits']().name).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('.field-edit')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.avatar-edit')).toBeNull();
+  });
+
+  it('refreshes the saved chat without closing a new chat field being edited', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    const field = component['Field'].Name;
+    component['edit'](field);
+    component['fields'].name!.value().value.set('旧群改名');
+    const saving = component['save'](field);
     const patch = http.expectOne({ method: 'PATCH', url: `/_api/group/${wireChat.id}` });
     const nextId = encodeId('9007199254741993');
     fixture.componentRef.setInput('chatId', nextId);
     fixture.detectChanges();
-    http.expectOne(`/_api/group/${decodeId(nextId)}`).flush({ ...wireChat, id: decodeId(nextId), name: '当前群' });
+    http
+      .expectOne(`/_api/group/${decodeId(nextId)}`)
+      .flush({ ...wireChat, id: decodeId(nextId), name: '当前群', myRole: GroupRole.admin });
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
     await fixture.whenStable();
-    component['edit']();
-    const currentView = component['view']();
+    component['edit'](field);
     expect(component['busy']()).toBe(false);
-
     patch.flush(null);
     await Promise.resolve();
-    http.expectOne(`/_api/group/${wireChat.id}`).flush(structuredClone(wireChat));
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, name: '旧群改名', myRole: GroupRole.admin });
     await saving;
-    expect(component['view']()).toBe(currentView);
-    expect(component['values']().name).toBe('当前群');
+    expect(component['edits']().name?.value).toBe('当前群');
     expect(component['error']()).toBe(false);
   });
 

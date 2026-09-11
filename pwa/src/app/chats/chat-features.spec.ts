@@ -6,7 +6,7 @@ import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
 import type { FriendRelationshipResponse } from '../../generated/models';
-import { GroupRole, GroupVisibility } from '../../generated/models';
+import { GroupRole } from '../../generated/models';
 import { activeQuery } from '../api/query';
 import { testChat, testUser, wireChat } from '../api/testing';
 import { SessionStore } from '../session/session-store';
@@ -162,14 +162,13 @@ describe('Chat feature requests', () => {
     fixture.detectChanges();
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
     await fixture.whenStable();
-    fixture.componentInstance['values'].set({
-      name: '新群名',
-      description: '新简介',
-      visibility: GroupVisibility.public,
-    });
-    const saving = fixture.componentInstance['save']();
+    const component = fixture.componentInstance;
+    const field = component['Field'].Name;
+    component['edit'](field);
+    component['fields'].name!.value().value.set('新群名');
+    const saving = component['save'](field);
     const request = http.expectOne((req) => req.method === 'PATCH');
-    expect(request.request.body).toEqual({ name: '新群名', description: '新简介', visibility: GroupVisibility.public });
+    expect(request.request.body).toEqual({ name: '新群名' });
     request.flush({ ...wireChat, name: '新群名', description: '新简介' });
     await saving;
     expect(store.invalidate).toHaveBeenCalled();
