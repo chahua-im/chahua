@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { provideRouter, Router, RouterLink } from '@angular/router';
+import { NavigationEnd, provideRouter, Router, RouterLink } from '@angular/router';
 import { IonContent, IonModal, IonTextarea, iosTransitionAnimation } from '@ionic/angular';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -837,6 +837,59 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('');
     expect(TestBed.inject(DraftStore).get(testChat.id)?.text).toBe('旧会话草稿');
     expect(TestBed.inject(DraftStore).get(encodeId('9007199254740995'))).toBeUndefined();
+  });
+
+  it('reuses the parent message and avatar when returning from a topic, then merges missed messages', async () => {
+    const router = TestBed.inject(Router);
+    const parent = `/chats/chat/${wireChat.id}`;
+    const url = vi.spyOn(router, 'url', 'get').mockReturnValue(`${parent}/thread/${wireMessage.id}`);
+    const row = fixture.nativeElement.querySelector('app-message');
+    const avatar = row.querySelector('ion-avatar');
+    expect(avatar).not.toBeNull();
+    component['updateDraft']('群里的草稿');
+    component.ionViewWillLeave();
+    component.ionViewDidLeave();
+    expect(component['active']()).toBe(false);
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
+    expect(row.querySelector('ion-avatar')).toBe(avatar);
+    const reading = vi.mocked(TestBed.inject(ChatStore).markRead);
+    reading.mockClear();
+    await component['trackScroll']();
+    expect(reading).not.toHaveBeenCalled();
+
+    url.mockReturnValue(parent);
+    component.ionViewWillEnter();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
+    expect(row.querySelector('ion-avatar')).toBe(avatar);
+    expect(component['draft']()).toBe('群里的草稿');
+    expect(fixture.nativeElement.querySelector('.loading-status')).toBeNull();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`).flush({
+      messages: [
+        {
+          ...wireMessage,
+          id: '9007199254741010',
+          clientGeneratedId: 'missed-in-topic',
+          message: '新消息',
+          sender: { ...wireMessage.sender, uid: wireMessage.sender.uid + 1 },
+        },
+      ],
+    });
+    await vi.waitFor(() => expect(component['conversation'].items()).toHaveLength(2));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
+    expect(row.querySelector('ion-avatar')).toBe(avatar);
+  });
+
+  it('releases a covered parent when navigation leaves its group and topics', () => {
+    const router = TestBed.inject(Router);
+    const url = vi.spyOn(router, 'url', 'get').mockReturnValue(`/chats/chat/${wireChat.id}/thread/${wireMessage.id}`);
+    component.ionViewDidLeave();
+    expect(component['conversation'].items()).toHaveLength(1);
+    url.mockReturnValue('/chats');
+    (router.events as Subject<NavigationEnd>).next(new NavigationEnd(1, '/chats', '/chats'));
+    expect(component['conversation'].page()).toBeUndefined();
+    expect(fixture.nativeElement.querySelector('app-message')).toBeNull();
   });
 
   it('keeps typing and reply selection local, persisting once when navigation starts', () => {

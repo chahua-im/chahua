@@ -147,7 +147,9 @@
             <app-saved-message-list [chatId]="chatId()" />
           }
           @default {
-            <app-chat-attachments [chatId]="chatId()" [kind]="selected" />
+            @for (kind of [selected]; track kind) {
+              <app-chat-attachments [chatId]="chatId()" [kind]="kind" />
+            }
           }
         }
       </div>
