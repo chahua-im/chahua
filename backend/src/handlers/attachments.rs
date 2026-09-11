@@ -208,13 +208,6 @@ fn validate_upload_request(
         AttachmentUploadPurpose::Voice if mime.type_() != mime::AUDIO => {
             Err(AppError::BadRequest("Voice uploads must be audio"))
         }
-        AttachmentUploadPurpose::File
-            if mime.type_() == mime::IMAGE || mime.type_() == mime::VIDEO =>
-        {
-            Err(AppError::BadRequest(
-                "Image and video uploads must use media purpose",
-            ))
-        }
         _ => Ok(purpose),
     }
 }
@@ -274,6 +267,11 @@ mod tests {
             52_428_800,
         )
         .is_err());
+        assert!(validate_upload_request(
+            &request(1, Some(AttachmentUploadPurpose::File), "image/png"),
+            52_428_800,
+        )
+        .is_ok());
         assert!(validate_upload_request(
             &request(1, Some(AttachmentUploadPurpose::Voice), "audio/ogg"),
             52_428_800,
