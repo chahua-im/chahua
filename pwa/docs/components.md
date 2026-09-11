@@ -110,13 +110,14 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 ## 输入和媒体
 
-| 组件            | 输入、输出与局部字段                                                                                           | 所有权                                                                        |
-| --------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| MessageComposer | chatId、text model、editing、editingUploads、relationship；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选；手动键盘操作输出 editLast / escape 给页面 |
-| VoiceRecorder   | active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                | 设备资源和未发送录音属于组件，离开时释放                                      |
-| VoicePlayer     | src；playing、loading、failed、elapsed、duration、rate、波形状态                                               | 点击后创建 Audio 和 WaveSurfer；同一时间播放一条，销毁时停止                  |
-| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；不复制包内贴纸       |
-| MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                               | 当前消息的媒体集合与本地画布，不写入聊天状态                                  |
+| 组件            | 输入、输出与局部字段                                                                                           | 所有权                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| MessageComposer | chatId、text model、editing、editingUploads、relationship；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面 |
+| VoiceRecorder   | active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                | 设备资源和未发送录音属于组件，离开时释放                                                    |
+| UploadProgress  | value（0–1）                                                                                                   | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                       |
+| VoicePlayer     | src；playing、loading、failed、elapsed、duration、rate、波形状态                                               | 点击后创建 Audio 和 WaveSurfer；同一时间播放一条，销毁时停止                                |
+| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；不复制包内贴纸                     |
+| MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                               | 当前消息的媒体集合与本地画布，不写入聊天状态                                                |
 
 上传任务提交后归 MessageOutbox，编辑只借用任务引用。输入区可以继续输入和录音。VoicePlayer 不显示原生音频控制条，首次点击前不下载媒体，波形读取失败时仍保留可用播放。
 
@@ -124,19 +125,19 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 ## 资料、搜索与管理
 
-| 组件               | 输入与局部字段                                                                                                                 | 共享数据/输出                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| ChatDetails        | chatId 或 user、currentConversation、threadId、threadRoot、messages → closed；view、tab、编辑表单、pending/error、详情 loading | ChatStore 的头像、标题、详情、静音、订阅与好友关系；静音复用 ChatMute |
-| ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                 | 从聊天消息页提取话题根，点击导航                                      |
-| ChatMembers        | chatId；members、cursor、loading/error                                                                                         | MembersService；行点击打开资料，仅管理员显示右侧身份                  |
-| ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                   | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料       |
-| ChatAttachments    | chatId、kind；items、cursor、loading/error、打开/定位状态                                                                      | 列表归组件，打开原消息媒体或定位上下文                                |
-| ChatSearch         | chatId；query、sort、messages、cursor、loading/error                                                                           | 聊天消息搜索，点击定位原消息                                          |
-| ChatInvites        | chatId；邀请列表、创建限制、目标用户与操作状态                                                                                 | InvitesService；DirectorySearch 选择指定用户                          |
-| StartChat          | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                                                        | 点击提交才创建或加入；改邀请码会使旧预览不可提交                      |
-| ChatMute           | 公开 toggle(chatId)；菜单选择                                                                                                  | 调用 ChatStore.setMuted，原调用按钮持有等待状态                       |
+| 组件               | 输入与局部字段                                                                                                                                   | 共享数据/输出                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| ChatDetails        | chatId 或 user、currentConversation、threadId、threadRoot、messages → closed；view、tab、字段编辑草稿、头像上传进度、pending/error、详情 loading | ChatStore 的头像、标题、详情、静音、订阅与好友关系；静音复用 ChatMute |
+| ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                   | 从聊天消息页提取话题根，点击导航                                      |
+| ChatMembers        | chatId；members、cursor、loading/error                                                                                                           | MembersService；行点击打开资料，仅管理员显示右侧身份                  |
+| ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                     | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料       |
+| ChatAttachments    | chatId、kind；items、cursor、loading/error、打开/定位状态                                                                                        | 列表归组件，打开原消息媒体或定位上下文                                |
+| ChatSearch         | chatId；query、sort、messages、cursor、loading/error                                                                                             | 聊天消息搜索，点击定位原消息                                          |
+| ChatInvites        | chatId；邀请列表、创建限制、目标用户与操作状态                                                                                                   | InvitesService；DirectorySearch 选择指定用户                          |
+| StartChat          | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                                                                          | 点击提交才创建或加入；改邀请码会使旧预览不可提交                      |
+| ChatMute           | 公开 toggle(chatId)；菜单选择                                                                                                                    | 调用 ChatStore.setMuted，原调用按钮持有等待状态                       |
 
-ChatDetails 的侧栏、会话信息 modal 和用户资料 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
+ChatDetails 的侧栏、会话信息 modal 和用户资料 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。名称和简介仅在进入编辑时创建各自的 Signal Form 字段草稿，保存只提交对应字段，另一个字段的草稿保持不变；切换会话清空草稿及头像上传进度。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
 
 ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资料中的添加/删除/拉黑成功后刷新它；所有消费者随共享值变化，不各自请求并维护副本。
 

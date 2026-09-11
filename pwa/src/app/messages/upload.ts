@@ -87,11 +87,12 @@ export class AttachmentUpload {
   private async run(): Promise<SnowflakeID | undefined> {
     const signal = AbortSignal.any([this.controller.signal, this.attempt!.signal]);
     const aborted = fromEvent(signal, 'abort');
-    const processing = this.purpose === AttachmentUploadPurpose.media && !this.prepared;
+    const uploadStart = this.purpose === AttachmentUploadPurpose.media ? 0.5 : 0;
+    const processing = uploadStart > 0 && !this.prepared;
     this.uploadState.update((state) => ({
       ...state,
       status: processing ? UploadStatus.Processing : UploadStatus.Uploading,
-      progress: 0,
+      progress: processing ? 0 : uploadStart,
     }));
     const progress = (progress: number) => {
       if (!signal.aborted) this.uploadState.update((state) => ({ ...state, progress }));
@@ -101,7 +102,9 @@ export class AttachmentUpload {
       const config = await firstValueFrom(this.api.getConfig().pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)));
       signal.throwIfAborted();
       if (processing) {
-        this.prepared = await firstValueFrom(from(prepareMedia(this.file, signal, progress)).pipe(takeUntil(aborted)));
+        this.prepared = await firstValueFrom(
+          from(prepareMedia(this.file, signal, (value) => progress(value * uploadStart))).pipe(takeUntil(aborted)),
+        );
         signal.throwIfAborted();
       }
       const { file, dimensions } = this.prepared ?? { file: this.file, dimensions: undefined };
@@ -109,7 +112,7 @@ export class AttachmentUpload {
         this.retryable = false;
         throw new Error('文件过大');
       }
-      this.uploadState.set({ ...dimensions, status: UploadStatus.Uploading, progress: 0 });
+      this.uploadState.set({ ...dimensions, status: UploadStatus.Uploading, progress: uploadStart });
       const response = await firstValueFrom(
         this.api
           .postUploadUrl({
@@ -122,7 +125,9 @@ export class AttachmentUpload {
           .pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)),
       );
       signal.throwIfAborted();
-      await uploadBlob(response.uploadUrl, file, response.uploadHeaders, signal, progress);
+      await uploadBlob(response.uploadUrl, file, response.uploadHeaders, signal, (value) =>
+        progress(uploadStart + value * (1 - uploadStart)),
+      );
       signal.throwIfAborted();
       this.uploadState.update((state) => ({
         ...state,

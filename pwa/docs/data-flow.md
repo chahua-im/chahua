@@ -156,7 +156,7 @@ Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceU
 
 ## 媒体与语音
 
-上传先读取限制，照片入口检测/压缩后申请签名 URL；文件入口保留原字节。签名 PUT 使用返回头，不携带聊天 token。AttachmentUpload 持有进度、AbortSignal、本地 URL 和成功 ID；重试复用已有任务/ID，释放时取消处理与上传。
+上传先读取限制，照片入口检测/压缩后申请签名 URL；文件入口保留原字节。签名 PUT 使用返回头，不携带聊天 token。AttachmentUpload 持有统一总进度（阶段权重见[加载反馈](loading-indicators.md)）、AbortSignal、本地 URL 和成功 ID；重试复用已有任务/ID，释放时取消处理与上传。
 
 静态图片长边限制 1920，尝试 AVIF/WebP/JPEG，低于原体积 75% 才采用；视频通过 Mediabunny 转码，低于原体积 50% 且轨道完整才采用。保留动图，HEIC 必要时解码，编码失败回退原文件。浏览器已启动的不可取消编码结束后丢弃结果，不再上传。
 
