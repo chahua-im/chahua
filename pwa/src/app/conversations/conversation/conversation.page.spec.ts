@@ -4,7 +4,7 @@ import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NavigationEnd, provideRouter, Router, RouterLink } from '@angular/router';
-import { IonContent, IonModal, IonTextarea, iosTransitionAnimation } from '@ionic/angular';
+import { IonActionSheet, IonContent, IonModal, IonTextarea, iosTransitionAnimation } from '@ionic/angular';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -60,6 +60,8 @@ describe('ConversationPage', () => {
   let resizes: Map<Element, () => void>;
   const avatars = signal(false);
   beforeEach(async () => {
+    vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
+    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
     resizes = new Map();
     vi.stubGlobal(
       'ResizeObserver',
@@ -140,6 +142,43 @@ describe('ConversationPage', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     http.verify();
+  });
+
+  it('opens search from the conversation toolbar', () => {
+    const button = [...fixture.nativeElement.querySelectorAll('ion-header ion-button')].find(
+      (element) => element.querySelector('ion-icon')?.icon === component['toolbarIcons'].searchOutline,
+    );
+    expect(button).toBeDefined();
+    button.click();
+    expect(component['searchOpen']()).toBe(true);
+  });
+
+  it('shares mute updates with the list and reflects websocket changes without another detail request', async () => {
+    const muting = component['toggleMute']();
+    await component['toggleMute'](); // A second tap while busy must not submit a duplicate.
+    await vi.waitFor(() => {
+      const request = http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/mute` });
+      expect(request.request.body).toEqual({ durationSeconds: 3600 });
+      request.flush({ mutedUntil: '9999-12-31T23:59:59Z', archived: false });
+    });
+    await muting;
+    expect(component['muted']()).toBe(true);
+    expect(TestBed.inject(ChatStore).chatState(testChat.id)?.mutedUntil).toBe('9999-12-31T23:59:59Z');
+    events.next({
+      type: ServerWsMessageType.chatArchiveStateChanged,
+      payload: { chatId: testChat.id, archived: false },
+    });
+    expect(component['muted']()).toBe(false);
+  });
+
+  it('uses shared mute state and can unmute from the conversation', async () => {
+    const store = TestBed.inject(ChatStore);
+    store.acceptChats([{ ...testChat, mutedUntil: '9999-12-31T23:59:59Z' }], store.snapshot());
+    expect(fixture.componentInstance['muted']()).toBe(true);
+    const unmuting = fixture.componentInstance['toggleMute']();
+    http.expectOne({ method: 'DELETE', url: `/_api/group/${wireChat.id}/mute` }).flush(null);
+    await unmuting;
+    expect(fixture.componentInstance['muted']()).toBe(false);
   });
 
   it.each(['forward', 'back'] as const)(

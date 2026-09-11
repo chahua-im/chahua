@@ -32,9 +32,10 @@
       <ion-buttons slot="end">
         <ion-button [disabled]="threadBusy()" (click)="updateThread()">
           @if (threadBusy()) {
-            <ion-spinner />
+            <ion-spinner class="action-icon" slot="icon-only" />
           } @else {
             <ion-icon
+              class="action-icon"
               slot="icon-only"
               [icon]="
                 !status.subscribed
@@ -48,6 +49,21 @@
       </ion-buttons>
     }
     <ion-buttons slot="end">
+      <ion-button (click)="searchOpen.set(true)">
+        <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
+      </ion-button>
+      @if (!threadId()) {
+        <ion-button [disabled]="muteBusy()" (click)="toggleMute()">
+          @if (muteBusy()) {
+            <ion-spinner class="action-icon" slot="icon-only" />
+          } @else {
+            <ion-icon
+              class="action-icon"
+              slot="icon-only"
+              [icon]="muted() ? toolbarIcons.notificationsOffOutline : toolbarIcons.notificationsOutline" />
+          }
+        </ion-button>
+      }
       <ion-button class="info-button" (click)="details()">
         @if (largeScreen()) {
           <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -212,9 +228,9 @@
       [style.visibility]="showDownButton() ? 'visible' : 'hidden'">
       <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="navigateDown()">
         @if (navigatingDown() || pendingNavigation()?.type === ConversationTargetKind.Latest) {
-          <ion-spinner></ion-spinner>
+          <ion-spinner class="action-icon"></ion-spinner>
         } @else {
-          <ion-icon [icon]="downIcon"></ion-icon>
+          <ion-icon class="action-icon" [icon]="downIcon"></ion-icon>
         }
       </ion-fab-button>
       <ion-badge [style.opacity]="unreadCount() ? 1 : 0">{{ unreadCount() }}</ion-badge>
@@ -299,3 +315,17 @@
   (edit)="startEdit($event)"
   (editQueued)="startEdit($event)"
   (openThread)="openThread($event)"></app-message-menu>
+
+<app-chat-mute />
+<ion-toast #muteError message="静音设置失败，请重试" [duration]="3000" />
+<ion-modal [isOpen]="searchOpen() && active()" (didDismiss)="searchOpen.set(false)">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>搜索</ion-title>
+        <ion-buttons slot="end"><ion-button (click)="searchOpen.set(false)">关闭</ion-button></ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content appScrollbars><app-chat-search [chatId]="id()" /></ion-content>
+  </ng-template>
+</ion-modal>

@@ -56,6 +56,14 @@ ion-content {
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
 }
+.profile-name {
+  display: block;
+  position: relative;
+  min-width: 0;
+}
+.profile-title.editing {
+  visibility: hidden;
+}
 .profile-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -102,8 +110,10 @@ ion-content {
   font-size: var(--app-font-caption);
   line-height: var(--app-line-caption);
 }
-.quick-actions ion-icon {
-  font-size: 24px;
+.quick-actions :is(ion-icon, ion-spinner) {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
 }
 .destructive {
   color: var(--ion-color-danger);
@@ -112,20 +122,10 @@ ion-content {
   background: var(--ion-background-color, #fff);
 }
 
-.quick-actions ion-spinner {
-  width: 24px;
-  height: 24px;
-}
-
 .attachments ion-segment-button {
   min-width: 0;
   --padding-start: 4px;
   --padding-end: 4px;
-}
-
-.quick-actions.user-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .profile .editable {
@@ -137,7 +137,7 @@ ion-content {
   gap: 4px;
   align-items: center;
 }
-.profile .editable:has(.profile-input) {
+.profile p.editable:has(.profile-input) {
   width: 100%;
 }
 .editable::before {
@@ -155,6 +155,12 @@ ion-content {
   text-align: inherit;
   resize: vertical;
 }
+.profile-name .profile-input {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  padding-block: 0;
+}
 textarea.profile-input {
   font-size: var(--app-font-body);
   line-height: var(--app-line-body);
@@ -169,7 +175,7 @@ textarea.profile-input {
   color: var(--ion-color-primary);
   font-size: 18px;
 }
-.field-edit ion-spinner {
-  width: 20px;
-  height: 20px;
+.field-edit :is(ion-icon, ion-spinner) {
+  width: 18px;
+  height: 18px;
 }
