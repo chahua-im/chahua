@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import WaveSurfer from 'wavesurfer.js';
-import { VoicePlayer } from './voice-player';
+import { pauseVoicePlayback, VoicePlayer } from './voice-player';
 const destroy = vi.fn(),
   handlers = new Map<string, () => void>();
 let create: ReturnType<typeof vi.spyOn>;
@@ -61,6 +61,16 @@ describe('VoicePlayer', () => {
     handlers.get('error')!();
     expect(second.componentInstance['playing']()).toBe(true);
     expect(second.componentInstance['failed']()).toBe(false);
+  });
+  it('pauses playback and buffering while retaining the player for a covered conversation', () => {
+    const fixture = open();
+    fixture.componentInstance['toggle']();
+    audios[0].dispatchEvent(new Event('waiting'));
+    expect(fixture.componentInstance['loading']()).toBe(true);
+    pauseVoicePlayback();
+    expect(fixture.componentInstance['playing']()).toBe(false);
+    expect(fixture.componentInstance['loading']()).toBe(false);
+    expect(destroy).not.toHaveBeenCalled();
   });
   it('offers original-file access and recreates a failed player on retry', () => {
     const fixture = open();

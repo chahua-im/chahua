@@ -5,6 +5,10 @@ import WaveSurfer from 'wavesurfer.js';
 
 let playingAudio: HTMLAudioElement | undefined;
 
+export function pauseVoicePlayback() {
+  playingAudio?.pause();
+}
+
 @Component({
   selector: 'app-voice-player',
   imports: [IonIcon, IonSpinner],
@@ -47,7 +51,10 @@ export class VoicePlayer {
         this.playing.set(true);
         this.loading.set(false);
       });
-      audio.addEventListener('pause', () => this.playing.set(false));
+      audio.addEventListener('pause', () => {
+        this.playing.set(false);
+        this.loading.set(false);
+      });
       audio.addEventListener('waiting', () => this.loading.set(true));
       audio.addEventListener('timeupdate', () => this.elapsed.set(audio.currentTime));
       audio.addEventListener('durationchange', () => {
