@@ -108,6 +108,25 @@ describe('ConversationStore', () => {
     expect(timeline.error()).toBeUndefined();
   });
 
+  it('cancels pagination without discarding the parent range and can catch up on return', async () => {
+    const opening = timeline.open();
+    http.expectOne(`${root}?max=50`).flush({ messages: [wire('100')], olderCursor: '100' });
+    await opening;
+    const page = timeline.page();
+    const loading = timeline.load(PageDirection.Older);
+    const request = http.expectOne(`${root}?max=50&before=100`);
+    timeline.cancelLoading();
+    expect(request.cancelled).toBe(true);
+    await loading;
+    expect(timeline.page()).toBe(page);
+    expect(timeline.paging()).toBe(false);
+    expect(timeline.error()).toBeUndefined();
+    const reconnecting = timeline.reconnect();
+    http.expectOne(`${root}?max=50&after=100`).flush({ messages: [wire('101')] });
+    await reconnecting;
+    expect(timeline.items().map((message) => message.id)).toEqual([encodeId('100'), encodeId('101')]);
+  });
+
   it('jumps directly to a distant message and keeps both paging edges independent', async () => {
     expect(timeline.atLatest()).toBe(false);
     expect(timeline.canLoad(PageDirection.Older)).toBe(false);

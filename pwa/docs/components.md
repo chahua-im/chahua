@@ -84,7 +84,7 @@ ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保
 
 输入文字、回复对象与编辑目标由页面持有；Composer 通过 model 和输出传递变化。引用来源栈、当前置顶选择等只保留需要重新查找的 ID；已有同一对象引用无需转成 ID。未读数字直接消费 ChatStore。滚动中的已读与分页判断共用一次滚动尺寸读取；已确认消息的元素集合随消息行和视图变化派生，不在每次滚动时重新过滤。置顶栏持有当前显示的置顶对象引用，仅在栏位出现或消失时等待触摸与惯性结束；共享的置顶数据仍即时更新。
 
-scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯性，用于分页合并和置顶栏显隐；visibleDate 来自已有视口测量。Ionic 缓存页面离开时释放区间和组件资源，DraftStore 与 MessageOutbox 的生命周期独立于页面。
+scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯性，用于分页合并和置顶栏显隐；visibleDate 来自已有视口测量。Ionic 缓存页面通常在离开时释放区间和组件资源；群聊被其话题覆盖时保留消息节点和位置，返回时补取消息，离开这组群聊/话题后释放。DraftStore 与 MessageOutbox 的生命周期独立于页面。
 
 ## 消息展示与操作
 

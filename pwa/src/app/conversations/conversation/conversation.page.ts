@@ -17,7 +17,7 @@ import {
   viewChildren,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterLink } from '@angular/router';
+import { NavigationEnd, Router, RouterLink } from '@angular/router';
 import {
   IonBackButton,
   IonBadge,
@@ -62,6 +62,7 @@ import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { Message, type MessageContent } from '../../messages/message/message';
+import { pauseVoicePlayback } from '../../messages/voice-player/voice-player';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
@@ -486,6 +487,18 @@ export class ConversationPage {
       this.position();
       if (this.active()) void this.positionAndRead();
     });
+    this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
+      if (
+        event instanceof NavigationEnd &&
+        !this.active() &&
+        this.conversation.page() &&
+        !this.coveredByThread() &&
+        event.urlAfterRedirects.split(/[?#]/)[0] !== `/chats/chat/${decodeId(this.id())}`
+      ) {
+        this.leave();
+        this.changeDetector.detectChanges();
+      }
+    });
     this.destroyRef.onDestroy(() => this.leave());
   }
 
@@ -508,7 +521,15 @@ export class ConversationPage {
   }
 
   ionViewWillEnter() {
-    if (!this.active()) this.activate(this.id(), this.threadId());
+    if (this.active()) return;
+    if (!this.conversation.page()) {
+      this.activate(this.id(), this.threadId());
+      return;
+    }
+    this.active.set(true);
+    void this.conversation.reconnect();
+    void this.loadPins();
+    void this.refreshConversationMetadata().catch(() => {});
   }
 
   ionViewDidEnter() {
@@ -521,10 +542,28 @@ export class ConversationPage {
   }
 
   ionViewDidLeave() {
-    // Only release after a completed transition: an iOS back gesture can be cancelled.
-    this.leave();
-    // Ionic detaches cached pages; render the cleared state once to release message components.
+    // A topic covers its parent chat: preserve its DOM and scroll position for the back transition.
+    if (this.coveredByThread() && this.conversation.page()) {
+      this.active.set(false);
+      this.entered = false;
+      this.navigationVersion++;
+      this.position.set(undefined);
+      this.scrolling.reset();
+      this.conversation.cancelLoading();
+      this.menu()?.reset();
+      this.cancelEdit();
+      this.composer()?.reset();
+      pauseVoicePlayback();
+    } else {
+      // Only release after a completed transition: an iOS back gesture can be cancelled.
+      this.leave();
+    }
+    // Ionic detaches cached pages; apply resource cleanup after the transition.
     this.changeDetector.detectChanges();
+  }
+
+  private coveredByThread() {
+    return !this.threadId() && this.router.url.startsWith(`/chats/chat/${decodeId(this.id())}/thread/`);
   }
 
   private isCurrent(entry = this.entryKey()) {
