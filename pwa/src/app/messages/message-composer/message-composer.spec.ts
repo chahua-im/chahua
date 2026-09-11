@@ -19,6 +19,7 @@ import { decodeId, encodeId } from '../../api/snowflake-id';
 import { testChat, testMessage } from '../../api/testing';
 import type { MessageContent } from '../message/message';
 import { AttachmentUpload, UploadStatus } from '../upload';
+import { UploadProgress } from '../upload-progress/upload-progress';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { MessageComposer, type Composition } from './message-composer';
 
@@ -204,7 +205,7 @@ describe('Message composer upload ownership', () => {
     const xhr = await startStorage();
     xhr.upload.onprogress?.({ lengthComputable: true, loaded: 3, total: 4 });
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.uploads').textContent).toContain('75%');
+    expect(fixture.debugElement.query(By.directive(UploadProgress)).componentInstance.value()).toBe(0.75);
     composer['submit']();
     expect(submitted.mock.calls[0][0].uploads).toEqual([upload]);
     composer.reset();
@@ -437,7 +438,7 @@ describe('Message composer upload ownership', () => {
     expect(composer['existing']()).toEqual([existing]);
     expect(composer['visualUploads']()).toEqual([borrowed, owned]);
     expect(fixture.nativeElement.querySelectorAll('.upload')).toHaveLength(3);
-    expect(fixture.nativeElement.querySelector('.uploads').textContent).toContain('25%');
+    expect(fixture.debugElement.query(By.directive(UploadProgress)).componentInstance.value()).toBe(0.625);
     composer.submitted.subscribe(() => {
       expect(composer['uploads']()).toEqual([]);
       expect(composer['borrowedUploads']()).toEqual([]);

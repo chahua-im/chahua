@@ -22,10 +22,41 @@ ion-content {
 .profile {
   padding-block: var(--app-profile-padding);
 }
-.profile app-chat-avatar {
+.profile-avatar {
+  position: relative;
+  width: 88px;
+  height: 88px;
   margin-inline: auto;
 }
-.profile h2 {
+.avatar-edit,
+.avatar-upload {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+.avatar-edit {
+  padding: 0;
+  background: transparent;
+}
+.avatar-edit > ion-icon {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  padding: 4px;
+  border: 2px solid var(--ion-color-light);
+  border-radius: 50%;
+  background: var(--ion-color-primary);
+  color: var(--ion-color-primary-contrast);
+}
+.avatar-upload {
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+.profile-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -95,4 +126,50 @@ ion-content {
 .quick-actions.user-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.profile .editable {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  gap: 4px;
+  align-items: center;
+}
+.profile .editable:has(.profile-input) {
+  width: 100%;
+}
+.editable::before {
+  content: '';
+}
+.profile-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--ion-color-primary);
+  border-radius: 6px;
+  background: var(--ion-background-color);
+  color: var(--ion-text-color);
+  font: inherit;
+  text-align: inherit;
+  resize: vertical;
+}
+textarea.profile-input {
+  font-size: var(--app-font-body);
+  line-height: var(--app-line-body);
+}
+.field-edit {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--ion-color-primary);
+  font-size: 18px;
+}
+.field-edit ion-spinner {
+  width: 20px;
+  height: 20px;
 }

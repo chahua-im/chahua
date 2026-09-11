@@ -45,3 +45,12 @@
   font-size: 12px;
   font-weight: 600;
 }
+
+:host(.compact) {
+  width: 42px;
+  height: 42px;
+}
+:host(.compact) .track,
+:host(.compact) .speed {
+  display: none;
+}
