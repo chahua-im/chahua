@@ -93,7 +93,7 @@
       [disabled]="!!pendingAction()"
       [title]="action.label"
       (click)="perform(action, $event)">
-      <span class="action-content" [class.busy]="pendingAction()?.label === action.label">
+      <span class="action-content icon-content" [class.busy]="pendingAction()?.label === action.label">
         <ion-icon class="action-label" [icon]="action.icon"></ion-icon>
         @if (pendingAction()?.label === action.label) {
           <ion-spinner></ion-spinner>

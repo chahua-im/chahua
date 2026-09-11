@@ -33,6 +33,7 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
+  IonToast,
 } from '@ionic/angular';
 import {
   archive,
@@ -42,6 +43,9 @@ import {
   informationCircleOutline,
   listOutline,
   starOutline,
+  searchOutline,
+  notificationsOutline,
+  notificationsOffOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
@@ -56,6 +60,8 @@ import {
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatAvatar, conversationAvatar } from '../../chats/chat-avatar/chat-avatar';
+import { ChatMute } from '../../chats/chat-mute/chat-mute';
+import { ChatSearch } from '../../chats/chat-search/chat-search';
 import { ChatDetails } from '../../chats/chat-details/chat-details';
 import { ChatStore } from '../../chats/chat-store';
 import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
@@ -110,6 +116,8 @@ type ScrollPosition =
     ContentScrollbars,
     DatePipe,
     ChatDetails,
+    ChatMute,
+    ChatSearch,
     ChatAvatar,
     IonModal,
     RouterLink,
@@ -130,6 +138,7 @@ type ScrollPosition =
     IonSpinner,
     IonTitle,
     IonToolbar,
+    IonToast,
   ],
 })
 export class ConversationPage {
@@ -141,6 +150,24 @@ export class ConversationPage {
   protected details() {
     if (this.largeScreen()) this.sidebarOpen.update((open) => !open);
     else this.infoOpen.set(true);
+  }
+  protected readonly toolbarIcons = { searchOutline, notificationsOutline, notificationsOffOutline };
+  protected readonly searchOpen = linkedSignal({ source: () => this.entryKey(), computation: () => false });
+  protected readonly muteBusy = linkedSignal({ source: () => this.entryKey(), computation: () => false });
+  protected readonly muted = computed(() => this.chatInfo.isMuted(this.id()));
+  private readonly muteMenu = viewChild.required(ChatMute);
+  private readonly muteError = viewChild.required<IonToast>('muteError');
+  protected async toggleMute() {
+    if (this.muteBusy()) return;
+    const entry = this.entryKey();
+    this.muteBusy.set(true);
+    try {
+      await this.muteMenu().toggle(this.id());
+    } catch {
+      if (entry === this.entryKey()) await this.muteError().present();
+    } finally {
+      if (entry === this.entryKey()) this.muteBusy.set(false);
+    }
   }
   private readonly editTarget = linkedSignal<MessageResponse | OutgoingMessage | undefined>(() => {
     this.entryKey();

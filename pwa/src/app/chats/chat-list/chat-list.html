@@ -48,9 +48,9 @@
         <ion-buttons slot="end">
           <ion-button (click)="addMenu.present($event)">
             @if (realtime.connected()) {
-              <ion-icon slot="icon-only" [icon]="addIcon"></ion-icon>
+              <ion-icon class="action-icon" slot="icon-only" [icon]="addIcon"></ion-icon>
             } @else {
-              <ion-spinner slot="icon-only" />
+              <ion-spinner class="action-icon" slot="icon-only" />
             }
           </ion-button>
         </ion-buttons>

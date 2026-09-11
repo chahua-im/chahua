@@ -10,9 +10,6 @@
     @case (View.Invites) {
       <app-chat-invites [chatId]="chatId" />
     }
-    @case (View.Search) {
-      <app-chat-search [chatId]="chatId" />
-    }
     @default {
       @if (chat() || person()) {
         <div class="profile ion-text-center ion-padding">
@@ -30,14 +27,8 @@
             }
           </div>
           <h2 [class.editable]="canManage()">
-            @if (canManage() && edits().name != null) {
-              <input
-                class="profile-input"
-                [formField]="fields.name!.value"
-                [readOnly]="pending() === Action.Name"
-                (keydown)="editKeydown($event, Field.Name)" />
-            } @else {
-              <span class="profile-title">
+            <span class="profile-name">
+              <span class="profile-title" [class.editing]="canManage() && edits().name != null">
                 @if (threadId()) {
                   @if (threadRoot(); as root) {
                     <app-message-preview [message]="root" />
@@ -48,7 +39,14 @@
                   {{ person()?.username ?? chat()?.name ?? '用户' }}
                 }
               </span>
-            }
+              @if (canManage() && edits().name != null) {
+                <input
+                  class="profile-input"
+                  [formField]="fields.name!.value"
+                  [readOnly]="pending() === Action.Name"
+                  (keydown)="editKeydown($event, Field.Name)" />
+              }
+            </span>
             @if (canManage()) {
               <button
                 type="button"
@@ -97,7 +95,7 @@
             </p>
           }
         </div>
-        <div class="quick-actions ion-padding-horizontal" [class.user-actions]="!!person()">
+        <div class="quick-actions ion-padding-horizontal">
           @if (person(); as user) {
             <ion-button
               fill="solid"
@@ -133,12 +131,6 @@
             }
           }
           @if (!person() || otherUser()) {
-            <ion-button fill="solid" [disabled]="!id()" (click)="view.set(View.Search)">
-              <span>
-                <ion-icon [icon]="icons.searchOutline" />
-                搜索
-              </span>
-            </ion-button>
             @if (threadId()) {
               @let status = cachedSubscription();
               <ion-button fill="solid" [disabled]="busy() || !subscription()" (click)="updateThread()">
@@ -158,24 +150,15 @@
                   {{ !status?.subscribed ? '订阅' : status?.archived ? '已归档' : '归档' }}
                 </span>
               </ion-button>
-            } @else {
-              <ion-button fill="solid" [disabled]="busy() || !id()" (click)="toggleMute()">
-                <span>
-                  @if (pending() === Action.Mute) {
-                    <ion-spinner />
-                  } @else {
-                    <ion-icon [icon]="muted() ? icons.notificationsOffOutline : icons.notificationsOutline" />
-                  }
-                  @if (archived()) {
-                    取消归档并开启通知
-                  } @else if (mutedUntil(); as until) {
-                    {{ permanentMute() ? '永久' : '至 ' + (until | date: 'short') }}
-                  } @else {
-                    静音
-                  }
-                </span>
-              </ion-button>
             }
+          }
+          @if (canManage()) {
+            <ion-button fill="solid" (click)="view.set(View.Invites)">
+              <span>
+                <ion-icon [icon]="icons.linkOutline" />
+                邀请
+              </span>
+            </ion-button>
           }
           @if (!threadId() && (chat()?.kind === Kind.group || (otherUser() && relationship()?.isFriend))) {
             <ion-button fill="solid" [disabled]="busy()" (click)="leave()">
@@ -198,14 +181,6 @@
                   <ion-icon [icon]="icons.banOutline" />
                 }
                 {{ relationship()?.blocking ? '解除拉黑' : '拉黑' }}
-              </span>
-            </ion-button>
-          }
-          @if (canManage()) {
-            <ion-button fill="solid" (click)="view.set(View.Invites)">
-              <span>
-                <ion-icon [icon]="icons.linkOutline" />
-                邀请
               </span>
             </ion-button>
           }
@@ -255,5 +230,4 @@
     </p>
   }
 </ion-content>
-<app-chat-mute />
 <ion-toast #saveError message="保存失败，请重试。" [duration]="3000" />
