@@ -239,22 +239,31 @@ async fn put_reaction(
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
 
-    // Insert reaction (ON CONFLICT DO NOTHING for idempotency)
-    let inserted = diesel::insert_into(message_reactions::table)
-        .values(&MessageReaction {
-            message_id,
-            user_uid: uid,
-            emoji,
-            created_at: Utc::now(),
-            message_author_uid: message.sender_uid,
-        })
-        .on_conflict_do_nothing()
-        .execute(conn)?;
+    // Insert reaction (ON CONFLICT DO NOTHING for idempotency). The insert and
+    // the revision allocation happen under the per-chat watermark lock so
+    // revision order matches commit order (see UnreadService) — a concurrent
+    // watermark snapshot can never miss a reaction that later commits with a
+    // revision below its watermark.
+    let inserted = conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        crate::services::unread::UnreadService::lock_chat_reaction_watermark(conn, chat_id)?;
+        let inserted = diesel::insert_into(message_reactions::table)
+            .values(&MessageReaction {
+                message_id,
+                user_uid: uid,
+                emoji,
+                created_at: Utc::now(),
+                message_author_uid: message.sender_uid,
+            })
+            .on_conflict_do_nothing()
+            .execute(conn)?;
 
-    // Set denormalized flag
-    diesel::update(messages::table.filter(messages::id.eq(message_id)))
-        .set(messages::has_reactions.eq(true))
-        .execute(conn)?;
+        // Set denormalized flag
+        diesel::update(messages::table.filter(messages::id.eq(message_id)))
+            .set(messages::has_reactions.eq(true))
+            .execute(conn)?;
+
+        Ok(inserted)
+    })?;
 
     let member_uids = broadcast_reaction_update(conn, &state, chat_id, message_id);
 
