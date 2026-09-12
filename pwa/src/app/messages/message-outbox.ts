@@ -1,20 +1,6 @@
 import { computed, DestroyRef, effect, inject, Service, signal, type Signal, type WritableSignal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  catchError,
-  defaultIfEmpty,
-  firstValueFrom,
-  forkJoin,
-  from,
-  fromEvent,
-  map,
-  merge,
-  of,
-  Subject,
-  takeUntil,
-  timeout,
-  type Observable,
-} from 'rxjs';
+import { firstValueFrom, from, fromEvent, merge, Subject, takeUntil, timeout, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { MessageType, ServerWsMessageType, type CreateMessageBody, type MessageResponse } from '../../generated/models';
 import { Connection } from '../api/connection';
@@ -404,20 +390,15 @@ export class MessageOutbox {
     while (this.needsSend(item)) {
       const intent = task.intent();
       const ids = await firstValueFrom(
-        forkJoin(
-          intent.uploads.map((upload) =>
-            from(upload.retry()).pipe(
-              map((id) => {
-                if (id == null) throw new Error('Attachment upload failed');
-                return id;
-              }),
-            ),
-          ),
-        ).pipe(
-          defaultIfEmpty([] as SnowflakeID[]),
-          catchError(() => of(undefined)),
-          takeUntil(merge(task.changed, task.stopped)),
-        ),
+        from(
+          Promise.all(
+            intent.uploads.map(async (upload) => {
+              const id = await upload.retry();
+              if (id == null) throw new Error('Attachment upload failed');
+              return id;
+            }),
+          ).catch(() => undefined),
+        ).pipe(takeUntil(merge(task.changed, task.stopped))),
         { defaultValue: undefined },
       );
       if (!this.needsSend(item)) return;

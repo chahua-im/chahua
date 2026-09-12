@@ -341,7 +341,7 @@ export class ConversationPage {
     return uid ? this.chatInfo.relationship(uid).value() : undefined;
   });
   protected readonly scrolling = scrollActivity();
-  private readonly floatingDate = viewChild<ElementRef<HTMLElement>>('floatingDate');
+  private readonly floatingDate = viewChild.required<ElementRef<HTMLElement>>('floatingDate');
   private readonly dateSeparators = viewChildren<ElementRef<HTMLElement>>('dateSeparator');
   protected readonly dateColliding = signal(false);
   protected readonly hiddenDateKey = signal<string | number | undefined>(undefined);
@@ -802,17 +802,20 @@ export class ConversationPage {
       else last = middle;
     }
     this.visibleDate.set(rows[first]?.message.createdAt);
-    const floating = this.floatingDate()?.nativeElement.getBoundingClientRect();
+    const floating = this.floatingDate().nativeElement;
+    const floatingTop = viewport.top + floating.offsetTop;
+    const floatingBottom = floatingTop + floating.offsetHeight;
+    const overlapMargin = 1;
     const dates = this.dateSeparators();
     let dateLow = 0,
       dateHigh = dates.length;
     while (dateLow < dateHigh) {
       const mid = (dateLow + dateHigh) >>> 1;
-      if (dates[mid].nativeElement.getBoundingClientRect().bottom < viewport.top + 12 - 1) dateLow = mid + 1;
+      if (dates[mid].nativeElement.getBoundingClientRect().bottom < floatingTop - overlapMargin) dateLow = mid + 1;
       else dateHigh = mid;
     }
     const nextDate = dates[dateLow]?.nativeElement.getBoundingClientRect();
-    this.dateColliding.set(!!nextDate && nextDate.top <= viewport.top + 12 + (floating?.height ?? 25) + 1);
+    this.dateColliding.set(!!nextDate && nextDate.top <= floatingBottom + overlapMargin);
     let dateRow = first;
     while (dateRow > 0 && !rows[dateRow]?.dateBreak) dateRow--;
     this.hiddenDateKey.set(rows[dateRow]?.key);
