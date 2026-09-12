@@ -113,11 +113,17 @@ pub fn search_user_uids_by_prefix(
     username_prefix: &str,
     limit: i64,
 ) -> QueryResult<Vec<i32>> {
+    // Preserve UID ordering while preventing PostgreSQL from favoring a full
+    // primary-key scan solely to satisfy the outer ORDER BY.
     sql_query(
-        "SELECT cm.uid
-         FROM discuz.common_member AS cm
-         WHERE LOWER(BTRIM(cm.username::text)) LIKE LOWER($1) || '%'
-         ORDER BY cm.uid ASC
+        "SELECT matches.uid
+         FROM (
+             SELECT cm.uid
+             FROM discuz.common_member AS cm
+             WHERE LOWER(BTRIM(cm.username::text)) LIKE LOWER($1) || '%'
+             OFFSET 0
+         ) AS matches
+         ORDER BY matches.uid ASC
          LIMIT $2",
     )
     .bind::<diesel::sql_types::Text, _>(username_prefix)
