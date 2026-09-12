@@ -77,3 +77,14 @@
   text-align: center;
   color: var(--ion-color-medium);
 }
+
+.subtitle {
+  margin: 2px 0 0;
+  font-size: var(--app-font-caption);
+  color: var(--ion-color-medium);
+}
+.sticker-item.selected {
+  outline: 2px solid var(--ion-color-primary);
+  outline-offset: -2px;
+  background: var(--ion-background-color-step-100, var(--ion-color-light));
+}

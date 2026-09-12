@@ -1,12 +1,16 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, computed, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, output, signal } from '@angular/core';
 import {
   AlertController,
   IonButton,
   IonButtons,
   IonContent,
   IonHeader,
+  IonFooter,
+  IonGrid,
+  IonRow,
+  IonCol,
   IonIcon,
   IonItem,
   IonLabel,
@@ -41,6 +45,10 @@ import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../me
     IonPopover,
     NgTemplateOutlet,
     IonHeader,
+    IonFooter,
+    IonGrid,
+    IonRow,
+    IonCol,
     IonToolbar,
     IonTitle,
     IonButtons,
@@ -76,6 +84,10 @@ export class StickerPicker {
     return 'id' in content ? content : undefined;
   });
   protected readonly stickers = computed(() => this.content().stickers);
+  private readonly chosenId = linkedSignal(() => this.stickerId());
+  protected readonly chosen = computed(
+    () => this.stickers().find((sticker) => sticker.id === this.chosenId()) ?? this.stickers().at(0),
+  );
   protected readonly busy = signal(false);
   protected readonly error = signal(false);
   constructor() {
@@ -194,9 +206,11 @@ export class StickerPicker {
   }
   private async openSticker(id: SnowflakeID) {
     this.busy.set(true);
+    this.error.set(false);
     try {
       const sticker = await firstValueFrom(this.api.getSticker(id));
-      this.content.set({ stickers: [sticker] });
+      const pack = sticker.packs[0];
+      this.content.set(pack ? await firstValueFrom(this.api.getPack(pack.id)) : { stickers: [sticker] });
       this.packs.set(sticker.packs);
     } catch {
       this.error.set(true);
@@ -204,7 +218,13 @@ export class StickerPicker {
       this.busy.set(false);
     }
   }
+  protected retry() {
+    const pack = this.pack()?.id ?? this.packId();
+    const sticker = this.stickerId();
+    return pack ? this.openPack(pack) : sticker ? this.openSticker(sticker) : this.load();
+  }
   protected async favorite(sticker: StickerSummary) {
+    if (this.busy()) return;
     this.busy.set(true);
     this.error.set(false);
     try {
@@ -225,8 +245,9 @@ export class StickerPicker {
   }
   protected async subscribe() {
     const pack = this.pack();
-    if (!pack) return;
+    if (!pack || this.busy()) return;
     this.busy.set(true);
+    this.error.set(false);
     try {
       await firstValueFrom(
         pack.isSubscribed ? this.api.deleteSubscription(pack.id) : this.api.putSubscription(pack.id),
@@ -243,11 +264,15 @@ export class StickerPicker {
       this.longPressed = false;
       return;
     }
-    if (!this.selectable()) return;
+    if (!this.selectable()) {
+      this.chosenId.set(sticker.id);
+      return;
+    }
     if (this.embedded()) this.selected.emit(sticker);
     else void this.modals.dismiss(sticker, 'send');
   }
   protected press(sticker: StickerSummary, event: PointerEvent) {
+    if (!this.selectable()) return;
     this.cancelHold();
     this.longPressed = false;
     if (event.pointerType !== 'touch' || !event.isPrimary) return;
@@ -263,6 +288,7 @@ export class StickerPicker {
   }
   protected showMenu(sticker: StickerSummary, event: Event) {
     event.preventDefault();
+    if (!this.selectable()) return;
     this.cancelHold();
     this.longPressed = true;
     this.menu.set({ sticker, event });
