@@ -1,4 +1,4 @@
-@if (!landingPage() && !loading() && !session.user() && error() === undefined) {
+@if (!session.token()) {
   <h1>418 I'm a teapot</h1>
 } @else {
   <ion-app>
@@ -22,22 +22,31 @@
       <app-settings-modal />
       <app-notification-prompt />
     } @else {
+      @if (loading()) {
+        <ion-header>
+          <ion-toolbar>
+            <ion-buttons slot="end">
+              <ion-button>
+                <ion-spinner class="action-icon" slot="icon-only" />
+              </ion-button>
+            </ion-buttons>
+          </ion-toolbar>
+        </ion-header>
+      }
       <ion-content appScrollbars class="ion-text-center" [class.ion-padding]="!loading()">
-        @if (loading()) {
-          <div class="loading-status">
-            <ion-spinner></ion-spinner>
-          </div>
-        } @else if (error() !== undefined) {
-          <p>
-            @if (error() === expired) {
-              授权已失效，请重新打开授权链接。
-            } @else {
-              暂时无法登录，请重试。
-            }
-          </p>
+        @if (error()) {
+          <p>暂时无法登录，请重试。</p>
           <ion-button (click)="initialize()">重试</ion-button>
         }
       </ion-content>
     }
+    <ion-toast
+      [isOpen]="updates.promptOpen()"
+      message="新版本已准备好"
+      [buttons]="[
+        { text: '暂不更新', role: 'cancel' },
+        { text: '立即更新', handler: updates.reload },
+      ]"
+      (didDismiss)="updates.dismiss()" />
   </ion-app>
 }

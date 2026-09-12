@@ -125,7 +125,7 @@ export class PinnedMessagesPage {
     }
   }
   protected locateMessage(message: MessageResponse, messageId: SnowflakeID) {
-    void this.router.navigate(this.originalCommands(message), { queryParams: { message: decodeId(messageId) } });
+    void this.router.navigate(this.originalCommands(message), { fragment: `msg=${decodeId(messageId)}` });
   }
   protected replyTo(message: MessageResponse) {
     void this.router.navigate(this.originalCommands(message), { queryParams: { reply: decodeId(message.id) } });

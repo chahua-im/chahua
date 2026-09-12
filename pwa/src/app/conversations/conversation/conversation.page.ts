@@ -16,8 +16,8 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NavigationEnd, Router, RouterLink } from '@angular/router';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
 import {
   IonBackButton,
   IonBadge,
@@ -79,7 +79,7 @@ import { ConversationError, ConversationStore, PageDirection } from '../conversa
 import { DraftStore } from '../draft-store';
 import { messageRows } from '../message-rows';
 
-function queryMessageId(id: string | undefined) {
+function parseMessageId(id: string | null | undefined) {
   return id && /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n ? encodeId(id) : undefined;
 }
 
@@ -236,11 +236,16 @@ export class ConversationPage {
   readonly threadId = input<SnowflakeID | undefined, string | undefined>(undefined, {
     transform: (id) => (id ? encodeId(id) : undefined),
   });
-  readonly message = input<SnowflakeID | undefined, string | undefined>(undefined, {
-    transform: queryMessageId,
+  readonly queryMessage = input<SnowflakeID | undefined, string | undefined>(undefined, {
+    alias: 'message',
+    transform: parseMessageId,
   });
+  private readonly fragment = toSignal(inject(ActivatedRoute).fragment);
+  readonly message = computed(
+    () => parseMessageId(new URLSearchParams(this.fragment() ?? '').get('msg')) ?? this.queryMessage(),
+  );
   readonly reply = input<SnowflakeID | undefined, string | undefined>(undefined, {
-    transform: queryMessageId,
+    transform: parseMessageId,
   });
   private readonly entryVersion = signal(0);
   private readonly entryKey = computed(() => ({

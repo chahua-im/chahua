@@ -9,7 +9,7 @@ import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { StartChat, StartChatKind } from '../start-chat/start-chat';
 import { ChatDetails } from '../chat-details/chat-details';
-export function decodePermalink(encoded: string) {
+function decodePermalink(encoded: string) {
   const bytes = Uint8Array.from(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
   if (bytes.length !== 16) throw new Error('无效消息链接');
   const view = new DataView(bytes.buffer);
@@ -53,7 +53,7 @@ export class ChatLink {
         const message = await firstValueFrom(this.chats.getMessage(chatId, messageId));
         await this.router.navigate(
           ['/chats/chat', decodeId(chatId), ...(message.replyRootId ? ['thread', decodeId(message.replyRootId)] : [])],
-          { replaceUrl: true, queryParams: { message: decodeId(messageId) } },
+          { replaceUrl: true, fragment: `msg=${decodeId(messageId)}` },
         );
         return;
       }

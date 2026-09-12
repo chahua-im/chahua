@@ -1,5 +1,6 @@
 import { inject } from '@angular/core';
 import { RedirectCommand, Router, type CanMatchFn, type Routes } from '@angular/router';
+import { isPlatform } from '@ionic/angular';
 import { ChatLink } from './chats/chat-link/chat-link';
 import { ChatListPage } from './chats/chat-list-page/chat-list.page';
 import { isListTab, ListTab } from './chats/list-tabs';
@@ -11,7 +12,16 @@ import { Landing } from './pwa/landing/landing';
 const matchListTab: CanMatchFn = (_route, segments) => isListTab(segments[1].path);
 
 export const routes: Routes = [
-  { path: 'landing', component: Landing },
+  {
+    path: 'landing',
+    component: Landing,
+    canMatch: [
+      () =>
+        isPlatform('pwa')
+          ? new RedirectCommand(inject(Router).createUrlTree(['/chats']), { replaceUrl: true })
+          : true,
+    ],
+  },
   { path: 'm/:encoded', component: ChatLink },
   { path: 'profile', component: ChatLink },
   { path: 'chats/new', component: ChatLink, data: { create: true } },

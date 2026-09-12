@@ -61,9 +61,21 @@ export class PushNotifications {
   private readonly seen = new Set<SnowflakeID>();
   private started = false;
 
+  constructor() {
+    if (this.supported && Notification.permission === 'granted' && window.localStorage.getItem(ENABLED_KEY) === null) {
+      this.setDeviceEnabled(true);
+    }
+  }
+
   start() {
     if (this.started) return;
     this.started = true;
+    const syncAccount = () => void this.workerCommand({ type: 'CHAHUA_SESSION' });
+    effect(syncAccount, { injector: this.injector });
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', syncAccount);
+      this.destroy.onDestroy(() => navigator.serviceWorker.removeEventListener('controllerchange', syncAccount));
+    }
     const baseTitle = document.title;
     const hidden = signal(document.hidden);
     const visibility = () => hidden.set(document.hidden);
@@ -212,9 +224,10 @@ export class PushNotifications {
 
   private async workerCommand(data: object): Promise<void> {
     if (!this.push.isEnabled || !('serviceWorker' in navigator)) return;
+    const uid = this.session.user()?.uid ?? null;
     try {
       const registration = await navigator.serviceWorker.getRegistration();
-      registration?.active?.postMessage(data);
+      registration?.active?.postMessage({ ...data, uid });
     } catch {}
   }
 

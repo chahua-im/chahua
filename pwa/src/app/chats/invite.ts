@@ -13,10 +13,12 @@ export function inviteStatus(invite: InviteResponse, now = Date.now()) {
 }
 
 export function inviteCode(value: string) {
+  const input = value.trim();
+  if (/^[^/?#:\s]+$/.test(input)) return input;
   try {
-    const url = new URL(value);
-    return url.searchParams.get('invite') || url.pathname.split('/').filter(Boolean).at(-1) || '';
+    const url = new URL(input, location.origin);
+    return url.pathname.match(/^\/chats\/join\/([^/]+)\/?$/)?.[1] ?? '';
   } catch {
-    return value.trim();
+    return '';
   }
 }

@@ -9,7 +9,7 @@ import { jsonInterceptor } from '../api/json.interceptor';
 import { testUser } from '../api/testing';
 import { SessionStore } from './session-store';
 
-const TOKEN_KEY = 'chahua.auth.token';
+const TOKEN_KEY = 'jwt_token';
 
 describe('SessionStore', () => {
   let session: SessionStore;
@@ -47,7 +47,19 @@ describe('SessionStore', () => {
     request.flush({ members: [{ uid: testUser.uid, userGroup }], excluded: [] });
   }
 
+  it('saves a landing token synchronously without requests and preserves the other URL fields', () => {
+    history.replaceState(null, '', '/landing?token=landing-token&example=preserved#install');
+    expect(session.restoreToken()).toBeUndefined();
+    expect(session.token()).toBe('landing-token');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('landing-token');
+    expect(document.cookie).toContain(`${TOKEN_KEY}=landing-token`);
+    expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
+    expect(session.user()).toBeUndefined();
+    http.expectNone(() => true);
+  });
+
   it('removes the URL token, refreshes it, and uses the new token for the current user', async () => {
+    session.restoreToken();
     const login = session.initialize();
     expect(location.search).toBe('');
     const refresh = http.expectOne('/_api/auth/refresh');
@@ -85,6 +97,7 @@ describe('SessionStore', () => {
       history.replaceState(null, '', urlToken ? `/?token=${urlToken}` : '/chats');
       if (storedToken) localStorage.setItem(TOKEN_KEY, storedToken);
       if (cookieToken) document.cookie = `${TOKEN_KEY}=${cookieToken}; Path=/`;
+      session.restoreToken();
       const startup = session.initialize();
       const refresh = http.expectOne('/_api/auth/refresh');
       expect(refresh.request.headers.get('Authorization')).toBe(`Bearer ${expected}`);
@@ -102,6 +115,7 @@ describe('SessionStore', () => {
   );
 
   it('retains a token for network retry and clears an expired token', async () => {
+    session.restoreToken();
     let login = session.initialize();
     http.expectOne('/_api/auth/refresh').flush('', { status: 503, statusText: 'Unavailable' });
     await expect(login).rejects.toMatchObject({ status: 503 });
@@ -115,11 +129,13 @@ describe('SessionStore', () => {
     expect(session.user()).toBeUndefined();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    session.restoreToken();
     await session.initialize();
     http.expectNone(() => true);
   });
 
   it('keeps login usable when the optional group lookup fails', async () => {
+    session.restoreToken();
     const login = session.initialize();
     http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
     await Promise.resolve();
@@ -203,12 +219,14 @@ describe('SessionStore', () => {
 
   it('does not start authenticated requests without a URL or stored token', async () => {
     history.replaceState(null, '', '/chats');
+    session.restoreToken();
     await session.initialize();
     http.expectNone(() => true);
     expect(session.user()).toBeUndefined();
   });
 
   it('clears both stores on logout so the cookie cannot sign the user back in', async () => {
+    session.restoreToken();
     const login = session.initialize();
     http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
     await Promise.resolve();
@@ -220,6 +238,7 @@ describe('SessionStore', () => {
     expect(session.user()).toBeUndefined();
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    session.restoreToken();
     await session.initialize();
     http.expectNone(() => true);
   });

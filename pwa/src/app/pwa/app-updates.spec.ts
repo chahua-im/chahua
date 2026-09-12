@@ -13,6 +13,7 @@ describe('AppUpdates', () => {
     TestBed.configureTestingModule({ providers: [{ provide: SwUpdate, useValue: worker }] });
   });
   afterEach(() => {
+    delete window.chahuaUpdates;
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -40,6 +41,25 @@ describe('AppUpdates', () => {
     expect(await service.check()).toBe(UpdateCheckResult.Updated);
   });
 
+  it('remembers an early update and offers each version once while the app is interactive', () => {
+    window.chahuaUpdates = { latestVersion: 'new', setInteractive: vi.fn() };
+    const service = TestBed.inject(AppUpdates);
+    expect(service.available()).toBe(true);
+    expect(service.promptOpen()).toBe(false);
+    service.setInteractive(true);
+    expect(window.chahuaUpdates.setInteractive).toHaveBeenCalledWith(true);
+    expect(service.promptOpen()).toBe(true);
+    service.dismiss();
+    events.next({ type: 'VERSION_READY', currentVersion: { hash: 'old' }, latestVersion: { hash: 'new' } });
+    expect(service.promptOpen()).toBe(false);
+    expect(service.available()).toBe(true);
+    events.next({ type: 'VERSION_READY', currentVersion: { hash: 'old' }, latestVersion: { hash: 'newer' } });
+    expect(service.promptOpen()).toBe(true);
+    service.setInteractive(false);
+    expect(service.promptOpen()).toBe(false);
+    expect(window.chahuaUpdates.setInteractive).toHaveBeenLastCalledWith(false);
+  });
+
   it('shares a pending check and restores loading state after a failed request', async () => {
     worker.checkForUpdate.mockRejectedValue(new Error('offline'));
     const service = TestBed.inject(AppUpdates);
@@ -63,7 +83,8 @@ describe('AppUpdates', () => {
   it('reloads the whole document to activate a ready version safely', () => {
     const reload = vi.fn();
     vi.stubGlobal('window', { location: { reload } });
-    TestBed.inject(AppUpdates).reload();
+    const install = TestBed.inject(AppUpdates).reload;
+    install();
     expect(reload).toHaveBeenCalledOnce();
   });
 });

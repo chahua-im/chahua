@@ -1,5 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { Component, signal } from '@angular/core';
 import {
   IonCard,
   IonCardContent,
@@ -12,7 +11,6 @@ import {
   IonTitle,
   IonToolbar,
   isPlatform,
-  ModalController,
 } from '@ionic/angular';
 import {
   ellipsisHorizontal,
@@ -23,10 +21,8 @@ import {
   menuOutline,
   shareOutline,
 } from 'ionicons/icons';
-import { StartChat, StartChatKind } from '../../chats/start-chat/start-chat';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
-import { SessionStore } from '../../session/session-store';
-export enum LandingPlatform {
+enum LandingPlatform {
   android = 'android',
   ios = 'ios',
   windows = 'windows',
@@ -76,25 +72,7 @@ export class Landing {
     menuOutline,
     shareOutline,
   };
-  private readonly router = inject(Router);
-  private readonly route = inject(ActivatedRoute);
-  private readonly modals = inject(ModalController);
-  private readonly session = inject(SessionStore);
   protected select(value: unknown) {
     if (Object.values(LandingPlatform).includes(value as LandingPlatform)) this.selected.set(value as LandingPlatform);
-  }
-  async ionViewDidEnter() {
-    const code = this.route.snapshot.queryParamMap.get('invite');
-    if (isPlatform('pwa')) {
-      await this.router.navigate(code ? ['/chats/join', code] : ['/chats'], { replaceUrl: true });
-      return;
-    }
-    if (code && this.session.user()) {
-      const modal = await this.modals.create({
-        component: StartChat,
-        componentProps: { kind: StartChatKind.Join, code },
-      });
-      await modal.present();
-    }
   }
 }

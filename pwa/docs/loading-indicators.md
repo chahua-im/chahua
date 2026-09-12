@@ -6,8 +6,8 @@
 
 | 场景                             | 标识                                                 | 状态归属                                              |
 | -------------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
-| Angular 挂载前                   | index.html 的内联 SVG 短线菊花，屏幕居中；适应深浅色 | 静态 HTML                                             |
-| 登录初始化                       | 居中 spinner                                         | App.loading                                           |
+| Angular 挂载前                   | toolbar 色全屏背景，内联 SVG 短线菊花居中；适应深浅色 | 静态 HTML                                             |
+| 登录初始化                       | 空 toolbar 右侧图标按钮尺寸的 spinner，正文留空       | App.loading                                           |
 | 列表首次加载、切换分类、点击重试 | 内容区 spinner                                       | 当前分类查询 loading 汇总与 ChatListContent.ready     |
 | 列表下拉刷新                     | Ionic refresher；不同时显示内容区加载图标            | ChatListContent.refreshing 与查询 loading             |
 | 列表续页                         | Ionic infinite-scroll spinner                        | 查询 loadingMore                                      |
@@ -16,6 +16,8 @@
 | 收藏/置顶页面加载                | 内容区 spinner                                       | SavedMessageList.loading / PinnedMessagesPage.loading |
 | 好友验证设置加载                 | 列表内 spinner                                       | FriendVerificationSettings.loading                    |
 | 表情组件代码加载                 | @loading 延迟 100ms 展示 spinner                     | @defer 的加载状态                                     |
+
+后台更新检查无加载提示，不阻塞 Angular 或登录。业务页面的新版就绪 toast 不自动消失，提供“立即更新”和“暂不更新”；启动失败或 landing 时按[更新约定](requirements.md#通知静音与设置)自动刷新。
 
 主列表固定显示“已归档”，好友 tab 还显示“好友请求”历史入口；入口立即可用。首次内容加载时 spinner 位于入口下方。归档数字独立更新，历史数据在进入对应页面时读取。
 
