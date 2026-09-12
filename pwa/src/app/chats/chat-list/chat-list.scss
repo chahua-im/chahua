@@ -32,13 +32,3 @@ ion-segment-content {
   display: flex;
   overflow: hidden;
 }
-
-ion-segment ion-label {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-ion-segment ion-badge {
-  font-size: var(--app-font-micro);
-  padding: 2px 4px;
-}
