@@ -428,6 +428,13 @@ describe('MessageMenu', () => {
     expect(menu['confirmation']()).toBeUndefined();
   });
 
+  it('copies the same lossless short message link as the old application', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    await menu['choose'](MessageAction.Link);
+    expect(writeText).toHaveBeenCalledWith(new URL('/m/ACAAAAAAAAEAIAAAAAAACw', document.baseURI).href);
+  });
+
   it('starts a clipboard write synchronously before dismissal completes', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { clipboard: { writeText } });

@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
+import { getPlatforms } from '@ionic/angular';
 import { routes } from './app.routes';
 import { listSelection, ListTab } from './chats/list-tabs';
 
@@ -8,6 +9,22 @@ describe('App routes', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ providers: [provideRouter(routes)] });
     router = TestBed.inject(Router);
+  });
+
+  it('allows browser landing and redirects installed PWA landing to chats', async () => {
+    const platforms = getPlatforms();
+    const original = [...platforms];
+    try {
+      platforms.splice(0, platforms.length, 'desktop');
+      await router.navigateByUrl('/landing');
+      expect(router.url).toBe('/landing');
+      await router.navigateByUrl('/chats');
+      platforms.push('pwa');
+      await router.navigateByUrl('/landing');
+      expect(router.url).toBe('/chats');
+    } finally {
+      platforms.splice(0, platforms.length, ...original);
+    }
   });
 
   it('redirects the root and unknown tabs to the chat list', async () => {

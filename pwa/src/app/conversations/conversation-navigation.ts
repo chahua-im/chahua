@@ -25,7 +25,7 @@ export class ConversationNavigation {
     await dismissChatOverlays(this.modals);
     const commands = ['/chats/chat', decodeId(chatId), ...(threadId ? ['thread', decodeId(threadId)] : [])];
     if (!messageId) return this.router.navigate(commands);
-    const extras = { queryParams: { message: decodeId(messageId) } };
+    const extras = { fragment: `msg=${decodeId(messageId)}` };
     const url = this.router.serializeUrl(this.router.createUrlTree(commands, extras));
     if (this.router.url === url) {
       // Angular ignores identical URLs; an already-open message still needs repositioning.

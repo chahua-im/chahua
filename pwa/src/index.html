@@ -6,15 +6,143 @@
 
     <base href="/" />
 
+    <script id="startup-updates">
+      (() => {
+        if (!('serviceWorker' in navigator)) return;
+        const requestTimeout = 15000;
+        const updateCheckTimeout = 60000;
+        const updateCheckInterval = 60000;
+        let interactive = false;
+        let checking = false;
+        let registration;
+        let sequence = 0;
+        let reloading = false;
+        let associated = !!navigator.serviceWorker.controller;
+        const updates = (window.chahuaUpdates = {
+          latestVersion: undefined,
+          setInteractive(value) {
+            interactive = value;
+            applyUpdate();
+          },
+        });
+
+        function applyUpdate() {
+          if (interactive || !updates.latestVersion || reloading) return;
+          // A faulty release must not cause an automatic reload loop.
+          const key = 'chahua.update.reloaded';
+          try {
+            if (sessionStorage.getItem(key) === updates.latestVersion) return;
+            sessionStorage.setItem(key, updates.latestVersion);
+          } catch {}
+          reloading = true;
+          location.reload();
+        }
+
+        navigator.serviceWorker.addEventListener('message', ({ data }) => {
+          if (data?.type !== 'VERSION_READY') return;
+          updates.latestVersion = data.latestVersion.hash;
+          applyUpdate();
+        });
+
+        async function withTimeout(promise, milliseconds = requestTimeout) {
+          let timer;
+          try {
+            return await Promise.race([
+              promise,
+              new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('Update check timed out')), milliseconds);
+              }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+
+        async function waitForWorkerEvent(type, matches, start = () => {}, milliseconds = requestTimeout) {
+          let listener;
+          try {
+            await withTimeout(
+              new Promise((resolve) => {
+                listener = (event) => {
+                  if (matches(event)) resolve();
+                };
+                navigator.serviceWorker.addEventListener(type, listener);
+                start();
+              }),
+              milliseconds,
+            );
+          } finally {
+            navigator.serviceWorker.removeEventListener(type, listener);
+          }
+        }
+
+        async function check() {
+          if (checking) return;
+          checking = true;
+          try {
+            if (!registration) {
+              registration = await withTimeout(navigator.serviceWorker.getRegistration());
+              if (!registration) {
+                // Only production builds publish an Angular service-worker manifest.
+                const response = await fetch('ngsw.json?ngsw-bypass=true', {
+                  cache: 'no-store',
+                  signal: AbortSignal.timeout(requestTimeout),
+                });
+                const manifest = await response.json();
+                if (manifest.configVersion !== 1 || !manifest.hashTable) return;
+                registration = await withTimeout(
+                  navigator.serviceWorker.register('serviceWorker.js', { updateViaCache: 'none' }),
+                );
+              }
+            }
+            // Worker script updates and application-version updates are separate operations.
+            void registration.update().catch(() => {});
+            if (!navigator.serviceWorker.controller) {
+              await waitForWorkerEvent('controllerchange', () => !!navigator.serviceWorker.controller);
+            }
+            if (!associated) {
+              // A newly claimed page needs a fetch before Angular's worker tracks its version.
+              await withTimeout(fetch('manifest.webmanifest'));
+              associated = true;
+            }
+            const worker = navigator.serviceWorker.controller;
+            const nonce = `chahua-startup-${++sequence}`;
+            await waitForWorkerEvent(
+              'message',
+              ({ data }) => data?.type === 'OPERATION_COMPLETED' && data.nonce === nonce,
+              () => worker.postMessage({ action: 'CHECK_FOR_UPDATES', nonce }),
+              updateCheckTimeout,
+            );
+          } catch {
+            // Offline and failed checks are retried independently of Angular startup.
+          } finally {
+            checking = false;
+          }
+        }
+
+        function checkWhenVisible() {
+          if (!document.hidden) void check();
+        }
+
+        void check();
+        setInterval(checkWhenVisible, updateCheckInterval);
+        window.addEventListener('online', check);
+        document.addEventListener('visibilitychange', checkWhenVisible);
+        navigator.serviceWorker.addEventListener('controllerchange', check);
+      })();
+    </script>
+
     <meta name="color-scheme" content="light dark" />
-    <meta name="viewport" content="viewport-fit=cover, width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta
+      name="viewport"
+      content="viewport-fit=cover, width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="msapplication-tap-highlight" content="no" />
 
-    <link rel="icon" type="image/png" href="icons/pwa-64x64.png" />
+    <link rel="icon" type="image/png" href="icon/pwa-64x64.png" />
 
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="icons/pwa-192x192.png" />
+    <link rel="apple-touch-icon" href="icon-maskable/apple-touch-icon-180x180.png" />
     <meta name="theme-color" content="#f7f7f7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)" />
 
@@ -28,6 +156,7 @@
         display: grid;
         place-content: center;
         justify-items: center;
+        background: var(--ion-toolbar-background, light-dark(#f7f7f7, #0d0d0d));
         color: var(--ion-text-color, light-dark(#000, #fff));
       }
       .startup-spinner {

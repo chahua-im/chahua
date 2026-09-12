@@ -109,7 +109,7 @@ describe('PinnedMessagesPage', () => {
     expect(fixture.nativeElement.querySelector('.message-date')).not.toBeNull();
     page['locateMessage'](pin.message, pin.message.id);
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], {
-      queryParams: { message: wireMessage.id },
+      fragment: `msg=${wireMessage.id}`,
     });
     http.expectNone((request) => request.url.endsWith('/read') || request.url.endsWith('/read-state'));
   });
@@ -184,7 +184,7 @@ describe('PinnedMessagesPage', () => {
     });
     page['locateMessage'](pin.message, encodeId('101'));
     expect(navigate).toHaveBeenLastCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], {
-      queryParams: { message: '101' },
+      fragment: 'msg=101',
     });
     http.expectNone((request) => request.url.endsWith('/read') || request.url.endsWith('/read-state'));
   });

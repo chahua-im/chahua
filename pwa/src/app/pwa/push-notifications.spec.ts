@@ -89,8 +89,8 @@ describe('PushNotifications', () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(['default', 'granted', 'denied'] as const)(
-    'asks for the application choice when none is stored, even with %s permission',
+  it.each(['default', 'denied'] as const)(
+    'asks for the application choice when none is stored and permission is %s',
     async (permission) => {
       notification.permission = permission;
       current.next(subscription);
@@ -105,6 +105,25 @@ describe('PushNotifications', () => {
       expect(notification.requestPermission).not.toHaveBeenCalled();
     },
   );
+
+  it('inherits granted permission and registers push without prompting again', async () => {
+    const service = TestBed.inject(PushNotifications);
+    expect(service.shouldPrompt()).toBe(false);
+    expect(service.enabled()).toBe(true);
+    expect(localStorage.getItem(preferenceKey)).toBe('true');
+    await service.refresh();
+    expect(api.postSubscribe).toHaveBeenCalledOnce();
+    expect(notification.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it('preserves an explicit off choice even when the browser already granted permission', async () => {
+    localStorage.setItem(preferenceKey, 'false');
+    const service = TestBed.inject(PushNotifications);
+    await service.refresh();
+    expect(service.enabled()).toBe(false);
+    expect(service.shouldPrompt()).toBe(false);
+    expect(api.postSubscribe).not.toHaveBeenCalled();
+  });
 
   it('leaves the initial permission click available while startup has no saved choice', async () => {
     notification.permission = 'default';

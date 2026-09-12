@@ -1,6 +1,7 @@
 import { inject, isDevMode, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideServiceWorker } from '@angular/service-worker';
 import { AppUpdates } from './app/pwa/app-updates';
+import { LegacyMigration } from './app/pwa/legacy-migration';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { RouteReuseStrategy, provideRouter, withComponentInputBinding } from '@angular/router';
@@ -23,13 +24,14 @@ if (isDevMode() && typeof crypto.randomUUID !== 'function')
 bootstrapApplication(App, {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideServiceWorker('push-worker.js', {
+    provideServiceWorker('serviceWorker.js', {
       enabled: !isDevMode(),
       registrationStrategy: 'registerWhenStable:3000',
       updateViaCache: 'none',
     }),
     provideAppInitializer(() => {
       inject(AppUpdates);
+      return inject(LegacyMigration).run();
     }),
     provideHttpClient(withInterceptors([authInterceptor, jsonInterceptor])),
     provideChahuaBaseUrl('/_api'),
