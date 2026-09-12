@@ -187,17 +187,12 @@ ion-action-sheet.ios .action-sheet-button {
   line-height: var(--app-line-secondary);
 }
 
-.browser-toolbar-background {
-  // Safari samples boxes taller than 10px. Keep this element empty so text clipping paints nothing.
-  position: fixed;
-  inset: 0 0 auto;
-  height: 12px;
+html,
+body {
   background-color: var(
     --ion-toolbar-background,
     var(--ion-color-step-50, var(--ion-background-color-step-50, #f7f7f7))
   );
-  background-clip: text;
-  pointer-events: none;
 }
 
 ion-modal.message-menu-modal,
@@ -278,6 +273,9 @@ ion-infinite-scroll.infinite-scroll-loading + .loading-status {
   height: 24px;
   font-size: 24px;
   flex-shrink: 0;
+}
+ion-spinner.action-icon {
+  --color: var(--ion-text-color, #000);
 }
 .action-content.icon-content > :is(ion-icon, ion-spinner) {
   width: 1em;
