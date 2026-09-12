@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, inject, linkedSignal, signal } from '@angular/core';
+import { Component, inject, linkedSignal, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router } from '@angular/router';
 import {
@@ -11,7 +11,6 @@ import {
   IonSpinner,
   IonSplitPane,
   iosTransitionAnimation,
-  isPlatform,
 } from '@ionic/angular';
 import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
@@ -79,44 +78,7 @@ export class App {
   protected readonly splitPaneVisible = signal(false);
 
   constructor() {
-    if (isPlatform('ios')) this.fitViewport();
     void this.initialize();
-  }
-
-  private fitViewport() {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const style = document.body.style;
-    const reset = () => {
-      style.removeProperty('height');
-      style.removeProperty('top');
-      style.removeProperty('--ion-safe-area-bottom');
-    };
-    const update = () => {
-      // Safari shrinks and pans the visual viewport without resizing the layout viewport.
-      // Resize the app shell; leave pinch zoom and ion-content's native scrolling alone.
-      if (viewport.scale !== 1) {
-        reset();
-        return;
-      }
-      style.height = `${viewport.height}px`;
-      style.top = `${viewport.offsetTop}px`;
-      // iOS also shrinks innerHeight with the keyboard; clientHeight retains the layout viewport.
-      style.setProperty(
-        '--ion-safe-area-bottom',
-        document.documentElement.clientHeight - viewport.height > 150 ? '0px' : '',
-      );
-    };
-    viewport.addEventListener('resize', update);
-    viewport.addEventListener('scroll', update);
-    window.addEventListener('resize', update);
-    update();
-    inject(DestroyRef).onDestroy(() => {
-      viewport.removeEventListener('resize', update);
-      viewport.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-      reset();
-    });
   }
 
   protected prepareTransition(outlet: IonRouterOutlet) {
