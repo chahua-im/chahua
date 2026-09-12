@@ -168,26 +168,6 @@ fn normalize_user_search_limit(limit: Option<i64>) -> i64 {
         .clamp(1, MAX_USER_SEARCH_LIMIT)
 }
 
-fn lookup_member_summary(
-    conn: &mut PgConnection,
-    state: &AppState,
-    uid: i32,
-) -> Result<Option<MemberSummary>, AppError> {
-    let mut profiles = lookup_user_profiles(conn, &[uid])?;
-    let Some(profile) = profiles.remove(&uid) else {
-        return Ok(None);
-    };
-
-    let mut avatars = state.avatars.lookup(&[uid]);
-    Ok(Some(MemberSummary {
-        uid,
-        username: profile.username,
-        avatar_url: avatars.remove(&uid).flatten(),
-        gender: profile.gender,
-        user_group: profile.user_group,
-    }))
-}
-
 pub fn build_member_summary_map(
     conn: &mut PgConnection,
     state: &AppState,
@@ -349,10 +329,8 @@ async fn get_user_search(
     let mut seen_uids = HashSet::new();
 
     if let Ok(exact_uid) = q.parse::<i32>() {
-        if let Some(summary) = lookup_member_summary(conn, &state, exact_uid)? {
-            seen_uids.insert(summary.uid);
-            merged_uids.push(summary.uid);
-        }
+        seen_uids.insert(exact_uid);
+        merged_uids.push(exact_uid);
     }
 
     if !q.is_empty()
