@@ -3,6 +3,8 @@
 }
 ion-header > ion-toolbar:first-of-type {
   --border-width: 0 0 0.55px;
+  --padding-top: 0;
+  --padding-bottom: 0;
 }
 .details-sidebar {
   position: absolute;
@@ -202,11 +204,9 @@ ion-title app-message-preview {
 
 .conversation-title {
   padding-block: 4px;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 100%;
-  vertical-align: middle;
   > span {
     min-width: 0;
     overflow: hidden;
