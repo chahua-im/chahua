@@ -17,6 +17,7 @@ export interface User {
   username: string;
   avatarUrl?: string | null;
   gender: number;
+  userGroup?: UserGroupTagInfo | null;
   stickerPackOrder?: StickerPackOrderItem[];
   permissions?: string[];
 }
