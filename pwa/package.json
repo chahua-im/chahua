@@ -8,7 +8,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "test:pwa": "node --test scripts/push-worker.test.mjs"
+    "test:pwa": "node --test scripts/push-worker.test.mjs scripts/startup-updates.test.mjs"
   },
   "private": true,
   "dependencies": {
@@ -36,6 +36,7 @@
     "@angular/cli": "^22.1.7",
     "@angular/compiler-cli": "^22.1.5",
     "@types/node": "^26.5.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^28.1.0",
     "orval": "8.28.1",
     "prettier": "^3.9.6",

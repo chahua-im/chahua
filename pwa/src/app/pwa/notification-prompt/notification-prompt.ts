@@ -1,4 +1,4 @@
-import { Component, inject, signal, TemplateRef, viewChild, ViewContainerRef, ViewEncapsulation } from '@angular/core';
+import { Component, inject, signal, TemplateRef, viewChild, ViewContainerRef } from '@angular/core';
 import { IonAlert, IonSpinner, IonToast } from '@ionic/angular';
 import { PushNotifications } from '../push-notifications';
 
@@ -6,7 +6,6 @@ import { PushNotifications } from '../push-notifications';
   selector: 'app-notification-prompt',
   templateUrl: './notification-prompt.html',
   styleUrl: './notification-prompt.scss',
-  encapsulation: ViewEncapsulation.None,
   imports: [IonAlert, IonSpinner, IonToast],
 })
 export class NotificationPrompt {

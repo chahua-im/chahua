@@ -6,7 +6,7 @@
       "name": "app",
       "installMode": "prefetch",
       "resources": {
-        "files": ["/index.html", "/manifest.webmanifest", "/*.css", "/*.js", "/icons/**"]
+        "files": ["/index.html", "/manifest.webmanifest", "/*.css", "/*.js", "/icon/**", "/icon-maskable/**"]
       }
     },
     {
@@ -18,5 +18,5 @@
       }
     }
   ],
-  "navigationUrls": ["/chats", "/chats/**", "/"]
+  "navigationUrls": ["/chats", "/chats/**", "/m/**", "/landing", "/"]
 }

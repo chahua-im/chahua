@@ -1,30 +1,30 @@
-import { HttpErrorResponse } from '@angular/common/http';
-import { Component, inject, linkedSignal, signal } from '@angular/core';
+import { afterRenderEffect, Component, inject, linkedSignal, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router } from '@angular/router';
 import {
   IonApp,
   IonButton,
+  IonButtons,
   IonContent,
+  IonHeader,
   IonMenu,
   IonRouterOutlet,
   IonSpinner,
   IonSplitPane,
+  IonToolbar,
+  IonToast,
   iosTransitionAnimation,
+  isPlatform,
 } from '@ionic/angular';
 import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
 import { PushNotifications } from '../pwa/push-notifications';
 import { NotificationPrompt } from '../pwa/notification-prompt/notification-prompt';
+import { AppUpdates } from '../pwa/app-updates';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
 import { SettingsModal } from '../settings/settings-modal/settings-modal';
-
-enum StartupError {
-  Expired,
-  Unavailable,
-}
 
 @Component({
   selector: 'app-root',
@@ -35,11 +35,15 @@ enum StartupError {
     ContentScrollbars,
     IonApp,
     IonButton,
+    IonButtons,
     IonContent,
+    IonHeader,
     IonMenu,
     IonRouterOutlet,
     IonSpinner,
     IonSplitPane,
+    IonToolbar,
+    IonToast,
     ChatList,
     SettingsModal,
     NotificationPrompt,
@@ -72,13 +76,19 @@ export class App {
   });
   protected readonly browserTransition = signal(false);
   protected readonly session = inject(SessionStore);
-  protected readonly expired = StartupError.Expired;
   protected readonly loading = signal(true);
-  protected readonly error = signal<StartupError | undefined>(undefined);
+  protected readonly error = signal(false);
   protected readonly splitPaneVisible = signal(false);
+  protected readonly updates = inject(AppUpdates);
 
   constructor() {
-    void this.initialize();
+    afterRenderEffect(() => this.updates.setInteractive(!this.landingPage() && !!this.session.user()));
+    this.session.restoreToken();
+    if (!this.session.token() || (this.landingPage() && !isPlatform('pwa'))) {
+      this.loading.set(false);
+    } else {
+      void this.initialize();
+    }
   }
 
   protected prepareTransition(outlet: IonRouterOutlet) {
@@ -92,14 +102,12 @@ export class App {
 
   protected async initialize() {
     this.loading.set(true);
-    this.error.set(undefined);
+    this.error.set(false);
     try {
       await this.session.initialize();
       if (this.session.user()) this.notifications.start();
-    } catch (error) {
-      this.error.set(
-        error instanceof HttpErrorResponse && error.status === 401 ? StartupError.Expired : StartupError.Unavailable,
-      );
+    } catch {
+      this.error.set(true);
     } finally {
       this.loading.set(false);
     }

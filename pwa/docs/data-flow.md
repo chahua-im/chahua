@@ -16,7 +16,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | Preferences            | 话题/头像显示偏好、最近表情                                             | localStorage                              |
 | MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                          |
 | ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                      | 应用；当前页面消费                        |
-| PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                            | 应用；本机意图保存到 localStorage         |
+| PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                            | 应用；本机意图保存到 localStorage，去重保存到独立 IndexedDB         |
 | AppUpdates             | 检查更新和可更新状态                                                    | 应用                                      |
 
 话题订阅的已知值、新鲜度与响应版本保存在同一缓存条目中；失效时继续显示已知值，读取使用新鲜度判断，不另存一套失效 ID。
@@ -52,13 +52,19 @@ flowchart TD
   CONNECTION --> NOTIFY[PushNotifications]
   CHAT --> NOTIFY
   LISTS -->|同一未读响应| NOTIFY
-  NOTIFY <--> WORKER[push-worker.js]
+  NOTIFY <--> WORKER[serviceWorker.js]
   PUSH[Web Push] --> WORKER
 ```
 
+## 启动存储迁移
+
+LegacyMigration 通过 Angular 初始化器先于组件和偏好服务运行，只读取旧数据库 `wetty`。不存在旧库时中止创建；有旧库时将 Token 补入 `jwt_token`，把 `draft:聊天ID_thread_话题ID` 转为按原 Token uid 归属的 `chahua.drafts.uid` 与 `聊天ID/话题ID` 键，回复字段转为 `replyTo`，保留保存时间和更晚的新草稿。话题显示、全部头像、最近表情转换为 Preferences 的 localStorage 格式；已有新偏好不覆盖。
+
+没有对应界面的旧设置、贴纸排序以及无法确认归属的草稿保存在 `chahua.migration.wetty.backup`，不新建设置入口。所有写入成功后标记已转换，再后台删除旧库；失败保留旧库供下次重试。旧标签页阻挡删除时不阻塞应用启动，后续启动跳过读取、继续删除；连接释放后完成删除并标记迁移完成。通知独立数据库不受影响。
+
 ## 身份、协议与入口
 
-SessionStore 按 URL token、localStorage、Cookie、开发预设选择身份并移除 URL 中的 token。localStorage 和 Cookie 使用同一个键 `chahua.auth.token`；读取身份及刷新 token 时同步写入两处。Cookie 只属于当前主机，使用 `Path=/`、`SameSite=Lax`，HTTPS 下设置 `Secure`，每次写入续期 400 天。Cookie 过期不影响 localStorage；只有 Cookie 时自动补入 localStorage。退出登录或登录收到 401 时清除两处，网络失败保留凭据供重试。请求仍使用 Bearer token。
+SessionStore 按 URL token、localStorage、Cookie、开发预设选择身份并移除 URL 中的 token。localStorage 和 Cookie 使用同一个键 `jwt_token`；读取身份及刷新 token 时同步写入两处。Cookie 只属于当前主机，使用 `Path=/`、`SameSite=Lax`，HTTPS 下设置 `Secure`，每次写入续期 400 天。Cookie 过期不影响 localStorage；只有 Cookie 时自动补入 localStorage。退出登录或登录收到 401 时清除两处，网络失败保留凭据供重试。请求仍使用 Bearer token。
 
 iOS/iPadOS 17.2+ 与 macOS Safari 安装网页应用时复制 Cookie，不复制 localStorage；安装后两边存储独立，已安装应用不会收到 Safari 后续的登录变化。更早 iOS 不提供这条安装登录传递；`start_url` 固定为 `/chats`，不携带 token。[WebKit 安装行为](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/#login-cookies)
 
@@ -66,9 +72,11 @@ iOS/iPadOS 17.2+ 与 macOS Safari 安装网页应用时复制 Cookie，不复制
 
 API 基地址为 `/_api`。SnowflakeID 是有意使用的可排序无损 number 编码，HTTP/WS/路由边界编解码，普通 UID 和计数不转换。null/undefined 原样保留；仅 UpdateChatBody.avatarImageId 与 PatchInviteBody.expiresAt 显式允许请求 null 表达清除。JSON 拦截器保留 FormData，二进制上传不按 JSON 转换。
 
-`/landing` 无需登录即可阅读安装指引，仍由 SessionStore 提取 token。已安装应用进入聊天；携带邀请码时进入邀请预览，不自动兑换。其他业务页面由 App 的身份加载/错误状态控制。
+App 先调用 SessionStore.restoreToken 同步读取并保存 token，后续 initialize 及登录重试复用内存中的 token；没有 token 时，所有路径（包括 `/landing`）直接显示无应用外壳的 418，不启动登录请求。有 token 时，普通浏览器的 `/landing` 只恢复 token，不刷新凭据、不获取用户、不启动通知或打开邀请预览。已安装 PWA 的 `/landing` 由同步路由 guard 重定向到 `/chats` 并替换历史记录，App 正常初始化登录。其他业务页面由 App 的身份加载/错误状态控制，进入时才执行登录请求。
 
-Service Worker 缓存应用资源和表情数据，不缓存业务 API。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
+index.html 的独立内联脚本在 Angular 加载前检查更新；先复用已有 Service Worker，没有注册时确认生产 ngsw.json 后注册 serviceWorker.js。脚本直接使用 Angular Worker 的 CHECK_FOR_UPDATES / OPERATION_COMPLETED / VERSION_READY 消息，等待完整版本下载；Worker 脚本另用 registration.update() 检查。前台每 60 秒检查，恢复联网、回到前台和 controller 变化时也尝试检查；同一脚本不并发检查，失败或超时保留当前页面并重试。会话内记录自动刷新过的版本 hash，避免同一版本反复刷新。App 在已登录的业务页面完成渲染后标记为可交互；此之前及 landing 可以自动应用已就绪版本，可交互页面交给更新提示确认。
+
+Service Worker 缓存应用资源和表情数据（包括 landing 安装页），不缓存业务 API。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
 
 ## 何时请求
 
@@ -166,7 +174,7 @@ Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceU
 
 App 在会话初始化并确认登录后启动 PushNotifications。在线 WebSocket 优先，前后台页面均直接让 Worker 展示系统通知，未运行时由 Web Push 兜底。各平台与分栏布局共用同一流程；前台正在阅读对应会话且未被设置或 modal 覆盖时，只登记去重，不展示通知。
 
-NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持通知且选择不存在时显示 Ionic alert，不根据已有的浏览器授权推断用户选择。拒绝立即保存关闭并结束弹窗；允许在点击事件内调用 PushNotifications，授权和推送登记成功后结束，失败保留重试。弹窗等待状态由组件持有。
+NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持通知、选择不存在且浏览器已经授权时，直接保存开启并在后台登记订阅，不再询问。明确保存过的关闭选择保持关闭；其余选择不存在的场景显示 Ionic alert。拒绝立即保存关闭并结束弹窗；允许在点击事件内调用 PushNotifications，授权和推送登记成功后结束，失败保留重试。弹窗等待状态由组件持有。
 
 设置行不等待异步请求。PushNotifications 同步检查浏览器 API 与 Worker 配置，读取 `chahua.notifications.enabled` 和 `Notification.permission`；本机关闭直接显示关，开启且已授权显示开。ChatList 在头像点击事件内调用 requestSettingsPermission，在导航之前为本机已开启但权限为 default 的场景申请权限。拒绝、关闭权限弹窗或无手势直接进入设置且缺授权时，保存关闭选择；Settings 的 refresh 不打断已开始的授权。
 
@@ -176,7 +184,7 @@ NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持�
 
 规则读取 ChatStore：自己、系统和已撤回消息不提醒；普通提及绕过静音，回复自己可绕过归档。话题按订阅/归档判断，提及是例外，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史。
 
-Worker 串行处理页面与 Push，按消息 ID 去重，保留最近 512 个 ID，重启从通知中心恢复；已关闭通知不持久保存去重记录。已读按聊天/话题确认边界清理，撤回按 ID 清理；最近 256 个读范围抑制迟到通知。点击导航至 `?message=ID`，复用当前应用以保留队列。
+Worker 串行处理页面与 Push，在独立的 `chahua-notifications` IndexedDB 中按账号保存已处理消息 ID、聊天/话题已读边界。通知成功展示、前台阅读时抑制或撤回后登记具体 ID；仅确认已读才推进范围边界，乱序消息不会因更大的 ID 已提醒而被忽略。记录保存 30 天，覆盖后端 web-push 默认 28 天有效期，按过期索引清理；Worker 重启和通知被划掉均不丢失有效记录。通知中心补回仍显示的通知，账号变化清理旧通知，退出后停止处理 Push。页面通过 CHAHUA_SESSION 同步账号，控制器切换后重新同步。通知点击使用 `#msg=ID`；新通知由 Angular onActionClick 唤起，缺少该字段的旧通知由兼容监听器唤起并发送导航事件，已有页面不整页刷新。
 
 ChatListStore.unread 的完整响应同时服务归档数、系统角标和后台标题，不额外相加话题/静音/归档计数。支持角标或标签隐藏时激活同一查询；前台恢复普通标题。
 
