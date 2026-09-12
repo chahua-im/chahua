@@ -116,7 +116,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 | VoiceRecorder   | active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                | 设备资源和未发送录音属于组件，离开时释放                                                    |
 | UploadProgress  | value（0–1）                                                                                                   | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                       |
 | VoicePlayer     | src；playing、loading、failed、elapsed、duration、rate、波形状态                                               | 点击后创建 Audio 和 WaveSurfer；同一时间播放一条，销毁时停止                                |
-| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；不复制包内贴纸                     |
+| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；详情选中项按 ID 从当前列表派生，不复制包内贴纸                     |
 | MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                               | 当前消息的媒体集合与本地画布，不写入聊天状态                                                |
 
 上传任务提交后归 MessageOutbox，编辑只借用任务引用。输入区可以继续输入和录音。VoicePlayer 不显示原生音频控制条，首次点击前不下载媒体，波形读取失败时仍保留可用播放。

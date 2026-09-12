@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { AlertController, ModalController } from '@ionic/angular';
-import { of, Subject } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
@@ -38,6 +38,8 @@ describe('StickerPicker selection during requests', () => {
     getMySubscribedPacks: vi.fn(() => of({ packs: [pack] })),
     getMyOwnedPacks: vi.fn(() => of({ packs: [] })),
     getPack: vi.fn(() => of(pack)),
+    getSticker: vi.fn(() => of({ ...sticker, packs: [pack] })),
+    deleteSubscription: vi.fn(() => of(undefined)),
     putFavorite: vi.fn(() => of(undefined)),
     deleteFavorite: vi.fn(() => of(undefined)),
     putSubscription: vi.fn(() => of(undefined)),
@@ -50,6 +52,8 @@ describe('StickerPicker selection during requests', () => {
     api.getMySubscribedPacks.mockReset().mockReturnValue(of({ packs: [pack] }));
     api.getMyOwnedPacks.mockReset().mockReturnValue(of({ packs: [] }));
     api.getPack.mockReset().mockReturnValue(of(pack));
+    api.getSticker.mockReset().mockReturnValue(of({ ...sticker, packs: [pack] }));
+    api.deleteSubscription.mockReset().mockReturnValue(of(undefined));
     api.putFavorite.mockReset().mockReturnValue(of(undefined));
     api.deleteFavorite.mockReset().mockReturnValue(of(undefined));
     api.putSubscription.mockReset().mockReturnValue(of(undefined));
@@ -98,6 +102,81 @@ describe('StickerPicker selection during requests', () => {
       );
     return { fixture, button, pointer, selected };
   }
+
+  async function renderDetails() {
+    const fixture = TestBed.createComponent(StickerPicker);
+    fixture.componentRef.setInput('selectable', false);
+    fixture.componentRef.setInput('stickerId', sticker.id);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(fixture.componentInstance['busy']()).toBe(false);
+    });
+    return fixture;
+  }
+
+  it('opens the whole pack, selects the message sticker and changes selection without sending', async () => {
+    const other = { ...sticker, id: encodeId('104'), isFavorited: true };
+    api.getPack.mockReturnValueOnce(of({ ...pack, stickers: [other, sticker], stickerCount: 2 }));
+    const fixture = await renderDetails();
+    expect(api.getSticker).toHaveBeenCalledWith(sticker.id);
+    expect(api.getPack).toHaveBeenCalledWith(pack.id);
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('Tea');
+    expect(fixture.nativeElement.querySelector('.subtitle').textContent).toContain('2 张贴纸');
+    expect(api.getMyFavorites).not.toHaveBeenCalled();
+    const items = fixture.nativeElement.querySelectorAll('.sticker-item');
+    expect(items).toHaveLength(2);
+    expect(items[1].classList.contains('selected')).toBe(true);
+    items[0].click();
+    fixture.detectChanges();
+    expect(items[0].classList.contains('selected')).toBe(true);
+    expect(modals.dismiss).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.querySelector('.pack-bar')).toBeNull();
+    const favorite = fixture.nativeElement.querySelector('ion-footer ion-button');
+    expect(favorite.textContent).toContain('取消收藏');
+    expect(favorite.color).toBe('danger');
+    favorite.click();
+    await fixture.whenStable();
+    expect(api.deleteFavorite).toHaveBeenCalledWith(other.id);
+    expect(favorite.textContent).toContain('收藏单个');
+    expect(favorite.color).toBe('primary');
+    favorite.click();
+    await fixture.whenStable();
+    expect(api.putFavorite).toHaveBeenCalledWith(other.id);
+    const subscribe = fixture.nativeElement.querySelectorAll('ion-footer ion-button')[1];
+    subscribe.click();
+    await fixture.whenStable();
+    expect(api.putSubscription).toHaveBeenCalledWith(pack.id);
+    expect(subscribe.textContent).toContain('取消订阅');
+    expect(subscribe.color).toBe('danger');
+    expect(fixture.componentInstance['chosen']()?.isFavorited).toBe(true);
+    subscribe.click();
+    await fixture.whenStable();
+    expect(api.deleteSubscription).toHaveBeenCalledWith(pack.id);
+    expect(subscribe.textContent).toContain('订阅整组');
+    expect(subscribe.color).toBe('primary');
+  });
+
+  it('retries a failed pack lookup without switching to the favorites library', async () => {
+    api.getPack.mockReturnValueOnce(throwError(() => new Error('offline')));
+    const fixture = await renderDetails();
+    expect(fixture.componentInstance['error']()).toBe(true);
+    await fixture.componentInstance['retry']();
+    expect(fixture.componentInstance['pack']()?.id).toBe(pack.id);
+    expect(fixture.componentInstance['chosen']()?.id).toBe(sticker.id);
+    expect(api.getMyFavorites).not.toHaveBeenCalled();
+  });
+
+  it('keeps an ungrouped sticker available for individual favorites', async () => {
+    api.getSticker.mockReturnValueOnce(of({ ...sticker, packs: [] }));
+    const fixture = await renderDetails();
+    expect(fixture.componentInstance['chosen']()?.id).toBe(sticker.id);
+    expect(api.getPack).not.toHaveBeenCalled();
+    const actions = fixture.nativeElement.querySelectorAll('ion-footer ion-button');
+    expect(actions[0].disabled).toBe(false);
+    expect(actions[1].disabled).toBe(true);
+  });
 
   it('emits an already displayed sticker while favorites reload, keeping navigation busy', async () => {
     const { fixture, button, selected } = await render();
