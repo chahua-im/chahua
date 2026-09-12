@@ -96,6 +96,12 @@ ion-content::part(scroll) {
   color: var(--ion-color-medium);
   font-size: 22px;
 }
+ion-title {
+  position: static;
+  padding-inline: 8px;
+  text-align: start;
+}
+
 ion-title app-message-preview {
   display: block;
   overflow: hidden;
@@ -195,6 +201,7 @@ ion-title app-message-preview {
 }
 
 .conversation-title {
+  padding-block: 4px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
