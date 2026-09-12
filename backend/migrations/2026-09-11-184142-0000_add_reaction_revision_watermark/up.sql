@@ -24,7 +24,19 @@ SET last_reactions_read_revision = (SELECT COALESCE(MAX(revision), 0) FROM messa
 UPDATE thread_user_states
 SET last_reactions_read_revision = (SELECT COALESCE(MAX(revision), 0) FROM message_reactions);
 
--- Serves the unread-reaction range scan with the revision cursor (author scope,
--- revision ordering), mirroring idx_message_reactions_author_created.
+-- The timestamp cursors are no longer read or written by the backend. Remove
+-- them (and their old index) so every reaction write does not maintain dead
+-- compatibility state indefinitely. This migration requires old writers to be
+-- drained before rollout; they cannot update a dropped timestamp column.
+DROP INDEX IF EXISTS idx_message_reactions_author_created;
+
+ALTER TABLE group_membership
+    DROP COLUMN IF EXISTS last_reactions_read_at;
+
+ALTER TABLE thread_user_states
+    DROP COLUMN IF EXISTS last_reactions_read_at;
+
+-- Serves the scoped watermark lookup: first locate messages in the chat/thread,
+-- then probe reactions by message and author without scanning other chats.
 CREATE INDEX idx_message_reactions_author_revision
-    ON message_reactions (message_author_uid, revision);
+    ON message_reactions (message_id, message_author_uid, revision DESC);

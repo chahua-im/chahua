@@ -701,7 +701,7 @@ async fn get_chat_reactions(
     // Snapshot + watermark must be atomic against reaction inserts (see
     // `lock_chat_reaction_watermark`): the lock makes revision order match
     // commit order, so the watermark never covers an uncommitted reaction.
-    let (list, unread_reactions) = conn.transaction::<_, diesel::result::Error, _>(|conn| {
+    let list = conn.transaction::<_, diesel::result::Error, _>(|conn| {
         crate::services::unread::UnreadService::lock_chat_reaction_watermark(conn, chat_id)?;
         let list = state.unread_service.list_chat_unread_reactions(
             conn,
@@ -710,11 +710,7 @@ async fn get_chat_reactions(
             q.thread_id,
             limit,
         )?;
-        let unread_reactions =
-            state
-                .unread_service
-                .count_chat_unread_reactions(conn, uid, chat_id, q.thread_id)?;
-        Ok((list, unread_reactions))
+        Ok(list)
     })?;
 
     Ok(Json(UnreadReactionIdsResponse {
@@ -724,7 +720,7 @@ async fn get_chat_reactions(
             .map(|id| id.to_string())
             .collect(),
         watermark: list.watermark,
-        unread_reactions,
+        unread_reactions: list.unread_reactions,
     }))
 }
 
@@ -780,7 +776,7 @@ async fn acknowledge_chat_reactions(
     }
 
     let limit = crate::constants::MAX_UNREAD_COUNT;
-    let (unread_reactions, list) = state.unread_service.acknowledge_chat_unread_reactions(
+    let (_, list) = state.unread_service.acknowledge_chat_unread_reactions(
         conn,
         uid,
         chat_id,
@@ -790,7 +786,7 @@ async fn acknowledge_chat_reactions(
     )?;
 
     Ok(Json(UnreadReactionsAckResponse {
-        unread_reactions,
+        unread_reactions: list.unread_reactions,
         message_ids: list
             .message_ids
             .into_iter()

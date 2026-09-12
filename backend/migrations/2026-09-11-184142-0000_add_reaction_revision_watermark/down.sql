@@ -8,3 +8,12 @@ ALTER TABLE group_membership
 
 ALTER TABLE message_reactions
     DROP COLUMN IF EXISTS revision;
+
+ALTER TABLE group_membership
+    ADD COLUMN IF NOT EXISTS last_reactions_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE thread_user_states
+    ADD COLUMN IF NOT EXISTS last_reactions_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_message_reactions_author_created
+    ON message_reactions (message_author_uid, created_at);

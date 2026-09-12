@@ -125,10 +125,12 @@ const UNREAD_REACTIONS_THREAD_TAIL: &str = "AND m.reply_root_id = $3
 
 #[derive(diesel::QueryableByName)]
 struct UnreadReactionEntryRow {
-    #[diesel(sql_type = diesel::sql_types::BigInt)]
-    message_id: i64,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::BigInt>)]
+    message_id: Option<i64>,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     watermark: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    unread_reactions: i64,
 }
 
 /// One page of unread-reaction ids plus the server-issued watermark covering
@@ -143,6 +145,8 @@ pub struct UnreadReactionList {
     /// belongs to one of `message_ids`. Acknowledging this watermark clears
     /// only reactions the client has actually seen.
     pub watermark: i64,
+    /// Total number of distinct messages with unread reactions in this scope.
+    pub unread_reactions: i64,
 }
 
 impl UnreadService {
@@ -407,9 +411,14 @@ impl UnreadService {
                          THEN COALESCE((SELECT MAX(revision) FROM matched), 0)
                      ELSE COALESCE((SELECT MIN(first_revision) - 1 FROM ordered WHERE rn = {limit} + 1), 0)
                  END AS boundary
+             ), summary AS (
+                 SELECT COUNT(*)::BIGINT AS unread_reactions FROM per_message
              )
-             SELECT o.message_id AS message_id, b.boundary AS watermark
-             FROM ordered o CROSS JOIN boundary b
+             SELECT o.message_id AS message_id, b.boundary AS watermark,
+                    s.unread_reactions AS unread_reactions
+             FROM summary s
+             CROSS JOIN boundary b
+             LEFT JOIN ordered o ON TRUE
              ORDER BY o.first_revision ASC
              LIMIT {limit}",
             match thread_root_id {
@@ -429,9 +438,14 @@ impl UnreadService {
                 .load(conn)?,
         };
         let watermark = rows.first().map(|r| r.watermark).unwrap_or(0);
+        let unread_reactions = rows
+            .first()
+            .map(|r| r.unread_reactions.min(MAX_UNREAD_COUNT))
+            .unwrap_or(0);
         Ok(UnreadReactionList {
-            message_ids: rows.into_iter().map(|r| r.message_id).collect(),
+            message_ids: rows.into_iter().filter_map(|r| r.message_id).collect(),
             watermark,
+            unread_reactions,
         })
     }
 
@@ -478,20 +492,43 @@ impl UnreadService {
             // remains untrusted input.  Bound it to revisions that already
             // exist while the per-chat lock is held so a forged max integer
             // cannot suppress reactions inserted in the future.
+            //
+            // The bound is scoped to the user's own eligible reactions (same
+            // filter as the unread queries). Descending LIMIT can read via
+            // idx_message_reactions_author_revision without aggregating every
+            // matching row. Any future eligible reaction allocates a revision
+            // above every existing one, so clamping to this scoped maximum is
+            // safe. Eligibility is monotonic (delete and publish never revert),
+            // so an excluded reaction cannot later hide under this bound.
+            // Materialize the message scope first.  The old author/revision
+            // index cannot constrain chat_id because that column lives on
+            // messages; starting from the scoped messages and probing the
+            // message_id/author/revision index avoids walking this user's
+            // reactions from unrelated chats while holding the advisory lock.
             let scope_filter = if thread_root_id.is_some() {
                 "AND m.reply_root_id = $3"
             } else {
                 "AND m.reply_root_id IS NULL"
             };
             let sql = format!(
-                "SELECT COALESCE(MAX(mr.revision), 0)::BIGINT AS watermark
-                 FROM message_reactions mr
-                 JOIN messages m ON m.id = mr.message_id
-                 WHERE m.chat_id = $1 {scope_filter}"
+                "WITH scoped_messages AS MATERIALIZED (
+                     SELECT m.id
+                     FROM messages m
+                     WHERE m.chat_id = $2
+                       AND m.deleted_at IS NULL
+                       AND m.is_published = TRUE
+                       {scope_filter}
+                 )
+                 SELECT COALESCE(MAX(mr.revision), 0)::BIGINT AS watermark
+                 FROM scoped_messages sm
+                 JOIN message_reactions mr ON mr.message_id = sm.id
+                 WHERE mr.message_author_uid = $1
+                   AND mr.user_uid <> $1"
             );
             let watermark = match thread_root_id {
                 Some(thread_id) => {
                     sql_query(sql)
+                        .bind::<diesel::sql_types::Integer, _>(uid)
                         .bind::<diesel::sql_types::BigInt, _>(chat_id)
                         .bind::<diesel::sql_types::BigInt, _>(thread_id)
                         .get_result::<ReactionWatermarkRow>(conn)?
@@ -499,6 +536,7 @@ impl UnreadService {
                 }
                 None => {
                     sql_query(sql)
+                        .bind::<diesel::sql_types::Integer, _>(uid)
                         .bind::<diesel::sql_types::BigInt, _>(chat_id)
                         .get_result::<ReactionWatermarkRow>(conn)?
                         .watermark
@@ -543,8 +581,7 @@ impl UnreadService {
             }
             let list =
                 self.list_chat_unread_reactions(conn, uid, chat_id, thread_root_id, limit)?;
-            let unread = self.count_chat_unread_reactions(conn, uid, chat_id, thread_root_id)?;
-            Ok((unread, list))
+            Ok((list.unread_reactions, list))
         })
     }
 
@@ -1753,6 +1790,109 @@ mod tests {
                 conn, author, chat_id, None, snapshot.watermark, 100,
             )?;
             assert_eq!(replayed, 1);
+            assert_eq!(
+                service.count_chat_unread_reactions(conn, author, chat_id, None)?,
+                1
+            );
+
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+
+        assert!(
+            matches!(result, Err(diesel::result::Error::RollbackTransaction)),
+            "transaction should roll back"
+        );
+    }
+
+    /// A forged `read_through` is clamped to the user's own eligible reactions
+    /// only: other members' reactions (on their own messages, or
+    /// self-reactions) neither raise the bound nor get cleared, and reactions
+    /// that arrive later — including on the same message — stay unread.
+    /// Requires a test database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn reaction_ack_clamps_forged_read_through_to_own_eligible_reactions() {
+        use diesel::Connection;
+        use diesel::PgConnection;
+        use diesel::RunQueryDsl;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_631_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let other_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author: i32 = 4254;
+        let actor: i32 = 4255;
+        let service = UnreadService::new();
+
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'reaction-ack-clamp-test')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(actor)
+                .execute(conn)?;
+            for (msg_id, sender) in [(author_msg, author), (other_msg, actor)] {
+                diesel::sql_query(
+                    "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                     VALUES ($1, 'text', $2, $3, $4, NOW())",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Text, _>(format!("cg-{chat_id}-{msg_id}"))
+                .bind::<diesel::sql_types::Integer, _>(sender)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            }
+            let insert_reaction = |conn: &mut PgConnection,
+                                   msg_id: i64,
+                                   reactor: i32,
+                                   msg_author: i32,
+                                   emoji: &str|
+             -> Result<(), diesel::result::Error> {
+                diesel::sql_query(
+                    "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) \
+                     VALUES ($1, $2, $4, NOW(), $3)",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Integer, _>(reactor)
+                .bind::<diesel::sql_types::Integer, _>(msg_author)
+                .bind::<diesel::sql_types::Text, _>(emoji)
+                .execute(conn)?;
+                Ok(())
+            };
+
+            // The author's one eligible unread reaction...
+            insert_reaction(conn, author_msg, actor, author, "👍")?;
+            // ...followed by reactions outside the author's unread scope that
+            // carry HIGHER revisions: a reaction on the actor's own message and
+            // the author's self-reaction.
+            insert_reaction(conn, other_msg, actor, actor, "👍")?;
+            insert_reaction(conn, author_msg, author, author, "👍")?;
+
+            // Forged acknowledge with an absurd read_through: the cursor must
+            // stop at the author's eligible maximum, not the chat-wide one.
+            let (unread, post_ack) =
+                service.acknowledge_chat_unread_reactions(conn, author, chat_id, None, i64::MAX, 100)?;
+            assert_eq!(unread, 0);
+            assert!(post_ack.message_ids.is_empty());
+
+            // The cursor sits at the eligible bound, so a later eligible
+            // reaction (new revision, above every existing one) stays unread —
+            // the forged value suppressed nothing.
+            insert_reaction(conn, author_msg, actor, author, "🎉")?;
             assert_eq!(
                 service.count_chat_unread_reactions(conn, author, chat_id, None)?,
                 1

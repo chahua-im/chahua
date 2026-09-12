@@ -153,7 +153,6 @@ diesel::table! {
         join_reason -> GroupJoinReason,
         join_reason_extra -> Nullable<Jsonb>,
         archived -> Bool,
-        last_reactions_read_at -> Timestamptz,
         last_reactions_read_revision -> Int8,
     }
 }
@@ -435,7 +434,6 @@ diesel::table! {
         subscribed_at -> Timestamptz,
         archived -> Bool,
         subscribed -> Bool,
-        last_reactions_read_at -> Timestamptz,
         last_reactions_read_revision -> Int8,
     }
 }
