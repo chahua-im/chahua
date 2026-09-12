@@ -23,6 +23,22 @@ const image: AttachmentResponse = {
 };
 
 describe('MessageAttachments', () => {
+  let resize: (width: number) => void;
+  const disconnect = vi.fn();
+  beforeEach(() => {
+    disconnect.mockClear();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: (entries: { contentRect: { width: number } }[]) => void) {
+          resize = (width) => callback([{ contentRect: { width } }]);
+        }
+        observe() {}
+        disconnect = disconnect;
+      },
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
   async function render(message: Partial<MessageResponse> | Partial<MessageAttachmentSource>) {
     await TestBed.configureTestingModule({ imports: [MessageAttachments] }).compileComponents();
     const fixture = TestBed.createComponent(MessageAttachments);
@@ -31,7 +47,7 @@ describe('MessageAttachments', () => {
     return fixture;
   }
 
-  it('reserves each image and video ratio in attachment order before loading', async () => {
+  it('reserves an album before loading, resizes it without replacing media, and releases observation', async () => {
     const fixture = await render({
       attachments: [
         image,
@@ -47,10 +63,10 @@ describe('MessageAttachments', () => {
     });
     const element: HTMLElement = fixture.nativeElement;
     const frames = element.querySelectorAll<HTMLElement>('.media-frame');
-    expect(frames[0].style.width).toBe('360px');
-    expect(frames[0].style.aspectRatio).toBe('1200 / 800');
-    expect(frames[1].style.width).toBe('202.5px');
-    expect(frames[1].style.aspectRatio).toBe('1080 / 1920');
+    expect(element.classList.contains('album')).toBe(true);
+    expect(frames[0].style.top).toBe('0px');
+    expect(frames[1].style.top).toBe('0px');
+    expect(parseFloat(frames[0].style.width)).toBeGreaterThan(parseFloat(frames[1].style.width));
     expect(element.querySelector('img')?.getAttribute('loading')).toBe('lazy');
     const video = element.querySelector('video')!;
     expect(video.controls).toBe(false);
@@ -59,6 +75,16 @@ describe('MessageAttachments', () => {
     video.dispatchEvent(new Event('loadedmetadata'));
     fixture.detectChanges();
     expect(frames[1].getAttribute('style')).toBe(before);
+    await fixture.whenStable();
+    resize(282.5);
+    await fixture.whenStable();
+    expect(element.querySelector<HTMLElement>('.attachments')!.style.width).toBe('282px');
+    expect(element.querySelector('video')).toBe(video);
+    resize(0);
+    await fixture.whenStable();
+    expect(element.querySelector<HTMLElement>('.attachments')!.style.width).toBe('282px');
+    fixture.destroy();
+    expect(disconnect).toHaveBeenCalled();
   });
 
   it('preserves the frame on image failure and offers the original file', async () => {
@@ -85,6 +111,49 @@ describe('MessageAttachments', () => {
     expect(frames[0].querySelector('time')).toBeNull();
     expect(frames[1].querySelector('time')?.getAttribute('datetime')).toBe(testMessage.createdAt);
     expect(element.querySelectorAll('time')).toHaveLength(1);
+  });
+
+  it('limits album previews to nine items while the viewer retains all media and the selected index', async () => {
+    const attachments = Array.from({ length: 12 }, (_, index) => ({
+      ...image,
+      id: encodeId(String(100 + index)),
+      url: `https://example.com/${index}.jpg`,
+    }));
+    const fixture = await render({ attachments });
+    fixture.componentRef.setInput('overlayTime', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.media-frame')).toHaveLength(9);
+    expect(fixture.nativeElement.querySelectorAll('time')).toHaveLength(1);
+    const more: HTMLButtonElement = fixture.nativeElement.querySelector('.album-more');
+    expect(more.textContent?.trim()).toBe('+3');
+    const modal = Object.assign(document.createElement('ion-modal'), { present: vi.fn().mockResolvedValue(undefined) });
+    const create = vi.spyOn(TestBed.inject(ModalController), 'create').mockResolvedValue(modal);
+    more.click();
+    await fixture.whenStable();
+    const props = create.mock.calls[0][0].componentProps!;
+    expect(props['media']).toHaveLength(12);
+    expect(props['initial']).toBe(8);
+    create.mockRestore();
+  });
+
+  it('keeps unknown album dimensions fixed when upload metadata arrives', async () => {
+    const uploads = [upload('blob:a'), upload('blob:b')];
+    const fixture = await render({
+      attachments: uploads.map(({ url }) => ({ kind: 'image/jpeg', url, fileName: '图片', size: 1 })),
+    });
+    fixture.componentRef.setInput('uploads', uploads);
+    await fixture.whenStable();
+    const element: HTMLElement = fixture.nativeElement;
+    const before = [...element.querySelectorAll('.attachments, .media-frame')].map((node) =>
+      node.getAttribute('style'),
+    );
+    expect(element.querySelector('.media-frame.cover')).toBeNull();
+    uploads[0].state.set({ status: UploadStatus.Uploading, progress: 0.5, width: 800, height: 2000 });
+    await fixture.whenStable();
+    expect(
+      [...element.querySelectorAll('.attachments, .media-frame')].map((node) => node.getAttribute('style')),
+    ).toEqual(before);
+    expect(element.querySelector('.media-frame.cover')).toBeNull();
   });
 
   it('plays video stickers silently in a loop and gives missing dimensions a stable square', async () => {

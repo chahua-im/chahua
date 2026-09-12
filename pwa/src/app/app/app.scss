@@ -4,6 +4,13 @@ ion-split-pane {
   --side-max-width: 384px;
 }
 
+ion-content {
+  --background: var(
+    --ion-toolbar-background,
+    var(--ion-color-step-50, var(--ion-background-color-step-50, #f7f7f7))
+  );
+}
+
 .loading-status {
   height: 100%;
   display: grid;
