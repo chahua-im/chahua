@@ -133,6 +133,8 @@ describe('ChatListPage query lifecycle', () => {
         {
           provide: ChatListStore,
           useValue: {
+            unread: { value: signal(undefined), activate: () => () => {} },
+            threadUnread: { value: signal(undefined), activate: () => () => {} },
             chats: () => query,
             friendRequests: () => query,
             threads: () => query,

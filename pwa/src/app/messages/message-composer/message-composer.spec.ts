@@ -213,17 +213,22 @@ describe('Message composer upload ownership', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(upload.url);
   });
 
-  it('hands off failed uploads so retry can continue outside the composer', async () => {
+  it('blocks failed attachments until retry starts', async () => {
     const upload = add();
     const pending = upload.retry();
     (await startStorage()).finish(403);
     await pending;
     expect(upload.state().status).toBe(UploadStatus.Failed);
+    expect(composer['canSend']()).toBe(false);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.send-button').disabled).toBe(true);
+    composer['submit']();
+    expect(submitted).not.toHaveBeenCalled();
+    const retry = upload.retry();
     expect(composer['canSend']()).toBe(true);
     composer['submit']();
     expect(submitted.mock.calls[0][0].uploads).toEqual([upload]);
     composer.reset();
-    const retry = upload.retry();
     (await startStorage(encodeId('101'))).finish();
     await expect(retry).resolves.toBe(encodeId('101'));
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(upload.url);
@@ -313,7 +318,7 @@ describe('Message composer upload ownership', () => {
     expect(composer.text()).toBe('保留文字');
   });
 
-  it.each(['processing', 'uploading', 'failed', 'ready'] as const)(
+  it.each(['processing', 'uploading', 'ready'] as const)(
     'hands off %s edit uploads before the receiver immediately exits editing',
     async (phase) => {
       const removed = { ...existing, id: encodeId('91'), fileName: 'removed.gif' };
@@ -330,9 +335,9 @@ describe('Message composer upload ownership', () => {
         xhr = await startStorage();
         expect(upload.state().status).toBe(UploadStatus.Uploading);
         if (phase !== 'uploading') {
-          xhr.finish(phase === 'failed' ? 403 : 200);
+          xhr.finish();
           await pending;
-          expect(upload.state().status).toBe(phase === 'failed' ? UploadStatus.Failed : UploadStatus.Ready);
+          expect(upload.state().status).toBe(UploadStatus.Ready);
         }
       }
       composer.submitted.subscribe(() => {
@@ -359,7 +364,7 @@ describe('Message composer upload ownership', () => {
       expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(upload.url);
       if (xhr) expect(xhr.abort).not.toHaveBeenCalled();
       const continuation = upload.retry();
-      if (phase === 'processing' || phase === 'failed') xhr = await startStorage();
+      if (phase === 'processing') xhr = await startStorage();
       if (phase !== 'ready') xhr!.finish();
       await expect(continuation).resolves.toBe(encodeId('100'));
       expect(dispose).not.toHaveBeenCalled();
@@ -477,7 +482,7 @@ describe('Message composer upload ownership', () => {
     const selection = Object.freeze([borrowed]);
     edit(pendingMessage, selection);
     expect(composer['error']()).toBe(true);
-    expect(composer['canSend']()).toBe(true);
+    expect(composer['canSend']()).toBe(false);
     const owned = add(AttachmentUploadPurpose.media);
     const ownedRequest = http.expectOne('/_api/attachments/config');
     composer['remove'](borrowed);

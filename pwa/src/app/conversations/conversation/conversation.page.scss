@@ -154,19 +154,44 @@ ion-title app-message-preview {
   transform: translateY(-50%);
 }
 
-.floating-date {
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-  pointer-events: none;
+.floating-date,
+.message-date > span {
   border-radius: 12px;
-  padding: 4px 10px;
-  color: var(--ion-color-medium-contrast);
-  background: var(--ion-color-medium);
+  padding: 4px 12px;
+  color: var(--ion-color-medium);
+  background: rgba(var(--ion-text-color-rgb, 0, 0, 0), 0.08);
   font-size: var(--app-font-caption);
   line-height: var(--app-line-caption);
+  font-weight: 500;
   white-space: nowrap;
+}
+.message-date {
+  margin: 0;
+  padding: 12px 0 8px;
+}
+.floating-date {
+  top: 12px;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 200ms ease 1s,
+    transform 200ms ease 1s,
+    visibility 0s 1.2s;
+
+  &.scrolling {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+    transition-delay: 0s;
+  }
+  &.colliding {
+    visibility: hidden;
+    transition: none;
+  }
 }
 
 .conversation-title {
