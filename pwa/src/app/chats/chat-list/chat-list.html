@@ -33,7 +33,12 @@
         </ion-buttons>
         <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)">
           <ion-segment-button [value]="ListTab.Messages" [contentId]="contentPrefix + ListTab.Messages">
-            <ion-label>消息</ion-label>
+            <ion-label>
+              消息
+              @if (messageUnread(); as count) {
+                <ion-badge>{{ count }}</ion-badge>
+              }
+            </ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Groups" [contentId]="contentPrefix + ListTab.Groups">
             <ion-label>群组</ion-label>
@@ -42,7 +47,12 @@
             <ion-label>好友</ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Threads" [contentId]="contentPrefix + ListTab.Threads">
-            <ion-label>话题</ion-label>
+            <ion-label>
+              话题
+              @if (lists.threadUnread.value()?.unreadThreadCount; as count) {
+                <ion-badge>{{ count }}</ion-badge>
+              }
+            </ion-label>
           </ion-segment-button>
         </ion-segment>
         <ion-buttons slot="end">

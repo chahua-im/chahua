@@ -81,7 +81,7 @@ describe('ChatListStore threads and friend requests', () => {
     disposed = false;
     inbox = scope.get(ChatListStore);
     refreshChats = vi.spyOn(inbox, 'refreshChats');
-    refreshCounts = vi.spyOn(inbox.archivedUnread.threads, 'refresh');
+    refreshCounts = vi.spyOn(inbox.threadUnread, 'refresh');
     requests = inbox.friendRequests(false);
     threads = inbox.threads(false);
     releaseList = () => {};

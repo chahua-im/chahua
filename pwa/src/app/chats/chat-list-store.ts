@@ -11,6 +11,7 @@ import {
   type FriendRequestHistoryEntry,
   type MessageResponse,
   type UnreadCountResponse,
+  type UnreadThreadCountResponse,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { activeQuery, readPages } from '../api/query';
@@ -96,12 +97,9 @@ export class ChatListStore {
     (cancel) => this.response(this.api.getUnreadCount({ timeout: 10000 }), cancel),
     undefined,
   );
-  private readonly archivedThreadUnread = activeQuery(
+  readonly threadUnread = activeQuery<UnreadThreadCountResponse | undefined>(
     this.destroyRef,
-    async (cancel) => {
-      const counts = await this.response(this.threadsApi.getUnreadThreadCount(), cancel);
-      return counts.archivedUnreadMessageCount;
-    },
+    (cancel) => this.response(this.threadsApi.getUnreadThreadCount(), cancel),
     undefined,
   );
   readonly archivedUnread = {
@@ -109,7 +107,10 @@ export class ChatListStore {
       ...this.unread,
       value: computed(() => this.unread.value()?.archivedUnreadCount),
     },
-    threads: this.archivedThreadUnread,
+    threads: {
+      ...this.threadUnread,
+      value: computed(() => this.threadUnread.value()?.archivedUnreadMessageCount),
+    },
     refresh: () => this.refreshArchivedUnread(),
     refreshChats: () => this.refreshChatUnread(),
   };
@@ -124,7 +125,7 @@ export class ChatListStore {
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, threadId }) => {
       if (threadId) {
-        void this.archivedThreadUnread.refresh();
+        void this.threadUnread.refresh();
         if (kind === ChatChangeKind.Membership) void this.invalidateThreads();
       } else {
         this.refreshChatUnread();
@@ -551,6 +552,6 @@ export class ChatListStore {
 
   private refreshArchivedUnread() {
     this.refreshChatUnread();
-    void this.archivedThreadUnread.refresh();
+    void this.threadUnread.refresh();
   }
 }

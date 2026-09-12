@@ -1,6 +1,20 @@
 import { computed, DestroyRef, effect, inject, Service, signal, type Signal, type WritableSignal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, from, fromEvent, merge, Subject, takeUntil, timeout, type Observable } from 'rxjs';
+import {
+  catchError,
+  defaultIfEmpty,
+  firstValueFrom,
+  forkJoin,
+  from,
+  fromEvent,
+  map,
+  merge,
+  of,
+  Subject,
+  takeUntil,
+  timeout,
+  type Observable,
+} from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { MessageType, ServerWsMessageType, type CreateMessageBody, type MessageResponse } from '../../generated/models';
 import { Connection } from '../api/connection';
@@ -390,19 +404,30 @@ export class MessageOutbox {
     while (this.needsSend(item)) {
       const intent = task.intent();
       const ids = await firstValueFrom(
-        from(Promise.all(intent.uploads.map((upload) => upload.retry()))).pipe(
+        forkJoin(
+          intent.uploads.map((upload) =>
+            from(upload.retry()).pipe(
+              map((id) => {
+                if (id == null) throw new Error('Attachment upload failed');
+                return id;
+              }),
+            ),
+          ),
+        ).pipe(
+          defaultIfEmpty([] as SnowflakeID[]),
+          catchError(() => of(undefined)),
           takeUntil(merge(task.changed, task.stopped)),
         ),
-        { defaultValue: [] },
+        { defaultValue: undefined },
       );
       if (!this.needsSend(item)) return;
       if (intent !== task.intent()) continue;
-      if (ids.some((id) => id == null)) {
+      if (!ids) {
         task.retryable = intent.uploads.every((upload) => upload.retryable !== false);
         item.delivery.set(MessageDelivery.Failed);
         this.schedule(item);
       } else {
-        task.ready = submission(intent, ids as SnowflakeID[]);
+        task.ready = submission(intent, ids);
       }
       return;
     }

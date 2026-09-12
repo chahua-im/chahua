@@ -1,7 +1,8 @@
-import { Component, inject, input, output, signal, viewChild } from '@angular/core';
+import { Component, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import {
   IonAvatar,
+  IonBadge,
   IonBackButton,
   IonButton,
   IonButtons,
@@ -29,6 +30,8 @@ import { Connection } from '../../api/connection';
 import { PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
+import { ChatListStore } from '../chat-list-store';
+import { Preferences } from '../../settings/preferences';
 import { AvatarTextPipe } from '../avatar-text.pipe';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { DirectorySearch } from '../directory-search/directory-search';
@@ -48,6 +51,7 @@ let nextContentId = 0;
     ContentScrollbars,
     DirectorySearch,
     IonAvatar,
+    IonBadge,
     IonBackButton,
     IonButton,
     IonButtons,
@@ -73,6 +77,22 @@ export class ChatList {
   readonly active = input(true);
   readonly openList = output<ListSelection>();
   protected readonly list = this.selection;
+  protected readonly lists = inject(ChatListStore);
+  private readonly preferences = inject(Preferences);
+  protected readonly messageUnread = computed(() => {
+    const chats = this.lists.unread.value()?.unreadChatCount;
+    const threads = this.preferences.showThreadsInMessages() ? this.lists.threadUnread.value()?.unreadThreadCount : 0;
+    return chats == null || threads == null ? undefined : chats + threads;
+  });
+
+  constructor() {
+    effect((onCleanup) => {
+      if (!this.active()) return;
+      onCleanup(this.lists.unread.activate());
+      onCleanup(this.lists.threadUnread.activate());
+    });
+  }
+
   // Ionic resolves segment content IDs across the document, including cached pages and the sidebar.
   protected readonly contentPrefix = `chat-list-${nextContentId++}-`;
   protected readonly realtime = inject(Connection);
