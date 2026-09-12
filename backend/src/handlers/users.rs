@@ -318,6 +318,7 @@ async fn get_me(
         username,
         avatar_url,
         gender: profile.map(|profile| profile.gender).unwrap_or(0),
+        user_group: profile.and_then(|profile| profile.user_group.clone()),
         sticker_pack_order,
         permissions,
     }))
