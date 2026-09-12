@@ -219,17 +219,11 @@ pub fn mark_thread_as_read(
     )
     .set(thread_user_states::last_read_message_id.eq(Some(message_id)))
     .execute(conn)?;
-    // Advancing the read position also acknowledges unread reactions: they are
-    // derived from a reaction-timestamp cursor (see UnreadService), which only
-    // moves forward.
-    diesel::update(
-        thread_user_states::table
-            .filter(thread_user_states::chat_id.eq(chat_id))
-            .filter(thread_user_states::thread_root_id.eq(thread_root_id))
-            .filter(thread_user_states::uid.eq(uid)),
-    )
-    .set(thread_user_states::last_reactions_read_at.eq(Utc::now()))
-    .execute(conn)?;
+    // Unread reactions are NOT acknowledged here: the reaction cursor
+    // (`last_reactions_read_revision`) is independent of the message read
+    // position and only advances through the explicit reaction-acknowledge
+    // endpoint, so reactions on messages the user never viewed are never
+    // cleared as a side effect of ordinary reading.
     Ok(updated > 0)
 }
 
@@ -793,7 +787,7 @@ pub fn enrich_thread_list(
          JOIN message_reactions mr
            ON mr.message_id = my_msgs.message_id
           AND mr.user_uid <> my_msgs.sender_uid
-          AND mr.created_at > tus.last_reactions_read_at
+          AND mr.revision > tus.last_reactions_read_revision
          GROUP BY my_msgs.thread_root_id",
     )
     .bind::<diesel::sql_types::Integer, _>(uid)

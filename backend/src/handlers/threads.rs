@@ -170,6 +170,11 @@ fn apply_thread_read(
     uid: i32,
     message_id: i64,
 ) -> Result<MarkThreadReadResponse, AppError> {
+    // Ordinary thread reads do not acknowledge reactions; the live
+    // unread-reaction count is reported independently of the read position.
+    let unread_reactions =
+        unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
+
     // If the client reports reading the root message itself (no replies),
     // there is nothing to track — skip the write.
     if message_id == thread_root_id {
@@ -177,7 +182,7 @@ fn apply_thread_read(
             last_read_message_id: None,
             unread_count: 0,
             unread_mentions: 0,
-            unread_reactions: 0,
+            unread_reactions,
         });
     }
 
@@ -193,10 +198,6 @@ fn apply_thread_read(
         read_state.last_read_message_id,
         Some(thread_root_id),
     )?;
-    // The reaction cursor was advanced by mark_thread_as_read, so this is
-    // normally 0; computed for consistency with the mention count.
-    let unread_reactions =
-        unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
 
     Ok(MarkThreadReadResponse {
         last_read_message_id: read_state.last_read_message_id,

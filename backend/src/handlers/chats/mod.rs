@@ -16,8 +16,9 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         chats::{
-            ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse,
-            UnreadMentionIdsResponse, UnreadReactionIdsResponse,
+            AcknowledgeReactionsBody, ChatListItem, ListChatsResponse, MarkChatReadStateResponse,
+            UnreadCountResponse, UnreadMentionIdsResponse, UnreadReactionIdsResponse,
+            UnreadReactionsAckResponse,
         },
         messages::MessageResponse,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
@@ -417,8 +418,8 @@ async fn mark_as_read(
         read_state.last_read_message_id,
         None,
     )?;
-    // The reaction cursor was just advanced by mark_chat_as_read, so this is
-    // normally 0; computed for consistency with the mention count.
+    // Ordinary reads no longer acknowledge reactions; this is the live
+    // unread-reaction count for the (unchanged) reaction cursor.
     let unread_reactions = state
         .unread_service
         .count_chat_unread_reactions(conn, uid, chat_id, None)?;
@@ -664,10 +665,13 @@ async fn get_chat_mentions(
 ///
 /// Returns main-scope reactions by default (reactions on the user's top-level
 /// messages); pass `threadId` for reactions on the user's messages in that
-/// thread. Ids are newest-first, one entry per message regardless of how many
-/// new reactions it carries (default 1000, hard cap 1000). A reaction is
-/// unread while `created_at > last_reactions_read_at` (cursor-derived; the
-/// cursor advances on mark-read).
+/// thread. Ids are oldest-unread-first (by each message's oldest unread
+/// reaction), one entry per message regardless of how many new reactions it
+/// carries (default 1000, hard cap 1000). A reaction is unread while
+/// `revision > last_reactions_read_revision` (cursor-derived; the cursor only
+/// advances through the explicit acknowledge endpoint). The response carries a
+/// server-issued `watermark` covering exactly the listed reactions — acknowledge
+/// it after viewing the listed messages.
 #[utoipa::path(
     get,
     path = "/reactions",
@@ -677,7 +681,7 @@ async fn get_chat_mentions(
         ("max" = Option<i64>, Query, description = "Max ids to return (default 1000, capped at 1000)"),
     ),
     responses(
-        (status = 200, description = "Message ids with unread reactions, newest-first", body = UnreadReactionIdsResponse),
+        (status = 200, description = "Message ids with unread reactions, oldest-unread-first, plus the acknowledge watermark", body = UnreadReactionIdsResponse),
     ),
     security(("uid_header" = []), ("bearer_jwt" = [])),
 )]
@@ -694,13 +698,105 @@ async fn get_chat_reactions(
 
     let limit = validate_limit(q.max, crate::constants::MAX_UNREAD_COUNT);
 
-    let ids =
-        state
-            .unread_service
-            .list_chat_unread_reactions(conn, uid, chat_id, q.thread_id, limit)?;
+    // Snapshot + watermark must be atomic against reaction inserts (see
+    // `lock_chat_reaction_watermark`): the lock makes revision order match
+    // commit order, so the watermark never covers an uncommitted reaction.
+    let (list, unread_reactions) = conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        crate::services::unread::UnreadService::lock_chat_reaction_watermark(conn, chat_id)?;
+        let list = state.unread_service.list_chat_unread_reactions(
+            conn,
+            uid,
+            chat_id,
+            q.thread_id,
+            limit,
+        )?;
+        let unread_reactions =
+            state
+                .unread_service
+                .count_chat_unread_reactions(conn, uid, chat_id, q.thread_id)?;
+        Ok((list, unread_reactions))
+    })?;
 
     Ok(Json(UnreadReactionIdsResponse {
-        message_ids: ids.into_iter().map(|id| id.to_string()).collect(),
+        message_ids: list
+            .message_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect(),
+        watermark: list.watermark,
+        unread_reactions,
+    }))
+}
+
+/// POST /chats/{chat_id}/reactions/read — Acknowledge unread reactions up to a
+/// server-issued watermark.
+///
+/// Advances the per-scope reaction cursor to `readThrough` (monotonic: an older
+/// or repeated watermark is a no-op) and returns the fresh post-acknowledge
+/// state. Reactions created after the client's snapshot stay unread: the
+/// watermark only covers reactions the id list actually contained. This is the
+/// only way reactions become read — ordinary message reads never move the
+/// reaction cursor.
+#[utoipa::path(
+    post,
+    path = "/reactions/read",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+    ),
+    request_body = AcknowledgeReactionsBody,
+    responses(
+        (status = 200, description = "Fresh unread-reaction state after the cursor advance", body = UnreadReactionsAckResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn acknowledge_chat_reactions(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<AcknowledgeReactionsBody>,
+) -> Result<Json<UnreadReactionsAckResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    // `thread_id` is a client supplied scope selector.  Do not let it create
+    // state for a root from another chat (or disclose whether such a root
+    // exists) merely because the caller belongs to this chat.
+    if let Some(thread_id) = body.thread_id {
+        let belongs_to_chat: bool = diesel::select(diesel::dsl::exists(
+            messages_schema::table.filter(
+                messages_schema::id
+                    .eq(thread_id)
+                    .and(messages_schema::chat_id.eq(chat_id))
+                    .and(messages_schema::reply_root_id.is_null()),
+            ),
+        ))
+        .get_result(conn)?;
+        if !belongs_to_chat {
+            return Err(AppError::NotFound("Thread root message not found"));
+        }
+    }
+
+    let limit = crate::constants::MAX_UNREAD_COUNT;
+    let (unread_reactions, list) = state.unread_service.acknowledge_chat_unread_reactions(
+        conn,
+        uid,
+        chat_id,
+        body.thread_id,
+        body.read_through,
+        limit,
+    )?;
+
+    Ok(Json(UnreadReactionsAckResponse {
+        unread_reactions,
+        message_ids: list
+            .message_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect(),
+        watermark: list.watermark,
     }))
 }
 
@@ -863,6 +959,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(get_chat_unread_count))
                 .routes(utoipa_axum::routes!(get_chat_mentions))
                 .routes(utoipa_axum::routes!(get_chat_reactions))
+                .routes(utoipa_axum::routes!(acknowledge_chat_reactions))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
                 .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())

@@ -51,16 +51,11 @@ pub fn mark_chat_as_read(
     .set(gm_dsl::last_read_message_id.eq(Some(message_id)))
     .execute(conn)?;
 
-    // Advancing the read position also acknowledges unread reactions: they are
-    // derived from a reaction-timestamp cursor (see UnreadService), which only
-    // moves forward.
-    diesel::update(
-        group_membership::table
-            .filter(gm_dsl::chat_id.eq(chat_id))
-            .filter(gm_dsl::uid.eq(uid)),
-    )
-    .set(gm_dsl::last_reactions_read_at.eq(Utc::now()))
-    .execute(conn)?;
+    // Unread reactions are NOT acknowledged here: the reaction cursor
+    // (`last_reactions_read_revision`) is independent of the message read
+    // position and only advances through the explicit reaction-acknowledge
+    // endpoint, so reactions on messages the user never viewed are never
+    // cleared as a side effect of ordinary reading.
 
     Ok(updated > 0)
 }
@@ -185,5 +180,79 @@ mod tests {
     #[test]
     fn unread_count_cap_matches_display_overflow_boundary() {
         assert_eq!(MAX_UNREAD_COUNT, 1000);
+    }
+
+    /// Ordinary message reads must NOT acknowledge unread reactions: the
+    /// reaction cursor only advances through the explicit acknowledge endpoint,
+    /// so reactions on messages the user never viewed are never cleared as a
+    /// side effect of reading newer messages.
+    /// Requires a test database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn mark_chat_as_read_does_not_clear_unread_reactions() {
+        use crate::schema::message_reactions;
+        use crate::services::chat::mark_chat_as_read;
+        use crate::services::unread::UnreadService;
+        use diesel::prelude::*;
+        use diesel::RunQueryDsl;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = diesel::PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_634_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let old_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let new_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author: i32 = 4254;
+        let actor: i32 = 4255;
+
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'reaction-read-decoupled')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+            for (msg_id, cg) in [(old_msg, "cg-old"), (new_msg, "cg-new")] {
+                diesel::sql_query(
+                    "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                     VALUES ($1, 'text', $2, $3, $4, NOW())",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Text, _>(cg)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            }
+            diesel::insert_into(message_reactions::table)
+                .values((
+                    message_reactions::message_id.eq(old_msg),
+                    message_reactions::user_uid.eq(actor),
+                    message_reactions::emoji.eq("👍"),
+                    message_reactions::message_author_uid.eq(author),
+                ))
+                .execute(conn)?;
+
+            // The user reads all the way past the reacted message: the reaction
+            // must stay unread.
+            mark_chat_as_read(conn, chat_id, author, new_msg)?;
+
+            let unread = UnreadService::new().count_chat_unread_reactions(conn, author, chat_id, None)?;
+            assert_eq!(unread, 1);
+
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+
+        assert!(
+            matches!(result, Err(diesel::result::Error::RollbackTransaction)),
+            "transaction should roll back"
+        );
     }
 }

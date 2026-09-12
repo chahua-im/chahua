@@ -10,7 +10,7 @@ use diesel::PgConnection;
 
 use super::chat_index::{ChatUnreadIndex, ChatUnreadMessageSnapshot};
 use crate::constants::{MAX_UNREAD_COUNT, UNREAD_CHAT_INDEX_LOAD_BATCH_SIZE};
-use crate::schema::group_membership;
+use crate::schema::{group_membership, thread_user_states};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatUnreadMembership {
@@ -86,6 +86,12 @@ struct ReactionTotalRow {
     reaction_count: i64,
 }
 
+#[derive(diesel::QueryableByName)]
+struct ReactionWatermarkRow {
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    watermark: i64,
+}
+
 /// Shared filter for the unread-reaction queries: reactions on the user's
 /// non-deleted, published messages in one chat, excluding self-reactions.
 /// `$1` = uid, `$2` = chat id.
@@ -98,27 +104,45 @@ const UNREAD_REACTIONS_FILTER: &str = "FROM message_reactions mr
       AND m.is_published = TRUE";
 
 /// Main-scope tail (reactions on top-level messages), cursor from the chat
-/// membership row.
+/// membership row. The cursor is the identity `revision` allocated under the
+/// per-chat watermark lock, so `revision > cursor` has strict commit-order
+/// semantics (a timestamp comparison cannot order concurrent inserts).
 const UNREAD_REACTIONS_MAIN_TAIL: &str = "AND m.reply_root_id IS NULL
-    AND mr.created_at > COALESCE((
-        SELECT gm.last_reactions_read_at
+    AND mr.revision > COALESCE((
+        SELECT gm.last_reactions_read_revision
         FROM group_membership gm
         WHERE gm.chat_id = $2 AND gm.uid = $1
-    ), '-infinity'::timestamptz)";
+    ), 0)";
 
 /// Thread-scope tail (reactions on the user's messages in thread `$3`),
 /// cursor from the per-thread user state row.
 const UNREAD_REACTIONS_THREAD_TAIL: &str = "AND m.reply_root_id = $3
-    AND mr.created_at > COALESCE((
-        SELECT tus.last_reactions_read_at
+    AND mr.revision > COALESCE((
+        SELECT tus.last_reactions_read_revision
         FROM thread_user_states tus
         WHERE tus.chat_id = $2 AND tus.thread_root_id = $3 AND tus.uid = $1
-    ), '-infinity'::timestamptz)";
+    ), 0)";
 
 #[derive(diesel::QueryableByName)]
-struct UnreadReactionIdRow {
+struct UnreadReactionEntryRow {
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     message_id: i64,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    watermark: i64,
+}
+
+/// One page of unread-reaction ids plus the server-issued watermark covering
+/// exactly the reactions belonging to those messages (see
+/// [`UnreadService::list_chat_unread_reactions`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadReactionList {
+    /// Message ids ordered by their oldest unread reaction (oldest-first), one
+    /// entry per message.
+    pub message_ids: Vec<i64>,
+    /// Server boundary: every unread reaction with `revision <= watermark`
+    /// belongs to one of `message_ids`. Acknowledging this watermark clears
+    /// only reactions the client has actually seen.
+    pub watermark: i64,
 }
 
 impl UnreadService {
@@ -274,7 +298,7 @@ impl UnreadService {
     /// top-level messages) for a user, aggregated per message.
     ///
     /// Unread reactions are derived from `message_reactions` (no per-row read
-    /// flag): a reaction is unread while `created_at > last_reactions_read_at`.
+    /// flag): a reaction is unread while `revision > last_reactions_read_revision`.
     /// Self-reactions never count. Like mentions, this deliberately ignores
     /// mute/archive; unlike mentions it is NOT folded into the global unread
     /// message count — it only feeds list badges.
@@ -294,7 +318,7 @@ impl UnreadService {
                AND m.deleted_at IS NULL
                AND m.is_published = TRUE
                AND m.reply_root_id IS NULL
-               AND mr.created_at > gm.last_reactions_read_at
+               AND mr.revision > gm.last_reactions_read_revision
              GROUP BY m.chat_id",
         )
         .bind::<diesel::sql_types::Integer, _>(uid)
@@ -308,10 +332,10 @@ impl UnreadService {
     /// Unread-reaction message count for a single chat, aggregated per message.
     ///
     /// `thread_root_id`: `None` counts reactions on the user's top-level
-    /// messages (cursor: `group_membership.last_reactions_read_at`);
+    /// messages (cursor: `group_membership.last_reactions_read_revision`);
     /// `Some(id)` counts reactions on the user's messages in that thread
-    /// (cursor: `thread_user_states.last_reactions_read_at`). The read cursor
-    /// is read here so callers never handle the timestamp.
+    /// (cursor: `thread_user_states.last_reactions_read_revision`). The read
+    /// cursor is read here so callers never handle the revision.
     pub fn count_chat_unread_reactions(
         &self,
         conn: &mut PgConnection,
@@ -340,12 +364,23 @@ impl UnreadService {
         Ok(row.reaction_count.min(MAX_UNREAD_COUNT))
     }
 
-    /// Unread-reaction message ids for a single chat, newest-first, one entry
-    /// per message regardless of how many new reactions it carries.
+    /// Unread-reaction message ids for a single chat plus a server-issued
+    /// watermark, one entry per message regardless of how many new reactions it
+    /// carries.
     ///
     /// Same derivation and scope rules as `count_chat_unread_reactions`. The
     /// limit is interpolated instead of bound so both scope variants share one
     /// placeholder layout (`limit` is a validated `i64` from `validate_limit`).
+    ///
+    /// Ordering and watermark contract: ids are ordered oldest-unread-first (by
+    /// each message's oldest unread reaction) so the client can jump
+    /// chronologically. The watermark covers exactly the reactions belonging to
+    /// the returned messages — when more distinct messages match than `limit`,
+    /// the watermark stops just before the oldest unlisted message's first
+    /// unread reaction, so acknowledging it can never clear a reaction the
+    /// client was never shown. Callers must hold
+    /// [`Self::lock_chat_reaction_watermark`] (same transaction) so the
+    /// watermark has commit-order meaning.
     pub fn list_chat_unread_reactions(
         &self,
         conn: &mut PgConnection,
@@ -353,16 +388,36 @@ impl UnreadService {
         chat_id: i64,
         thread_root_id: Option<i64>,
         limit: i64,
-    ) -> Result<Vec<i64>, DieselError> {
+    ) -> Result<UnreadReactionList, DieselError> {
         let sql = format!(
-            "SELECT DISTINCT mr.message_id AS message_id {UNREAD_REACTIONS_FILTER} {} \
-             ORDER BY mr.message_id DESC LIMIT {limit}",
+            "WITH matched AS (
+                 SELECT mr.message_id AS message_id, mr.revision AS revision
+                 {UNREAD_REACTIONS_FILTER} {}
+             ), per_message AS (
+                 SELECT message_id, MIN(revision) AS first_revision
+                 FROM matched
+                 GROUP BY message_id
+             ), ordered AS (
+                 SELECT message_id, first_revision,
+                        ROW_NUMBER() OVER (ORDER BY first_revision ASC) AS rn
+                 FROM per_message
+             ), boundary AS (
+                 SELECT CASE
+                     WHEN (SELECT COUNT(*) FROM ordered) <= {limit}
+                         THEN COALESCE((SELECT MAX(revision) FROM matched), 0)
+                     ELSE COALESCE((SELECT MIN(first_revision) - 1 FROM ordered WHERE rn = {limit} + 1), 0)
+                 END AS boundary
+             )
+             SELECT o.message_id AS message_id, b.boundary AS watermark
+             FROM ordered o CROSS JOIN boundary b
+             ORDER BY o.first_revision ASC
+             LIMIT {limit}",
             match thread_root_id {
                 Some(_) => UNREAD_REACTIONS_THREAD_TAIL,
                 None => UNREAD_REACTIONS_MAIN_TAIL,
             }
         );
-        let rows: Vec<UnreadReactionIdRow> = match thread_root_id {
+        let rows: Vec<UnreadReactionEntryRow> = match thread_root_id {
             Some(thread_id) => sql_query(&sql)
                 .bind::<diesel::sql_types::Integer, _>(uid)
                 .bind::<diesel::sql_types::BigInt, _>(chat_id)
@@ -373,7 +428,124 @@ impl UnreadService {
                 .bind::<diesel::sql_types::BigInt, _>(chat_id)
                 .load(conn)?,
         };
-        Ok(rows.into_iter().map(|r| r.message_id).collect())
+        let watermark = rows.first().map(|r| r.watermark).unwrap_or(0);
+        Ok(UnreadReactionList {
+            message_ids: rows.into_iter().map(|r| r.message_id).collect(),
+            watermark,
+        })
+    }
+
+    /// Per-chat lock serializing reaction inserts with watermark readers
+    /// (snapshot + acknowledge). Identity revisions are allocated at INSERT
+    /// time but become visible only at COMMIT; without this lock a reaction
+    /// could allocate a revision below an already-computed watermark and commit
+    /// after it — acknowledging that watermark would silently clear a reaction
+    /// the client never saw. Holding the lock until commit makes revision
+    /// order match commit order, so "revision <= watermark" implies "the
+    /// snapshot listed it".
+    ///
+    /// Callers must run this inside the transaction that performs the insert,
+    /// snapshot, or cursor advance. No other `pg_advisory_xact_lock` keys are
+    /// in use, so the raw chat id is a safe key.
+    pub fn lock_chat_reaction_watermark(conn: &mut PgConnection, chat_id: i64) -> QueryResult<()> {
+        sql_query("SELECT pg_advisory_xact_lock($1)")
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .execute(conn)?;
+        Ok(())
+    }
+
+    /// Advance the unread-reaction cursor to `read_through` (monotonic) and
+    /// return the fresh post-acknowledge state so the client can apply count,
+    /// ids, and watermark in one atomic update.
+    ///
+    /// Because the cursor only covers reactions listed under the acknowledged
+    /// watermark, reactions created after the client's snapshot (revision >
+    /// watermark, guaranteed by [`Self::lock_chat_reaction_watermark`]) stay
+    /// unread. An old or repeated watermark is a no-op: the cursor never
+    /// regresses.
+    pub fn acknowledge_chat_unread_reactions(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+        chat_id: i64,
+        thread_root_id: Option<i64>,
+        read_through: i64,
+        limit: i64,
+    ) -> Result<(i64, UnreadReactionList), DieselError> {
+        conn.transaction(|conn| {
+            Self::lock_chat_reaction_watermark(conn, chat_id)?;
+            // The client gets a watermark from a prior list response, but it
+            // remains untrusted input.  Bound it to revisions that already
+            // exist while the per-chat lock is held so a forged max integer
+            // cannot suppress reactions inserted in the future.
+            let scope_filter = if thread_root_id.is_some() {
+                "AND m.reply_root_id = $3"
+            } else {
+                "AND m.reply_root_id IS NULL"
+            };
+            let sql = format!(
+                "SELECT COALESCE(MAX(mr.revision), 0)::BIGINT AS watermark
+                 FROM message_reactions mr
+                 JOIN messages m ON m.id = mr.message_id
+                 WHERE m.chat_id = $1 {scope_filter}"
+            );
+            let watermark = match thread_root_id {
+                Some(thread_id) => {
+                    sql_query(sql)
+                        .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                        .bind::<diesel::sql_types::BigInt, _>(thread_id)
+                        .get_result::<ReactionWatermarkRow>(conn)?
+                        .watermark
+                }
+                None => {
+                    sql_query(sql)
+                        .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                        .get_result::<ReactionWatermarkRow>(conn)?
+                        .watermark
+                }
+            };
+            let safe_read_through = watermark.min(read_through);
+            match thread_root_id {
+                Some(thread_id) => {
+                    crate::services::threads::ensure_thread_user_state(
+                        conn, chat_id, thread_id, uid, false,
+                    )?;
+                    diesel::update(
+                        thread_user_states::table.filter(
+                            thread_user_states::chat_id
+                                .eq(chat_id)
+                                .and(thread_user_states::thread_root_id.eq(thread_id))
+                                .and(thread_user_states::uid.eq(uid))
+                                .and(
+                                    thread_user_states::last_reactions_read_revision
+                                        .lt(safe_read_through),
+                                ),
+                        ),
+                    )
+                    .set(thread_user_states::last_reactions_read_revision.eq(safe_read_through))
+                    .execute(conn)?;
+                }
+                None => {
+                    diesel::update(
+                        group_membership::table.filter(
+                            group_membership::chat_id
+                                .eq(chat_id)
+                                .and(group_membership::uid.eq(uid))
+                                .and(
+                                    group_membership::last_reactions_read_revision
+                                        .lt(safe_read_through),
+                                ),
+                        ),
+                    )
+                    .set(group_membership::last_reactions_read_revision.eq(safe_read_through))
+                    .execute(conn)?;
+                }
+            }
+            let list =
+                self.list_chat_unread_reactions(conn, uid, chat_id, thread_root_id, limit)?;
+            let unread = self.count_chat_unread_reactions(conn, uid, chat_id, thread_root_id)?;
+            Ok((unread, list))
+        })
     }
 
     pub fn observe_top_level_message(&self, chat_id: i64, message_id: i64, is_counted: bool) {
@@ -1379,6 +1551,380 @@ mod tests {
             .execute(conn)?;
             let counts_after = service.count_user_chat_unread_mentions(conn, user)?;
             assert!(counts_after.get(&chat_id).copied().is_none());
+
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+
+        assert!(
+            matches!(result, Err(diesel::result::Error::RollbackTransaction)),
+            "transaction should roll back"
+        );
+    }
+
+    /// Reactions created after the client's id snapshot (revision > watermark)
+    /// must stay unread when the client acknowledges that watermark. This is
+    /// the watermark boundary contract the PWA pass/acknowledge flow relies on.
+    /// Requires a test database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn reaction_ack_covers_only_reactions_below_the_watermark() {
+        use diesel::Connection;
+        use diesel::PgConnection;
+        use diesel::RunQueryDsl;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_576_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author_msg_a = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author_msg_b = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author_msg_c = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author: i32 = 4245;
+        let actor: i32 = 4246;
+        let service = UnreadService::new();
+
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'reaction-ack-test')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+            for msg_id in [author_msg_a, author_msg_b, author_msg_c] {
+                diesel::sql_query(
+                    "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                     VALUES ($1, 'text', $2, $3, $4, NOW())",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Text, _>(format!("cg-{chat_id}-{msg_id}"))
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            }
+            let insert_reaction = |conn: &mut PgConnection, msg_id: i64| -> Result<(), diesel::result::Error> {
+                diesel::sql_query(
+                    "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) \
+                     VALUES ($1, $2, '👍', NOW(), $3)",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Integer, _>(actor)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+                Ok(())
+            };
+
+            // Snapshot batch: reactions on messages A and B.
+            insert_reaction(conn, author_msg_a)?;
+            insert_reaction(conn, author_msg_b)?;
+
+            let snapshot = service.list_chat_unread_reactions(conn, author, chat_id, None, 100)?;
+            assert_eq!(snapshot.message_ids, vec![author_msg_a, author_msg_b]);
+            assert!(snapshot.watermark > 0);
+            assert_eq!(service.count_chat_unread_reactions(conn, author, chat_id, None)?, 2);
+
+            // A new reaction lands on message C AFTER the snapshot: its
+            // revision is above the snapshot watermark.
+            insert_reaction(conn, author_msg_c)?;
+
+            // Acknowledging the snapshot watermark clears only the listed
+            // messages; message C survives.
+            let (unread, post_ack) = service.acknowledge_chat_unread_reactions(
+                conn, author, chat_id, None, snapshot.watermark, 100,
+            )?;
+            assert_eq!(unread, 1);
+            assert_eq!(post_ack.message_ids, vec![author_msg_c]);
+            assert_eq!(
+                service.count_chat_unread_reactions(conn, author, chat_id, None)?,
+                1
+            );
+
+            // A second reaction on an already-acked message still counts as one
+            // distinct message unit and stays unread.
+            diesel::sql_query(
+                "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) \
+                 VALUES ($1, $2, '🎉', NOW(), $3)",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(author_msg_c)
+            .bind::<diesel::sql_types::Integer, _>(4247)
+            .bind::<diesel::sql_types::Integer, _>(author)
+            .execute(conn)?;
+            assert_eq!(
+                service.count_chat_unread_reactions(conn, author, chat_id, None)?,
+                1
+            );
+
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+
+        assert!(
+            matches!(result, Err(diesel::result::Error::RollbackTransaction)),
+            "transaction should roll back"
+        );
+    }
+
+    /// The acknowledge cursor is monotonic: repeated or older watermarks are
+    /// no-ops, and reactions created after an acknowledged watermark remain
+    /// unread when the old watermark is replayed.
+    /// Requires a test database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn reaction_ack_is_idempotent_and_never_regresses() {
+        use diesel::Connection;
+        use diesel::PgConnection;
+        use diesel::RunQueryDsl;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_598_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author_msg_a = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author_msg_b = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author: i32 = 4248;
+        let actor: i32 = 4249;
+        let service = UnreadService::new();
+
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'reaction-ack-idempotent')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+            for msg_id in [author_msg_a, author_msg_b] {
+                diesel::sql_query(
+                    "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                     VALUES ($1, 'text', $2, $3, $4, NOW())",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Text, _>(format!("cg-{chat_id}-{msg_id}"))
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            }
+            diesel::sql_query(
+                "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) \
+                 VALUES ($1, $2, '👍', NOW(), $3)",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(author_msg_a)
+            .bind::<diesel::sql_types::Integer, _>(actor)
+            .bind::<diesel::sql_types::Integer, _>(author)
+            .execute(conn)?;
+
+            let snapshot = service.list_chat_unread_reactions(conn, author, chat_id, None, 100)?;
+            assert_eq!(snapshot.message_ids, vec![author_msg_a]);
+
+            // Repeating the same acknowledge is a no-op.
+            let (first, _) = service.acknowledge_chat_unread_reactions(
+                conn, author, chat_id, None, snapshot.watermark, 100,
+            )?;
+            assert_eq!(first, 0);
+            let (second, _) = service.acknowledge_chat_unread_reactions(
+                conn, author, chat_id, None, snapshot.watermark, 100,
+            )?;
+            assert_eq!(second, 0);
+
+            // A new reaction arrives, then the OLD watermark is replayed: the
+            // cursor must not regress and the new reaction stays unread.
+            diesel::sql_query(
+                "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) \
+                 VALUES ($1, $2, '👍', NOW(), $3)",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(author_msg_b)
+            .bind::<diesel::sql_types::Integer, _>(actor)
+            .bind::<diesel::sql_types::Integer, _>(author)
+            .execute(conn)?;
+            let (replayed, _) = service.acknowledge_chat_unread_reactions(
+                conn, author, chat_id, None, snapshot.watermark, 100,
+            )?;
+            assert_eq!(replayed, 1);
+            assert_eq!(
+                service.count_chat_unread_reactions(conn, author, chat_id, None)?,
+                1
+            );
+
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+
+        assert!(
+            matches!(result, Err(diesel::result::Error::RollbackTransaction)),
+            "transaction should roll back"
+        );
+    }
+
+    /// With more matching messages than `limit`, the watermark stops before the
+    /// oldest unlisted message so acknowledging it never clears unlisted
+    /// reactions, and the id list is ordered oldest-unread-first.
+    /// Requires a test database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn reaction_list_boundary_is_safe_when_truncated() {
+        use diesel::Connection;
+        use diesel::PgConnection;
+        use diesel::RunQueryDsl;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_610_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let msg_a = SEQ.fetch_add(1, Ordering::SeqCst);
+        let msg_b = SEQ.fetch_add(1, Ordering::SeqCst);
+        let msg_c = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author: i32 = 4250;
+        let actor: i32 = 4251;
+        let service = UnreadService::new();
+
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'reaction-limit-test')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+            for msg_id in [msg_a, msg_b, msg_c] {
+                diesel::sql_query(
+                    "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                     VALUES ($1, 'text', $2, $3, $4, NOW())",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Text, _>(format!("cg-{chat_id}-{msg_id}"))
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+                diesel::sql_query(
+                    "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) \
+                     VALUES ($1, $2, '👍', NOW(), $3)",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(msg_id)
+                .bind::<diesel::sql_types::Integer, _>(actor)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+            }
+
+            let page = service.list_chat_unread_reactions(conn, author, chat_id, None, 2)?;
+            assert_eq!(page.message_ids, vec![msg_a, msg_b]);
+
+            // Acknowledging the truncated page's watermark leaves the unlisted
+            // message unread.
+            let (unread, _) = service.acknowledge_chat_unread_reactions(
+                conn, author, chat_id, None, page.watermark, 100,
+            )?;
+            assert_eq!(unread, 1);
+            let remaining = service.list_chat_unread_reactions(conn, author, chat_id, None, 100)?;
+            assert_eq!(remaining.message_ids, vec![msg_c]);
+
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+
+        assert!(
+            matches!(result, Err(diesel::result::Error::RollbackTransaction)),
+            "transaction should roll back"
+        );
+    }
+
+    /// Thread-scope reactions use the same watermark contract, creating the
+    /// per-thread cursor row on demand.
+    /// Requires a test database (`WETTY_TEST_DATABASE_URL`); skipped otherwise.
+    #[test]
+    fn thread_scope_reaction_acknowledgement_matches_chat_scope() {
+        use diesel::Connection;
+        use diesel::PgConnection;
+        use diesel::RunQueryDsl;
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+
+        static SEQ: AtomicI64 = AtomicI64::new(9_876_622_000);
+        let chat_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let thread_root_id = SEQ.fetch_add(1, Ordering::SeqCst);
+        let my_thread_msg = SEQ.fetch_add(1, Ordering::SeqCst);
+        let author: i32 = 4252;
+        let actor: i32 = 4253;
+        let service = UnreadService::new();
+
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            diesel::sql_query("INSERT INTO groups (id, name) VALUES ($1, 'reaction-thread-test')")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            diesel::sql_query("INSERT INTO group_membership (chat_id, uid) VALUES ($1, $2)")
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(author)
+                .execute(conn)?;
+            // The thread root is authored by someone else; the reacted message
+            // is the author's reply inside the thread.
+            diesel::sql_query(
+                "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at) \
+                 VALUES ($1, 'text', $2, $3, $4, NOW())",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(thread_root_id)
+            .bind::<diesel::sql_types::Text, _>(format!("cg-root-{thread_root_id}"))
+            .bind::<diesel::sql_types::Integer, _>(actor)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .execute(conn)?;
+            diesel::sql_query(
+                "INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at, reply_root_id) \
+                 VALUES ($1, 'text', $2, $3, $4, NOW(), $5)",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(my_thread_msg)
+            .bind::<diesel::sql_types::Text, _>(format!("cg-reply-{my_thread_msg}"))
+            .bind::<diesel::sql_types::Integer, _>(author)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .bind::<diesel::sql_types::BigInt, _>(thread_root_id)
+            .execute(conn)?;
+            diesel::sql_query(
+                "INSERT INTO message_reactions (message_id, user_uid, emoji, created_at, message_author_uid) \
+                 VALUES ($1, $2, '👍', NOW(), $3)",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(my_thread_msg)
+            .bind::<diesel::sql_types::Integer, _>(actor)
+            .bind::<diesel::sql_types::Integer, _>(author)
+            .execute(conn)?;
+
+            // No thread_user_states row yet: the snapshot lists the reaction
+            // and the acknowledge creates the cursor row on demand.
+            let snapshot =
+                service.list_chat_unread_reactions(conn, author, chat_id, Some(thread_root_id), 100)?;
+            assert_eq!(snapshot.message_ids, vec![my_thread_msg]);
+
+            let (unread, post_ack) = service.acknowledge_chat_unread_reactions(
+                conn, author, chat_id, Some(thread_root_id), snapshot.watermark, 100,
+            )?;
+            assert_eq!(unread, 0);
+            assert!(post_ack.message_ids.is_empty());
+            assert_eq!(
+                service.count_chat_unread_reactions(conn, author, chat_id, Some(thread_root_id))?,
+                0
+            );
 
             Err(diesel::result::Error::RollbackTransaction)
         });
