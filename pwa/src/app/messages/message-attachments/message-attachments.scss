@@ -1,9 +1,43 @@
 :host {
+  display: block;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+
+:host(.album) {
+  width: 360px;
+  max-width: 100%;
+}
+
+.attachments {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
-  min-width: 0;
-  margin-bottom: 4px;
+  max-width: 100%;
+
+  &.album {
+    position: relative;
+    display: block;
+    overflow: hidden;
+
+    .media-frame {
+      position: absolute;
+    }
+  }
+}
+
+.album-more {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  background: rgba(var(--ion-color-dark-rgb), 0.6);
+  color: var(--ion-color-dark-contrast);
+  font-size: 28px;
+}
+
+.media-frame.cover img,
+.media-frame.cover video {
+  object-fit: cover;
 }
 
 .media-frame,

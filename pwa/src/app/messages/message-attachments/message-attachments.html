@@ -1,70 +1,86 @@
-@for (item of items(); track item.id ?? item.url; let last = $last) {
-  @if (item.kind === MediaKind.Image || item.kind === MediaKind.Video) {
-    <div
-      class="media-frame"
-      [class.sticker]="item.sticker"
-      [style.width.px]="item.displayWidth"
-      [style.aspect-ratio]="item.width + ' / ' + item.height">
-      @if (failed().has(item.id ?? item.url)) {
-        <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
-      } @else if (item.kind === MediaKind.Image) {
-        <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id ?? item.url, $event)">
-          <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id ?? item.url)" />
-        </a>
-      } @else {
-        <video
-          [src]="item.url"
-          [autoplay]="item.sticker"
-          [loop]="item.sticker"
-          [muted]="item.sticker"
-          playsinline
-          preload="metadata"
-          (error)="fail(item.id ?? item.url)"></video>
-        @if (!item.sticker) {
-          <button class="video-open" type="button" (click)="view(item.id ?? item.url, $event)">
-            <ion-icon [icon]="playIcon" />
+<div
+  class="attachments"
+  [class.album]="album()"
+  [style.width.px]="album() ? layout().width : null"
+  [style.height.px]="album() ? layout().height : null">
+  @for (item of visibleItems(); track item.id ?? item.url; let last = $last; let index = $index) {
+    @let frame = album() ? layout().frames[index] : undefined;
+    @if (item.kind === MediaKind.Image || item.kind === MediaKind.Video) {
+      <div
+        class="media-frame"
+        [class.sticker]="item.sticker"
+        [class.cover]="frame && item.knownSize && canCrop(item, frame)"
+        [style.left.px]="frame?.x"
+        [style.top.px]="frame?.y"
+        [style.width.px]="frame?.width ?? item.displayWidth"
+        [style.height.px]="frame?.height"
+        [style.aspect-ratio]="frame ? null : item.width + ' / ' + item.height">
+        @if (failed().has(item.id ?? item.url)) {
+          <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
+        } @else if (item.kind === MediaKind.Image) {
+          <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id ?? item.url, $event)">
+            <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id ?? item.url)" />
+          </a>
+        } @else {
+          <video
+            [src]="item.url"
+            [autoplay]="item.sticker"
+            [loop]="item.sticker"
+            [muted]="item.sticker"
+            playsinline
+            preload="metadata"
+            (error)="fail(item.id ?? item.url)"></video>
+          @if (!item.sticker) {
+            <button class="video-open" type="button" (click)="view(item.id ?? item.url, $event)">
+              <ion-icon [icon]="playIcon" />
+            </button>
+          }
+        }
+        @if (item.progress != null) {
+          <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
+        }
+        @if (album() && last && items().length > 9) {
+          <button class="album-more" type="button" (click)="view(item.id ?? item.url, $event)">
+            +{{ items().length - 9 }}
           </button>
         }
-      }
-      @if (item.progress != null) {
-        <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
-      }
-      @if (last && overlayTime()) {
-        <ion-badge class="media-time" color="medium">
-          <time [attr.datetime]="message().createdAt">{{ message().createdAt | date: 'HH:mm' }}</time>
-          <app-message-status [delivery]="delivery()" />
-        </ion-badge>
-      }
-    </div>
-  } @else if (item.kind === MediaKind.Audio) {
-    <div class="audio-frame">
-      <app-voice-player [src]="item.url" />
-      @if (item.progress != null) {
-        <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
-      }
-    </div>
-  } @else {
-    <a class="file" [href]="item.url" [attr.download]="item.fileName" target="_blank" rel="noopener">
-      <ion-icon [icon]="fileIcon"></ion-icon>
-      <span class="file-info">
-        <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
-        @if (item.size != null) {
-          <small>
-            @if (item.size < 1024) {
-              {{ item.size }} B
-            } @else if (item.size < 1024 * 1024) {
-              {{ (item.size / 1024).toFixed(1) }} KB
-            } @else {
-              {{ (item.size / (1024 * 1024)).toFixed(1) }} MB
-            }
-          </small>
+        @if (last && overlayTime()) {
+          <ion-badge class="media-time" color="medium">
+            <time [attr.datetime]="message().createdAt">{{ message().createdAt | date: 'HH:mm' }}</time>
+            <app-message-status [delivery]="delivery()" />
+          </ion-badge>
         }
-      </span>
-      @if (item.progress != null) {
-        <app-upload-progress [value]="item.progress" />
-      } @else {
-        <ion-icon [icon]="downloadIcon"></ion-icon>
-      }
-    </a>
+      </div>
+    } @else if (item.kind === MediaKind.Audio) {
+      <div class="audio-frame">
+        <app-voice-player [src]="item.url" />
+        @if (item.progress != null) {
+          <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
+        }
+      </div>
+    } @else {
+      <a class="file" [href]="item.url" [attr.download]="item.fileName" target="_blank" rel="noopener">
+        <ion-icon [icon]="fileIcon"></ion-icon>
+        <span class="file-info">
+          <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
+          @if (item.size != null) {
+            <small>
+              @if (item.size < 1024) {
+                {{ item.size }} B
+              } @else if (item.size < 1024 * 1024) {
+                {{ (item.size / 1024).toFixed(1) }} KB
+              } @else {
+                {{ (item.size / (1024 * 1024)).toFixed(1) }} MB
+              }
+            </small>
+          }
+        </span>
+        @if (item.progress != null) {
+          <app-upload-progress [value]="item.progress" />
+        } @else {
+          <ion-icon [icon]="downloadIcon"></ion-icon>
+        }
+      </a>
+    }
   }
-}
+</div>
