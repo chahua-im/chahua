@@ -10,6 +10,8 @@ import { PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { ListTab, type ListSelection } from '../list-tabs';
+import { ChatListStore } from '../chat-list-store';
+import { Preferences } from '../../settings/preferences';
 import { ChatList } from './chat-list';
 
 beforeAll(() => {
@@ -30,6 +32,14 @@ describe('ChatList', () => {
     await TestBed.configureTestingModule({
       imports: [ChatList],
       providers: [
+        {
+          provide: ChatListStore,
+          useValue: {
+            unread: { value: signal({ unreadChatCount: 2 }), activate: vi.fn(() => vi.fn()) },
+            threadUnread: { value: signal({ unreadThreadCount: 3 }), activate: vi.fn(() => vi.fn()) },
+          },
+        },
+        { provide: Preferences, useValue: { showThreadsInMessages: signal(true) } },
         provideRouter([{ path: 'chats/chat/:id', children: [] }]),
         { provide: Connection, useValue: mockRealtime() },
         { provide: PushNotifications, useValue: { requestSettingsPermission: vi.fn() } },
@@ -47,6 +57,18 @@ describe('ChatList', () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  it('shows authoritative chat and thread counts and follows the thread display preference', async () => {
+    const badges = () =>
+      [...fixture.nativeElement.querySelectorAll('ion-segment ion-badge')].map((node) =>
+        (node as HTMLElement).textContent?.trim(),
+      );
+    expect(badges()).toEqual(['5', '3']);
+    const preferences = TestBed.inject(Preferences);
+    (preferences.showThreadsInMessages as ReturnType<typeof signal<boolean>>).set(false);
+    await fixture.whenStable();
+    expect(badges()).toEqual(['2', '3']);
+  });
 
   it('requests settings permission in the avatar click before navigation', () => {
     const notifications = TestBed.inject(PushNotifications);

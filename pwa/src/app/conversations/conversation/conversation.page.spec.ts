@@ -605,20 +605,46 @@ describe('ConversationPage', () => {
     const content: HTMLElement = fixture.nativeElement.querySelector('ion-content');
     const children = [...content.children];
     const date = content.querySelector<HTMLElement>('.floating-date')!;
-    expect(date.style.visibility).toBe('hidden');
+    expect(date.classList.contains('scrolling')).toBe(false);
     for (const day of ['2026-09-08', '2026-09-09']) {
       component['visibleDate'].set(`${day}T00:00:00Z`);
       content.dispatchEvent(new Event('ionScrollStart'));
       await fixture.whenStable();
       expect([...content.children]).toEqual(children);
       expect(content.querySelector('.floating-date')).toBe(date);
-      expect(date.style.visibility).toBe('visible');
+      expect(date.classList.contains('scrolling')).toBe(true);
       expect(date.textContent).toContain(day.endsWith('08') ? '2026年9月8日' : '2026年9月9日');
       content.dispatchEvent(new Event('ionScrollEnd'));
       await fixture.whenStable();
       expect([...content.children]).toEqual(children);
-      expect(date.style.visibility).toBe('hidden');
+      expect(date.classList.contains('scrolling')).toBe(false);
     }
+  });
+
+  it('yields to a date separator crossing the floating label and restores the label afterwards', async () => {
+    const separator: HTMLElement = fixture.nativeElement.querySelector('.message-date');
+    const floating: HTMLElement = fixture.nativeElement.querySelector('.floating-date');
+    const message: HTMLElement = fixture.nativeElement.querySelector('app-message');
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    vi.spyOn(floating, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 12, 100, 25));
+    vi.spyOn(message, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 50, 300, 100));
+    const dateRect = vi.spyOn(separator, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 12, 300, 40));
+    component.ionViewWillEnter();
+    component.ionViewDidEnter();
+    component['scrolling'].scrollStart();
+    await component['trackScroll']();
+    fixture.detectChanges();
+    expect(floating.classList.contains('colliding')).toBe(true);
+    expect(separator.style.visibility).toBe('visible');
+    dateRect.mockReturnValue(new DOMRect(0, -50, 300, 40));
+    await component['trackScroll']();
+    fixture.detectChanges();
+    expect(floating.classList.contains('colliding')).toBe(false);
+    expect(floating.classList.contains('scrolling')).toBe(true);
+    expect(separator.style.visibility).toBe('hidden');
+    component['scrolling'].scrollEnd();
+    fixture.detectChanges();
+    expect(separator.style.visibility).toBe('visible');
   });
 
   it('reads the badge from shared state, keeps its node mounted and hides it with the button', async () => {

@@ -152,7 +152,10 @@ export class MessageComposer {
     ),
   );
   protected readonly canSend = computed(
-    () => !this.voiceActive() && (!!this.text().trim() || !!this.existing().length || !!this.selectedUploads().length),
+    () =>
+      !this.error() &&
+      !this.voiceActive() &&
+      (!!this.text().trim() || !!this.existing().length || !!this.selectedUploads().length),
   );
   protected readonly visualUploads = computed(() =>
     this.selectedUploads().filter((u) => u.purpose !== AttachmentUploadPurpose.voice),

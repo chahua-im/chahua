@@ -120,8 +120,10 @@
   (touchcancel)="scrolling.touchEnd()">
   <span
     slot="fixed"
+    #floatingDate
     class="floating-date"
-    [style.visibility]="scrolling.moving() && visibleDate() ? 'visible' : 'hidden'">
+    [class.scrolling]="scrolling.moving() && visibleDate()"
+    [class.colliding]="dateColliding() || !visibleDate()">
     {{ visibleDate() | date: 'yyyy年M月d日' }}
   </span>
   <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
@@ -152,7 +154,14 @@
     <div class="message-list">
       @for (row of rows(); track row.key) {
         @if (row.dateBreak) {
-          <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
+          <p
+            #dateSeparator
+            class="message-date"
+            [style.visibility]="
+              scrolling.moving() && !dateColliding() && hiddenDateKey() === row.key ? 'hidden' : 'visible'
+            ">
+            <span>{{ row.message.createdAt | date: 'yyyy年M月d日' }}</span>
+          </p>
         }
         @if (firstUnreadId() && row.message.id === firstUnreadId()) {
           <p #unreadSeparator class="unread-separator">以下是未读消息</p>

@@ -228,6 +228,39 @@ describe('MessageOutbox', () => {
     expect(item.message().attachments[0].url).toBe(media.item.url);
     expect(media.dispose).not.toHaveBeenCalled();
   });
+  it('fails immediately while another attachment is pending and retries failed attachments together', async () => {
+    const ready = upload();
+    const failed = upload();
+    const otherFailed = upload();
+    const pending = upload();
+    const item = outbox.enqueue(testChat.id, undefined, '', {
+      ...text,
+      uploads: [ready.item, failed.item, otherFailed.item, pending.item],
+    });
+    ready.finish(encodeId('7'));
+    failed.finish(undefined);
+    otherFailed.finish(undefined);
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(api.postMessage).not.toHaveBeenCalled();
+    expect(pending.state().status).toBe(UploadStatus.Uploading);
+    vi.mocked(ready.item.retry).mockResolvedValue(encodeId('7'));
+    const retryFailed = upload();
+    const retryOther = upload();
+    vi.mocked(failed.item.retry).mockImplementation(() => retryFailed.item.retry());
+    vi.mocked(otherFailed.item.retry).mockImplementation(() => retryOther.item.retry());
+    const retry = outbox.retry(item);
+    expect(failed.item.retry).toHaveBeenCalledTimes(2);
+    expect(otherFailed.item.retry).toHaveBeenCalledTimes(2);
+    retryFailed.finish(encodeId('8'));
+    retryOther.finish(encodeId('9'));
+    pending.finish(encodeId('10'));
+    await retry;
+    expect(api.postMessage).toHaveBeenCalledOnce();
+    expect(api.postMessage.mock.calls[0][1].attachmentIds).toEqual([7, 8, 9, 10].map((id) => encodeId(String(id))));
+    replies[0].next(accepted());
+    await item.operation;
+  });
   it('acknowledges audio over HTTP but retains local playback until its published WebSocket event', async () => {
     const item = outbox.enqueue(testChat.id, undefined, '', {
       messageType: MessageType.audio,
