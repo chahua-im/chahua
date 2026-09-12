@@ -50,84 +50,23 @@ describe('App', () => {
       vi.restoreAllMocks();
     });
 
-    it('fits keyboard opening, viewport panning and closing without scrolling the document', () => {
+    it('leaves keyboard resizing and panning to the browser', () => {
       const scroll = vi.spyOn(window, 'scrollTo');
       TestBed.createComponent(App);
-      expect(document.body.style.height).toBe(`${window.innerHeight}px`);
-      viewport.height = 420;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.height).toBe('420px');
-      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('0px');
-      viewport.offsetTop = 80;
-      viewport.dispatchEvent(new Event('scroll'));
-      expect(document.body.style.top).toBe('80px');
-      viewport.height = 390;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.height).toBe('390px');
-      viewport.height = window.innerHeight;
-      viewport.offsetTop = 0;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.height).toBe(`${window.innerHeight}px`);
-      expect(document.body.style.top).toBe('0px');
-      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('');
+      const initialStyle = document.body.style.cssText;
+      for (const [height, offsetTop, scale] of [
+        [393, 404, 1],
+        [420, 80, 1],
+        [420, 80, 2],
+        [797, 0, 1],
+      ]) {
+        Object.assign(viewport, { height, offsetTop, scale });
+        viewport.dispatchEvent(new Event('resize'));
+        viewport.dispatchEvent(new Event('scroll'));
+        window.dispatchEvent(new Event('resize'));
+        expect(document.body.style.cssText).toBe(initialStyle);
+      }
       expect(scroll).not.toHaveBeenCalled();
-      scroll.mockRestore();
-    });
-
-    it('removes the PWA safe area when iOS shrinks innerHeight along with the visual viewport', () => {
-      // Measured on iOS 26.6.1: layout 797px, both visible heights 393px, safe area 34px.
-      vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(797);
-      TestBed.createComponent(App);
-      vi.stubGlobal('innerHeight', 393);
-      viewport.height = 393;
-      viewport.offsetTop = 404;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('0px');
-      expect(document.body.style.height).toBe('393px');
-      vi.stubGlobal('innerHeight', 797);
-      viewport.height = 797;
-      viewport.offsetTop = 0;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('');
-    });
-
-    it('preserves browser pinch zoom and restores sizing when zoom ends', () => {
-      TestBed.createComponent(App);
-      viewport.scale = 2;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.height).toBe('');
-      expect(document.body.style.top).toBe('');
-      viewport.scale = 1;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.height).toBe(`${window.innerHeight}px`);
-    });
-
-    it('cleans up sizing and viewport listeners when the app is destroyed', () => {
-      const fixture = TestBed.createComponent(App);
-      fixture.destroy();
-      viewport.height = 420;
-      viewport.offsetTop = 50;
-      viewport.dispatchEvent(new Event('resize'));
-      viewport.dispatchEvent(new Event('scroll'));
-      window.dispatchEvent(new Event('resize'));
-      expect(document.body.style.height).toBe('');
-      expect(document.body.style.top).toBe('');
-    });
-
-    it('keeps the safe area for browser chrome and hardware keyboards', () => {
-      TestBed.createComponent(App);
-      viewport.height = window.innerHeight - 80;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.getPropertyValue('--ion-safe-area-bottom')).toBe('');
-    });
-
-    it('keeps desktop layout under browser control', () => {
-      platforms.splice(0, platforms.length, 'desktop');
-      TestBed.createComponent(App);
-      viewport.height = 420;
-      viewport.dispatchEvent(new Event('resize'));
-      expect(document.body.style.height).toBe('');
-      expect(document.body.style.top).toBe('');
     });
   });
 
