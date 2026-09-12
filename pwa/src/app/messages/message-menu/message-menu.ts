@@ -13,7 +13,6 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { Router } from '@angular/router';
 import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, ModalController } from '@ionic/angular';
 import {
   addOutline,
@@ -74,7 +73,6 @@ export class MessageMenu {
   private readonly session = inject(SessionStore);
   private readonly messageActions = inject(MessageActions);
   private readonly outbox = inject(MessageOutbox);
-  private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
   private readonly modal = viewChild(IonModal);
   private readonly preview = viewChild<ElementRef<HTMLElement>>('preview');
@@ -382,11 +380,15 @@ export class MessageMenu {
     const message = this.serverMessage();
     if (!message || (action === MessageAction.Pin && !this.admin())) return;
     if (action === MessageAction.Link) {
-      const url = this.router.createUrlTree(
-        ['/chats/chat', decodeId(this.chatId()), ...(this.threadId() ? ['thread', decodeId(this.threadId()!)] : [])],
-        { queryParams: { message: decodeId(message.id) } },
-      );
-      const text = new URL(this.router.serializeUrl(url), this.document.baseURI).href;
+      const bytes = new Uint8Array(16);
+      const view = new DataView(bytes.buffer);
+      view.setBigUint64(0, BigInt(decodeId(this.chatId())));
+      view.setBigUint64(8, BigInt(decodeId(message.id)));
+      const encoded = btoa(String.fromCharCode(...bytes))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      const text = new URL(`/m/${encoded}`, this.document.baseURI).href;
       void this.close();
       await this.perform(() => navigator.clipboard.writeText(text), MessageNotice.Copied);
       return;

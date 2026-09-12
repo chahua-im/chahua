@@ -187,14 +187,6 @@ ion-action-sheet.ios .action-sheet-button {
   line-height: var(--app-line-secondary);
 }
 
-html,
-body {
-  background-color: var(
-    --ion-toolbar-background,
-    var(--ion-color-step-50, var(--ion-background-color-step-50, #f7f7f7))
-  );
-}
-
 ion-modal.message-menu-modal,
 ion-modal.media-viewer-overlay {
   --width: 100%;
@@ -330,4 +322,19 @@ ion-list > app-chat-list-item:last-child ion-item {
 
 .action-sheet-button.mute-permanent {
   color: var(--ion-color-danger);
+}
+
+// These elements are created by Ionic outside Angular's template style scope.
+ion-alert.notification-prompt {
+  .alert-wrapper {
+    outline: none;
+  }
+
+  .notification-allow {
+    position: relative;
+  }
+
+  &.requesting .notification-allow .alert-button-inner {
+    visibility: hidden;
+  }
 }

@@ -60,7 +60,7 @@ MediaViewer、ChatDetails 的用户资料模式、StartChat 和 StickerPicker �
 
 | 组件               | 输入、输出与局部字段                                                                                            | 数据依赖                                                                              |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| App                | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态；iOS 可见视口监听与清理 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                              |
+| App                | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态、全局更新 toast 和可交互标记 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                              |
 | NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                            | PushNotifications                                                                     |
 | ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                 | 将 selection 和 active 传给单列 ChatList                                              |
 | ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                    | SessionStore、Connection、PushNotifications；控制分类面板与菜单，设置入口保留授权手势 |
@@ -149,9 +149,9 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | Settings                   | 当前用户、通知和更新状态；持有权限拒绝 toast、局部更新结果，打开设置子页和收藏 |
 | GeneralSettings            | 直接编辑 Preferences，无额外状态副本                                           |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |
-| Landing                    | 检测平台与选中平台；公开安装指引，复用 SessionStore 提取 URL token             |
+| Landing                    | 检测平台与选中平台；公开安装指引                                             |
 
-SettingsModal 保留底层聊天路由；关闭恢复历史。Landing 只提供安装指引，已安装应用直接进入聊天或邀请预览。
+SettingsModal 保留底层聊天路由；关闭恢复历史。Landing 只提供安装指引，普通浏览器中 App 在该入口只同步恢复并保存 token；已安装 PWA 由路由 guard 重定向到聊天并正常初始化登录。
 
 消息、提及、成员和目录结果可再次打开 ChatDetails；递归模板依赖使用 Angular forwardRef，避免组件定义依赖模块加载顺序。
 

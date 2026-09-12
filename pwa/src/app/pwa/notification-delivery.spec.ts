@@ -74,6 +74,8 @@ describe('online notifications', () => {
     vi.stubGlobal('navigator', {
       ...badges,
       serviceWorker: {
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
         getRegistration: async () => ({
           active: {
             postMessage: (data: (typeof commands)[number]) => {
@@ -128,6 +130,8 @@ describe('online notifications', () => {
     await router.navigateByUrl('/chats');
     service.start();
     await settle();
+    expect(commands[0]).toEqual({ type: 'CHAHUA_SESSION', uid: testUser.uid });
+    commands.length = 0;
   });
 
   afterEach(() => {
@@ -283,14 +287,14 @@ describe('online notifications', () => {
     await settle();
     events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...incoming, isDeleted: true } });
     await settle();
-    expect(commands.at(-1)).toEqual({ type: 'CHAHUA_CLOSE', messageIds: [decodeId(incoming.id)] });
+    expect(commands.at(-1)).toEqual({ type: 'CHAHUA_CLOSE', uid: testUser.uid, messageIds: [decodeId(incoming.id)] });
   });
 
   it('opens a notification through the router, keeping the page and local outbox alive', async () => {
     const goTo = vi.spyOn(TestBed.inject(ConversationNavigation), 'goTo');
     clicks.next({ notification: { data: { chatId: decodeId(incoming.chatId), messageId: decodeId(incoming.id) } } });
     await settle();
-    expect(router.url).toBe(chatPath + '?message=' + decodeId(incoming.id));
+    expect(router.url).toBe(chatPath + '#msg=' + decodeId(incoming.id));
     expect(goTo).not.toHaveBeenCalled();
     // Repeated clicks still locate the message even when Angular ignores the identical URL.
     clicks.next({ notification: { data: { chatId: decodeId(incoming.chatId), messageId: decodeId(incoming.id) } } });

@@ -96,7 +96,7 @@ describe('SavedMessagesPage', () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     await list()['locateSaved'](list()['saved']()[0]);
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'thread', '100'], {
-      queryParams: { message: wireMessage.id },
+      fragment: `msg=${wireMessage.id}`,
     });
     await list()['locateSaved']({ ...list()['saved']()[0], canLocateContext: false });
     expect(navigate).toHaveBeenCalledOnce();

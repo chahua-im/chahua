@@ -7,7 +7,7 @@ import type { MeResponse, User } from '../../generated/models';
 
 declare const CHAHUA_DEV_TOKEN: string | undefined;
 
-const TOKEN_KEY = 'chahua.auth.token';
+const TOKEN_KEY = 'jwt_token';
 
 @Service()
 export class SessionStore {
@@ -15,7 +15,7 @@ export class SessionStore {
   private readonly users = inject(UsersService);
   readonly token = signal<string | undefined>(undefined);
   readonly user = signal<(MeResponse & Pick<User, 'userGroup'>) | undefined>(undefined);
-  async initialize() {
+  restoreToken() {
     const url = new URL(window.location.href);
     const token =
       url.searchParams.get('token') ??
@@ -28,9 +28,12 @@ export class SessionStore {
     url.searchParams.delete('token');
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 
+    if (token) this.saveToken(token);
+  }
+
+  async initialize() {
     try {
-      if (!token) return;
-      this.saveToken(token);
+      if (!this.token()) return;
       const refreshed = await firstValueFrom(this.auth.postRefresh());
       this.saveToken(refreshed.token);
       const user = await firstValueFrom(this.users.getMe());
