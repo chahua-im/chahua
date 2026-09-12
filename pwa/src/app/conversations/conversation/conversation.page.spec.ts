@@ -626,7 +626,7 @@ describe('ConversationPage', () => {
     const floating: HTMLElement = fixture.nativeElement.querySelector('.floating-date');
     const message: HTMLElement = fixture.nativeElement.querySelector('app-message');
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
-    vi.spyOn(floating, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 12, 100, 25));
+    Object.defineProperties(floating, { offsetTop: { value: 12 }, offsetHeight: { value: 25 } });
     vi.spyOn(message, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 50, 300, 100));
     const dateRect = vi.spyOn(separator, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 12, 300, 40));
     component.ionViewWillEnter();
