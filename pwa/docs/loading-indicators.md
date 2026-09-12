@@ -42,7 +42,7 @@
 | 发送消息                         | 消息时间之后       | 立即上屏；上传 cloud-upload-outline，排队／发送 time-outline，确认 checkmark-outline，失败 alert-circle-outline；失败原位重试                          |
 | 附件上传                         | 附件自身           | 本地图片、视频、语音或文件显示 UploadProgress 圆形进度环，不配百分比文字；上传未完成也可发送                                                                                       |
 
-图标切换为 spinner 时，两者使用相同宽高；Ionic 纯图标按钮在两种状态下都保留 `icon-only` 槽位，避免按钮尺寸变化。
+图标切换为 spinner 时，两者使用相同宽高；Ionic 纯图标按钮在两种状态下都保留 `icon-only` 槽位，避免按钮尺寸变化。`.action-icon` spinner 使用主题正文色，不继承图标按钮的蓝色。
 
 操作按钮通过 `.action-content` 和 `.action-label` 保留原有尺寸，spinner 绝对定位叠放。`.busy` 控制原内容的隐藏，spinner 显示等待状态。
 

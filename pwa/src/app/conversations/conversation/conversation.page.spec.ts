@@ -647,6 +647,34 @@ describe('ConversationPage', () => {
     expect(separator.style.visibility).toBe('visible');
   });
 
+  it.each([false, true])('hides the down button until initial positioning (newer page: %s)', async (hasNewer) => {
+    const positioning = vi
+      .spyOn(component as unknown as { positionAndRead(): Promise<void> }, 'positionAndRead')
+      .mockResolvedValue();
+    component['activate'](testChat.id);
+    await fixture.whenStable();
+    expect(component['showDownButton']()).toBe(false);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+      messages: [{ ...wireMessage }],
+      olderCursor: wireMessage.id,
+      ...(hasNewer ? { newerCursor: wireMessage.id } : {}),
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const button: HTMLElement = fixture.nativeElement.querySelector('.history-navigation');
+    expect(button.style.visibility).toBe('hidden');
+    positioning.mockRestore();
+    await component['positionAndRead']();
+    await fixture.whenStable();
+    expect(button.style.visibility).toBe(hasNewer ? 'visible' : 'hidden');
+    Object.defineProperties(scroll, { scrollHeight: { value: 3000 }, clientHeight: { value: 500 } });
+    scroll.scrollTop = 1000;
+    await component['trackScroll']();
+    await fixture.whenStable();
+    expect(button.style.visibility).toBe('visible');
+    expect(fixture.nativeElement.querySelector('.history-navigation')).toBe(button);
+  });
+
   it('reads the badge from shared state, keeps its node mounted and hides it with the button', async () => {
     const data = TestBed.inject(ChatStore);
     const badge: HTMLElement = fixture.nativeElement.querySelector('.history-navigation ion-badge');
@@ -772,33 +800,36 @@ describe('ConversationPage', () => {
     expect(component['position']()).toBeUndefined();
   });
 
-  it('preserves the message bottom when prepending removes its author header', async () => {
-    await component['positionAndRead']();
-    await fixture.whenStable();
-    const message: HTMLElement = fixture.nativeElement.querySelector('app-message');
-    scroll.scrollTop = 80;
-    vi.spyOn(message, 'getBoundingClientRect').mockImplementation(() => {
-      const prepended = fixture.nativeElement.querySelectorAll('app-message').length > 1;
-      return new DOMRect(
-        0,
-        100 + (prepended ? 200 : 0) - scroll.scrollTop,
-        300,
-        message.querySelector('.sender') ? 64 : 44,
-      );
-    });
-    const bottom = message.getBoundingClientRect().bottom;
-    const loading = component['loadPage'](PageDirection.Older);
-    await Promise.resolve();
-    http
-      .expectOne((req) => req.url.endsWith('/messages') && req.params.has('before'))
-      .flush({ messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older-100' }], olderCursor: '100' });
-    await loading;
-    await fixture.whenStable();
-    expect(message.querySelector('.sender')).toBeNull();
-    expect(message.getBoundingClientRect().height).toBe(44);
-    expect(message.getBoundingClientRect().bottom).toBe(bottom);
-    expect(scroll.scrollTop).toBe(260);
-  });
+  it.each([200, 200.9765625])(
+    'preserves the message bottom when prepending %s px and removing its author header',
+    async (prependedHeight) => {
+      await component['positionAndRead']();
+      await fixture.whenStable();
+      const message: HTMLElement = fixture.nativeElement.querySelector('app-message');
+      scroll.scrollTop = 80;
+      vi.spyOn(message, 'getBoundingClientRect').mockImplementation(() => {
+        const prepended = fixture.nativeElement.querySelectorAll('app-message').length > 1;
+        return new DOMRect(
+          0,
+          100 + (prepended ? prependedHeight : 0) - scroll.scrollTop,
+          300,
+          message.querySelector('.sender') ? 64 : 44,
+        );
+      });
+      const bottom = message.getBoundingClientRect().bottom;
+      const loading = component['loadPage'](PageDirection.Older);
+      await Promise.resolve();
+      http
+        .expectOne((req) => req.url.endsWith('/messages') && req.params.has('before'))
+        .flush({ messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older-100' }], olderCursor: '100' });
+      await loading;
+      await fixture.whenStable();
+      expect(message.querySelector('.sender')).toBeNull();
+      expect(message.getBoundingClientRect().height).toBe(44);
+      expect(message.getBoundingClientRect().bottom).toBe(bottom);
+      expect(scroll.scrollTop).toBe(80 + prependedHeight - 20);
+    },
+  );
 
   it('keeps the pagination button, spinner and content slots mounted while loading older messages', async () => {
     await component['positionAndRead']();

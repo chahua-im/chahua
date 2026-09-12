@@ -361,13 +361,17 @@ export class ConversationPage {
           ?.confirmed?.id
       : undefined;
   });
+  private readonly positioned = linkedSignal({ source: this.entryKey, computation: () => false });
   protected readonly atBottom = signal(true);
   private readonly returnMessageIds = linkedSignal({
     source: this.entryKey,
     computation: (): SnowflakeID[] => [],
   });
   protected readonly showDownButton = computed(
-    () => (!this.atBottom() || !!this.conversation.page()?.newerCursor) && !this.composer()?.voiceActive(),
+    () =>
+      this.positioned() &&
+      (!this.atBottom() || !!this.conversation.page()?.newerCursor) &&
+      !this.composer()?.voiceActive(),
   );
   protected readonly navigatingDown = linkedSignal({ source: this.entryKey, computation: () => false });
   protected readonly unreadCount = computed(() => this.chatInfo.unreadCount(this.id(), this.threadId()));
@@ -774,6 +778,7 @@ export class ConversationPage {
       this.position.set(undefined);
     }
     await this.trackScroll();
+    if (position && this.isCurrent(entry) && version === this.navigationVersion) this.positioned.set(true);
   }
 
   private async trackScroll() {
