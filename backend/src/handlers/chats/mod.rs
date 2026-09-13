@@ -16,8 +16,9 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         chats::{
-            ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse,
-            UnreadMentionIdsResponse, UnreadReactionIdsResponse,
+            AcknowledgeReactionsBody, ChatListItem, ListChatsResponse, MarkChatReadStateResponse,
+            UnreadCountResponse, UnreadMentionIdsResponse, UnreadReactionIdsResponse,
+            UnreadReactionsAckResponse,
         },
         messages::MessageResponse,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
@@ -28,6 +29,7 @@ use crate::{
     services::{
         chat,
         messages::{attach_metadata, message_response_preview},
+        user_settings,
     },
     utils::{auth::CurrentUid, pagination::validate_limit},
 };
@@ -418,11 +420,10 @@ async fn mark_as_read(
         read_state.last_read_message_id,
         None,
     )?;
-    // The reaction cursor was just advanced by mark_chat_as_read, so this is
-    // normally 0; computed for consistency with the mention count.
+
     let unread_reactions = state
         .unread_service
-        .count_chat_unread_reactions(conn, uid, chat_id, None)?;
+        .count_chat_unread_reactions(conn, uid, chat_id)?;
 
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: read_state.last_read_message_id,
@@ -525,11 +526,9 @@ async fn mark_as_unread(
         state
             .unread_service
             .count_chat_unread_mentions(conn, uid, chat_id, new_read_id, None)?;
-    // Marking unread rewinds the message pointer only; the reaction cursor
-    // never moves backwards, so this reports the live (unchanged) count.
     let unread_reactions = state
         .unread_service
-        .count_chat_unread_reactions(conn, uid, chat_id, None)?;
+        .count_chat_unread_reactions(conn, uid, chat_id)?;
 
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: new_read_id,
@@ -581,7 +580,7 @@ async fn get_chat_unread_count(
     )?;
     let unread_reactions = state
         .unread_service
-        .count_chat_unread_reactions(conn, uid, chat_id, None)?;
+        .count_chat_unread_reactions(conn, uid, chat_id)?;
 
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id,
@@ -593,7 +592,7 @@ async fn get_chat_unread_count(
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UnreadMentionsQuery {
+struct UnreadActivityQuery {
     #[serde(
         default,
         deserialize_with = "crate::serde_i64_string::opt::deserialize"
@@ -601,6 +600,31 @@ struct UnreadMentionsQuery {
     thread_id: Option<i64>,
     #[serde(default)]
     max: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnreadReactionQuery {
+    #[serde(default)]
+    max: Option<i64>,
+}
+
+fn parse_acknowledged_reaction_message_ids(ids: Vec<String>) -> Result<Vec<i64>, AppError> {
+    if ids.len() > crate::constants::MAX_UNREAD_COUNT as usize {
+        return Err(AppError::BadRequest("messageIds exceeds maximum"));
+    }
+
+    let mut parsed = std::collections::BTreeSet::new();
+    for id in ids {
+        let id = id
+            .parse::<i64>()
+            .map_err(|_| AppError::BadRequest("messageIds contains an invalid id"))?;
+        if id <= 0 {
+            return Err(AppError::BadRequest("messageIds contains an invalid id"));
+        }
+        parsed.insert(id);
+    }
+    Ok(parsed.into_iter().collect())
 }
 
 /// GET /chats/{chat_id}/mentions - Unread @mention message ids for the current user.
@@ -626,7 +650,7 @@ async fn get_chat_mentions(
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
-    Query(q): Query<UnreadMentionsQuery>,
+    Query(q): Query<UnreadActivityQuery>,
 ) -> Result<Json<UnreadMentionIdsResponse>, AppError> {
     let conn = &mut *conn;
 
@@ -663,22 +687,20 @@ async fn get_chat_mentions(
 
 /// GET /chats/{chat_id}/reactions - Message ids with unread reactions for the current user.
 ///
-/// Returns main-scope reactions by default (reactions on the user's top-level
-/// messages); pass `threadId` for reactions on the user's messages in that
-/// thread. Ids are newest-first, one entry per message regardless of how many
-/// new reactions it carries (default 1000, hard cap 1000). A reaction is
-/// unread while `created_at > last_reactions_read_at` (cursor-derived; the
-/// cursor advances on mark-read).
+/// Main scope only: reactions on the caller's top-level messages (thread
+/// replies light the thread badge). Ids are oldest-unread-first, one entry per
+/// message. A reaction is unread until acknowledged through the reaction read
+/// endpoint. While the reaction-notification toggle is off this returns an
+/// empty state.
 #[utoipa::path(
     get,
     path = "/reactions",
     params(
         ("chat_id" = i64, Path, description = "Chat ID"),
-        ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope reactions"),
         ("max" = Option<i64>, Query, description = "Max ids to return (default 1000, capped at 1000)"),
     ),
     responses(
-        (status = 200, description = "Message ids with unread reactions, newest-first", body = UnreadReactionIdsResponse),
+        (status = 200, description = "Message ids with unread reactions, oldest-unread-first", body = UnreadReactionIdsResponse),
     ),
     security(("uid_header" = []), ("bearer_jwt" = [])),
 )]
@@ -687,21 +709,89 @@ async fn get_chat_reactions(
     State(state): State<AppState>,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
-    Query(q): Query<UnreadMentionsQuery>,
+    Query(q): Query<UnreadReactionQuery>,
 ) -> Result<Json<UnreadReactionIdsResponse>, AppError> {
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
 
+    if !user_settings::reaction_notifications_enabled(conn, uid)? {
+        return Ok(Json(UnreadReactionIdsResponse {
+            message_ids: Vec::new(),
+            unread_reactions: 0,
+        }));
+    }
+
     let limit = validate_limit(q.max, crate::constants::MAX_UNREAD_COUNT);
 
-    let ids =
-        state
-            .unread_service
-            .list_chat_unread_reactions(conn, uid, chat_id, q.thread_id, limit)?;
+    let list = state
+        .unread_service
+        .list_chat_unread_reactions(conn, uid, chat_id, limit)?;
 
     Ok(Json(UnreadReactionIdsResponse {
-        message_ids: ids.into_iter().map(|id| id.to_string()).collect(),
+        message_ids: list
+            .message_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect(),
+        unread_reactions: list.unread_reactions,
+    }))
+}
+
+/// POST /chats/{chat_id}/reactions/read — Record explicitly viewed messages.
+///
+/// The only way reactions become read. Accepts both top-level and thread-reply
+/// message ids, but the response is always the chat's main-scope snapshot:
+/// refresh thread badge state separately. While the reaction-notification
+/// toggle is off this is a no-op returning an empty state.
+#[utoipa::path(
+    post,
+    path = "/reactions/read",
+    tag = "chats",
+    params(
+        ("chat_id" = i64, Path, description = "Chat ID"),
+    ),
+    request_body = AcknowledgeReactionsBody,
+    responses(
+        (status = 200, description = "Fresh unread-reaction state after recording views", body = UnreadReactionsAckResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn acknowledge_chat_reactions(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<AcknowledgeReactionsBody>,
+) -> Result<Json<UnreadReactionsAckResponse>, AppError> {
+    let conn = &mut *conn;
+
+    check_membership(conn, chat_id, uid)?;
+
+    if !user_settings::reaction_notifications_enabled(conn, uid)? {
+        return Ok(Json(UnreadReactionsAckResponse {
+            unread_reactions: 0,
+            message_ids: Vec::new(),
+        }));
+    }
+
+    let message_ids = parse_acknowledged_reaction_message_ids(body.message_ids)?;
+    let limit = crate::constants::MAX_UNREAD_COUNT;
+    let list = state.unread_service.acknowledge_chat_unread_reactions(
+        conn,
+        uid,
+        chat_id,
+        &message_ids,
+        limit,
+    )?;
+
+    Ok(Json(UnreadReactionsAckResponse {
+        unread_reactions: list.unread_reactions,
+        message_ids: list
+            .message_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect(),
     }))
 }
 
@@ -864,9 +954,32 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(get_chat_unread_count))
                 .routes(utoipa_axum::routes!(get_chat_mentions))
                 .routes(utoipa_axum::routes!(get_chat_reactions))
+                .routes(utoipa_axum::routes!(acknowledge_chat_reactions))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
                 .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())
                 .nest("/pins", super::pins::router()),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_acknowledged_reaction_message_ids;
+
+    #[test]
+    fn acknowledged_reaction_ids_are_deduplicated_and_sorted() {
+        let ids = parse_acknowledged_reaction_message_ids(vec![
+            "30".to_string(),
+            "10".to_string(),
+            "30".to_string(),
+        ])
+        .expect("valid message ids");
+        assert_eq!(ids, vec![10, 30]);
+    }
+
+    #[test]
+    fn acknowledged_reaction_ids_reject_non_positive_and_non_numeric_values() {
+        assert!(parse_acknowledged_reaction_message_ids(vec!["0".to_string()]).is_err());
+        assert!(parse_acknowledged_reaction_message_ids(vec!["invalid".to_string()]).is_err());
+    }
 }

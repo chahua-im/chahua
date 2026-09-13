@@ -591,6 +591,14 @@ pub struct MessageReaction {
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]
+#[diesel(table_name = schema::message_views)]
+pub struct MessageView {
+    pub uid: i32,
+    pub message_id: i64,
+    pub viewed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Queryable, Selectable, Insertable)]
 #[diesel(table_name = schema::message_mentions)]
 pub struct MessageMention {
     pub message_id: i64,
@@ -813,6 +821,7 @@ pub struct UserExtra {
     pub verification_mode: FriendAddVerificationMode,
     pub verification_question: Option<String>,
     pub token_gen: i32,
+    pub reaction_notifications_enabled: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]

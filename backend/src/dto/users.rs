@@ -37,6 +37,19 @@ pub struct MeResponse {
     pub user_group: Option<UserGroupTagInfo>,
     pub sticker_pack_order: Vec<StickerPackOrderItem>,
     pub permissions: Vec<String>,
+    pub reaction_notifications_enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReactionNotificationsRequest {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionNotificationsResponse {
+    pub reaction_notifications_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -76,6 +89,7 @@ mod tests {
             }),
             sticker_pack_order: vec![],
             permissions: vec![],
+            reaction_notifications_enabled: false,
         };
 
         let value = serde_json::to_value(response).unwrap();
