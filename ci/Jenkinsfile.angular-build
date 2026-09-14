@@ -5,22 +5,11 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '90'))
   }
 
-  parameters {
-    string(name: 'GIT_COMMIT_SHA', defaultValue: '', description: 'Commit SHA that passed the main Jenkins checks.')
-  }
-
   environment {
     PWA_ARTIFACT = 'pwa/chahua-angular.zip'
   }
 
   stages {
-    stage('Validate Input') {
-      steps {
-        script {
-          env.PWA_BUILD_REF = params.GIT_COMMIT_SHA?.trim() ?: 'origin/angular'
-        }
-      }
-    }
 
     stage('Build PWA Artifact') {
       agent {
@@ -43,19 +32,6 @@ spec:
       }
 
       stages {
-        stage('Checkout') {
-          steps {
-            checkout([
-              $class: 'GitSCM',
-              branches: [[name: env.PWA_BUILD_REF]],
-              userRemoteConfigs: [[
-                credentialsId: 'github-app',
-                refspec: '+refs/heads/*:refs/remotes/origin/*',
-                url: 'https://github.com/chahua-im/chahua.git'
-              ]]
-            ])
-          }
-        }
 
         stage('Build') {
           steps {
