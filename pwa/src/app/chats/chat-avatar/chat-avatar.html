@@ -1,7 +1,7 @@
 <ion-avatar
   [class.placeholder]="!entry().avatar"
   [class.icon-avatar]="!!entry().icon"
-  [avatarColor]="entry().icon ? null : (entry().avatarName ?? entry().title ?? '')">
+  [avatarColor]="entry().icon || entry().avatar ? null : (entry().avatarName ?? entry().title ?? '')">
   @if (entry().icon; as icon) {
     <ion-icon [icon]="icon"></ion-icon>
   } @else if (entry().avatar; as src) {
@@ -15,7 +15,7 @@
     class="avatar-badge"
     [class.placeholder]="!entry().badgeAvatar"
     [class.icon-avatar]="!!entry().badgeIcon"
-    [avatarColor]="entry().badgeIcon ? null : (entry().badgeName ?? '')">
+    [avatarColor]="entry().badgeIcon || entry().badgeAvatar ? null : (entry().badgeName ?? '')">
     @if (entry().badgeIcon; as icon) {
       <ion-icon [icon]="icon"></ion-icon>
     } @else if (entry().badgeAvatar; as src) {

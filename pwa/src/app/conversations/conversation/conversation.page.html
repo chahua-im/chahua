@@ -114,7 +114,7 @@
     @if (stickySender(); as sender) {
       <button
         class="sticky-avatar"
-        [avatarColor]="sender.name ?? sender.uid.toString()"
+        [avatarColor]="sender.avatarUrl ? null : (sender.name ?? sender.uid.toString())"
         [style.transform]="'translateY(' + stickyOffset() + 'px)'"
         [routerLink]="['/profile', sender.uid]">
         @if (sender.avatarUrl; as src) {
