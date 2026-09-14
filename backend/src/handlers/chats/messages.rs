@@ -34,9 +34,17 @@ use crate::{
 use super::{ChatIdPath, CreateMessageBody};
 use crate::services::authz::Action as AuthzAction;
 use crate::services::messages::{
-    attach_metadata, authorize_message_send, extract_mention_uids, load_username_by_uid,
-    parse_attachment_ids, send_prepared_message, sync_edited_message_mentions, validate_message,
-    PreparedMessageSend, SendMessageOutcome,
+    attach_metadata, //
+    attachment_position,
+    authorize_message_send,
+    extract_mention_uids,
+    load_username_by_uid,
+    parse_attachment_ids,
+    send_prepared_message,
+    sync_edited_message_mentions,
+    validate_message,
+    PreparedMessageSend,
+    SendMessageOutcome,
 };
 use crate::services::social;
 #[derive(serde::Deserialize, utoipa::ToSchema)]
@@ -98,6 +106,7 @@ pub struct MessageIdPath {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateMessageBody {
     message: String,
+    /// Complete attachment selection in display order, including retained uploads.
     #[serde(default)]
     attachment_ids: Vec<String>,
 }
@@ -893,7 +902,10 @@ async fn patch_message(
                     .filter(a_dsl::id.eq_any(&attachment_ids))
                     .filter(a_dsl::message_id.is_null()),
             )
-            .set(a_dsl::message_id.eq(message_id))
+            .set((
+                a_dsl::message_id.eq(message_id),
+                a_dsl::order.eq(attachment_position(&attachment_ids, a_dsl::id) - 1i16),
+            ))
             .execute(conn)?;
             if attached != attachment_ids.len() {
                 return Err(AppError::BadRequest("Invalid attachment selection"));
