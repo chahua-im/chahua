@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { testMessage } from '../../api/testing';
 import { MessagePreview } from './message-preview';
@@ -7,7 +7,7 @@ import { MessagePreview } from './message-preview';
 describe('MessagePreview', () => {
   let fixture: ComponentFixture<MessagePreview>;
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideRouter([])] });
+    TestBed.configureTestingModule({ providers: [provideRouter([{ path: 'profile/:uid', children: [] }])] });
     fixture = TestBed.createComponent(MessagePreview);
   });
   function render(message: Partial<MessageResponse>) {
@@ -41,6 +41,29 @@ describe('MessagePreview', () => {
     const message = { messageType: MessageType.system, message: 'joined the chat' };
     expect(render({ ...message, sender: { uid: 2, name: '小花', gender: 0 } })).toBe('小花 加入了群');
     expect(render({ ...message, sender: { uid: 2, gender: 0 } })).toBe('用户 2 加入了群');
+  });
+
+  it('opens the actor profile only when the system message is interactive', async () => {
+    const message = {
+      messageType: MessageType.system,
+      message: 'joined the chat',
+      sender: { uid: 2, name: '小花', gender: 0 },
+    };
+    render(message);
+    expect(fixture.nativeElement.querySelector('a')).toBeNull();
+    fixture.componentRef.setInput('interactive', true);
+    render(message);
+    const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a');
+    expect(link.textContent).toBe('小花');
+    const parentClick = vi.fn();
+    fixture.nativeElement.addEventListener('click', parentClick);
+    link.click();
+    await fixture.whenStable();
+    expect(TestBed.inject(Router).url).toBe('/profile/2');
+    expect(parentClick).not.toHaveBeenCalled();
+    fixture.componentRef.setInput('interactive', false);
+    render(message);
+    expect(fixture.nativeElement.querySelector('a')).toBeNull();
   });
 
   it('keeps unknown system text instead of silently discarding it', () => {
