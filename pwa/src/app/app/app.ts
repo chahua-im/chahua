@@ -1,6 +1,7 @@
+import { DOCUMENT } from '@angular/common';
 import { afterRenderEffect, Component, inject, linkedSignal, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { NavigationEnd, Router } from '@angular/router';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { NavigationEnd, NavigationStart, Router } from '@angular/router';
 import {
   IonApp,
   IonButton,
@@ -24,7 +25,6 @@ import { NotificationPrompt } from '../pwa/notification-prompt/notification-prom
 import { AppUpdates } from '../pwa/app-updates';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
-import { SettingsModal } from '../settings/settings-modal/settings-modal';
 
 @Component({
   selector: 'app-root',
@@ -45,7 +45,6 @@ import { SettingsModal } from '../settings/settings-modal/settings-modal';
     IonToolbar,
     IonToast,
     ChatList,
-    SettingsModal,
     NotificationPrompt,
   ],
 })
@@ -82,6 +81,17 @@ export class App {
   protected readonly updates = inject(AppUpdates);
 
   constructor() {
+    const document = inject(DOCUMENT);
+    this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
+      if (event instanceof NavigationStart) {
+        // Snapshot existing overlays so a newly opened page cannot be dismissed by an older transition.
+        document
+          .querySelectorAll<
+            HTMLIonModalElement | HTMLIonPopoverElement | HTMLIonAlertElement | HTMLIonActionSheetElement
+          >('ion-modal, ion-popover, ion-alert, ion-action-sheet')
+          .forEach((overlay) => void overlay.dismiss(undefined, 'navigate'));
+      }
+    });
     afterRenderEffect(() => this.updates.setInteractive(!this.landingPage() && !!this.session.user()));
     this.session.restoreToken();
     if (!this.session.token() || (this.landingPage() && !isPlatform('pwa'))) {

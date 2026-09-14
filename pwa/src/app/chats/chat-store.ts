@@ -27,6 +27,8 @@ import { ChatPins } from './chat-pins';
 export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> &
   Partial<Pick<GroupInfoResponse, 'myRole' | 'description' | 'visibility' | 'mutedUntil'>>;
 type ChatSummary = Pick<ChatListItem, 'lastMessage' | 'lastMessageAt' | 'archived' | 'mutedUntil'>;
+type ChatState = Partial<Pick<ChatListItem, 'archived' | 'mutedUntil'>>;
+const PERMANENT_MUTE = '9999-12-31T23:59:59Z';
 type ThreadSummary = Omit<ThreadListItem, 'unreadCount' | 'lastReadMessageId' | 'archived'>;
 interface ChatReadOperation {
   version: number;
@@ -359,7 +361,7 @@ export class ChatStore {
     this.readStates.update((states) => new Map(states).set(chatId, { state, version: ++this.version, dirty: false }));
   }
 
-  private applyChatState(chatId: SnowflakeID, state: Partial<Pick<ChatListItem, 'archived' | 'mutedUntil'>>) {
+  private applyChatState(chatId: SnowflakeID, state: ChatState) {
     const current = this.summaries().get(chatId);
     this.summaries.update((items) =>
       new Map(items).set(chatId, {
@@ -480,32 +482,42 @@ export class ChatStore {
     if (operation.refresh || operation.read || operation.rewind) return;
     if (this.readOperations.get(chatId) === operation) this.readOperations.delete(chatId);
   }
-  async setArchived(chatId: SnowflakeID, archived: boolean) {
-    await firstValueFrom(
-      (archived ? this.api.archiveChat(chatId) : this.api.unarchiveChat(chatId)).pipe(
-        takeUntilDestroyed(this.destroyRef),
-      ),
+  setArchived(chatId: SnowflakeID, archived: boolean) {
+    return this.changeChatState(
+      chatId,
+      { archived, mutedUntil: archived ? PERMANENT_MUTE : undefined },
+      archived ? this.api.archiveChat(chatId) : this.api.unarchiveChat(chatId),
     );
-    if (this.destroyRef.destroyed) return;
-    this.changed(ChatChangeKind.Read, chatId);
-    this.applyChatState(chatId, { archived, mutedUntil: archived ? '9999-12-31T23:59:59Z' : undefined });
-    this.changed(ChatChangeKind.Membership, chatId);
   }
-  async setMuted(chatId: SnowflakeID, muted: boolean, durationSeconds?: number) {
+  setMuted(chatId: SnowflakeID, muted: boolean, durationSeconds?: number) {
     const state = muted
-      ? await firstValueFrom(
-          this.groupsApi
-            .putMute(chatId, durationSeconds ? { durationSeconds } : {})
-            .pipe(takeUntilDestroyed(this.destroyRef)),
-        )
-      : await firstValueFrom(this.groupsApi.deleteMute(chatId).pipe(takeUntilDestroyed(this.destroyRef))).then(() => ({
-          mutedUntil: undefined,
-          archived: false,
-        }));
-    if (this.destroyRef.destroyed) return;
+      ? { mutedUntil: durationSeconds ? new Date(Date.now() + durationSeconds * 1000).toISOString() : PERMANENT_MUTE }
+      : { mutedUntil: undefined, archived: false };
+    return this.changeChatState(
+      chatId,
+      state,
+      muted
+        ? this.groupsApi.putMute(chatId, durationSeconds ? { durationSeconds } : {})
+        : this.groupsApi.deleteMute(chatId),
+    );
+  }
+  private async changeChatState(chatId: SnowflakeID, state: ChatState, request: Observable<ChatState | void>) {
+    const previous = this.chatState(chatId) ?? { archived: false, mutedUntil: this.mutedUntil(chatId) };
     this.applyChatState(chatId, state);
-    this.changed(ChatChangeKind.Read, chatId);
-    this.changed(ChatChangeKind.Membership, chatId);
+    const version = this.summaries().get(chatId)!.stateVersion;
+    try {
+      const confirmed = await this.response(request);
+      if (this.destroyRef.destroyed) return;
+      if (confirmed && this.summaries().get(chatId)?.stateVersion === version)
+        this.applyChatState(chatId, { ...state, ...confirmed });
+      this.changed(ChatChangeKind.Read, chatId);
+      this.changed(ChatChangeKind.Membership, chatId);
+    } catch (error) {
+      // A failed older request must not undo a newer choice or server update.
+      if (!this.destroyRef.destroyed && this.summaries().get(chatId)?.stateVersion === version)
+        this.applyChatState(chatId, previous);
+      throw error;
+    }
   }
 
   thread(rootId: SnowflakeID): ThreadListItem | undefined {
@@ -610,32 +622,48 @@ export class ChatStore {
     chatId: SnowflakeID,
     rootId: SnowflakeID,
     change: Partial<ThreadSubscriptionStatusResponse>,
+    request: Observable<void>,
   ) {
-    const status = this.subscription(chatId, rootId);
-    this.setSubscription(chatId, rootId, status && { ...status, ...change });
-    if (!status) await this.loadSubscription(chatId, rootId);
+    const previous = this.cachedSubscription(chatId, rootId);
+    if (previous) this.setSubscription(chatId, rootId, { ...previous, ...change });
+    const version = this.subscriptions().get(rootId)?.version;
+    try {
+      await this.response(request);
+      if (this.destroyRef.destroyed) return;
+      this.changed(ChatChangeKind.Membership, chatId, rootId);
+      if (!previous) {
+        this.setSubscription(chatId, rootId, undefined);
+        await this.loadSubscription(chatId, rootId);
+      }
+    } catch (error) {
+      if (!this.destroyRef.destroyed && previous && this.subscriptions().get(rootId)?.version === version)
+        this.setSubscription(chatId, rootId, previous);
+      throw error;
+    }
   }
-  async setThreadArchived(chatId: SnowflakeID, rootId: SnowflakeID, archived: boolean) {
-    await this.response(
+  setThreadArchived(chatId: SnowflakeID, rootId: SnowflakeID, archived: boolean) {
+    return this.updateSubscription(
+      chatId,
+      rootId,
+      { archived },
       archived ? this.threadsApi.archiveThread(chatId, rootId) : this.threadsApi.unarchiveThread(chatId, rootId),
     );
-    if (this.destroyRef.destroyed) return;
-    const updated = this.updateSubscription(chatId, rootId, { archived });
-    this.changed(ChatChangeKind.Membership, chatId, rootId);
-    await updated;
   }
-  async subscribeThread(chatId: SnowflakeID, rootId: SnowflakeID) {
-    await this.response(this.threadsApi.subscribeThread(chatId, rootId));
-    if (this.destroyRef.destroyed) return;
-    const updated = this.updateSubscription(chatId, rootId, { subscribed: true });
-    this.changed(ChatChangeKind.Membership, chatId, rootId);
-    await updated;
+  subscribeThread(chatId: SnowflakeID, rootId: SnowflakeID) {
+    return this.updateSubscription(
+      chatId,
+      rootId,
+      { subscribed: true },
+      this.threadsApi.subscribeThread(chatId, rootId),
+    );
   }
-  async unsubscribeThread(chatId: SnowflakeID, rootId: SnowflakeID) {
-    await this.response(this.threadsApi.unsubscribeThread(chatId, rootId));
-    if (this.destroyRef.destroyed) return;
-    await this.updateSubscription(chatId, rootId, { subscribed: false });
-    this.changed(ChatChangeKind.Membership, chatId, rootId);
+  unsubscribeThread(chatId: SnowflakeID, rootId: SnowflakeID) {
+    return this.updateSubscription(
+      chatId,
+      rootId,
+      { subscribed: false },
+      this.threadsApi.unsubscribeThread(chatId, rootId),
+    );
   }
   markThreadRead(chatId: SnowflakeID, rootId: SnowflakeID, messageId: SnowflakeID): Promise<void> {
     if (this.destroyRef.destroyed) return Promise.resolve();

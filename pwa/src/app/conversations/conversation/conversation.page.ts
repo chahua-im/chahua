@@ -29,7 +29,6 @@ import {
   IonFooter,
   IonHeader,
   IonIcon,
-  IonModal,
   IonSpinner,
   IonTitle,
   IonToolbar,
@@ -60,8 +59,8 @@ import {
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatAvatar, conversationAvatar } from '../../chats/chat-avatar/chat-avatar';
+import { AvatarColor, AvatarTextPipe } from '../../chats/avatar-text.pipe';
 import { ChatMute } from '../../chats/chat-mute/chat-mute';
-import { ChatSearch } from '../../chats/chat-search/chat-search';
 import { ChatDetails } from '../../chats/chat-details/chat-details';
 import { ChatStore } from '../../chats/chat-store';
 import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
@@ -113,13 +112,13 @@ type ScrollPosition =
     '(window:pagehide)': 'saveDraft()',
   },
   imports: [
+    AvatarColor,
+    AvatarTextPipe,
     ContentScrollbars,
     DatePipe,
     ChatDetails,
     ChatMute,
-    ChatSearch,
     ChatAvatar,
-    IonModal,
     RouterLink,
     Message,
     MessageMenu,
@@ -142,17 +141,27 @@ type ScrollPosition =
   ],
 })
 export class ConversationPage {
+  protected readonly stickySender = signal<MessageContent['sender'] | undefined>(undefined);
+  protected readonly stickyOffset = signal(0);
+  protected readonly stickyRow = signal<number | undefined>(undefined);
   private readonly wide = window.matchMedia('(min-width: 1200px)');
   protected readonly largeScreen = signal(this.wide.matches);
   protected readonly sidebarOpen = signal(true);
-  protected readonly infoOpen = signal(false);
   protected readonly infoIcon = informationCircleOutline;
   protected details() {
     if (this.largeScreen()) this.sidebarOpen.update((open) => !open);
-    else this.infoOpen.set(true);
+    else
+      void this.router.navigate([
+        '/chats/chat',
+        decodeId(this.id()),
+        ...(this.threadId() ? ['thread', decodeId(this.threadId()!)] : []),
+        'info',
+      ]);
   }
   protected readonly toolbarIcons = { searchOutline, notificationsOutline, notificationsOffOutline };
-  protected readonly searchOpen = linkedSignal({ source: () => this.entryKey(), computation: () => false });
+  protected search() {
+    return this.router.navigate(['/chats/chat', decodeId(this.id()), 'search']);
+  }
   protected readonly muteBusy = linkedSignal({ source: () => this.entryKey(), computation: () => false });
   protected readonly muted = computed(() => this.chatInfo.isMuted(this.id()));
   private readonly muteMenu = viewChild.required(ChatMute);
@@ -455,7 +464,6 @@ export class ConversationPage {
     });
     const resize = () => {
       this.largeScreen.set(this.wide.matches);
-      if (this.wide.matches) this.infoOpen.set(false);
     };
     this.wide.addEventListener('change', resize);
     this.destroyRef.onDestroy(() => this.wide.removeEventListener('change', resize));
@@ -538,7 +546,7 @@ export class ConversationPage {
         event instanceof NavigationEnd &&
         !this.active() &&
         this.conversation.page() &&
-        !this.coveredByThread() &&
+        !this.coveredByPage() &&
         event.urlAfterRedirects.split(/[?#]/)[0] !== `/chats/chat/${decodeId(this.id())}`
       ) {
         this.leave();
@@ -588,14 +596,17 @@ export class ConversationPage {
   }
 
   ionViewDidLeave() {
-    // A topic retains its parent range for back navigation. A cancelled gesture never reaches this hook.
-    this.leave(this.coveredByThread() && !!this.conversation.page());
+    // Topic and detail pages retain the conversation for browser Back.
+    this.leave(this.coveredByPage() && !!this.conversation.page());
     // Ionic detaches cached pages; apply resource cleanup after the transition.
     this.changeDetector.detectChanges();
   }
 
-  private coveredByThread() {
-    return !this.threadId() && this.router.url.startsWith(`/chats/chat/${decodeId(this.id())}/thread/`);
+  private coveredByPage() {
+    return (
+      this.router.routerState.snapshot.root.firstChild?.data['modal'] ||
+      (!this.threadId() && this.router.url.startsWith(`/chats/chat/${decodeId(this.id())}/thread/`))
+    );
   }
 
   private isCurrent(entry = this.entryKey()) {
@@ -613,6 +624,7 @@ export class ConversationPage {
   }
 
   private leave(retainRange = false) {
+    const retainComposer = retainRange && this.router.routerState.snapshot.root.firstChild?.data['modal'];
     this.saveDraft();
     this.scrolling.reset();
     this.active.set(false);
@@ -621,7 +633,7 @@ export class ConversationPage {
     this.position.set(undefined);
     if (retainRange) {
       this.conversation.cancelLoading();
-      this.cancelEdit();
+      if (!retainComposer) this.cancelEdit();
       pauseVoicePlayback();
     } else {
       this.entryVersion.update((version) => version + 1);
@@ -631,7 +643,7 @@ export class ConversationPage {
       this.replyTo.set(undefined);
     }
     this.menu()?.reset();
-    this.composer()?.reset();
+    if (!retainComposer) this.composer()?.reset();
   }
 
   protected readonly pendingNavigation = linkedSignal({
@@ -804,6 +816,21 @@ export class ConversationPage {
     const elements = this.confirmedElements();
     const viewport = scroll.getBoundingClientRect();
     const allElements = this.messageElements();
+    let bottomLow = 0,
+      bottomHigh = allElements.length;
+    while (bottomLow < bottomHigh) {
+      const middle = (bottomLow + bottomHigh) >>> 1;
+      if (allElements[middle].nativeElement.getBoundingClientRect().bottom < viewport.bottom) bottomLow = middle + 1;
+      else bottomHigh = middle;
+    }
+    const bottomRow = rows[bottomLow];
+    const bottomElement = allElements[bottomLow]?.nativeElement;
+    const bubble = bottomElement?.querySelector('.bubble, .sticker-content')?.getBoundingClientRect();
+    const avatar = bottomElement?.querySelector('.avatar')?.getBoundingClientRect();
+    const sticky = bottomRow && bubble && bubble.top < viewport.bottom && (!avatar || avatar.bottom > viewport.bottom);
+    this.stickySender.set(sticky ? bottomRow.message.sender : undefined);
+    this.stickyRow.set(sticky ? bottomLow : undefined);
+    this.stickyOffset.set(sticky && bottomRow.first ? Math.max(0, bubble.top + 34 - viewport.bottom) : 0);
     let first = 0,
       last = allElements.length - 1;
     while (first < last) {

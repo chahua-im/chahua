@@ -6,12 +6,6 @@
   max-width: 100%;
   height: max(66px, calc(var(--app-line-body) + var(--app-line-secondary)));
 }
-ion-avatar {
-  flex-shrink: 0;
-  width: 44px;
-  height: 44px;
-  background: var(--ion-color-light);
-}
 div {
   min-width: 0;
 }

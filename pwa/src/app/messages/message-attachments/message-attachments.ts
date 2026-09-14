@@ -1,6 +1,7 @@
+import { Router } from '@angular/router';
 import { DatePipe } from '@angular/common';
 import { afterRenderEffect, Component, computed, ElementRef, inject, input, linkedSignal, signal } from '@angular/core';
-import { IonBadge, IonIcon, ModalController } from '@ionic/angular';
+import { IonBadge, IonIcon } from '@ionic/angular';
 import { documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
 import { type MessageResponse, MessageType } from '../../../generated/models';
 import type { SnowflakeID } from '../../api/snowflake-id';
@@ -32,14 +33,14 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   host: { '[class.overlay-time]': 'overlayTime()', '[class.album]': 'album()' },
 })
 export class MessageAttachments {
-  private readonly modals = inject(ModalController);
+  private readonly router = inject(Router);
   protected async view(key: SnowflakeID | string, event: Event) {
     event.preventDefault();
     if (this.message().messageType === MessageType.sticker) return;
     event.stopPropagation();
     const media = this.items().filter((item) => item.kind === MediaKind.Image || item.kind === MediaKind.Video);
     await openMediaViewer(
-      this.modals,
+      this.router,
       media,
       media.findIndex((item) => (item.id ?? item.url) === key),
     );

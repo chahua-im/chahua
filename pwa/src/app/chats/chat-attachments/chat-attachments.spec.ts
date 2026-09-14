@@ -1,9 +1,8 @@
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { ChatAttachmentKindFilter } from '../../../generated/models';
-import { ModalController } from '@ionic/angular';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { jsonInterceptor } from '../../api/json.interceptor';
@@ -34,8 +33,7 @@ const second = { ...photo, id: '9007199254744003', url: 'https://media.invalid/s
 
 describe('ChatAttachments media viewer', () => {
   let http: HttpTestingController;
-  const present = vi.fn().mockResolvedValue(undefined);
-  const create = vi.fn().mockResolvedValue({ present });
+  const create = vi.fn().mockResolvedValue(true);
   beforeEach(() => {
     create.mockClear();
     TestBed.configureTestingModule({
@@ -43,9 +41,10 @@ describe('ChatAttachments media viewer', () => {
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
-        { provide: ModalController, useValue: { create } },
+        provideRouter([]),
       ],
     });
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockImplementation(create);
     http = TestBed.inject(HttpTestingController);
   });
   afterEach(() => http.verify());
@@ -72,10 +71,9 @@ describe('ChatAttachments media viewer', () => {
       .flush({ ...wireMessage, attachments: [{ ...photo }, { ...video }, { ...second }], hasAttachments: true });
     await operation;
     expect(create).toHaveBeenCalledExactlyOnceWith(
+      ['/media'],
       expect.objectContaining({
-        cssClass: 'media-viewer-overlay',
-        animated: false,
-        componentProps: {
+        state: {
           media: [
             expect.objectContaining({ kind: MediaKind.Image, url: photo.url }),
             expect.objectContaining({ kind: MediaKind.Video }),

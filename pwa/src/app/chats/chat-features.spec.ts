@@ -11,6 +11,7 @@ import { activeQuery } from '../api/query';
 import { testChat, testUser, wireChat } from '../api/testing';
 import { SessionStore } from '../session/session-store';
 import { ChatDetails } from './chat-details/chat-details';
+import { ChatSearch } from './chat-search/chat-search';
 import { ChatListStore } from './chat-list-store';
 import { ChatStore } from './chat-store';
 import { DirectorySearch } from './directory-search/directory-search';
@@ -53,6 +54,25 @@ describe('Chat feature requests', () => {
     http = TestBed.inject(HttpTestingController);
   });
   afterEach(() => http.verify());
+  it('fills the search page when only Ionic overscroll extends beyond the viewport', async () => {
+    const fixture = TestBed.createComponent(ChatSearch);
+    fixture.componentRef.setInput('chatId', testChat.id);
+    fixture.detectChanges();
+    const content: HTMLIonContentElement = fixture.nativeElement.querySelector('ion-content');
+    const scroll = document.createElement('div');
+    Object.defineProperties(scroll, { clientHeight: { value: 600 }, scrollHeight: { value: 601 } });
+    vi.spyOn(content, 'getScrollElement').mockResolvedValue(scroll);
+    fixture.componentInstance['query'].set('消息');
+    fixture.detectChanges();
+    http.expectOne((req) => req.url.endsWith('/messages/search')).flush({ messages: [], nextOffset: 40 });
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      const next = http.expectOne((req) => req.params.get('offset') === '40');
+      next.flush({ messages: [] });
+    });
+    await fixture.whenStable();
+    http.expectNone((req) => req.url.endsWith('/messages/search'));
+  });
   it('loads verification on demand and only sends a friend request after confirmation', async () => {
     vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue({
       present: async () => undefined,

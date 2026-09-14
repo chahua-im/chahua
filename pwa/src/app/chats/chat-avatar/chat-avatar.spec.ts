@@ -15,4 +15,23 @@ describe('ChatAvatar', () => {
     expect(avatar()).toBe('🇨🇳');
     expect(badge()).toBe('𠮷');
   });
+  it('uses deterministic light and dark placeholder colors, preserving icon backgrounds', () => {
+    const fixture = TestBed.createComponent(ChatAvatar);
+    fixture.componentRef.setInput('entry', { title: 'Alice' });
+    fixture.detectChanges();
+    const avatar = fixture.nativeElement.querySelector('ion-avatar') as HTMLElement;
+    const light = avatar.style.getPropertyValue('--avatar-light');
+    const dark = avatar.style.getPropertyValue('--avatar-dark');
+    expect(light).toMatch(/^#[0-9A-F]+$/);
+    expect(dark).not.toBe(light);
+    fixture.componentRef.setInput('entry', { title: 'Bob' });
+    fixture.detectChanges();
+    expect(avatar.style.getPropertyValue('--avatar-light')).not.toBe(light);
+    fixture.componentRef.setInput('entry', { title: 'Alice' });
+    fixture.detectChanges();
+    expect(avatar.style.getPropertyValue('--avatar-light')).toBe(light);
+    fixture.componentRef.setInput('entry', { icon: 'icon' });
+    fixture.detectChanges();
+    expect(avatar.style.background).toBe('');
+  });
 });

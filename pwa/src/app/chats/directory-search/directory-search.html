@@ -5,9 +5,7 @@
     }
     @for (group of groups(); track group.id) {
       <ion-item [button]="true" (click)="openChat(group.id)">
-        @if (group.avatar) {
-          <ion-avatar slot="start"><img [src]="group.avatar" /></ion-avatar>
-        }
+        <app-chat-avatar slot="start" [size]="40" [entry]="{ avatar: group.avatar, title: group.name }" />
         <ion-label>
           {{ group.name }}
           <p>{{ group.description }}</p>
@@ -22,9 +20,10 @@
     }
     @for (person of people(); track person.uid) {
       <ion-item [button]="true" (click)="profile(person)">
-        @if (person.avatarUrl) {
-          <ion-avatar slot="start"><img [src]="person.avatarUrl" /></ion-avatar>
-        }
+        <app-chat-avatar
+          slot="start"
+          [size]="40"
+          [entry]="{ avatar: person.avatarUrl, title: person.username ?? person.uid.toString() }" />
         <ion-label>{{ person.username || person.uid }}</ion-label>
       </ion-item>
     }

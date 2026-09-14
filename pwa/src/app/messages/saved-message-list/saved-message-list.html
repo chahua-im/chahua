@@ -6,22 +6,9 @@
       <app-message
         [message]="row.content"
         [interactive]="false"
+        [contextMenu]="true"
+        (menu)="openMenu(item, $event)"
         [own]="item.originalSenderUid === session.user()?.uid"></app-message>
-      <div class="collection-actions">
-        <ion-button fill="clear" [disabled]="!item.canLocateContext" (click)="locateSaved(item)">查看原消息</ion-button>
-        <ion-button
-          fill="clear"
-          color="danger"
-          [disabled]="!!removingSavedId() || loading()"
-          (click)="removeSaved(item)">
-          <span class="action-content" [class.busy]="removingSavedId() === item.id">
-            <span class="action-label">取消收藏</span>
-            @if (removingSavedId() === item.id) {
-              <ion-spinner></ion-spinner>
-            }
-          </span>
-        </ion-button>
-      </div>
     </div>
   } @empty {
     @if (!loading() && !failed()) {
@@ -50,3 +37,22 @@
   message="操作失败，请重试。"
   [duration]="2500"
   (didDismiss)="removeFailed.set(false)"></ion-toast>
+
+<ion-popover [isOpen]="!!menu()" [event]="menu()?.event" (didDismiss)="menu.set(undefined)">
+  <ng-template>
+    @if (menu(); as selected) {
+      <ion-list>
+        <ion-item [button]="true" [disabled]="!selected.item.canLocateContext" (click)="locateSaved(selected.item)">
+          查看原消息
+        </ion-item>
+        <ion-item
+          [button]="true"
+          [disabled]="removing() || loading()"
+          (click)="removeSaved(selected.item)"
+          color="danger">
+          取消收藏
+        </ion-item>
+      </ion-list>
+    }
+  </ng-template>
+</ion-popover>

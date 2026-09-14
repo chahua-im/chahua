@@ -8,6 +8,8 @@ import type { MeResponse, User } from '../../generated/models';
 declare const CHAHUA_DEV_TOKEN: string | undefined;
 
 const TOKEN_KEY = 'jwt_token';
+// Angular releases before the storage-name alignment used this key in both stores.
+const LEGACY_TOKEN_KEY = 'chahua.auth.token';
 
 @Service()
 export class SessionStore {
@@ -19,11 +21,8 @@ export class SessionStore {
     const url = new URL(window.location.href);
     const token =
       url.searchParams.get('token') ??
-      window.localStorage.getItem(TOKEN_KEY) ??
-      document.cookie
-        .split('; ')
-        .find((cookie) => cookie.startsWith(`${TOKEN_KEY}=`))
-        ?.slice(TOKEN_KEY.length + 1) ??
+      storedToken(TOKEN_KEY) ??
+      storedToken(LEGACY_TOKEN_KEY) ??
       (isDevMode() && typeof CHAHUA_DEV_TOKEN !== 'undefined' ? CHAHUA_DEV_TOKEN : undefined);
     url.searchParams.delete('token');
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
@@ -77,7 +76,16 @@ export class SessionStore {
     else window.localStorage.removeItem(TOKEN_KEY);
     // Safari copies cookies into a newly installed PWA, but not localStorage.
     document.cookie = `${TOKEN_KEY}=${token ?? ''}; Path=/; Max-Age=${token ? 400 * 24 * 60 * 60 : 0}; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
+    window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+    document.cookie = `${LEGACY_TOKEN_KEY}=; Path=/; Max-Age=0`;
   }
+}
+
+function storedToken(key: string) {
+  return (
+    window.localStorage.getItem(key) ??
+    document.cookie.split('; ').find((cookie) => cookie.startsWith(`${key}=`))?.slice(key.length + 1)
+  );
 }
 
 function findOwnProfile(data: unknown, uid: number): Partial<User & MeResponse> | undefined {

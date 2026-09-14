@@ -574,6 +574,7 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [chat] }));
     await settle();
     const muting = data['chatInfo'].setMuted(testChat.id, true);
+    expect(data['chatInfo'].isMuted(testChat.id)).toBe(true);
     const request = http.expectOne(`/_api/group/${decodeId(testChat.id)}/mute`);
     expect(request.request.method).toBe('PUT');
     expect(request.request.body).toEqual({});
@@ -619,10 +620,11 @@ describe('ChatListStore', () => {
     expect(query.items()[0]).toMatchObject({ mutedUntil: null, archived: false });
   });
 
-  it('leaves mute metadata unchanged when the command fails', async () => {
+  it('updates mute immediately and restores the original metadata when the command fails', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...wireChat, mutedUntil: null }] }));
     await settle();
     const failed = expect(data['chatInfo'].setMuted(testChat.id, true)).rejects.toBeDefined();
+    expect(data['chatInfo'].isMuted(testChat.id)).toBe(true);
     http.expectOne(`/_api/group/${decodeId(testChat.id)}/mute`).flush('failed', { status: 500, statusText: 'Error' });
     await failed;
     expect(query.items()[0].mutedUntil).toBeNull();
@@ -1015,5 +1017,31 @@ describe('ChatListStore', () => {
     const next = query.loadMore();
     http.expectOne(`/_api/chats?limit=50&after=${olderChat.id}`).flush({ chats: [] });
     await next;
+  });
+  it('removes an archived chat immediately and puts it back if the write fails', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    const operation = data['chatInfo'].setArchived(testChat.id, true);
+    const failed = expect(operation).rejects.toBeDefined();
+    expect(query.items()).toEqual([]);
+    http.expectOne(`/_api/chats/${wireChat.id}/archive`).flush('failed', { status: 500, statusText: 'Error' });
+    await failed;
+    expect(query.items().map((chat) => chat.id)).toEqual([testChat.id]);
+    expect(data['chatInfo'].isMuted(testChat.id)).toBe(false);
+  });
+
+  it('does not undo a newer mute choice when an older request fails', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    const first = expect(data['chatInfo'].setMuted(testChat.id, true)).rejects.toBeDefined();
+    const old = http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/mute` });
+    const latest = data['chatInfo'].setMuted(testChat.id, false);
+    old.flush('failed', { status: 500, statusText: 'Error' });
+    await first;
+    expect(data['chatInfo'].isMuted(testChat.id)).toBe(false);
+    http.expectOne({ method: 'DELETE', url: `/_api/group/${wireChat.id}/mute` }).flush(null);
+    await latest;
+    await settle();
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
   });
 });

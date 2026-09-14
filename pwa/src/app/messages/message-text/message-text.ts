@@ -1,8 +1,6 @@
 import { Component, computed, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
-import { ModalController } from '@ionic/angular';
 import { type MentionInfo } from '../../../generated/models';
-import { ChatDetails } from '../../chats/chat-details/chat-details';
 
 export interface TextPart {
   text: string;
@@ -63,7 +61,6 @@ export class MessageText {
   readonly mentions = input<readonly MentionInfo[]>([]);
   readonly interactive = input(true);
   protected readonly parts = computed(() => messageParts(this.text(), this.mentions()));
-  private readonly modals = inject(ModalController);
   private readonly router = inject(Router);
   protected follow(url: string, event: MouseEvent) {
     event.stopPropagation();
@@ -73,11 +70,6 @@ export class MessageText {
   }
   protected async profile(uid: number, event: Event) {
     event.stopPropagation();
-    const mention = this.mentions().find((m) => m.uid === uid);
-    const modal = await this.modals.create({
-      component: ChatDetails,
-      componentProps: { user: mention ?? { uid, gender: 0 } },
-    });
-    await modal.present();
+    await this.router.navigate(['/profile', uid]);
   }
 }

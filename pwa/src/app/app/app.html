@@ -19,7 +19,6 @@
           [swipeGesture]="false"
           (stackWillChange)="prepareTransition(outlet)"></ion-router-outlet>
       </ion-split-pane>
-      <app-settings-modal />
       <app-notification-prompt />
     } @else {
       @if (loading()) {

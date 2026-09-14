@@ -98,7 +98,7 @@
           class="pack-tab"
           [class.selected]="pack()?.id === item.id"
           [disabled]="busy()"
-          (click)="openPack(item.id)"
+          (click)="selectPack(item.id)"
           [title]="item.name">
           @if (item.previewSticker?.media?.contentType?.startsWith('image/')) {
             <img [src]="item.previewSticker!.media.url" />

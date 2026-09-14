@@ -1,3 +1,4 @@
+import { Router } from '@angular/router';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -8,7 +9,6 @@ import {
   IonLabel,
   IonList,
   IonSpinner,
-  ModalController,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
@@ -38,7 +38,7 @@ export class ChatAttachments {
   protected readonly error = signal(false);
   private readonly api = inject(ChatsService);
   private readonly navigation = inject(ConversationNavigation);
-  private readonly modals = inject(ModalController);
+  private readonly router = inject(Router);
   private readonly destroy = inject(DestroyRef);
   private version = 0;
   constructor() {
@@ -98,7 +98,7 @@ export class ChatAttachments {
       // A stale media summary can outlive a recalled message; its original file still opens.
       if (!media.length) media.push({ ...item, kind: mediaKind(item.kind) });
       await openMediaViewer(
-        this.modals,
+        this.router,
         media,
         media.findIndex((attachment) => attachment.id === item.id),
       );

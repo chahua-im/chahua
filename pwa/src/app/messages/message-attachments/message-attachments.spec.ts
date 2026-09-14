@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { ModalController } from '@ionic/angular';
+import { provideRouter, Router } from '@angular/router';
 import { vi } from 'vitest';
 import type { AttachmentResponse, MessageResponse } from '../../../generated/models';
 import { AttachmentUploadPurpose, MessageType } from '../../../generated/models';
@@ -26,6 +26,7 @@ describe('MessageAttachments', () => {
   let resize: (width: number) => void;
   const disconnect = vi.fn();
   beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideRouter([])] });
     disconnect.mockClear();
     vi.stubGlobal(
       'ResizeObserver',
@@ -126,11 +127,10 @@ describe('MessageAttachments', () => {
     expect(fixture.nativeElement.querySelectorAll('time')).toHaveLength(1);
     const more: HTMLButtonElement = fixture.nativeElement.querySelector('.album-more');
     expect(more.textContent?.trim()).toBe('+3');
-    const modal = Object.assign(document.createElement('ion-modal'), { present: vi.fn().mockResolvedValue(undefined) });
-    const create = vi.spyOn(TestBed.inject(ModalController), 'create').mockResolvedValue(modal);
+    const create = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     more.click();
     await fixture.whenStable();
-    const props = create.mock.calls[0][0].componentProps!;
+    const props = create.mock.calls[0][1]!.state!;
     expect(props['media']).toHaveLength(12);
     expect(props['initial']).toBe(8);
     create.mockRestore();
@@ -301,25 +301,21 @@ describe('MessageAttachments', () => {
     const fixture = await render({
       attachments: ['blob:first', 'blob:second'].map((url) => ({ kind: 'image/jpeg', url, fileName: '图片', size: 5 })),
     });
-    const present = vi.fn().mockResolvedValue(undefined);
-    const modal = Object.assign(document.createElement('ion-modal'), { present });
-    const create = vi.spyOn(TestBed.inject(ModalController), 'create').mockResolvedValue(modal);
+    const create = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     const links = fixture.nativeElement.querySelectorAll('.media-frame a') as NodeListOf<HTMLAnchorElement>;
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
     links[1].dispatchEvent(event);
     await fixture.whenStable();
     expect(event.defaultPrevented).toBe(true);
     expect(create).toHaveBeenCalledWith(
+      ['/media'],
       expect.objectContaining({
-        cssClass: 'media-viewer-overlay',
-        animated: false,
-        componentProps: {
+        state: {
           media: [expect.objectContaining({ url: 'blob:first' }), expect.objectContaining({ url: 'blob:second' })],
           initial: 1,
         },
       }),
     );
-    expect(present).toHaveBeenCalledOnce();
     create.mockRestore();
   });
 
@@ -331,14 +327,13 @@ describe('MessageAttachments', () => {
         { ...image, id: encodeId('9007199254741105'), kind: 'application/pdf' },
       ],
     });
-    const modal = Object.assign(document.createElement('ion-modal'), { present: vi.fn().mockResolvedValue(undefined) });
-    const create = vi.spyOn(TestBed.inject(ModalController), 'create').mockResolvedValue(modal);
+    const create = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     fixture.nativeElement.querySelector('.video-open').click();
     await fixture.whenStable();
     expect(create).toHaveBeenCalledWith(
+      ['/media'],
       expect.objectContaining({
-        cssClass: 'media-viewer-overlay',
-        componentProps: {
+        state: {
           media: [
             expect.objectContaining({ kind: MediaKind.Image }),
             expect.objectContaining({ kind: MediaKind.Video }),

@@ -1,4 +1,4 @@
-import { Component, forwardRef, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   IonButton,
@@ -9,6 +9,12 @@ import {
   IonSegment,
   IonSegmentButton,
   IonSpinner,
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonButtons,
+  IonContent,
+  ModalController,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
@@ -17,10 +23,18 @@ import { MessageSearchSort, type MessageResponse, type SnowflakeID } from '../..
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { Message } from '../../messages/message/message';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 @Component({
   selector: 'app-chat-search',
+  host: { class: 'ion-page' },
   templateUrl: './chat-search.html',
   imports: [
+    ContentScrollbars,
+    IonHeader,
+    IonToolbar,
+    IonTitle,
+    IonButtons,
+    IonContent,
     IonInfiniteScroll,
     IonInfiniteScrollContent,
     IonSearchbar,
@@ -29,11 +43,12 @@ import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
     IonLabel,
     IonButton,
     IonSpinner,
-    forwardRef(() => Message),
+    Message,
   ],
 })
 export class ChatSearch {
   readonly chatId = input.required<SnowflakeID>();
+  protected readonly modals = inject(ModalController);
   protected readonly query = signal('');
   protected readonly sort = signal(MessageSearchSort.relevance);
   protected readonly Sort = MessageSearchSort;

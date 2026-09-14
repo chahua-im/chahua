@@ -43,7 +43,11 @@ describe('SavedMessagesPage', () => {
     await TestBed.configureTestingModule({
       imports: [SavedMessagesPage],
       providers: [
-        provideRouter([]),
+        provideRouter([
+          { path: 'chats/saved', children: [] },
+          { path: 'media', children: [], data: { modal: true } },
+          { path: 'chats', children: [] },
+        ]),
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
@@ -105,6 +109,7 @@ describe('SavedMessagesPage', () => {
   it('removes a saved entry by snapshot ID rather than original message ID', async () => {
     await saved();
     const removing = list()['removeSaved'](list()['saved']()[0]);
+    expect(list()['saved']()).toEqual([]);
     http.expectOne('/_api/saved-messages/by-id/500').flush(null);
     await removing;
     expect(list()['saved']()).toEqual([]);
@@ -131,5 +136,43 @@ describe('SavedMessagesPage', () => {
     const request = http.expectOne('/_api/saved-messages?limit=50');
     fixture.destroy();
     expect(request.cancelled).toBe(true);
+  });
+  it('restores an optimistically removed snapshot if deletion fails', async () => {
+    await saved();
+    const item = list()['saved']()[0];
+    const removing = list()['removeSaved'](item);
+    expect(list()['saved']()).toEqual([]);
+    http.expectOne('/_api/saved-messages/by-id/500').flush('failed', { status: 500, statusText: 'Error' });
+    await removing;
+    expect(list()['saved']()).toEqual([item]);
+    expect(list()['removeFailed']()).toBe(true);
+  });
+  it('preserves saved rows beneath media details and releases them when leaving the collection', async () => {
+    await saved();
+    const node = fixture.nativeElement.querySelector('app-message');
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/media');
+    page.ionViewDidLeave();
+    await router.navigateByUrl('/chats/saved');
+    page.ionViewDidEnter();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    http.expectNone('/_api/saved-messages?limit=50');
+    await router.navigateByUrl('/media');
+    page.ionViewDidLeave();
+    await router.navigateByUrl('/chats');
+    expect(fixture.nativeElement.querySelector('app-saved-message-list')).toBeNull();
+  });
+
+  it('offers the saved-message menu for system snapshots without per-row action buttons', async () => {
+    fixture.detectChanges();
+    http
+      .expectOne('/_api/saved-messages?limit=50')
+      .flush({ savedMessages: [{ ...savedSnapshot(), messageType: MessageType.system, message: 'joined the chat' }] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const entry = fixture.nativeElement.querySelector('.system-message') as HTMLElement;
+    entry.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 80 }));
+    expect(list()['menu']()?.item.id).toBe(encodeId('500'));
+    expect(fixture.nativeElement.querySelector('.collection-actions')).toBeNull();
   });
 });

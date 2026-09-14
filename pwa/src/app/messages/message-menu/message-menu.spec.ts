@@ -1,3 +1,5 @@
+import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
+import { of } from 'rxjs';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -74,6 +76,7 @@ describe('MessageMenu', () => {
     await TestBed.configureTestingModule({
       imports: [MessageMenu],
       providers: [
+        { provide: StickersService, useValue: { putFavorite: vi.fn(() => of(undefined)) } },
         { provide: Preferences, useValue: { recentReactions: signal([]), rememberReaction: vi.fn() } },
         provideRouter([]),
         { provide: MessageOutbox, useValue: outbox },
@@ -148,7 +151,7 @@ describe('MessageMenu', () => {
     fixture.componentRef.setInput('canReply', false);
     const { content } = openQueued();
     expect(labels()).toEqual(['编辑', '复制', '撤回']);
-    expect(fixture.nativeElement.querySelector('.reactions')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     expect(fixture.nativeElement.querySelector('.actions button').disabled).toBe(false);
     const preview = fixture.debugElement.query(By.directive(Message)).componentInstance as Message<MessageContent>;
     expect(preview.message()).toBe(content());
@@ -330,7 +333,7 @@ describe('MessageMenu', () => {
     setMessages([{ ...testMessage, messageType: MessageType.sticker }]);
     fixture.detectChanges();
     expect(labels()).toEqual(['回复', '链接', '撤回']);
-    expect(fixture.nativeElement.querySelector('.reactions')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     setMessages([{ ...testMessage, messageType: MessageType.invite }]);
     fixture.detectChanges();
     expect(labels()).toEqual(['回复', '置顶', '撤回']);
@@ -442,5 +445,31 @@ describe('MessageMenu', () => {
     expect(writeText).toHaveBeenCalledWith(testMessage.message);
     await copying;
     expect(menu['notice']()).toBe(MessageNotice.Copied);
+  });
+  it('uses the legacy sticker actions and favorites the sticker instead of saving the message', async () => {
+    admin.set(true);
+    pinned.set(true);
+    const sticker = {
+      id: encodeId('123'),
+      emoji: '🙂',
+      name: '表情',
+      createdAt: testMessage.createdAt,
+      isFavorited: false,
+      media: { id: encodeId('124'), url: '/sticker.png', contentType: 'image/png', width: 100, height: 100, size: 20 },
+    };
+    setMessages([
+      {
+        ...testMessage,
+        messageType: MessageType.sticker,
+        sticker,
+        reactions: [{ emoji: '👍', count: 1, reactedByMe: false }],
+      },
+    ]);
+    fixture.detectChanges();
+    expect(labels()).toEqual(['回复', '收藏表情', '链接', '撤回']);
+    expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
+    await menu['choose'](MessageAction.FavoriteSticker);
+    expect(TestBed.inject(StickersService).putFavorite).toHaveBeenCalledWith(sticker.id);
+    expect(actions.save).not.toHaveBeenCalled();
   });
 });

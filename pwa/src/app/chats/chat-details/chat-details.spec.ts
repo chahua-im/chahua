@@ -392,10 +392,10 @@ describe('ChatDetails', () => {
       ['PUT', 'archive', '已归档', archive],
       ['DELETE', 'archive', '归档', archiveOutline],
     ]) {
-      const previousLabel = buttons()[0].textContent?.trim();
       buttons()[0].click();
       fixture.detectChanges();
-      expect(buttons()[0].querySelector('ion-spinner')).not.toBeNull();
+      expect(buttons()[0].querySelector('ion-spinner')).toBeNull();
+      expect(buttons()[0].textContent?.trim()).toBe(label);
       const write = http.expectOne({
         method,
         url: `/_api/chats/${wireChat.id}/threads/${decodeId(testMessage.id)}/${endpoint}`,
@@ -415,7 +415,7 @@ describe('ChatDetails', () => {
       refresh.flush({ subscribed: true, archived: label === '已归档' });
       await fixture.whenStable();
       write.flush(null);
-      expect(loadingLabel).toBe(previousLabel);
+      expect(loadingLabel).toBe(label);
       await fixture.whenStable();
       fixture.detectChanges();
       expect(buttons().map((button) => button.textContent?.trim())).toEqual([label]);

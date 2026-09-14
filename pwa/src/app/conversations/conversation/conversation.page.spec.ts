@@ -149,8 +149,9 @@ describe('ConversationPage', () => {
       (element) => element.querySelector('ion-icon')?.icon === component['toolbarIcons'].searchOutline,
     );
     expect(button).toBeDefined();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     button.click();
-    expect(component['searchOpen']()).toBe(true);
+    expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'search']);
   });
 
   it('shares mute updates with the list and reflects websocket changes without another detail request', async () => {

@@ -3,7 +3,7 @@ import { IonAvatar, IonIcon } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
 import { GroupKind, type MessagePreview } from '../../../generated/models';
 import type { ChatInfo } from '../chat-store';
-import { AvatarTextPipe } from '../avatar-text.pipe';
+import { AvatarColor, AvatarTextPipe } from '../avatar-text.pipe';
 
 export interface ChatAvatarData {
   title?: string;
@@ -19,7 +19,7 @@ export interface ChatAvatarData {
   selector: 'app-chat-avatar',
   templateUrl: './chat-avatar.html',
   styleUrl: './chat-avatar.scss',
-  imports: [AvatarTextPipe, IonAvatar, IonIcon],
+  imports: [AvatarColor, AvatarTextPipe, IonAvatar, IonIcon],
   host: { '[style.--avatar-size.px]': 'size()' },
 })
 export class ChatAvatar {
