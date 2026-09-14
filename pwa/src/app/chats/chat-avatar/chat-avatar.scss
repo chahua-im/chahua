@@ -17,7 +17,7 @@ ion-avatar {
   font-size: round(var(--avatar-size) / 3, 1px);
 }
 .placeholder {
-  background: var(--ion-color-light);
+  color: var(--ion-color-primary-contrast);
 }
 .icon-avatar {
   background: var(--ion-color-primary);

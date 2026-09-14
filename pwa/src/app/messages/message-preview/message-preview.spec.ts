@@ -67,4 +67,21 @@ describe('MessagePreview', () => {
     expect(render({ isDeleted: true })).toBe('消息已删除');
     expect(fixture.nativeElement.classList.contains('action')).toBe(true);
   });
+  it('keeps attachment types alongside a caption and resolves mentions in the caption', () => {
+    const attachment = { id: testMessage.id, url: '/local-media', size: 1, fileName: '附件' };
+    const text = render({
+      message: '给 @[uid:2] 看看',
+      mentions: [{ uid: 2, username: '小花', gender: 0 }],
+      attachments: [
+        { ...attachment, kind: 'image/jpeg' },
+        { ...attachment, kind: 'image/png' },
+        { ...attachment, kind: 'video/mp4' },
+      ],
+    });
+    expect(text).toContain('[图片]');
+    expect(text).toContain('[视频]');
+    expect(text.match(/\[图片\]/g)).toHaveLength(1);
+    expect(text).toContain('给 @小花 看看');
+    expect(fixture.nativeElement.querySelector('a')).toBeNull();
+  });
 });

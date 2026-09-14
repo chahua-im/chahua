@@ -1,11 +1,12 @@
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { Component, effect, inject, input, signal } from '@angular/core';
-import { IonAvatar, IonSpinner } from '@ionic/angular';
+import { IonSpinner } from '@ionic/angular';
 import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
 import type { InvitePreviewResponse } from '../../../generated/models';
 import { inviteCode, inviteStatus, InviteStatus } from '../../chats/invite';
 @Component({
   selector: 'app-invite-card',
-  imports: [IonAvatar, IonSpinner],
+  imports: [ChatAvatar, IonSpinner],
   templateUrl: './invite-card.html',
   styleUrl: './invite-card.scss',
 })

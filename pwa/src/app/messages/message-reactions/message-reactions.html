@@ -4,7 +4,11 @@
     @if (reaction.reactors?.length) {
       <span class="reactors">
         @for (reactor of reaction.reactors!.slice(0, 5); track reactor.uid; let i = $index) {
-          <span class="reactor" [style.z-index]="5 - i">
+          <span
+            class="reactor"
+            [class.placeholder]="!reactor.avatarUrl"
+            [avatarColor]="reactor.name ?? reactor.uid.toString()"
+            [style.z-index]="5 - i">
             @if (reactor.avatarUrl; as src) {
               <img [src]="src" width="23" height="23" decoding="async" />
             } @else {

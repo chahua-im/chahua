@@ -24,11 +24,10 @@
       @for (group of visible(); track group.emoji) {
         @for (user of group.reactors; track user.uid) {
           <ion-item>
-            <ion-avatar slot="start">
-              @if (user.avatarUrl) {
-                <img [src]="user.avatarUrl" />
-              }
-            </ion-avatar>
+            <app-chat-avatar
+              slot="start"
+              [size]="40"
+              [entry]="{ avatar: user.avatarUrl, title: user.name ?? user.uid.toString() }" />
             <ion-label>{{ user.name || user.uid }}</ion-label>
             <span slot="end">{{ group.emoji }}</span>
           </ion-item>

@@ -1,6 +1,7 @@
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
+import { RouterLink, Router } from '@angular/router';
 import { afterRenderEffect, Component, inject, signal, viewChild } from '@angular/core';
 import {
-  IonAvatar,
   IonButton,
   IonButtons,
   IonContent,
@@ -9,7 +10,6 @@ import {
   IonItem,
   IonLabel,
   IonList,
-  IonNav,
   IonNote,
   IonSpinner,
   IonTitle,
@@ -22,7 +22,6 @@ import type { ToggleCustomEvent } from '@ionic/core';
 import {
   bookmarkOutline,
   notificationsOutline,
-  personCircleOutline,
   refreshOutline,
   settingsOutline,
   shieldCheckmarkOutline,
@@ -31,20 +30,15 @@ import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
-import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
-import { GeneralSettings } from '../general-settings/general-settings';
-
-export enum SettingsDismissRole {
-  Saved = 'saved',
-}
 
 @Component({
   selector: 'app-settings',
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
   imports: [
+    ChatAvatar,
+    RouterLink,
     ContentScrollbars,
-    IonAvatar,
     IonButton,
     IonButtons,
     IonContent,
@@ -65,17 +59,14 @@ export enum SettingsDismissRole {
 export class Settings {
   private readonly modals = inject(ModalController);
   private readonly permissionToast = viewChild.required(IonToast);
-  protected readonly nav = inject(IonNav);
+  private readonly router = inject(Router);
   protected readonly session = inject(SessionStore);
   protected readonly notifications = inject(PushNotifications);
   protected readonly updates = inject(AppUpdates);
-  protected readonly generalPage = GeneralSettings;
-  protected readonly verificationPage = FriendVerificationSettings;
   protected readonly PushError = PushNotificationError;
   protected readonly UpdateResult = UpdateCheckResult;
   protected readonly updateResult = signal<UpdateCheckResult | undefined>(undefined);
   protected readonly bookmarkIcon = bookmarkOutline;
-  protected readonly personIcon = personCircleOutline;
   protected readonly generalIcon = settingsOutline;
   protected readonly verificationIcon = shieldCheckmarkOutline;
   protected readonly notificationIcon = notificationsOutline;
@@ -93,7 +84,7 @@ export class Settings {
   }
 
   protected openSaved() {
-    return this.modals.dismiss(undefined, SettingsDismissRole.Saved);
+    return this.router.navigateByUrl('/chats/saved', { replaceUrl: true });
   }
 
   protected async setNotifications(event: ToggleCustomEvent) {

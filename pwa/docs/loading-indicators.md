@@ -4,18 +4,18 @@
 
 ## 数据加载
 
-| 场景                             | 标识                                                 | 状态归属                                              |
-| -------------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
+| 场景                             | 标识                                                  | 状态归属                                              |
+| -------------------------------- | ----------------------------------------------------- | ----------------------------------------------------- |
 | Angular 挂载前                   | toolbar 色全屏背景，内联 SVG 短线菊花居中；适应深浅色 | 静态 HTML                                             |
 | 登录初始化                       | 空 toolbar 右侧图标按钮尺寸的 spinner，正文留空       | App.loading                                           |
-| 列表首次加载、切换分类、点击重试 | 内容区 spinner                                       | 当前分类查询 loading 汇总与 ChatListContent.ready     |
-| 列表下拉刷新                     | Ionic refresher；不同时显示内容区加载图标            | ChatListContent.refreshing 与查询 loading             |
-| 列表续页                         | Ionic infinite-scroll spinner                        | 查询 loadingMore                                      |
-| 对话首次加载                     | 内容区居中 spinner                                   | ConversationStore.loading                             |
-| 对话历史/后续消息分页            | 顶部/底部固定尺寸菊花控件                            | ConversationStore.pagingDirection                     |
-| 收藏/置顶页面加载                | 内容区 spinner                                       | SavedMessageList.loading / PinnedMessagesPage.loading |
-| 好友验证设置加载                 | 列表内 spinner                                       | FriendVerificationSettings.loading                    |
-| 表情组件代码加载                 | @loading 延迟 100ms 展示 spinner                     | @defer 的加载状态                                     |
+| 列表首次加载、切换分类、点击重试 | 内容区 spinner                                        | 当前分类查询 loading 汇总与 ChatListContent.ready     |
+| 列表下拉刷新                     | Ionic refresher；不同时显示内容区加载图标             | ChatListContent.refreshing 与查询 loading             |
+| 列表续页                         | Ionic infinite-scroll spinner                         | 查询 loadingMore                                      |
+| 对话首次加载                     | 内容区居中 spinner                                    | ConversationStore.loading                             |
+| 对话历史/后续消息分页            | 顶部/底部固定尺寸菊花控件                             | ConversationStore.pagingDirection                     |
+| 收藏/置顶页面加载                | 内容区 spinner                                        | SavedMessageList.loading / PinnedMessagesPage.loading |
+| 好友验证设置加载                 | 列表内 spinner                                        | FriendVerificationSettings.loading                    |
+| 表情组件代码加载                 | @loading 延迟 100ms 展示 spinner                      | @defer 的加载状态                                     |
 
 后台更新检查无加载提示，不阻塞 Angular 或登录。业务页面的新版就绪 toast 不自动消失，提供“立即更新”和“暂不更新”；启动失败或 landing 时按[更新约定](requirements.md#通知静音与设置)自动刷新。
 
@@ -27,22 +27,22 @@
 
 ## 操作反馈
 
-| 操作                             | 反馈位置           | 等待行为                                                                                                                                               |
-| -------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 接受/拒绝/归档好友请求           | 被点击的按钮       | 按钮显示 spinner，同条请求的其他操作禁用                                                                                                               |
-| 列表滑动操作                     | 列表项右侧         | 收起滑动菜单后显示 spinner，pendingAction 标识当前操作                                                                                                 |
-| 点击置顶预览                     | 置顶栏预览右侧     | 等待消息定位；预览和消息列表保持原位                                                                                                                   |
-| 点击引用                         | 引用区域           | 原内容保留尺寸，spinner 叠放，跳转按钮暂时禁用                                                                                                         |
-| 回到最新消息                     | 底部按钮           | 按钮节点常驻，等待导航时显示 spinner                                                                                                                   |
-| 菜单中的收藏/撤回/置顶/表态/复制 | 当前页面 toolbar   | Menu.busy 为真；菜单关闭，操作完成后由菜单显示 Toast                                                                                                   |
-| 取消收藏                         | 对应收藏的取消按钮 | removingSavedId 标识当前行，其他取消按钮禁用；失败由收藏列表提示                                                                                       |
-| 话题订阅/归档                    | 话题 toolbar 按钮  | threadBusy 为真时显示 spinner 并禁用重复操作                                                                                                           |
-| 保存好友验证设置                 | 保存按钮           | 保留文案占位，spinner 叠放；表单暂时禁用                                                                                                               |
-| 首次允许通知                     | alert 的允许按钮   | 文案保留占位、spinner 叠放；授权期间阻止重复操作，失败 toast 后可重试                                                                                  |
-| 通知订阅                         | 通知设置行右侧     | PushNotifications.busy 仅用于用户主动授权或开关；spinner 替换 toggle，权限拒绝使用 toast；后台订阅同步无 spinner、失败静默，开关同步显示本机意图与权限 |
-| 检查更新                         | 检查更新行右侧     | AppUpdates.checking 时 spinner 替换右侧版本、结果或更新按钮，左侧图标保留；结果在设置页展示                                                            |
-| 发送消息                         | 消息时间之后       | 立即上屏；上传 cloud-upload-outline，排队／发送 time-outline，确认 checkmark-outline，失败 alert-circle-outline；失败原位重试                          |
-| 附件上传                         | 附件自身           | 本地图片、视频、语音或文件显示 UploadProgress 圆形进度环，不配百分比文字；上传未完成也可发送                                                                                       |
+| 操作                             | 反馈位置          | 等待行为                                                                                                                                               |
+| -------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 接受/拒绝/归档好友请求           | 被点击的按钮      | 按钮显示 spinner，同条请求的其他操作禁用                                                                                                               |
+| 列表滑动操作                     | 列表项右侧        | 收起滑动菜单后显示 spinner，pendingAction 标识当前操作                                                                                                 |
+| 点击置顶预览                     | 置顶栏预览右侧    | 等待消息定位；预览和消息列表保持原位                                                                                                                   |
+| 点击引用                         | 引用区域          | 原内容保留尺寸，spinner 叠放，跳转按钮暂时禁用                                                                                                         |
+| 回到最新消息                     | 底部按钮          | 按钮节点常驻，等待导航时显示 spinner                                                                                                                   |
+| 菜单中的收藏/撤回/置顶/表态/复制 | 当前页面 toolbar  | Menu.busy 为真；菜单关闭，操作完成后由菜单显示 Toast                                                                                                   |
+| 取消收藏                         | 收藏快照列表      | 立即移除快照；removing 防止重复取消，失败恢复原位置并由收藏列表提示                                                                                    |
+| 话题订阅/归档                    | 话题 toolbar 按钮 | 立即显示新订阅／归档图标并禁用重复操作，失败回退                                                                                                       |
+| 保存好友验证设置                 | 保存按钮          | 保留文案占位，spinner 叠放；表单暂时禁用                                                                                                               |
+| 首次允许通知                     | alert 的允许按钮  | 文案保留占位、spinner 叠放；授权期间阻止重复操作，失败 toast 后可重试                                                                                  |
+| 通知订阅                         | 通知设置行右侧    | PushNotifications.busy 仅用于用户主动授权或开关；spinner 替换 toggle，权限拒绝使用 toast；后台订阅同步无 spinner、失败静默，开关同步显示本机意图与权限 |
+| 检查更新                         | 检查更新行右侧    | AppUpdates.checking 时 spinner 替换右侧版本、结果或更新按钮，左侧图标保留；结果在设置页展示                                                            |
+| 发送消息                         | 消息时间之后      | 立即上屏；上传 cloud-upload-outline，排队／发送 time-outline，确认 checkmark-outline，失败 alert-circle-outline；失败原位重试                          |
+| 附件上传                         | 附件自身          | 本地图片、视频、语音或文件显示 UploadProgress 圆形进度环，不配百分比文字；上传未完成也可发送                                                           |
 
 图标切换为 spinner 时，两者使用相同宽高；Ionic 纯图标按钮在两种状态下都保留 `icon-only` 槽位，避免按钮尺寸变化。`.action-icon` spinner 使用主题正文色，不继承图标按钮的蓝色。
 
@@ -52,7 +52,7 @@
 
 输入区不因消息读取、发送或编辑请求进入忙碌状态。编辑保存后在原消息上显示队列状态，失败原位重试；尚未发出的消息编辑直接更新该行。撤回立即隐藏消息，网络请求由队列继续处理。录音能力不足时显示 mic-off-outline，点击展示 Ionic alert，不使用禁用按钮。
 
-静音时长菜单等待用户选择；确认后由原列表项或会话标题栏按钮保持操作反馈，取消菜单不发送请求。静音到期只更新标记和计数，不显示全屏 loading。通知横幅不改变页面加载状态，点击后复用会话页面已有的消息定位反馈。
+静音时长菜单等待用户选择；确认后立即更新静音标记，会话标题栏保留新图标并禁用重复点击；失败回退，取消菜单不发送请求。静音到期只更新标记和计数，不显示全屏 loading。通知横幅不改变页面加载状态，点击后复用会话页面已有的消息定位反馈。
 
 资料的成员、话题、媒体与聊天搜索使用 IonInfiniteScroll，加载标识与 ChatList 一致，不提供可点击的加载控件。有下一页时保留 Ionic 默认 84px 加载区域与 spinner 节点，空闲时仅隐藏 spinner；末页或出错时收起加载区域。首次读取和自动补页使用局部 spinner；触底时只显示 Ionic 的 spinner，不同时显示局部 spinner。续页请求结束后调用 complete；错误重试重新挂载控件，不沿用失败前的触底状态。成员、媒体和聊天搜索不足一屏时继续补页；话题只在触底时续页，不自动扫描普通消息填满侧栏。Connection.connected 为假时，聊天列表加号按钮用 spinner 替换图标，点击仍打开原菜单；会话 toolbar 单独显示 spinner。
 

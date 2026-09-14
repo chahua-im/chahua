@@ -296,9 +296,10 @@ describe('Message', () => {
     );
     fixture.componentRef.setInput('preview', true);
     fixture.detectChanges();
-    expect(element.querySelector('.bubble .sender')).not.toBeNull();
+    expect(element.querySelector('.bubble')).toBeNull();
+    expect(element.querySelector('.sender')).toBeNull();
     expect(element.querySelector('.avatar')).not.toBeNull();
-    expect(element.querySelector('.sticker-content')).toBeNull();
+    expect(element.querySelector('.sticker-content .media-time')).not.toBeNull();
   });
 
   it('opens the message menu with the measured bubble and click position', async () => {

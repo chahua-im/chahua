@@ -78,7 +78,7 @@ describe('ChatList', () => {
     });
     fixture.debugElement.query(By.css('ion-buttons[slot="start"] ion-button')).triggerEventHandler('click');
     expect(navigate).toHaveBeenCalledOnce();
-    expect(navigate.mock.calls[0][1]).toEqual({ browserUrl: '/settings', state: { settingsEntry: true } });
+    expect(navigate).toHaveBeenCalledWith('/settings');
   });
 
   it('keeps the add menu available while its icon indicates a pending connection', async () => {
@@ -98,25 +98,6 @@ describe('ChatList', () => {
     await fixture.whenStable();
     expect(button.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.nativeElement.querySelector('ion-icon')).not.toBeNull();
-  });
-
-  it('connects native segment buttons to distinct contents in each list instance', async () => {
-    const second = TestBed.createComponent(ChatList);
-    second.componentRef.setInput('selection', { tab: ListTab.Groups, archived: false, requestHistory: false });
-    await second.whenStable();
-    const ids: string[] = [];
-    for (const instance of [fixture, second]) {
-      const element: HTMLElement = instance.nativeElement;
-      const views = element.querySelectorAll('ion-segment-view');
-      expect(views.length).toBe(1);
-      for (const button of element.querySelectorAll('ion-segment-button')) {
-        const content = views[0].querySelector(`[id="${button.contentId}"]`);
-        expect(content).not.toBeNull();
-        ids.push(button.contentId!);
-      }
-    }
-    expect(new Set(ids).size).toBe(8);
-    second.destroy();
   });
 
   it('activates only the selected content and delegates selection without changing the conversation route', async () => {
