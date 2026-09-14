@@ -22,7 +22,7 @@
       } @else {
         <ion-buttons slot="start">
           <ion-button (click)="openSettings()">
-            <ion-avatar [avatarColor]="session.user()?.username ?? ''">
+            <ion-avatar [avatarColor]="session.user()?.avatarUrl ? null : (session.user()?.username ?? '')">
               @if (session.user()?.avatarUrl; as src) {
                 <img [src]="src" width="26" height="26" decoding="async" />
               } @else {

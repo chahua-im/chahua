@@ -35,6 +35,7 @@ enum SystemMessageKind {
     }
     a {
       color: var(--ion-color-primary);
+      text-decoration: none;
     }
   `,
 })
