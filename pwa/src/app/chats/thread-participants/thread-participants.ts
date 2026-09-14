@@ -1,20 +1,20 @@
+import { ChatAvatar } from '../chat-avatar/chat-avatar';
+import { RouterLink } from '@angular/router';
 import { Component, computed, inject, input } from '@angular/core';
-import { IonAvatar, IonItem, IonLabel, IonList, ModalController } from '@ionic/angular';
-import type { MessagePreview, MessageResponse, SnowflakeID, User } from '../../../generated/models';
+import { IonItem, IonLabel, IonList } from '@ionic/angular';
+import type { MessagePreview, MessageResponse, SnowflakeID } from '../../../generated/models';
 import { ChatStore } from '../chat-store';
-import { ChatDetails } from '../chat-details/chat-details';
 
 @Component({
   selector: 'app-thread-participants',
   templateUrl: './thread-participants.html',
-  imports: [IonAvatar, IonItem, IonLabel, IonList],
+  imports: [RouterLink, ChatAvatar, IonItem, IonLabel, IonList],
 })
 export class ThreadParticipants {
   readonly rootId = input.required<SnowflakeID>();
   readonly root = input<MessageResponse | MessagePreview>();
   readonly messages = input<readonly MessageResponse[]>([]);
   private readonly store = inject(ChatStore);
-  private readonly modals = inject(ModalController);
   private readonly cached = computed(() => this.store.thread(this.rootId())?.participants);
   protected readonly complete = computed(() => !!this.cached());
   protected readonly participants = computed(() => {
@@ -26,12 +26,4 @@ export class ThreadParticipants {
     }
     return [...users.values()];
   });
-
-  protected async profile(user: User) {
-    const modal = await this.modals.create({
-      component: ChatDetails,
-      componentProps: { user: { ...user, username: user.name } },
-    });
-    await modal.present();
-  }
 }

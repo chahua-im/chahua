@@ -1,9 +1,10 @@
 <ion-list>
   @for (member of members(); track member.uid) {
-    <ion-item [button]="true" [detail]="false" (click)="profile(member)">
-      @if (member.avatarUrl) {
-        <ion-avatar slot="start"><img [src]="member.avatarUrl" /></ion-avatar>
-      }
+    <ion-item [button]="true" [detail]="false" [routerLink]="['/profile', member.uid]">
+      <app-chat-avatar
+        slot="start"
+        [size]="40"
+        [entry]="{ avatar: member.avatarUrl, title: member.username ?? member.uid.toString() }" />
       <ion-label>{{ member.username || member.uid }}</ion-label>
       @if (member.role === Role.admin) {
         <ion-note slot="end">管理员</ion-note>

@@ -1,8 +1,9 @@
+import { GeneralSettings } from '../general-settings/general-settings';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ChangeDetectorRef, Component, getDebugNode, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { IonNav, ModalController, provideIonicAngular } from '@ionic/angular';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -14,7 +15,7 @@ import { PushNotificationError, PushNotifications } from '../../pwa/push-notific
 import { SessionStore } from '../../session/session-store';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
 import { Preferences } from '../preferences';
-import { Settings, SettingsDismissRole } from './settings';
+import { Settings } from './settings';
 
 @Component({ imports: [IonNav], template: '<ion-nav [root]="root"></ion-nav>' })
 class SettingsHost {
@@ -105,23 +106,20 @@ describe('Settings', () => {
     fixture.detectChanges();
   }
 
-  async function followLink(button: HTMLElement) {
-    const previous = page;
-    button.click();
-    await vi.waitFor(async () => {
-      const active = (await nav.getActive())!.element!;
-      expect(active).not.toBe(previous);
-      page = active;
-    });
-  }
-
   async function openPage(label: string) {
     const item = Array.from(page.querySelectorAll('ion-item')).find((entry) => entry.textContent?.trim() === label)!;
-    await followLink(item);
+    expect(item.getAttribute('href')).toBe(label === '通用' ? '/settings/general' : '/settings/friend-verification');
+    await nav.push(label === '通用' ? GeneralSettings : FriendVerificationSettings);
+    page = (await nav.getActive())!.element!;
+    await fixture.whenStable();
   }
 
   async function back() {
-    await followLink(page.querySelector('ion-nav-link ion-button')!);
+    page.querySelector<HTMLElement>('ion-buttons[slot="start"] ion-button')!.click();
+    expect(dismiss).toHaveBeenCalledOnce();
+    dismiss.mockClear();
+    await nav.pop();
+    page = (await nav.getActive())!.element!;
   }
 
   function friendPage() {
@@ -162,7 +160,7 @@ describe('Settings', () => {
     http.expectNone(endpoint);
   });
 
-  it('opens general settings, persists preferences and returns within the same modal', async () => {
+  it('links to general settings and persists preferences across page visits', async () => {
     await openPage('通用');
     expect(page.querySelector('ion-title')!.textContent).toBe('通用');
     const toggles = Array.from(page.querySelectorAll('ion-toggle'));
@@ -259,9 +257,10 @@ describe('Settings', () => {
     expect(page.textContent).toContain('已保存');
   });
 
-  it('requests saved-message navigation through the modal dismissal', async () => {
+  it('replaces the settings page with saved messages', async () => {
+    vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     await homePage()['openSaved']();
-    expect(dismiss).toHaveBeenCalledWith(undefined, SettingsDismissRole.Saved);
+    expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/chats/saved', { replaceUrl: true });
   });
 
   it('refreshes notification status without requesting permission and rolls back a denied toggle', async () => {

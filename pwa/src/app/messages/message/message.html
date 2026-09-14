@@ -1,6 +1,12 @@
 @if (!message().isDeleted) {
   @if (message().messageType === system) {
-    <p class="system-message"><app-message-preview [message]="message()"></app-message-preview></p>
+    <p
+      #systemMessage
+      class="system-message"
+      (contextmenu)="showMenu($event, systemMessage)"
+      (pointerdown)="startPress($event, systemMessage)">
+      <app-message-preview [message]="message()"></app-message-preview>
+    </p>
   } @else {
     <div
       class="chat-row"
@@ -38,7 +44,11 @@
       }
       <span class="avatar-slot">
         @if (showAvatar()) {
-          <ion-avatar (click)="profile()" class="avatar" [class.placeholder]="!message().sender.avatarUrl">
+          <ion-avatar
+            (click)="profile()"
+            class="avatar"
+            [style.visibility]="stickyAvatar() ? 'hidden' : null"
+            [class.placeholder]="!message().sender.avatarUrl">
             @if (message().sender.avatarUrl; as src) {
               <img [src]="src" width="34" height="34" decoding="async" />
             } @else {
@@ -49,13 +59,13 @@
       </span>
       <div
         #bubble
-        [class]="isSticker() && !preview() ? 'sticker-content' : 'bubble'"
+        [class]="isSticker() ? 'sticker-content' : 'bubble'"
         [class.media-only]="mediaOverlay()"
         [class.has-thread]="!!threadInfo()"
         [attr.inert]="preview() ? '' : null"
         (contextmenu)="showMenu($event, bubble)"
         (pointerdown)="startPress($event, bubble)">
-        @if (first() && (!isSticker() || preview())) {
+        @if (first() && !isSticker()) {
           <app-message-author class="sender" [sender]="message().sender" [own]="own()"></app-message-author>
         }
         @if (quoted(); as quote) {

@@ -1,6 +1,6 @@
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import {
-  IonAvatar,
   IonButton,
   IonButtons,
   IonContent,
@@ -23,6 +23,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 @Component({
   selector: 'app-reaction-details',
   imports: [
+    ChatAvatar,
     ContentScrollbars,
     IonHeader,
     IonToolbar,
@@ -35,7 +36,6 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
     IonLabel,
     IonList,
     IonItem,
-    IonAvatar,
     IonSpinner,
   ],
   host: { class: 'ion-page' },

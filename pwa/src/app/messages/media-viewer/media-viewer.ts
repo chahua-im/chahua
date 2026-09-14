@@ -1,3 +1,4 @@
+import { Router } from '@angular/router';
 import {
   afterRenderEffect,
   Component,
@@ -194,12 +195,7 @@ export class MediaViewer {
   }
 }
 
-export async function openMediaViewer(modals: ModalController, media: readonly ViewerMedia[], initial: number) {
-  const overlay = await modals.create({
-    component: MediaViewer,
-    componentProps: { media, initial: Math.max(0, initial) },
-    cssClass: 'media-viewer-overlay',
-    animated: false,
-  });
-  await overlay.present();
+export function openMediaViewer(router: Router, media: readonly ViewerMedia[], initial: number) {
+  // History state keeps the whole album available on Back/Forward and reload without putting signed file URLs in the address.
+  return router.navigate(['/media'], { state: { media, initial: Math.max(0, initial) } });
 }

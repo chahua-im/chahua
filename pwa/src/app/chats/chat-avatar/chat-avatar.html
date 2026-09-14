@@ -1,4 +1,7 @@
-<ion-avatar [class.placeholder]="!entry().avatar" [class.icon-avatar]="!!entry().icon">
+<ion-avatar
+  [class.placeholder]="!entry().avatar"
+  [class.icon-avatar]="!!entry().icon"
+  [avatarColor]="entry().icon ? null : (entry().avatarName ?? entry().title ?? '')">
   @if (entry().icon; as icon) {
     <ion-icon [icon]="icon"></ion-icon>
   } @else if (entry().avatar; as src) {
@@ -8,7 +11,11 @@
   }
 </ion-avatar>
 @if (entry().badgeIcon || entry().badgeAvatar || entry().badgeName) {
-  <ion-avatar class="avatar-badge" [class.placeholder]="!entry().badgeAvatar" [class.icon-avatar]="!!entry().badgeIcon">
+  <ion-avatar
+    class="avatar-badge"
+    [class.placeholder]="!entry().badgeAvatar"
+    [class.icon-avatar]="!!entry().badgeIcon"
+    [avatarColor]="entry().badgeIcon ? null : (entry().badgeName ?? '')">
     @if (entry().badgeIcon; as icon) {
       <ion-icon [icon]="icon"></ion-icon>
     } @else if (entry().badgeAvatar; as src) {

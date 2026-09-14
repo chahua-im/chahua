@@ -1,12 +1,10 @@
 <ion-header>
   <ion-toolbar>
     <ion-buttons slot="start">
-      <ion-nav-link routerDirection="back">
-        <ion-button>
-          <ion-icon slot="start" [icon]="backIcon"></ion-icon>
-          返回
-        </ion-button>
-      </ion-nav-link>
+      <ion-button (click)="modals.dismiss()">
+        <ion-icon slot="start" [icon]="backIcon"></ion-icon>
+        返回
+      </ion-button>
     </ion-buttons>
     <ion-title>通用</ion-title>
     <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>

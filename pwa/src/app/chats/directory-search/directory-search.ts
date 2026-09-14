@@ -1,16 +1,8 @@
+import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import {
-  IonAvatar,
-  IonButton,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonListHeader,
-  IonSpinner,
-  ModalController,
-} from '@ionic/angular';
+import { IonButton, IonItem, IonLabel, IonList, IonListHeader, IonSpinner } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
 import { UsersService } from '../../../generated/endpoints/users/users.service';
@@ -22,11 +14,10 @@ import {
   type SnowflakeID,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
-import { ChatDetails } from '../chat-details/chat-details';
 @Component({
   selector: 'app-directory-search',
   templateUrl: './directory-search.html',
-  imports: [IonItem, IonList, IonLabel, IonAvatar, IonButton, IonSpinner, IonListHeader],
+  imports: [ChatAvatar, IonItem, IonList, IonLabel, IonButton, IonSpinner, IonListHeader],
 })
 export class DirectorySearch {
   readonly query = input('');
@@ -36,7 +27,6 @@ export class DirectorySearch {
   private readonly api = inject(GroupsService);
   private readonly users = inject(UsersService);
   private readonly router = inject(Router);
-  private readonly modals = inject(ModalController);
   private readonly destroy = inject(DestroyRef);
   protected readonly groups = signal<GroupSelectorItem[]>([]);
   protected readonly people = signal<MemberSummary[]>([]);
@@ -101,7 +91,6 @@ export class DirectorySearch {
       this.selected.emit(user);
       return;
     }
-    const modal = await this.modals.create({ component: ChatDetails, componentProps: { user } });
-    await modal.present();
+    await this.router.navigate(['/profile', user.uid]);
   }
 }

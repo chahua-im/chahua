@@ -338,3 +338,12 @@ ion-alert.notification-prompt {
     visibility: hidden;
   }
 }
+
+.avatar-placeholder {
+  --avatar-background: var(--avatar-light);
+}
+@media (prefers-color-scheme: dark) {
+  .avatar-placeholder {
+    --avatar-background: var(--avatar-dark);
+  }
+}

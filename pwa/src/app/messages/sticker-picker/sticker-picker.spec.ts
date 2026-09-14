@@ -232,7 +232,7 @@ describe('StickerPicker selection during requests', () => {
     expect(fixture.nativeElement.querySelector('ion-spinner')).not.toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
-    expect(selected).toHaveBeenCalledExactlyOnceWith(item);
+    expect(selected).toHaveBeenCalledExactlyOnceWith({ ...item, isFavorited: !isFavorited });
     response.next(undefined);
     await favorite;
     fixture.detectChanges();
@@ -319,5 +319,34 @@ describe('StickerPicker selection during requests', () => {
     expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
     response.next(undefined);
     await favorite;
+  });
+  it('restores a favorite immediately after a failed optimistic removal', async () => {
+    const item = { ...sticker, isFavorited: true };
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: [item] }));
+    const { fixture } = await render();
+    const response = new Subject<undefined>();
+    api.deleteFavorite.mockReturnValueOnce(response);
+    const picker = fixture.componentInstance;
+    const operation = picker['favorite'](item);
+    expect(picker['stickers']()[0].isFavorited).toBe(false);
+    response.error(new Error('offline'));
+    await operation;
+    expect(picker['stickers']()[0]).toEqual(item);
+    expect(picker['error']()).toBe(true);
+  });
+
+  it('restores a pack subscription after a failed optimistic change', async () => {
+    const { fixture } = await render(false);
+    const picker = fixture.componentInstance;
+    await picker['openPack'](pack.id);
+    const previous = picker['pack']()!;
+    const response = new Subject<undefined>();
+    (previous.isSubscribed ? api.deleteSubscription : api.putSubscription).mockReturnValueOnce(response);
+    const operation = picker['subscribe']();
+    expect(picker['pack']()?.isSubscribed).toBe(!previous.isSubscribed);
+    response.error(new Error('offline'));
+    await operation;
+    expect(picker['pack']()).toEqual(previous);
+    expect(picker['error']()).toBe(true);
   });
 });

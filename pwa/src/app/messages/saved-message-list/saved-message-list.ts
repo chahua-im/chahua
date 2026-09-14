@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   IonButton,
@@ -7,6 +7,9 @@ import {
   IonInfiniteScrollContent,
   IonSpinner,
   IonToast,
+  IonPopover,
+  IonList,
+  IonItem,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
@@ -17,14 +20,25 @@ import type { SnowflakeID } from '../../api/snowflake-id';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { SessionStore } from '../../session/session-store';
-import { Message } from '../message/message';
+import { Message, type MessageMenuSelection } from '../message/message';
 import { savedMessageContent } from './saved-message-content';
 
 @Component({
   selector: 'app-saved-message-list',
   templateUrl: './saved-message-list.html',
   styleUrl: './saved-message-list.scss',
-  imports: [DatePipe, IonButton, IonInfiniteScroll, IonInfiniteScrollContent, IonSpinner, IonToast, Message],
+  imports: [
+    DatePipe,
+    IonButton,
+    IonInfiniteScroll,
+    IonInfiniteScrollContent,
+    IonSpinner,
+    IonToast,
+    IonPopover,
+    IonList,
+    IonItem,
+    Message,
+  ],
 })
 export class SavedMessageList {
   protected readonly session = inject(SessionStore);
@@ -40,13 +54,17 @@ export class SavedMessageList {
   protected readonly nextCursor = signal<SnowflakeID | undefined>(undefined);
   protected readonly loading = signal(false);
   protected readonly failed = signal(false);
-  protected readonly removingSavedId = signal<SnowflakeID | undefined>(undefined);
+  protected readonly removing = signal(false);
   protected readonly removeFailed = signal(false);
+  protected readonly menu = signal<{ item: SavedMessageResponse; event: MouseEvent } | undefined>(undefined);
+
+  protected openMenu(item: SavedMessageResponse, selection: MessageMenuSelection) {
+    const point = selection.point ?? { x: selection.rect.x + selection.rect.width / 2, y: selection.rect.y };
+    this.menu.set({ item, event: new MouseEvent('contextmenu', { clientX: point.x, clientY: point.y }) });
+  }
   constructor() {
     fillScrollViewport(this.loading, this.failed, this.nextCursor, () => this.load(true));
-    effect(() => {
-      untracked(() => this.reset());
-    });
+    this.reset();
 
     inject(Connection)
       .resync$.pipe(takeUntilDestroyed())
@@ -55,11 +73,12 @@ export class SavedMessageList {
   }
   private reset() {
     this.version++;
+    this.menu.set(undefined);
     this.cancelReads.next();
     this.saved.set([]);
     this.nextCursor.set(undefined);
     this.loading.set(false);
-    this.removingSavedId.set(undefined);
+    this.removing.set(false);
     this.failed.set(false);
     this.removeFailed.set(false);
     void this.load();
@@ -95,20 +114,26 @@ export class SavedMessageList {
   }
   protected async locateSaved(saved: SavedMessageResponse) {
     if (!saved.canLocateContext) return;
+    this.menu.set(undefined);
     await this.navigation.open(saved.originalChatId, saved.originalThreadRootId, saved.originalMessageId);
   }
   protected async removeSaved(saved: SavedMessageResponse) {
-    if (this.removingSavedId()) return;
+    if (this.removing()) return;
     const version = this.version;
-    this.removingSavedId.set(saved.id);
+    const index = this.saved().findIndex((item) => item.id === saved.id);
+    this.menu.set(undefined);
+    this.saved.update((items) => items.filter((item) => item.id !== saved.id));
+    this.removing.set(true);
     this.removeFailed.set(false);
     try {
       await firstValueFrom(this.savedApi.deleteSavedMessageById(saved.id).pipe(takeUntilDestroyed(this.destroyRef)));
-      if (version === this.version) this.saved.update((items) => items.filter((item) => item.id !== saved.id));
     } catch {
-      if (version === this.version) this.removeFailed.set(true);
+      if (version === this.version) {
+        this.saved.update((items) => [...items.slice(0, index), saved, ...items.slice(index)]);
+        this.removeFailed.set(true);
+      }
     } finally {
-      if (version === this.version) this.removingSavedId.set(undefined);
+      if (version === this.version) this.removing.set(false);
     }
   }
 }

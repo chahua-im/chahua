@@ -1,7 +1,8 @@
+import { ChatAvatar } from '../chat-avatar/chat-avatar';
+import { RouterLink } from '@angular/router';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  IonAvatar,
   IonButton,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
@@ -10,25 +11,24 @@ import {
   IonList,
   IonNote,
   IonSpinner,
-  ModalController,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
 import { GroupRole, type MemberResponse, type SnowflakeID } from '../../../generated/models';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
-import { ChatDetails } from '../chat-details/chat-details';
 @Component({
   selector: 'app-chat-members',
   templateUrl: './chat-members.html',
   imports: [
+    RouterLink,
+    ChatAvatar,
     IonInfiniteScroll,
     IonInfiniteScrollContent,
     IonNote,
     IonList,
     IonItem,
     IonLabel,
-    IonAvatar,
     IonButton,
     IonSpinner,
   ],
@@ -37,7 +37,6 @@ export class ChatMembers {
   readonly chatId = input.required<SnowflakeID>();
   protected readonly Role = GroupRole;
   private readonly api = inject(MembersService);
-  private readonly modals = inject(ModalController);
   private readonly destroy = inject(DestroyRef);
   private version = 0;
   protected readonly members = signal<MemberResponse[]>([]);
@@ -84,9 +83,5 @@ export class ChatMembers {
     } finally {
       if (version === this.version) this.loading.set(false);
     }
-  }
-  protected async profile(user: MemberResponse) {
-    const modal = await this.modals.create({ component: ChatDetails, componentProps: { user } });
-    await modal.present();
   }
 }

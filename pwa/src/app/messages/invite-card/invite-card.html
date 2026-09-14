@@ -1,8 +1,6 @@
-<ion-avatar>
-  @if (preview()?.chat?.avatar) {
-    <img [src]="preview()?.chat?.avatar" />
-  }
-</ion-avatar>
+<app-chat-avatar
+  [size]="44"
+  [entry]="{ avatar: preview()?.chat?.avatar, title: preview()?.chat?.name ?? '群组邀请' }" />
 <div>
   <strong>{{ preview()?.chat?.name || '群组邀请' }}</strong>
   <small>

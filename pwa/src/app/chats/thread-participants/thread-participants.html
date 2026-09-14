@@ -3,10 +3,11 @@
 }
 <ion-list>
   @for (user of participants(); track user.uid) {
-    <ion-item [button]="true" [detail]="false" (click)="profile(user)">
-      @if (user.avatarUrl) {
-        <ion-avatar slot="start"><img [src]="user.avatarUrl" /></ion-avatar>
-      }
+    <ion-item [button]="true" [detail]="false" [routerLink]="['/profile', user.uid]">
+      <app-chat-avatar
+        slot="start"
+        [size]="40"
+        [entry]="{ avatar: user.avatarUrl, title: user.name ?? user.uid.toString() }" />
       <ion-label>{{ user.name || user.uid }}</ion-label>
     </ion-item>
   } @empty {

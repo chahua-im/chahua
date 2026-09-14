@@ -4,7 +4,7 @@
     <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
   </ion-button>
   @if (view() !== View.Info) {
-    <ion-button fill="clear" (click)="view.set(View.Info)">返回</ion-button>
+    <ion-button fill="clear" (click)="modals.dismiss()">返回</ion-button>
   }
   @switch (view()) {
     @case (View.Invites) {
@@ -135,25 +135,17 @@
               @let status = cachedSubscription();
               <ion-button fill="solid" [disabled]="busy() || !subscription()" (click)="updateThread()">
                 <span>
-                  @if (pending() === Action.Thread) {
-                    <ion-spinner />
-                  } @else {
-                    <ion-icon
-                      [icon]="
-                        !status?.subscribed
-                          ? icons.starOutline
-                          : status?.archived
-                            ? icons.archive
-                            : icons.archiveOutline
-                      " />
-                  }
+                  <ion-icon
+                    [icon]="
+                      !status?.subscribed ? icons.starOutline : status?.archived ? icons.archive : icons.archiveOutline
+                    " />
                   {{ !status?.subscribed ? '订阅' : status?.archived ? '已归档' : '归档' }}
                 </span>
               </ion-button>
             }
           }
           @if (canManage()) {
-            <ion-button fill="solid" (click)="view.set(View.Invites)">
+            <ion-button fill="solid" (click)="invites()">
               <span>
                 <ion-icon [icon]="icons.linkOutline" />
                 邀请

@@ -57,6 +57,9 @@ button.reaction {
 }
 
 .reactor {
+  &.placeholder {
+    color: var(--ion-color-primary-contrast);
+  }
   display: grid;
   place-items: center;
   position: relative;

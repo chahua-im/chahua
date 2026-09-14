@@ -1,10 +1,10 @@
+import { decodeId } from '../../api/snowflake-id';
 import {
   afterNextRender,
   Component,
   computed,
   DestroyRef,
   effect,
-  forwardRef,
   inject,
   Injector,
   input,
@@ -97,7 +97,7 @@ enum InfoTab {
 }
 type ContentTab = ChatAttachmentKindFilter | InfoTab;
 
-enum DetailView {
+export enum DetailView {
   Info,
   Invites,
 }
@@ -119,17 +119,19 @@ enum DetailView {
     IonSegmentButton,
     ChatAvatar,
     UploadProgress,
-    forwardRef(() => MessagePreview),
-    forwardRef(() => ChatMembers),
-    forwardRef(() => ThreadParticipants),
-    forwardRef(() => ChatThreads),
-    forwardRef(() => ChatInvites),
+    MessagePreview,
+    ChatMembers,
+    ThreadParticipants,
+    ChatThreads,
+    ChatInvites,
     ChatAttachments,
   ],
   host: { class: 'ion-page' },
 })
 export class ChatDetails {
   readonly chatId = input<SnowflakeID>();
+  readonly modal = input(false);
+  readonly view = input(DetailView.Info);
   readonly user = input<MemberSummary>();
   readonly currentConversation = input(false);
   readonly threadId = input<SnowflakeID>();
@@ -198,7 +200,6 @@ export class ChatDetails {
   protected readonly canManage = computed(
     () => !this.threadId() && this.chat()?.kind === GroupKind.group && this.chat()?.myRole === GroupRole.admin,
   );
-  protected readonly view = linkedSignal({ source: this.scope, computation: () => DetailView.Info });
   protected readonly InfoTab = InfoTab;
   protected readonly AttachmentKind = ChatAttachmentKindFilter;
   protected readonly tab = linkedSignal<ContentTab>(() => {
@@ -404,9 +405,13 @@ export class ChatDetails {
       }
     }
   }
+  protected invites() {
+    return this.router.navigate(['/chats/chat', decodeId(this.id()!), 'invites']);
+  }
+
   protected close() {
     this.closed.emit();
-    if (this.user()) void this.modals.dismiss();
+    if (this.user() || this.modal()) void this.modals.dismiss();
   }
   protected messageUser() {
     const id = this.id();

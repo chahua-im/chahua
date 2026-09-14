@@ -1,5 +1,16 @@
-import { Component, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
-import { Router } from '@angular/router';
+import {
+  afterRenderEffect,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  input,
+  output,
+  signal,
+  viewChildren,
+} from '@angular/core';
+import { Router, RouterLink } from '@angular/router';
 import {
   IonAvatar,
   IonBadge,
@@ -17,12 +28,9 @@ import {
   IonSearchbar,
   IonSegment,
   IonSegmentButton,
-  IonSegmentContent,
-  IonSegmentView,
   IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
   type SegmentCustomEvent,
 } from '@ionic/angular';
 import { addCircleOutline } from 'ionicons/icons';
@@ -32,13 +40,10 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { ChatListStore } from '../chat-list-store';
 import { Preferences } from '../../settings/preferences';
-import { AvatarTextPipe } from '../avatar-text.pipe';
+import { AvatarColor, AvatarTextPipe } from '../avatar-text.pipe';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { isListTab, ListTab, type ListSelection } from '../list-tabs';
-import { StartChat, StartChatKind } from '../start-chat/start-chat';
-
-let nextContentId = 0;
 
 @Component({
   selector: 'app-chat-list',
@@ -46,7 +51,9 @@ let nextContentId = 0;
   styleUrl: './chat-list.scss',
   host: { class: 'ion-page' },
   imports: [
+    RouterLink,
     AvatarTextPipe,
+    AvatarColor,
     ChatListContent,
     ContentScrollbars,
     DirectorySearch,
@@ -65,8 +72,6 @@ let nextContentId = 0;
     IonSearchbar,
     IonSegment,
     IonSegmentButton,
-    IonSegmentContent,
-    IonSegmentView,
     IonSpinner,
     IonTitle,
     IonToolbar,
@@ -77,6 +82,9 @@ export class ChatList {
   readonly active = input(true);
   readonly openList = output<ListSelection>();
   protected readonly list = this.selection;
+  protected readonly tabs = Object.values(ListTab);
+  private readonly panels = viewChildren<ElementRef<HTMLElement>>('panel');
+  private previousTab?: ListTab;
   protected readonly lists = inject(ChatListStore);
   private readonly preferences = inject(Preferences);
   protected readonly messageUnread = computed(() => {
@@ -91,22 +99,38 @@ export class ChatList {
       onCleanup(this.lists.unread.activate());
       onCleanup(this.lists.threadUnread.activate());
     });
+    afterRenderEffect((onCleanup) => {
+      const tab = this.list().tab;
+      const panels = this.panels().map((panel) => panel.nativeElement);
+      const previous = this.previousTab;
+      this.previousTab = tab;
+      const from = panels.find((panel) => panel.dataset['tab'] === previous);
+      const to = panels.find((panel) => panel.dataset['tab'] === tab);
+      if (!from || !to || tab === previous || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      from.hidden = false;
+      const direction = this.tabs.indexOf(tab) > this.tabs.indexOf(previous!) ? 1 : -1;
+      const options = { duration: 200, easing: 'ease-out' };
+      const animations = [
+        from.animate([{ transform: 'translateX(0)' }, { transform: `translateX(${-direction * 100}%)` }], options),
+        to.animate([{ transform: `translateX(${direction * 100}%)` }, { transform: 'translateX(0)' }], options),
+      ];
+      animations[0].onfinish = () => (from.hidden = true);
+      onCleanup(() => {
+        animations.forEach((animation) => animation.cancel());
+        from.hidden = from.dataset['tab'] !== this.list().tab;
+      });
+    });
   }
 
-  // Ionic resolves segment content IDs across the document, including cached pages and the sidebar.
-  protected readonly contentPrefix = `chat-list-${nextContentId++}-`;
   protected readonly realtime = inject(Connection);
   protected readonly session = inject(SessionStore);
   protected readonly searching = signal(false);
   protected readonly search = signal('');
   protected readonly ListTab = ListTab;
-  protected readonly StartKind = StartChatKind;
   protected readonly outlet = inject(IonRouterOutlet, { optional: true });
   protected readonly addIcon = addCircleOutline;
   private readonly router = inject(Router);
   private readonly notifications = inject(PushNotifications);
-  private readonly modals = inject(ModalController);
-  private readonly addMenu = viewChild<IonPopover>('addMenu');
 
   protected back() {
     // The sidebar has no router outlet; returning there only changes its local selection.
@@ -115,17 +139,9 @@ export class ChatList {
     }
   }
 
-  protected async start(kind: StartChatKind) {
-    await this.addMenu()?.dismiss();
-    const modal = await this.modals.create({ component: StartChat, componentProps: { kind } });
-    await modal.present();
-  }
-
   protected openSettings() {
     this.notifications.requestSettingsPermission();
-    const url = this.router.parseUrl(this.router.url);
-    url.queryParams['settings'] = '1';
-    return this.router.navigateByUrl(url, { browserUrl: '/settings', state: { settingsEntry: true } });
+    return this.router.navigateByUrl('/settings');
   }
 
   protected selectTab(event: SegmentCustomEvent) {

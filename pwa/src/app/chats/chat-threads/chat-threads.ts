@@ -1,4 +1,4 @@
-import { Component, forwardRef, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   IonButton,
@@ -18,15 +18,7 @@ import { ChatListItem } from '../chat-list-item/chat-list-item';
 @Component({
   selector: 'app-chat-threads',
   templateUrl: './chat-threads.html',
-  imports: [
-    IonInfiniteScroll,
-    IonInfiniteScrollContent,
-    IonButton,
-    IonList,
-    IonSpinner,
-    ChatListItem,
-    forwardRef(() => MessagePreview),
-  ],
+  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonButton, IonList, IonSpinner, ChatListItem, MessagePreview],
 })
 export class ChatThreads {
   readonly chatId = input.required<SnowflakeID>();
