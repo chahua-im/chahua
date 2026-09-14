@@ -876,6 +876,15 @@ pub fn sync_edited_message_mentions(
 /// Maximum attachments a single message may carry.
 pub const MAX_ATTACHMENTS_PER_MESSAGE: usize = 20;
 
+diesel::define_sql_function! {
+    /// Assign request ordinals in the association UPDATE, without per-attachment queries.
+    #[sql_name = "array_position"]
+    fn attachment_position(
+        ids: diesel::sql_types::Array<diesel::sql_types::BigInt>,
+        id: diesel::sql_types::BigInt,
+    ) -> diesel::sql_types::SmallInt;
+}
+
 /// Parses attachment IDs while preserving the request order.
 ///
 /// The sequence is part of the message-composition contract. Callers that
@@ -1209,7 +1218,10 @@ pub async fn send_prepared_message(
                 .filter(a_dsl::message_id.is_null())
                 .filter(a_dsl::uploader_uid.eq(Some(prepared.sender_uid))),
         )
-        .set(a_dsl::message_id.eq(id))
+        .set((
+            a_dsl::message_id.eq(id),
+            a_dsl::order.eq(attachment_position(&prepared.attachment_ids, a_dsl::id) - 1i16),
+        ))
         .execute(conn)?;
         if associated != prepared.attachment_ids.len() {
             return Err(AppError::BadRequest("Invalid attachment selection"));
@@ -1276,7 +1288,7 @@ fn load_message_attachment_ids(conn: &mut PgConnection, message_id: i64) -> Quer
         .filter(a_dsl::message_id.eq(message_id))
         .filter(a_dsl::deleted_at.is_null())
         .select(a_dsl::id)
-        .order(a_dsl::id.asc())
+        .order((a_dsl::order.asc(), a_dsl::id.asc()))
         .load::<i64>(conn)
 }
 
@@ -1286,12 +1298,7 @@ fn validate_idempotent_message_payload(
     stored_message: Option<&str>,
     existing_attachment_ids: &[i64],
 ) -> Result<(), AppError> {
-    let mut prepared_attachment_ids = prepared.attachment_ids.clone();
-    prepared_attachment_ids.sort_unstable();
-    let mut existing_attachment_ids = existing_attachment_ids.to_vec();
-    existing_attachment_ids.sort_unstable();
-
-    let attachment_ids_match = existing_attachment_ids == prepared_attachment_ids;
+    let attachment_ids_match = existing_attachment_ids == prepared.attachment_ids;
 
     if existing.chat_id == prepared.chat_id
         && existing.sender_uid == prepared.sender_uid
@@ -1984,6 +1991,22 @@ mod tests {
                 &prepared,
                 Some("hello"),
                 &[10, 12]
+            ),
+            Err(super::AppError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn idempotent_message_payload_rejects_different_attachment_order() {
+        let existing = test_message();
+        let prepared = test_prepared_message();
+
+        assert!(matches!(
+            super::validate_idempotent_message_payload(
+                &existing,
+                &prepared,
+                Some("hello"),
+                &[11, 10]
             ),
             Err(super::AppError::Conflict(_))
         ));
