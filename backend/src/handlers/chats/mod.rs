@@ -70,6 +70,7 @@ pub struct CreateMessageBody {
     )]
     #[schema(value_type = Option<String>)]
     pub reply_to_id: Option<i64>,
+    /// Uploaded attachment IDs in display order; allocation-time order is replaced.
     #[serde(default)]
     pub attachment_ids: Vec<String>,
 }
