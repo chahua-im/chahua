@@ -10,6 +10,8 @@ import {
   selectArchivedChats,
   selectChatsLoading,
   selectChatsNextCursor,
+  selectChatUnreadMentions,
+  selectChatUnreadReactions,
   setChatsList,
 } from './chatsSlice';
 import { loadMoreChatList, loadMoreThreadList, refreshChatList, refreshThreadList } from './listPagination';
@@ -35,13 +37,15 @@ function response<T>(data: T): AxiosResponse<T> {
   return { data } as AxiosResponse<T>;
 }
 
-function chat(id: string, archived = false): ChatListEntry {
+function chat(id: string, archived = false, unreadMentions = 0, unreadReactions = 0): ChatListEntry {
   return {
     id,
     name: id,
     avatar: null,
     lastMessageAt: null,
     unreadCount: 0,
+    unreadMentions,
+    unreadReactions,
     lastMessage: null,
     mutedUntil: null,
     archived,
@@ -65,6 +69,7 @@ function thread(id: string, archived = false): ThreadListItem {
     replyCount: 1,
     lastReplyAt: '2026-09-05T00:00:00Z',
     unreadCount: 0,
+    unreadMentions: 0,
     lastReadMessageId: null,
     subscribedAt: '2026-09-05T00:00:00Z',
     archived,
@@ -80,12 +85,16 @@ describe('list pagination', () => {
     const store = createStore();
     store.dispatch(setChatsList({ chats: [chat('active-1')], nextCursor: 'cursor-1', archived: false }));
     store.dispatch(setChatsList({ chats: [chat('archived-1', true)], nextCursor: null, archived: true }));
-    vi.mocked(getChats).mockResolvedValue(response({ chats: [chat('active-1'), chat('active-2')], nextCursor: null }));
+    vi.mocked(getChats).mockResolvedValue(
+      response({ chats: [chat('active-1'), chat('active-2', false, 2, 3)], nextCursor: null }),
+    );
 
     await store.dispatch(loadMoreChatList(false));
 
     expect(selectAllChats(store.getState()).map((entry) => entry.id)).toEqual(['active-1', 'active-2']);
     expect(selectArchivedChats(store.getState()).map((entry) => entry.id)).toEqual(['archived-1']);
+    expect(selectChatUnreadMentions(store.getState(), 'active-2')).toBe(2);
+    expect(selectChatUnreadReactions(store.getState(), 'active-2')).toBe(3);
     expect(selectChatsNextCursor(store.getState())).toBeNull();
   });
 

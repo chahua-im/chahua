@@ -43,6 +43,7 @@ describe('message listener projections', () => {
       replyCount: 1,
       lastReplyAt: testMessage('11').createdAt,
       unreadCount: 0,
+      unreadMentions: 0,
       lastReadMessageId: null,
       subscribedAt: rootMessage.createdAt,
       archived: false,

@@ -1,11 +1,32 @@
 import { useEffect, useRef } from 'react';
 import { useSelector } from 'react-redux';
-import { selectChatUnreadCount, selectChatsWithUnreadCount } from '@/store/chatsSlice';
-import { selectThreadUnreadCount, selectThreadsWithUnreadCount } from '@/store/threadsSlice';
+import {
+  selectChatUnreadCount,
+  selectChatsWithUnreadCount,
+  selectHasChatsWithUnreadMentions,
+} from '@/store/chatsSlice';
+import {
+  selectThreadUnreadCount,
+  selectThreadsWithUnreadCount,
+  selectHasThreadsWithUnreadMentions,
+} from '@/store/threadsSlice';
+import { isFeatureEnabled } from '@/features';
 import type { RootState } from '@/store';
 import { isPageHidden } from '@/utils/dom';
 
 const BASE_TITLE = '茶话';
+const TITLE_COUNT_PREFIX = /^\((?:\d+|@)\)\s*/;
+
+/** Everything updateTitle() reads, kept in one ref so visibility listeners always see the latest values. */
+interface TitleInputs {
+  activeChatId: string | undefined;
+  activeThreadId: string | undefined;
+  chatUnreadCount: number;
+  threadUnreadCount: number;
+  chatsWithUnread: number;
+  threadsWithUnread: number;
+  hasUnreadMentions: boolean;
+}
 
 export function useDocumentTitle(activeChatId: string | undefined, activeThreadId?: string): void {
   const chatUnreadCount = useSelector((state: RootState) =>
@@ -16,23 +37,34 @@ export function useDocumentTitle(activeChatId: string | undefined, activeThreadI
   );
   const chatsWithUnread = useSelector(selectChatsWithUnreadCount);
   const threadsWithUnread = useSelector(selectThreadsWithUnreadCount);
+  const chatsHaveMentions = useSelector(selectHasChatsWithUnreadMentions);
+  const threadsHaveMentions = useSelector(selectHasThreadsWithUnreadMentions);
+  const hasUnreadMentions = isFeatureEnabled('mentionNotifications') && (chatsHaveMentions || threadsHaveMentions);
 
-  const activeChatIdRef = useRef(activeChatId);
-  const activeThreadIdRef = useRef(activeThreadId);
-  const chatUnreadCountRef = useRef(chatUnreadCount);
-  const threadUnreadCountRef = useRef(threadUnreadCount);
-  const chatsWithUnreadRef = useRef(chatsWithUnread);
-  const threadsWithUnreadRef = useRef(threadsWithUnread);
-  const baseTitleRef = useRef((document.title || '').replace(/^\(\d+\)\s*/, '') || BASE_TITLE);
+  const baseTitleRef = useRef((document.title || '').replace(TITLE_COUNT_PREFIX, '') || BASE_TITLE);
+  const inputsRef = useRef<TitleInputs>({
+    activeChatId,
+    activeThreadId,
+    chatUnreadCount,
+    threadUnreadCount,
+    chatsWithUnread,
+    threadsWithUnread,
+    hasUnreadMentions,
+  });
 
   function updateTitle() {
+    const inputs = inputsRef.current;
     if (isPageHidden()) {
-      const count = activeThreadIdRef.current
-        ? threadUnreadCountRef.current
-        : activeChatIdRef.current
-          ? chatUnreadCountRef.current
-          : chatsWithUnreadRef.current + threadsWithUnreadRef.current;
-      document.title = count > 0 ? `(${count}) ${baseTitleRef.current}` : baseTitleRef.current;
+      const count = inputs.activeThreadId
+        ? inputs.threadUnreadCount
+        : inputs.activeChatId
+          ? inputs.chatUnreadCount
+          : inputs.chatsWithUnread + inputs.threadsWithUnread;
+      if (inputs.hasUnreadMentions) {
+        document.title = `(@) ${baseTitleRef.current}`;
+      } else {
+        document.title = count > 0 ? `(${count}) ${baseTitleRef.current}` : baseTitleRef.current;
+      }
     } else {
       document.title = baseTitleRef.current;
     }
@@ -53,15 +85,26 @@ export function useDocumentTitle(activeChatId: string | undefined, activeThreadI
     };
   }, []);
 
-  // Keep refs in sync and update title when the active chat changes
+  // Keep the inputs ref in sync and update title when the active chat changes
   // (handles navigation while the page is hidden).
   useEffect(() => {
-    activeChatIdRef.current = activeChatId;
-    activeThreadIdRef.current = activeThreadId;
-    chatUnreadCountRef.current = chatUnreadCount;
-    threadUnreadCountRef.current = threadUnreadCount;
-    chatsWithUnreadRef.current = chatsWithUnread;
-    threadsWithUnreadRef.current = threadsWithUnread;
+    inputsRef.current = {
+      activeChatId,
+      activeThreadId,
+      chatUnreadCount,
+      threadUnreadCount,
+      chatsWithUnread,
+      threadsWithUnread,
+      hasUnreadMentions,
+    };
     updateTitle();
-  }, [activeChatId, activeThreadId, chatUnreadCount, threadUnreadCount, chatsWithUnread, threadsWithUnread]);
+  }, [
+    activeChatId,
+    activeThreadId,
+    chatUnreadCount,
+    threadUnreadCount,
+    chatsWithUnread,
+    threadsWithUnread,
+    hasUnreadMentions,
+  ]);
 }

@@ -40,6 +40,7 @@ import {
   capRange,
   clamp,
   classifyKeyMutation,
+  computeAlignedScrollTarget,
   detectAlternatingJitter,
   hasMeaningfulScrollDelta,
   normalizeRange,
@@ -576,18 +577,14 @@ export function ChatVirtualScroll({
         return false;
       }
 
-      const maxScroll = container.scrollHeight - container.clientHeight;
-      let rawTarget: number;
-      if (align === 'bottom') {
-        rawTarget = row.offsetTop + row.offsetHeight - container.clientHeight;
-      } else if (align === 'custom') {
-        // Position row at offsetRatio (0=top, 0.5=center, 1=bottom) from top of viewport
-        const ratio = Math.max(0, Math.min(1, offsetRatio));
-        rawTarget = row.offsetTop - container.clientHeight * ratio;
-      } else {
-        rawTarget = row.offsetTop;
-      }
-      const target = roundScrollValue(Math.max(0, Math.min(rawTarget, maxScroll)));
+      const target = computeAlignedScrollTarget(
+        container.clientHeight,
+        container.scrollHeight,
+        row.offsetTop,
+        row.offsetHeight,
+        align,
+        offsetRatio,
+      );
       if (behavior === 'auto' && !hasMeaningfulScrollDelta(container.scrollTop, target)) {
         return true;
       }
@@ -599,6 +596,51 @@ export function ChatVirtualScroll({
         to: target,
         mounted: mountedRef.current,
       });
+      container.scrollTo({ top: target, behavior });
+      return true;
+    },
+    [],
+  );
+
+  // Scroll to a specific message element (not its sender-group) so tall groups don't leave the
+  // target message off-screen. Returns false when the message element isn't in the DOM yet, in
+  // which case the caller recenters around the target to mount it.
+  const scrollToMessageElement = useCallback(
+    (
+      messageId: string,
+      behavior: ScrollBehavior = 'auto',
+      align: 'top' | 'bottom' | 'custom' = 'top',
+      offsetRatio: number = DEFAULT_OFFSET_RATIO,
+    ): boolean => {
+      const container = containerRef.current;
+      if (!container) return false;
+      const node = container.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+      if (!node) return false;
+      const el = (node.closest('[data-message-row]') as HTMLElement | null) ?? (node as HTMLElement);
+      const containerRect = container.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      // Absolute scrollTop that places the message row's top edge at the viewport top.
+      const offsetTop = elRect.top - containerRect.top + container.scrollTop;
+      const offsetHeight = elRect.height;
+      const target = computeAlignedScrollTarget(
+        container.clientHeight,
+        container.scrollHeight,
+        offsetTop,
+        offsetHeight,
+        align,
+        offsetRatio,
+      );
+      logVirtualScroll('scroll-to-message-element-execute', {
+        messageId,
+        behavior,
+        mode: behavior === 'smooth' ? 'smooth-scroll' : 'jump-scroll',
+        from: container.scrollTop,
+        to: target,
+        offsetTop,
+      });
+      if (behavior === 'auto' && !hasMeaningfulScrollDelta(container.scrollTop, target)) {
+        return true;
+      }
       container.scrollTo({ top: target, behavior });
       return true;
     },
@@ -2337,15 +2379,19 @@ export function ChatVirtualScroll({
         });
 
         if (mounted && target.index >= mounted.start && target.index <= mounted.end) {
-          const scrolled = scrollToKeyInternal(target.key, resolvedBehavior, align, offsetRatio);
+          // Scroll to the specific message element so tall sender-groups don't leave the target
+          // message off-screen. Group rows are an internal layout convenience, so scrolling to a
+          // group's top edge is not meaningful; if the element isn't in the DOM yet, fall through
+          // to recentering so it gets mounted and the scroll is applied.
+          const scrolled = scrollToMessageElement(messageId, resolvedBehavior, align, offsetRatio);
           if (scrolled) {
-            // Skip highlight when resuming the latest message — no jump is happening.
+            // Skip highlight when resuming the latest message - no jump is happening.
             if (target.index < rowKeys.length - 1) {
               triggerJumpTargetHighlight(target.key, messageId);
             }
             pendingScrollMessageIdRef.current = null;
+            return;
           }
-          return;
         }
 
         if (phaseRef.current === 'READY') {
@@ -2375,6 +2421,7 @@ export function ChatVirtualScroll({
     resolveMessageTarget,
     scrollApiRef,
     scrollToKeyInternal,
+    scrollToMessageElement,
     triggerJumpTargetHighlight,
   ]);
 
