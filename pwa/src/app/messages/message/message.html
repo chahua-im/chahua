@@ -5,7 +5,7 @@
       class="system-message"
       (contextmenu)="showMenu($event, systemMessage)"
       (pointerdown)="startPress($event, systemMessage)">
-      <app-message-preview [message]="message()"></app-message-preview>
+      <app-message-preview [message]="message()" [interactive]="canInteract()"></app-message-preview>
     </p>
   } @else {
     <div
