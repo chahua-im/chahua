@@ -94,7 +94,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | Message            | message、own、分组标志、preview/interactive、待发状态/附件、跳转状态 → reply、jump、openThread、menu、react、retry；只持有手势和点击抑制状态 |
 | MessageAuthor      | sender、own；派生用户名、用户组和性别                                                                                                        |
 | MessageText        | text、mentions、interactive；派生文本片段，点击提及才打开资料                                                                                |
-| MessagePreview     | 消息摘要字段；派生去重附件类型与正文、系统短语枚举                                                                                           |
+| MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文、系统短语枚举；交互模式下系统用户名链接资料                                  |
 | MessageAttachments | message、overlayTime、uploads；派生媒体框、相册布局、时间及上传反馈；局部保留相册初始尺寸、容器宽度与资源加载失败                            |
 | MessageStatus      | delivery；把 MessageDelivery 枚举显示为图标                                                                                                  |
 | MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                                        |

@@ -2,7 +2,12 @@
   <ng-container>消息已删除</ng-container>
 } @else if (message().messageType === MessageType.system) {
   @if (message().sender; as sender) {
-    <ng-container>{{ sender.name ?? '用户 ' + sender.uid }}</ng-container>
+    @let name = sender.name ?? '用户 ' + sender.uid;
+    @if (interactive()) {
+      <a [routerLink]="['/profile', sender.uid]" (click)="$event.stopPropagation()">{{ name }}</a>
+    } @else {
+      <ng-container>{{ name }}</ng-container>
+    }
   } @else {
     <ng-container>有人</ng-container>
   }
