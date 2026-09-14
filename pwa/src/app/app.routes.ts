@@ -1,3 +1,5 @@
+import { ReactionDetails } from './messages/reaction-details/reaction-details';
+import { MediaViewer } from './messages/media-viewer/media-viewer';
 import { inject } from '@angular/core';
 import { RedirectCommand, Router, type CanMatchFn, type Routes } from '@angular/router';
 import { isPlatform } from '@ionic/angular';
@@ -7,6 +9,12 @@ import { isListTab, ListTab } from './chats/list-tabs';
 import { ConversationPage } from './conversations/conversation/conversation.page';
 import { PinnedMessagesPage } from './conversations/pinned-messages/pinned-messages.page';
 import { SavedMessagesPage } from './conversations/saved-messages/saved-messages.page';
+import { ChatDetails, DetailView } from './chats/chat-details/chat-details';
+import { ChatSearch } from './chats/chat-search/chat-search';
+import { StartChatKind } from './chats/start-chat/start-chat';
+import { Settings } from './settings/settings/settings';
+import { GeneralSettings } from './settings/general-settings/general-settings';
+import { FriendVerificationSettings } from './settings/friend-verification-settings/friend-verification-settings';
 import { Landing } from './pwa/landing/landing';
 
 const matchListTab: CanMatchFn = (_route, segments) => isListTab(segments[1].path);
@@ -17,28 +25,48 @@ export const routes: Routes = [
     component: Landing,
     canMatch: [
       () =>
-        isPlatform('pwa')
-          ? new RedirectCommand(inject(Router).createUrlTree(['/chats']), { replaceUrl: true })
-          : true,
+        isPlatform('pwa') ? new RedirectCommand(inject(Router).createUrlTree(['/chats']), { replaceUrl: true }) : true,
     ],
   },
-  { path: 'm/:encoded', component: ChatLink },
-  { path: 'profile', component: ChatLink },
-  { path: 'chats/new', component: ChatLink, data: { create: true } },
-  { path: 'chats/join', component: ChatLink },
-  { path: 'chats/join/:code', component: ChatLink },
-  { path: 'chats/chat/:id/stickers/:packId', component: ChatLink },
+  { path: 'm/:encoded', component: ChatLink, data: { modal: true } },
+  { path: 'media', component: ChatLink, data: { modal: true, component: MediaViewer, media: true } },
   {
-    path: 'settings',
-    pathMatch: 'full',
-    canMatch: [
-      () =>
-        new RedirectCommand(inject(Router).createUrlTree(['/chats'], { queryParams: { settings: '1' } }), {
-          browserUrl: '/settings',
-        }),
-    ],
-    children: [],
+    path: 'chats/chat/:id/message/:messageId/reactions',
+    component: ChatLink,
+    data: { modal: true, component: ReactionDetails },
   },
+  { path: 'profile', component: ChatLink, data: { modal: true } },
+  { path: 'profile/:uid', component: ChatLink, data: { modal: true } },
+  { path: 'stickers/:packId', component: ChatLink, data: { modal: true } },
+  { path: 'sticker/:stickerId', component: ChatLink, data: { modal: true } },
+  { path: 'chats/new', component: ChatLink, data: { modal: true, kind: StartChatKind.Create } },
+  { path: 'chats/add-friend', component: ChatLink, data: { modal: true, kind: StartChatKind.Friend } },
+  { path: 'chats/join', component: ChatLink, data: { modal: true } },
+  { path: 'chats/join/:code', component: ChatLink, data: { modal: true } },
+  { path: 'chats/chat/:id/stickers/:packId', component: ChatLink, data: { modal: true } },
+  { path: 'settings', component: ChatLink, data: { modal: true, component: Settings } },
+  { path: 'settings/general', component: ChatLink, data: { modal: true, component: GeneralSettings } },
+  {
+    path: 'settings/friend-verification',
+    component: ChatLink,
+    data: { modal: true, component: FriendVerificationSettings },
+  },
+  {
+    path: 'chats/chat/:id/info',
+    component: ChatLink,
+    data: { modal: true, component: ChatDetails, props: { modal: true, currentConversation: true } },
+  },
+  {
+    path: 'chats/chat/:id/thread/:threadId/info',
+    component: ChatLink,
+    data: { modal: true, component: ChatDetails, props: { modal: true, currentConversation: true } },
+  },
+  {
+    path: 'chats/chat/:id/invites',
+    component: ChatLink,
+    data: { modal: true, component: ChatDetails, props: { modal: true, view: DetailView.Invites } },
+  },
+  { path: 'chats/chat/:id/search', component: ChatLink, data: { modal: true, component: ChatSearch } },
   {
     path: 'chats/saved',
     component: SavedMessagesPage,

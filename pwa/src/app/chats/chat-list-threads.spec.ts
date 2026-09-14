@@ -541,6 +541,7 @@ describe('ChatListStore threads and friend requests', () => {
     http.expectOne(topicUrl + '/archive').flush(null);
     await archiveAgain;
     const subscribing = inbox['chatInfo'].subscribeThread(testChat.id, rootId);
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
     http.expectOne(topicUrl + '/subscribe').flush(null);
     await subscribing;
     expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
@@ -802,5 +803,16 @@ describe('ChatListStore threads and friend requests', () => {
     );
     await settle();
     expect(threads.items()[0].unreadCount).toBe(1);
+  });
+  it('rolls back a failed optimistic thread archive without changing subscription', async () => {
+    const loading = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
+    http.expectOne(topicUrl + '/subscribe').flush({ subscribed: true, archived: false });
+    await loading;
+    const operation = inbox['chatInfo'].setThreadArchived(testChat.id, rootId, true);
+    const failed = expect(operation).rejects.toBeDefined();
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
+    http.expectOne(topicUrl + '/archive').flush('offline', { status: 500, statusText: 'Error' });
+    await failed;
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: false });
   });
 });

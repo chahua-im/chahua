@@ -1,7 +1,7 @@
-import { Component, computed, effect, forwardRef, inject, input, signal, untracked } from '@angular/core';
+import { ChatAvatar } from '../chat-avatar/chat-avatar';
+import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import {
-  IonAvatar,
   IonButton,
   IonButtons,
   IonContent,
@@ -33,7 +33,7 @@ export enum StartChatKind {
   selector: 'app-start-chat',
   templateUrl: './start-chat.html',
   imports: [
-    IonAvatar,
+    ChatAvatar,
     ContentScrollbars,
     FormField,
     IonHeader,
@@ -47,7 +47,7 @@ export enum StartChatKind {
     IonLabel,
     IonSpinner,
     IonSearchbar,
-    forwardRef(() => DirectorySearch),
+    DirectorySearch,
   ],
   host: { class: 'ion-page' },
 })

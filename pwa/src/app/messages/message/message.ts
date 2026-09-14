@@ -1,12 +1,11 @@
+import { Router } from '@angular/router';
 import { DatePipe } from '@angular/common';
-import { Component, forwardRef, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
-import { IonAvatar, IonIcon, IonSpinner, ModalController } from '@ionic/angular';
+import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
+import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
 import { arrowUndoOutline } from 'ionicons/icons';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { AvatarTextPipe } from '../../chats/avatar-text.pipe';
-import { StartChat, StartChatKind } from '../../chats/start-chat/start-chat';
-import { ChatDetails } from '../../chats/chat-details/chat-details';
 import { InviteCard } from '../invite-card/invite-card';
 import { mediaOverlay } from '../media-overlay';
 import { MessageAttachments, type MessageAttachmentSource } from '../message-attachments/message-attachments';
@@ -17,7 +16,6 @@ import { MessageReactions } from '../message-reactions/message-reactions';
 import { MessageStatus } from '../message-status/message-status';
 import { MessageText } from '../message-text/message-text';
 import { MessageThread } from '../message-thread/message-thread';
-import { StickerPicker } from '../sticker-picker/sticker-picker';
 import { UploadStatus, type AttachmentUpload } from '../upload';
 import { userColors } from '../user-colors';
 
@@ -51,9 +49,9 @@ export interface MessageMenuSelection {
     IonIcon,
     IonSpinner,
     MessageAttachments,
-    forwardRef(() => MessageText),
+    MessageText,
     MessageAuthor,
-    forwardRef(() => MessagePreview),
+    MessagePreview,
     MessageReactions,
     MessageThread,
     MessageStatus,
@@ -67,15 +65,11 @@ export interface MessageMenuSelection {
   },
 })
 export class Message<T extends MessageContent = MessageResponse> {
-  private readonly modals = inject(ModalController);
+  private readonly router = inject(Router);
   protected async profile() {
     if (!this.canInteract()) return;
     const sender = this.message().sender;
-    const modal = await this.modals.create({
-      component: ChatDetails,
-      componentProps: { user: { ...sender, username: sender.name } },
-    });
-    await modal.present();
+    await this.router.navigate(['/profile', sender.uid]);
   }
   protected readonly messageId = computed(() => {
     const id = this.message().id;
@@ -87,31 +81,30 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected async invite(event: Event) {
     event.stopPropagation();
     if (!this.canInteract()) return;
-    const modal = await this.modals.create({
-      component: StartChat,
-      componentProps: { kind: StartChatKind.Join, code: this.message().message ?? '' },
-    });
-    await modal.present();
+    await this.router.navigate(['/chats/join', this.message().message ?? '']);
   }
   protected async sticker(event: Event) {
     if (!this.isSticker() || !this.canInteract()) return;
     event.stopPropagation();
-    const modal = await this.modals.create({
-      component: StickerPicker,
-      componentProps: { selectable: false, stickerId: this.message().sticker?.id },
-    });
-    await modal.present();
+    await this.router.navigate(['/sticker', decodeId(this.message().sticker!.id)]);
   }
   readonly own = input.required<boolean>();
   readonly first = input(true);
   readonly last = input(true);
   protected readonly showAvatar = computed(() => this.last() || this.showAllAvatars());
   readonly showAllAvatars = input(false);
+  readonly stickyAvatar = input(false);
   readonly preview = input(false);
   readonly interactive = input(true);
+  readonly contextMenu = input(false);
   readonly outgoingId = input<string>();
   protected readonly canInteract = computed(() => this.interactive() && !this.preview() && this.message().id != null);
-  protected readonly canMenu = computed(() => !this.preview() && (this.canInteract() || !!this.outgoingId()));
+  protected readonly canMenu = computed(
+    () =>
+      !this.preview() &&
+      (this.contextMenu() ||
+        (this.message().messageType !== MessageType.system && (this.canInteract() || !!this.outgoingId()))),
+  );
   readonly delivery = input<MessageDelivery>();
   readonly uploads = input<readonly AttachmentUpload[]>([]);
   readonly retry = output<void>();
@@ -275,7 +268,7 @@ export class Message<T extends MessageContent = MessageResponse> {
 
   private emitMenu(element: HTMLElement, event?: MouseEvent) {
     const message = this.message();
-    if (!this.canMenu() || message.messageType === MessageType.system) return;
+    if (!this.canMenu()) return;
     this.menu.emit({
       messageId: message.id,
       clientGeneratedId: this.outgoingId(),

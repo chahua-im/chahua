@@ -7,10 +7,6 @@ ion-avatar {
   border-radius: 50%;
   color: var(--ion-color-primary-contrast);
   font-size: 15px;
-
-  &.placeholder {
-    background: var(--ion-color-primary);
-  }
 }
 
 ion-segment {
@@ -24,11 +20,19 @@ ion-segment-button {
   min-width: 0;
 }
 
-ion-segment-view {
+.tab-pages {
+  position: relative;
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
-ion-segment-content {
-  display: flex;
+.tab-page {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
+
+  &:not([hidden]) {
+    display: flex;
+  }
 }

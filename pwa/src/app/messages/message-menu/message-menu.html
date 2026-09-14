@@ -47,7 +47,7 @@
                   [preview]="true"></app-message>
               </div>
               <div #actions class="actions panel">
-                @if (!queued() && message.reactions?.length) {
+                @if (canReact() && message.reactions?.length) {
                   <button type="button" (click)="choose(Action.Reactions)">
                     <ion-icon [icon]="icons.peopleOutline" />
                     <span>查看表态</span>
@@ -61,7 +61,7 @@
                 }
                 @if (canEdit()) {
                   <button type="button" [disabled]="!queued() && !canReply()" (click)="choose(Action.Edit)">
-                    <ion-icon [icon]="icons.pencilOutline" />
+                    <ion-icon [icon]="icons.createOutline" />
                     <span>编辑</span>
                   </button>
                 }
@@ -74,7 +74,8 @@
                 @if (
                   !queued() &&
                   admin() &&
-                  (pinned() || (!message.isDeleted && message.messageType !== MessageType.sticker))
+                  message.messageType !== MessageType.sticker &&
+                  (pinned() || !message.isDeleted)
                 ) {
                   <button type="button" [disabled]="pins().loading() || busy()" (click)="choose(Action.Pin)">
                     <ion-icon [icon]="icons.pinOutline"></ion-icon>
@@ -91,6 +92,14 @@
                   <button type="button" (click)="choose(Action.Save)">
                     <ion-icon [icon]="icons.bookmarkOutline"></ion-icon>
                     <span>收藏</span>
+                  </button>
+                }
+                @if (
+                  !queued() && !message.isDeleted && message.messageType === MessageType.sticker && message.sticker
+                ) {
+                  <button type="button" (click)="choose(Action.FavoriteSticker)">
+                    <ion-icon [icon]="icons.heartOutline" />
+                    <span>收藏表情</span>
                   </button>
                 }
                 @if (!queued() && message.messageType !== MessageType.invite) {

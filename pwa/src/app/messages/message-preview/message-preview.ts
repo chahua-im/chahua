@@ -1,6 +1,6 @@
-import { Component, forwardRef, computed, input } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
 import { MessageType, type MessageResponse } from '../../../generated/models';
-import { MediaKind, mediaKind } from '../message-attachments/media-kind';
+import { MediaKind, attachmentKind } from '../message-attachments/media-kind';
 import { MessageText } from '../message-text/message-text';
 
 type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
@@ -23,7 +23,7 @@ enum SystemMessageKind {
 @Component({
   selector: 'app-message-preview',
   templateUrl: './message-preview.html',
-  imports: [forwardRef(() => MessageText)],
+  imports: [MessageText],
   host: {
     '[class.action]':
       'message().isDeleted || message().messageType === MessageType.system || message().messageType === MessageType.invite || !message().message?.trim()',
@@ -44,5 +44,9 @@ export class MessagePreview {
     return undefined;
   });
   protected readonly MediaKind = MediaKind;
-  protected readonly media = computed(() => mediaKind(this.message().attachments[0]?.kind));
+  protected readonly media = computed(() => [
+    ...new Set(
+      this.message().attachments.map((attachment) => attachmentKind(this.message().messageType, attachment.kind)),
+    ),
+  ]);
 }

@@ -1,3 +1,4 @@
+import { Router } from '@angular/router';
 import { DOCUMENT } from '@angular/common';
 import {
   afterRenderEffect,
@@ -13,7 +14,8 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, ModalController } from '@ionic/angular';
+import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast } from '@ionic/angular';
+import { firstValueFrom } from 'rxjs';
 import {
   addOutline,
   arrowUndoOutline,
@@ -22,11 +24,13 @@ import {
   copyOutline,
   linkOutline,
   peopleOutline,
-  pencilOutline,
+  createOutline,
+  heartOutline,
   pinOutline,
   trashOutline,
 } from 'ionicons/icons';
 import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
+import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
 import { SessionStore } from '../../session/session-store';
@@ -37,7 +41,6 @@ import { MessageNotice } from '../message-notice';
 import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
 import { messageParts } from '../message-text/message-text';
 import { Message, type MessageContent, type MessageMenuSelection } from '../message/message';
-import { ReactionDetails } from '../reaction-details/reaction-details';
 import { exceedsReactionLimit } from '../reaction-state';
 
 export enum MessageAction {
@@ -50,6 +53,7 @@ export enum MessageAction {
   Recall,
   Edit,
   Reactions,
+  FavoriteSticker,
 }
 
 @Component({
@@ -72,6 +76,7 @@ export class MessageMenu {
   private readonly chatInfo = inject(ChatStore);
   private readonly session = inject(SessionStore);
   private readonly messageActions = inject(MessageActions);
+  private readonly stickers = inject(StickersService);
   private readonly outbox = inject(MessageOutbox);
   private readonly document = inject(DOCUMENT);
   private readonly modal = viewChild(IonModal);
@@ -101,7 +106,7 @@ export class MessageMenu {
     return !this.queued() && !!message && !!this.pins().get(message.id);
   });
   private readonly preferences = inject(Preferences);
-  private readonly modals = inject(ModalController);
+  private readonly router = inject(Router);
   protected readonly recent = this.preferences.recentReactions;
   protected readonly notice = signal<MessageNotice | undefined>(undefined);
   protected readonly Notice = MessageNotice;
@@ -123,7 +128,8 @@ export class MessageMenu {
     chatbubblesOutline,
     copyOutline,
     linkOutline,
-    pencilOutline,
+    createOutline,
+    heartOutline,
     pinOutline,
     trashOutline,
   };
@@ -398,11 +404,13 @@ export class MessageMenu {
     if (version !== this.version) return;
     switch (action) {
       case MessageAction.Reactions: {
-        const modal = await this.modals.create({
-          component: ReactionDetails,
-          componentProps: { chatId: this.chatId(), messageId: message.id },
-        });
-        await modal.present();
+        await this.router.navigate([
+          '/chats/chat',
+          decodeId(this.chatId()),
+          'message',
+          decodeId(message.id),
+          'reactions',
+        ]);
         break;
       }
       case MessageAction.Edit:
@@ -421,6 +429,12 @@ export class MessageMenu {
       case MessageAction.Save:
         await this.perform(() => this.messageActions.save(message), MessageNotice.Saved);
         break;
+      case MessageAction.FavoriteSticker: {
+        const sticker = message.sticker;
+        if (sticker)
+          await this.perform(() => firstValueFrom(this.stickers.putFavorite(sticker.id)), MessageNotice.Saved);
+        break;
+      }
     }
   }
 

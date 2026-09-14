@@ -22,7 +22,7 @@
       } @else {
         <ion-buttons slot="start">
           <ion-button (click)="openSettings()">
-            <ion-avatar [class.placeholder]="!session.user()?.avatarUrl">
+            <ion-avatar [avatarColor]="session.user()?.username ?? ''">
               @if (session.user()?.avatarUrl; as src) {
                 <img [src]="src" width="26" height="26" decoding="async" />
               } @else {
@@ -32,7 +32,7 @@
           </ion-button>
         </ion-buttons>
         <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)">
-          <ion-segment-button [value]="ListTab.Messages" [contentId]="contentPrefix + ListTab.Messages">
+          <ion-segment-button [value]="ListTab.Messages">
             <ion-label>
               消息
               @if (messageUnread(); as count) {
@@ -40,13 +40,13 @@
               }
             </ion-label>
           </ion-segment-button>
-          <ion-segment-button [value]="ListTab.Groups" [contentId]="contentPrefix + ListTab.Groups">
+          <ion-segment-button [value]="ListTab.Groups">
             <ion-label>群组</ion-label>
           </ion-segment-button>
-          <ion-segment-button [value]="ListTab.Friends" [contentId]="contentPrefix + ListTab.Friends">
+          <ion-segment-button [value]="ListTab.Friends">
             <ion-label>好友</ion-label>
           </ion-segment-button>
-          <ion-segment-button [value]="ListTab.Threads" [contentId]="contentPrefix + ListTab.Threads">
+          <ion-segment-button [value]="ListTab.Threads">
             <ion-label>
               话题
               @if (lists.threadUnread.value()?.unreadThreadCount; as count) {
@@ -73,23 +73,23 @@
 } @else if (list().archived || list().requestHistory) {
   <app-chat-list-content [selection]="list()" [active]="active()" (openList)="openList.emit($event)" />
 } @else {
-  <ion-segment-view [swipeGesture]="false">
-    @for (tab of [ListTab.Messages, ListTab.Groups, ListTab.Friends, ListTab.Threads]; track tab) {
-      <ion-segment-content [id]="contentPrefix + tab">
+  <div class="tab-pages">
+    @for (tab of tabs; track tab) {
+      <div #panel class="tab-page" [attr.data-tab]="tab" [hidden]="list().tab !== tab">
         <app-chat-list-content
           [selection]="{ tab, archived: false, requestHistory: false }"
           [active]="active() && list().tab === tab"
           (openList)="openList.emit($event)" />
-      </ion-segment-content>
+      </div>
     }
-  </ion-segment-view>
+  </div>
 }
 <ion-popover #addMenu [dismissOnSelect]="true">
   <ng-template>
     <ion-list>
-      <ion-item [button]="true" (click)="start(StartKind.Create)"><ion-label>创建群组</ion-label></ion-item>
-      <ion-item [button]="true" (click)="start(StartKind.Join)"><ion-label>加入群组</ion-label></ion-item>
-      <ion-item [button]="true" (click)="start(StartKind.Friend)"><ion-label>添加好友</ion-label></ion-item>
+      <ion-item [button]="true" routerLink="/chats/new"><ion-label>创建群组</ion-label></ion-item>
+      <ion-item [button]="true" routerLink="/chats/join"><ion-label>加入群组</ion-label></ion-item>
+      <ion-item [button]="true" routerLink="/chats/add-friend"><ion-label>添加好友</ion-label></ion-item>
       <ion-item [button]="true" (click)="searching.set(true)"><ion-label>搜索</ion-label></ion-item>
     </ion-list>
   </ng-template>
