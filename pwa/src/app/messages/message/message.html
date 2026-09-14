@@ -66,7 +66,11 @@
         (contextmenu)="showMenu($event, bubble)"
         (pointerdown)="startPress($event, bubble)">
         @if (first() && !isSticker()) {
-          <app-message-author class="sender" [sender]="message().sender" [own]="own()"></app-message-author>
+          <app-message-author
+            class="sender"
+            [sender]="message().sender"
+            [own]="own()"
+            (click)="profile()"></app-message-author>
         }
         @if (quoted(); as quote) {
           <button
