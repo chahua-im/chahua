@@ -1,4 +1,5 @@
 import { Component, computed, input } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { MediaKind, attachmentKind } from '../message-attachments/media-kind';
 import { MessageText } from '../message-text/message-text';
@@ -23,15 +24,23 @@ enum SystemMessageKind {
 @Component({
   selector: 'app-message-preview',
   templateUrl: './message-preview.html',
-  imports: [MessageText],
+  imports: [MessageText, RouterLink],
   host: {
     '[class.action]':
       'message().isDeleted || message().messageType === MessageType.system || message().messageType === MessageType.invite || !message().message?.trim()',
   },
-  styles: ':host(.action) { color: var(--message-action-color, inherit); }',
+  styles: `
+    :host(.action) {
+      color: var(--message-action-color, inherit);
+    }
+    a {
+      color: var(--ion-color-primary);
+    }
+  `,
 })
 export class MessagePreview {
   readonly message = input.required<PreviewSource>();
+  readonly interactive = input(false);
   protected readonly MessageType = MessageType;
   protected readonly SystemMessageKind = SystemMessageKind;
   protected readonly systemMessage = computed(() => {
