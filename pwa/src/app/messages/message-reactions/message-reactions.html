@@ -7,7 +7,7 @@
           <span
             class="reactor"
             [class.placeholder]="!reactor.avatarUrl"
-            [avatarColor]="reactor.name ?? reactor.uid.toString()"
+            [avatarColor]="reactor.avatarUrl ? null : (reactor.name ?? reactor.uid.toString())"
             [style.z-index]="5 - i">
             @if (reactor.avatarUrl; as src) {
               <img [src]="src" width="23" height="23" decoding="async" />

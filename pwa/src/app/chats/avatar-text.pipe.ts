@@ -19,7 +19,7 @@ export class AvatarTextPipe implements PipeTransform {
 @Directive({
   selector: '[avatarColor]',
   host: {
-    class: 'avatar-placeholder',
+    '[class.avatar-placeholder]': 'avatarColor() != null',
     '[style.--avatar-light]': 'colors().light',
     '[style.--avatar-dark]': 'colors().dark',
     '[style.background]': "avatarColor() != null ? 'var(--avatar-background)' : null",
