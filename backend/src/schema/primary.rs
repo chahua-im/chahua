@@ -153,7 +153,6 @@ diesel::table! {
         join_reason -> GroupJoinReason,
         join_reason_extra -> Nullable<Jsonb>,
         archived -> Bool,
-        last_reactions_read_at -> Timestamptz,
     }
 }
 
@@ -231,6 +230,14 @@ diesel::table! {
         thread_root_id -> Nullable<Int8>,
         kind -> MentionKind,
         created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    message_views (uid, message_id) {
+        uid -> Int4,
+        message_id -> Int8,
+        viewed_at -> Timestamptz,
     }
 }
 
@@ -433,7 +440,6 @@ diesel::table! {
         subscribed_at -> Timestamptz,
         archived -> Bool,
         subscribed -> Bool,
-        last_reactions_read_at -> Timestamptz,
     }
 }
 
@@ -449,6 +455,7 @@ diesel::table! {
         verification_mode -> FriendAddVerificationMode,
         verification_question -> Nullable<Text>,
         token_gen -> Int4,
+        reaction_notifications_enabled -> Bool,
     }
 }
 
@@ -484,6 +491,7 @@ diesel::joinable!(groups -> media (avatar_image_id));
 diesel::joinable!(message_mentions -> groups (chat_id));
 diesel::joinable!(message_mentions -> messages (message_id));
 diesel::joinable!(message_reactions -> messages (message_id));
+diesel::joinable!(message_views -> messages (message_id));
 diesel::joinable!(messages -> stickers (sticker_id));
 diesel::joinable!(pinned_messages -> groups (chat_id));
 diesel::joinable!(policy_assignments -> policies (policy_id));
@@ -512,6 +520,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     media,
     message_mentions,
     message_reactions,
+    message_views,
     messages,
     pinned_messages,
     policies,
