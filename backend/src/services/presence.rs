@@ -311,6 +311,100 @@ mod tests {
         });
     }
 
+    /// Two connections observing the same uid on the same UTC date must count
+    /// the user once: the `FOR UPDATE` row lock serializes the observations
+    /// and the second one sees the day as already counted. Uses real
+    /// (committed) connections, because two independent transactions must
+    /// contend on the user_extra row lock; fixture rows are removed at the end.
+    #[test]
+    fn concurrent_same_day_observations_count_dau_once() {
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        // Serialize against other DB tests while preparing and asserting on
+        // shared rows.
+        let mut db = crate::test_support::TestDb::establish();
+        let conn = db.conn();
+
+        static SEQ: AtomicI32 = AtomicI32::new(2_100_000_000);
+        let uid = SEQ.fetch_add(1, Ordering::SeqCst);
+        let at = NaiveDate::from_ymd_opt(2040, 5, 5)
+            .unwrap()
+            .and_hms_opt(10, 0, 0)
+            .unwrap();
+        use diesel::RunQueryDsl;
+        diesel::insert_into(user_extra::table)
+            .values(&crate::models::NewUserExtra {
+                uid,
+                first_seen_at: at,
+                last_seen_at: None,
+                presence_visibility: crate::models::PresenceVisibility::Everyone,
+                sticker_pack_order: serde_json::json!([]),
+                verification_mode: crate::models::FriendAddVerificationMode::Direct,
+                verification_question: None,
+            })
+            .execute(conn)
+            .expect("seed user_extra row");
+
+        let stored: Arc<std::sync::Mutex<Vec<chrono::NaiveDateTime>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let url = url.clone();
+                let stored = stored.clone();
+                std::thread::spawn(move || {
+                    let mut conn =
+                        diesel::PgConnection::establish(&url).expect("connect for observation");
+                    let registry = prometheus::Registry::new();
+                    let metrics = Arc::new(ClientTrackingMetrics::new(&registry));
+                    let daily_metrics = ActivityMetricsService::new(metrics);
+                    let stored_value = record_presence_observation(
+                        &mut conn,
+                        &daily_metrics,
+                        uid,
+                        at,
+                        PresenceObservationCause::ActiveCheckpoint,
+                    )
+                    .expect("observation commits");
+                    stored.lock().expect("stored lock").push(stored_value);
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("observation thread succeeds");
+        }
+
+        // Both observations commit, but the day is counted exactly once.
+        let first_day = activity_daily_metrics::table
+            .find(at.date())
+            .select(ActivityDailyMetric::as_select())
+            .first::<ActivityDailyMetric>(conn)
+            .expect("metric row exists");
+        assert_eq!(
+            (first_day.active_users, first_day.new_users),
+            (1, 1),
+            "two concurrent same-day observations must count the user once"
+        );
+        let all_stored = stored.lock().expect("stored lock").clone();
+        assert!(all_stored.iter().all(|value| *value == at));
+
+        // Cleanup the committed fixture rows.
+        {
+            use crate::schema::activity_daily_metrics::dsl as adm;
+            use crate::schema::user_extra::dsl as ue;
+            diesel::delete(adm::activity_daily_metrics.find(at.date()))
+                .execute(conn)
+                .expect("cleanup metric row");
+            diesel::delete(ue::user_extra.find(uid))
+                .execute(conn)
+                .expect("cleanup user_extra row");
+        }
+    }
+
     /// Exercises `visible_presence_records` against Postgres: the missing-row
     /// default (everyone + null), the friend and block filters, and the
     /// viewer-nobody early return that must still resolve self.

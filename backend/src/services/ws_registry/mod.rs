@@ -2458,6 +2458,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prune_deciding_before_the_ping_closes_the_revolving_connection() {
+        // The second §6.5 interleaving: the prune pass reads freshness inside
+        // the uid lane and decides stale while the connection's last heartbeat
+        // is still old; the ping command that arrives only after the prune
+        // decision gets NotFound from the command lane, which is the signal
+        // for the handler to close the socket and reconnect.
+        let registry = registry();
+        let (entry, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        entry.heartbeat.record_at(
+            Instant::now()
+                .checked_sub(Duration::from_secs(120))
+                .expect("valid stale sample"),
+            Utc::now().naive_utc(),
+        );
+
+        // The prune decision (and removal) completes before the late ping
+        // command enters the command lane: the sequential awaits fix the
+        // interleaving deterministically.
+        registry.prune_stale(5).await;
+        assert!(
+            !registry.inner.contains_key(&7),
+            "the stale connection is removed"
+        );
+        assert!(
+            !registry
+                .heartbeat(7, entry.conn_id(), Some(AppPresenceState::Active))
+                .await,
+            "the late ping must be rejected so the handler closes the socket"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn debounce_expiry_before_reregister_publishes_offline_then_online() {
+        // Order 1: the disconnect debounce expires before the reconnect
+        // registers, so the user publishes offline and comes back online with
+        // the new connection.
+        let registry = ConnectionRegistry::with_disconnect_debounce(
+            Arc::new(WsMetrics::new(&prometheus::Registry::new())),
+            Duration::from_secs(25),
+        );
+        let (entry, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        registry.remove_connection(7, entry.conn_id()).await;
+
+        tokio::time::advance(Duration::from_secs(25)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(registry.online_flags(&[7]).get(&7), Some(&false));
+
+        let (_second, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn register_winning_the_race_against_debounce_expiry_stays_online() {
+        // Order 2: the reconnect registers before the debounce deadline, so
+        // the offline transition never publishes even when the deadline later
+        // elapses.
+        let registry = ConnectionRegistry::with_disconnect_debounce(
+            Arc::new(WsMetrics::new(&prometheus::Registry::new())),
+            Duration::from_secs(25),
+        );
+        let (entry, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        registry.remove_connection(7, entry.conn_id()).await;
+
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let (_second, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        tokio::time::advance(Duration::from_secs(15)).await;
+        tokio::task::yield_now().await;
+
+        assert_eq!(
+            registry.online_flags(&[7]).get(&7),
+            Some(&true),
+            "the re-registered Active connection must keep the user online"
+        );
+    }
+
+    #[tokio::test]
     async fn reconciliation_revocation_is_an_empty_offline_snapshot() {
         let registry = registry();
         let (_entry, mut rx) = registry.register(7, None).await;
@@ -2792,6 +2868,185 @@ mod tests {
         // the transaction-time last-seen value, not null.
         assert!(!payload.online);
         assert_eq!(payload.last_seen_at, Some(last_seen_at.and_utc()));
+    }
+
+    /// §10: deleting a friend must revoke the presence the ex-friend could
+    /// previously see, for both directions of the relationship.
+    #[tokio::test]
+    async fn friendship_removal_facts_revoke_presence_in_both_directions() {
+        let registry = registry();
+        let (_alice, mut alice_rx) = registry.register(1, None).await;
+        let (_bob, mut bob_rx) = registry.register(2, None).await;
+
+        let permit = registry
+            .reserve_reconciliation()
+            .await
+            .expect("coordinator accepts the reservation");
+        permit.send_social(social::PresencePairReconciliation {
+            // Alice loses sight of Bob and vice versa: both were visible, now
+            // neither is. Content is an empty offline snapshot, so it bypasses
+            // the (new) block filter by construction.
+            first_to_second: directed_facts(1, 2, true, false, None),
+            second_to_first: directed_facts(2, 1, true, false, None),
+        });
+
+        let to_alice = next_presence_change(&mut alice_rx).await;
+        assert_eq!(to_alice.uid, 2);
+        assert!(!to_alice.online);
+        assert_eq!(to_alice.last_seen_at, None);
+        let to_bob = next_presence_change(&mut bob_rx).await;
+        assert_eq!(to_bob.uid, 1);
+        assert!(!to_bob.online);
+        assert_eq!(to_bob.last_seen_at, None);
+    }
+
+    /// §10: blocking a friend must revoke the presence the blocker and the
+    /// blocked used to see of each other, using the transaction-captured old
+    /// eligibility rather than the new (blocking) relationship.
+    #[tokio::test]
+    async fn blocking_facts_revoke_presence_despite_the_new_block() {
+        let registry = registry();
+        let (_blocker, mut blocker_rx) = registry.register(1, None).await;
+        let (_blocked, mut blocked_rx) = registry.register(2, None).await;
+
+        let permit = registry
+            .reserve_reconciliation()
+            .await
+            .expect("coordinator accepts the reservation");
+        permit.send_social(social::PresencePairReconciliation {
+            first_to_second: directed_facts(1, 2, true, false, None),
+            second_to_first: directed_facts(2, 1, true, false, None),
+        });
+
+        // Both sides still receive exactly one revocation; nothing leaks the
+        // real presence values.
+        let to_blocker = next_presence_change(&mut blocker_rx).await;
+        assert_eq!(to_blocker.uid, 2);
+        assert!(!to_blocker.online);
+        assert_eq!(to_blocker.last_seen_at, None);
+        let to_blocked = next_presence_change(&mut blocked_rx).await;
+        assert_eq!(to_blocked.uid, 1);
+        assert!(!to_blocked.online);
+        assert_eq!(to_blocked.last_seen_at, None);
+    }
+
+    /// §10: unblocking (or accepting a friend request) restores an authoritative
+    /// snapshot built from the current published state, not from the facts'
+    /// was/is flags alone.
+    #[tokio::test]
+    async fn unblocking_facts_deliver_a_fresh_online_snapshot() {
+        let registry = registry();
+        let (_viewer, mut viewer_rx) = registry.register(1, None).await;
+        // The subject is a fresh Active connection, so the snapshot must say
+        // online with a null last seen even though the facts carry an older
+        // last-seen value.
+        let (_subject, _subject_rx) = registry.register(2, Some(AppPresenceState::Active)).await;
+
+        let permit = registry
+            .reserve_reconciliation()
+            .await
+            .expect("coordinator accepts the reservation");
+        permit.send_social(social::PresencePairReconciliation {
+            // The pair became visible for the viewer: (false, true) triggers
+            // the authoritative snapshot; the reverse direction was and stays
+            // hidden, so it emits nothing.
+            first_to_second: directed_facts(1, 2, false, true, None),
+            second_to_first: directed_facts(2, 1, false, false, None),
+        });
+
+        let to_viewer = next_presence_change(&mut viewer_rx).await;
+        assert_eq!(to_viewer.uid, 2);
+        assert!(to_viewer.online);
+        assert_eq!(to_viewer.last_seen_at, None);
+    }
+
+    /// §12 multi-connection matrix: with one Active and one Inactive
+    /// connection, removing the Active one keeps the user online.
+    #[tokio::test]
+    async fn removing_the_only_active_connection_keeps_online_while_another_active_remains() {
+        let registry = registry();
+        let (active, _active_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        let (inactive, _inactive_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        assert!(
+            registry
+                .heartbeat(7, inactive.conn_id(), Some(AppPresenceState::Inactive))
+                .await
+        );
+
+        registry.remove_connection(7, active.conn_id()).await;
+        assert_eq!(
+            registry.online_flags(&[7]).get(&7),
+            Some(&true),
+            "the remaining Active connection keeps the user online"
+        );
+    }
+
+    /// §12 multi-connection matrix: removing an Inactive connection while an
+    /// Active one remains must not start the disconnect debounce nor flip the
+    /// published state.
+    #[tokio::test(start_paused = true)]
+    async fn removing_an_inactive_connection_while_active_remains_does_not_debounce() {
+        let registry = ConnectionRegistry::with_disconnect_debounce(
+            Arc::new(WsMetrics::new(&prometheus::Registry::new())),
+            Duration::from_secs(25),
+        );
+        let (active, _active_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        let (inactive, _inactive_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        assert!(
+            registry
+                .heartbeat(7, inactive.conn_id(), Some(AppPresenceState::Inactive))
+                .await
+        );
+
+        registry.remove_connection(7, inactive.conn_id()).await;
+        assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
+        assert!(!registry
+            .published_presence
+            .get(&7)
+            .expect("published presence exists")
+            .debouncing
+            .load(Ordering::Relaxed));
+        let _ = active;
+
+        // The debounce never fires for the surviving Active connection.
+        tokio::time::advance(Duration::from_secs(25)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
+    }
+
+    /// §12 multi-connection matrix: pruning one of two connections where the
+    /// surviving one is Active must not produce an offline transition.
+    #[tokio::test(start_paused = true)]
+    async fn pruning_a_stale_connection_keeps_online_when_another_stays_active() {
+        let registry = ConnectionRegistry::with_transition_rate_limits(
+            Arc::new(WsMetrics::new(&prometheus::Registry::new())),
+            Duration::from_secs(25),
+            PresenceTransitionLimits {
+                window: Duration::from_secs(10),
+                per_connection: 12,
+                per_uid: 20,
+            },
+        );
+        let (stale, _stale_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        let (fresh, _fresh_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        stale.heartbeat.record_at(
+            Instant::now()
+                .checked_sub(Duration::from_secs(120))
+                .expect("valid stale sample"),
+            Utc::now().naive_utc(),
+        );
+        // Keep the surviving connection's sample fresh: record at a fixed
+        // offset relative to now.
+        fresh
+            .heartbeat
+            .record_at(Instant::now(), Utc::now().naive_utc());
+
+        registry.prune_stale(90).await;
+        assert_eq!(
+            registry.online_flags(&[7]).get(&7),
+            Some(&true),
+            "the surviving Active connection keeps the user published online"
+        );
     }
 
     #[tokio::test]
