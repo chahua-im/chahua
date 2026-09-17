@@ -29,6 +29,7 @@ pub enum ServerWsMessage {
     MessagesBulkDeleted(BulkDeletedPayload),
     ReactionUpdated(ReactionUpdatePayload),
     PresenceUpdate(PresenceUpdatePayload),
+    PresenceChanged(PresenceChangedPayload),
     ThreadUpdate(ThreadUpdatePayload),
     ThreadMembershipChanged(ThreadMembershipChangedPayload),
     ChatArchiveStateChanged(ChatArchiveStateChangedPayload),
@@ -56,6 +57,7 @@ impl ServerWsMessage {
             Self::MessagesBulkDeleted(_) => "messagesBulkDeleted",
             Self::ReactionUpdated(_) => "reactionUpdated",
             Self::PresenceUpdate(_) => "presenceUpdate",
+            Self::PresenceChanged(_) => "presenceChanged",
             Self::ThreadUpdate(_) => "threadUpdate",
             Self::ThreadMembershipChanged(_) => "threadMembershipChanged",
             Self::ChatArchiveStateChanged(_) => "chatArchiveStateChanged",
@@ -88,6 +90,16 @@ pub struct ReactionUpdatePayload {
 #[serde(rename_all = "camelCase")]
 pub struct PresenceUpdatePayload {
     pub active_connections: u32,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceChangedPayload {
+    pub uid: i32,
+    pub online: bool,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub changed_at: DateTime<Utc>,
+    pub sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -210,8 +222,8 @@ pub struct NotificationPayload {
 #[cfg(test)]
 mod tests {
     use super::{
-        NotificationPayload, NotificationType, PinUpdatePayload, PresenceUpdatePayload,
-        ServerWsMessage, ThreadMembershipChangedPayload,
+        NotificationPayload, NotificationType, PinUpdatePayload, PresenceChangedPayload,
+        PresenceUpdatePayload, ServerWsMessage, ThreadMembershipChangedPayload,
     };
     use serde_json::json;
 
@@ -225,6 +237,43 @@ mod tests {
         assert_eq!(value["type"], json!("presenceUpdate"));
         assert_eq!(value["payload"]["activeConnections"], json!(3));
         assert!(value["payload"].get("active_connections").is_none());
+    }
+
+    #[test]
+    fn serializes_presence_changed_payload() {
+        let changed_at = "2026-09-14T10:00:45Z".parse().unwrap();
+        let last_seen_at = "2026-09-14T10:00:00Z".parse().unwrap();
+        let value =
+            serde_json::to_value(ServerWsMessage::PresenceChanged(PresenceChangedPayload {
+                uid: 123,
+                online: false,
+                last_seen_at: Some(last_seen_at),
+                changed_at,
+                sequence: 42,
+            }))
+            .expect("serialize presence changed event");
+
+        assert_eq!(value["type"], json!("presenceChanged"));
+        assert_eq!(value["payload"]["uid"], json!(123));
+        assert_eq!(value["payload"]["online"], json!(false));
+        assert_eq!(
+            value["payload"]["lastSeenAt"],
+            json!("2026-09-14T10:00:00Z")
+        );
+        assert_eq!(value["payload"]["changedAt"], json!("2026-09-14T10:00:45Z"));
+        assert_eq!(value["payload"]["sequence"], json!(42));
+        assert!(value["payload"].get("last_seen_at").is_none());
+        assert_eq!(
+            ServerWsMessage::PresenceChanged(PresenceChangedPayload {
+                uid: 123,
+                online: true,
+                last_seen_at: None,
+                changed_at,
+                sequence: 43,
+            })
+            .message_type(),
+            "presenceChanged"
+        );
     }
 
     #[test]

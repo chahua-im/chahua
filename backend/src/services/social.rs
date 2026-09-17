@@ -4,7 +4,7 @@
 //! All functions take a `&mut PgConnection` (borrowed from `DbConn`); the few
 //! that need snowflake IDs are `async` and take `&AppState` for the generator.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use diesel::prelude::*;
@@ -41,6 +41,238 @@ pub struct PeerRelationship {
     pub blocked_by: bool,
     /// `(id, uid_is_sender, created_at)`.
     pub pending_request: Option<(i64, bool, chrono::DateTime<Utc>)>,
+}
+
+/// The stored, viewer-independent portion of a user's presence.
+#[derive(Debug, Clone, Copy)]
+pub struct PresenceRecord {
+    pub last_seen_at: Option<chrono::NaiveDateTime>,
+    pub visibility: PresenceVisibility,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VisiblePresence {
+    pub visible: bool,
+    pub last_seen_at: Option<chrono::NaiveDateTime>,
+}
+
+fn presence_pair_is_visible(
+    viewer_uid: i32,
+    target_uid: i32,
+    viewer_visibility: PresenceVisibility,
+    target_visibility: PresenceVisibility,
+    are_friends: bool,
+    blocked: bool,
+) -> bool {
+    if viewer_uid == target_uid {
+        return true;
+    }
+    if blocked {
+        return false;
+    }
+    let allows = |visibility| {
+        visibility == PresenceVisibility::Everyone
+            || (visibility == PresenceVisibility::Friends && are_friends)
+    };
+    allows(viewer_visibility) && allows(target_visibility)
+}
+
+/// Load presence records and apply the bilateral visibility policy for a viewer.
+///
+/// A missing `user_extra` row deliberately behaves like the product defaults:
+/// `everyone` visibility and no observed last-seen time. The friendship and block
+/// queries are split by canonical pair direction so they retain their index paths.
+pub fn visible_presence_records(
+    conn: &mut PgConnection,
+    viewer_uid: i32,
+    target_uids: &[i32],
+) -> QueryResult<HashMap<i32, VisiblePresence>> {
+    let targets: HashSet<i32> = target_uids.iter().copied().collect();
+    if targets.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut extra_uids: Vec<i32> = targets.iter().copied().collect();
+    if !targets.contains(&viewer_uid) {
+        extra_uids.push(viewer_uid);
+    }
+    let records: HashMap<i32, PresenceRecord> = user_extra::table
+        .filter(user_extra::uid.eq_any(extra_uids))
+        .select((
+            user_extra::uid,
+            user_extra::last_seen_at,
+            user_extra::presence_visibility,
+        ))
+        .load::<(i32, Option<chrono::NaiveDateTime>, PresenceVisibility)>(conn)?
+        .into_iter()
+        .map(|(uid, last_seen_at, visibility)| {
+            (
+                uid,
+                PresenceRecord {
+                    last_seen_at,
+                    visibility,
+                },
+            )
+        })
+        .collect();
+
+    let viewer_visibility = records
+        .get(&viewer_uid)
+        .map(|record| record.visibility)
+        .unwrap_or(PresenceVisibility::Everyone);
+    if viewer_visibility == PresenceVisibility::Nobody {
+        return Ok(targets
+            .into_iter()
+            .map(|target| {
+                let last_seen_at = (target == viewer_uid)
+                    .then(|| records.get(&target).and_then(|record| record.last_seen_at))
+                    .flatten();
+                (
+                    target,
+                    VisiblePresence {
+                        visible: target == viewer_uid,
+                        last_seen_at,
+                    },
+                )
+            })
+            .collect());
+    }
+
+    let peers: Vec<i32> = targets
+        .iter()
+        .copied()
+        .filter(|target| *target != viewer_uid)
+        .collect();
+    let greater: Vec<i32> = peers
+        .iter()
+        .copied()
+        .filter(|target| *target > viewer_uid)
+        .collect();
+    let lesser: Vec<i32> = peers
+        .iter()
+        .copied()
+        .filter(|target| *target < viewer_uid)
+        .collect();
+    let mut friends = HashSet::new();
+    if !greater.is_empty() {
+        friends.extend(
+            friendships::table
+                .filter(
+                    friendships::uid1
+                        .eq(viewer_uid)
+                        .and(friendships::uid2.eq_any(&greater)),
+                )
+                .select(friendships::uid2)
+                .load::<i32>(conn)?,
+        );
+    }
+    if !lesser.is_empty() {
+        friends.extend(
+            friendships::table
+                .filter(
+                    friendships::uid2
+                        .eq(viewer_uid)
+                        .and(friendships::uid1.eq_any(&lesser)),
+                )
+                .select(friendships::uid1)
+                .load::<i32>(conn)?,
+        );
+    }
+
+    let mut blocked = HashSet::new();
+    if !peers.is_empty() {
+        blocked.extend(
+            blocks::table
+                .filter(
+                    blocks::blocker_uid
+                        .eq(viewer_uid)
+                        .and(blocks::blocked_uid.eq_any(&peers)),
+                )
+                .select(blocks::blocked_uid)
+                .load::<i32>(conn)?,
+        );
+        blocked.extend(
+            blocks::table
+                .filter(
+                    blocks::blocked_uid
+                        .eq(viewer_uid)
+                        .and(blocks::blocker_uid.eq_any(&peers)),
+                )
+                .select(blocks::blocker_uid)
+                .load::<i32>(conn)?,
+        );
+    }
+
+    Ok(targets
+        .into_iter()
+        .map(|target| {
+            if target == viewer_uid {
+                return (
+                    target,
+                    VisiblePresence {
+                        visible: true,
+                        last_seen_at: records.get(&target).and_then(|record| record.last_seen_at),
+                    },
+                );
+            }
+            let target_record = records.get(&target).copied().unwrap_or(PresenceRecord {
+                last_seen_at: None,
+                visibility: PresenceVisibility::Everyone,
+            });
+            let are_friends = friends.contains(&target);
+            let visible = presence_pair_is_visible(
+                viewer_uid,
+                target,
+                viewer_visibility,
+                target_record.visibility,
+                are_friends,
+                blocked.contains(&target),
+            );
+            (
+                target,
+                VisiblePresence {
+                    visible,
+                    last_seen_at: visible.then_some(target_record.last_seen_at).flatten(),
+                },
+            )
+        })
+        .collect())
+}
+
+pub fn get_presence_visibility(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> QueryResult<PresenceVisibility> {
+    user_extra::table
+        .filter(user_extra::uid.eq(uid))
+        .select(user_extra::presence_visibility)
+        .first(conn)
+        .optional()
+        .map(|visibility| visibility.unwrap_or(PresenceVisibility::Everyone))
+}
+
+/// Store a presence visibility preference without fabricating a last-seen value.
+pub fn upsert_presence_visibility(
+    conn: &mut PgConnection,
+    uid: i32,
+    visibility: PresenceVisibility,
+) -> QueryResult<PresenceVisibility> {
+    let now = Utc::now().naive_utc();
+    diesel::insert_into(user_extra::table)
+        .values(NewUserExtra {
+            uid,
+            first_seen_at: now,
+            last_seen_at: None,
+            presence_visibility: visibility,
+            sticker_pack_order: serde_json::json!([]),
+            verification_mode: FriendAddVerificationMode::Direct,
+            verification_question: None,
+        })
+        .on_conflict(user_extra::uid)
+        .do_update()
+        .set(user_extra::presence_visibility.eq(visibility))
+        .returning(user_extra::presence_visibility)
+        .get_result(conn)
 }
 
 /// Load relationship facts for `uid` against `peers`.
@@ -892,8 +1124,8 @@ pub fn unblock_user(conn: &mut PgConnection, blocker: i32, blocked: i32) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_pair, merge_request_history};
-    use crate::models::{FriendRequest, FriendRequestStatus};
+    use super::{canonical_pair, merge_request_history, presence_pair_is_visible};
+    use crate::models::{FriendRequest, FriendRequestStatus, PresenceVisibility};
     use chrono::{DateTime, Utc};
 
     fn request_history_entry(
@@ -940,5 +1172,27 @@ mod tests {
         assert_eq!(canonical_pair(5, 3), (3, 5));
         assert_eq!(canonical_pair(3, 5), (3, 5));
         assert_eq!(canonical_pair(-1, 9), (-1, 9));
+    }
+
+    #[test]
+    fn presence_visibility_is_bilateral_and_block_safe() {
+        use PresenceVisibility::{Everyone, Friends, Nobody};
+
+        for (viewer, target, friends, expected) in [
+            (Everyone, Everyone, false, true),
+            (Everyone, Friends, false, false),
+            (Friends, Everyone, false, false),
+            (Friends, Friends, true, true),
+            (Nobody, Everyone, true, false),
+        ] {
+            assert_eq!(
+                presence_pair_is_visible(1, 2, viewer, target, friends, false),
+                expected
+            );
+        }
+        assert!(!presence_pair_is_visible(
+            1, 2, Everyone, Everyone, true, true
+        ));
+        assert!(presence_pair_is_visible(1, 1, Nobody, Nobody, false, true));
     }
 }

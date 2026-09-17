@@ -90,15 +90,19 @@ fn missing_user_summary(uid: i32) -> MemberSummary {
         avatar_url: None,
         gender: 0,
         user_group: None,
+        last_seen_at: None,
+        online: false,
     }
 }
 
 fn build_request_response(
     conn: &mut PgConnection,
     state: &AppState,
+    viewer_uid: i32,
     request: &FriendRequest,
 ) -> Result<FriendRequestResponse, AppError> {
-    let summaries = build_member_summary_map(conn, state, &[request.from_uid, request.to_uid])?;
+    let summaries =
+        build_member_summary_map(conn, state, viewer_uid, &[request.from_uid, request.to_uid])?;
     Ok(FriendRequestResponse {
         id: request.id,
         from: summaries
@@ -120,6 +124,7 @@ fn build_request_response(
 fn build_request_responses(
     conn: &mut PgConnection,
     state: &AppState,
+    viewer_uid: i32,
     requests: &[FriendRequest],
 ) -> Result<Vec<FriendRequestResponse>, AppError> {
     let mut uids: Vec<i32> = Vec::with_capacity(requests.len() * 2);
@@ -127,7 +132,8 @@ fn build_request_responses(
         uids.push(request.from_uid);
         uids.push(request.to_uid);
     }
-    let summaries: HashMap<i32, MemberSummary> = build_member_summary_map(conn, state, &uids)?;
+    let summaries: HashMap<i32, MemberSummary> =
+        build_member_summary_map(conn, state, viewer_uid, &uids)?;
     Ok(requests
         .iter()
         .map(|request| FriendRequestResponse {
@@ -166,7 +172,7 @@ async fn get_friends(
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
     let friends = social::list_friends_with_since(conn, uid)?;
     let uids: Vec<i32> = friends.iter().map(|(uid, _)| *uid).collect();
-    let summaries = build_member_summary_map(conn, &state, &uids)?;
+    let summaries = build_member_summary_map(conn, &state, uid, &uids)?;
     let friends = friends
         .into_iter()
         .filter_map(|(uid, since)| {
@@ -290,7 +296,7 @@ async fn create_friend_request(
                     from_uid: uid,
                 }),
             );
-            let response = build_request_response(conn, &state, &request)?;
+            let response = build_request_response(conn, &state, uid, &request)?;
             Ok((StatusCode::CREATED, Json(response)))
         }
         CreateRequestOutcome::AutoAccepted { request } => {
@@ -304,7 +310,7 @@ async fn create_friend_request(
                     by_uid: uid,
                 }),
             );
-            let response = build_request_response(conn, &state, &request)?;
+            let response = build_request_response(conn, &state, uid, &request)?;
             Ok((StatusCode::OK, Json(response)))
         }
         CreateRequestOutcome::AlreadyPending => {
@@ -365,7 +371,7 @@ async fn list_friend_request_history(
             }
         })
         .collect();
-    let requests = build_request_responses(conn, &state, &rows)?
+    let requests = build_request_responses(conn, &state, uid, &rows)?
         .into_iter()
         .zip(directions)
         .map(|(request, direction)| FriendRequestHistoryEntry { request, direction })
@@ -403,7 +409,7 @@ async fn accept_friend_request(
             by_uid: uid,
         }),
     );
-    let response = build_request_response(conn, &state, request)?;
+    let response = build_request_response(conn, &state, uid, request)?;
     Ok(Json(response))
 }
 
@@ -443,7 +449,7 @@ async fn reject_friend_request(
     if matches!(&outcome, ResolveOutcome::RejectedWhileFriends(_)) {
         return Err(AppError::Conflict("You are already friends with this user"));
     }
-    let response = build_request_response(conn, &state, request)?;
+    let response = build_request_response(conn, &state, uid, request)?;
     Ok(Json(response))
 }
 

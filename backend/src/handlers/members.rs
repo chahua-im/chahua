@@ -61,16 +61,22 @@ struct ListMembersQuery {
 fn build_member_responses(
     conn: &mut diesel::PgConnection,
     state: &AppState,
+    viewer_uid: i32,
     page_rows: Vec<(i32, GroupRole, DateTime<Utc>)>,
 ) -> Result<Vec<MemberResponse>, AppError> {
     let uids: Vec<i32> = page_rows.iter().map(|(uid, _, _)| *uid).collect();
     let profiles = lookup_user_profiles(conn, &uids)?;
     let mut avatars = state.avatars.lookup(&uids);
+    let presence = crate::services::social::visible_presence_records(conn, viewer_uid, &uids)?;
+    let online_flags = state.ws_registry.online_flags(&uids);
 
     Ok(page_rows
         .into_iter()
         .map(|(uid, role, joined_at)| {
             let profile = profiles.get(&uid);
+            let visible_presence = presence.get(&uid).copied();
+            let online = visible_presence.is_some_and(|record| record.visible)
+                && online_flags.get(&uid).copied().unwrap_or(false);
             MemberResponse {
                 avatar_url: avatars.remove(&uid).flatten(),
                 uid,
@@ -79,6 +85,11 @@ fn build_member_responses(
                 username: profile.and_then(|profile| profile.username.clone()),
                 gender: profile.map(|profile| profile.gender).unwrap_or(0),
                 user_group: profile.and_then(|profile| profile.user_group.clone()),
+                last_seen_at: (!online)
+                    .then(|| visible_presence.and_then(|record| record.last_seen_at))
+                    .flatten()
+                    .map(|last_seen_at| DateTime::from_naive_utc_and_offset(last_seen_at, Utc)),
+                online,
             }
         })
         .collect())
@@ -188,7 +199,7 @@ async fn get_members(
                 .map(|row| (row.uid, row.role.clone(), row.joined_at))
         })
         .collect();
-    let members = build_member_responses(conn, &state, page_rows)?;
+    let members = build_member_responses(conn, &state, uid, page_rows)?;
 
     let next_cursor = has_more
         .then(|| members.last().map(|member| member.uid))
@@ -308,24 +319,11 @@ async fn post_add_member(
         send_result.side_effects.fire(&state);
     }
 
-    let avatar_url = state
-        .avatars
-        .lookup(&[body.uid])
-        .remove(&body.uid)
-        .flatten();
+    let member = build_member_responses(conn, &state, uid, vec![(body.uid, role, now)])?
+        .pop()
+        .expect("single member response must be present");
 
-    Ok((
-        StatusCode::CREATED,
-        Json(MemberResponse {
-            uid: body.uid,
-            role,
-            joined_at: now,
-            username: profile.and_then(|profile| profile.username.clone()),
-            avatar_url,
-            gender: profile.map(|profile| profile.gender).unwrap_or(0),
-            user_group: profile.and_then(|profile| profile.user_group.clone()),
-        }),
-    ))
+    Ok((StatusCode::CREATED, Json(member)))
 }
 
 /// Query parameters for the remove-member endpoint.
@@ -543,24 +541,16 @@ async fn patch_member(
         .select((gm_dsl::role, gm_dsl::joined_at))
         .first(conn)?;
 
-    let profiles = lookup_user_profiles(conn, &[target_uid])?;
-    let profile = profiles.get(&target_uid);
+    let member = build_member_responses(
+        conn,
+        &state,
+        requester_uid,
+        vec![(target_uid, role, joined_at)],
+    )?
+    .pop()
+    .expect("single member response must be present");
 
-    let avatar_url = state
-        .avatars
-        .lookup(&[target_uid])
-        .remove(&target_uid)
-        .flatten();
-
-    Ok(Json(MemberResponse {
-        uid: target_uid,
-        role,
-        joined_at,
-        username: profile.and_then(|profile| profile.username.clone()),
-        avatar_url,
-        gender: profile.map(|profile| profile.gender).unwrap_or(0),
-        user_group: profile.and_then(|profile| profile.user_group.clone()),
-    }))
+    Ok(Json(member))
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

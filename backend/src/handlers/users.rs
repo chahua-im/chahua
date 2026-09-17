@@ -8,7 +8,10 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::auth::AuthTokenResponse;
-use crate::dto::users::{MeResponse, MemberSummary, SearchUsersResponse, StickerPackOrderItem};
+use crate::dto::users::{
+    MeResponse, MemberSummary, PresenceVisibilityResponse, SearchUsersResponse,
+    StickerPackOrderItem,
+};
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
@@ -172,15 +175,21 @@ fn normalize_user_search_limit(limit: Option<i64>) -> i64 {
 pub fn build_member_summary_map(
     conn: &mut PgConnection,
     state: &AppState,
+    viewer_uid: i32,
     uids: &[i32],
 ) -> Result<HashMap<i32, MemberSummary>, AppError> {
     let profiles = lookup_user_profiles(conn, uids)?;
     let mut avatars = state.avatars.lookup(uids);
+    let presence = crate::services::social::visible_presence_records(conn, viewer_uid, uids)?;
+    let online_flags = state.ws_registry.online_flags(uids);
 
     Ok(uids
         .iter()
         .filter_map(|uid| {
             profiles.get(uid).map(|profile| {
+                let visible_presence = presence.get(uid).copied();
+                let online = visible_presence.is_some_and(|record| record.visible)
+                    && online_flags.get(uid).copied().unwrap_or(false);
                 (
                     *uid,
                     MemberSummary {
@@ -189,11 +198,59 @@ pub fn build_member_summary_map(
                         avatar_url: avatars.remove(uid).flatten(),
                         gender: profile.gender,
                         user_group: profile.user_group.clone(),
+                        last_seen_at: (!online)
+                            .then(|| visible_presence.and_then(|record| record.last_seen_at))
+                            .flatten()
+                            .map(|last_seen_at| {
+                                chrono::DateTime::from_naive_utc_and_offset(
+                                    last_seen_at,
+                                    chrono::Utc,
+                                )
+                            }),
+                        online,
                     },
                 )
             })
         })
         .collect())
+}
+
+#[utoipa::path(
+    get,
+    path = "/me/presence-visibility",
+    tag = "users",
+    responses((status = 200, body = PresenceVisibilityResponse)),
+    security(("bearer_jwt" = []))
+)]
+async fn get_presence_visibility(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+) -> Result<Json<PresenceVisibilityResponse>, AppError> {
+    Ok(Json(PresenceVisibilityResponse {
+        visibility: crate::services::social::get_presence_visibility(&mut conn, uid)?,
+    }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/me/presence-visibility",
+    tag = "users",
+    request_body = PresenceVisibilityResponse,
+    responses((status = 200, body = PresenceVisibilityResponse)),
+    security(("bearer_jwt" = []))
+)]
+async fn put_presence_visibility(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+    Json(body): Json<PresenceVisibilityResponse>,
+) -> Result<Json<PresenceVisibilityResponse>, AppError> {
+    Ok(Json(PresenceVisibilityResponse {
+        visibility: crate::services::social::upsert_presence_visibility(
+            &mut conn,
+            uid,
+            body.visibility,
+        )?,
+    }))
 }
 
 fn can_exclude_members_of_chat(
@@ -349,7 +406,7 @@ async fn get_user_search(
         }
     }
 
-    let summaries_by_uid = build_member_summary_map(conn, &state, &merged_uids)?;
+    let summaries_by_uid = build_member_summary_map(conn, &state, uid, &merged_uids)?;
     let summaries: Vec<MemberSummary> = merged_uids
         .into_iter()
         .filter_map(|member_uid| summaries_by_uid.get(&member_uid).cloned())
@@ -399,6 +456,8 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(routes!(get_user_search))
         .routes(routes!(get_auth_token))
         .routes(routes!(put_stickerpack_order))
+        .routes(routes!(get_presence_visibility))
+        .routes(routes!(put_presence_visibility))
 }
 
 fn load_accessible_sticker_pack_ids(
@@ -440,6 +499,8 @@ mod tests {
             avatar_url: None,
             gender: 0,
             user_group: None,
+            last_seen_at: None,
+            online: false,
         }
     }
 

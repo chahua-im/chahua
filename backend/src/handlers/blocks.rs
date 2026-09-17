@@ -44,7 +44,7 @@ async fn get_blocks(
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
     let blocks = social::list_blocks_with_since(conn, uid)?;
     let uids: Vec<i32> = blocks.iter().map(|(uid, _)| *uid).collect();
-    let summaries = build_member_summary_map(conn, &state, &uids)?;
+    let summaries = build_member_summary_map(conn, &state, uid, &uids)?;
     let blocks = blocks
         .into_iter()
         .filter_map(|(uid, since)| {

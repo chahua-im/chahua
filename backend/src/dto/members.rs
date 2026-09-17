@@ -13,6 +13,8 @@ pub struct MemberResponse {
     pub avatar_url: Option<String>,
     pub gender: i16,
     pub user_group: Option<UserGroupTagInfo>,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub online: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

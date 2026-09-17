@@ -47,6 +47,14 @@ pub struct MemberSummary {
     pub avatar_url: Option<String>,
     pub gender: i16,
     pub user_group: Option<UserGroupTagInfo>,
+    pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub online: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceVisibilityResponse {
+    pub visibility: crate::models::PresenceVisibility,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
