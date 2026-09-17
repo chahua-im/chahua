@@ -219,17 +219,6 @@ pub fn mark_thread_as_read(
     )
     .set(thread_user_states::last_read_message_id.eq(Some(message_id)))
     .execute(conn)?;
-    // Advancing the read position also acknowledges unread reactions: they are
-    // derived from a reaction-timestamp cursor (see UnreadService), which only
-    // moves forward.
-    diesel::update(
-        thread_user_states::table
-            .filter(thread_user_states::chat_id.eq(chat_id))
-            .filter(thread_user_states::thread_root_id.eq(thread_root_id))
-            .filter(thread_user_states::uid.eq(uid)),
-    )
-    .set(thread_user_states::last_reactions_read_at.eq(Utc::now()))
-    .execute(conn)?;
     Ok(updated > 0)
 }
 
@@ -678,13 +667,17 @@ struct ParticipantRow {
 /// `rows` — the thread subscription rows (already trimmed to the page size).
 /// `has_more` — whether there are more results beyond this page.
 /// `root_messages` — raw root `Message` rows (no heavy enrichment needed).
+/// `reactions_enabled` — the user's reaction-notification toggle; while off
+/// the unread-reaction batch query is skipped.
 /// `media` / `avatars` — URL construction for attachments and user avatars.
+#[allow(clippy::too_many_arguments)]
 pub fn enrich_thread_list(
     conn: &mut PgConnection,
     rows: Vec<ThreadListRow>,
     has_more: bool,
     root_messages: Vec<Message>,
     uid: i32,
+    reactions_enabled: bool,
     media: &MediaStore,
     avatars: &AvatarService,
 ) -> Result<ListThreadsResponse, diesel::result::Error> {
@@ -764,10 +757,7 @@ pub fn enrich_thread_list(
         .map(|r| (r.thread_root_id, r.mention_count.min(MAX_UNREAD_COUNT)))
         .collect();
 
-    // 0c. Batch query: unread-reaction counts per thread (reactions on the
-    // user's messages in each thread, aggregated per message; cursor is the
-    // per-(thread, user) reaction timestamp). Rows without a thread_user_states
-    // row produce no count, mirroring the mention join semantics.
+    // 0c. Batch query: unread-reaction counts per thread.
     #[derive(QueryableByName)]
     struct UnreadReactionRow {
         #[diesel(sql_type = diesel::sql_types::BigInt)]
@@ -775,34 +765,36 @@ pub fn enrich_thread_list(
         #[diesel(sql_type = diesel::sql_types::BigInt)]
         reaction_count: i64,
     }
-    let reaction_rows: Vec<UnreadReactionRow> = sql_query(
-        "SELECT my_msgs.thread_root_id,
-                COUNT(DISTINCT mr.message_id)::bigint AS reaction_count
-         FROM (
-             SELECT m.id AS message_id, m.chat_id AS chat_id, m.reply_root_id AS thread_root_id, m.sender_uid
-             FROM messages m
-             WHERE m.reply_root_id = ANY($2)
-               AND m.deleted_at IS NULL
-               AND m.is_published = TRUE
-               AND m.sender_uid = $1
-         ) my_msgs
-         JOIN thread_user_states tus
-           ON tus.chat_id = my_msgs.chat_id
-          AND tus.thread_root_id = my_msgs.thread_root_id
-          AND tus.uid = my_msgs.sender_uid
-         JOIN message_reactions mr
-           ON mr.message_id = my_msgs.message_id
-          AND mr.user_uid <> my_msgs.sender_uid
-          AND mr.created_at > tus.last_reactions_read_at
-         GROUP BY my_msgs.thread_root_id",
-    )
-    .bind::<diesel::sql_types::Integer, _>(uid)
-    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
-    .load(conn)?;
-    let reaction_map: HashMap<i64, i64> = reaction_rows
+    let reaction_map: HashMap<i64, i64> = if reactions_enabled {
+        sql_query(
+            "SELECT my_msgs.thread_root_id,
+                    COUNT(DISTINCT mr.message_id)::bigint AS reaction_count
+             FROM (
+                 SELECT m.id AS message_id, m.chat_id AS chat_id, m.reply_root_id AS thread_root_id, m.sender_uid
+                 FROM messages m
+                 WHERE m.reply_root_id = ANY($2)
+                   AND m.deleted_at IS NULL
+                   AND m.is_published = TRUE
+                   AND m.sender_uid = $1
+             ) my_msgs
+             JOIN message_reactions mr
+               ON mr.message_id = my_msgs.message_id
+              AND mr.user_uid <> my_msgs.sender_uid
+             LEFT JOIN message_views mv
+               ON mv.uid = my_msgs.sender_uid
+              AND mv.message_id = my_msgs.message_id
+             WHERE mr.created_at > COALESCE(mv.viewed_at, '-infinity'::timestamptz)
+             GROUP BY my_msgs.thread_root_id",
+        )
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
+        .load::<UnreadReactionRow>(conn)?
         .into_iter()
         .map(|r| (r.thread_root_id, r.reaction_count.min(MAX_UNREAD_COUNT)))
-        .collect();
+        .collect()
+    } else {
+        HashMap::new()
+    };
 
     // 1. Batch query: distinct participants per thread (replies + root message author)
     let participant_rows: Vec<ParticipantRow> = sql_query(
@@ -996,7 +988,7 @@ pub fn enrich_thread_list(
         );
     }
 
-    // 7. Assemble final response
+    // 8. Assemble final response
     let next_cursor = if has_more {
         rows.last().map(|r| r.last_reply_at.to_rfc3339())
     } else {
