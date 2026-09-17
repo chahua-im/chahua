@@ -1,7 +1,11 @@
 # Last-Seen / 在线状态功能方案（后端）
 
-> 状态：方案已完成第九次评审修订（2026-09-14），**尚未实施**。等用户明确指令后再动手。
-> 分支：`crsh/lastseen`（相对 main 无提交）。
+> 状态：已实施并通过对照终审（2026-09-17）。实施中相对本方案的偏差均已按计划
+> 修复（permit 先于 mutation、ack 回投 coordinator、§6.1 统一 PresenceSlot、
+> §6.3 队尾目标与 checkpoint 间隔 gate、§6.5 原子 slot 删除）；EXPLAIN 验证
+> 记录见 `ai-notes/lastseen-explain-verification.md`（本地笔记，不入库）。
+> §14 未做事项保持不变；测试缺口终审后仅剩计划外可选项，见终审记录。
+> 分支：`crsh/lastseen`（相对 main 含 39 个提交，待合入）。
 > 范围：仅后端；除 auth 缺少 state 时采用明确的宽容策略外，不以现有前端兼容性为约束，
 > 其他 REST / WS 契约允许破坏性调整。
 > 部署前提：本期只支持单实例。多实例 presence 在真正需要扩容时另行设计，本方案不处理。

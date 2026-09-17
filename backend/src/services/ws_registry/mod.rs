@@ -237,7 +237,9 @@ impl PresenceObservation {
 
 #[derive(Clone)]
 struct PresenceBroadcaster {
-    connections: Arc<dashmap::DashMap<i32, Vec<Arc<ConnectionEntry>>>>,
+    /// Shared with the registry: connection lists live inside the per-uid
+    /// presence slot (§6.1); delivery takes short shared guards.
+    slots: Arc<dashmap::DashMap<i32, PresenceSlot>>,
     metrics: Arc<WsMetrics>,
     sequence: Arc<AtomicU64>,
     broadcast_lane: Arc<Mutex<()>>,
@@ -349,7 +351,8 @@ impl PresenceBroadcaster {
         let msg_type = message.message_type();
         for recipient in recipients {
             let mut failed_conn_ids = Vec::new();
-            if let Some(entries) = self.connections.get(&recipient) {
+            if let Some(slot) = self.slots.get(&recipient) {
+                let entries = &slot.connections;
                 for entry in entries.iter() {
                     if entry.tx.try_send(message.clone()).is_err() {
                         if evict_on_failure {
@@ -387,9 +390,9 @@ impl PresenceBroadcaster {
         // Dropping a `get_mut` guard and then calling `remove` permits a
         // concurrent register to insert a new connection in between, which
         // would incorrectly evict that new connection too.
-        if let dashmap::mapref::entry::Entry::Occupied(mut occupied) = self.connections.entry(uid) {
+        if let dashmap::mapref::entry::Entry::Occupied(mut occupied) = self.slots.entry(uid) {
             let mut unknown_refunds = 0i64;
-            occupied.get_mut().retain(|entry| {
+            occupied.get_mut().connections.retain(|entry| {
                 if conn_ids.contains(&entry.conn_id) && entry.retire_unknown_accounting() {
                     unknown_refunds -= 1;
                 }
@@ -399,28 +402,56 @@ impl PresenceBroadcaster {
                 self.metrics
                     .add_long_lived_unknown_connections(unknown_refunds);
             }
-            if occupied.get().is_empty() {
-                occupied.remove();
+            {
+                let slot = occupied.get();
+                if slot.connections.is_empty()
+                    && !slot.published_online
+                    && !slot.debouncing
+                    && slot.queued_online_target.is_none()
+                {
+                    occupied.remove();
+                }
             }
         }
     }
 }
 
-/// State exposed to presence consumers. The generation invalidates an earlier
-/// disconnect timer after the user becomes active again.
-#[derive(Debug)]
-struct PublishedPresence {
-    online: AtomicBool,
-    debouncing: AtomicBool,
-    disconnect_generation: AtomicU64,
+/// The unified per-uid state slot (§6.1): every piece of a user's presence
+/// state that the coordinator mutates lives in one entry of one map, so no
+/// reader can observe half of a transition. Only the uid-wide transition
+/// limiter is deliberately separate (§6.3: it must outlive empty slots), and
+/// the operation queue lives with the persistence supervisor, which alone
+/// touches it. Cross-task readers (push suppression, broadcast delivery)
+/// take short shared guards on this map.
+#[derive(Debug, Default)]
+struct PresenceSlot {
+    /// Connections for this uid (multiple tabs/devices per user).
+    connections: Vec<Arc<ConnectionEntry>>,
+    /// Per-slot operation id counter (§6.1). Ids only need to distinguish
+    /// operations of one uid; the attempt id guards resubmission.
+    next_operation_id: u64,
+    /// The published (externally visible) online state. Unlike the physical
+    /// connection set, this remains online while a normal disconnect is in
+    /// its reconnect grace period.
+    published_online: bool,
+    /// True while a normal disconnect is awaiting its debounce deadline.
+    debouncing: bool,
+    /// The generation that invalidates an earlier disconnect timer after the
+    /// user becomes active again.
+    disconnect_generation: u64,
+    /// The online target already promised by a queued observation and not yet
+    /// committed (§6.3 tail-target rule).
+    queued_online_target: Option<bool>,
+    /// The instant the last checkpoint was enqueued, so many active
+    /// connections cannot multiply the periodic observation rate.
+    last_checkpoint_enqueued_at: Option<Instant>,
 }
 
-impl PublishedPresence {
-    fn new(online: bool) -> Self {
+impl PresenceSlot {
+    fn new(published_online: bool) -> Self {
         Self {
-            online: AtomicBool::new(online),
-            debouncing: AtomicBool::new(false),
-            disconnect_generation: AtomicU64::new(0),
+            published_online,
+            ..PresenceSlot::default()
         }
     }
 }
@@ -432,7 +463,6 @@ impl PublishedPresence {
 #[derive(Clone)]
 struct PresencePersistence {
     tx: mpsc::Sender<PresenceObservation>,
-    next_operation_id: Arc<AtomicU64>,
     queued_operations: Arc<AtomicUsize>,
     metrics: Arc<WsMetrics>,
     supervisor: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -476,7 +506,6 @@ impl PresencePersistence {
         });
         Self {
             tx,
-            next_operation_id: Arc::new(AtomicU64::new(0)),
             queued_operations,
             metrics,
             supervisor: Arc::new(StdMutex::new(Some(supervisor))),
@@ -740,15 +769,13 @@ impl PresencePersistence {
     fn enqueue(
         &self,
         uid: i32,
+        operation_id: u64,
         observed_at: NaiveDateTime,
         cause: PresenceObservationCause,
         published_online: Option<bool>,
     ) -> Option<PresenceObservation> {
         let observation = PresenceObservation {
-            operation_id: self
-                .next_operation_id
-                .fetch_add(1, Ordering::Relaxed)
-                .saturating_add(1),
+            operation_id,
             attempt_id: 1,
             uid,
             observed_at,
@@ -784,14 +811,14 @@ fn next_conn_id() -> u64 {
 /// after the borrowed entry guard is dropped, before the state lane is
 /// released, so the observed state cannot race with the same lane.
 fn entry_snapshot_state(
-    inner: &dashmap::DashMap<i32, Vec<Arc<ConnectionEntry>>>,
+    slots: &dashmap::DashMap<i32, PresenceSlot>,
     uid: i32,
     conn_id: u64,
 ) -> AppPresenceState {
-    inner
+    slots
         .get(&uid)
-        .and_then(|entries| {
-            entries
+        .and_then(|slot| {
+            slot.connections
                 .iter()
                 .find(|entry| entry.conn_id == conn_id)
                 .map(|entry| entry.app_state())
@@ -867,11 +894,10 @@ enum CoordinatorTimer {
 /// Registry of active WebSocket connections per user id. Thread-safe; shared via Arc.
 #[derive(Clone)]
 pub struct ConnectionRegistry {
-    /// uid -> list of connection entries (multiple tabs/devices per user).
-    inner: Arc<dashmap::DashMap<i32, Vec<Arc<ConnectionEntry>>>>,
-    /// Logical online state. Unlike the physical connection set, this remains
-    /// online while a normal disconnect is in its reconnect grace period.
-    published_presence: Arc<dashmap::DashMap<i32, Arc<PublishedPresence>>>,
+    /// The per-uid presence state slot (§6.1): published online state,
+    /// debounce state, the queued online target and the checkpoint reference
+    /// live in one entry so a transition cannot be observed half-applied.
+    slots: Arc<dashmap::DashMap<i32, PresenceSlot>>,
     metrics: Arc<WsMetrics>,
     /// Per-uid command lanes serialize lifecycle and state transitions for one
     /// user without making an unrelated user's heartbeat wait behind it.
@@ -887,14 +913,7 @@ pub struct ConnectionRegistry {
     per_uid_transition_limit: u32,
     unknown_connection_threshold: Duration,
     checkpoint_interval: Duration,
-    /// Kept per uid so many active connections cannot multiply the periodic
-    /// observation rate.
-    last_checkpoint_enqueued_at: Arc<dashmap::DashMap<i32, Instant>>,
-    /// The online target already promised by a queued observation and not yet
-    /// committed. §6.3 tail-target rule: a reconnect while a disconnect
-    /// debounce is pending must not re-announce online, while a reconnect
-    /// behind an in-flight Offline must queue an Online operation.
-    queued_online_target: Arc<dashmap::DashMap<i32, bool>>,
+
     /// This is intentionally independent of the physical connection map, so a
     /// disconnect/reconnect cannot bypass the uid-wide abuse budget.
     uid_transition_limiters: Arc<dashmap::DashMap<i32, TransitionLimiter>>,
@@ -974,17 +993,16 @@ impl ConnectionRegistry {
             "per-uid transition limit must be non-zero"
         );
         let (command_tx, _) = mpsc::channel(1);
-        let inner = Arc::new(dashmap::DashMap::new());
+        let slots = Arc::new(dashmap::DashMap::new());
         let broadcaster = PresenceBroadcaster {
-            connections: inner.clone(),
+            slots: slots.clone(),
             metrics: metrics.clone(),
             sequence: Arc::new(AtomicU64::new(0)),
             broadcast_lane: Arc::new(Mutex::new(())),
         };
         Self::build(
             Self {
-                inner,
-                published_presence: Arc::new(dashmap::DashMap::new()),
+                slots,
                 metrics: metrics.clone(),
                 state_lanes: Arc::new(dashmap::DashMap::new()),
                 persistence: None,
@@ -996,8 +1014,6 @@ impl ConnectionRegistry {
                 per_uid_transition_limit: limits.per_uid,
                 unknown_connection_threshold: Duration::from_secs(60),
                 checkpoint_interval: Duration::from_secs(5 * 60),
-                last_checkpoint_enqueued_at: Arc::new(dashmap::DashMap::new()),
-                queued_online_target: Arc::new(dashmap::DashMap::new()),
                 uid_transition_limiters: Arc::new(dashmap::DashMap::new()),
                 last_uid_limiter_cleanup_at: Arc::new(StdMutex::new(Instant::now())),
                 command_tx,
@@ -1053,15 +1069,14 @@ impl ConnectionRegistry {
             operation_queue_capacity > 0,
             "operation queue capacity must be non-zero"
         );
-        let inner = Arc::new(dashmap::DashMap::new());
+        let slots = Arc::new(dashmap::DashMap::new());
         let presence_sequence = Arc::new(AtomicU64::new(0));
         let broadcaster = PresenceBroadcaster {
-            connections: inner.clone(),
+            slots: slots.clone(),
             metrics: metrics.clone(),
             sequence: presence_sequence,
             broadcast_lane: Arc::new(Mutex::new(())),
         };
-        let published_presence = Arc::new(dashmap::DashMap::new());
         let (command_tx, _) = mpsc::channel(1);
         // Success acknowledgements flow back to the coordinator, which alone
         // commits published state and broadcasts. Capacity bounds the
@@ -1070,8 +1085,7 @@ impl ConnectionRegistry {
         let (ack_tx, ack_rx) = mpsc::channel::<PresencePersistenceAck>(queue_capacity);
         Self::build(
             Self {
-                inner: inner.clone(),
-                published_presence: published_presence.clone(),
+                slots,
                 metrics: metrics.clone(),
                 state_lanes: Arc::new(dashmap::DashMap::new()),
                 persistence: Some(PresencePersistence::start(
@@ -1091,8 +1105,6 @@ impl ConnectionRegistry {
                 per_uid_transition_limit: limits.per_uid,
                 unknown_connection_threshold,
                 checkpoint_interval,
-                last_checkpoint_enqueued_at: Arc::new(dashmap::DashMap::new()),
-                queued_online_target: Arc::new(dashmap::DashMap::new()),
                 uid_transition_limiters: Arc::new(dashmap::DashMap::new()),
                 last_uid_limiter_cleanup_at: Arc::new(StdMutex::new(Instant::now())),
                 command_tx,
@@ -1167,8 +1179,12 @@ impl ConnectionRegistry {
                     Some(CoordinatorCommand::Heartbeat { uid, conn_id, app_state, reply }) => {
                         let result = self.heartbeat_inner(uid, conn_id, app_state, &mut timers).await;
                         if result && app_state == Some(AppPresenceState::Unknown) {
-                            if let Some(entries) = self.inner.get(&uid) {
-                                if let Some(entry) = entries.iter().find(|entry| entry.conn_id == conn_id) {
+                            if let Some(slot) = self.slots.get(&uid) {
+                                if let Some(entry) = slot
+                                    .connections
+                                    .iter()
+                                    .find(|entry| entry.conn_id == conn_id)
+                                {
                                     self.schedule_unknown_deadline(&mut timers, uid, entry);
                                 }
                             }
@@ -1229,22 +1245,25 @@ impl ConnectionRegistry {
             return;
         };
         let changed_at = Utc::now();
-        let presence = self
-            .published_presence
-            .entry(ack.uid)
-            .or_insert_with(|| Arc::new(PublishedPresence::new(false)));
-        presence.online.store(online, Ordering::Relaxed);
-        if !online {
-            presence.debouncing.store(false, Ordering::Relaxed);
-        }
-        // Clear the tail target only when it still describes this operation;
-        // a newer enqueue has already replaced it.
-        if self
-            .queued_online_target
-            .get(&ack.uid)
-            .is_some_and(|target| *target == online)
         {
-            self.queued_online_target.remove(&ack.uid);
+            let mut slot = self.slot_for(ack.uid);
+            if slot.published_online != online {
+                self.metrics.add_published_online_users(
+                    i64::from(online) - i64::from(slot.published_online),
+                );
+            }
+            slot.published_online = online;
+            if !online {
+                if slot.debouncing {
+                    self.metrics.add_debouncing_users(-1);
+                }
+                slot.debouncing = false;
+            }
+            // Clear the tail target only when it still describes this
+            // operation; a newer enqueue has already replaced it.
+            if slot.queued_online_target == Some(online) {
+                slot.queued_online_target = None;
+            }
         }
         if let Some(broadcaster) = self.presence_broadcaster.clone() {
             broadcaster
@@ -1330,7 +1349,7 @@ impl ConnectionRegistry {
         // behind an already-queued Online) is not a new transition; only an
         // Offline promise still turns the first Active into an Online.
         let promised_online_before = self.promised_online(uid);
-        self.inner.entry(uid).or_default().push(entry.clone());
+        self.slot_for(uid).connections.push(entry.clone());
         let transitioned_online =
             initial_state == AppPresenceState::Active && !promised_online_before;
         self.account_connected_users_change(1);
@@ -1357,11 +1376,12 @@ impl ConnectionRegistry {
             // checkpoint interval governs.
             let checkpoint_due = !transitioned_online
                 && self
-                    .last_checkpoint_enqueued_at
+                    .slots
                     .get(&uid)
+                    .and_then(|slot| slot.last_checkpoint_enqueued_at)
                     .is_none_or(|last| last.elapsed() >= self.checkpoint_interval);
             if transitioned_online || checkpoint_due {
-                self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
+                self.slot_for(uid).last_checkpoint_enqueued_at = Some(Instant::now());
             }
             self.enqueue_observation_now(
                 uid,
@@ -1408,17 +1428,28 @@ impl ConnectionRegistry {
         // Occupied-entry removal: a concurrent register for the same uid can
         // never observe a vacated slot between "vec became empty" and "key
         // removed" (§6.5).
-        if let dashmap::mapref::entry::Entry::Occupied(mut occupied) = self.inner.entry(uid) {
-            let vec = occupied.get_mut();
-            if let Some(entry) = vec.iter().find(|entry| entry.conn_id == conn_id) {
+        if let dashmap::mapref::entry::Entry::Occupied(mut occupied) = self.slots.entry(uid) {
+            let slot = occupied.get_mut();
+            if let Some(entry) = slot
+                .connections
+                .iter()
+                .find(|entry| entry.conn_id == conn_id)
+            {
                 removed_state = entry.app_state();
                 if entry.retire_unknown_accounting() {
                     self.metrics.add_long_lived_unknown_connections(-1);
                 }
             }
             removed_active = removed_state == AppPresenceState::Active;
-            vec.retain(|e| e.conn_id != conn_id);
-            if vec.is_empty() {
+            slot.connections.retain(|e| e.conn_id != conn_id);
+            // Keep the slot itself: the published state and debounce must
+            // survive the last connection's departure (§6.5 removes only the
+            // connection collection).
+            if slot.connections.is_empty()
+                && !slot.published_online
+                && !slot.debouncing
+                && slot.queued_online_target.is_none()
+            {
                 occupied.remove();
             }
         }
@@ -1468,12 +1499,16 @@ impl ConnectionRegistry {
     ) -> bool {
         let state_lane = self.state_lane_for(uid);
         let _state_lane = state_lane.lock().await;
-        let Some(entries) = self.inner.get(&uid) else {
+        let entries = self.slots.entry(uid).or_default();
+        let Some(entry) = entries
+            .connections
+            .iter()
+            .find(|entry| entry.conn_id == conn_id)
+            .cloned()
+        else {
             return false;
         };
-        let Some(entry) = entries.iter().find(|entry| entry.conn_id == conn_id) else {
-            return false;
-        };
+        drop(entries);
 
         let had_active_connection = self.has_active_connection(uid);
         let previous_state = entry.app_state();
@@ -1488,9 +1523,8 @@ impl ConnectionRegistry {
                 }
             };
         if changed_state
-            && !self.permit_transition(entry, uid, changes_aggregate_state, Instant::now())
+            && !self.permit_transition(&entry, uid, changes_aggregate_state, Instant::now())
         {
-            drop(entries);
             drop(_state_lane);
             tracing::warn!(
                 uid,
@@ -1515,14 +1549,14 @@ impl ConnectionRegistry {
         }
         let checkpoint_due = entry.app_state() == AppPresenceState::Active
             && self
-                .last_checkpoint_enqueued_at
+                .slots
                 .get(&uid)
+                .and_then(|slot| slot.last_checkpoint_enqueued_at)
                 .is_none_or(|last| last.elapsed() >= self.checkpoint_interval);
-        drop(entries);
         if changed_state {
             self.account_connection_transition(
                 previous_state,
-                entry_snapshot_state(&self.inner, uid, conn_id),
+                entry_snapshot_state(&self.slots, uid, conn_id),
             );
             if changes_aggregate_state {
                 self.account_physical_online_change(
@@ -1557,8 +1591,9 @@ impl ConnectionRegistry {
                     // on the shared interval.
                     let checkpoint_due = !transitioned_online
                         && self
-                            .last_checkpoint_enqueued_at
+                            .slots
                             .get(&uid)
+                            .and_then(|slot| slot.last_checkpoint_enqueued_at)
                             .is_none_or(|last| last.elapsed() >= self.checkpoint_interval);
                     if transitioned_online {
                         self.metrics.record_presence_transition();
@@ -1569,7 +1604,7 @@ impl ConnectionRegistry {
                         );
                     } else if checkpoint_due {
                         self.metrics.record_presence_checkpoint_submitted();
-                        self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
+                        self.slot_for(uid).last_checkpoint_enqueued_at = Some(Instant::now());
                         self.enqueue_observation_now(
                             uid,
                             PresenceObservationCause::ActiveCheckpoint,
@@ -1601,7 +1636,7 @@ impl ConnectionRegistry {
             }
         } else if checkpoint_due {
             self.metrics.record_presence_checkpoint_submitted();
-            self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
+            self.slot_for(uid).last_checkpoint_enqueued_at = Some(Instant::now());
             self.enqueue_observation_now(uid, PresenceObservationCause::ActiveCheckpoint, None);
         }
         true
@@ -1612,8 +1647,8 @@ impl ConnectionRegistry {
     pub fn broadcast_to_uids(&self, uids: &[i32], message: Arc<ServerWsMessage>) {
         let msg_type = message.message_type();
         for &uid in uids {
-            if let Some(vec) = self.inner.get(&uid) {
-                for entry in vec.iter() {
+            if let Some(slot) = self.slots.get(&uid) {
+                for entry in slot.connections.iter() {
                     if entry.tx.try_send(message.clone()).is_err() {
                         tracing::warn!(
                             uid,
@@ -1632,8 +1667,8 @@ impl ConnectionRegistry {
     /// Returns true when at least one fresh connection is actively viewing the app.
     pub fn should_suppress_push(&self, uid: i32, freshness_secs: u64) -> bool {
         let now = Instant::now();
-        self.inner.get(&uid).is_some_and(|vec| {
-            vec.iter().any(|entry| {
+        self.slots.get(&uid).is_some_and(|slot| {
+            slot.connections.iter().any(|entry| {
                 now.duration_since(entry.heartbeat.sample().received_at)
                     <= Duration::from_secs(freshness_secs)
                     && entry.app_state() == AppPresenceState::Active
@@ -1665,7 +1700,7 @@ impl ConnectionRegistry {
         _timers: &mut DelayQueue<CoordinatorTimer>,
     ) {
         let now = Instant::now();
-        let uids: Vec<i32> = self.inner.iter().map(|entry| *entry.key()).collect();
+        let uids: Vec<i32> = self.slots.iter().map(|entry| *entry.key()).collect();
         let mut pruned_uids: Vec<(i32, bool, NaiveDateTime)> = Vec::new();
         let mut connected_delta = 0i64;
         for uid in uids {
@@ -1675,9 +1710,10 @@ impl ConnectionRegistry {
             let _state_lane = self.state_lane_for(uid).lock_owned().await;
             let mut removed_active = false;
             let mut offline_candidate = None;
-            if let dashmap::mapref::entry::Entry::Occupied(mut occupied) = self.inner.entry(uid) {
+            if let dashmap::mapref::entry::Entry::Occupied(mut occupied) = self.slots.entry(uid) {
                 let stale: Vec<u64> = occupied
                     .get()
+                    .connections
                     .iter()
                     .filter(|entry| {
                         now.duration_since(entry.heartbeat.sample().received_at)
@@ -1686,12 +1722,13 @@ impl ConnectionRegistry {
                     .map(|entry| entry.conn_id)
                     .collect();
                 if !stale.is_empty() {
-                    removed_active = occupied.get().iter().any(|entry| {
+                    removed_active = occupied.get().connections.iter().any(|entry| {
                         stale.contains(&entry.conn_id)
                             && entry.app_state() == AppPresenceState::Active
                     });
                     offline_candidate = occupied
                         .get()
+                        .connections
                         .iter()
                         .filter(|entry| {
                             stale.contains(&entry.conn_id)
@@ -1701,7 +1738,7 @@ impl ConnectionRegistry {
                         .max();
                     let mut unknown_refunds = 0i64;
                     let mut state_deltas: HashMap<AppPresenceState, i64> = HashMap::new();
-                    occupied.get_mut().retain(|entry| {
+                    occupied.get_mut().connections.retain(|entry| {
                         if stale.contains(&entry.conn_id) {
                             *state_deltas.entry(entry.app_state()).or_insert(0) -= 1;
                             if entry.retire_unknown_accounting() {
@@ -1725,8 +1762,15 @@ impl ConnectionRegistry {
                         );
                         connected_delta += delta;
                     }
-                    if occupied.get().is_empty() {
-                        occupied.remove();
+                    {
+                        let slot = occupied.get();
+                        if slot.connections.is_empty()
+                            && !slot.published_online
+                            && !slot.debouncing
+                            && slot.queued_online_target.is_none()
+                        {
+                            occupied.remove();
+                        }
                     }
                 }
             }
@@ -1764,12 +1808,12 @@ impl ConnectionRegistry {
 
     /// Notify all of a user's connections about the current connection count.
     pub fn broadcast_presence_to_user(&self, uid: i32) {
-        if let Some(vec) = self.inner.get(&uid) {
-            let count = vec.len() as u32;
+        if let Some(slot) = self.slots.get(&uid) {
+            let count = slot.connections.len() as u32;
             let msg = Arc::new(ServerWsMessage::PresenceUpdate(PresenceUpdatePayload {
                 active_connections: count,
             }));
-            for entry in vec.iter() {
+            for entry in slot.connections.iter() {
                 let _ = entry.tx.try_send(msg.clone());
             }
         }
@@ -1796,9 +1840,9 @@ impl ConnectionRegistry {
             .copied()
             .map(|uid| {
                 let online = self
-                    .published_presence
+                    .slots
                     .get(&uid)
-                    .is_some_and(|presence| presence.online.load(Ordering::Relaxed));
+                    .is_some_and(|slot| slot.published_online);
                 (uid, online)
             })
             .collect()
@@ -1864,10 +1908,22 @@ impl ConnectionRegistry {
         published_online: Option<bool>,
     ) {
         if let Some(persistence) = &self.persistence {
-            if let Some(online) = published_online {
-                self.queued_online_target.insert(uid, online);
-            }
-            if let Some(spilled) = persistence.enqueue(uid, observed_at, cause, published_online) {
+            // §6.1: operation ids are allocated per uid slot. The slot may
+            // be removed between operations; ids only need to distinguish
+            // concurrent queue entries of one uid, and the attempt id guards
+            // resubmission, so reuse after removal is safe.
+            let operation_id = {
+                let mut slot = self.slot_for(uid);
+                slot.next_operation_id = slot.next_operation_id.saturating_add(1);
+                let operation_id = slot.next_operation_id;
+                if published_online.is_some() {
+                    slot.queued_online_target = published_online;
+                }
+                operation_id
+            };
+            if let Some(spilled) =
+                persistence.enqueue(uid, operation_id, observed_at, cause, published_online)
+            {
                 // §11: nothing is dropped at the submission boundary. Park the
                 // operation on the uid's spillway; the coordinator retries it
                 // on every loop turn, so a saturated global lane degrades to
@@ -1954,24 +2010,26 @@ impl ConnectionRegistry {
     /// uid's operation queue, or the committed published state when the queue
     /// is empty (§6.1).
     fn promised_online(&self, uid: i32) -> bool {
-        if let Some(target) = self.queued_online_target.get(&uid) {
-            return *target;
+        if let Some(slot) = self.slots.get(&uid) {
+            if let Some(target) = slot.queued_online_target {
+                return target;
+            }
         }
         self.is_published_online(uid)
     }
 
-    fn presence_for(&self, uid: i32) -> Arc<PublishedPresence> {
-        self.published_presence
+    /// The uid's presence slot, created empty-offline when absent. Callers
+    /// run inside the coordinator, which serializes slot mutation per uid.
+    fn slot_for(&self, uid: i32) -> dashmap::mapref::one::RefMut<'_, i32, PresenceSlot> {
+        self.slots
             .entry(uid)
-            .or_insert_with(|| Arc::new(PublishedPresence::new(false)))
-            .clone()
+            .or_insert_with(|| PresenceSlot::new(false))
     }
 
     fn set_published_online(&self, uid: i32, online: bool) {
-        let was_online = self
-            .presence_for(uid)
-            .online
-            .swap(online, Ordering::Relaxed);
+        let mut slot = self.slot_for(uid);
+        let was_online = slot.published_online;
+        slot.published_online = online;
         if was_online != online {
             self.metrics.add_published_online_users(i64::from(online));
         }
@@ -1979,11 +2037,10 @@ impl ConnectionRegistry {
 
     fn cancel_disconnect_debounce(&self, uid: i32) {
         let mut absorbed = false;
-        if let Some(presence) = self.published_presence.get(&uid) {
-            presence
-                .disconnect_generation
-                .fetch_add(1, Ordering::Relaxed);
-            absorbed = presence.debouncing.swap(false, Ordering::Relaxed);
+        if let Some(mut slot) = self.slots.get_mut(&uid) {
+            slot.disconnect_generation = slot.disconnect_generation.wrapping_add(1);
+            absorbed = slot.debouncing;
+            slot.debouncing = false;
         }
         if absorbed {
             self.metrics.record_presence_debounce_absorbed();
@@ -1997,12 +2054,11 @@ impl ConnectionRegistry {
         uid: i32,
         candidate_time: NaiveDateTime,
     ) {
-        let presence = self.presence_for(uid);
-        let generation = presence
-            .disconnect_generation
-            .fetch_add(1, Ordering::Relaxed)
-            .saturating_add(1);
-        presence.debouncing.store(true, Ordering::Relaxed);
+        let mut slot = self.slot_for(uid);
+        slot.disconnect_generation = slot.disconnect_generation.wrapping_add(1);
+        let generation = slot.disconnect_generation;
+        slot.debouncing = true;
+        drop(slot);
         self.metrics.add_debouncing_users(1);
         timers.insert(
             CoordinatorTimer::Disconnect {
@@ -2020,27 +2076,36 @@ impl ConnectionRegistry {
         generation: u64,
         candidate_time: NaiveDateTime,
     ) {
-        let Some(presence) = self.published_presence.get(&uid) else {
-            return;
+        // All slot reads and writes happen under one guard; the connection
+        // scan runs after the guard is released (a dashmap shard write guard
+        // re-entered for the same uid would deadlock).
+        let decision = {
+            let Some(mut slot) = self.slots.get_mut(&uid) else {
+                return;
+            };
+            if slot.disconnect_generation != generation {
+                return;
+            }
+            let should_publish_offline = self.persistence.is_some() || slot.published_online;
+            if self.persistence.is_none() {
+                slot.published_online = false;
+            }
+            slot.debouncing = false;
+            should_publish_offline
         };
-        if presence.disconnect_generation.load(Ordering::Relaxed) != generation
-            || self.has_active_connection(uid)
-        {
+        let still_has_active = self.has_active_connection(uid);
+        if decision && still_has_active {
+            // An Active connection appeared between the timer firing and this
+            // commit: keep the user online and skip the offline observation.
+            self.metrics.add_debouncing_users(-1);
             return;
         }
-        let transitioned_offline = presence.online.load(Ordering::Relaxed);
-        let should_publish_offline = self.persistence.is_some() || transitioned_offline;
-        if self.persistence.is_none() {
-            presence.online.store(false, Ordering::Relaxed);
-        }
-        presence.debouncing.store(false, Ordering::Relaxed);
-        drop(presence);
         self.metrics.add_debouncing_users(-1);
         self.enqueue_observation_at(
             uid,
             candidate_time,
             PresenceObservationCause::Disconnect,
-            should_publish_offline.then_some(false),
+            decision.then_some(false),
         );
     }
 
@@ -2061,10 +2126,14 @@ impl ConnectionRegistry {
     }
 
     fn finish_unknown_deadline(&self, uid: i32, conn_id: u64, generation: u64) {
-        let Some(entries) = self.inner.get(&uid) else {
+        let Some(slot) = self.slots.get(&uid) else {
             return;
         };
-        let Some(entry) = entries.iter().find(|entry| entry.conn_id == conn_id) else {
+        let Some(entry) = slot
+            .connections
+            .iter()
+            .find(|entry| entry.conn_id == conn_id)
+        else {
             return;
         };
         if entry.app_state() == AppPresenceState::Unknown
@@ -2078,16 +2147,16 @@ impl ConnectionRegistry {
     }
 
     fn has_active_connection(&self, uid: i32) -> bool {
-        self.inner.get(&uid).is_some_and(|entries| {
-            entries
+        self.slots.get(&uid).is_some_and(|slot| {
+            slot.connections
                 .iter()
                 .any(|entry| entry.app_state() == AppPresenceState::Active)
         })
     }
 
     fn has_other_active_connection(&self, uid: i32, conn_id: u64) -> bool {
-        self.inner.get(&uid).is_some_and(|entries| {
-            entries.iter().any(|entry| {
+        self.slots.get(&uid).is_some_and(|slot| {
+            slot.connections.iter().any(|entry| {
                 entry.conn_id != conn_id && entry.app_state() == AppPresenceState::Active
             })
         })
@@ -2148,9 +2217,9 @@ impl ConnectionRegistry {
     }
 
     fn is_published_online(&self, uid: i32) -> bool {
-        self.published_presence
+        self.slots
             .get(&uid)
-            .is_some_and(|presence| presence.online.load(Ordering::Relaxed))
+            .is_some_and(|slot| slot.published_online)
     }
 
     /// Recompute every registry-derived gauge from scratch. Only the
@@ -2162,9 +2231,9 @@ impl ConnectionRegistry {
         let mut long_lived_unknown_connections = 0usize;
         let mut physical_online_users = 0usize;
 
-        for ref_entry in self.inner.iter() {
+        for slot_ref in self.slots.iter() {
             let mut has_active_connection = false;
-            for entry in ref_entry.iter() {
+            for entry in slot_ref.connections.iter() {
                 match entry.app_state() {
                     AppPresenceState::Active => {
                         active_connections += 1;
@@ -2180,18 +2249,14 @@ impl ConnectionRegistry {
             physical_online_users += usize::from(has_active_connection);
         }
         let published_online_users = self
-            .published_presence
+            .slots
             .iter()
-            .filter(|presence| presence.online.load(Ordering::Relaxed))
+            .filter(|slot| slot.published_online)
             .count();
-        let debouncing_users = self
-            .published_presence
-            .iter()
-            .filter(|presence| presence.debouncing.load(Ordering::Relaxed))
-            .count();
+        let debouncing_users = self.slots.iter().filter(|slot| slot.debouncing).count();
 
         GaugeSnapshot {
-            connected_users: self.inner.len(),
+            connected_users: self.slots.len(),
             active_connections,
             inactive_connections,
             long_lived_unknown_connections,
@@ -2332,6 +2397,28 @@ impl ConnectionRegistry {
 mod tests {
     use super::*;
 
+    /// Snapshot of a uid's slot (connections omitted; tests assert on state
+    /// flags via the targeted accessors below).
+    fn slot_of(registry: &ConnectionRegistry, uid: i32) -> PresenceSlot {
+        registry
+            .slots
+            .get(&uid)
+            .map(|slot| PresenceSlot {
+                published_online: slot.published_online,
+                debouncing: slot.debouncing,
+                disconnect_generation: slot.disconnect_generation,
+                queued_online_target: slot.queued_online_target,
+                last_checkpoint_enqueued_at: slot.last_checkpoint_enqueued_at,
+                next_operation_id: slot.next_operation_id,
+                connections: Vec::new(),
+            })
+            .unwrap_or_else(|| PresenceSlot::new(false))
+    }
+
+    fn slot_has_uid(registry: &ConnectionRegistry, uid: i32) -> bool {
+        registry.slots.contains_key(&uid)
+    }
+
     fn registry() -> ConnectionRegistry {
         ConnectionRegistry::new(Arc::new(WsMetrics::new(&prometheus::Registry::new())))
     }
@@ -2353,7 +2440,7 @@ mod tests {
 
     fn broadcaster(registry: &ConnectionRegistry) -> PresenceBroadcaster {
         PresenceBroadcaster {
-            connections: registry.inner.clone(),
+            slots: registry.slots.clone(),
             metrics: registry.metrics.clone(),
             sequence: Arc::new(AtomicU64::new(0)),
             broadcast_lane: Arc::new(Mutex::new(())),
@@ -2520,22 +2607,21 @@ mod tests {
     async fn active_heartbeat_renews_a_due_uid_checkpoint() {
         let registry = registry();
         let (entry, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
-        registry.last_checkpoint_enqueued_at.insert(
-            7,
+        registry
+            .slots
+            .entry(7)
+            .or_insert_with(|| PresenceSlot::new(false))
+            .last_checkpoint_enqueued_at = Some(
             Instant::now()
                 .checked_sub(registry.checkpoint_interval)
                 .expect("checkpoint interval is smaller than process uptime in this test"),
         );
 
         assert!(registry.heartbeat(7, entry.conn_id(), None).await);
-        assert!(
-            registry
-                .last_checkpoint_enqueued_at
-                .get(&7)
-                .expect("active heartbeat renews checkpoint")
-                .elapsed()
-                < Duration::from_secs(1)
-        );
+        let renewed = slot_of(&registry, 7)
+            .last_checkpoint_enqueued_at
+            .expect("active heartbeat renews checkpoint");
+        assert!(renewed.elapsed() < Duration::from_secs(1));
     }
 
     #[tokio::test]
@@ -2614,12 +2700,7 @@ mod tests {
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
         // The second Active is a real transition after an Offline, not an
         // absorbed reconnect: no debounce generation may have absorbed it.
-        assert!(!registry
-            .published_presence
-            .get(&7)
-            .expect("published presence exists")
-            .debouncing
-            .load(Ordering::Relaxed));
+        assert!(!slot_of(&registry, 7).debouncing);
     }
 
     #[tokio::test(start_paused = true)]
@@ -2640,9 +2721,8 @@ mod tests {
         let (entry, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
         tokio::time::advance(registry.checkpoint_interval).await;
         assert!(registry.heartbeat(7, entry.conn_id(), None).await);
-        let recorded_at = *registry
+        let recorded_at = slot_of(&registry, 7)
             .last_checkpoint_enqueued_at
-            .get(&7)
             .expect("due heartbeat recorded the checkpoint reference");
 
         // Well inside the 5-minute interval: an Inactive -> Active flip must
@@ -2658,9 +2738,8 @@ mod tests {
                 .await
         );
         assert_eq!(
-            *registry
+            slot_of(&registry, 7)
                 .last_checkpoint_enqueued_at
-                .get(&7)
                 .expect("checkpoint reference survives"),
             recorded_at,
             "the 5-minute checkpoint interval must gate repeated Active transitions"
@@ -2719,12 +2798,9 @@ mod tests {
         for _ in 0..8 {
             let (_entry, _rx) = registry.register(2, Some(AppPresenceState::Active)).await;
         }
+        let conn_id = registry.slots.get(&2).unwrap().connections[0].conn_id();
         let hb = registry
-            .heartbeat(
-                2,
-                registry.inner.get(&2).unwrap()[0].conn_id(),
-                Some(AppPresenceState::Inactive),
-            )
+            .heartbeat(2, conn_id, Some(AppPresenceState::Inactive))
             .await;
         assert!(
             hb,
@@ -2771,12 +2847,7 @@ mod tests {
         tokio::time::advance(Duration::from_secs(30)).await;
         tokio::task::yield_now().await;
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
-        assert!(registry
-            .published_presence
-            .get(&7)
-            .expect("published presence exists")
-            .debouncing
-            .load(Ordering::Relaxed));
+        assert!(slot_of(&registry, 7).debouncing);
 
         tokio::time::advance(Duration::from_secs(15)).await;
         tokio::task::yield_now().await;
@@ -2840,7 +2911,7 @@ mod tests {
         drop(lane_guard);
         prune.await.expect("prune task completes");
 
-        assert!(registry.inner.contains_key(&7));
+        assert!(slot_has_uid(&registry, 7));
         assert!(registry.should_suppress_push(7, 30));
     }
 
@@ -2865,8 +2936,8 @@ mod tests {
         // interleaving deterministically.
         registry.prune_stale(5).await;
         assert!(
-            !registry.inner.contains_key(&7),
-            "the stale connection is removed"
+            !slot_has_uid(&registry, 7) || registry.slots.get(&7).unwrap().connections.is_empty(),
+            "the stale connection is removed from the slot"
         );
         assert!(
             !registry
@@ -2980,12 +3051,7 @@ mod tests {
         );
 
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&false));
-        assert!(!registry
-            .published_presence
-            .get(&7)
-            .expect("published presence exists")
-            .debouncing
-            .load(Ordering::Relaxed));
+        assert!(!slot_of(&registry, 7).debouncing);
     }
 
     #[tokio::test]
@@ -3005,12 +3071,7 @@ mod tests {
         registry.prune_stale(5).await;
 
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&false));
-        assert!(!registry
-            .published_presence
-            .get(&7)
-            .expect("published presence exists")
-            .debouncing
-            .load(Ordering::Relaxed));
+        assert!(!slot_of(&registry, 7).debouncing);
     }
 
     #[tokio::test(start_paused = true)]
@@ -3042,7 +3103,7 @@ mod tests {
             Utc::now().naive_utc(),
         );
         registry.prune_stale(90).await;
-        assert!(!registry.inner.contains_key(&7));
+        assert!(!slot_has_uid(&registry, 7));
         assert!(crate::metrics::encode(&prometheus_registry)
             .expect("metrics render")
             .contains("ws_long_lived_unknown_connections 0"));
@@ -3058,7 +3119,7 @@ mod tests {
             .broadcast_revocation_exact(vec![7], 9)
             .await;
 
-        assert!(!registry.inner.contains_key(&7));
+        assert!(!slot_has_uid(&registry, 7));
     }
 
     #[tokio::test]
@@ -3080,7 +3141,7 @@ mod tests {
             .broadcast_revocation_exact(vec![7], 9)
             .await;
 
-        assert!(!registry.inner.contains_key(&7));
+        assert!(!slot_has_uid(&registry, 7));
     }
 
     #[tokio::test]
@@ -3102,7 +3163,7 @@ mod tests {
             .broadcast_exact(vec![7], 9, false, None)
             .await;
 
-        assert!(registry.inner.contains_key(&7));
+        assert!(slot_has_uid(&registry, 7));
     }
 
     #[tokio::test]
@@ -3125,7 +3186,7 @@ mod tests {
                 .heartbeat(7, entry.conn_id(), Some(AppPresenceState::Active))
                 .await
         );
-        assert!(!registry.inner.contains_key(&7));
+        assert!(!slot_has_uid(&registry, 7));
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&false));
     }
 
@@ -3173,7 +3234,7 @@ mod tests {
                 .heartbeat(7, second.conn_id(), Some(AppPresenceState::Active))
                 .await
         );
-        assert!(!registry.inner.contains_key(&7));
+        assert!(!slot_has_uid(&registry, 7));
     }
 
     fn directed_facts(
@@ -3404,12 +3465,7 @@ mod tests {
 
         registry.remove_connection(7, inactive.conn_id()).await;
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
-        assert!(!registry
-            .published_presence
-            .get(&7)
-            .expect("published presence exists")
-            .debouncing
-            .load(Ordering::Relaxed));
+        assert!(!slot_of(&registry, 7).debouncing);
         let _ = active;
 
         // The debounce never fires for the surviving Active connection.
