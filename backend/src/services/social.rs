@@ -56,6 +56,84 @@ pub struct VisiblePresence {
     pub last_seen_at: Option<chrono::NaiveDateTime>,
 }
 
+/// An immutable, transaction-time snapshot of one directed presence view.
+/// `subject_uid` is the person whose presence is being sent to `viewer_uid`.
+#[derive(Debug, Clone, Copy)]
+pub struct DirectedPresenceReconciliation {
+    pub viewer_uid: i32,
+    pub subject_uid: i32,
+    pub was_visible: bool,
+    pub is_visible: bool,
+    pub last_seen_at: Option<chrono::NaiveDateTime>,
+}
+
+/// Both directed views affected by a two-person social graph mutation.  These
+/// facts are captured inside the mutation transaction; reconciliation must not
+/// re-read the relationship after commit because that loses revocation targets.
+#[derive(Debug, Clone, Copy)]
+pub struct PresencePairReconciliation {
+    pub first_to_second: DirectedPresenceReconciliation,
+    pub second_to_first: DirectedPresenceReconciliation,
+}
+
+#[derive(Debug, Clone)]
+pub struct PresenceVisibilityReconciliation {
+    pub directions: Vec<DirectedPresenceReconciliation>,
+}
+
+/// The persisted visibility plus the transaction-time reconciliation facts.
+/// The before/after visibility is already folded into the directions, so
+/// callers must not re-read the relationship after commit.
+#[derive(Debug, Clone)]
+pub struct PresenceVisibilityMutation {
+    pub visibility: PresenceVisibility,
+    pub reconciliation: PresenceVisibilityReconciliation,
+}
+
+fn pair_presence_views(
+    conn: &mut PgConnection,
+    first_uid: i32,
+    second_uid: i32,
+) -> QueryResult<(VisiblePresence, VisiblePresence)> {
+    let first_to_second =
+        visible_presence_records(conn, second_uid, &[first_uid]).map(|mut records| {
+            records
+                .remove(&first_uid)
+                .expect("presence pair lookup includes subject")
+        })?;
+    let second_to_first =
+        visible_presence_records(conn, first_uid, &[second_uid]).map(|mut records| {
+            records
+                .remove(&second_uid)
+                .expect("presence pair lookup includes subject")
+        })?;
+    Ok((first_to_second, second_to_first))
+}
+
+fn pair_reconciliation(
+    first_uid: i32,
+    second_uid: i32,
+    before: (VisiblePresence, VisiblePresence),
+    after: (VisiblePresence, VisiblePresence),
+) -> PresencePairReconciliation {
+    PresencePairReconciliation {
+        first_to_second: DirectedPresenceReconciliation {
+            viewer_uid: second_uid,
+            subject_uid: first_uid,
+            was_visible: before.0.visible,
+            is_visible: after.0.visible,
+            last_seen_at: after.0.last_seen_at,
+        },
+        second_to_first: DirectedPresenceReconciliation {
+            viewer_uid: first_uid,
+            subject_uid: second_uid,
+            was_visible: before.1.visible,
+            is_visible: after.1.visible,
+            last_seen_at: after.1.last_seen_at,
+        },
+    }
+}
+
 /// The before/after visibility facts needed to reconcile an existing friend
 /// relationship without attempting to infer the old setting after its update.
 #[derive(Debug, Clone, Copy)]
@@ -255,12 +333,21 @@ pub fn visible_presence_records(
         .collect())
 }
 
-/// Return the friends currently eligible to receive a presence event for `uid`.
+/// Friends currently eligible to receive a presence event for `uid`, plus the
+/// number of friend candidates considered before visibility/block filtering.
 ///
 /// Presence events are intentionally narrower than REST presence: only friends
 /// receive them, and each candidate must still pass the bilateral visibility and
 /// block policy. All relationship lookups retain their indexed directional form.
-pub fn presence_broadcast_recipients(conn: &mut PgConnection, uid: i32) -> QueryResult<Vec<i32>> {
+pub struct PresenceBroadcastAudience {
+    pub recipients: Vec<i32>,
+    pub candidates: usize,
+}
+
+pub fn presence_broadcast_recipients(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> QueryResult<PresenceBroadcastAudience> {
     let mut recipients = friendships::table
         .filter(friendships::uid1.eq(uid))
         .select(friendships::uid2)
@@ -272,7 +359,10 @@ pub fn presence_broadcast_recipients(conn: &mut PgConnection, uid: i32) -> Query
             .load::<i32>(conn)?,
     );
     if recipients.is_empty() {
-        return Ok(recipients);
+        return Ok(PresenceBroadcastAudience {
+            recipients,
+            candidates: 0,
+        });
     }
 
     let mut extra_uids = recipients.clone();
@@ -310,6 +400,7 @@ pub fn presence_broadcast_recipients(conn: &mut PgConnection, uid: i32) -> Query
             .load::<i32>(conn)?,
     );
 
+    let candidates = recipients.len();
     recipients.retain(|viewer_uid| {
         let viewer_visibility = visibilities
             .get(viewer_uid)
@@ -324,7 +415,10 @@ pub fn presence_broadcast_recipients(conn: &mut PgConnection, uid: i32) -> Query
             blocked.contains(viewer_uid),
         )
     });
-    Ok(recipients)
+    Ok(PresenceBroadcastAudience {
+        recipients,
+        candidates,
+    })
 }
 
 /// Return every friend whose bilateral eligibility changed when `uid` changed
@@ -455,7 +549,7 @@ pub fn upsert_presence_visibility(
     conn: &mut PgConnection,
     uid: i32,
     visibility: PresenceVisibility,
-) -> QueryResult<PresenceVisibilityChange> {
+) -> QueryResult<PresenceVisibilityMutation> {
     let now = Utc::now().naive_utc();
     conn.transaction(|conn| {
         let previous = get_presence_visibility(conn, uid)?;
@@ -473,9 +567,36 @@ pub fn upsert_presence_visibility(
             .do_update()
             .set(user_extra::presence_visibility.eq(visibility))
             .execute(conn)?;
-        Ok(PresenceVisibilityChange {
+        let change = PresenceVisibilityChange {
             previous,
             current: visibility,
+        };
+        let own_last_seen_at = presence_last_seen_at(conn, uid)?;
+        let peers = presence_visibility_reconciliation_peers(conn, uid, previous, visibility)?;
+        let mut directions = Vec::with_capacity(peers.len() * 2);
+        for peer in peers {
+            directions.push(DirectedPresenceReconciliation {
+                viewer_uid: peer.uid,
+                subject_uid: uid,
+                was_visible: peer.was_visible,
+                is_visible: peer.is_visible,
+                last_seen_at: own_last_seen_at,
+            });
+            directions.push(DirectedPresenceReconciliation {
+                viewer_uid: uid,
+                subject_uid: peer.uid,
+                was_visible: peer.was_visible,
+                is_visible: peer.is_visible,
+                last_seen_at: peer.last_seen_at,
+            });
+        }
+        if change.previous == change.current {
+            // Idempotent PUT: no visibility change means no reconciliation.
+            directions.clear();
+        }
+        Ok(PresenceVisibilityMutation {
+            visibility: change.current,
+            reconciliation: PresenceVisibilityReconciliation { directions },
         })
     })
 }
@@ -874,6 +995,19 @@ pub fn remove_friendship(conn: &mut PgConnection, a: i32, b: i32) -> QueryResult
     Ok(affected > 0)
 }
 
+pub fn remove_friendship_with_presence(
+    conn: &mut PgConnection,
+    a: i32,
+    b: i32,
+) -> QueryResult<(bool, PresencePairReconciliation)> {
+    conn.transaction(|conn| {
+        let before = pair_presence_views(conn, a, b)?;
+        let removed = remove_friendship(conn, a, b)?;
+        let after = pair_presence_views(conn, a, b)?;
+        Ok((removed, pair_reconciliation(a, b, before, after)))
+    })
+}
+
 /// Create a friendship row for `(a, b)` (idempotent).
 fn insert_friendship(
     conn: &mut PgConnection,
@@ -899,8 +1033,13 @@ fn insert_friendship(
 pub enum CreateRequestOutcome {
     /// A new pending request was created (notify `to_uid`).
     Created { request: FriendRequest },
-    /// A reciprocal pending request was auto-accepted (notify the original requester).
-    AutoAccepted { request: FriendRequest },
+    /// A reciprocal pending request was auto-accepted (notify the original
+    /// requester). The pair presence facts are captured inside the acceptance
+    /// transaction.
+    AutoAccepted {
+        request: FriendRequest,
+        reconciliation: PresencePairReconciliation,
+    },
     /// A pending request already exists for this pair (show "申请中").
     AlreadyPending,
     /// The users are already friends.
@@ -1051,29 +1190,34 @@ pub async fn create_friend_request(
             tracing::error!("failed to generate dm group id: {:?}", err);
             AppError::Internal("Failed to generate id")
         })?;
-        let request = conn.transaction::<FriendRequest, AppError, _>(|conn| {
-            let updated = diesel::update(
-                friend_requests::table
-                    .filter(friend_requests::id.eq(existing.id))
-                    .filter(friend_requests::from_uid.eq(to))
-                    .filter(friend_requests::to_uid.eq(from))
-                    .filter(friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)),
-            )
-            .set((
-                friend_requests::status.eq(FriendRequestStatus::Accepted),
-                friend_requests::decided_at.eq(now),
-            ))
-            .returning(FriendRequest::as_returning())
-            .get_result::<FriendRequest>(conn)
-            .optional()?
-            .ok_or(AppError::Conflict("Friend request is no longer pending"))?;
-            insert_friendship(conn, from, to, from, now)?;
-            create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
-            Ok(updated)
-        })?;
-        return Ok(CreateRequestOutcome::AutoAccepted { request });
+        let (request, reconciliation) = conn
+            .transaction::<(FriendRequest, PresencePairReconciliation), AppError, _>(|conn| {
+                let before = pair_presence_views(conn, from, to)?;
+                let updated = diesel::update(
+                    friend_requests::table
+                        .filter(friend_requests::id.eq(existing.id))
+                        .filter(friend_requests::from_uid.eq(to))
+                        .filter(friend_requests::to_uid.eq(from))
+                        .filter(friend_requests::status.eq_any(UNRESOLVED_FRIEND_REQUEST_STATUSES)),
+                )
+                .set((
+                    friend_requests::status.eq(FriendRequestStatus::Accepted),
+                    friend_requests::decided_at.eq(now),
+                ))
+                .returning(FriendRequest::as_returning())
+                .get_result::<FriendRequest>(conn)
+                .optional()?
+                .ok_or(AppError::Conflict("Friend request is no longer pending"))?;
+                insert_friendship(conn, from, to, from, now)?;
+                create_dm_for_friendship(conn, dm_group_id, from, to, now)?;
+                let after = pair_presence_views(conn, from, to)?;
+                Ok((updated, pair_reconciliation(from, to, before, after)))
+            })?;
+        return Ok(CreateRequestOutcome::AutoAccepted {
+            request,
+            reconciliation,
+        });
     }
-
     // Apply the target's verification settings to the new request.
     let (mode, target_question) = get_friend_settings(conn, to)?;
     let (message, question) = normalize_request_message(mode, message, target_question)?;
@@ -1110,8 +1254,11 @@ pub async fn create_friend_request(
 
 /// Result of a recipient resolving a friend request.
 pub enum ResolveOutcome {
-    /// The request reached its terminal status normally.
-    Resolved(FriendRequest),
+    /// The request reached its terminal status normally. On an accept, the
+    /// pair presence facts are captured inside the same transaction so the
+    /// caller can hand them to the presence coordinator without re-reading
+    /// the (now changed) relationship.
+    Resolved(FriendRequest, Option<PresencePairReconciliation>),
     /// A reject claimed a pending request whose users are already friends. The
     /// request is dismissed as `Rejected` and the friendship is left intact;
     /// the caller must report the anomaly to the recipient.
@@ -1121,7 +1268,7 @@ pub enum ResolveOutcome {
 impl ResolveOutcome {
     pub fn request(&self) -> &FriendRequest {
         match self {
-            Self::Resolved(request) | Self::RejectedWhileFriends(request) => request,
+            Self::Resolved(request, _) | Self::RejectedWhileFriends(request) => request,
         }
     }
 }
@@ -1179,20 +1326,21 @@ pub async fn resolve_friend_request(
         };
 
         if let Some(dm_group_id) = dm_group_id {
-            insert_friendship(
-                conn,
-                request.from_uid,
-                request.to_uid,
-                request.from_uid,
-                now,
-            )?;
-            create_dm_for_friendship(conn, dm_group_id, request.from_uid, request.to_uid, now)?;
-            return Ok(ResolveOutcome::Resolved(request));
+            let first_uid = request.from_uid;
+            let second_uid = request.to_uid;
+            let before = pair_presence_views(conn, first_uid, second_uid)?;
+            insert_friendship(conn, first_uid, second_uid, first_uid, now)?;
+            create_dm_for_friendship(conn, dm_group_id, first_uid, second_uid, now)?;
+            let after = pair_presence_views(conn, first_uid, second_uid)?;
+            return Ok(ResolveOutcome::Resolved(
+                request,
+                Some(pair_reconciliation(first_uid, second_uid, before, after)),
+            ));
         }
         if are_mutual_friends(conn, request.from_uid, request.to_uid)? {
             return Ok(ResolveOutcome::RejectedWhileFriends(request));
         }
-        Ok(ResolveOutcome::Resolved(request))
+        Ok(ResolveOutcome::Resolved(request, None))
     })
 }
 
@@ -1297,34 +1445,56 @@ pub fn count_pending_incoming_requests(conn: &mut PgConnection, uid: i32) -> Que
 
 /// Block a user. Idempotent. Blocking only gates communication: it preserves
 /// existing friendships and pending friend requests.
-pub fn block_user(conn: &mut PgConnection, blocker: i32, blocked: i32) -> Result<(), AppError> {
+pub fn block_user_with_presence(
+    conn: &mut PgConnection,
+    blocker: i32,
+    blocked: i32,
+) -> Result<(bool, PresencePairReconciliation), AppError> {
     if blocker == blocked {
         return Err(AppError::BadRequest("Cannot block yourself"));
     }
-    let now = Utc::now();
-    diesel::insert_into(blocks::table)
-        .values(&NewBlock {
-            blocker_uid: blocker,
-            blocked_uid: blocked,
-            created_at: now,
-        })
-        .on_conflict((blocks::blocker_uid, blocks::blocked_uid))
-        .do_nothing()
-        .execute(conn)?;
-    Ok(())
+    conn.transaction::<_, AppError, _>(|conn| {
+        let before = pair_presence_views(conn, blocker, blocked)?;
+        let now = Utc::now();
+        let affected = diesel::insert_into(blocks::table)
+            .values(&NewBlock {
+                blocker_uid: blocker,
+                blocked_uid: blocked,
+                created_at: now,
+            })
+            .on_conflict((blocks::blocker_uid, blocks::blocked_uid))
+            .do_nothing()
+            .execute(conn)?;
+        let after = pair_presence_views(conn, blocker, blocked)?;
+        Ok((
+            affected > 0,
+            pair_reconciliation(blocker, blocked, before, after),
+        ))
+    })
 }
 
 /// Unblock a user. Returns `true` if a block was removed.
-pub fn unblock_user(conn: &mut PgConnection, blocker: i32, blocked: i32) -> Result<bool, AppError> {
-    let affected = diesel::delete(
-        blocks::table.filter(
-            blocks::blocker_uid
-                .eq(blocker)
-                .and(blocks::blocked_uid.eq(blocked)),
-        ),
-    )
-    .execute(conn)?;
-    Ok(affected > 0)
+pub fn unblock_user_with_presence(
+    conn: &mut PgConnection,
+    blocker: i32,
+    blocked: i32,
+) -> Result<(bool, PresencePairReconciliation), AppError> {
+    conn.transaction::<_, AppError, _>(|conn| {
+        let before = pair_presence_views(conn, blocker, blocked)?;
+        let removed = diesel::delete(
+            blocks::table.filter(
+                blocks::blocker_uid
+                    .eq(blocker)
+                    .and(blocks::blocked_uid.eq(blocked)),
+            ),
+        )
+        .execute(conn)?;
+        let after = pair_presence_views(conn, blocker, blocked)?;
+        Ok((
+            removed > 0,
+            pair_reconciliation(blocker, blocked, before, after),
+        ))
+    })
 }
 
 #[cfg(test)]

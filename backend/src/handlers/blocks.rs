@@ -72,17 +72,17 @@ async fn block_user(
     mut conn: DbConn,
     Json(body): Json<BlockRequestBody>,
 ) -> Result<StatusCode, AppError> {
-    let uid = {
+    let permit = state.ws_registry.reserve_reconciliation().await?;
+    let (_uid, changed, facts) = {
         let conn = &mut *conn;
         let uid =
             principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
-        social::block_user(conn, uid, body.uid)?;
-        uid
+        let (changed, facts) = social::block_user_with_presence(conn, uid, body.uid)?;
+        (uid, changed, facts)
     };
-    state
-        .ws_registry
-        .reconcile_social_presence_change(state.db.clone(), uid, body.uid)
-        .await;
+    if changed {
+        permit.send_social(facts);
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -103,20 +103,18 @@ async fn unblock_user(
     mut conn: DbConn,
     Path(BlockPath { uid: other }): Path<BlockPath>,
 ) -> Result<StatusCode, AppError> {
-    let (uid, removed) = {
+    let permit = state.ws_registry.reserve_reconciliation().await?;
+    let (_uid, removed, facts) = {
         let conn = &mut *conn;
         let uid =
             principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
-        let removed = social::unblock_user(conn, uid, other)?;
-        (uid, removed)
+        let (removed, facts) = social::unblock_user_with_presence(conn, uid, other)?;
+        (uid, removed, facts)
     };
     if !removed {
         return Err(AppError::NotFound("Block not found"));
     }
-    state
-        .ws_registry
-        .reconcile_social_presence_change(state.db.clone(), uid, other)
-        .await;
+    permit.send_social(facts);
     Ok(StatusCode::NO_CONTENT)
 }
 

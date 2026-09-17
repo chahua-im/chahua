@@ -8,7 +8,8 @@ unsafe_code = "forbid"
 unused_must_use = "deny"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "test-util"] }
+tokio-util = { version = "0.7", features = ["time"] }
 axum = { version = "0.8", features = ["ws", "multipart"] }
 diesel = { version = "2", features = [
     "postgres",

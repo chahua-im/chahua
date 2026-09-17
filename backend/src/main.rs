@@ -124,6 +124,13 @@ async fn main() {
                 per_connection: config.presence.per_connection_transition_limit,
                 per_uid: config.presence.per_uid_transition_limit,
             },
+            config.presence.unknown_connection_threshold,
+            config.presence.checkpoint_interval,
+            config.presence.operation_queue_capacity,
+            config.presence.max_retry_backoff,
+            config.presence.command_queue_capacity,
+            config.presence.prune_interval,
+            config.presence.stale_timeout,
         ),
     );
     let unread_service = Arc::new(services::unread::UnreadService::new());
@@ -167,17 +174,8 @@ async fn main() {
     });
 
     services::audio_transcode::start(state.clone());
-
-    let registry = state.ws_registry.clone();
-    let prune_interval = state.config.presence.prune_interval;
-    let stale_timeout_secs = state.config.presence.stale_timeout.as_secs();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(prune_interval);
-        loop {
-            interval.tick().await;
-            registry.prune_stale(stale_timeout_secs).await;
-        }
-    });
+    let presence_persistence_supervisor = state.ws_registry.take_presence_persistence_supervisor();
+    let presence_coordinator_supervisor = state.ws_registry.take_presence_coordinator_supervisor();
 
     // --- Sub-routers ---
     // Sub-routers are mounted via handlers::api_router()
@@ -287,13 +285,28 @@ async fn main() {
 
     let api_server = axum::serve(app_listener, app);
     let metrics_server = axum::serve(metrics_listener, metrics_app);
-
     tokio::select! {
         result = api_server => {
             result.unwrap();
         }
         result = metrics_server => {
             result.unwrap();
+        }
+        result = async move {
+            match presence_persistence_supervisor {
+                Some(supervisor) => supervisor.await,
+                None => std::future::pending().await,
+            }
+        } => {
+            panic!("presence persistence supervisor stopped unexpectedly: {result:?}");
+        }
+        result = async move {
+            match presence_coordinator_supervisor {
+                Some(supervisor) => supervisor.await,
+                None => std::future::pending().await,
+            }
+        } => {
+            panic!("presence coordinator stopped unexpectedly: {result:?}");
         }
     }
 }

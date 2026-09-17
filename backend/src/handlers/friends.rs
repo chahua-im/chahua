@@ -243,12 +243,13 @@ async fn delete_friend(
     mut conn: DbConn,
     Path(FriendPath { uid: other }): Path<FriendPath>,
 ) -> Result<StatusCode, AppError> {
-    let (uid, removed) = {
+    let permit = state.ws_registry.reserve_reconciliation().await?;
+    let (uid, removed, facts) = {
         let conn = &mut *conn;
         let uid =
             principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
-        let removed = social::remove_friendship(conn, uid, other)?;
-        (uid, removed)
+        let (removed, facts) = social::remove_friendship_with_presence(conn, uid, other)?;
+        (uid, removed, facts)
     };
     if !removed {
         return Err(AppError::NotFound("Friendship not found"));
@@ -258,10 +259,7 @@ async fn delete_friend(
         &[uid, other],
         ServerWsMessage::FriendshipRemoved(FriendshipRemovedPayload { actor_uid: uid }),
     );
-    state
-        .ws_registry
-        .reconcile_social_presence_change(state.db.clone(), uid, other)
-        .await;
+    permit.send_social(facts);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -307,7 +305,10 @@ async fn create_friend_request(
             let response = build_request_response(conn, &state, uid, &request)?;
             Ok((StatusCode::CREATED, Json(response)))
         }
-        CreateRequestOutcome::AutoAccepted { request } => {
+        CreateRequestOutcome::AutoAccepted {
+            request,
+            reconciliation,
+        } => {
             // Notify the original requester that their request was accepted.
             fire_ws(
                 &state,
@@ -318,13 +319,15 @@ async fn create_friend_request(
                     by_uid: uid,
                 }),
             );
-            let first_uid = request.from_uid;
-            let second_uid = request.to_uid;
             let response = build_request_response(conn, &state, uid, &request)?;
+            // The friendship (and its presence facts) has already committed;
+            // the reserved permit guarantees the revocation/snapshot command
+            // reaches the coordinator even if this request is cancelled.
             state
                 .ws_registry
-                .reconcile_social_presence_change(state.db.clone(), first_uid, second_uid)
-                .await;
+                .reserve_reconciliation()
+                .await?
+                .send_social(reconciliation);
             Ok((StatusCode::OK, Json(response)))
         }
         CreateRequestOutcome::AlreadyPending => {
@@ -423,13 +426,17 @@ async fn accept_friend_request(
             by_uid: uid,
         }),
     );
-    let first_uid = request.from_uid;
-    let second_uid = request.to_uid;
     let response = build_request_response(conn, &state, uid, request)?;
-    state
-        .ws_registry
-        .reconcile_social_presence_change(state.db.clone(), first_uid, second_uid)
-        .await;
+    if let ResolveOutcome::Resolved(_, Some(reconciliation)) = outcome {
+        // The friendship (and its presence facts) has already committed; the
+        // reserved permit guarantees the snapshot command reaches the
+        // coordinator even if this request is cancelled.
+        state
+            .ws_registry
+            .reserve_reconciliation()
+            .await?
+            .send_social(reconciliation);
+    }
     Ok(Json(response))
 }
 

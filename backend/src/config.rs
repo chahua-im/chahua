@@ -75,6 +75,26 @@ pub struct PresenceConfig {
     pub unknown_connection_threshold: Duration,
 }
 
+impl Default for PresenceConfig {
+    fn default() -> Self {
+        Self {
+            checkpoint_interval: Duration::from_secs(5 * 60),
+            disconnect_debounce: Duration::from_secs(45),
+            max_heartbeat_interval: Duration::from_secs(30),
+            stale_timeout: Duration::from_secs(90),
+            prune_interval: Duration::from_secs(60),
+            transition_window: Duration::from_secs(10),
+            per_connection_transition_limit: 12,
+            per_uid_transition_limit: 20,
+            command_queue_capacity: 4096,
+            persistence_queue_capacity: 256,
+            operation_queue_capacity: 64,
+            max_retry_backoff: Duration::from_secs(60),
+            unknown_connection_threshold: Duration::from_secs(60),
+        }
+    }
+}
+
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database_url: String,
@@ -200,10 +220,7 @@ fn read_presence_config() -> PresenceConfig {
     let disconnect_debounce = read_positive_u64_env("PRESENCE_DISCONNECT_DEBOUNCE_SECS", 45);
     let max_heartbeat_interval = read_positive_u64_env("PRESENCE_MAX_HEARTBEAT_INTERVAL_SECS", 30);
     let stale_timeout = read_positive_u64_env("PRESENCE_STALE_TIMEOUT_SECS", 90);
-    assert!(
-        stale_timeout >= max_heartbeat_interval * 3,
-        "PRESENCE_STALE_TIMEOUT_SECS must be at least three times PRESENCE_MAX_HEARTBEAT_INTERVAL_SECS"
-    );
+    validate_presence_timing(stale_timeout, max_heartbeat_interval);
 
     PresenceConfig {
         checkpoint_interval: Duration::from_secs(checkpoint_interval),
@@ -241,6 +258,13 @@ fn read_presence_config() -> PresenceConfig {
             60,
         )),
     }
+}
+
+fn validate_presence_timing(stale_timeout_secs: u64, max_heartbeat_interval_secs: u64) {
+    assert!(
+        stale_timeout_secs >= max_heartbeat_interval_secs * 3,
+        "PRESENCE_STALE_TIMEOUT_SECS must be at least three times PRESENCE_MAX_HEARTBEAT_INTERVAL_SECS"
+    );
 }
 
 fn decode_key_at_least_32_bytes(var_name: &str, raw: &str) -> Vec<u8> {
@@ -317,9 +341,10 @@ fn read_cors_allowed_origins(var_name: &str) -> Option<Vec<HeaderValue>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        debug_auth_enabled, parse_log_format, read_positive_i64_env, LogFormat,
-        DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES,
+        debug_auth_enabled, parse_log_format, read_positive_i64_env, validate_presence_timing,
+        LogFormat, PresenceConfig, DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES,
     };
+    use std::time::Duration;
 
     #[test]
     fn log_format_defaults_to_pretty_when_unset() {
@@ -364,5 +389,26 @@ mod tests {
             1024
         );
         std::env::remove_var("ATTACHMENT_MAX_FILE_SIZE_BYTES");
+    }
+
+    #[test]
+    fn presence_config_defaults_match_the_deployment_contract() {
+        let config = PresenceConfig::default();
+
+        assert_eq!(config.checkpoint_interval, Duration::from_secs(5 * 60));
+        assert_eq!(config.disconnect_debounce, Duration::from_secs(45));
+        assert_eq!(config.max_heartbeat_interval, Duration::from_secs(30));
+        assert_eq!(config.stale_timeout, Duration::from_secs(90));
+        assert_eq!(config.prune_interval, Duration::from_secs(60));
+        assert_eq!(config.unknown_connection_threshold, Duration::from_secs(60));
+        assert_eq!(config.command_queue_capacity, 4096);
+        assert_eq!(config.persistence_queue_capacity, 256);
+        assert_eq!(config.operation_queue_capacity, 64);
+    }
+
+    #[test]
+    #[should_panic(expected = "PRESENCE_STALE_TIMEOUT_SECS must be at least three times")]
+    fn presence_timing_rejects_a_stale_timeout_under_three_heartbeats() {
+        validate_presence_timing(89, 30);
     }
 }

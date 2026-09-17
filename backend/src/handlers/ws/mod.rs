@@ -50,10 +50,10 @@ struct WsAuthMessage {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct WsMessage {
-    #[serde(rename = "type")]
-    type_: String,
-    state: Option<WsAppState>,
+#[serde(tag = "type")]
+enum WsClientMessage {
+    Ping { state: Option<WsAppState> },
+    AppState { state: WsAppState },
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,8 +116,9 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
     let registry = state.ws_registry.clone();
     let (entry, rx) = registry.register(uid, initial_state).await;
     let conn_id = entry.conn_id();
+    let heartbeat = entry.heartbeat_handle();
 
-    handle_socket(socket, state, uid, conn_id, registry, rx).await;
+    handle_socket(socket, state, uid, conn_id, heartbeat, registry, rx).await;
 }
 
 async fn handle_socket(
@@ -125,6 +126,7 @@ async fn handle_socket(
     state: AppState,
     uid: i32,
     conn_id: u64,
+    heartbeat: ws_registry::HeartbeatHandle,
     registry: Arc<ws_registry::ConnectionRegistry>,
     mut rx: tokio::sync::mpsc::Receiver<Arc<ServerWsMessage>>,
 ) {
@@ -146,9 +148,11 @@ async fn handle_socket(
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Ok(parsed) = serde_json::from_str::<WsMessage>(&text) {
-                            if parsed.type_ == "ping" {
-                                let app_state = parsed.state.map(AppPresenceState::from);
+                        if let Ok(parsed) = serde_json::from_str::<WsClientMessage>(&text) {
+                            match parsed {
+                            WsClientMessage::Ping { state } => {
+                                let app_state = state.map(AppPresenceState::from);
+                                heartbeat.record();
                                 if !registry.heartbeat(uid, conn_id, app_state).await {
                                     break;
                                 }
@@ -156,18 +160,20 @@ async fn handle_socket(
                                 if socket.send(Message::Text(PONG_JSON.into())).await.is_err() {
                                     break;
                                 }
-                            } else if parsed.type_ == "appState" {
-                                if let Some(app_state) = parsed.state.map(AppPresenceState::from) {
-                                    if !registry.heartbeat(uid, conn_id, Some(app_state)).await {
-                                        break;
-                                    }
-                                    trace!(
-                                        "ws app_state received uid={} conn_id={} state={:?}",
-                                        uid,
-                                        conn_id,
-                                        app_state
-                                    );
+                            }
+                            WsClientMessage::AppState { state } => {
+                                let app_state = AppPresenceState::from(state);
+                                heartbeat.record();
+                                if !registry.heartbeat(uid, conn_id, Some(app_state)).await {
+                                    break;
                                 }
+                                trace!(
+                                    "ws app_state received uid={} conn_id={} state={:?}",
+                                    uid,
+                                    conn_id,
+                                    app_state
+                                );
+                            }
                             }
                         }
                     }
@@ -192,7 +198,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::{WsAppState, WsAuthMessage, WsMessage};
+    use super::{WsAppState, WsAuthMessage, WsClientMessage};
 
     #[test]
     fn auth_state_is_optional_for_legacy_clients() {
@@ -212,10 +218,15 @@ mod tests {
     }
 
     #[test]
-    fn app_state_message_without_state_has_no_state_to_apply() {
-        let message: WsMessage = serde_json::from_str(r#"{"type":"appState"}"#)
-            .expect("app state message should deserialize");
+    fn app_state_message_requires_state() {
+        assert!(serde_json::from_str::<WsClientMessage>(r#"{"type":"appState"}"#).is_err());
+    }
 
-        assert!(message.state.is_none());
+    #[test]
+    fn ping_without_state_remains_a_heartbeat_only() {
+        let message: WsClientMessage = serde_json::from_str(r#"{"type":"ping"}"#)
+            .expect("ping without state should deserialize");
+
+        assert!(matches!(message, WsClientMessage::Ping { state: None }));
     }
 }

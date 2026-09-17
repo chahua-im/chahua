@@ -245,15 +245,12 @@ async fn put_presence_visibility(
     mut conn: DbConn,
     Json(body): Json<PresenceVisibilityResponse>,
 ) -> Result<Json<PresenceVisibilityResponse>, AppError> {
-    let change =
+    let permit = state.ws_registry.reserve_reconciliation().await?;
+    let mutation =
         crate::services::social::upsert_presence_visibility(&mut conn, uid, body.visibility)?;
-    drop(conn);
-    state
-        .ws_registry
-        .reconcile_visibility_change(state.db.clone(), uid, change)
-        .await;
+    permit.send_visibility(mutation.reconciliation);
     Ok(Json(PresenceVisibilityResponse {
-        visibility: change.current,
+        visibility: mutation.visibility,
     }))
 }
 
