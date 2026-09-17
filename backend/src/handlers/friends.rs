@@ -243,9 +243,13 @@ async fn delete_friend(
     mut conn: DbConn,
     Path(FriendPath { uid: other }): Path<FriendPath>,
 ) -> Result<StatusCode, AppError> {
-    let conn = &mut *conn;
-    let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
-    let removed = social::remove_friendship(conn, uid, other)?;
+    let (uid, removed) = {
+        let conn = &mut *conn;
+        let uid =
+            principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
+        let removed = social::remove_friendship(conn, uid, other)?;
+        (uid, removed)
+    };
     if !removed {
         return Err(AppError::NotFound("Friendship not found"));
     }
@@ -254,6 +258,10 @@ async fn delete_friend(
         &[uid, other],
         ServerWsMessage::FriendshipRemoved(FriendshipRemovedPayload { actor_uid: uid }),
     );
+    state
+        .ws_registry
+        .reconcile_social_presence_change(state.db.clone(), uid, other)
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -310,7 +318,13 @@ async fn create_friend_request(
                     by_uid: uid,
                 }),
             );
+            let first_uid = request.from_uid;
+            let second_uid = request.to_uid;
             let response = build_request_response(conn, &state, uid, &request)?;
+            state
+                .ws_registry
+                .reconcile_social_presence_change(state.db.clone(), first_uid, second_uid)
+                .await;
             Ok((StatusCode::OK, Json(response)))
         }
         CreateRequestOutcome::AlreadyPending => {
@@ -409,7 +423,13 @@ async fn accept_friend_request(
             by_uid: uid,
         }),
     );
+    let first_uid = request.from_uid;
+    let second_uid = request.to_uid;
     let response = build_request_response(conn, &state, uid, request)?;
+    state
+        .ws_registry
+        .reconcile_social_presence_change(state.db.clone(), first_uid, second_uid)
+        .await;
     Ok(Json(response))
 }
 

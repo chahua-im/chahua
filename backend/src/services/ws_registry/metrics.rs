@@ -12,6 +12,8 @@ pub struct WsMetrics {
     connection_duration_seconds: Histogram,
     messages_pushed_total: IntCounterVec,
     messages_dropped_total: IntCounterVec,
+    presence_transition_rate_limited_total: IntCounter,
+    presence_transition_rate_limit_evictions_total: IntCounter,
 }
 
 impl WsMetrics {
@@ -61,6 +63,18 @@ impl WsMetrics {
             registry
         )
         .expect("ws_messages_dropped_total registration should succeed");
+        let presence_transition_rate_limited_total = register_int_counter_with_registry!(
+            "ws_presence_transition_rate_limited_total",
+            "Presence state transitions rejected for exceeding a rate limit",
+            registry
+        )
+        .expect("ws_presence_transition_rate_limited_total registration should succeed");
+        let presence_transition_rate_limit_evictions_total = register_int_counter_with_registry!(
+            "ws_presence_transition_rate_limit_evictions_total",
+            "WebSocket connections removed after exceeding a presence transition rate limit",
+            registry
+        )
+        .expect("ws_presence_transition_rate_limit_evictions_total registration should succeed");
 
         Self {
             connected_users,
@@ -70,6 +84,8 @@ impl WsMetrics {
             connection_duration_seconds,
             messages_pushed_total,
             messages_dropped_total,
+            presence_transition_rate_limited_total,
+            presence_transition_rate_limit_evictions_total,
         }
     }
 
@@ -100,6 +116,14 @@ impl WsMetrics {
         self.messages_dropped_total
             .with_label_values(&[message_type])
             .inc();
+    }
+
+    pub fn record_presence_transition_rate_limited(&self) {
+        self.presence_transition_rate_limited_total.inc();
+    }
+
+    pub fn record_presence_transition_rate_limit_eviction(&self) {
+        self.presence_transition_rate_limit_evictions_total.inc();
     }
 }
 

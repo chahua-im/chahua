@@ -241,15 +241,19 @@ async fn get_presence_visibility(
 )]
 async fn put_presence_visibility(
     CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
     mut conn: DbConn,
     Json(body): Json<PresenceVisibilityResponse>,
 ) -> Result<Json<PresenceVisibilityResponse>, AppError> {
+    let change =
+        crate::services::social::upsert_presence_visibility(&mut conn, uid, body.visibility)?;
+    drop(conn);
+    state
+        .ws_registry
+        .reconcile_visibility_change(state.db.clone(), uid, change)
+        .await;
     Ok(Json(PresenceVisibilityResponse {
-        visibility: crate::services::social::upsert_presence_visibility(
-            &mut conn,
-            uid,
-            body.visibility,
-        )?,
+        visibility: change.current,
     }))
 }
 

@@ -56,6 +56,22 @@ pub struct VisiblePresence {
     pub last_seen_at: Option<chrono::NaiveDateTime>,
 }
 
+/// The before/after visibility facts needed to reconcile an existing friend
+/// relationship without attempting to infer the old setting after its update.
+#[derive(Debug, Clone, Copy)]
+pub struct PresenceVisibilityChange {
+    pub previous: PresenceVisibility,
+    pub current: PresenceVisibility,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PresenceReconciliationPeer {
+    pub uid: i32,
+    pub was_visible: bool,
+    pub is_visible: bool,
+    pub last_seen_at: Option<chrono::NaiveDateTime>,
+}
+
 fn presence_pair_is_visible(
     viewer_uid: i32,
     target_uid: i32,
@@ -239,6 +255,177 @@ pub fn visible_presence_records(
         .collect())
 }
 
+/// Return the friends currently eligible to receive a presence event for `uid`.
+///
+/// Presence events are intentionally narrower than REST presence: only friends
+/// receive them, and each candidate must still pass the bilateral visibility and
+/// block policy. All relationship lookups retain their indexed directional form.
+pub fn presence_broadcast_recipients(conn: &mut PgConnection, uid: i32) -> QueryResult<Vec<i32>> {
+    let mut recipients = friendships::table
+        .filter(friendships::uid1.eq(uid))
+        .select(friendships::uid2)
+        .load::<i32>(conn)?;
+    recipients.extend(
+        friendships::table
+            .filter(friendships::uid2.eq(uid))
+            .select(friendships::uid1)
+            .load::<i32>(conn)?,
+    );
+    if recipients.is_empty() {
+        return Ok(recipients);
+    }
+
+    let mut extra_uids = recipients.clone();
+    extra_uids.push(uid);
+    let visibilities: HashMap<i32, PresenceVisibility> = user_extra::table
+        .filter(user_extra::uid.eq_any(extra_uids))
+        .select((user_extra::uid, user_extra::presence_visibility))
+        .load::<(i32, PresenceVisibility)>(conn)?
+        .into_iter()
+        .collect();
+    let subject_visibility = visibilities
+        .get(&uid)
+        .copied()
+        .unwrap_or(PresenceVisibility::Everyone);
+
+    let mut blocked = HashSet::new();
+    blocked.extend(
+        blocks::table
+            .filter(
+                blocks::blocker_uid
+                    .eq(uid)
+                    .and(blocks::blocked_uid.eq_any(&recipients)),
+            )
+            .select(blocks::blocked_uid)
+            .load::<i32>(conn)?,
+    );
+    blocked.extend(
+        blocks::table
+            .filter(
+                blocks::blocked_uid
+                    .eq(uid)
+                    .and(blocks::blocker_uid.eq_any(&recipients)),
+            )
+            .select(blocks::blocker_uid)
+            .load::<i32>(conn)?,
+    );
+
+    recipients.retain(|viewer_uid| {
+        let viewer_visibility = visibilities
+            .get(viewer_uid)
+            .copied()
+            .unwrap_or(PresenceVisibility::Everyone);
+        presence_pair_is_visible(
+            *viewer_uid,
+            uid,
+            viewer_visibility,
+            subject_visibility,
+            true,
+            blocked.contains(viewer_uid),
+        )
+    });
+    Ok(recipients)
+}
+
+/// Return every friend whose bilateral eligibility changed when `uid` changed
+/// their setting.  This deliberately reads the current peer settings and block
+/// facts, while the caller supplies the old setting captured by the mutation.
+pub fn presence_visibility_reconciliation_peers(
+    conn: &mut PgConnection,
+    uid: i32,
+    previous_visibility: PresenceVisibility,
+    current_visibility: PresenceVisibility,
+) -> QueryResult<Vec<PresenceReconciliationPeer>> {
+    let mut peers = friendships::table
+        .filter(friendships::uid1.eq(uid))
+        .select(friendships::uid2)
+        .load::<i32>(conn)?;
+    peers.extend(
+        friendships::table
+            .filter(friendships::uid2.eq(uid))
+            .select(friendships::uid1)
+            .load::<i32>(conn)?,
+    );
+    if peers.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let peer_records: HashMap<i32, PresenceRecord> = user_extra::table
+        .filter(user_extra::uid.eq_any(&peers))
+        .select((
+            user_extra::uid,
+            user_extra::last_seen_at,
+            user_extra::presence_visibility,
+        ))
+        .load::<(i32, Option<chrono::NaiveDateTime>, PresenceVisibility)>(conn)?
+        .into_iter()
+        .map(|(uid, last_seen_at, visibility)| {
+            (
+                uid,
+                PresenceRecord {
+                    last_seen_at,
+                    visibility,
+                },
+            )
+        })
+        .collect();
+    let mut blocked = HashSet::new();
+    blocked.extend(
+        blocks::table
+            .filter(
+                blocks::blocker_uid
+                    .eq(uid)
+                    .and(blocks::blocked_uid.eq_any(&peers)),
+            )
+            .select(blocks::blocked_uid)
+            .load::<i32>(conn)?,
+    );
+    blocked.extend(
+        blocks::table
+            .filter(
+                blocks::blocked_uid
+                    .eq(uid)
+                    .and(blocks::blocker_uid.eq_any(&peers)),
+            )
+            .select(blocks::blocker_uid)
+            .load::<i32>(conn)?,
+    );
+
+    Ok(peers
+        .into_iter()
+        .map(|peer_uid| {
+            let peer = peer_records
+                .get(&peer_uid)
+                .copied()
+                .unwrap_or(PresenceRecord {
+                    last_seen_at: None,
+                    visibility: PresenceVisibility::Everyone,
+                });
+            let blocked = blocked.contains(&peer_uid);
+            PresenceReconciliationPeer {
+                uid: peer_uid,
+                was_visible: presence_pair_is_visible(
+                    peer_uid,
+                    uid,
+                    peer.visibility,
+                    previous_visibility,
+                    true,
+                    blocked,
+                ),
+                is_visible: presence_pair_is_visible(
+                    peer_uid,
+                    uid,
+                    peer.visibility,
+                    current_visibility,
+                    true,
+                    blocked,
+                ),
+                last_seen_at: peer.last_seen_at,
+            }
+        })
+        .collect())
+}
+
 pub fn get_presence_visibility(
     conn: &mut PgConnection,
     uid: i32,
@@ -251,28 +438,46 @@ pub fn get_presence_visibility(
         .map(|visibility| visibility.unwrap_or(PresenceVisibility::Everyone))
 }
 
+pub fn presence_last_seen_at(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> QueryResult<Option<chrono::NaiveDateTime>> {
+    user_extra::table
+        .filter(user_extra::uid.eq(uid))
+        .select(user_extra::last_seen_at)
+        .first(conn)
+        .optional()
+        .map(|last_seen_at| last_seen_at.flatten())
+}
+
 /// Store a presence visibility preference without fabricating a last-seen value.
 pub fn upsert_presence_visibility(
     conn: &mut PgConnection,
     uid: i32,
     visibility: PresenceVisibility,
-) -> QueryResult<PresenceVisibility> {
+) -> QueryResult<PresenceVisibilityChange> {
     let now = Utc::now().naive_utc();
-    diesel::insert_into(user_extra::table)
-        .values(NewUserExtra {
-            uid,
-            first_seen_at: now,
-            last_seen_at: None,
-            presence_visibility: visibility,
-            sticker_pack_order: serde_json::json!([]),
-            verification_mode: FriendAddVerificationMode::Direct,
-            verification_question: None,
+    conn.transaction(|conn| {
+        let previous = get_presence_visibility(conn, uid)?;
+        diesel::insert_into(user_extra::table)
+            .values(NewUserExtra {
+                uid,
+                first_seen_at: now,
+                last_seen_at: None,
+                presence_visibility: visibility,
+                sticker_pack_order: serde_json::json!([]),
+                verification_mode: FriendAddVerificationMode::Direct,
+                verification_question: None,
+            })
+            .on_conflict(user_extra::uid)
+            .do_update()
+            .set(user_extra::presence_visibility.eq(visibility))
+            .execute(conn)?;
+        Ok(PresenceVisibilityChange {
+            previous,
+            current: visibility,
         })
-        .on_conflict(user_extra::uid)
-        .do_update()
-        .set(user_extra::presence_visibility.eq(visibility))
-        .returning(user_extra::presence_visibility)
-        .get_result(conn)
+    })
 }
 
 /// Load relationship facts for `uid` against `peers`.

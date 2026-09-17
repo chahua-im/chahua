@@ -119,6 +119,11 @@ async fn main() {
             activity_metrics.clone(),
             config.presence.persistence_queue_capacity,
             config.presence.disconnect_debounce,
+            services::ws_registry::PresenceTransitionLimits {
+                window: config.presence.transition_window,
+                per_connection: config.presence.per_connection_transition_limit,
+                per_uid: config.presence.per_uid_transition_limit,
+            },
         ),
     );
     let unread_service = Arc::new(services::unread::UnreadService::new());
