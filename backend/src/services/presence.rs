@@ -310,4 +310,125 @@ mod tests {
             Ok(())
         });
     }
+
+    /// Exercises `visible_presence_records` against Postgres: the missing-row
+    /// default (everyone + null), the friend and block filters, and the
+    /// viewer-nobody early return that must still resolve self.
+    #[test]
+    fn visible_presence_records_applies_defaults_friendship_and_blocks() {
+        use crate::models::PresenceVisibility;
+        use crate::schema::{blocks, friendships, user_extra};
+
+        let mut db = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(_) => crate::test_support::TestDb::establish(),
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let conn = db.conn();
+
+        static SEQ: AtomicI32 = AtomicI32::new(2_000_000_000);
+        let viewer = SEQ.fetch_add(1, Ordering::SeqCst);
+        let friend = SEQ.fetch_add(1, Ordering::SeqCst);
+        let restricted = SEQ.fetch_add(1, Ordering::SeqCst);
+        let blocked = SEQ.fetch_add(1, Ordering::SeqCst);
+        let no_row = SEQ.fetch_add(1, Ordering::SeqCst);
+
+        conn.test_transaction::<(), diesel::result::Error, _>(|conn| {
+            let seeded = |conn: &mut diesel::PgConnection,
+                          uid: i32,
+                          last_seen_at: Option<chrono::NaiveDateTime>,
+                          visibility: PresenceVisibility| {
+                diesel::insert_into(user_extra::table)
+                    .values(&crate::models::NewUserExtra {
+                        uid,
+                        first_seen_at: last_seen_at.unwrap_or_default(),
+                        last_seen_at,
+                        presence_visibility: visibility,
+                        sticker_pack_order: serde_json::json!([]),
+                        verification_mode: crate::models::FriendAddVerificationMode::Direct,
+                        verification_question: None,
+                    })
+                    .execute(conn)
+            };
+            let last_seen = NaiveDate::from_ymd_opt(2026, 9, 1)
+                .unwrap()
+                .and_hms_opt(8, 0, 0)
+                .unwrap();
+            seeded(conn, viewer, None, PresenceVisibility::Everyone)?;
+            seeded(conn, friend, Some(last_seen), PresenceVisibility::Friends)?;
+            seeded(
+                conn,
+                restricted,
+                Some(last_seen),
+                PresenceVisibility::Nobody,
+            )?;
+            seeded(conn, blocked, Some(last_seen), PresenceVisibility::Everyone)?;
+            // `no_row` deliberately has no user_extra row.
+
+            diesel::insert_into(friendships::table)
+                .values((
+                    friendships::uid1.eq(viewer.min(friend)),
+                    friendships::uid2.eq(viewer.max(friend)),
+                    friendships::initiated_by.eq(viewer),
+                ))
+                .execute(conn)?;
+            diesel::insert_into(blocks::table)
+                .values((
+                    blocks::blocker_uid.eq(blocked),
+                    blocks::blocked_uid.eq(viewer),
+                ))
+                .execute(conn)?;
+
+            let records = crate::services::social::visible_presence_records(
+                conn,
+                viewer,
+                &[friend, restricted, blocked, no_row, viewer],
+            )?;
+
+            // Friend, but target visibility is `friends`: visible with time.
+            assert!(records.get(&friend).unwrap().visible);
+            assert_eq!(records.get(&friend).unwrap().last_seen_at, Some(last_seen));
+            // `restricted` allows only friends but is not one: hidden.
+            assert!(!records.get(&restricted).unwrap().visible);
+            assert_eq!(records.get(&restricted).unwrap().last_seen_at, None);
+            // Blocked in one direction: hidden either way.
+            assert!(!records.get(&blocked).unwrap().visible);
+            // Missing user_extra row defaults to `everyone + null`: viewer
+            // also allows everyone, so the non-friend is visible with a null
+            // last seen.
+            assert!(records.get(&no_row).unwrap().visible);
+            assert_eq!(records.get(&no_row).unwrap().last_seen_at, None);
+            // Self always sees its own (empty) presence.
+            assert!(records.get(&viewer).unwrap().visible);
+
+            // A missing row looks like `everyone` to a friend viewer: make the
+            // no-row target a friend of viewer and expect visibility.
+            diesel::insert_into(friendships::table)
+                .values((
+                    friendships::uid1.eq(viewer),
+                    friendships::uid2.eq(no_row),
+                    friendships::initiated_by.eq(viewer),
+                ))
+                .execute(conn)?;
+            let records =
+                crate::services::social::visible_presence_records(conn, viewer, &[no_row])?;
+            assert!(records.get(&no_row).unwrap().visible);
+            assert_eq!(records.get(&no_row).unwrap().last_seen_at, None);
+
+            // Viewer `nobody` (here `restricted`): batch is hidden except
+            // self, without consulting friendships or blocks.
+            let records = crate::services::social::visible_presence_records(
+                conn,
+                restricted,
+                &[viewer, blocked, restricted],
+            )?;
+            assert!(!records.get(&viewer).unwrap().visible);
+            assert!(!records.get(&blocked).unwrap().visible);
+            assert!(records.get(&restricted).unwrap().visible);
+
+            Ok::<(), diesel::result::Error>(())
+        });
+    }
 }

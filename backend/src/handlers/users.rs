@@ -188,8 +188,10 @@ pub fn build_member_summary_map(
         .filter_map(|uid| {
             profiles.get(uid).map(|profile| {
                 let visible_presence = presence.get(uid).copied();
-                let online = visible_presence.is_some_and(|record| record.visible)
-                    && online_flags.get(uid).copied().unwrap_or(false);
+                let presence_view = presence_view(
+                    visible_presence,
+                    online_flags.get(uid).copied().unwrap_or(false),
+                );
                 (
                     *uid,
                     MemberSummary {
@@ -198,21 +200,49 @@ pub fn build_member_summary_map(
                         avatar_url: avatars.remove(uid).flatten(),
                         gender: profile.gender,
                         user_group: profile.user_group.clone(),
-                        last_seen_at: (!online)
-                            .then(|| visible_presence.and_then(|record| record.last_seen_at))
-                            .flatten()
-                            .map(|last_seen_at| {
-                                chrono::DateTime::from_naive_utc_and_offset(
-                                    last_seen_at,
-                                    chrono::Utc,
-                                )
-                            }),
-                        online,
+                        last_seen_at: presence_view.last_seen_at,
+                        online: presence_view.online,
                     },
                 )
             })
         })
         .collect())
+}
+
+/// The published presence fields shared by every REST DTO: `online` is only
+/// true when the record is visible and the user's published state is online;
+/// `last_seen_at` is only shown when offline, and only when visible.
+///
+/// These are the §7.1 return invariants:
+/// visible + online      => { online: true,  lastSeenAt: null }
+/// visible + offline     => { online: false, lastSeenAt: db value | null }
+/// not visible           => { online: false, lastSeenAt: null }
+pub(crate) fn presence_view(
+    visible_presence: Option<crate::services::social::VisiblePresence>,
+    published_online: bool,
+) -> PresenceView {
+    let visible = visible_presence.is_some_and(|record| record.visible);
+    let online = visible && published_online;
+    let last_seen_at = if online {
+        None
+    } else if visible {
+        visible_presence.and_then(|record| record.last_seen_at)
+    } else {
+        None
+    };
+    PresenceView {
+        online,
+        last_seen_at: last_seen_at.map(|last_seen_at| {
+            chrono::DateTime::from_naive_utc_and_offset(last_seen_at, chrono::Utc)
+        }),
+    }
+}
+
+/// The published presence portion of a REST DTO, in UTC.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PresenceView {
+    pub online: bool,
+    pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[utoipa::path(
@@ -490,8 +520,91 @@ fn load_accessible_sticker_pack_ids(
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_user_search_limit, split_excluded_member_summaries, MemberSummary};
+    use super::{
+        normalize_user_search_limit, presence_view, split_excluded_member_summaries, MemberSummary,
+    };
+    use crate::services::social::VisiblePresence;
+    use chrono::{NaiveDate, NaiveDateTime};
     use std::collections::HashSet;
+
+    fn visible(last_seen_at: Option<NaiveDateTime>) -> Option<VisiblePresence> {
+        Some(VisiblePresence {
+            visible: true,
+            last_seen_at,
+        })
+    }
+
+    fn hidden() -> Option<VisiblePresence> {
+        Some(VisiblePresence {
+            visible: false,
+            last_seen_at: Some(
+                NaiveDate::from_ymd_opt(2026, 1, 1)
+                    .unwrap()
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            ),
+        })
+    }
+
+    fn stored_time() -> Option<NaiveDateTime> {
+        Some(
+            NaiveDate::from_ymd_opt(2026, 9, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn presence_view_online_hides_last_seen() {
+        // Visible + online => { online: true, lastSeenAt: null }, even though a
+        // stored last-seen value exists.
+        let view = presence_view(visible(stored_time()), true);
+        assert!(view.online);
+        assert_eq!(view.last_seen_at, None);
+    }
+
+    #[test]
+    fn presence_view_offline_shows_stored_last_seen() {
+        let view = presence_view(visible(stored_time()), false);
+        assert!(!view.online);
+        assert_eq!(
+            view.last_seen_at,
+            Some(chrono::DateTime::from_naive_utc_and_offset(
+                stored_time().unwrap(),
+                chrono::Utc
+            ))
+        );
+    }
+
+    #[test]
+    fn presence_view_offline_without_history_shows_null() {
+        // Visible, online=false, never confirmed Active => lastSeenAt: null.
+        let view = presence_view(visible(None), false);
+        assert!(!view.online);
+        assert_eq!(view.last_seen_at, None);
+    }
+
+    #[test]
+    fn presence_view_hidden_is_offline_with_null_last_seen() {
+        // A hidden record must not leak its stored value even when the
+        // subject's published state is online.
+        let view = presence_view(hidden(), true);
+        assert!(!view.online);
+        assert_eq!(view.last_seen_at, None);
+        let view = presence_view(hidden(), false);
+        assert!(!view.online);
+        assert_eq!(view.last_seen_at, None);
+    }
+
+    #[test]
+    fn presence_view_missing_record_is_offline_with_null_last_seen() {
+        // Missing user_extra row: defaults apply (everyone + null), and an
+        // offline user has no last seen to show.
+        let view = presence_view(None, false);
+        assert!(!view.online);
+        assert_eq!(view.last_seen_at, None);
+    }
 
     fn make_summary(uid: i32) -> MemberSummary {
         MemberSummary {

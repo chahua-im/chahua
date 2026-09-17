@@ -74,9 +74,10 @@ fn build_member_responses(
         .into_iter()
         .map(|(uid, role, joined_at)| {
             let profile = profiles.get(&uid);
-            let visible_presence = presence.get(&uid).copied();
-            let online = visible_presence.is_some_and(|record| record.visible)
-                && online_flags.get(&uid).copied().unwrap_or(false);
+            let presence_view = crate::handlers::users::presence_view(
+                presence.get(&uid).copied(),
+                online_flags.get(&uid).copied().unwrap_or(false),
+            );
             MemberResponse {
                 avatar_url: avatars.remove(&uid).flatten(),
                 uid,
@@ -85,11 +86,8 @@ fn build_member_responses(
                 username: profile.and_then(|profile| profile.username.clone()),
                 gender: profile.map(|profile| profile.gender).unwrap_or(0),
                 user_group: profile.and_then(|profile| profile.user_group.clone()),
-                last_seen_at: (!online)
-                    .then(|| visible_presence.and_then(|record| record.last_seen_at))
-                    .flatten()
-                    .map(|last_seen_at| DateTime::from_naive_utc_and_offset(last_seen_at, Utc)),
-                online,
+                last_seen_at: presence_view.last_seen_at,
+                online: presence_view.online,
             }
         })
         .collect())

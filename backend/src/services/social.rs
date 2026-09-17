@@ -1570,4 +1570,59 @@ mod tests {
         ));
         assert!(presence_pair_is_visible(1, 1, Nobody, Nobody, false, true));
     }
+
+    /// The full §3 truth table: every (viewer, target) visibility pair ×
+    /// friends / non-friends. `presence_pair_is_visible` is symmetric in its
+    /// visibility arguments only through the shared `are_friends` input, so
+    /// both directions of each row are asserted.
+    #[test]
+    fn presence_visibility_covers_the_full_truth_table() {
+        use PresenceVisibility::{Everyone, Friends, Nobody};
+        let levels = [Everyone, Friends, Nobody];
+        // (viewer setting, target setting) => visible when friends.
+        let expected_friends = [
+            [true, true, false],
+            [true, true, false],
+            [false, false, false],
+        ];
+        for (vi, &viewer) in levels.iter().enumerate() {
+            for (ti, &target) in levels.iter().enumerate() {
+                assert_eq!(
+                    presence_pair_is_visible(1, 2, viewer, target, true, false),
+                    expected_friends[vi][ti],
+                    "friends case viewer={viewer:?} target={target:?}"
+                );
+                // Non-friends: only everyone×everyone is visible.
+                assert_eq!(
+                    presence_pair_is_visible(2, 1, target, viewer, false, false),
+                    (vi == 0 && ti == 0),
+                    "non-friend case viewer={viewer:?} target={target:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn presence_visibility_blocks_both_directions_and_keeps_self_visible() {
+        use PresenceVisibility::{Everyone, Friends, Nobody};
+        for (viewer, target) in [
+            (Everyone, Everyone),
+            (Friends, Friends),
+            (Nobody, Nobody),
+            (Everyone, Friends),
+            (Friends, Everyone),
+        ] {
+            assert!(
+                !presence_pair_is_visible(1, 2, viewer, target, true, true),
+                "any block direction hides the pair for viewer={viewer:?} target={target:?}"
+            );
+            assert!(
+                !presence_pair_is_visible(2, 1, target, viewer, true, true),
+                "reverse direction viewer={target:?} target={viewer:?}"
+            );
+        }
+        // Self is always visible regardless of settings or a (theoretical)
+        // block record.
+        assert!(presence_pair_is_visible(7, 7, Nobody, Nobody, false, true));
+    }
 }
