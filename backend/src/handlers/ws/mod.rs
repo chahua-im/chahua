@@ -114,9 +114,15 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
     };
 
     let registry = state.ws_registry.clone();
-    let (entry, rx) = registry.register(uid, initial_state).await;
-    let conn_id = entry.conn_id();
-    let heartbeat = entry.heartbeat_handle();
+    // The registry must be the sole owner of the connection sender (§6.5):
+    // dropping the entry Arc here is what lets prune, privacy-revocation
+    // eviction and rate-limit removal close this socket by dropping the last
+    // sender, so the rx loop below observes closure immediately instead of
+    // lingering until the next client frame.
+    let (conn_id, heartbeat, rx) = {
+        let (entry, rx) = registry.register(uid, initial_state).await;
+        (entry.conn_id(), entry.heartbeat_handle(), rx)
+    };
 
     handle_socket(socket, state, uid, conn_id, heartbeat, registry, rx).await;
 }

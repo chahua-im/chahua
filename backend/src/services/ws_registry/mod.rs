@@ -1301,6 +1301,12 @@ impl ConnectionRegistry {
     /// Register a new connection for the given user. Returns the entry and
     /// receiver for the send task.
     /// and the receiver for the send task. Caller must call `remove_connection(uid, conn_id)` when the socket closes.
+    ///
+    /// §6.5: the registry is the sole owner of the connection sender. Callers
+    /// must drop the returned `ConnectionEntry` Arc after extracting
+    /// `conn_id`/`heartbeat_handle()` — holding it would keep the channel
+    /// alive across eviction, prune and rate-limit removal, so the socket task
+    /// would never observe the closure those paths must produce.
     pub async fn register(
         &self,
         uid: i32,
@@ -1421,10 +1427,13 @@ impl ConnectionRegistry {
         conn_id: u64,
         _timers: &mut DelayQueue<CoordinatorTimer>,
     ) {
+        // Idempotent: a socket task closed by eviction, prune or rate-limit
+        // removal still runs its cleanup path and sends one more Remove. The
+        // connection is already gone then, and the accounting must not run a
+        // second time (the gauges are incremental).
         let state_lane = self.state_lane_for(uid);
         let _state_lane = state_lane.lock().await;
         let mut removed_active = false;
-        let mut removed_state = AppPresenceState::Unknown;
         // Occupied-entry removal: a concurrent register for the same uid can
         // never observe a vacated slot between "vec became empty" and "key
         // removed" (§6.5).
@@ -1435,26 +1444,26 @@ impl ConnectionRegistry {
                 .iter()
                 .find(|entry| entry.conn_id == conn_id)
             {
-                removed_state = entry.app_state();
+                let removed_state = entry.app_state();
                 if entry.retire_unknown_accounting() {
                     self.metrics.add_long_lived_unknown_connections(-1);
                 }
-            }
-            removed_active = removed_state == AppPresenceState::Active;
-            slot.connections.retain(|e| e.conn_id != conn_id);
-            // Keep the slot itself: the published state and debounce must
-            // survive the last connection's departure (§6.5 removes only the
-            // connection collection).
-            if slot.connections.is_empty()
-                && !slot.published_online
-                && !slot.debouncing
-                && slot.queued_online_target.is_none()
-            {
-                occupied.remove();
+                removed_active = removed_state == AppPresenceState::Active;
+                slot.connections.retain(|e| e.conn_id != conn_id);
+                self.account_connected_users_change(-1);
+                self.account_connection_transition(removed_state, AppPresenceState::Unknown);
+                // Keep the slot itself: the published state and debounce must
+                // survive the last connection's departure (§6.5 removes only
+                // the connection collection).
+                if slot.connections.is_empty()
+                    && !slot.published_online
+                    && !slot.debouncing
+                    && slot.queued_online_target.is_none()
+                {
+                    occupied.remove();
+                }
             }
         }
-        self.account_connected_users_change(-1);
-        self.account_connection_transition(removed_state, AppPresenceState::Unknown);
         if removed_active && !self.has_active_connection(uid) {
             self.account_physical_online_change(-1);
         }
@@ -3142,6 +3151,93 @@ mod tests {
             .await;
 
         assert!(!slot_has_uid(&registry, 7));
+    }
+
+    #[tokio::test]
+    async fn revocation_eviction_closes_the_evicted_receiver() {
+        // The production handler drops the ConnectionEntry Arc right after
+        // extracting conn_id and the heartbeat handle (§6.5: the registry is
+        // the sole owner of the sender). A saturated connection queue makes
+        // the revocation take the evict branch, which must then drop the last
+        // sender so the socket task's rx.recv() yields None immediately,
+        // instead of the socket lingering until the next client frame.
+        let registry = registry();
+        let (entry, mut rx) = registry.register(7, None).await;
+        let _conn_id = entry.conn_id();
+        // Fill the connection queue so the revocation cannot enqueue and must
+        // evict (§10 enqueue-or-evict).
+        let message = Arc::new(ServerWsMessage::PresenceUpdate(PresenceUpdatePayload {
+            active_connections: 1,
+        }));
+        loop {
+            if entry.tx.try_send(message.clone()).is_err() {
+                break;
+            }
+        }
+        // Model the handler: drop the Arc so the registry is the sole owner
+        // of the sender.
+        drop(entry);
+
+        broadcaster(&registry)
+            .broadcast_revocation_exact(vec![7], 9)
+            .await;
+
+        assert!(!slot_has_uid(&registry, 7));
+        // The evicted connection's receiver observes closure once the queued
+        // messages are drained: recv() eventually yields None.
+        loop {
+            match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(Some(_)) => continue, // drain buffered messages first
+                Ok(None) => break,       // channel closed
+                Err(_) => panic!("evicted receiver never closed"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn prune_closes_the_pruned_receiver() {
+        let registry = registry();
+        // Connection A: stale heartbeat, its socket must be closed by prune.
+        let (stale_entry, mut stale_rx) =
+            registry.register(7, Some(AppPresenceState::Active)).await;
+        let _conn_id = stale_entry.conn_id();
+        drop(stale_entry);
+        // Connection B: fresh heartbeat, prune keeps it.
+        let (_fresh, mut fresh_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        drain_messages(&mut fresh_rx).await;
+
+        // Make only connection A stale.
+        stale_heartbeat_at(&registry, 7, 0);
+
+        registry.prune_stale(90).await;
+
+        // The stale connection's receiver observes closure once its queued
+        // messages are drained.
+        loop {
+            match tokio::time::timeout(Duration::from_millis(100), stale_rx.recv()).await {
+                Ok(Some(_)) => continue,
+                Ok(None) => break,
+                Err(_) => panic!("pruned receiver never closed"),
+            }
+        }
+        // The fresh connection survives.
+        assert!(slot_has_uid(&registry, 7));
+    }
+
+    /// Overwrite the heartbeat sample of the connection at `index` for `uid`
+    /// with a timestamp `age_secs` in the past, without holding the entry Arc.
+    fn stale_heartbeat_at(registry: &ConnectionRegistry, uid: i32, index: usize) {
+        let slot = registry.slots.get(&uid).expect("slot exists");
+        let entry = slot
+            .connections
+            .get(index)
+            .expect("connection exists at index");
+        entry.heartbeat.record_at(
+            Instant::now()
+                .checked_sub(Duration::from_secs(120))
+                .expect("valid stale sample"),
+            Utc::now().naive_utc(),
+        );
     }
 
     #[tokio::test]
