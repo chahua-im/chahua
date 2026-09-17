@@ -808,7 +808,8 @@ pub struct NewClientRecord {
 pub struct UserExtra {
     pub uid: i32,
     pub first_seen_at: chrono::NaiveDateTime,
-    pub last_seen_at: chrono::NaiveDateTime,
+    pub last_seen_at: Option<chrono::NaiveDateTime>,
+    pub presence_visibility: PresenceVisibility,
     pub sticker_pack_order: serde_json::Value,
     pub verification_mode: FriendAddVerificationMode,
     pub verification_question: Option<String>,
@@ -820,7 +821,8 @@ pub struct UserExtra {
 pub struct NewUserExtra {
     pub uid: i32,
     pub first_seen_at: chrono::NaiveDateTime,
-    pub last_seen_at: chrono::NaiveDateTime,
+    pub last_seen_at: Option<chrono::NaiveDateTime>,
+    pub presence_visibility: PresenceVisibility,
     pub sticker_pack_order: serde_json::Value,
     pub verification_mode: FriendAddVerificationMode,
     pub verification_question: Option<String>,
@@ -956,6 +958,25 @@ pub enum FriendAddVerificationMode {
     Forbid,
     /// Switch on, mode 3: requester must answer a pre-set question (manual review).
     Question,
+}
+
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::PresenceVisibility"]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceVisibility {
+    Everyone,
+    Friends,
+    Nobody,
 }
 
 /// Canonical friendship row: `uid1 < uid2`, so each pair is stored once.

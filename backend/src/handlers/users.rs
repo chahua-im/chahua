@@ -12,7 +12,7 @@ use crate::dto::users::{MeResponse, MemberSummary, SearchUsersResponse, StickerP
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::models::{FriendAddVerificationMode, NewUserExtra, UserExtra};
+use crate::models::{FriendAddVerificationMode, NewUserExtra, PresenceVisibility, UserExtra};
 use crate::schema::{group_membership, sticker_packs, user_extra, user_sticker_pack_subscriptions};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
 use crate::services::user::{lookup_user_profiles, search_user_uids_by_prefix};
@@ -131,7 +131,8 @@ async fn put_stickerpack_order(
             .values(NewUserExtra {
                 uid,
                 first_seen_at: now,
-                last_seen_at: now,
+                last_seen_at: None,
+                presence_visibility: PresenceVisibility::Everyone,
                 sticker_pack_order: order_json.clone(),
                 verification_mode: FriendAddVerificationMode::Direct,
                 verification_question: None,

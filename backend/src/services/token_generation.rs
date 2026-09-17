@@ -6,7 +6,7 @@ use diesel::prelude::*;
 use diesel::PgConnection;
 
 use crate::errors::AppError;
-use crate::models::FriendAddVerificationMode;
+use crate::models::{FriendAddVerificationMode, PresenceVisibility};
 use crate::schema::user_extra;
 use crate::state::DbPool;
 
@@ -59,7 +59,8 @@ impl TokenGenerationService {
             .values((
                 user_extra::uid.eq(uid),
                 user_extra::first_seen_at.eq(now),
-                user_extra::last_seen_at.eq(now),
+                user_extra::last_seen_at.eq(None::<chrono::NaiveDateTime>),
+                user_extra::presence_visibility.eq(PresenceVisibility::Everyone),
                 user_extra::sticker_pack_order.eq(serde_json::json!([])),
                 user_extra::verification_mode.eq(FriendAddVerificationMode::Direct),
                 user_extra::token_gen.eq(1),

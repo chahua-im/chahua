@@ -92,6 +92,11 @@ async fn main() {
     }
 
     let metrics = Arc::new(metrics::Metrics::new());
+    let activity_metrics =
+        services::activity_metrics::ActivityMetricsService::new(metrics.client_tracking.clone());
+    if let Err(error) = activity_metrics.refresh_today_gauges(&pool) {
+        tracing::warn!("failed to initialize today's activity gauges: {error}");
+    }
     if matches!(command, Some(BackendCommand::MessageSearchReindex)) {
         if let Err(err) =
             run_message_search_reindex(pool.clone(), metrics.message_search.clone()).await
@@ -132,6 +137,7 @@ async fn main() {
         client_tracking: services::client_tracking::ClientTrackingService::start(
             pool.clone(),
             metrics.client_tracking.clone(),
+            Arc::new(activity_metrics),
         ),
         background_service: services::background::BackgroundService::start(
             pool.clone(),

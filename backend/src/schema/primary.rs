@@ -2,6 +2,10 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "presence_visibility"))]
+    pub struct PresenceVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "friend_add_verification_mode"))]
     pub struct FriendAddVerificationMode;
 
@@ -439,12 +443,13 @@ diesel::table! {
 
 diesel::table! {
     use diesel::sql_types::*;
-    use super::sql_types::FriendAddVerificationMode;
+    use super::sql_types::{FriendAddVerificationMode, PresenceVisibility};
 
     user_extra (uid) {
         uid -> Int4,
         first_seen_at -> Timestamp,
-        last_seen_at -> Timestamp,
+        last_seen_at -> Nullable<Timestamp>,
+        presence_visibility -> PresenceVisibility,
         sticker_pack_order -> Jsonb,
         verification_mode -> FriendAddVerificationMode,
         verification_question -> Nullable<Text>,

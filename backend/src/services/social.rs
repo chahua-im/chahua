@@ -13,7 +13,7 @@ use crate::errors::AppError;
 use crate::models::{
     FriendAddVerificationMode, FriendRequest, FriendRequestStatus, GroupJoinReason, GroupKind,
     GroupRole, GroupVisibility, NewBlock, NewFriendRequest, NewFriendship, NewGroup,
-    NewGroupMembership, NewUserExtra,
+    NewGroupMembership, NewUserExtra, PresenceVisibility,
 };
 use crate::schema::{blocks, friend_requests, friendships, group_membership, groups, user_extra};
 use crate::services::user;
@@ -529,7 +529,8 @@ pub fn upsert_friend_settings(
     let row = NewUserExtra {
         uid,
         first_seen_at: now,
-        last_seen_at: now,
+        last_seen_at: None,
+        presence_visibility: PresenceVisibility::Everyone,
         sticker_pack_order: serde_json::json!([]),
         verification_mode: mode,
         verification_question: trimmed_question.clone(),

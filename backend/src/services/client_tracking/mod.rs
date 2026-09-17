@@ -10,18 +10,16 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use chrono::{Days, NaiveDate, NaiveDateTime, Utc};
+use chrono::{Days, Utc};
 use dashmap::DashMap;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use tracing::{error, info, warn};
 
-use crate::models::{
-    ActivityDailyMetric, ClientRecord, FriendAddVerificationMode, NewActivityDailyMetric,
-    NewClientRecord, NewUserExtra, UserExtra,
-};
-use crate::schema::{activity_daily_metrics, clients, push_subscriptions, user_extra};
+use crate::models::ClientRecord;
+use crate::schema::{clients, push_subscriptions};
+use crate::services::activity_metrics::{ActivityMetricsService, DailyMetricDelta};
 use crate::utils::auth::{extract_auth_context, X_APP_VERSION};
 
 const ACTIVITY_WRITE_THROTTLE: Duration = Duration::from_secs(5 * 60);
@@ -36,45 +34,10 @@ struct CachedActivity {
     uid: i32,
 }
 
-#[derive(Clone, Copy)]
-struct DailyMetricDelta {
-    day: NaiveDate,
-    active_users: i64,
-    new_users: i64,
-    active_clients: i64,
-    new_clients: i64,
-    client_rebinds: i64,
-    stale_clients_purged: i64,
-    legacy_subscriptions_purged: i64,
-}
-
-impl DailyMetricDelta {
-    fn is_zero(self) -> bool {
-        self.active_users == 0
-            && self.new_users == 0
-            && self.active_clients == 0
-            && self.new_clients == 0
-            && self.client_rebinds == 0
-            && self.stale_clients_purged == 0
-            && self.legacy_subscriptions_purged == 0
-    }
-
-    fn as_activity_today_snapshot(self) -> ActivityTodaySnapshot {
-        ActivityTodaySnapshot {
-            active_users: self.active_users,
-            new_users: self.new_users,
-            active_clients: self.active_clients,
-            new_clients: self.new_clients,
-            client_rebinds: self.client_rebinds,
-            stale_clients_purged: self.stale_clients_purged,
-            legacy_subscriptions_purged: self.legacy_subscriptions_purged,
-        }
-    }
-}
-
 pub struct ClientTrackingService {
     db: Pool<ConnectionManager<PgConnection>>,
     metrics: Arc<ClientTrackingMetrics>,
+    activity_metrics: Arc<ActivityMetricsService>,
     recent_writes: DashMap<String, CachedActivity>,
 }
 
@@ -82,19 +45,14 @@ impl ClientTrackingService {
     pub fn start(
         db: Pool<ConnectionManager<PgConnection>>,
         metrics: Arc<ClientTrackingMetrics>,
+        activity_metrics: Arc<ActivityMetricsService>,
     ) -> Arc<Self> {
         let service = Arc::new(Self {
             db,
             metrics,
+            activity_metrics,
             recent_writes: DashMap::new(),
         });
-
-        if let Err(error) = service.refresh_today_metrics_gauges() {
-            warn!(
-                "client tracking: failed to initialize today's activity gauges: {}",
-                error
-            );
-        }
 
         let worker_service = service.clone();
         tokio::spawn(async move {
@@ -143,24 +101,12 @@ impl ClientTrackingService {
                 .select(ClientRecord::as_select())
                 .first::<ClientRecord>(conn)
                 .optional()?;
-            let existing_user = user_extra::table
-                .find(uid)
-                .select(UserExtra::as_select())
-                .first::<UserExtra>(conn)
-                .optional()?;
-
             let active_client_delta = i64::from(
                 existing_client
                     .as_ref()
                     .is_none_or(|client| client.last_active.date() != today),
             );
             let new_client_delta = i64::from(existing_client.is_none());
-            let active_user_delta = i64::from(
-                existing_user
-                    .as_ref()
-                    .is_none_or(|user| user.last_seen_at.date() != today),
-            );
-            let new_user_delta = i64::from(existing_user.is_none());
             let rebind_delta = i64::from(
                 existing_client
                     .as_ref()
@@ -176,7 +122,7 @@ impl ClientTrackingService {
                 .execute(conn)?;
             }
 
-            let new_client = NewClientRecord {
+            let new_client = crate::models::NewClientRecord {
                 client_id: client_id.to_string(),
                 created_at: existing_client
                     .as_ref()
@@ -195,32 +141,12 @@ impl ClientTrackingService {
                 ))
                 .execute(conn)?;
 
-            let new_user = NewUserExtra {
-                uid,
-                first_seen_at: existing_user
-                    .as_ref()
-                    .map_or(now, |user| user.first_seen_at),
-                last_seen_at: now,
-                sticker_pack_order: existing_user
-                    .as_ref()
-                    .map_or(serde_json::json!([]), |u| u.sticker_pack_order.clone()),
-                verification_mode: FriendAddVerificationMode::Direct,
-                verification_question: None,
-            };
-
-            diesel::insert_into(user_extra::table)
-                .values(&new_user)
-                .on_conflict(user_extra::uid)
-                .do_update()
-                .set(user_extra::last_seen_at.eq(now))
-                .execute(conn)?;
-
-            self.upsert_daily_metrics(
+            self.activity_metrics.upsert(
                 conn,
                 DailyMetricDelta {
                     day: today,
-                    active_users: active_user_delta,
-                    new_users: new_user_delta,
+                    active_users: 0,
+                    new_users: 0,
                     active_clients: active_client_delta,
                     new_clients: new_client_delta,
                     client_rebinds: rebind_delta,
@@ -303,21 +229,22 @@ impl ClientTrackingService {
             }
         }
 
-        self.upsert_daily_metrics(
-            conn,
-            DailyMetricDelta {
-                day: today,
-                active_users: 0,
-                new_users: 0,
-                active_clients: 0,
-                new_clients: 0,
-                client_rebinds: 0,
-                stale_clients_purged: deleted_clients as i64,
-                legacy_subscriptions_purged: 0,
-            },
-            now,
-        )
-        .map_err(|e| format!("failed to update daily purge metrics: {:?}", e))?;
+        self.activity_metrics
+            .upsert(
+                conn,
+                DailyMetricDelta {
+                    day: today,
+                    active_users: 0,
+                    new_users: 0,
+                    active_clients: 0,
+                    new_clients: 0,
+                    client_rebinds: 0,
+                    stale_clients_purged: deleted_clients as i64,
+                    legacy_subscriptions_purged: 0,
+                },
+                now,
+            )
+            .map_err(|e| format!("failed to update daily purge metrics: {:?}", e))?;
 
         if deleted_clients > 0 {
             self.metrics
@@ -331,109 +258,6 @@ impl ClientTrackingService {
             );
         }
 
-        Ok(())
-    }
-
-    fn refresh_today_metrics_gauges(&self) -> Result<(), String> {
-        let today = Utc::now().date_naive();
-        let conn = &mut self
-            .db
-            .get()
-            .map_err(|e| format!("failed to get DB connection: {:?}", e))?;
-
-        let today_metrics = activity_daily_metrics::table
-            .find(today)
-            .select(ActivityDailyMetric::as_select())
-            .first::<ActivityDailyMetric>(conn)
-            .optional()
-            .map_err(|e| format!("failed to load today's activity metrics: {:?}", e))?;
-
-        if let Some(metrics) = today_metrics {
-            self.metrics.set_activity_today(ActivityTodaySnapshot {
-                active_users: metrics.active_users,
-                new_users: metrics.new_users,
-                active_clients: metrics.active_clients,
-                new_clients: metrics.new_clients,
-                client_rebinds: metrics.client_rebinds,
-                stale_clients_purged: metrics.stale_clients_purged,
-                legacy_subscriptions_purged: metrics.legacy_subscriptions_purged,
-            });
-        } else {
-            self.metrics
-                .set_activity_today(ActivityTodaySnapshot::zero());
-        }
-
-        Ok(())
-    }
-
-    fn upsert_daily_metrics(
-        &self,
-        conn: &mut PgConnection,
-        delta: DailyMetricDelta,
-        now: NaiveDateTime,
-    ) -> Result<(), diesel::result::Error> {
-        if delta.is_zero() {
-            return Ok(());
-        }
-
-        let new_row = NewActivityDailyMetric {
-            day: delta.day,
-            active_users: delta.active_users,
-            new_users: delta.new_users,
-            active_clients: delta.active_clients,
-            new_clients: delta.new_clients,
-            client_rebinds: delta.client_rebinds,
-            stale_clients_purged: delta.stale_clients_purged,
-            legacy_subscriptions_purged: delta.legacy_subscriptions_purged,
-            updated_at: now,
-        };
-
-        diesel::insert_into(activity_daily_metrics::table)
-            .values(&new_row)
-            .on_conflict(activity_daily_metrics::day)
-            .do_update()
-            .set((
-                activity_daily_metrics::active_users
-                    .eq(activity_daily_metrics::active_users + delta.active_users),
-                activity_daily_metrics::new_users
-                    .eq(activity_daily_metrics::new_users + delta.new_users),
-                activity_daily_metrics::active_clients
-                    .eq(activity_daily_metrics::active_clients + delta.active_clients),
-                activity_daily_metrics::new_clients
-                    .eq(activity_daily_metrics::new_clients + delta.new_clients),
-                activity_daily_metrics::client_rebinds
-                    .eq(activity_daily_metrics::client_rebinds + delta.client_rebinds),
-                activity_daily_metrics::stale_clients_purged
-                    .eq(activity_daily_metrics::stale_clients_purged + delta.stale_clients_purged),
-                activity_daily_metrics::legacy_subscriptions_purged
-                    .eq(activity_daily_metrics::legacy_subscriptions_purged
-                        + delta.legacy_subscriptions_purged),
-                activity_daily_metrics::updated_at.eq(now),
-            ))
-            .execute(conn)?;
-
-        let today_metrics = activity_daily_metrics::table
-            .find(delta.day)
-            .select(ActivityDailyMetric::as_select())
-            .first::<ActivityDailyMetric>(conn)?;
-
-        self.metrics.set_activity_today(
-            DailyMetricDelta {
-                day: today_metrics.day,
-                active_users: today_metrics.active_users,
-                new_users: today_metrics.new_users,
-                active_clients: today_metrics.active_clients,
-                new_clients: today_metrics.new_clients,
-                client_rebinds: today_metrics.client_rebinds,
-                stale_clients_purged: today_metrics.stale_clients_purged,
-                legacy_subscriptions_purged: today_metrics.legacy_subscriptions_purged,
-            }
-            .as_activity_today_snapshot(),
-        );
-        self.metrics.record_daily_rollup_update("success");
-        if delta.client_rebinds > 0 {
-            self.metrics.record_rebind();
-        }
         Ok(())
     }
 }
@@ -482,8 +306,8 @@ mod tests {
 
     #[test]
     fn daily_metric_delta_detects_zero_values() {
-        assert!(DailyMetricDelta {
-            day: NaiveDate::from_ymd_opt(2026, 3, 21).unwrap(),
+        assert!(crate::services::activity_metrics::DailyMetricDelta {
+            day: chrono::NaiveDate::from_ymd_opt(2026, 3, 21).unwrap(),
             active_users: 0,
             new_users: 0,
             active_clients: 0,
@@ -505,8 +329,8 @@ mod tests {
 
     #[test]
     fn daily_metric_delta_detects_non_zero_values() {
-        assert!(!DailyMetricDelta {
-            day: NaiveDate::from_ymd_opt(2026, 3, 21).unwrap(),
+        assert!(!crate::services::activity_metrics::DailyMetricDelta {
+            day: chrono::NaiveDate::from_ymd_opt(2026, 3, 21).unwrap(),
             active_users: 1,
             new_users: 0,
             active_clients: 0,
@@ -521,7 +345,7 @@ mod tests {
     #[test]
     fn activity_daily_metric_model_uses_expected_day_type() {
         let record = crate::models::ActivityDailyMetric {
-            day: NaiveDate::from_ymd_opt(2026, 3, 21).unwrap(),
+            day: chrono::NaiveDate::from_ymd_opt(2026, 3, 21).unwrap(),
             active_users: 1,
             new_users: 1,
             active_clients: 1,
@@ -529,7 +353,7 @@ mod tests {
             client_rebinds: 0,
             stale_clients_purged: 0,
             legacy_subscriptions_purged: 0,
-            updated_at: NaiveDate::from_ymd_opt(2026, 3, 21)
+            updated_at: chrono::NaiveDate::from_ymd_opt(2026, 3, 21)
                 .unwrap()
                 .and_hms_opt(0, 0, 0)
                 .unwrap(),
