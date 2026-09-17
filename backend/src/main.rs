@@ -92,8 +92,9 @@ async fn main() {
     }
 
     let metrics = Arc::new(metrics::Metrics::new());
-    let activity_metrics =
-        services::activity_metrics::ActivityMetricsService::new(metrics.client_tracking.clone());
+    let activity_metrics = Arc::new(services::activity_metrics::ActivityMetricsService::new(
+        metrics.client_tracking.clone(),
+    ));
     if let Err(error) = activity_metrics.refresh_today_gauges(&pool) {
         tracing::warn!("failed to initialize today's activity gauges: {error}");
     }
@@ -111,9 +112,15 @@ async fn main() {
         .await
         .expect("Failed to initialize message search service");
 
-    let ws_registry = Arc::new(services::ws_registry::ConnectionRegistry::new(
-        metrics.ws.clone(),
-    ));
+    let ws_registry = Arc::new(
+        services::ws_registry::ConnectionRegistry::with_presence_persistence(
+            metrics.ws.clone(),
+            pool.clone(),
+            activity_metrics.clone(),
+            config.presence.persistence_queue_capacity,
+            config.presence.disconnect_debounce,
+        ),
+    );
     let unread_service = Arc::new(services::unread::UnreadService::new());
 
     let state = AppState::new(AppInner {
@@ -137,7 +144,7 @@ async fn main() {
         client_tracking: services::client_tracking::ClientTrackingService::start(
             pool.clone(),
             metrics.client_tracking.clone(),
-            Arc::new(activity_metrics),
+            activity_metrics,
         ),
         background_service: services::background::BackgroundService::start(
             pool.clone(),
@@ -157,11 +164,13 @@ async fn main() {
     services::audio_transcode::start(state.clone());
 
     let registry = state.ws_registry.clone();
+    let prune_interval = state.config.presence.prune_interval;
+    let stale_timeout_secs = state.config.presence.stale_timeout.as_secs();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut interval = tokio::time::interval(prune_interval);
         loop {
             interval.tick().await;
-            registry.prune_stale(300);
+            registry.prune_stale(stale_timeout_secs).await;
         }
     });
 

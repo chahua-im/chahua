@@ -45,6 +45,7 @@ struct WsAuthMessage {
     #[serde(rename = "type")]
     type_: String,
     ticket: String,
+    state: Option<WsAppState>,
 }
 
 #[derive(Deserialize)]
@@ -91,12 +92,12 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
     // Wait for auth message, timeout after 5 seconds
     let auth_result = timeout(std::time::Duration::from_secs(5), socket.recv()).await;
 
-    let uid = match auth_result {
+    let (uid, initial_state) = match auth_result {
         Ok(Some(Ok(Message::Text(text)))) => {
             if let Ok(parsed) = serde_json::from_str::<WsAuthMessage>(&text) {
                 if parsed.type_ == "auth" {
                     match crate::utils::auth::verify_session(&parsed.ticket, &state) {
-                        Ok(session) => session.uid,
+                        Ok(session) => (session.uid, parsed.state.map(AppPresenceState::from)),
                         Err(e) => {
                             debug!("ws auth rejected (invalid ticket): {:?}", e);
                             return;
@@ -113,10 +114,10 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
     };
 
     let registry = state.ws_registry.clone();
-    let (entry, rx) = registry.register(uid);
-    let conn_id = entry.conn_id;
+    let (entry, rx) = registry.register(uid, initial_state).await;
+    let conn_id = entry.conn_id();
 
-    handle_socket(socket, state, uid, conn_id, registry, entry, rx).await;
+    handle_socket(socket, state, uid, conn_id, registry, rx).await;
 }
 
 async fn handle_socket(
@@ -125,7 +126,6 @@ async fn handle_socket(
     uid: i32,
     conn_id: u64,
     registry: Arc<ws_registry::ConnectionRegistry>,
-    entry: Arc<ws_registry::ConnectionEntry>,
     mut rx: tokio::sync::mpsc::Receiver<Arc<ServerWsMessage>>,
 ) {
     let started_at = Instant::now();
@@ -148,29 +148,26 @@ async fn handle_socket(
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(parsed) = serde_json::from_str::<WsMessage>(&text) {
                             if parsed.type_ == "ping" {
-                                let state = parsed
-                                    .state
-                                    .map(AppPresenceState::from)
-                                    .unwrap_or(AppPresenceState::Active);
-                                entry.update_ping(state);
-                                registry.refresh_metrics();
+                                let app_state = parsed.state.map(AppPresenceState::from);
+                                if !registry.heartbeat(uid, conn_id, app_state).await {
+                                    break;
+                                }
                                 trace!("ws ping received uid={} conn_id={}", uid, conn_id);
                                 if socket.send(Message::Text(PONG_JSON.into())).await.is_err() {
                                     break;
                                 }
                             } else if parsed.type_ == "appState" {
-                                let state = parsed
-                                    .state
-                                    .map(AppPresenceState::from)
-                                    .unwrap_or(AppPresenceState::Inactive);
-                                entry.update_app_state(state);
-                                registry.refresh_metrics();
-                                trace!(
-                                    "ws app_state received uid={} conn_id={} state={:?}",
-                                    uid,
-                                    conn_id,
-                                    state
-                                );
+                                if let Some(app_state) = parsed.state.map(AppPresenceState::from) {
+                                    if !registry.heartbeat(uid, conn_id, Some(app_state)).await {
+                                        break;
+                                    }
+                                    trace!(
+                                        "ws app_state received uid={} conn_id={} state={:?}",
+                                        uid,
+                                        conn_id,
+                                        app_state
+                                    );
+                                }
                             }
                         }
                     }
@@ -180,7 +177,7 @@ async fn handle_socket(
             }
         }
     }
-    registry.remove_connection(uid, conn_id);
+    registry.remove_connection(uid, conn_id).await;
     state
         .metrics
         .ws
@@ -191,4 +188,34 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(ws_handler))
         .routes(utoipa_axum::routes!(get_ws_ticket))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WsAppState, WsAuthMessage, WsMessage};
+
+    #[test]
+    fn auth_state_is_optional_for_legacy_clients() {
+        let auth: WsAuthMessage = serde_json::from_str(r#"{"type":"auth","ticket":"ticket"}"#)
+            .expect("auth message should deserialize");
+
+        assert!(auth.state.is_none());
+    }
+
+    #[test]
+    fn auth_accepts_an_explicit_initial_state() {
+        let auth: WsAuthMessage =
+            serde_json::from_str(r#"{"type":"auth","ticket":"ticket","state":"active"}"#)
+                .expect("auth message should deserialize");
+
+        assert!(matches!(auth.state, Some(WsAppState::Active)));
+    }
+
+    #[test]
+    fn app_state_message_without_state_has_no_state_to_apply() {
+        let message: WsMessage = serde_json::from_str(r#"{"type":"appState"}"#)
+            .expect("app state message should deserialize");
+
+        assert!(message.state.is_none());
+    }
 }

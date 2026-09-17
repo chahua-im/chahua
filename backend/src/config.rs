@@ -8,6 +8,7 @@
 use axum::http::HeaderValue;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine;
 
@@ -57,12 +58,30 @@ pub struct AuthConfig {
     pub service_token_hash_key: Vec<u8>,
 }
 
+/// Timing and capacity limits for the single-instance presence coordinator.
+pub struct PresenceConfig {
+    pub checkpoint_interval: Duration,
+    pub disconnect_debounce: Duration,
+    pub max_heartbeat_interval: Duration,
+    pub stale_timeout: Duration,
+    pub prune_interval: Duration,
+    pub transition_window: Duration,
+    pub per_connection_transition_limit: u32,
+    pub per_uid_transition_limit: u32,
+    pub command_queue_capacity: usize,
+    pub persistence_queue_capacity: usize,
+    pub operation_queue_capacity: usize,
+    pub max_retry_backoff: Duration,
+    pub unknown_connection_threshold: Duration,
+}
+
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database_url: String,
     pub media: Arc<MediaConfig>,
     pub avatars: Option<Arc<DiscuzAvatarConfig>>,
     pub auth: AuthConfig,
+    pub presence: PresenceConfig,
 }
 
 impl AppConfig {
@@ -124,6 +143,7 @@ impl AppConfig {
                 jwt_signing_key,
                 service_token_hash_key,
             },
+            presence: read_presence_config(),
         }
     }
 }
@@ -158,6 +178,68 @@ fn read_positive_i64_env(var_name: &str, default: i64) -> i64 {
         Err(std::env::VarError::NotUnicode(_)) => {
             panic!("{var_name} must be a positive integer")
         }
+    }
+}
+
+fn read_positive_u64_env(var_name: &str, default: u64) -> u64 {
+    match std::env::var(var_name) {
+        Ok(raw) => raw
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .unwrap_or_else(|| panic!("{var_name} must be a positive integer")),
+        Err(std::env::VarError::NotPresent) => default,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            panic!("{var_name} must be a positive integer")
+        }
+    }
+}
+
+fn read_presence_config() -> PresenceConfig {
+    let checkpoint_interval = read_positive_u64_env("PRESENCE_CHECKPOINT_INTERVAL_SECS", 5 * 60);
+    let disconnect_debounce = read_positive_u64_env("PRESENCE_DISCONNECT_DEBOUNCE_SECS", 45);
+    let max_heartbeat_interval = read_positive_u64_env("PRESENCE_MAX_HEARTBEAT_INTERVAL_SECS", 30);
+    let stale_timeout = read_positive_u64_env("PRESENCE_STALE_TIMEOUT_SECS", 90);
+    assert!(
+        stale_timeout >= max_heartbeat_interval * 3,
+        "PRESENCE_STALE_TIMEOUT_SECS must be at least three times PRESENCE_MAX_HEARTBEAT_INTERVAL_SECS"
+    );
+
+    PresenceConfig {
+        checkpoint_interval: Duration::from_secs(checkpoint_interval),
+        disconnect_debounce: Duration::from_secs(disconnect_debounce),
+        max_heartbeat_interval: Duration::from_secs(max_heartbeat_interval),
+        stale_timeout: Duration::from_secs(stale_timeout),
+        prune_interval: Duration::from_secs(read_positive_u64_env(
+            "PRESENCE_PRUNE_INTERVAL_SECS",
+            60,
+        )),
+        transition_window: Duration::from_secs(read_positive_u64_env(
+            "PRESENCE_TRANSITION_WINDOW_SECS",
+            10,
+        )),
+        per_connection_transition_limit: read_positive_u64_env(
+            "PRESENCE_PER_CONNECTION_TRANSITION_LIMIT",
+            12,
+        ) as u32,
+        per_uid_transition_limit: read_positive_u64_env("PRESENCE_PER_UID_TRANSITION_LIMIT", 20)
+            as u32,
+        command_queue_capacity: read_positive_u64_env("PRESENCE_COMMAND_QUEUE_CAPACITY", 4096)
+            as usize,
+        persistence_queue_capacity: read_positive_u64_env(
+            "PRESENCE_PERSISTENCE_QUEUE_CAPACITY",
+            256,
+        ) as usize,
+        operation_queue_capacity: read_positive_u64_env("PRESENCE_OPERATION_QUEUE_CAPACITY", 64)
+            as usize,
+        max_retry_backoff: Duration::from_secs(read_positive_u64_env(
+            "PRESENCE_MAX_RETRY_BACKOFF_SECS",
+            60,
+        )),
+        unknown_connection_threshold: Duration::from_secs(read_positive_u64_env(
+            "PRESENCE_UNKNOWN_CONNECTION_THRESHOLD_SECS",
+            60,
+        )),
     }
 }
 
