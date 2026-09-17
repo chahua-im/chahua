@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use axum::{
     extract::State,
-    http::{Request, StatusCode},
+    http::{HeaderMap, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -22,7 +22,7 @@ use crate::models::{
     NewClientRecord, NewUserExtra, UserExtra,
 };
 use crate::schema::{activity_daily_metrics, clients, push_subscriptions, user_extra};
-use crate::utils::auth::{extract_auth_context, X_APP_VERSION};
+use crate::utils::auth::{extract_auth_context, X_APP_VERSION, X_ON_BEHALF_OF};
 
 const ACTIVITY_WRITE_THROTTLE: Duration = Duration::from_secs(5 * 60);
 const PURGE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -452,12 +452,15 @@ pub async fn track_client_activity(
 
     let mut resolved_client_id: Option<String> = None;
 
-    if let Ok(auth) = extract_auth_context(request.headers(), &state) {
-        let client_id = auth.client_id;
-        resolved_client_id = Some(client_id.clone());
-        if let Err((status, message)) = state.client_tracking.record_activity(auth.uid, &client_id)
-        {
-            return (status, message).into_response();
+    if should_record_client_activity(request.headers()) {
+        if let Ok(auth) = extract_auth_context(request.headers(), &state) {
+            let client_id = auth.client_id;
+            resolved_client_id = Some(client_id.clone());
+            if let Err((status, message)) =
+                state.client_tracking.record_activity(auth.uid, &client_id)
+            {
+                return (status, message).into_response();
+            }
         }
     }
 
@@ -470,6 +473,10 @@ pub async fn track_client_activity(
     }
 
     next.run(request).await
+}
+
+fn should_record_client_activity(headers: &HeaderMap) -> bool {
+    !headers.contains_key(X_ON_BEHALF_OF)
 }
 
 fn should_record_app_version_request(path: &str) -> bool {
@@ -501,6 +508,15 @@ mod tests {
         assert!(!should_record_app_version_request("/ws/"));
         assert!(should_record_app_version_request("/ws/ticket"));
         assert!(should_record_app_version_request("/chats"));
+    }
+
+    #[test]
+    fn delegated_requests_do_not_record_client_activity() {
+        let mut headers = HeaderMap::new();
+        assert!(should_record_client_activity(&headers));
+
+        headers.insert(X_ON_BEHALF_OF, axum::http::HeaderValue::from_static("42"));
+        assert!(!should_record_client_activity(&headers));
     }
 
     #[test]
