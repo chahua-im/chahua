@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { useRef } from 'react';
 import type { AxiosResponse } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageResponse } from '@/api/messages';
@@ -59,7 +60,7 @@ interface HookState {
   timeline: ReturnType<typeof useConversationTimeline>;
 }
 
-function emptyState(messages: MessageResponse[] = []): RootState {
+function emptyState(messages: MessageResponse[] = [], threadUnreadCount = 0, threadId = '20'): RootState {
   return {
     messages: {
       chats:
@@ -79,28 +80,43 @@ function emptyState(messages: MessageResponse[] = []): RootState {
     settings: {
       showAllAvatars: false,
     },
+    // threadsSlice shape needed by selectThreadUnreadCount when a thread opens;
+    // the item id defaults to the threadId used by the tests below.
+    threads: {
+      items: [
+        {
+          threadRootMessage: { id: threadId },
+          unreadCount: threadUnreadCount,
+        },
+      ],
+    },
   } as RootState;
 }
 
 function TestComponent({
   initialResumeMessageId = null,
   threadId,
+  scrollToBottomUnreadCount = 0,
+  threadLastReadMessageIdRef: providedThreadLastReadMessageIdRef,
   onRender,
   showToast,
 }: {
   initialResumeMessageId?: string | null;
   threadId?: string;
+  scrollToBottomUnreadCount?: number;
+  threadLastReadMessageIdRef?: { current: string | null };
   onRender: (state: HookState) => void;
   showToast: (message: string) => void;
 }) {
+  const fallbackRef = useRef<string | null>(null);
   const timeline = useConversationTimeline({
     chatId: 'chat-1',
     storeChatId: threadId ? `chat-1_thread_${threadId}` : 'chat-1',
     threadId,
     initialResumeMessageId,
     lastReadMessageId: '5',
-    scrollToBottomUnreadCount: 0,
-    threadLastReadMessageIdRef: { current: null },
+    scrollToBottomUnreadCount,
+    threadLastReadMessageIdRef: providedThreadLastReadMessageIdRef ?? fallbackRef,
     formatDateSeparator: () => 'date',
     showToast,
   });
@@ -248,5 +264,68 @@ describe('useConversationTimeline', () => {
 
     expect(scrollToMessageId).toHaveBeenCalledWith('10', 'smooth', 'top', DEFAULT_OFFSET_RATIO);
     expect(getMessages).not.toHaveBeenCalled();
+  });
+
+  it('shows the scroll-to-bottom button with the unread count for a thread with unread replies', async () => {
+    fakeState = emptyState([message('10'), message('11')]);
+    // FAB visibility must come from the unread count alone, not from scroll
+    // direction or anchor position.
+    await renderHook({ threadId: '20', scrollToBottomUnreadCount: 42 });
+
+    expect(state.timeline.pendingJumpCount).toBe(42);
+    expect(state.timeline.showScrollToBottomButton).toBe(true);
+  });
+
+  it('hides the scroll-to-bottom button when the thread has no unread replies', async () => {
+    fakeState = emptyState([message('10'), message('11')]);
+    await renderHook({ threadId: '20', scrollToBottomUnreadCount: 0 });
+
+    expect(state.timeline.pendingJumpCount).toBe(0);
+    expect(state.timeline.showScrollToBottomButton).toBe(false);
+  });
+
+  it('records the thread read position in the store after fetching the read state', async () => {
+    fakeState = emptyState([message('10'), message('11')]);
+    await renderHook({ threadId: '20' });
+
+    expect(getThreadReadState).toHaveBeenCalledWith('chat-1', '20');
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'threads/setThreadLastReadMessageId',
+        payload: { threadRootId: '20', lastReadMessageId: '9' },
+      }),
+    );
+  });
+
+  it('seeds the thread last-read ref from the fetched read state for the initial anchor', async () => {
+    fakeState = emptyState([message('10'), message('11')]);
+    const threadLastReadMessageIdRef = { current: null as string | null };
+    await renderHook({ threadId: '20', threadLastReadMessageIdRef });
+
+    expect(threadLastReadMessageIdRef.current).toBe('9');
+  });
+
+  it('opens a thread with unread replies around the read boundary instead of the latest window', async () => {
+    // Anchoring the latest window strands the read boundary outside the loaded
+    // range: the view falls to the bottom and read tracking immediately marks
+    // the unseen tail as read, zeroing the unread badge.
+    fakeState = emptyState([message('10'), message('11')], 42);
+    vi.mocked(getMessages).mockResolvedValue(
+      response({ messages: [message('8'), message('9'), message('10')], olderCursor: '8', newerCursor: '10' }),
+    );
+
+    await renderHook({ threadId: '20', scrollToBottomUnreadCount: 42 });
+
+    expect(getMessages).toHaveBeenCalledWith('chat-1', { around: '9', max: 50, threadId: '20' });
+    expect(state.timeline.initialAnchor).toEqual({ type: 'message', messageId: '9', token: 1, align: 'top' });
+    expect(state.timeline.pendingJumpCount).toBe(42);
+  });
+
+  it('opens a fully read thread on the latest window', async () => {
+    fakeState = emptyState([message('10'), message('11')]);
+
+    await renderHook({ threadId: '20', scrollToBottomUnreadCount: 0 });
+
+    expect(getMessages).toHaveBeenCalledWith('chat-1', { threadId: '20' });
   });
 });

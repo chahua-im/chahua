@@ -81,6 +81,10 @@ export interface ReactionDetailResponse {
 export interface MarkChatReadStateResponse {
   lastReadMessageId: string | null;
   unreadCount: number;
+  /** Absent from responses of backends that predate mention badges; treat as 0. */
+  unreadMentions?: number;
+  /** Absent from responses of backends that predate reaction badges; treat as 0. */
+  unreadReactions?: number;
 }
 
 export interface MessageResponse {

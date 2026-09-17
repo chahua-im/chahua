@@ -14,6 +14,9 @@ export interface ThreadListItem {
   replyCount: number;
   lastReplyAt: string;
   unreadCount: number;
+  unreadMentions: number;
+  /** Absent on payloads from backends that predate reaction badges; treat as 0. */
+  unreadReactions?: number;
   lastReadMessageId: string | null;
   subscribedAt: string;
   archived: boolean;
@@ -42,6 +45,10 @@ export interface ThreadSubscriptionStatusResponse {
 export interface MarkThreadReadResponse {
   lastReadMessageId: string | null;
   unreadCount: number;
+  /** Absent from responses of backends that predate mention badges; treat as 0. */
+  unreadMentions?: number;
+  /** Absent from responses of backends that predate reaction badges; treat as 0. */
+  unreadReactions?: number;
 }
 
 export function getThreads(params?: {

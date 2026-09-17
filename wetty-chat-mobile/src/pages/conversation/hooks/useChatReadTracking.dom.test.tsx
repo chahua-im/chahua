@@ -78,8 +78,12 @@ describe('useChatReadTracking', () => {
     root = createRoot(host);
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     pageHidden = false;
-    vi.mocked(markMessagesAsRead).mockResolvedValue(response({ lastReadMessageId: '20', unreadCount: 0 }));
-    vi.mocked(markThreadAsRead).mockResolvedValue(response({ lastReadMessageId: '20', unreadCount: 0 }));
+    vi.mocked(markMessagesAsRead).mockResolvedValue(
+      response({ lastReadMessageId: '20', unreadCount: 0, unreadMentions: 0 }),
+    );
+    vi.mocked(markThreadAsRead).mockResolvedValue(
+      response({ lastReadMessageId: '20', unreadCount: 0, unreadMentions: 0 }),
+    );
   });
 
   afterEach(() => {
@@ -99,14 +103,8 @@ describe('useChatReadTracking', () => {
     expect(markMessagesAsRead).toHaveBeenCalledWith('chat-1', '20');
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'chats/setChatLastReadMessageId',
-        payload: { chatId: 'chat-1', lastReadMessageId: '20' },
-      }),
-    );
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'chats/setChatUnreadCount',
-        payload: { chatId: 'chat-1', unreadCount: 0 },
+        type: 'chats/setChatReadState',
+        payload: { chatId: 'chat-1', lastReadMessageId: '20', unreadCount: 0, unreadMentions: 0 },
       }),
     );
     expect(syncAppBadgeCount).toHaveBeenCalled();
@@ -120,14 +118,8 @@ describe('useChatReadTracking', () => {
     expect(markMessagesAsRead).toHaveBeenCalledWith('chat-1', '20');
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'chats/setChatLastReadMessageId',
-        payload: { chatId: 'chat-1', lastReadMessageId: '20' },
-      }),
-    );
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'chats/setChatUnreadCount',
-        payload: { chatId: 'chat-1', unreadCount: 0 },
+        type: 'chats/setChatReadState',
+        payload: { chatId: 'chat-1', lastReadMessageId: '20', unreadCount: 0, unreadMentions: 0 },
       }),
     );
   });
@@ -168,7 +160,13 @@ describe('useChatReadTracking', () => {
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'threads/setThreadReadState',
-        payload: { threadRootId: 'thread-1', lastReadMessageId: '20', unreadCount: 0 },
+        payload: {
+          threadRootId: 'thread-1',
+          lastReadMessageId: '20',
+          unreadCount: 0,
+          unreadMentions: 0,
+          unreadReactions: 0,
+        },
       }),
     );
   });

@@ -11,6 +11,7 @@ function makeChat(overrides: Partial<ChatListEntry> = {}): ChatListEntry {
     avatar: null,
     lastMessageAt: null,
     unreadCount: 0,
+    unreadMentions: 0,
     lastReadMessageId: null,
     lastMessage: null,
     mutedUntil: null,

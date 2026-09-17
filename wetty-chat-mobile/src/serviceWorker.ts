@@ -5,6 +5,7 @@ import { registerRoute } from 'workbox-routing';
 import { CacheFirst } from 'workbox-strategies';
 import { getHighWaterMark, kvGet, setHighWaterMark } from './utils/db';
 import { formatNotificationBody, getNotificationPreviewLabels, type PreviewMessage } from './utils/messagePreview';
+import { isFeatureEnabled } from './features';
 import {
   buildNotificationNavigationData,
   buildNotificationLaunchUrl,
@@ -17,12 +18,13 @@ import {
 declare let self: ServiceWorkerGlobalScope;
 
 interface PushPayload {
-  type?: 'newMessage';
+  type?: 'newMessage' | 'mention' | 'reply';
   title?: string;
   body?: string;
   senderName?: string;
   messagePreview?: PreviewMessage;
   unreadCount?: number;
+  mentionedUid?: number;
   data?: NotificationNavigationData;
 }
 
@@ -281,10 +283,19 @@ self.addEventListener('push', (event) => {
         if (payload.messagePreview) {
           try {
             const locale = await kvGet<string>('effective_locale');
+            // Mentions and replies share the mentionNotifications gate and get
+            // directed copy; everything else keeps the generic body.
+            const gatedType =
+              payload.type === 'mention' || payload.type === 'reply'
+                ? isFeatureEnabled('mentionNotifications')
+                  ? payload.type
+                  : 'message'
+                : 'message';
             body = formatNotificationBody(
               payload.senderName ?? 'Someone',
               payload.messagePreview,
               getNotificationPreviewLabels(locale),
+              gatedType,
             );
           } catch (err) {
             console.error('Failed to localize push preview, using legacy body', err);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   capRange,
   classifyKeyMutation,
+  computeAlignedScrollTarget,
   detectAlternatingJitter,
   normalizeRange,
   unionRanges,
@@ -41,5 +42,42 @@ describe('virtual scroll layout math', () => {
         { top: 11, at: 50 },
       ]),
     ).toEqual({ values: [10, 11], durationMs: 50 });
+  });
+});
+
+describe('computeAlignedScrollTarget', () => {
+  // 600px viewport in a 2000px document -> maxScroll = 1400.
+  const clientHeight = 600;
+  const scrollHeight = 2000;
+
+  it('aligns a row to the viewport top and clamps into the scroll range', () => {
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900, 80, 'top', 0.5)).toBe(900);
+    // Negative and past-the-end rows clamp to [0, maxScroll].
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, -40, 80, 'top', 0.5)).toBe(0);
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 1900, 80, 'top', 0.5)).toBe(1400);
+  });
+
+  it('bottom-aligns using the row height and viewport height', () => {
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900, 80, 'bottom', 0.5)).toBe(380);
+    // A row whose bottom sits at 1980 scrolls to 1380 (< maxScroll 1400, no clamp).
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 1900, 80, 'bottom', 0.5)).toBe(1380);
+  });
+
+  it('positions a row at offsetRatio and clamps the ratio to [0, 1]', () => {
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900, 80, 'custom', 0.5)).toBe(600);
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900, 80, 'custom', 0)).toBe(900);
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900, 80, 'custom', 1)).toBe(300);
+    // Out-of-range ratios clamp before use.
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900, 80, 'custom', 5)).toBe(300);
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900, 80, 'custom', -2)).toBe(900);
+  });
+
+  it('rounds fractional offsets so scroll comparisons stay pixel-stable', () => {
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900.4, 80, 'top', 0.5)).toBe(900);
+    expect(computeAlignedScrollTarget(clientHeight, scrollHeight, 900.6, 80, 'top', 0.5)).toBe(901);
+  });
+
+  it('clamps to zero when the content is shorter than the viewport', () => {
+    expect(computeAlignedScrollTarget(600, 500, 300, 80, 'top', 0.5)).toBe(0);
   });
 });
