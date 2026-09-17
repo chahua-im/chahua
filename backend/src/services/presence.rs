@@ -13,6 +13,18 @@ pub enum PresenceObservationCause {
     Prune,
 }
 
+impl PresenceObservationCause {
+    /// Prometheus label for the per-cause observation counter.
+    pub fn metric_label(&self) -> &'static str {
+        match self {
+            Self::ActiveCheckpoint => "active_checkpoint",
+            Self::ExplicitInactive => "explicit_inactive",
+            Self::Disconnect => "disconnect",
+            Self::Prune => "prune",
+        }
+    }
+}
+
 /// Persist a trusted foreground observation and its user-level daily metrics.
 ///
 /// `observed_at` must be a UTC naive timestamp. The transaction locks the user's
@@ -23,8 +35,9 @@ pub fn record_presence_observation(
     daily_metrics: &ActivityMetricsService,
     uid: i32,
     observed_at: NaiveDateTime,
-    _cause: PresenceObservationCause,
+    cause: PresenceObservationCause,
 ) -> QueryResult<NaiveDateTime> {
+    tracing::debug!(uid, %observed_at, cause = cause.metric_label(), "recording presence observation");
     conn.transaction(|conn| {
         let skeleton = NewUserExtra {
             uid,

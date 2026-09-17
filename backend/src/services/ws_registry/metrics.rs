@@ -14,11 +14,14 @@ pub struct WsMetrics {
     messages_pushed_total: IntCounterVec,
     messages_dropped_total: IntCounterVec,
     presence_transition_rate_limited_total: IntCounter,
+    presence_observations_total: IntCounterVec,
     presence_transition_rate_limit_evictions_total: IntCounter,
     presence_physical_online_users: IntGauge,
     presence_published_online_users: IntGauge,
     presence_debouncing_users: IntGauge,
     presence_persistence_queue_depth: IntGauge,
+    presence_operation_queue_depth: IntGauge,
+    presence_spillway_queue_depth: IntGauge,
     presence_persistence_successes_total: IntCounter,
     presence_persistence_failures_total: IntCounter,
     presence_persistence_retries_total: IntCounter,
@@ -124,6 +127,25 @@ impl WsMetrics {
             registry
         )
         .expect("ws_presence_persistence_queue_depth registration should succeed");
+        let presence_operation_queue_depth = register_int_gauge_with_registry!(
+            "ws_presence_operation_queue_depth",
+            "Current total depth of the per-uid operation queues inside the persistence supervisor",
+            registry
+        )
+        .expect("ws_presence_operation_queue_depth registration should succeed");
+        let presence_spillway_queue_depth = register_int_gauge_with_registry!(
+            "ws_presence_spillway_queue_depth",
+            "Current number of presence operations parked on per-uid spillways",
+            registry
+        )
+        .expect("ws_presence_spillway_queue_depth registration should succeed");
+        let presence_observations_total = register_int_counter_vec_with_registry!(
+            "ws_presence_observations_total",
+            "Total presence observations submitted for persistence by cause",
+            &["cause"],
+            registry
+        )
+        .expect("ws_presence_observations_total registration should succeed");
         let presence_persistence_successes_total = register_int_counter_with_registry!(
             "ws_presence_persistence_successes_total",
             "Total successful presence observation persistence operations",
@@ -219,11 +241,14 @@ impl WsMetrics {
             messages_pushed_total,
             messages_dropped_total,
             presence_transition_rate_limited_total,
+            presence_observations_total,
             presence_transition_rate_limit_evictions_total,
             presence_physical_online_users,
             presence_published_online_users,
             presence_debouncing_users,
             presence_persistence_queue_depth,
+            presence_operation_queue_depth,
+            presence_spillway_queue_depth,
             presence_persistence_successes_total,
             presence_persistence_failures_total,
             presence_persistence_retries_total,
@@ -318,6 +343,20 @@ impl WsMetrics {
         self.presence_persistence_queue_depth.set(depth as i64);
     }
 
+    pub fn set_presence_operation_queue_depth(&self, depth: usize) {
+        self.presence_operation_queue_depth.set(depth as i64);
+    }
+
+    pub fn set_presence_spillway_queue_depth(&self, depth: usize) {
+        self.presence_spillway_queue_depth.set(depth as i64);
+    }
+
+    pub fn record_presence_observation_submitted(&self, cause: &str) {
+        self.presence_observations_total
+            .with_label_values(&[cause])
+            .inc();
+    }
+
     pub fn record_presence_persistence_success(&self) {
         self.presence_persistence_successes_total.inc();
     }
@@ -396,6 +435,10 @@ mod tests {
         metrics.record_message_dropped("message_updated");
         metrics.set_presence_users(2, 1, 1);
         metrics.set_presence_persistence_queue_depth(3);
+        metrics.set_presence_operation_queue_depth(2);
+        metrics.set_presence_spillway_queue_depth(1);
+        metrics.record_presence_observation_submitted("active_checkpoint");
+        metrics.record_presence_observation_submitted("prune");
         metrics.record_presence_persistence_success();
         metrics.record_presence_persistence_failure();
         metrics.record_presence_persistence_retry();
@@ -423,6 +466,10 @@ mod tests {
         assert!(rendered.contains("ws_messages_pushed_total{message_type=\"message\"} 2"));
         assert!(rendered.contains("ws_messages_dropped_total{message_type=\"message_updated\"} 1"));
         assert!(rendered.contains("ws_presence_persistence_queue_depth 3"));
+        assert!(rendered.contains("ws_presence_operation_queue_depth 2"));
+        assert!(rendered.contains("ws_presence_spillway_queue_depth 1"));
+        assert!(rendered.contains("ws_presence_observations_total{cause=\"active_checkpoint\"} 1"));
+        assert!(rendered.contains("ws_presence_observations_total{cause=\"prune\"} 1"));
         assert!(rendered.contains("ws_presence_persistence_successes_total 1"));
         assert!(rendered.contains("ws_presence_persistence_failures_total 1"));
         assert!(rendered.contains("ws_presence_persistence_retries_total 1"));

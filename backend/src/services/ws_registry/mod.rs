@@ -202,13 +202,17 @@ struct PresenceObservation {
 
 /// The outcome of one specific persistence attempt.  Keeping both ids on the
 /// acknowledgement makes it safe for the supervisor to ignore a late result
-/// after a failed operation has been resubmitted.
+/// after a failed operation has been resubmitted. Successful acknowledgements
+/// carry the completed operation's published target so the coordinator can
+/// commit the transition it already matched.
 #[derive(Debug)]
 struct PresencePersistenceAck {
     operation_id: u64,
     attempt_id: u64,
     uid: i32,
     result: Result<NaiveDateTime, String>,
+    /// Only set on success, copied from the completed operation.
+    published_online: Option<bool>,
 }
 
 impl PresenceObservation {
@@ -423,10 +427,8 @@ impl PublishedPresence {
 
 /// The persistence half of the coordinator. State commands enqueue observations
 /// here, while Diesel work always runs outside the WebSocket task and state lock.
-///
-/// A later coordinator stage will add an acknowledgement command from this worker
-/// back to the state lane before using observations to publish online/offline
-/// transitions.
+/// The worker owns the per-uid operation queues and returns acknowledgements to
+/// the coordinator, which alone commits published state and broadcasts.
 #[derive(Clone)]
 struct PresencePersistence {
     tx: mpsc::Sender<PresenceObservation>,
@@ -434,6 +436,9 @@ struct PresencePersistence {
     queued_operations: Arc<AtomicUsize>,
     metrics: Arc<WsMetrics>,
     supervisor: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Operations parked when the global persistence lane is full. The
+    /// coordinator drains these back into the lane at every loop turn.
+    spillway: Arc<dashmap::DashMap<i32, VecDeque<PresenceObservation>>>,
 }
 
 impl PresencePersistence {
@@ -442,18 +447,13 @@ impl PresencePersistence {
     /// users to make bounded progress.
     const MAX_CONCURRENT_ATTEMPTS: usize = 4;
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "startup provides the supervisor's independent dependencies"
-    )]
     fn start(
         db: DbPool,
         activity_metrics: Arc<ActivityMetricsService>,
         queue_capacity: usize,
         operation_queue_capacity: usize,
         max_retry_backoff: Duration,
-        broadcaster: PresenceBroadcaster,
-        published_presence: Arc<dashmap::DashMap<i32, Arc<PublishedPresence>>>,
+        ack_tx: mpsc::Sender<PresencePersistenceAck>,
         metrics: Arc<WsMetrics>,
     ) -> Self {
         let (tx, mut rx) = mpsc::channel::<PresenceObservation>(queue_capacity);
@@ -465,8 +465,7 @@ impl PresencePersistence {
                 &mut rx,
                 db,
                 activity_metrics,
-                broadcaster,
-                published_presence,
+                ack_tx,
                 queue_capacity,
                 operation_queue_capacity,
                 max_retry_backoff,
@@ -481,6 +480,7 @@ impl PresencePersistence {
             queued_operations,
             metrics,
             supervisor: Arc::new(StdMutex::new(Some(supervisor))),
+            spillway: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -499,8 +499,7 @@ impl PresencePersistence {
         rx: &mut mpsc::Receiver<PresenceObservation>,
         db: DbPool,
         activity_metrics: Arc<ActivityMetricsService>,
-        broadcaster: PresenceBroadcaster,
-        published_presence: Arc<dashmap::DashMap<i32, Arc<PublishedPresence>>>,
+        ack_tx: mpsc::Sender<PresencePersistenceAck>,
         queue_capacity: usize,
         operation_queue_capacity: usize,
         max_retry_backoff: Duration,
@@ -595,11 +594,16 @@ impl PresencePersistence {
                             queued_operations = queued_operations.saturating_sub(dropped);
                             queue_depth.fetch_sub(dropped, Ordering::Relaxed);
                         }
+                        metrics.record_presence_observation_submitted(
+                            operation.cause.metric_label(),
+                        );
                         queue.push_back(operation);
                         queued_operations += 1;
                         metrics.set_presence_persistence_queue_depth(
                             queue_depth.load(Ordering::Relaxed),
                         );
+                        let total: usize = queues.values().map(VecDeque::len).sum();
+                        metrics.set_presence_operation_queue_depth(total);
                     }
                     None => input_open = false,
                 },
@@ -626,27 +630,30 @@ impl PresencePersistence {
                                 queue_depth.load(Ordering::Relaxed),
                             );
                             metrics.record_presence_persistence_success();
-                            if let Some(online) = completed.published_online {
-                                let changed_at = Utc::now();
-                                let presence = published_presence
-                                    .entry(completed.uid)
-                                    .or_insert_with(|| Arc::new(PublishedPresence::new(false)));
-                                presence.online.store(online, Ordering::Relaxed);
-                                if !online {
-                                    presence.debouncing.store(false, Ordering::Relaxed);
-                                }
-                                broadcaster
-                                    .broadcast(
-                                        db.clone(),
-                                        completed.uid,
-                                        online,
-                                        stored_last_seen_at,
-                                        changed_at,
-                                    )
-                                    .await;
-                            }
-                            if queue.is_empty() {
+                            let total_after_pop: usize = queue.len();
+                            if total_after_pop == 0 {
                                 queues.remove(&ack.uid);
+                            }
+                            let total: usize = queues.values().map(VecDeque::len).sum();
+                            metrics.set_presence_operation_queue_depth(
+                                total + total_after_pop,
+                            );
+                            // The coordinator alone commits published state and
+                            // broadcasts: a bounded ack channel cannot drop a
+                            // completed operation, and a dead coordinator means
+                            // the process is being torn down anyway.
+                            if ack_tx
+                                .send(PresencePersistenceAck {
+                                    operation_id: ack.operation_id,
+                                    attempt_id: ack.attempt_id,
+                                    uid: ack.uid,
+                                    result: Ok(stored_last_seen_at),
+                                    published_online: completed.published_online,
+                                })
+                                .await
+                                .is_err()
+                            {
+                                tracing::error!(uid = ack.uid, operation_id = ack.operation_id, "presence coordinator stopped; dropping success acknowledgement");
                             }
                         }
                         Err(error) => {
@@ -720,16 +727,23 @@ impl PresencePersistence {
             attempt_id: observation.attempt_id,
             uid: observation.uid,
             result,
+            published_online: observation.published_online,
         }
     }
 
-    async fn enqueue(
+    /// Hands an operation to the persistence supervisor. Never waits for
+    /// channel capacity: a full input lane means the supervisor's per-uid
+    /// degradation path will decide what survives, and the coordinator loop
+    /// must keep serving every other uid (§6.2). The operation is parked in a
+    /// bounded spillway and retried by the coordinator; nothing is dropped
+    /// here.
+    fn enqueue(
         &self,
         uid: i32,
         observed_at: NaiveDateTime,
         cause: PresenceObservationCause,
         published_online: Option<bool>,
-    ) {
+    ) -> Option<PresenceObservation> {
         let observation = PresenceObservation {
             operation_id: self
                 .next_operation_id
@@ -743,11 +757,12 @@ impl PresencePersistence {
         };
         self.queued_operations.fetch_add(1, Ordering::Relaxed);
         self.metrics_queue_depth();
-        if self.tx.send(observation).await.is_err() {
-            self.queued_operations.fetch_sub(1, Ordering::Relaxed);
-            self.metrics_queue_depth();
-            tracing::error!(uid, "presence persistence worker stopped");
+        if self.tx.try_send(observation.clone()).is_ok() {
+            return None;
         }
+        self.queued_operations.fetch_sub(1, Ordering::Relaxed);
+        self.metrics_queue_depth();
+        Some(observation)
     }
 
     fn metrics_queue_depth(&self) {
@@ -862,6 +877,9 @@ pub struct ConnectionRegistry {
     /// user without making an unrelated user's heartbeat wait behind it.
     state_lanes: Arc<dashmap::DashMap<i32, Arc<Mutex<()>>>>,
     persistence: Option<PresencePersistence>,
+    /// Set when persistence is configured; the coordinator uses it to query
+    /// broadcast recipients after committing a persisted operation.
+    db: Option<DbPool>,
     presence_broadcaster: Option<PresenceBroadcaster>,
     disconnect_debounce: std::time::Duration,
     transition_window: Duration,
@@ -872,6 +890,11 @@ pub struct ConnectionRegistry {
     /// Kept per uid so many active connections cannot multiply the periodic
     /// observation rate.
     last_checkpoint_enqueued_at: Arc<dashmap::DashMap<i32, Instant>>,
+    /// The online target already promised by a queued observation and not yet
+    /// committed. §6.3 tail-target rule: a reconnect while a disconnect
+    /// debounce is pending must not re-announce online, while a reconnect
+    /// behind an in-flight Offline must queue an Online operation.
+    queued_online_target: Arc<dashmap::DashMap<i32, bool>>,
     /// This is intentionally independent of the physical connection map, so a
     /// disconnect/reconnect cannot bypass the uid-wide abuse budget.
     uid_transition_limiters: Arc<dashmap::DashMap<i32, TransitionLimiter>>,
@@ -903,6 +926,10 @@ struct GaugeSnapshot {
 }
 
 impl ConnectionRegistry {
+    /// Hard bound on parked operations per uid while the global persistence
+    /// lane is saturated (§11).
+    const PARKED_OPERATIONS_PER_UID: usize = 4;
+
     fn state_lane_for(&self, uid: i32) -> Arc<Mutex<()>> {
         self.state_lanes
             .entry(uid)
@@ -961,6 +988,7 @@ impl ConnectionRegistry {
                 metrics: metrics.clone(),
                 state_lanes: Arc::new(dashmap::DashMap::new()),
                 persistence: None,
+                db: None,
                 presence_broadcaster: Some(broadcaster),
                 disconnect_debounce,
                 transition_window: limits.window,
@@ -969,6 +997,7 @@ impl ConnectionRegistry {
                 unknown_connection_threshold: Duration::from_secs(60),
                 checkpoint_interval: Duration::from_secs(5 * 60),
                 last_checkpoint_enqueued_at: Arc::new(dashmap::DashMap::new()),
+                queued_online_target: Arc::new(dashmap::DashMap::new()),
                 uid_transition_limiters: Arc::new(dashmap::DashMap::new()),
                 last_uid_limiter_cleanup_at: Arc::new(StdMutex::new(Instant::now())),
                 command_tx,
@@ -981,6 +1010,7 @@ impl ConnectionRegistry {
                 physical_online_users_total: Arc::new(AtomicUsize::new(0)),
             },
             4096,
+            None,
         )
     }
 
@@ -1033,6 +1063,11 @@ impl ConnectionRegistry {
         };
         let published_presence = Arc::new(dashmap::DashMap::new());
         let (command_tx, _) = mpsc::channel(1);
+        // Success acknowledgements flow back to the coordinator, which alone
+        // commits published state and broadcasts. Capacity bounds the
+        // outstanding completed operations; senders only await after the DB
+        // work is done, so this never blocks the state lane.
+        let (ack_tx, ack_rx) = mpsc::channel::<PresencePersistenceAck>(queue_capacity);
         Self::build(
             Self {
                 inner: inner.clone(),
@@ -1040,15 +1075,15 @@ impl ConnectionRegistry {
                 metrics: metrics.clone(),
                 state_lanes: Arc::new(dashmap::DashMap::new()),
                 persistence: Some(PresencePersistence::start(
-                    db,
+                    db.clone(),
                     activity_metrics,
                     queue_capacity,
                     operation_queue_capacity,
                     max_retry_backoff,
-                    broadcaster.clone(),
-                    published_presence,
+                    ack_tx,
                     metrics.clone(),
                 )),
+                db: Some(db.clone()),
                 presence_broadcaster: Some(broadcaster),
                 disconnect_debounce,
                 transition_window: limits.window,
@@ -1057,6 +1092,7 @@ impl ConnectionRegistry {
                 unknown_connection_threshold,
                 checkpoint_interval,
                 last_checkpoint_enqueued_at: Arc::new(dashmap::DashMap::new()),
+                queued_online_target: Arc::new(dashmap::DashMap::new()),
                 uid_transition_limiters: Arc::new(dashmap::DashMap::new()),
                 last_uid_limiter_cleanup_at: Arc::new(StdMutex::new(Instant::now())),
                 command_tx,
@@ -1069,10 +1105,15 @@ impl ConnectionRegistry {
                 physical_online_users_total: Arc::new(AtomicUsize::new(0)),
             },
             command_queue_capacity,
+            Some(ack_rx),
         )
     }
 
-    fn build(mut registry: Self, command_queue_capacity: usize) -> Self {
+    fn build(
+        mut registry: Self,
+        command_queue_capacity: usize,
+        ack_rx: Option<mpsc::Receiver<PresencePersistenceAck>>,
+    ) -> Self {
         assert!(
             command_queue_capacity > 0,
             "presence command queue must be non-zero"
@@ -1087,7 +1128,7 @@ impl ConnectionRegistry {
         let (dead_tx, _) = mpsc::channel(1);
         coordinator.command_tx = dead_tx;
         let supervisor = tokio::spawn(async move {
-            coordinator.run_coordinator(command_rx).await;
+            coordinator.run_coordinator(command_rx, ack_rx).await;
         });
         *registry
             .coordinator_supervisor
@@ -1096,7 +1137,11 @@ impl ConnectionRegistry {
         registry
     }
 
-    async fn run_coordinator(&self, mut rx: mpsc::Receiver<CoordinatorCommand>) {
+    async fn run_coordinator(
+        &self,
+        mut rx: mpsc::Receiver<CoordinatorCommand>,
+        mut persistence_ack_rx: Option<mpsc::Receiver<PresencePersistenceAck>>,
+    ) {
         let mut timers = DelayQueue::new();
         let mut prune = tokio::time::interval(self.prune_interval);
         // Low-frequency drift audit per §11: the full registry rescan happens
@@ -1105,6 +1150,7 @@ impl ConnectionRegistry {
         let mut metrics_audit = tokio::time::interval(Duration::from_secs(5 * 60));
         metrics_audit.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
+            self.drain_parked_operations();
             tokio::select! {
                 command = rx.recv() => match command {
                     Some(CoordinatorCommand::Register { uid, initial_state, reply }) => {
@@ -1143,6 +1189,20 @@ impl ConnectionRegistry {
                     }
                     None => return,
                 },
+                ack = async {
+                    match persistence_ack_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                }, if persistence_ack_rx.is_some() => match ack {
+                    Some(ack) => self.commit_persisted_operation(ack).await,
+                    None => {
+                        // The persistence supervisor is gone: the process
+                        // supervisor will observe its exit and terminate the
+                        // process; nothing further can be committed.
+                        persistence_ack_rx = None;
+                    }
+                },
                 Some(expired) = timers.next(), if !timers.is_empty() => {
                     match expired.into_inner() {
                         CoordinatorTimer::Disconnect { uid, generation, candidate_time } =>
@@ -1157,11 +1217,57 @@ impl ConnectionRegistry {
         }
     }
 
+    /// Commit a successfully persisted operation: §6.2 step 3. The operation
+    /// was matched and popped by the persistence supervisor; only publishing
+    /// remains here, so the coordinator is the single writer of the published
+    /// online state and the single producer of presence broadcasts.
+    async fn commit_persisted_operation(&self, ack: PresencePersistenceAck) {
+        let Ok(stored_last_seen_at) = ack.result else {
+            return;
+        };
+        let Some(online) = ack.published_online else {
+            return;
+        };
+        let changed_at = Utc::now();
+        let presence = self
+            .published_presence
+            .entry(ack.uid)
+            .or_insert_with(|| Arc::new(PublishedPresence::new(false)));
+        presence.online.store(online, Ordering::Relaxed);
+        if !online {
+            presence.debouncing.store(false, Ordering::Relaxed);
+        }
+        // Clear the tail target only when it still describes this operation;
+        // a newer enqueue has already replaced it.
+        if self
+            .queued_online_target
+            .get(&ack.uid)
+            .is_some_and(|target| *target == online)
+        {
+            self.queued_online_target.remove(&ack.uid);
+        }
+        if let Some(broadcaster) = self.presence_broadcaster.clone() {
+            broadcaster
+                .broadcast(
+                    self.db_pool().expect("persistence implies a database pool"),
+                    ack.uid,
+                    online,
+                    stored_last_seen_at,
+                    changed_at,
+                )
+                .await;
+        }
+    }
+
     pub fn take_presence_coordinator_supervisor(&self) -> Option<tokio::task::JoinHandle<()>> {
         self.coordinator_supervisor
             .lock()
             .expect("presence coordinator supervisor lock poisoned")
             .take()
+    }
+
+    fn db_pool(&self) -> Option<DbPool> {
+        self.db.clone()
     }
 
     pub async fn reserve_reconciliation(&self) -> Result<ReconciliationPermit, AppError> {
@@ -1220,9 +1326,13 @@ impl ConnectionRegistry {
             transition_limiter: std::sync::Mutex::new(TransitionLimiter::new(Instant::now())),
         });
         let had_active_connection = self.has_active_connection(uid);
+        // §6.3 tail-target rule: a reconnect during a disconnect debounce (or
+        // behind an already-queued Online) is not a new transition; only an
+        // Offline promise still turns the first Active into an Online.
+        let promised_online_before = self.promised_online(uid);
         self.inner.entry(uid).or_default().push(entry.clone());
         let transitioned_online =
-            initial_state == AppPresenceState::Active && !had_active_connection;
+            initial_state == AppPresenceState::Active && !promised_online_before;
         self.account_connected_users_change(1);
         self.account_connection_transition(AppPresenceState::Unknown, initial_state);
         if had_active_connection {
@@ -1242,13 +1352,22 @@ impl ConnectionRegistry {
         // Persistence backpressure must not hold this uid's lifecycle lane.
         drop(_state_lane);
         if initial_state == AppPresenceState::Active {
-            self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
+            // A fresh Active writes its first observation immediately when it
+            // transitions the published state; otherwise the 5-minute
+            // checkpoint interval governs.
+            let checkpoint_due = !transitioned_online
+                && self
+                    .last_checkpoint_enqueued_at
+                    .get(&uid)
+                    .is_none_or(|last| last.elapsed() >= self.checkpoint_interval);
+            if transitioned_online || checkpoint_due {
+                self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
+            }
             self.enqueue_observation_now(
                 uid,
                 PresenceObservationCause::ActiveCheckpoint,
                 transitioned_online.then_some(true),
-            )
-            .await;
+            );
         }
         (entry, rx)
     }
@@ -1399,9 +1518,6 @@ impl ConnectionRegistry {
                 .last_checkpoint_enqueued_at
                 .get(&uid)
                 .is_none_or(|last| last.elapsed() >= self.checkpoint_interval);
-        if checkpoint_due || (changed_state && app_state == Some(AppPresenceState::Active)) {
-            self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
-        }
         drop(entries);
         if changed_state {
             self.account_connection_transition(
@@ -1423,17 +1539,43 @@ impl ConnectionRegistry {
         drop(_state_lane);
 
         if changed_state {
-            let cause = match app_state.expect("changed state is always present") {
+            match app_state.expect("changed state is always present") {
                 AppPresenceState::Active => {
-                    let transitioned_online = changes_aggregate_state;
+                    // §6.3: the published state is what the tail target
+                    // promises, not merely whether an Active connection
+                    // exists. A reconnect absorbed by the disconnect debounce
+                    // must not re-announce online; a reconnect behind an
+                    // in-flight Offline must queue the matching Online.
+                    let transitioned_online = !self.promised_online(uid);
                     self.cancel_disconnect_debounce(uid);
                     if self.persistence.is_none() {
                         self.set_published_online(uid, true);
                     }
-                    (
-                        PresenceObservationCause::ActiveCheckpoint,
-                        transitioned_online.then_some(true),
-                    )
+                    // A fresh Active writes its first observation immediately
+                    // when it transitions the published state; a repeated
+                    // Active (state flip back or extra device) only checkpoints
+                    // on the shared interval.
+                    let checkpoint_due = !transitioned_online
+                        && self
+                            .last_checkpoint_enqueued_at
+                            .get(&uid)
+                            .is_none_or(|last| last.elapsed() >= self.checkpoint_interval);
+                    if transitioned_online {
+                        self.metrics.record_presence_transition();
+                        self.enqueue_observation_now(
+                            uid,
+                            PresenceObservationCause::ActiveCheckpoint,
+                            Some(true),
+                        );
+                    } else if checkpoint_due {
+                        self.metrics.record_presence_checkpoint_submitted();
+                        self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
+                        self.enqueue_observation_now(
+                            uid,
+                            PresenceObservationCause::ActiveCheckpoint,
+                            None,
+                        );
+                    }
                 }
                 AppPresenceState::Inactive => {
                     let mut transitioned_offline = false;
@@ -1444,23 +1586,23 @@ impl ConnectionRegistry {
                             self.set_published_online(uid, false);
                         }
                     }
-                    (
+                    let cause = (
                         PresenceObservationCause::ExplicitInactive,
                         transitioned_offline.then_some(false),
-                    )
+                    );
+                    if cause.1.is_some() {
+                        self.metrics.record_presence_transition();
+                    } else {
+                        self.metrics.record_presence_checkpoint_submitted();
+                    }
+                    self.enqueue_observation_now(uid, cause.0, cause.1);
                 }
                 AppPresenceState::Unknown => return true,
-            };
-            if cause.1.is_some() {
-                self.metrics.record_presence_transition();
-            } else {
-                self.metrics.record_presence_checkpoint_submitted();
             }
-            self.enqueue_observation_now(uid, cause.0, cause.1).await;
         } else if checkpoint_due {
             self.metrics.record_presence_checkpoint_submitted();
-            self.enqueue_observation_now(uid, PresenceObservationCause::ActiveCheckpoint, None)
-                .await;
+            self.last_checkpoint_enqueued_at.insert(uid, Instant::now());
+            self.enqueue_observation_now(uid, PresenceObservationCause::ActiveCheckpoint, None);
         }
         true
     }
@@ -1616,8 +1758,7 @@ impl ConnectionRegistry {
                 offline_candidate,
                 PresenceObservationCause::Prune,
                 transitioned_offline.then_some(false),
-            )
-            .await;
+            );
         }
     }
 
@@ -1706,17 +1847,16 @@ impl ConnectionRegistry {
         }
     }
 
-    async fn enqueue_observation_now(
+    fn enqueue_observation_now(
         &self,
         uid: i32,
         cause: PresenceObservationCause,
         published_online: Option<bool>,
     ) {
-        self.enqueue_observation_at(uid, Utc::now().naive_utc(), cause, published_online)
-            .await;
+        self.enqueue_observation_at(uid, Utc::now().naive_utc(), cause, published_online);
     }
 
-    async fn enqueue_observation_at(
+    fn enqueue_observation_at(
         &self,
         uid: i32,
         observed_at: NaiveDateTime,
@@ -1724,10 +1864,100 @@ impl ConnectionRegistry {
         published_online: Option<bool>,
     ) {
         if let Some(persistence) = &self.persistence {
-            persistence
-                .enqueue(uid, observed_at, cause, published_online)
-                .await;
+            if let Some(online) = published_online {
+                self.queued_online_target.insert(uid, online);
+            }
+            if let Some(spilled) = persistence.enqueue(uid, observed_at, cause, published_online) {
+                // §11: nothing is dropped at the submission boundary. Park the
+                // operation on the uid's spillway; the coordinator retries it
+                // on every loop turn, so a saturated global lane degrades to
+                // bounded per-uid backpressure instead of blocking all uids.
+                {
+                    let mut parked = persistence
+                        .spillway
+                        .entry(uid)
+                        .or_insert_with(|| VecDeque::with_capacity(4));
+                    parked.push_back(spilled);
+                    self.metrics.record_presence_degradation();
+                    while parked.len() > Self::PARKED_OPERATIONS_PER_UID {
+                        let head = parked.pop_front().expect("parked overflow above one");
+                        if head.published_online.is_none() {
+                            self.metrics.record_presence_checkpoint_coalesced();
+                            continue;
+                        }
+                        // Collapse the parked explicit transitions to their
+                        // latest target: the shortest sequence converging to
+                        // the current physical state under sustained
+                        // saturation.
+                        let latest = parked.iter().skip(1).last().cloned();
+                        let mut collapsed = VecDeque::with_capacity(2);
+                        collapsed.push_back(head);
+                        if let Some(latest) = latest {
+                            collapsed.push_back(latest);
+                        }
+                        *parked = collapsed;
+                        self.metrics.record_presence_degradation();
+                        break;
+                    }
+                }
+                // The entry guard must be released before the shared-borrow
+                // refresh below: dashmap would deadlock on the same shard.
+                self.refresh_spillway_depth();
+            }
         }
+    }
+
+    fn refresh_spillway_depth(&self) {
+        let Some(persistence) = &self.persistence else {
+            return;
+        };
+        let total: usize = persistence
+            .spillway
+            .iter()
+            .map(|entry| entry.value().len())
+            .sum();
+        self.metrics.set_presence_spillway_queue_depth(total);
+    }
+
+    /// Drain parked operations back into the persistence lane at the top of
+    /// every coordinator iteration.
+    fn drain_parked_operations(&self) {
+        let Some(persistence) = &self.persistence else {
+            return;
+        };
+        let uids: Vec<i32> = persistence
+            .spillway
+            .iter()
+            .filter(|entry| !entry.value().is_empty())
+            .map(|entry| *entry.key())
+            .collect();
+        for uid in uids {
+            {
+                let mut parked = persistence
+                    .spillway
+                    .entry(uid)
+                    .or_insert_with(VecDeque::new);
+                while let Some(observation) = parked.pop_front() {
+                    if persistence.tx.try_send(observation.clone()).is_err() {
+                        parked.push_front(observation);
+                        break;
+                    }
+                }
+            }
+            // Entry guard released before the shared-borrow refresh: dashmap
+            // would deadlock on the same shard otherwise.
+            self.refresh_spillway_depth();
+        }
+    }
+
+    /// The online state already promised to viewers: the tail target of the
+    /// uid's operation queue, or the committed published state when the queue
+    /// is empty (§6.1).
+    fn promised_online(&self, uid: i32) -> bool {
+        if let Some(target) = self.queued_online_target.get(&uid) {
+            return *target;
+        }
+        self.is_published_online(uid)
     }
 
     fn presence_for(&self, uid: i32) -> Arc<PublishedPresence> {
@@ -1811,8 +2041,7 @@ impl ConnectionRegistry {
             candidate_time,
             PresenceObservationCause::Disconnect,
             should_publish_offline.then_some(false),
-        )
-        .await;
+        );
     }
 
     fn schedule_unknown_deadline(
@@ -2152,18 +2381,21 @@ mod tests {
             attempt_id: 3,
             uid: 7,
             result: Ok(operation.observed_at),
+            published_online: operation.published_online,
         };
         let stale_attempt = PresencePersistenceAck {
             operation_id: 11,
             attempt_id: 2,
             uid: 7,
             result: Ok(operation.observed_at),
+            published_online: operation.published_online,
         };
         let stale_operation = PresencePersistenceAck {
             operation_id: 10,
             attempt_id: 3,
             uid: 7,
             result: Ok(operation.observed_at),
+            published_online: operation.published_online,
         };
 
         assert!(operation.matches_ack(&matching));
@@ -2339,14 +2571,169 @@ mod tests {
             Arc::new(WsMetrics::new(&prometheus::Registry::new())),
             std::time::Duration::from_secs(25),
         );
-        let (first, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        let (first, mut first_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        // Drain the initial connection-count broadcast so later assertions see
+        // only presence events.
+        drain_messages(&mut first_rx).await;
 
         registry.remove_connection(7, first.conn_id()).await;
-        let (_second, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        let (_second, mut second_rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        // §6.3: the reconnect was absorbed by the debounce, so the user was
+        // never published offline and no Online event may be broadcast.
+        assert!(
+            next_presence_change_opt(&mut second_rx).await.is_none(),
+            "an absorbed reconnect must not re-announce online"
+        );
 
         tokio::time::advance(Duration::from_secs(25)).await;
         tokio::task::yield_now().await;
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
+    }
+
+    #[tokio::test]
+    async fn explicit_offline_then_active_transitions_published_state_both_ways() {
+        // An explicit Inactive transitions the user offline immediately; the
+        // reconnect that follows is a real Online transition and restores the
+        // published state. Without persistence there is no broadcast stage:
+        // the published state is the assertion surface.
+        let registry = registry();
+        let (entry, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+
+        assert!(
+            registry
+                .heartbeat(7, entry.conn_id(), Some(AppPresenceState::Inactive))
+                .await
+        );
+        assert_eq!(registry.online_flags(&[7]).get(&7), Some(&false));
+
+        assert!(
+            registry
+                .heartbeat(7, entry.conn_id(), Some(AppPresenceState::Active))
+                .await
+        );
+        assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
+        // The second Active is a real transition after an Offline, not an
+        // absorbed reconnect: no debounce generation may have absorbed it.
+        assert!(!registry
+            .published_presence
+            .get(&7)
+            .expect("published presence exists")
+            .debouncing
+            .load(Ordering::Relaxed));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn repeated_active_heartbeats_do_not_checkpoint_before_the_interval() {
+        let registry = ConnectionRegistry::with_transition_rate_limits(
+            Arc::new(WsMetrics::new(&prometheus::Registry::new())),
+            Duration::from_secs(45),
+            PresenceTransitionLimits {
+                window: Duration::from_secs(10),
+                per_connection: 12,
+                per_uid: 20,
+            },
+        );
+        let registry = registry;
+        // Establish the checkpoint reference through the interval-gated path:
+        // register Active (immediate online observation), then expire the
+        // interval and renew via a stateless heartbeat.
+        let (entry, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        tokio::time::advance(registry.checkpoint_interval).await;
+        assert!(registry.heartbeat(7, entry.conn_id(), None).await);
+        let recorded_at = *registry
+            .last_checkpoint_enqueued_at
+            .get(&7)
+            .expect("due heartbeat recorded the checkpoint reference");
+
+        // Well inside the 5-minute interval: an Inactive -> Active flip must
+        // not enqueue a checkpoint on top of the standing reference.
+        assert!(
+            registry
+                .heartbeat(7, entry.conn_id(), Some(AppPresenceState::Inactive))
+                .await
+        );
+        assert!(
+            registry
+                .heartbeat(7, entry.conn_id(), Some(AppPresenceState::Active))
+                .await
+        );
+        assert_eq!(
+            *registry
+                .last_checkpoint_enqueued_at
+                .get(&7)
+                .expect("checkpoint reference survives"),
+            recorded_at,
+            "the 5-minute checkpoint interval must gate repeated Active transitions"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_saturated_persistence_lane_does_not_block_other_uids() {
+        // The pool points at an unroutable port: the single persistence
+        // attempt blocks on pool checkout, which keeps the global lane
+        // saturated for the whole test without depending on real database
+        // timing. No other test's rows are touched.
+        // build_unchecked skips eager connection attempts (r2d2's build
+        // retries failures until the connection timeout, which would hang):
+        // the checkout inside the persistence attempt is the first real
+        // connection attempt, and it blocks there for the whole test.
+        let db = crate::state::DbPool::builder()
+            .connection_timeout(std::time::Duration::from_millis(20))
+            .build_unchecked(diesel::r2d2::ConnectionManager::new(
+                "postgresql://wetty_chat:unused@127.0.0.1:1/none",
+            ));
+        let metrics = Arc::new(WsMetrics::new(&prometheus::Registry::new()));
+        let activity_metrics = Arc::new(
+            crate::services::activity_metrics::ActivityMetricsService::new(Arc::new(
+                crate::services::client_tracking::ClientTrackingMetrics::new(
+                    &prometheus::Registry::new(),
+                ),
+            )),
+        );
+        let registry = ConnectionRegistry::with_presence_persistence(
+            metrics,
+            db,
+            activity_metrics,
+            1, // queue capacity: a single observation saturates the lane
+            Duration::from_secs(45),
+            PresenceTransitionLimits {
+                window: Duration::from_secs(10),
+                per_connection: 12,
+                per_uid: 20,
+            },
+            Duration::from_secs(60),
+            Duration::from_secs(5 * 60),
+            1, // per-uid operation queue capacity
+            Duration::from_secs(60),
+            4096,
+            Duration::from_secs(60),
+            Duration::from_secs(90),
+        );
+
+        // Saturate the global lane: this operation occupies the single slot.
+        let (_first, _first_rx) = registry.register(1, Some(AppPresenceState::Active)).await;
+        // The following operations from a different uid must not wait on
+        // persistence capacity: they complete promptly because the
+        // coordinator loop never awaits the persistence lane.
+        let started = std::time::Instant::now();
+        for _ in 0..8 {
+            let (_entry, _rx) = registry.register(2, Some(AppPresenceState::Active)).await;
+        }
+        let hb = registry
+            .heartbeat(
+                2,
+                registry.inner.get(&2).unwrap()[0].conn_id(),
+                Some(AppPresenceState::Inactive),
+            )
+            .await;
+        assert!(
+            hb,
+            "an unrelated uid's heartbeat must be served while the lane is full"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "state handling must stay responsive while the lane is saturated"
+        );
     }
 
     #[tokio::test]
@@ -2816,6 +3203,23 @@ mod tests {
                 return payload.clone();
             }
         }
+    }
+
+    /// Resolves once the channel is empty: every queued broadcast has been
+    /// observed, so a subsequent presence assertion can rely on absence.
+    async fn next_presence_change_opt(
+        rx: &mut mpsc::Receiver<Arc<ServerWsMessage>>,
+    ) -> Option<PresenceChangedPayload> {
+        while let Ok(message) = rx.try_recv() {
+            if let ServerWsMessage::PresenceChanged(payload) = message.as_ref() {
+                return Some(payload.clone());
+            }
+        }
+        None
+    }
+
+    async fn drain_messages(rx: &mut mpsc::Receiver<Arc<ServerWsMessage>>) {
+        while rx.try_recv().is_ok() {}
     }
 
     #[tokio::test]
