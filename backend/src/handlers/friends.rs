@@ -291,6 +291,10 @@ async fn create_friend_request(
         return Err(AppError::NotFound("User not found"));
     }
 
+    // Reserve the reconciliation permit before the mutation: once a reciprocal
+    // request auto-accepts, the snapshot command must be guaranteed a slot on
+    // the coordinator even if this request future is cancelled.
+    let permit = state.ws_registry.reserve_reconciliation().await?;
     let outcome =
         social::create_friend_request(conn, &state, uid, body.to_uid, body.message).await?;
     match outcome {
@@ -321,13 +325,10 @@ async fn create_friend_request(
             );
             let response = build_request_response(conn, &state, uid, &request)?;
             // The friendship (and its presence facts) has already committed;
-            // the reserved permit guarantees the revocation/snapshot command
-            // reaches the coordinator even if this request is cancelled.
-            state
-                .ws_registry
-                .reserve_reconciliation()
-                .await?
-                .send_social(reconciliation);
+            // the permit reserved before the mutation guarantees the
+            // revocation/snapshot command reaches the coordinator even if
+            // this request is cancelled.
+            permit.send_social(reconciliation);
             Ok((StatusCode::OK, Json(response)))
         }
         CreateRequestOutcome::AlreadyPending => {
@@ -415,6 +416,10 @@ async fn accept_friend_request(
 ) -> Result<Json<FriendRequestResponse>, AppError> {
     let conn = &mut *conn;
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
+    // Reserve the reconciliation permit before the mutation: once the
+    // friendship commits, the snapshot command must be guaranteed a slot on
+    // the coordinator even if this request future is cancelled.
+    let permit = state.ws_registry.reserve_reconciliation().await?;
     let outcome = social::resolve_friend_request(conn, &state, uid, request_id, true).await?;
     let request = outcome.request();
     fire_ws(
@@ -428,14 +433,7 @@ async fn accept_friend_request(
     );
     let response = build_request_response(conn, &state, uid, request)?;
     if let ResolveOutcome::Resolved(_, Some(reconciliation)) = outcome {
-        // The friendship (and its presence facts) has already committed; the
-        // reserved permit guarantees the snapshot command reaches the
-        // coordinator even if this request is cancelled.
-        state
-            .ws_registry
-            .reserve_reconciliation()
-            .await?
-            .send_social(reconciliation);
+        permit.send_social(reconciliation);
     }
     Ok(Json(response))
 }

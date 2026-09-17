@@ -1284,10 +1284,13 @@ impl ConnectionRegistry {
     ) {
         let state_lane = self.state_lane_for(uid);
         let _state_lane = state_lane.lock().await;
-        let mut empty = false;
         let mut removed_active = false;
         let mut removed_state = AppPresenceState::Unknown;
-        if let Some(mut vec) = self.inner.get_mut(&uid) {
+        // Occupied-entry removal: a concurrent register for the same uid can
+        // never observe a vacated slot between "vec became empty" and "key
+        // removed" (§6.5).
+        if let dashmap::mapref::entry::Entry::Occupied(mut occupied) = self.inner.entry(uid) {
+            let vec = occupied.get_mut();
             if let Some(entry) = vec.iter().find(|entry| entry.conn_id == conn_id) {
                 removed_state = entry.app_state();
                 if entry.retire_unknown_accounting() {
@@ -1296,10 +1299,9 @@ impl ConnectionRegistry {
             }
             removed_active = removed_state == AppPresenceState::Active;
             vec.retain(|e| e.conn_id != conn_id);
-            empty = vec.is_empty();
-        }
-        if empty {
-            self.inner.remove(&uid);
+            if vec.is_empty() {
+                occupied.remove();
+            }
         }
         self.account_connected_users_change(-1);
         self.account_connection_transition(removed_state, AppPresenceState::Unknown);
@@ -2344,6 +2346,25 @@ mod tests {
 
         tokio::time::advance(Duration::from_secs(25)).await;
         tokio::task::yield_now().await;
+        assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
+    }
+
+    #[tokio::test]
+    async fn removing_the_last_connection_then_registering_again_keeps_the_new_connection() {
+        // Serializes the §6.5 hazard: removing the last connection vacates the
+        // uid slot, and an immediately following register for the same uid
+        // must not be dropped by the slot removal.
+        let registry = registry();
+        let (first, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        registry.remove_connection(7, first.conn_id()).await;
+
+        let (second, _rx) = registry.register(7, Some(AppPresenceState::Active)).await;
+        assert!(
+            registry
+                .heartbeat(7, second.conn_id(), Some(AppPresenceState::Active))
+                .await,
+            "the re-registered connection must be addressable"
+        );
         assert_eq!(registry.online_flags(&[7]).get(&7), Some(&true));
     }
 

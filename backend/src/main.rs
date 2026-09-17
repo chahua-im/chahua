@@ -32,6 +32,8 @@ mod schema;
 mod serde_i64_string;
 mod services;
 mod state;
+#[cfg(test)]
+mod test_support;
 mod utils;
 
 use config::{AppConfig, LogFormat};

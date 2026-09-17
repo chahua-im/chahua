@@ -146,16 +146,14 @@ mod tests {
     /// contract rather than merely inspecting the migration files.
     #[test]
     fn presence_visibility_migration_round_trips() {
-        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
-            Ok(url) => url,
+        let mut db = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(_) => crate::test_support::TestDb::establish(),
             Err(_) => {
                 eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
                 return;
             }
         };
-        let mut conn = PgConnection::establish(&url).expect("connect to test database");
-        static NEXT_UID: AtomicI32 = AtomicI32::new(1_800_000_000);
-        let uid = NEXT_UID.fetch_add(1, Ordering::SeqCst);
+        let conn = db.conn();
         let down = include_str!(
             "../../migrations/2026-09-14-120116-0000_add_presence_visibility/down.sql"
         );
@@ -163,6 +161,7 @@ mod tests {
             include_str!("../../migrations/2026-09-14-120116-0000_add_presence_visibility/up.sql");
 
         conn.test_transaction::<(), diesel::result::Error, _>(|conn| {
+            let uid = 1_800_000_001;
             conn.batch_execute(&format!(
                 "INSERT INTO user_extra (uid, first_seen_at, last_seen_at, presence_visibility, sticker_pack_order, verification_mode, token_gen) \
                  VALUES ({uid}, '2040-01-02 03:04:05', NULL, 'friends', '[]'::jsonb, 'direct', 0)"
@@ -211,14 +210,14 @@ mod tests {
     /// rolls back its fixture rows and daily-metric changes.
     #[test]
     fn record_observation_is_monotonic_and_counts_utc_days_once() {
-        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
-            Ok(url) => url,
+        let mut db = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(_) => crate::test_support::TestDb::establish(),
             Err(_) => {
                 eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
                 return;
             }
         };
-        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+        let conn = db.conn();
         let registry = Registry::new();
         let metrics = Arc::new(ClientTrackingMetrics::new(&registry));
         let daily_metrics = ActivityMetricsService::new(metrics);

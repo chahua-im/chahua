@@ -1,5 +1,5 @@
 //! WebSocket handler: auth handshake, lifecycle-aware presence updates, ping/pong keepalive,
-//! connection registry, 300s stale timeout.
+//! connection registry. Stale/prune timing defaults come from `PresenceConfig`.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;

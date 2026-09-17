@@ -277,6 +277,23 @@ spec:
       command:
         - cat
       tty: true
+    - name: postgres
+      image: postgres:18-alpine
+      env:
+        - name: POSTGRES_USER
+          value: wetty_chat
+        - name: POSTGRES_PASSWORD
+          value: wetty_chat_ci
+        - name: POSTGRES_DB
+          value: wetty_chat_test
+      ports:
+        - containerPort: 5432
+          name: postgres
+      readinessProbe:
+        exec:
+          command: ["pg_isready", "-U", "wetty_chat", "-d", "wetty_chat_test"]
+        initialDelaySeconds: 2
+        periodSeconds: 2
 '''
             }
           }
@@ -327,6 +344,9 @@ cargo clippy --all-targets --all-features -- -D warnings
             }
 
             stage('Test') {
+              environment {
+                WETTY_TEST_DATABASE_URL = 'postgresql://wetty_chat:wetty_chat_ci@localhost:5432/wetty_chat_test'
+              }
               steps {
                 dir('backend') {
                   sh '''#!/usr/bin/env bash
