@@ -102,6 +102,8 @@
           [title]="item.name">
           @if (item.previewSticker?.media?.contentType?.startsWith('image/')) {
             <img [src]="item.previewSticker!.media.url" />
+          } @else if (item.previewSticker?.media?.contentType?.startsWith('video/')) {
+            <video [src]="item.previewSticker!.media.url" autoplay loop [muted]="true" playsinline preload="metadata"></video>
           } @else {
             <ion-icon [icon]="icons.cubeOutline" />
           }
