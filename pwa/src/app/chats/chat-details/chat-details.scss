@@ -95,9 +95,11 @@ ion-content {
   --padding-bottom: 0;
   --border-radius: 12px;
   --box-shadow: none;
-  --background: var(--ion-background-color, #fff);
+  --background: rgba(var(--ion-color-primary-rgb), 0.08);
   --color: var(--ion-color-primary);
-  --background-activated: var(--ion-color-light-shade);
+  --background-activated: rgba(var(--ion-color-primary-rgb), 0.16);
+  --background-focused: rgba(var(--ion-color-primary-rgb), 0.12);
+  --background-hover: rgba(var(--ion-color-primary-rgb), 0.12);
 }
 .quick-actions span {
   pointer-events: none;
@@ -109,14 +111,25 @@ ion-content {
   overflow-wrap: anywhere;
   font-size: var(--app-font-caption);
   line-height: var(--app-line-caption);
+  transition: color 160ms ease;
 }
 .quick-actions :is(ion-icon, ion-spinner) {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
 }
-.destructive {
-  color: var(--ion-color-danger);
+.quick-actions ion-button:hover span {
+  color: var(--ion-color-primary-shade);
+}
+.quick-actions ion-button.destructive {
+  --background: rgba(var(--ion-color-danger-rgb), 0.1);
+  --background-activated: rgba(var(--ion-color-danger-rgb), 0.18);
+  --background-focused: rgba(var(--ion-color-danger-rgb), 0.14);
+  --background-hover: rgba(var(--ion-color-danger-rgb), 0.14);
+  --color: var(--ion-color-danger);
+}
+.quick-actions ion-button.destructive:hover span {
+  color: var(--ion-color-danger-shade);
 }
 .attachments {
   background: var(--ion-background-color, #fff);
