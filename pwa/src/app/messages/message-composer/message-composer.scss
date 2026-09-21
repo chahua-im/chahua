@@ -132,7 +132,6 @@ ion-textarea {
   flex: 1;
   min-width: 0;
   min-height: calc(var(--composer-control-size) - 2px);
-  max-height: 33vh;
   --padding-top: calc((var(--composer-control-size) - 2px - var(--app-line-body)) / 2);
   --padding-bottom: var(--padding-top);
   --padding-start: var(--composer-padding-start);

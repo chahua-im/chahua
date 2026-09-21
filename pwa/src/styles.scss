@@ -291,6 +291,14 @@ app-message-composer .input-wrapper .textarea-wrapper {
   line-height: var(--app-line-body);
 }
 
+app-message-composer .input-wrapper .native-wrapper {
+  max-height: calc(33vh - var(--padding-top) - var(--padding-bottom));
+}
+
+app-message-composer .input-wrapper .input-row ion-textarea[auto-grow] .native-textarea {
+  overflow-y: auto;
+}
+
 // Ionic owns the shadow viewport's layout and overflow; only hide its native bars.
 ion-content.custom-scrollbars::part(scroll) {
   scrollbar-width: none;
