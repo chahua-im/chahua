@@ -98,7 +98,7 @@
         <div class="quick-actions ion-padding-horizontal">
           @if (person(); as user) {
             <ion-button
-              fill="solid"
+              fill="clear"
               [href]="'https://www.shireyishunjian.com/main/home.php?mod=space&uid=' + user.uid"
               target="_blank">
               <span>
@@ -109,7 +109,7 @@
             @if (otherUser()) {
               @if (relationship()?.isFriend) {
                 @if (!currentConversation()) {
-                  <ion-button fill="solid" [disabled]="!id()" (click)="messageUser()">
+                  <ion-button fill="clear" [disabled]="!id()" (click)="messageUser()">
                     <span>
                       <ion-icon [icon]="icons.chatbubbleOutline" />
                       发消息
@@ -117,7 +117,7 @@
                   </ion-button>
                 }
               } @else {
-                <ion-button fill="solid" [disabled]="busy() || !relationship()" (click)="addFriend()">
+                <ion-button fill="clear" [disabled]="busy() || !relationship()" (click)="addFriend()">
                   <span>
                     @if (pending() === Action.AddFriend) {
                       <ion-spinner />
@@ -133,7 +133,7 @@
           @if (!person() || otherUser()) {
             @if (threadId()) {
               @let status = cachedSubscription();
-              <ion-button fill="solid" [disabled]="busy() || !subscription()" (click)="updateThread()">
+              <ion-button fill="clear" [disabled]="busy() || !subscription()" (click)="updateThread()">
                 <span>
                   <ion-icon
                     [icon]="
@@ -145,7 +145,7 @@
             }
           }
           @if (canManage()) {
-            <ion-button fill="solid" (click)="invites()">
+            <ion-button fill="clear" (click)="invites()">
               <span>
                 <ion-icon [icon]="icons.linkOutline" />
                 邀请
@@ -153,8 +153,8 @@
             </ion-button>
           }
           @if (!threadId() && (chat()?.kind === Kind.group || (otherUser() && relationship()?.isFriend))) {
-            <ion-button fill="solid" [disabled]="busy()" (click)="leave()">
-              <span class="destructive">
+            <ion-button fill="clear" class="destructive" [disabled]="busy()" (click)="leave()">
+              <span>
                 @if (pending() === Action.Leave) {
                   <ion-spinner />
                 } @else {
@@ -165,8 +165,8 @@
             </ion-button>
           }
           @if (otherUser()) {
-            <ion-button fill="solid" [disabled]="busy() || !relationship()" (click)="blockUser()">
-              <span class="destructive">
+            <ion-button fill="clear" class="destructive" [disabled]="busy() || !relationship()" (click)="blockUser()">
+              <span>
                 @if (pending() === Action.Block) {
                   <ion-spinner />
                 } @else {
