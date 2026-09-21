@@ -66,10 +66,12 @@
   color: var(--ion-color-primary);
   background: var(--ion-background-color-step-100, var(--ion-color-light));
 }
-.pack-tab img {
+.pack-tab img,
+.pack-tab video {
   width: 24px;
   height: 24px;
   object-fit: contain;
+  pointer-events: none;
 }
 .empty,
 .loading-status {
