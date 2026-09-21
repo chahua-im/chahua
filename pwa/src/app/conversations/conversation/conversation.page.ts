@@ -146,7 +146,7 @@ export class ConversationPage {
   protected readonly stickyRow = signal<number | undefined>(undefined);
   private readonly wide = window.matchMedia('(min-width: 1200px)');
   protected readonly largeScreen = signal(this.wide.matches);
-  protected readonly sidebarOpen = signal(true);
+  protected readonly sidebarOpen = signal(false);
   protected readonly infoIcon = informationCircleOutline;
   protected details() {
     if (this.largeScreen()) this.sidebarOpen.update((open) => !open);
