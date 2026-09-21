@@ -10,6 +10,7 @@ import type { EmojiClickEvent } from 'emoji-picker-element/shared';
     emoji-picker {
       width: 100%;
       height: min(400px, 65dvh);
+      --emoji-font-family: inherit;
       --background: var(--ion-background-color, #fff);
       --border-color: var(--ion-color-light-shade);
       --button-hover-background: var(--ion-color-light);

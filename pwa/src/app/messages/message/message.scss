@@ -3,7 +3,7 @@
   position: relative;
   touch-action: pan-y pinch-zoom;
   --message-padding-inline: 11px;
-  --message-padding-block: 6px;
+  --message-padding-block: 8px;
   --sender-color: var(--sender-light);
   --reply-color: var(--reply-light);
 }
@@ -15,17 +15,10 @@
   grid-template-columns: 44px fit-content(min(85%, calc(100% - 74px))) auto;
   align-items: end;
   justify-content: start;
-  padding: 1px 7px;
+  padding: 4px 7px;
 
   > :not(.avatar-slot, .reply-button, .swipe-reply) {
     grid-column: 2;
-  }
-
-  &.group-start {
-    padding-top: 2px;
-  }
-  &.group-end {
-    padding-bottom: 3px;
   }
 }
 
