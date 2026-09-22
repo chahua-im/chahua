@@ -146,7 +146,7 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | chatArchiveStateChanged                                   | 更新归档/静音字段，刷新受影响列表与计数                                                               |
 | 首次 presenceUpdate、恢复前台                             | Connection 发出 resync；活跃查询刷新，当前页面补必要元数据                                            |
 
-Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。presenceUpdate 无在线用户列表消费者，stickerPackOrderUpdated 也无界面消费者。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。
+Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者，stickerPackOrderUpdated 也无界面消费者。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。
 
 没有推送的数据靠本地写响应、页面进入、手动刷新或 resync。好友验证配置进入时读取；贴纸库进入时读取；创建贴纸包直接使用完整响应，上传后只重读该包。静音和远端已读没有专门跨设备推送，不增设轮询。较早开始的读取不能覆盖较新推送或本地操作；已读交错时补取对应读状态，不猜增减值。
 

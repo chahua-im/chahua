@@ -17,6 +17,10 @@
   justify-content: start;
   padding: 4px 7px;
 
+  &.group-start {
+    padding-top: 8px;
+  }
+
   > :not(.avatar-slot, .reply-button, .swipe-reply) {
     grid-column: 2;
   }
