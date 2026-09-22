@@ -792,6 +792,7 @@ pub struct ClientRecord {
     pub created_at: chrono::NaiveDateTime,
     pub last_active: chrono::NaiveDateTime,
     pub last_active_uid: i32,
+    pub last_app_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -801,6 +802,7 @@ pub struct NewClientRecord {
     pub created_at: chrono::NaiveDateTime,
     pub last_active: chrono::NaiveDateTime,
     pub last_active_uid: i32,
+    pub last_app_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]

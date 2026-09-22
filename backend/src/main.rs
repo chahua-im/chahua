@@ -155,7 +155,7 @@ async fn main() {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
-            registry.prune_stale(300);
+            registry.prune_stale(services::ws_registry::STALE_CONNECTION_TIMEOUT_SECS);
         }
     });
 

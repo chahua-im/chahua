@@ -110,6 +110,7 @@ diesel::table! {
         created_at -> Timestamp,
         last_active -> Timestamp,
         last_active_uid -> Int4,
+        last_app_version -> Nullable<Text>,
     }
 }
 

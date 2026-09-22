@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
+pub const STALE_CONNECTION_TIMEOUT_SECS: u64 = 300;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AppPresenceState {
@@ -30,6 +32,7 @@ impl AppPresenceState {
 #[derive(Debug)]
 pub struct ConnectionEntry {
     pub conn_id: u64,
+    pub client_id: String,
     pub tx: mpsc::Sender<Arc<ServerWsMessage>>,
     /// Unix timestamp (seconds) when we last received a ping from the client.
     pub last_ping_at: AtomicU64,
@@ -70,6 +73,14 @@ pub fn now_secs() -> u64 {
         .as_secs()
 }
 
+/// A current connection snapshot for an authenticated user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnlineConnection {
+    pub connection_id: u64,
+    pub client_id: String,
+    pub app_state: AppPresenceState,
+}
+
 /// Registry of active WebSocket connections per user id. Thread-safe; shared via Arc.
 pub struct ConnectionRegistry {
     /// uid -> list of connection entries (multiple tabs/devices per user).
@@ -85,17 +96,20 @@ impl ConnectionRegistry {
         }
     }
 
-    /// Register a new connection for the given user. Returns the entry (to update last_ping_at)
-    /// and the receiver for the send task. Caller must call `remove_connection(uid, conn_id)` when the socket closes.
+    /// Register a new connection for the authenticated user and client. Returns the entry (to
+    /// update last_ping_at) and the receiver for the send task. Caller must call
+    /// `remove_connection(uid, conn_id)` when the socket closes.
     pub fn register(
         &self,
         uid: i32,
+        client_id: String,
     ) -> (Arc<ConnectionEntry>, mpsc::Receiver<Arc<ServerWsMessage>>) {
         let conn_id = next_conn_id();
         let (tx, rx) = mpsc::channel(256);
         let now = now_secs();
         let entry = Arc::new(ConnectionEntry {
             conn_id,
+            client_id,
             tx,
             last_ping_at: AtomicU64::new(now),
             app_state: AtomicU8::new(AppPresenceState::Active as u8),
@@ -153,6 +167,30 @@ impl ConnectionRegistry {
                     && entry.app_state() == AppPresenceState::Active
             })
         })
+    }
+
+    /// Return fresh, open connections for one user. The registry can hold multiple entries for
+    /// the same client when that client has multiple browser tabs or devices connected.
+    pub fn online_connections(&self, uid: i32) -> Vec<OnlineConnection> {
+        let now = now_secs();
+        self.inner
+            .get(&uid)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|entry| {
+                        !entry.tx.is_closed()
+                            && now.saturating_sub(entry.last_ping_at.load(Ordering::Relaxed))
+                                <= STALE_CONNECTION_TIMEOUT_SECS
+                    })
+                    .map(|entry| OnlineConnection {
+                        connection_id: entry.conn_id,
+                        client_id: entry.client_id.clone(),
+                        app_state: entry.app_state(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Remove connections that have not sent a ping in more than `max_age` seconds.
@@ -237,7 +275,7 @@ mod tests {
     #[test]
     fn suppresses_push_for_fresh_active_connection() {
         let registry = registry();
-        let (entry, _rx) = registry.register(7);
+        let (entry, _rx) = registry.register(7, "client-a".to_string());
         entry.update_ping(AppPresenceState::Active);
 
         assert!(registry.should_suppress_push(7, 30));
@@ -246,7 +284,7 @@ mod tests {
     #[test]
     fn does_not_suppress_push_for_inactive_connection() {
         let registry = registry();
-        let (entry, _rx) = registry.register(7);
+        let (entry, _rx) = registry.register(7, "client-a".to_string());
         entry.update_app_state(AppPresenceState::Inactive);
 
         assert!(!registry.should_suppress_push(7, 30));
@@ -255,7 +293,7 @@ mod tests {
     #[test]
     fn does_not_suppress_push_for_stale_connection() {
         let registry = registry();
-        let (entry, _rx) = registry.register(7);
+        let (entry, _rx) = registry.register(7, "client-a".to_string());
         entry.update_ping(AppPresenceState::Active);
         entry
             .last_ping_at
@@ -267,11 +305,49 @@ mod tests {
     #[test]
     fn suppresses_push_when_any_connection_is_active() {
         let registry = registry();
-        let (inactive_entry, _rx1) = registry.register(7);
+        let (inactive_entry, _rx1) = registry.register(7, "client-a".to_string());
         inactive_entry.update_app_state(AppPresenceState::Inactive);
-        let (active_entry, _rx2) = registry.register(7);
+        let (active_entry, _rx2) = registry.register(7, "client-b".to_string());
         active_entry.update_ping(AppPresenceState::Active);
 
         assert!(registry.should_suppress_push(7, 30));
+    }
+
+    #[test]
+    fn lists_only_fresh_open_connections_for_the_requested_user() {
+        let registry = registry();
+        let (first, first_rx) = registry.register(7, "client-a".to_string());
+        let (second, _second_rx) = registry.register(7, "client-a".to_string());
+        second.update_app_state(AppPresenceState::Inactive);
+        let (other_user, _other_rx) = registry.register(8, "client-b".to_string());
+        let (stale, _stale_rx) = registry.register(7, "client-c".to_string());
+        stale.last_ping_at.store(
+            now_secs().saturating_sub(STALE_CONNECTION_TIMEOUT_SECS + 1),
+            Ordering::Relaxed,
+        );
+        let fresh_connections = registry.online_connections(7);
+        assert_eq!(fresh_connections.len(), 2);
+        assert_eq!(fresh_connections[0].client_id, "client-a");
+        assert_eq!(fresh_connections[0].app_state, AppPresenceState::Active);
+        assert_eq!(fresh_connections[1].client_id, "client-a");
+        assert_eq!(fresh_connections[1].app_state, AppPresenceState::Inactive);
+
+        drop(first_rx);
+
+        let connections = registry.online_connections(7);
+
+        assert_eq!(
+            connections,
+            vec![OnlineConnection {
+                connection_id: second.conn_id,
+                client_id: "client-a".to_string(),
+                app_state: AppPresenceState::Inactive,
+            }]
+        );
+        assert_ne!(first.conn_id, second.conn_id);
+        assert_ne!(other_user.conn_id, second.conn_id);
+
+        registry.remove_connection(7, second.conn_id);
+        assert!(registry.online_connections(7).is_empty());
     }
 }

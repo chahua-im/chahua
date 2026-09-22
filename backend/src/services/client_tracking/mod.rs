@@ -1,6 +1,7 @@
 mod metrics;
 pub use metrics::{ActivityTodaySnapshot, ClientTrackingMetrics};
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,10 +31,11 @@ const PURGE_RESTART_DELAY: Duration = Duration::from_secs(1);
 const STALE_CLIENT_RETENTION_DAYS: u64 = 45;
 const WS_UPGRADE_PATHS: [&str; 2] = ["/ws", "/ws/"];
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct CachedActivity {
     last_written_at: Instant,
     uid: i32,
+    last_app_version: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -118,9 +120,15 @@ impl ClientTrackingService {
         &self,
         uid: i32,
         client_id: &str,
+        app_version: Option<&str>,
     ) -> Result<(), (StatusCode, &'static str)> {
         if let Some(entry) = self.recent_writes.get(client_id) {
-            if entry.uid == uid && entry.last_written_at.elapsed() < ACTIVITY_WRITE_THROTTLE {
+            let app_version_changed = app_version
+                .is_some_and(|version| entry.last_app_version.as_deref() != Some(version));
+            if entry.uid == uid
+                && !app_version_changed
+                && entry.last_written_at.elapsed() < ACTIVITY_WRITE_THROTTLE
+            {
                 self.metrics.record_activity_write_skipped("throttled");
                 return Ok(());
             }
@@ -137,110 +145,132 @@ impl ClientTrackingService {
             )
         })?;
 
-        conn.transaction::<(), diesel::result::Error, _>(|conn| {
-            let existing_client = clients::table
-                .find(client_id)
-                .select(ClientRecord::as_select())
-                .first::<ClientRecord>(conn)
-                .optional()?;
-            let existing_user = user_extra::table
-                .find(uid)
-                .select(UserExtra::as_select())
-                .first::<UserExtra>(conn)
-                .optional()?;
+        let recorded_app_version = conn
+            .transaction::<Option<String>, diesel::result::Error, _>(|conn| {
+                let existing_client = clients::table
+                    .find(client_id)
+                    .select(ClientRecord::as_select())
+                    .first::<ClientRecord>(conn)
+                    .optional()?;
+                let existing_user = user_extra::table
+                    .find(uid)
+                    .select(UserExtra::as_select())
+                    .first::<UserExtra>(conn)
+                    .optional()?;
 
-            let active_client_delta = i64::from(
-                existing_client
-                    .as_ref()
-                    .is_none_or(|client| client.last_active.date() != today),
-            );
-            let new_client_delta = i64::from(existing_client.is_none());
-            let active_user_delta = i64::from(
-                existing_user
-                    .as_ref()
-                    .is_none_or(|user| user.last_seen_at.date() != today),
-            );
-            let new_user_delta = i64::from(existing_user.is_none());
-            let rebind_delta = i64::from(
-                existing_client
-                    .as_ref()
-                    .is_some_and(|client| client.last_active_uid != uid),
-            );
+                let active_client_delta = i64::from(
+                    existing_client
+                        .as_ref()
+                        .is_none_or(|client| client.last_active.date() != today),
+                );
+                let new_client_delta = i64::from(existing_client.is_none());
+                let active_user_delta = i64::from(
+                    existing_user
+                        .as_ref()
+                        .is_none_or(|user| user.last_seen_at.date() != today),
+                );
+                let new_user_delta = i64::from(existing_user.is_none());
+                let rebind_delta = i64::from(
+                    existing_client
+                        .as_ref()
+                        .is_some_and(|client| client.last_active_uid != uid),
+                );
 
-            if rebind_delta > 0 {
-                diesel::update(
-                    push_subscriptions::table
-                        .filter(push_subscriptions::client_id.eq(Some(client_id.to_string()))),
+                if rebind_delta > 0 {
+                    diesel::update(
+                        push_subscriptions::table
+                            .filter(push_subscriptions::client_id.eq(Some(client_id.to_string()))),
+                    )
+                    .set(push_subscriptions::user_id.eq(uid))
+                    .execute(conn)?;
+                }
+
+                let new_client_app_version = app_version.map(str::to_owned).or_else(|| {
+                    existing_client
+                        .as_ref()
+                        .and_then(|client| client.last_app_version.clone())
+                });
+                let new_client = NewClientRecord {
+                    client_id: client_id.to_string(),
+                    created_at: existing_client
+                        .as_ref()
+                        .map_or(now, |client| client.created_at),
+                    last_active: now,
+                    last_active_uid: uid,
+                    last_app_version: new_client_app_version,
+                };
+
+                let last_app_version = if let Some(version) = app_version {
+                    diesel::insert_into(clients::table)
+                        .values(&new_client)
+                        .on_conflict(clients::client_id)
+                        .do_update()
+                        .set((
+                            clients::last_active.eq(now),
+                            clients::last_active_uid.eq(uid),
+                            clients::last_app_version.eq(version),
+                        ))
+                        .returning(clients::last_app_version)
+                        .get_result::<Option<String>>(conn)?
+                } else {
+                    diesel::insert_into(clients::table)
+                        .values(&new_client)
+                        .on_conflict(clients::client_id)
+                        .do_update()
+                        .set((
+                            clients::last_active.eq(now),
+                            clients::last_active_uid.eq(uid),
+                        ))
+                        .returning(clients::last_app_version)
+                        .get_result::<Option<String>>(conn)?
+                };
+
+                let new_user = NewUserExtra {
+                    uid,
+                    first_seen_at: existing_user
+                        .as_ref()
+                        .map_or(now, |user| user.first_seen_at),
+                    last_seen_at: now,
+                    sticker_pack_order: existing_user
+                        .as_ref()
+                        .map_or(serde_json::json!([]), |u| u.sticker_pack_order.clone()),
+                    verification_mode: FriendAddVerificationMode::Direct,
+                    verification_question: None,
+                };
+
+                diesel::insert_into(user_extra::table)
+                    .values(&new_user)
+                    .on_conflict(user_extra::uid)
+                    .do_update()
+                    .set(user_extra::last_seen_at.eq(now))
+                    .execute(conn)?;
+
+                self.upsert_daily_metrics(
+                    conn,
+                    DailyMetricDelta {
+                        day: today,
+                        active_users: active_user_delta,
+                        new_users: new_user_delta,
+                        active_clients: active_client_delta,
+                        new_clients: new_client_delta,
+                        client_rebinds: rebind_delta,
+                        stale_clients_purged: 0,
+                        legacy_subscriptions_purged: 0,
+                    },
+                    now,
+                )?;
+
+                Ok(last_app_version)
+            })
+            .map_err(|e| {
+                error!("client tracking: failed to record activity: {:?}", e);
+                self.metrics.record_activity_write("error");
+                self.metrics.record_daily_rollup_update("error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to record client activity",
                 )
-                .set(push_subscriptions::user_id.eq(uid))
-                .execute(conn)?;
-            }
-
-            let new_client = NewClientRecord {
-                client_id: client_id.to_string(),
-                created_at: existing_client
-                    .as_ref()
-                    .map_or(now, |client| client.created_at),
-                last_active: now,
-                last_active_uid: uid,
-            };
-
-            diesel::insert_into(clients::table)
-                .values(&new_client)
-                .on_conflict(clients::client_id)
-                .do_update()
-                .set((
-                    clients::last_active.eq(now),
-                    clients::last_active_uid.eq(uid),
-                ))
-                .execute(conn)?;
-
-            let new_user = NewUserExtra {
-                uid,
-                first_seen_at: existing_user
-                    .as_ref()
-                    .map_or(now, |user| user.first_seen_at),
-                last_seen_at: now,
-                sticker_pack_order: existing_user
-                    .as_ref()
-                    .map_or(serde_json::json!([]), |u| u.sticker_pack_order.clone()),
-                verification_mode: FriendAddVerificationMode::Direct,
-                verification_question: None,
-            };
-
-            diesel::insert_into(user_extra::table)
-                .values(&new_user)
-                .on_conflict(user_extra::uid)
-                .do_update()
-                .set(user_extra::last_seen_at.eq(now))
-                .execute(conn)?;
-
-            self.upsert_daily_metrics(
-                conn,
-                DailyMetricDelta {
-                    day: today,
-                    active_users: active_user_delta,
-                    new_users: new_user_delta,
-                    active_clients: active_client_delta,
-                    new_clients: new_client_delta,
-                    client_rebinds: rebind_delta,
-                    stale_clients_purged: 0,
-                    legacy_subscriptions_purged: 0,
-                },
-                now,
-            )?;
-
-            Ok(())
-        })
-        .map_err(|e| {
-            error!("client tracking: failed to record activity: {:?}", e);
-            self.metrics.record_activity_write("error");
-            self.metrics.record_daily_rollup_update("error");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to record client activity",
-            )
-        })?;
+            })?;
 
         self.metrics.record_activity_write("success");
         self.recent_writes.insert(
@@ -248,10 +278,44 @@ impl ClientTrackingService {
             CachedActivity {
                 last_written_at: Instant::now(),
                 uid,
+                last_app_version: recorded_app_version,
             },
         );
 
         Ok(())
+    }
+
+    pub fn last_app_versions(
+        &self,
+        client_ids: &[String],
+    ) -> Result<HashMap<String, Option<String>>, (StatusCode, &'static str)> {
+        if client_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let conn = &mut self.db.get().map_err(|e| {
+            error!("client tracking: failed to get DB connection: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database connection failed",
+            )
+        })?;
+
+        clients::table
+            .filter(clients::client_id.eq_any(client_ids))
+            .select((clients::client_id, clients::last_app_version))
+            .load::<(String, Option<String>)>(conn)
+            .map(|rows| rows.into_iter().collect())
+            .map_err(|e| {
+                error!(
+                    "client tracking: failed to load client app versions: {:?}",
+                    e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load client app versions",
+                )
+            })
     }
 
     async fn run_purge_worker(self: Arc<Self>) {
@@ -444,11 +508,7 @@ pub async fn track_client_activity(
     next: Next,
 ) -> Response {
     let record_app_version = should_record_app_version_request(request.uri().path());
-    let app_version = request
-        .headers()
-        .get(X_APP_VERSION)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned);
+    let app_version = app_version_from_headers(request.headers());
 
     let mut resolved_client_id: Option<String> = None;
 
@@ -457,7 +517,9 @@ pub async fn track_client_activity(
             let client_id = auth.client_id;
             resolved_client_id = Some(client_id.clone());
             if let Err((status, message)) =
-                state.client_tracking.record_activity(auth.uid, &client_id)
+                state
+                    .client_tracking
+                    .record_activity(auth.uid, &client_id, app_version.as_deref())
             {
                 return (status, message).into_response();
             }
@@ -477,6 +539,15 @@ pub async fn track_client_activity(
 
 fn should_record_client_activity(headers: &HeaderMap) -> bool {
     !headers.contains_key(X_ON_BEHALF_OF)
+}
+
+fn app_version_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(X_APP_VERSION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(str::to_owned)
 }
 
 fn should_record_app_version_request(path: &str) -> bool {
@@ -552,5 +623,85 @@ mod tests {
         };
 
         assert_eq!(record.day.to_string(), "2026-03-21");
+    }
+    #[test]
+    fn app_version_header_is_trimmed_and_empty_values_are_ignored() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            X_APP_VERSION,
+            axum::http::HeaderValue::from_static("  1.2.3  "),
+        );
+        assert_eq!(app_version_from_headers(&headers).as_deref(), Some("1.2.3"));
+
+        headers.insert(X_APP_VERSION, axum::http::HeaderValue::from_static("   "));
+        assert_eq!(app_version_from_headers(&headers), None);
+    }
+
+    /// Requires a migrated test database (`WETTY_TEST_DATABASE_URL`); skipped
+    /// otherwise. All writes roll back, including daily activity metrics.
+    #[test]
+    fn app_version_persists_through_missing_headers_and_bypasses_throttle_when_changed() {
+        use std::sync::atomic::{AtomicI32, Ordering};
+
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        static NEXT_UID: AtomicI32 = AtomicI32::new(2_000_000_000);
+        let uid = NEXT_UID.fetch_add(1, Ordering::SeqCst);
+        let client_id = format!("app-version-test-{}", uuid::Uuid::new_v4());
+        let pool = Pool::builder()
+            .max_size(1)
+            .connection_customizer(Box::new(diesel::r2d2::TestCustomizer))
+            .build(ConnectionManager::<PgConnection>::new(url))
+            .expect("create test database pool");
+        let service = ClientTrackingService {
+            db: pool,
+            metrics: Arc::new(ClientTrackingMetrics::new(&prometheus::Registry::new())),
+            recent_writes: DashMap::new(),
+        };
+
+        service
+            .record_activity(uid, &client_id, Some("1.0.0"))
+            .expect("record initial app version");
+        service
+            .record_activity(uid, &client_id, None)
+            .expect("record activity without app version");
+        assert_eq!(
+            service
+                .last_app_versions(std::slice::from_ref(&client_id))
+                .expect("load persisted app version")
+                .get(&client_id)
+                .cloned(),
+            Some(Some("1.0.0".to_owned()))
+        );
+
+        service
+            .record_activity(uid, &client_id, Some("2.0.0"))
+            .expect("record changed app version without waiting for throttle");
+        assert_eq!(
+            service
+                .last_app_versions(std::slice::from_ref(&client_id))
+                .expect("load changed app version")
+                .get(&client_id)
+                .cloned(),
+            Some(Some("2.0.0".to_owned()))
+        );
+
+        service.recent_writes.clear();
+        service
+            .record_activity(uid, &client_id, None)
+            .expect("persist activity without overwriting the stored version");
+        assert_eq!(
+            service
+                .last_app_versions(std::slice::from_ref(&client_id))
+                .expect("load version after an unthrottled versionless write")
+                .get(&client_id)
+                .cloned(),
+            Some(Some("2.0.0".to_owned()))
+        );
     }
 }
