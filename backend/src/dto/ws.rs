@@ -13,6 +13,28 @@ pub struct TicketResponse {
     pub ticket: String,
 }
 
+/// A WebSocket connection's app-presence state.
+#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum OnlineClientStatus {
+    Active,
+    Inactive,
+}
+
+/// A current WebSocket connection belonging to the authenticated user.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OnlineClientConnectionResponse {
+    /// Server-assigned identifier unique to this connection.
+    pub connection_id: u64,
+    /// Authenticated client identifier carried by the WebSocket ticket.
+    pub client_id: String,
+    /// Most recently recorded HTTP application version for this client, when known.
+    pub last_app_version: Option<String>,
+    /// Current app-presence state reported by this connection.
+    pub status: OnlineClientStatus,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BulkDeletedPayload {

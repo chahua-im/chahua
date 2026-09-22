@@ -12,7 +12,9 @@ use tokio::time::timeout;
 use tracing::{debug, trace};
 use utoipa_axum::router::OpenApiRouter;
 
-use crate::dto::ws::{ServerWsMessage, TicketResponse};
+use crate::dto::ws::{
+    OnlineClientConnectionResponse, OnlineClientStatus, ServerWsMessage, TicketResponse,
+};
 use crate::services::ws_registry;
 use crate::utils::auth::BearerSession;
 use crate::AppState;
@@ -37,6 +39,45 @@ async fn get_ws_ticket(
         .map_err(crate::services::auth_token::AuthTokenError::into_rejection)?;
 
     Ok(Json(TicketResponse { ticket }))
+}
+
+/// Lists the caller's current, fresh WebSocket connections.
+#[utoipa::path(
+    get,
+    path = "/clients",
+    tag = "websocket",
+    responses(
+        (status = OK, body = Vec<OnlineClientConnectionResponse>),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn get_online_clients(
+    BearerSession(session): BearerSession,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<OnlineClientConnectionResponse>>, (axum::http::StatusCode, &'static str)> {
+    let connections = state.ws_registry.online_connections(session.uid);
+    let mut client_ids = connections
+        .iter()
+        .map(|connection| connection.client_id.clone())
+        .collect::<Vec<_>>();
+    client_ids.sort_unstable();
+    client_ids.dedup();
+    let app_versions = state.client_tracking.last_app_versions(&client_ids)?;
+
+    Ok(Json(
+        connections
+            .into_iter()
+            .map(|connection| OnlineClientConnectionResponse {
+                connection_id: connection.connection_id,
+                last_app_version: app_versions.get(&connection.client_id).cloned().flatten(),
+                client_id: connection.client_id,
+                status: match connection.app_state {
+                    AppPresenceState::Active => OnlineClientStatus::Active,
+                    AppPresenceState::Inactive => OnlineClientStatus::Inactive,
+                },
+            })
+            .collect(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -91,12 +132,12 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
     // Wait for auth message, timeout after 5 seconds
     let auth_result = timeout(std::time::Duration::from_secs(5), socket.recv()).await;
 
-    let uid = match auth_result {
+    let session = match auth_result {
         Ok(Some(Ok(Message::Text(text)))) => {
             if let Ok(parsed) = serde_json::from_str::<WsAuthMessage>(&text) {
                 if parsed.type_ == "auth" {
                     match crate::utils::auth::verify_session(&parsed.ticket, &state) {
-                        Ok(session) => session.uid,
+                        Ok(session) => session,
                         Err(e) => {
                             debug!("ws auth rejected (invalid ticket): {:?}", e);
                             return;
@@ -112,8 +153,11 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
         _ => return, // Timeout, connection closed, or non-text message
     };
 
+    let uid = session.uid;
+    let client_id = session.client_id;
+
     let registry = state.ws_registry.clone();
-    let (entry, rx) = registry.register(uid);
+    let (entry, rx) = registry.register(uid, client_id);
     let conn_id = entry.conn_id;
 
     handle_socket(socket, state, uid, conn_id, registry, entry, rx).await;
@@ -191,4 +235,5 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(ws_handler))
         .routes(utoipa_axum::routes!(get_ws_ticket))
+        .routes(utoipa_axum::routes!(get_online_clients))
 }
