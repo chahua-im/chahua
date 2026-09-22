@@ -73,12 +73,13 @@ export class Connection {
       let attempts = 0;
       let connected = false;
       let lastPong = Date.now();
-      const state = () => (document.hidden ? WsAppState.Inactive : WsAppState.Active);
+      const state = () => (document.hidden || !document.hasFocus() ? WsAppState.Inactive : WsAppState.Active);
       const connect = () => {
         socket = new WebSocket(url);
         socket.onopen = () => {
           lastPong = Date.now();
           socket.send(JSON.stringify({ type: WsControl.Auth, ticket: token }));
+          socket.send(JSON.stringify({ type: WsControl.AppState, state: state() }));
           heartbeat = setInterval(() => {
             if (Date.now() - lastPong > HEARTBEAT_TIMEOUT_MS) {
               socket.close();
@@ -120,9 +121,10 @@ export class Connection {
         };
       };
       const visibilityChanged = () => {
-        if (!document.hidden) this.resync.next();
+        const active = state() === WsAppState.Active;
+        if (active) this.resync.next();
         if (socket.readyState !== WebSocket.OPEN) return;
-        if (!document.hidden && Date.now() - lastPong > FOREGROUND_STALE_MS) {
+        if (active && Date.now() - lastPong > FOREGROUND_STALE_MS) {
           socket.close();
           return;
         }
@@ -130,12 +132,16 @@ export class Connection {
       };
       connect();
       document.addEventListener(VISIBILITY_CHANGE, visibilityChanged);
+      window.addEventListener('focus', visibilityChanged);
+      window.addEventListener('blur', visibilityChanged);
       onCleanup(() => {
         this.connected.set(false);
         this.acceptedIds.clear();
         clearTimeout(retry);
         clearInterval(heartbeat);
         document.removeEventListener(VISIBILITY_CHANGE, visibilityChanged);
+        window.removeEventListener('focus', visibilityChanged);
+        window.removeEventListener('blur', visibilityChanged);
         socket.onclose = null;
         socket.onmessage = null;
         socket.onopen = null;

@@ -32,6 +32,9 @@ class TestSocket {
 }
 
 describe('Connection', () => {
+  beforeEach(() => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+  });
   afterEach(() => {
     TestBed.resetTestingModule();
     vi.useRealTimers();
@@ -146,6 +149,56 @@ describe('Connection', () => {
     TestBed.tick();
     resync.mockClear();
     document.dispatchEvent(new Event('visibilitychange'));
+    expect(resync).not.toHaveBeenCalled();
+  });
+
+  it('reports window focus loss immediately and keeps heartbeats inactive until visible and focused', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', TestSocket);
+    TestSocket.instances = [];
+    let focused = false;
+    let hidden = false;
+    vi.mocked(document.hasFocus).mockImplementation(() => focused);
+    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+    const user = signal<typeof testUser | undefined>(testUser);
+    TestBed.configureTestingModule({
+      providers: [
+        provideChahuaBaseUrl('/_api'),
+        { provide: SessionStore, useValue: { token: signal('test-jwt'), user, updateProfile: vi.fn() } },
+      ],
+    });
+    const resync = vi.fn();
+    TestBed.inject(Connection).resync$.subscribe(resync);
+    TestBed.tick();
+    const socket = TestSocket.instances[0];
+    socket.open();
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'inactive' }));
+    focused = true;
+    window.dispatchEvent(new Event('focus'));
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'active' }));
+    expect(resync).toHaveBeenCalledOnce();
+    focused = false;
+    window.dispatchEvent(new Event('blur'));
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'inactive' }));
+    vi.advanceTimersByTime(10000);
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'ping', state: 'inactive' }));
+    expect(resync).toHaveBeenCalledOnce();
+    hidden = true;
+    focused = true;
+    window.dispatchEvent(new Event('focus'));
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'inactive' }));
+    hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'active' }));
+    vi.advanceTimersByTime(10000);
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'ping', state: 'active' }));
+    user.set(undefined);
+    TestBed.tick();
+    socket.send.mockClear();
+    resync.mockClear();
+    window.dispatchEvent(new Event('blur'));
+    window.dispatchEvent(new Event('focus'));
+    expect(socket.send).not.toHaveBeenCalled();
     expect(resync).not.toHaveBeenCalled();
   });
   it('publishes accepted edits and withdrawals without deduplicating distinct changes to the same message', () => {
