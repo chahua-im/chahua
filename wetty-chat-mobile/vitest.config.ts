@@ -9,6 +9,12 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Run lingui macros as identity helpers in tests, so the macro compiler
+      // and its optional peer "babel-plugin-macros" (missing on clean CI
+      // installs) never load. One stub per specifier: some tests vi.mock
+      // these two specifiers independently.
+      '@lingui/core/macro': path.resolve(__dirname, './src/test/linguiCoreMacroStub.ts'),
+      '@lingui/react/macro': path.resolve(__dirname, './src/test/linguiReactMacroStub.ts'),
     },
   },
   test: {
