@@ -5,31 +5,28 @@ use axum::{
     Json,
 };
 use chrono::Utc;
-use diesel::{prelude::*, PgConnection};
+use diesel::prelude::*;
 use std::time::Instant;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::{
         messages::{
-            ForwardedBundlePayloadItem, ForwardedBundleRefSnapshot, ForwardedMessageSnapshot,
-            ForwardedMessagesPreviewSnapshot, ForwardedMessagesResponse, ListMessagesResponse,
-            MessagePreview, MessagePreviewSnapshot, MessageResponse, SearchMessagesResponse,
+            ForwardedBundlePayloadItem, ForwardedMessagesResponse, ListMessagesResponse,
+            MessageResponse, SearchMessagesResponse,
         },
         ws::{NotificationPayload, NotificationType, ServerWsMessage},
     },
     errors::AppError,
     extractors::DbConn,
     handlers::{groups::load_requester_group_role, members::check_membership},
-    models::{
-        Attachment, ForwardedBundle, GroupRole, Message, MessageType, NewForwardedBundle,
-    },
+    models::{GroupRole, Message, MessageType, NewForwardedBundle},
     schema::{attachments, forwarded_bundles, group_membership, groups, messages, messages::dsl},
     services::message_search::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
         MessageSearchSort, SearchCandidateDropCounts,
     },
-    services::user::lookup_user_profiles,
+
     utils::{
         auth::{CurrentUid, Principal},
         ids,
@@ -44,17 +41,20 @@ use crate::services::messages::{
     attach_metadata,
     attachment_position,
     authorize_message_send,
-    build_forwarded_message_snapshots,
-    collect_forwarded_snapshot_uids,
+    build_forwarded_bundle_payload_item,
+    deserialize_forwarded_bundle_payload,
     extract_mention_uids,
-    forwarded_message_response,
+    forwarded_messages_response_from_items,
+    load_attachment_storage_keys,
+    load_forwarded_bundle,
+    load_forwarded_bundle_preview_items,
+    load_target_forwarded_bundle_from_root,
     load_username_by_uid,
     parse_attachment_ids,
     send_prepared_message,
     sync_edited_message_mentions,
     validate_message,
     FORWARDED_PREVIEW_LIMIT,
-    MAX_ATTACHMENTS_PER_MESSAGE,
     PreparedMessageSend,
     SendMessageOutcome,
 };
@@ -190,279 +190,6 @@ fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize>
 }
 
 
-fn validate_message_payload(
-    body: &CreateMessageBody,
-    attachment_ids: &[i64],
-) -> Result<(), AppError> {
-    if attachment_ids.len() > MAX_ATTACHMENTS_PER_MESSAGE {
-        return Err(AppError::BadRequest(
-            "Too many attachments (maximum of 20 allowed)",
-        ));
-    }
-
-    if matches!(body.message_type, MessageType::Sticker) {
-        body.sticker_id
-            .ok_or(AppError::BadRequest("Sticker ID is required"))?;
-
-        if !attachment_ids.is_empty() {
-            return Err(AppError::BadRequest(
-                "Sticker messages cannot include attachments",
-            ));
-        }
-        if body
-            .message
-            .as_deref()
-            .is_some_and(|message| !message.trim().is_empty())
-        {
-            return Err(AppError::BadRequest("Sticker messages cannot include text"));
-        }
-    } else if body.sticker_id.is_some() {
-        return Err(AppError::BadRequest(
-            "Sticker ID is only valid for sticker messages",
-        ));
-    }
-
-    Ok(())
-}
-
-fn build_forwarded_message_snapshot(
-    response: MessageResponse,
-    attachment_storage_keys: &std::collections::HashMap<i64, String>,
-) -> Result<ForwardedMessageSnapshot, AppError> {
-    let attachments =
-        response
-            .attachments
-            .into_iter()
-            .map(|attachment| {
-                let external_reference =
-                    attachment_storage_keys.get(&attachment.id).cloned().ok_or(
-                        AppError::Internal("Forwarded attachment storage key missing"),
-                    )?;
-                Ok(AttachmentSnapshot {
-                    id: attachment.id,
-                    external_reference,
-                    kind: attachment.kind,
-                    size: attachment.size,
-                    file_name: attachment.file_name,
-                    width: attachment.width,
-                    height: attachment.height,
-                })
-            })
-            .collect::<Result<Vec<_>, AppError>>()?;
-
-    Ok(ForwardedMessageSnapshot {
-        original_message_id: response.id,
-        original_chat_id: response.chat_id,
-        message: response.message,
-        message_type: response.message_type,
-        sender_uid: response.sender.uid,
-        original_created_at: response.created_at,
-        reply_to_message: response
-            .reply_to_message
-            .map(|preview| Box::new(build_forwarded_message_preview_snapshot(*preview))),
-        attachments,
-        mention_uids: response
-            .mentions
-            .into_iter()
-            .map(|mention| mention.uid)
-            .collect(),
-    })
-}
-
-fn build_forwarded_bundle_ref_snapshot(
-    source_message: &Message,
-    referenced_bundle_previews: &std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>,
-) -> Result<ForwardedBundleRefSnapshot, AppError> {
-    let forwarded_bundle_id = source_message
-        .forwarded_bundle_id
-        .ok_or(AppError::BadRequest(
-            "Forwarded source message has no bundle",
-        ))?;
-    let preview = referenced_bundle_previews
-        .get(&forwarded_bundle_id)
-        .cloned()
-        .ok_or(AppError::BadRequest("Forwarded source bundle not found"))?;
-
-    Ok(ForwardedBundleRefSnapshot {
-        original_message_id: source_message.id,
-        original_chat_id: source_message.chat_id,
-        forwarded_bundle_id,
-        message: source_message.message.clone(),
-        message_type: source_message.message_type.clone(),
-        sender_uid: source_message.sender_uid,
-        original_created_at: source_message.created_at,
-        preview,
-    })
-}
-
-fn build_forwarded_bundle_payload_item(
-    source_message: &Message,
-    response: MessageResponse,
-    attachment_storage_keys: &std::collections::HashMap<i64, String>,
-    referenced_bundle_previews: &std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>,
-) -> Result<ForwardedBundlePayloadItem, AppError> {
-    if matches!(source_message.message_type, MessageType::Forwarded) {
-        return Ok(ForwardedBundlePayloadItem::ForwardedBundleRef {
-            bundle_ref: build_forwarded_bundle_ref_snapshot(
-                source_message,
-                referenced_bundle_previews,
-            )?,
-        });
-    }
-
-    Ok(ForwardedBundlePayloadItem::MessageSnapshot {
-        snapshot: build_forwarded_message_snapshot(response, attachment_storage_keys)?,
-    })
-}
-
-fn load_forwarded_bundle_preview_items(
-    conn: &mut PgConnection,
-    bundle_ids: &[i64],
-) -> Result<std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>, AppError> {
-    if bundle_ids.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-
-    let bundles: Vec<ForwardedBundle> = forwarded_bundles::table
-        .filter(forwarded_bundles::id.eq_any(bundle_ids))
-        .select(ForwardedBundle::as_select())
-        .load(conn)?;
-
-    if bundles.len() != bundle_ids.len() {
-        return Err(AppError::BadRequest("Forwarded source bundle not found"));
-    }
-
-    bundles
-        .into_iter()
-        .map(|bundle| {
-            validate_forwarded_source_bundle_can_be_nested(&bundle)?;
-            let total = bundle.item_count as usize;
-            let messages: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
-                .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
-            Ok((
-                bundle.id,
-                ForwardedMessagesPreviewSnapshot {
-                    total,
-                    contains_forwarded_messages: !bundle.child_bundle_ids.is_empty(),
-                    messages: messages.into_iter().take(FORWARDED_PREVIEW_LIMIT).collect(),
-                },
-            ))
-        })
-        .collect()
-}
-
-fn validate_forwarded_source_bundle_can_be_nested(
-    bundle: &ForwardedBundle,
-) -> Result<(), AppError> {
-    if bundle.child_bundle_ids.is_empty() {
-        return Ok(());
-    }
-
-    Err(AppError::BadRequest(
-        "Forwarded messages cannot include nested forwarded messages",
-    ))
-}
-
-fn load_forwarded_bundle(
-    conn: &mut PgConnection,
-    bundle_id: i64,
-) -> Result<ForwardedBundle, AppError> {
-    forwarded_bundles::table
-        .filter(forwarded_bundles::id.eq(bundle_id))
-        .select(ForwardedBundle::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Forwarded messages not found"))
-}
-
-fn deserialize_forwarded_bundle_payload(
-    bundle: ForwardedBundle,
-) -> Result<(usize, Vec<ForwardedBundlePayloadItem>), AppError> {
-    let total = bundle.item_count as usize;
-    let items: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
-        .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
-    Ok((total, items))
-}
-
-fn load_target_forwarded_bundle_from_root(
-    conn: &mut PgConnection,
-    root_bundle: ForwardedBundle,
-    target_bundle_id: i64,
-) -> Result<ForwardedBundle, AppError> {
-    if root_bundle.id == target_bundle_id {
-        return Ok(root_bundle);
-    }
-
-    if root_bundle.child_bundle_ids.contains(&target_bundle_id) {
-        return load_forwarded_bundle(conn, target_bundle_id);
-    }
-
-    Err(AppError::NotFound("Forwarded messages not found"))
-}
-
-fn forwarded_messages_response_from_items(
-    conn: &mut PgConnection,
-    state: &AppState,
-    total: usize,
-    items: Vec<ForwardedBundlePayloadItem>,
-) -> ForwardedMessagesResponse {
-    let mut forwarded_uids = std::collections::HashSet::new();
-    collect_forwarded_bundle_item_uids(&items, &mut forwarded_uids);
-    let forwarded_uids: Vec<i32> = forwarded_uids.into_iter().collect();
-    let user_avatars = state.avatars.lookup(&forwarded_uids);
-    let user_profiles = lookup_user_profiles(conn, &forwarded_uids).unwrap_or_default();
-    let messages = items
-        .into_iter()
-        .map(|item| forwarded_bundle_item_response(state, item, &user_avatars, &user_profiles))
-        .collect();
-
-    ForwardedMessagesResponse { total, messages }
-}
-
-fn build_forwarded_message_preview_snapshot(preview: MessagePreview) -> MessagePreviewSnapshot {
-    MessagePreviewSnapshot {
-        id: preview.id,
-        client_generated_id: preview.client_generated_id,
-        created_at: preview.created_at,
-        sender_uid: preview.sender.uid,
-        message: preview.message,
-        message_type: preview.message_type,
-        sticker: preview.sticker,
-        attachments: preview.attachments,
-        is_deleted: preview.is_deleted,
-        mention_uids: preview
-            .mentions
-            .into_iter()
-            .map(|mention| mention.uid)
-            .collect(),
-    }
-}
-
-fn load_attachment_storage_keys(
-    conn: &mut PgConnection,
-    source_messages: &[MessageResponse],
-) -> Result<std::collections::HashMap<i64, String>, AppError> {
-    let attachment_ids: Vec<i64> = source_messages
-        .iter()
-        .flat_map(|message| message.attachments.iter().map(|attachment| attachment.id))
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    if attachment_ids.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-
-    let attachment_rows: Vec<Attachment> = attachments::table
-        .filter(attachments::id.eq_any(&attachment_ids))
-        .select(Attachment::as_select())
-        .load(conn)?;
-
-    Ok(attachment_rows
-        .into_iter()
-        .map(|attachment| (attachment.id, attachment.external_reference))
-        .collect())
-}
 
 /// GET /chats/:chat_id/messages — List messages in a chat (cursor-based).
 #[utoipa::path(
