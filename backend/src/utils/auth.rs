@@ -74,12 +74,6 @@ impl Principal {
                 if !user::lookup_user_profiles(conn, &[uid])?.contains_key(&uid) {
                     return Err(AppError::BadRequest("On-behalf-of user not found"));
                 }
-                tracing::info!(
-                    service_token_id = service_token.id,
-                    on_behalf_of_uid = uid,
-                    action = action.as_str(),
-                    "service token acting on behalf of user"
-                );
                 Ok(uid)
             }
         }
