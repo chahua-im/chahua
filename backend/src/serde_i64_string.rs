@@ -61,6 +61,30 @@ pub mod opt {
     }
 }
 
+pub mod vec {
+    use serde::{Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum StringOrNumber {
+            Str(String),
+            Num(i64),
+        }
+
+        Vec::<StringOrNumber>::deserialize(deserializer)?
+            .into_iter()
+            .map(|value| match value {
+                StringOrNumber::Str(s) => s.parse().map_err(serde::de::Error::custom),
+                StringOrNumber::Num(n) => Ok(n),
+            })
+            .collect()
+    }
+}
+
 pub mod double_opt {
     use serde::{Deserialize, Deserializer};
 

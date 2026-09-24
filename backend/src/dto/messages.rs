@@ -1,12 +1,15 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    dto::{attachments::AttachmentResponse, users::User},
+    dto::{
+        attachments::{AttachmentResponse, AttachmentSnapshot},
+        users::User,
+    },
     models::MessageType,
 };
 
-#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MentionInfo {
     pub uid: i32,
@@ -51,6 +54,152 @@ pub struct MessageResponse {
     pub reactions: Vec<ReactionSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
+    #[serde(
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub forwarded_bundle_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagesPreviewResponse {
+    pub total: usize,
+    pub contains_forwarded_messages: bool,
+    pub messages: Vec<ForwardedMessagePreviewResponse>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagePreviewResponse {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    pub sender: User,
+    pub original_created_at: DateTime<Utc>,
+    pub attachments: Vec<MessagePreviewAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<MentionInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagesPreviewSnapshot {
+    pub total: usize,
+    pub contains_forwarded_messages: bool,
+    pub messages: Vec<ForwardedBundlePayloadItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ForwardedBundlePayloadItem {
+    MessageSnapshot {
+        #[serde(flatten)]
+        snapshot: ForwardedMessageSnapshot,
+    },
+    ForwardedBundleRef {
+        #[serde(flatten)]
+        bundle_ref: ForwardedBundleRefSnapshot,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessageSnapshot {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    pub sender_uid: i32,
+    pub original_created_at: DateTime<Utc>,
+    pub reply_to_message: Option<Box<MessagePreviewSnapshot>>,
+    pub attachments: Vec<AttachmentSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mention_uids: Vec<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePreviewSnapshot {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub id: i64,
+    pub client_generated_id: String,
+    pub created_at: DateTime<Utc>,
+    pub sender_uid: i32,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sticker: Option<MessagePreviewSticker>,
+    pub attachments: Vec<MessagePreviewAttachment>,
+    pub is_deleted: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mention_uids: Vec<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedBundleRefSnapshot {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub forwarded_bundle_id: i64,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    pub sender_uid: i32,
+    pub original_created_at: DateTime<Utc>,
+    pub preview: ForwardedMessagesPreviewSnapshot,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagesResponse {
+    pub total: usize,
+    pub messages: Vec<ForwardedMessageResponse>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessageResponse {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    pub sender: User,
+    pub original_created_at: DateTime<Utc>,
+    pub reply_to_message: Option<Box<MessagePreview>>,
+    pub attachments: Vec<AttachmentResponse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<MentionInfo>,
+    #[serde(
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub forwarded_bundle_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -122,19 +271,19 @@ pub struct ReactionDetailResponse {
     pub reactions: Vec<ReactionDetailGroup>,
 }
 
-#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePreviewSticker {
     pub emoji: String,
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq, Eq, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePreviewAttachment {
     pub kind: String,
 }
 
-#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePreview {
     #[serde(with = "crate::serde_i64_string")]
