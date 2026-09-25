@@ -101,6 +101,14 @@
   overflow-wrap: anywhere;
 }
 
+.preview .message-text,
+.preview .message-text app-message-text,
+.preview .message-text app-message-preview {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 .timestamp {
   display: inline-flex;
   align-items: center;

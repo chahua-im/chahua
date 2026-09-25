@@ -427,6 +427,20 @@ describe('Message', () => {
     expect(menu).not.toHaveBeenCalled();
   });
 
+  it('preserves the message menu on the first text hold', async () => {
+    const fixture = await render();
+    const text = fixture.nativeElement.querySelector('.message-text app-message-text') as HTMLElement;
+    const menu = vi.fn();
+    fixture.componentInstance.menu.subscribe(menu);
+    vi.useFakeTimers();
+    pointer(text, 'pointerdown');
+    vi.advanceTimersByTime(400);
+    const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    text.dispatchEvent(context);
+    expect(context.defaultPrevented).toBe(true);
+    expect(menu).toHaveBeenCalledOnce();
+  });
+
   it('opens once after a touch hold and suppresses its synthesized quote click without changing taps', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('message', { ...testMessage, replyToMessage: { ...testMessage, mentions: [] } });
@@ -555,7 +569,7 @@ describe('Message', () => {
     },
   );
 
-  it('renders a full preview without actions while preserving quotes and reaction counts', async () => {
+  it('allows native text selection in previews while keeping quotes and actions inactive', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('preview', true);
     fixture.componentRef.setInput('canOpenThread', true);
@@ -567,7 +581,8 @@ describe('Message', () => {
     fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
     const bubble = element.querySelector('.bubble') as HTMLElement;
-    expect(bubble.hasAttribute('inert')).toBe(true);
+    expect(bubble.hasAttribute('inert')).toBe(false);
+    expect(element.querySelector('.reply-preview')?.hasAttribute('inert')).toBe(true);
     expect(element.querySelector('ion-avatar')).not.toBeNull();
     expect(element.querySelector('.reply-button, ion-button')).toBeNull();
     expect(element.querySelector('.reaction')?.textContent).toMatch(/❤️\s*2/);
@@ -577,10 +592,16 @@ describe('Message', () => {
     fixture.componentInstance.menu.subscribe(menu);
     fixture.componentInstance.jump.subscribe(jump);
     element.querySelector<HTMLButtonElement>('.reply-preview')?.click();
-    bubble.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     vi.useFakeTimers();
-    pointer(bubble, 'pointerdown');
+    const text = element.querySelector('.message-text app-message-text') as HTMLElement;
+    pointer(text, 'pointerdown');
     vi.advanceTimersByTime(400);
+    const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    text.dispatchEvent(context);
+    expect(context.defaultPrevented).toBe(false);
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    text.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(false);
     expect(menu).not.toHaveBeenCalled();
     expect(jump).not.toHaveBeenCalled();
   });
