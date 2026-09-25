@@ -62,7 +62,6 @@
         [class]="isSticker() ? 'sticker-content' : 'bubble'"
         [class.media-only]="mediaOverlay()"
         [class.has-thread]="!!threadInfo()"
-        [attr.inert]="preview() ? '' : null"
         (contextmenu)="showMenu($event, bubble)"
         (pointerdown)="startPress($event, bubble)">
         @if (first() && !isSticker()) {
@@ -76,6 +75,7 @@
           <button
             type="button"
             class="reply-preview"
+            [attr.inert]="preview() ? '' : null"
             [disabled]="jumpDisabled() || !canInteract()"
             [class.busy]="jumpingTo() === quote.id"
             (click)="jump.emit(quote.id)">
@@ -89,7 +89,7 @@
           </button>
         }
         @if (hasMedia()) {
-          <div class="media-content" (click)="sticker($event)">
+          <div class="media-content" [attr.inert]="preview() ? '' : null" (click)="sticker($event)">
             <app-message-attachments
               [message]="message()"
               [overlayTime]="mediaOverlay()"

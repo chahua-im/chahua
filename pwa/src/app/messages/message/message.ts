@@ -210,6 +210,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const suppressClick = (event: MouseEvent) => {
+      if (this.preview() && (event.target as Element).closest('.message-text')) return;
       if (this.preview() || (this.longPressed && event.detail > 0)) {
         this.longPressed = false;
         event.preventDefault();
