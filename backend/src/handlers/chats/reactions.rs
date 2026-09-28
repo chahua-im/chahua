@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::Utc;
 use diesel::prelude::*;
 use diesel::PgConnection;
 use unicode_segmentation::UnicodeSegmentation;
@@ -17,7 +16,7 @@ use crate::{
     errors::AppError,
     extractors::DbConn,
     handlers::members::check_membership,
-    models::{Message, MessageReaction},
+    models::Message,
     schema::{group_membership, message_reactions, messages},
     utils::auth::CurrentUid,
     AppState,
@@ -25,6 +24,7 @@ use crate::{
 
 use crate::services::messages::{load_username_by_uid, load_usernames_by_uids};
 use crate::services::social;
+use crate::services::user_settings;
 
 fn validate_emoji(input: &str) -> Result<String, AppError> {
     if input.is_empty() {
@@ -49,7 +49,7 @@ fn broadcast_reaction_update(
     state: &AppState,
     chat_id: i64,
     message_id: i64,
-) -> Vec<i32> {
+) {
     let counts: Vec<(String, i64)> = message_reactions::table
         .filter(message_reactions::message_id.eq(message_id))
         .group_by(message_reactions::emoji)
@@ -117,7 +117,6 @@ fn broadcast_reaction_update(
         reactions,
     }));
     state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
-    member_uids
 }
 
 #[utoipa::path(
@@ -239,37 +238,62 @@ async fn put_reaction(
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
 
-    // Insert reaction (ON CONFLICT DO NOTHING for idempotency)
-    let inserted = diesel::insert_into(message_reactions::table)
-        .values(&MessageReaction {
-            message_id,
-            user_uid: uid,
-            emoji,
-            created_at: Utc::now(),
-            message_author_uid: message.sender_uid,
-        })
-        .on_conflict_do_nothing()
+    // Insert reaction (ON CONFLICT DO NOTHING for idempotency). The author's
+    // settings lock serializes created_at against reaction views and toggle
+    // changes; the whole notification decision is made inside the transaction
+    // so a failed request can retry safely (a post-commit failure would leave
+    // the reaction inserted and the retry's conflict no-op would drop the
+    // notification).
+    let (notify_author, actor_name) = conn.transaction::<_, AppError, _>(|conn| {
+        user_settings::lock_user_settings(conn, message.sender_uid)?;
+        let inserted = diesel::sql_query(
+            "INSERT INTO message_reactions
+                (message_id, user_uid, emoji, created_at, message_author_uid)
+             VALUES ($1, $2, $3, clock_timestamp(), $4)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind::<diesel::sql_types::BigInt, _>(message_id)
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .bind::<diesel::sql_types::VarChar, _>(&emoji)
+        .bind::<diesel::sql_types::Integer, _>(message.sender_uid)
         .execute(conn)?;
 
-    // Set denormalized flag
-    diesel::update(messages::table.filter(messages::id.eq(message_id)))
-        .set(messages::has_reactions.eq(true))
-        .execute(conn)?;
+        // Set denormalized flag
+        diesel::update(messages::table.filter(messages::id.eq(message_id)))
+            .set(messages::has_reactions.eq(true))
+            .execute(conn)?;
 
-    let member_uids = broadcast_reaction_update(conn, &state, chat_id, message_id);
+        let notify_author = inserted > 0
+            && message.sender_uid != uid
+            && diesel::select(diesel::dsl::exists(
+                group_membership::table.filter(
+                    group_membership::chat_id
+                        .eq(chat_id)
+                        .and(group_membership::uid.eq(message.sender_uid)),
+                ),
+            ))
+            .get_result::<bool>(conn)?
+            && user_settings::reaction_notifications_enabled(conn, message.sender_uid)?;
 
-    // Directed unread-reaction notification to the message author. Only on a
-    // genuinely new row (re-putting the same emoji is a no-op) and never for
-    // self-reactions or authors who are no longer chat members.
-    if inserted > 0 && message.sender_uid != uid && member_uids.contains(&message.sender_uid) {
-        let actor_name = load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
+        let actor_name = if notify_author {
+            Some(load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string()))
+        } else {
+            None
+        };
+
+        Ok((notify_author, actor_name))
+    })?;
+
+    broadcast_reaction_update(conn, &state, chat_id, message_id);
+
+    if notify_author {
         let payload = NotificationPayload {
             notification_type: NotificationType::Reaction,
             chat_id,
             message_id,
             thread_root_id: message.reply_root_id,
             actor_uid: uid,
-            actor_name: Some(actor_name),
+            actor_name,
         };
         state.ws_registry.broadcast_to_uids(
             &[message.sender_uid],
@@ -336,7 +360,7 @@ async fn delete_reaction(
                 .execute(conn)?;
         }
 
-        let _ = broadcast_reaction_update(conn, &state, chat_id, message_id);
+        broadcast_reaction_update(conn, &state, chat_id, message_id);
     }
 
     Ok(StatusCode::NO_CONTENT)

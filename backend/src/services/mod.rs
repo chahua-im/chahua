@@ -18,4 +18,5 @@ pub mod threads;
 pub mod token_generation;
 pub mod unread;
 pub mod user;
+pub mod user_settings;
 pub mod ws_registry;

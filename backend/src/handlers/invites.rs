@@ -28,6 +28,7 @@ use crate::services::invites as invite_service;
 use crate::services::messages::{
     authorize_message_send, send_prepared_message, PreparedMessageSend, SendMessageOutcome,
 };
+use crate::services::user_settings;
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
@@ -656,22 +657,25 @@ async fn post_redeem_invite(
                 .first(conn)
                 .optional()?
                 .flatten();
-            match diesel::insert_into(group_membership::table)
-                .values(&NewGroupMembership {
-                    chat_id: invite.chat_id,
-                    uid,
-                    role: GroupRole::Member,
-                    joined_at: now,
-                    join_reason: GroupJoinReason::InviteCode,
-                    join_reason_extra: Some(json!({
-                        "invite_id": invite.id.to_string(),
-                        "code": invite.code,
-                        "creator_uid": invite.creator_uid,
-                    })),
-                    last_read_message_id: last_message_id,
-                })
-                .execute(conn)
-            {
+            let insert_result = conn.transaction::<_, diesel::result::Error, _>(|conn| {
+                user_settings::seed_membership_reaction_views(conn, uid, invite.chat_id)?;
+                diesel::insert_into(group_membership::table)
+                    .values(&NewGroupMembership {
+                        chat_id: invite.chat_id,
+                        uid,
+                        role: GroupRole::Member,
+                        joined_at: now,
+                        join_reason: GroupJoinReason::InviteCode,
+                        join_reason_extra: Some(json!({
+                            "invite_id": invite.id.to_string(),
+                            "code": invite.code,
+                            "creator_uid": invite.creator_uid,
+                        })),
+                        last_read_message_id: last_message_id,
+                    })
+                    .execute(conn)
+            });
+            match insert_result {
                 Ok(_) => {}
                 Err(diesel::result::Error::DatabaseError(
                     diesel::result::DatabaseErrorKind::UniqueViolation,

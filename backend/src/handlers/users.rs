@@ -8,7 +8,10 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::auth::AuthTokenResponse;
-use crate::dto::users::{MeResponse, MemberSummary, SearchUsersResponse, StickerPackOrderItem};
+use crate::dto::users::{
+    MeResponse, MemberSummary, ReactionNotificationsResponse, SearchUsersResponse,
+    StickerPackOrderItem, UpdateReactionNotificationsRequest,
+};
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
@@ -16,6 +19,7 @@ use crate::models::{FriendAddVerificationMode, NewUserExtra, UserExtra};
 use crate::schema::{group_membership, sticker_packs, user_extra, user_sticker_pack_subscriptions};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
 use crate::services::user::{lookup_user_profiles, search_user_uids_by_prefix};
+use crate::services::user_settings;
 use crate::utils::auth::{BearerSession, CurrentUid};
 use crate::AppState;
 use diesel::prelude::*;
@@ -282,6 +286,10 @@ async fn get_me(
         .first::<UserExtra>(conn)
         .optional()?;
 
+    let reaction_notifications_enabled = extra
+        .as_ref()
+        .map(|e| e.reaction_notifications_enabled)
+        .unwrap_or(false);
     let sticker_pack_order = extra
         .and_then(|e| {
             serde_json::from_value::<Vec<StickerPackOrderItem>>(e.sticker_pack_order).ok()
@@ -301,6 +309,7 @@ async fn get_me(
         user_group: profile.and_then(|profile| profile.user_group.clone()),
         sticker_pack_order,
         permissions,
+        reaction_notifications_enabled,
     }))
 }
 
@@ -398,6 +407,32 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(routes!(get_user_search))
         .routes(routes!(get_auth_token))
         .routes(routes!(put_stickerpack_order))
+        .routes(routes!(put_reaction_notifications))
+}
+
+/// PUT /users/me/reaction-notifications — Toggle unread-reaction badges and
+/// directed reaction notifications. Defaults to off; enabling treats existing
+/// reactions as read so the badge starts from zero.
+#[utoipa::path(
+    put,
+    path = "/me/reaction-notifications",
+    tag = "users",
+    request_body = UpdateReactionNotificationsRequest,
+    responses(
+        (status = 200, description = "Updated setting", body = ReactionNotificationsResponse)
+    ),
+    security(("bearer_jwt" = []))
+)]
+async fn put_reaction_notifications(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+    Json(req): Json<UpdateReactionNotificationsRequest>,
+) -> Result<Json<ReactionNotificationsResponse>, AppError> {
+    let conn = &mut *conn;
+    let enabled = user_settings::set_reaction_notifications_enabled(conn, uid, req.enabled)?;
+    Ok(Json(ReactionNotificationsResponse {
+        reaction_notifications_enabled: enabled,
+    }))
 }
 
 fn load_accessible_sticker_pack_ids(

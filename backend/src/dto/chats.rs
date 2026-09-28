@@ -16,8 +16,7 @@ pub struct ChatListItem {
     pub last_message_at: Option<DateTime<Utc>>,
     pub unread_count: i64,
     pub unread_mentions: i64,
-    /// Unread-reaction message count (reactions on my messages newer than my
-    /// reaction cursor). Never folded into `unread_count`.
+    /// Unread-reaction message count. Never folded into `unread_count`.
     pub unread_reactions: i64,
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
@@ -70,7 +69,29 @@ pub struct UnreadMentionIdsResponse {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnreadReactionIdsResponse {
-    /// Message ids with unread reactions, newest-first, one entry per message
-    /// regardless of how many new reactions it carries. Serialized as strings.
+    /// Message ids with unread reactions, oldest-unread-first. Serialized as
+    /// strings (JS-safe).
+    pub message_ids: Vec<String>,
+    /// Total unread-reaction message count (may exceed the id list length
+    /// when truncated at the limit).
+    pub unread_reactions: i64,
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcknowledgeReactionsBody {
+    /// Message ids explicitly viewed by the caller — top-level or thread
+    /// replies both count. Strings because message ids exceed JS safe
+    /// integers.
+    pub message_ids: Vec<String>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadReactionsAckResponse {
+    /// Fresh main-scope unread-reaction count after recording the views.
+    /// Thread badge state is not included — refresh it separately.
+    pub unread_reactions: i64,
+    /// Fresh main-scope unread-reaction message ids, oldest-unread-first.
     pub message_ids: Vec<String>,
 }
