@@ -86,6 +86,7 @@ pub struct ForwardMessagesBody {
     #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
     #[schema(value_type = Vec<String>)]
     pub message_ids: Vec<i64>,
+    pub client_generated_id: String,
 }
 
 // ---------------------------------------------------------------------------

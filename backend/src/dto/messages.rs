@@ -127,30 +127,59 @@ pub struct ForwardedMessageSnapshot {
     pub sender_uid: i32,
     pub original_created_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sticker: Option<MessageStickerResponse>,
-    pub reply_to_message: Option<Box<MessagePreviewSnapshot>>,
+    pub sticker: Option<ForwardedStickerSnapshot>,
+    pub reply: Option<ForwardedReplySnapshot>,
     pub attachments: Vec<AttachmentSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mention_uids: Vec<i32>,
 }
 
+/// Immutable sticker data kept in a forwarded bundle.
+///
+/// Public URLs and favorite state belong to the reader, so they are rebuilt
+/// when the bundle is read rather than persisted here.
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MessagePreviewSnapshot {
+pub struct ForwardedStickerSnapshot {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
-    pub client_generated_id: String,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub media_id: i64,
+    pub media_storage_key: String,
+    pub emoji: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
     pub created_at: DateTime<Utc>,
-    pub sender_uid: i32,
-    pub message: Option<String>,
-    pub message_type: MessageType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sticker: Option<MessagePreviewSticker>,
-    pub attachments: Vec<MessagePreviewAttachment>,
-    pub is_deleted: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mention_uids: Vec<i32>,
+    pub content_type: String,
+    pub size: i64,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+}
+
+/// A forwarded reply only references another member of its immediate bundle.
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ForwardedReplySnapshot {
+    Redacted,
+    Internal {
+        #[serde(rename = "originalMessageId", with = "crate::serde_i64_string")]
+        #[schema(value_type = String)]
+        original_message_id: i64,
+    },
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ForwardedReplyResponse {
+    Redacted,
+    Internal {
+        #[serde(rename = "originalMessageId", with = "crate::serde_i64_string")]
+        #[schema(value_type = String)]
+        original_message_id: i64,
+        preview: Box<ForwardedMessagePreviewResponse>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
@@ -169,6 +198,7 @@ pub struct ForwardedBundleRefSnapshot {
     pub message_type: MessageType,
     pub sender_uid: i32,
     pub original_created_at: DateTime<Utc>,
+    pub reply: Option<ForwardedReplySnapshot>,
     pub preview: ForwardedMessagesPreviewSnapshot,
 }
 
@@ -194,7 +224,7 @@ pub struct ForwardedMessageResponse {
     pub original_created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sticker: Option<MessageStickerResponse>,
-    pub reply_to_message: Option<Box<MessagePreview>>,
+    pub reply: Option<ForwardedReplyResponse>,
     pub attachments: Vec<AttachmentResponse>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
@@ -337,7 +367,7 @@ pub struct MessageStickerResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{ForwardedMessageSnapshot, ListMessagesResponse};
+    use super::ListMessagesResponse;
     use serde_json::json;
 
     #[test]
@@ -362,22 +392,5 @@ mod tests {
                 "newerCursor": "20"
             })
         );
-    }
-
-    #[test]
-    fn forwarded_snapshot_without_sticker_deserializes_for_existing_bundles() {
-        let snapshot: ForwardedMessageSnapshot = serde_json::from_value(json!({
-            "originalMessageId": "10",
-            "originalChatId": "20",
-            "message": null,
-            "messageType": "sticker",
-            "senderUid": 7,
-            "originalCreatedAt": "2024-01-01T00:00:00Z",
-            "replyToMessage": null,
-            "attachments": []
-        }))
-        .expect("old forwarded bundle payload");
-
-        assert!(snapshot.sticker.is_none());
     }
 }

@@ -184,7 +184,7 @@ async fn get_saved_forwarded_messages(
     let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
 
     Ok(Json(forwarded_messages_response_from_items(
-        conn, &state, total, items,
+        conn, &state, uid, total, items,
     )))
 }
 
@@ -216,7 +216,7 @@ async fn get_saved_forwarded_bundle_messages(
     let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
 
     Ok(Json(forwarded_messages_response_from_items(
-        conn, &state, total, items,
+        conn, &state, uid, total, items,
     )))
 }
 
