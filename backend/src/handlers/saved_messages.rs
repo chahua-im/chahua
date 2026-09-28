@@ -7,10 +7,19 @@ use serde::Deserialize;
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
-    dto::saved_messages::{ListSavedMessagesResponse, SavedMessageResponse},
+    dto::{
+        messages::ForwardedMessagesResponse,
+        saved_messages::{ListSavedMessagesResponse, SavedMessageResponse},
+    },
     errors::AppError,
     extractors::DbConn,
-    services::saved_messages as saved_messages_svc,
+    services::{
+        messages::{
+            deserialize_forwarded_bundle_payload, forwarded_messages_response_from_items,
+            load_target_forwarded_bundle_from_root,
+        },
+        saved_messages as saved_messages_svc,
+    },
     utils::auth::CurrentUid,
     AppState,
 };
@@ -38,6 +47,14 @@ struct MessageIdPath {
 struct SavedMessageIdPath {
     #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
     saved_message_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SavedForwardedBundleMessagesPath {
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    saved_message_id: i64,
+    #[serde(deserialize_with = "crate::serde_i64_string::deserialize")]
+    bundle_id: i64,
 }
 
 #[utoipa::path(
@@ -144,18 +161,71 @@ async fn delete_saved_message_by_id(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/{saved_message_id}/forwarded-messages",
+    tag = "saved_messages",
+    params(
+        ("saved_message_id" = String, Path, description = "Saved forwarded message ID"),
+    ),
+    responses(
+        (status = OK, description = "Saved forwarded message details", body = ForwardedMessagesResponse),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn get_saved_forwarded_messages(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(SavedMessageIdPath { saved_message_id }): Path<SavedMessageIdPath>,
+    mut conn: DbConn,
+) -> Result<Json<ForwardedMessagesResponse>, AppError> {
+    let conn = &mut *conn;
+    let bundle = saved_messages_svc::load_saved_forwarded_bundle(conn, uid, saved_message_id)?;
+    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
+
+    Ok(Json(forwarded_messages_response_from_items(
+        conn, &state, total, items,
+    )))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{saved_message_id}/forwarded-bundles/{bundle_id}/messages",
+    tag = "saved_messages",
+    params(
+        ("saved_message_id" = String, Path, description = "Saved root forwarded message ID"),
+        ("bundle_id" = String, Path, description = "Reachable forwarded bundle ID"),
+    ),
+    responses(
+        (status = OK, description = "Saved forwarded message details", body = ForwardedMessagesResponse),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn get_saved_forwarded_bundle_messages(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(SavedForwardedBundleMessagesPath {
+        saved_message_id,
+        bundle_id,
+    }): Path<SavedForwardedBundleMessagesPath>,
+    mut conn: DbConn,
+) -> Result<Json<ForwardedMessagesResponse>, AppError> {
+    let conn = &mut *conn;
+    let root_bundle = saved_messages_svc::load_saved_forwarded_bundle(conn, uid, saved_message_id)?;
+    let bundle = load_target_forwarded_bundle_from_root(conn, root_bundle, bundle_id)?;
+    let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
+
+    Ok(Json(forwarded_messages_response_from_items(
+        conn, &state, total, items,
+    )))
+}
+
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(list_saved_messages))
         .routes(utoipa_axum::routes!(put_saved_message))
         .routes(utoipa_axum::routes!(delete_saved_message_by_original))
         .routes(utoipa_axum::routes!(delete_saved_message_by_id))
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn router_constructs_without_route_conflicts() {
-        let _router = super::router();
-    }
+        .routes(utoipa_axum::routes!(get_saved_forwarded_messages))
+        .routes(utoipa_axum::routes!(get_saved_forwarded_bundle_messages))
 }

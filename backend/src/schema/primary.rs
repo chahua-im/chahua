@@ -123,6 +123,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    forwarded_bundles (id) {
+        id -> Int8,
+        created_by_uid -> Int4,
+        created_at -> Timestamptz,
+        item_count -> Int4,
+        payload -> Jsonb,
+        child_bundle_ids -> Array<Int8>,
+        preview -> Jsonb,
+    }
+}
+
+diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::FriendRequestStatus;
 
@@ -148,17 +160,6 @@ diesel::table! {
         uid2_shares_presence -> Nullable<Bool>,
         uid1_shares_read_receipts -> Nullable<Bool>,
         uid2_shares_read_receipts -> Nullable<Bool>,
-    }
-}
-
-diesel::table! {
-    forwarded_bundles (id) {
-        id -> Int8,
-        created_by_uid -> Int4,
-        created_at -> Timestamptz,
-        item_count -> Int4,
-        payload -> Jsonb,
-        child_bundle_ids -> Array<Int8>,
     }
 }
 
@@ -390,6 +391,7 @@ diesel::table! {
         snapshot_mentions -> Jsonb,
         snapshot_sender -> Jsonb,
         snapshot_chat -> Jsonb,
+        forwarded_bundle_id -> Nullable<Int8>,
     }
 }
 
@@ -520,6 +522,7 @@ diesel::joinable!(messages -> stickers (sticker_id));
 diesel::joinable!(pinned_messages -> groups (chat_id));
 diesel::joinable!(policy_assignments -> policies (policy_id));
 diesel::joinable!(policy_permissions -> policies (policy_id));
+diesel::joinable!(saved_messages -> forwarded_bundles (forwarded_bundle_id));
 diesel::joinable!(saved_messages -> groups (original_chat_id));
 diesel::joinable!(sticker_pack_stickers -> sticker_packs (pack_id));
 diesel::joinable!(sticker_pack_stickers -> stickers (sticker_id));
@@ -536,9 +539,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     attachments,
     blocks,
     clients,
+    forwarded_bundles,
     friend_requests,
     friendships,
-    forwarded_bundles,
     group_membership,
     groups,
     invites,

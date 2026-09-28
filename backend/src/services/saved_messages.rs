@@ -14,10 +14,11 @@ use crate::{
     },
     errors::AppError,
     models::{
-        Attachment, Group, Media, Message, MessageType, NewSavedMessage, SavedMessage, Sticker,
+        Attachment, ForwardedBundle, Group, Media, Message, MessageType, NewSavedMessage,
+        SavedMessage, Sticker,
     },
     schema::{attachments, group_membership, groups, media, messages, saved_messages, stickers},
-    services::messages::{build_mention_info, extract_mention_uids},
+    services::messages::{build_mention_info, extract_mention_uids, load_forwarded_bundle},
     services::{avatars::AvatarService, media::MediaStore, user::lookup_user_profiles},
     utils::{ids, ids::IdGen, pagination::validate_limit},
 };
@@ -113,6 +114,7 @@ pub fn saved_message_row_to_response(
         saved_at: row.saved_at,
         message: row.snapshot_message,
         message_type: row.snapshot_message_type,
+        forwarded_bundle_id: row.forwarded_bundle_id,
         attachments,
         sticker,
         mentions,
@@ -186,6 +188,26 @@ fn load_existing_saved_message(
         .first::<SavedMessage>(conn)
         .optional()
         .map_err(Into::into)
+}
+
+pub fn load_saved_forwarded_bundle(
+    conn: &mut PgConnection,
+    uid: i32,
+    saved_message_id: i64,
+) -> Result<ForwardedBundle, AppError> {
+    let bundle_id = saved_messages::table
+        .filter(
+            saved_messages::id
+                .eq(saved_message_id)
+                .and(saved_messages::uid.eq(uid)),
+        )
+        .select(saved_messages::forwarded_bundle_id)
+        .first::<Option<i64>>(conn)
+        .optional()?
+        .flatten()
+        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
+
+    load_forwarded_bundle(conn, bundle_id)
 }
 
 fn load_attachment_snapshots(
@@ -350,6 +372,15 @@ fn build_new_saved_message(
         snapshot_mentions: snapshot_json(&snapshots.mentions, "mentions")?,
         snapshot_sender: snapshot_json(&snapshots.sender, "sender")?,
         snapshot_chat: snapshot_json(&snapshots.chat, "chat")?,
+        forwarded_bundle_id: if matches!(&message.message_type, MessageType::Forwarded) {
+            Some(
+                message
+                    .forwarded_bundle_id
+                    .ok_or(AppError::NotFound("Forwarded messages not found"))?,
+            )
+        } else {
+            None
+        },
     })
 }
 
@@ -599,6 +630,7 @@ mod tests {
                 "name": "General",
                 "avatarUrl": null
             }),
+            forwarded_bundle_id: None,
         }
     }
 

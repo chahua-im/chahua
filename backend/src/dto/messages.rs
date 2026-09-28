@@ -86,6 +86,8 @@ pub struct ForwardedMessagePreviewResponse {
     pub sender: User,
     pub original_created_at: DateTime<Utc>,
     pub attachments: Vec<MessagePreviewAttachment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sticker: Option<MessagePreviewSticker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<MentionInfo>,
 }
@@ -124,6 +126,8 @@ pub struct ForwardedMessageSnapshot {
     pub message_type: MessageType,
     pub sender_uid: i32,
     pub original_created_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticker: Option<MessageStickerResponse>,
     pub reply_to_message: Option<Box<MessagePreviewSnapshot>>,
     pub attachments: Vec<AttachmentSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -188,6 +192,8 @@ pub struct ForwardedMessageResponse {
     pub message_type: MessageType,
     pub sender: User,
     pub original_created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sticker: Option<MessageStickerResponse>,
     pub reply_to_message: Option<Box<MessagePreview>>,
     pub attachments: Vec<AttachmentResponse>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -301,7 +307,7 @@ pub struct MessagePreview {
     pub mentions: Vec<MentionInfo>,
 }
 
-#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[schema(as = MessageStickerMediaResponse)]
 #[serde(rename_all = "camelCase")]
 pub struct StickerMediaResponse {
@@ -315,7 +321,7 @@ pub struct StickerMediaResponse {
     pub height: Option<i32>,
 }
 
-#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageStickerResponse {
     #[serde(with = "crate::serde_i64_string")]
@@ -331,7 +337,7 @@ pub struct MessageStickerResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::ListMessagesResponse;
+    use super::{ForwardedMessageSnapshot, ListMessagesResponse};
     use serde_json::json;
 
     #[test]
@@ -356,5 +362,22 @@ mod tests {
                 "newerCursor": "20"
             })
         );
+    }
+
+    #[test]
+    fn forwarded_snapshot_without_sticker_deserializes_for_existing_bundles() {
+        let snapshot: ForwardedMessageSnapshot = serde_json::from_value(json!({
+            "originalMessageId": "10",
+            "originalChatId": "20",
+            "message": null,
+            "messageType": "sticker",
+            "senderUid": 7,
+            "originalCreatedAt": "2024-01-01T00:00:00Z",
+            "replyToMessage": null,
+            "attachments": []
+        }))
+        .expect("old forwarded bundle payload");
+
+        assert!(snapshot.sticker.is_none());
     }
 }

@@ -26,7 +26,6 @@ use crate::{
         filter_authoritative_hits_with_counts, validate_search_query, MessageSearchMetrics,
         MessageSearchSort, SearchCandidateDropCounts,
     },
-
     utils::{
         auth::{CurrentUid, Principal},
         ids,
@@ -38,25 +37,14 @@ use crate::{
 use super::{ChatIdPath, CreateMessageBody, ForwardMessagesBody};
 use crate::services::authz::Action as AuthzAction;
 use crate::services::messages::{
-    attach_metadata,
-    attachment_position,
-    authorize_message_send,
-    build_forwarded_bundle_payload_item,
-    deserialize_forwarded_bundle_payload,
-    extract_mention_uids,
-    forwarded_messages_response_from_items,
-    load_attachment_storage_keys,
-    load_forwarded_bundle,
-    load_forwarded_bundle_preview_items,
-    load_target_forwarded_bundle_from_root,
-    load_username_by_uid,
-    parse_attachment_ids,
-    send_prepared_message,
-    sync_edited_message_mentions,
-    validate_message,
+    attach_metadata, attachment_position, authorize_message_send,
+    build_forwarded_bundle_payload_item, build_forwarded_preview_payload,
+    deserialize_forwarded_bundle_payload, extract_mention_uids,
+    forwarded_messages_response_from_items, load_attachment_storage_keys, load_forwarded_bundle,
+    load_forwarded_bundle_preview_items, load_target_forwarded_bundle_from_root,
+    load_username_by_uid, parse_attachment_ids, send_prepared_message,
+    sync_edited_message_mentions, validate_message, PreparedMessageSend, SendMessageOutcome,
     FORWARDED_PREVIEW_LIMIT,
-    PreparedMessageSend,
-    SendMessageOutcome,
 };
 use crate::services::social;
 #[derive(serde::Deserialize, utoipa::IntoParams)]
@@ -194,8 +182,6 @@ fn search_offset(offset: Option<usize>, limit: usize) -> Result<usize, AppError>
 fn search_next_offset(next_offset: Option<usize>, limit: usize) -> Option<usize> {
     next_offset.filter(|offset| offset.saturating_add(limit) <= MAX_SEARCH_RESULT_WINDOW)
 }
-
-
 
 /// GET /chats/:chat_id/messages — List messages in a chat (cursor-based).
 #[utoipa::path(
@@ -731,7 +717,7 @@ async fn forward_messages(
     }
 
     check_membership(conn, body.source_chat_id, uid)?;
-    check_membership(conn, dest_chat_id, uid)?;
+    authorize_message_send(conn, dest_chat_id, None, uid)?;
 
     let messages: Vec<Message> = messages::table
         .filter(
@@ -784,10 +770,11 @@ async fn forward_messages(
     let forwarded_message_snapshots_payload = serde_json::to_value(&forwarded_payload_items)
         .map_err(|_| AppError::Internal("Failed to serialize forwarded messages"))?;
     let forwarded_message_count = forwarded_payload_items.len();
-    let forwarded_preview_items = forwarded_payload_items
+    let forwarded_preview_items: Vec<ForwardedBundlePayloadItem> = forwarded_payload_items
         .into_iter()
         .take(FORWARDED_PREVIEW_LIMIT)
         .collect();
+    let forwarded_preview_payload = build_forwarded_preview_payload(&forwarded_preview_items)?;
 
     diesel::sql_query("BEGIN").execute(conn)?;
     let tx_result: Result<_, AppError> = async {
@@ -802,6 +789,7 @@ async fn forward_messages(
             created_at: now,
             item_count: forwarded_message_count as i32,
             payload: forwarded_message_snapshots_payload,
+            preview: forwarded_preview_payload,
             child_bundle_ids: forwarded_source_bundle_ids.clone(),
         };
         diesel::insert_into(forwarded_bundles::table)
@@ -914,7 +902,6 @@ async fn get_forwarded_messages(
 
     let bundle_id = message
         .forwarded_bundle_id
-
         .ok_or(AppError::NotFound("Forwarded messages not found"))?;
     // tracing::debug!(
     //     chat_id,
@@ -1565,12 +1552,10 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_forwarded_bundle_ref_snapshot, build_forwarded_message_snapshot, search_limit,
-        search_next_offset, search_offset, validate_client_message_type,
-        validate_forwardable_source_message_type, validate_forwarded_source_bundle_can_be_nested,
-        FORWARDED_MESSAGE_TYPE_FORBIDDEN, INVITE_MESSAGE_FORWARD_FORBIDDEN,
-        INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW, SYSTEM_MESSAGE_FORWARD_FORBIDDEN,
-        SYSTEM_MESSAGE_TYPE_FORBIDDEN,
+        search_limit, search_next_offset, search_offset, validate_client_message_type,
+        validate_forwardable_source_message_type, FORWARDED_MESSAGE_TYPE_FORBIDDEN,
+        INVITE_MESSAGE_FORWARD_FORBIDDEN, INVITE_MESSAGE_TYPE_FORBIDDEN, MAX_SEARCH_RESULT_WINDOW,
+        SYSTEM_MESSAGE_FORWARD_FORBIDDEN, SYSTEM_MESSAGE_TYPE_FORBIDDEN,
     };
     use crate::dto::{
         attachments::AttachmentResponse,
@@ -1581,8 +1566,11 @@ mod tests {
         users::User,
     };
     use crate::errors::AppError;
-    use crate::models::{ForwardedBundle, Message, MessageType, TranscodeStatus};
+    use crate::models::{Message, MessageType, TranscodeStatus};
     use crate::services::message_search::MessageSearchSort;
+    use crate::services::messages::{
+        build_forwarded_bundle_ref_snapshot, build_forwarded_message_snapshot,
+    };
     use chrono::Utc;
     use std::collections::HashMap;
 
@@ -1606,17 +1594,6 @@ mod tests {
             is_published: true,
             transcode_status: TranscodeStatus::None,
             forwarded_bundle_id,
-        }
-    }
-
-    fn forwarded_bundle(id: i64, child_bundle_ids: Vec<i64>) -> ForwardedBundle {
-        ForwardedBundle {
-            id,
-            created_by_uid: 7,
-            created_at: Utc::now(),
-            item_count: 0,
-            payload: serde_json::Value::Array(Vec::new()),
-            child_bundle_ids,
         }
     }
 
@@ -1760,6 +1737,7 @@ mod tests {
             original_chat_id: 20,
             message: Some("hello".to_string()),
             message_type: MessageType::Text,
+            sticker: None,
             sender_uid: 7,
             original_created_at: Utc::now(),
             reply_to_message: None,
@@ -1785,6 +1763,7 @@ mod tests {
                     original_chat_id: 20,
                     message: Some(format!("inner {id}")),
                     message_type: MessageType::Text,
+                    sticker: None,
                     sender_uid: 8,
                     original_created_at: Utc::now(),
                     reply_to_message: None,
@@ -1823,20 +1802,6 @@ mod tests {
 
         assert!(
             matches!(err, AppError::BadRequest(msg) if msg == "Forwarded source message has no bundle")
-        );
-    }
-
-    #[test]
-    fn forwarded_source_bundle_with_children_cannot_be_nested_again() {
-        let flat_bundle = forwarded_bundle(100, Vec::new());
-        assert!(validate_forwarded_source_bundle_can_be_nested(&flat_bundle).is_ok());
-
-        let nested_bundle = forwarded_bundle(101, vec![200]);
-        let err = validate_forwarded_source_bundle_can_be_nested(&nested_bundle)
-            .expect_err("bundle with children should be rejected");
-
-        assert!(
-            matches!(err, AppError::BadRequest(msg) if msg == "Forwarded messages cannot include nested forwarded messages")
         );
     }
 

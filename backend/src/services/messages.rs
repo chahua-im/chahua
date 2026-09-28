@@ -11,12 +11,12 @@ use crate::{
     dto::{
         attachments::{AttachmentResponse, AttachmentSnapshot},
         messages::{
-            ForwardedBundlePayloadItem, ForwardedBundleRefSnapshot, ForwardedMessagePreviewResponse,
-            ForwardedMessageResponse, ForwardedMessageSnapshot, ForwardedMessagesPreviewResponse,
-            ForwardedMessagesPreviewSnapshot, ForwardedMessagesResponse, MessagePreviewSnapshot,
-            MentionInfo, MessagePreview, MessagePreviewAttachment, MessagePreviewSticker,
-            MessageResponse, MessageStickerResponse, ReactionReactor, ReactionSummary,
-            StickerMediaResponse, ThreadInfo,
+            ForwardedBundlePayloadItem, ForwardedBundleRefSnapshot,
+            ForwardedMessagePreviewResponse, ForwardedMessageResponse, ForwardedMessageSnapshot,
+            ForwardedMessagesPreviewResponse, ForwardedMessagesPreviewSnapshot,
+            ForwardedMessagesResponse, MentionInfo, MessagePreview, MessagePreviewAttachment,
+            MessagePreviewSnapshot, MessagePreviewSticker, MessageResponse, MessageStickerResponse,
+            ReactionReactor, ReactionSummary, StickerMediaResponse, ThreadInfo,
         },
         users::User,
         ws::{NotificationPayload, NotificationType, ServerWsMessage},
@@ -509,7 +509,7 @@ pub fn redact_deleted_message_response(response: &mut MessageResponse) {
 
 pub const FORWARDED_PREVIEW_LIMIT: usize = 3;
 
-fn build_forwarded_message_snapshot(
+pub(crate) fn build_forwarded_message_snapshot(
     response: MessageResponse,
     attachment_storage_keys: &std::collections::HashMap<i64, String>,
 ) -> Result<ForwardedMessageSnapshot, AppError> {
@@ -545,6 +545,11 @@ fn build_forwarded_message_snapshot(
             .reply_to_message
             .map(|preview| Box::new(build_forwarded_message_preview_snapshot(*preview))),
         attachments,
+        sticker: response.sticker.map(|mut sticker| {
+            // Favorite state belongs to the viewer, not to the immutable bundle.
+            sticker.is_favorited = false;
+            sticker
+        }),
         mention_uids: response
             .mentions
             .into_iter()
@@ -553,7 +558,7 @@ fn build_forwarded_message_snapshot(
     })
 }
 
-fn build_forwarded_bundle_ref_snapshot(
+pub(crate) fn build_forwarded_bundle_ref_snapshot(
     source_message: &Message,
     referenced_bundle_previews: &std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>,
 ) -> Result<ForwardedBundleRefSnapshot, AppError> {
@@ -599,7 +604,30 @@ pub fn build_forwarded_bundle_payload_item(
     })
 }
 
+pub(crate) fn build_forwarded_preview_payload(
+    items: &[ForwardedBundlePayloadItem],
+) -> Result<serde_json::Value, AppError> {
+    serde_json::to_value(&items[..items.len().min(FORWARDED_PREVIEW_LIMIT)])
+        .map_err(|_| AppError::Internal("Failed to serialize forwarded message preview"))
+}
+
 pub fn load_forwarded_bundle_preview_items(
+    conn: &mut PgConnection,
+    bundle_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>, AppError> {
+    let previews = load_forwarded_bundle_previews(conn, bundle_ids)?;
+    if previews
+        .values()
+        .any(|preview| preview.contains_forwarded_messages)
+    {
+        return Err(AppError::BadRequest(
+            "Forwarded messages cannot include nested forwarded messages",
+        ));
+    }
+    Ok(previews)
+}
+
+fn load_forwarded_bundle_previews(
     conn: &mut PgConnection,
     bundle_ids: &[i64],
 ) -> Result<std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>, AppError> {
@@ -607,9 +635,14 @@ pub fn load_forwarded_bundle_preview_items(
         return Ok(std::collections::HashMap::new());
     }
 
-    let bundles: Vec<ForwardedBundle> = forwarded_bundles::table
+    let bundles: Vec<(i64, i32, Vec<i64>, serde_json::Value)> = forwarded_bundles::table
         .filter(forwarded_bundles::id.eq_any(bundle_ids))
-        .select(ForwardedBundle::as_select())
+        .select((
+            forwarded_bundles::id,
+            forwarded_bundles::item_count,
+            forwarded_bundles::child_bundle_ids,
+            forwarded_bundles::preview,
+        ))
         .load(conn)?;
 
     if bundles.len() != bundle_ids.len() {
@@ -618,33 +651,21 @@ pub fn load_forwarded_bundle_preview_items(
 
     bundles
         .into_iter()
-        .map(|bundle| {
-            validate_forwarded_source_bundle_can_be_nested(&bundle)?;
-            let total = bundle.item_count as usize;
-            let messages: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(bundle.payload)
-                .map_err(|_| AppError::Internal("Failed to deserialize forwarded messages"))?;
+        .map(|(id, item_count, child_bundle_ids, preview)| {
+            let messages: Vec<ForwardedBundlePayloadItem> = serde_json::from_value(preview)
+                .map_err(|_| {
+                    AppError::Internal("Failed to deserialize forwarded message preview")
+                })?;
             Ok((
-                bundle.id,
+                id,
                 ForwardedMessagesPreviewSnapshot {
-                    total,
-                    contains_forwarded_messages: !bundle.child_bundle_ids.is_empty(),
-                    messages: messages.into_iter().take(FORWARDED_PREVIEW_LIMIT).collect(),
+                    total: item_count as usize,
+                    contains_forwarded_messages: !child_bundle_ids.is_empty(),
+                    messages,
                 },
             ))
         })
         .collect()
-}
-
-fn validate_forwarded_source_bundle_can_be_nested(
-    bundle: &ForwardedBundle,
-) -> Result<(), AppError> {
-    if bundle.child_bundle_ids.is_empty() {
-        return Ok(());
-    }
-
-    Err(AppError::BadRequest(
-        "Forwarded messages cannot include nested forwarded messages",
-    ))
 }
 
 pub fn load_forwarded_bundle(
@@ -748,7 +769,6 @@ pub fn load_attachment_storage_keys(
         .collect())
 }
 
-
 pub fn collect_forwarded_bundle_item_uids(
     items: &[ForwardedBundlePayloadItem],
     uids: &mut std::collections::HashSet<i32>,
@@ -758,6 +778,10 @@ pub fn collect_forwarded_bundle_item_uids(
             ForwardedBundlePayloadItem::MessageSnapshot { snapshot } => {
                 uids.insert(snapshot.sender_uid);
                 uids.extend(snapshot.mention_uids.iter().copied());
+                if let Some(reply_preview) = &snapshot.reply_to_message {
+                    uids.insert(reply_preview.sender_uid);
+                    uids.extend(reply_preview.mention_uids.iter().copied());
+                }
             }
             ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => {
                 uids.insert(bundle_ref.sender_uid);
@@ -777,28 +801,53 @@ fn forwarded_messages_preview_response(
     ForwardedMessagesPreviewResponse {
         total,
         contains_forwarded_messages,
-        messages: items.iter().map(|item| match item {
-            ForwardedBundlePayloadItem::MessageSnapshot { snapshot } => ForwardedMessagePreviewResponse {
-                original_message_id: snapshot.original_message_id,
-                original_chat_id: snapshot.original_chat_id,
-                message: snapshot.message.clone(),
-                message_type: snapshot.message_type.clone(),
-                sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
-                original_created_at: snapshot.original_created_at,
-                attachments: snapshot.attachments.iter().map(|attachment| MessagePreviewAttachment { kind: attachment.kind.clone() }).collect(),
-                mentions: snapshot.mention_uids.iter().copied().map(|uid| build_mention_info(uid, user_avatars, user_profiles)).collect(),
-            },
-            ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => ForwardedMessagePreviewResponse {
-                original_message_id: bundle_ref.original_message_id,
-                original_chat_id: bundle_ref.original_chat_id,
-                message: bundle_ref.message.clone(),
-                message_type: bundle_ref.message_type.clone(),
-                sender: build_sender(bundle_ref.sender_uid, user_avatars, user_profiles),
-                original_created_at: bundle_ref.original_created_at,
-                attachments: Vec::new(),
-                mentions: Vec::new(),
-            },
-        }).collect(),
+        messages: items
+            .iter()
+            .map(|item| match item {
+                ForwardedBundlePayloadItem::MessageSnapshot { snapshot } => {
+                    ForwardedMessagePreviewResponse {
+                        original_message_id: snapshot.original_message_id,
+                        original_chat_id: snapshot.original_chat_id,
+                        message: snapshot.message.clone(),
+                        message_type: snapshot.message_type.clone(),
+                        sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
+                        original_created_at: snapshot.original_created_at,
+                        attachments: snapshot
+                            .attachments
+                            .iter()
+                            .map(|attachment| MessagePreviewAttachment {
+                                kind: attachment.kind.clone(),
+                            })
+                            .collect(),
+                        sticker: snapshot
+                            .sticker
+                            .as_ref()
+                            .map(|sticker| MessagePreviewSticker {
+                                emoji: sticker.emoji.clone(),
+                            }),
+                        mentions: snapshot
+                            .mention_uids
+                            .iter()
+                            .copied()
+                            .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+                            .collect(),
+                    }
+                }
+                ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => {
+                    ForwardedMessagePreviewResponse {
+                        original_message_id: bundle_ref.original_message_id,
+                        original_chat_id: bundle_ref.original_chat_id,
+                        message: bundle_ref.message.clone(),
+                        message_type: bundle_ref.message_type.clone(),
+                        sender: build_sender(bundle_ref.sender_uid, user_avatars, user_profiles),
+                        original_created_at: bundle_ref.original_created_at,
+                        attachments: Vec::new(),
+                        sticker: None,
+                        mentions: Vec::new(),
+                    }
+                }
+            })
+            .collect(),
     }
 }
 
@@ -816,27 +865,69 @@ pub fn forwarded_bundle_item_response(
             message_type: snapshot.message_type,
             sender: build_sender(snapshot.sender_uid, user_avatars, user_profiles),
             original_created_at: snapshot.original_created_at,
-            reply_to_message: snapshot.reply_to_message.map(|preview| Box::new(MessagePreview {
-                id: preview.id, client_generated_id: preview.client_generated_id, created_at: preview.created_at,
-                sender: build_sender(preview.sender_uid, user_avatars, user_profiles), message: preview.message,
-                message_type: preview.message_type, sticker: preview.sticker, attachments: preview.attachments,
-                is_deleted: preview.is_deleted, mentions: preview.mention_uids.into_iter().map(|uid| build_mention_info(uid, user_avatars, user_profiles)).collect(),
-            })),
-            attachments: snapshot.attachments.into_iter().map(|attachment| AttachmentResponse {
-                id: attachment.id, url: state.media.public_url(&attachment.external_reference), kind: attachment.kind,
-                size: attachment.size, file_name: attachment.file_name, width: attachment.width, height: attachment.height,
-            }).collect(),
-            mentions: snapshot.mention_uids.into_iter().map(|uid| build_mention_info(uid, user_avatars, user_profiles)).collect(),
+            sticker: snapshot.sticker.map(|mut sticker| {
+                // Bundles never retain viewer-specific favorite state.
+                sticker.is_favorited = false;
+                sticker
+            }),
+            reply_to_message: snapshot.reply_to_message.map(|preview| {
+                Box::new(MessagePreview {
+                    id: preview.id,
+                    client_generated_id: preview.client_generated_id,
+                    created_at: preview.created_at,
+                    sender: build_sender(preview.sender_uid, user_avatars, user_profiles),
+                    message: preview.message,
+                    message_type: preview.message_type,
+                    sticker: preview.sticker,
+                    attachments: preview.attachments,
+                    is_deleted: preview.is_deleted,
+                    mentions: preview
+                        .mention_uids
+                        .into_iter()
+                        .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+                        .collect(),
+                })
+            }),
+            attachments: snapshot
+                .attachments
+                .into_iter()
+                .map(|attachment| AttachmentResponse {
+                    id: attachment.id,
+                    url: state.media.public_url(&attachment.external_reference),
+                    kind: attachment.kind,
+                    size: attachment.size,
+                    file_name: attachment.file_name,
+                    width: attachment.width,
+                    height: attachment.height,
+                })
+                .collect(),
+            mentions: snapshot
+                .mention_uids
+                .into_iter()
+                .map(|uid| build_mention_info(uid, user_avatars, user_profiles))
+                .collect(),
             forwarded_bundle_id: None,
             forwarded_preview: None,
         },
         ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref } => ForwardedMessageResponse {
-            original_message_id: bundle_ref.original_message_id, original_chat_id: bundle_ref.original_chat_id,
-            message: bundle_ref.message, message_type: bundle_ref.message_type,
-            sender: build_sender(bundle_ref.sender_uid, user_avatars, user_profiles), original_created_at: bundle_ref.original_created_at,
-            reply_to_message: None, attachments: Vec::new(), mentions: Vec::new(),
+            original_message_id: bundle_ref.original_message_id,
+            original_chat_id: bundle_ref.original_chat_id,
+            message: bundle_ref.message,
+            message_type: bundle_ref.message_type,
+            sender: build_sender(bundle_ref.sender_uid, user_avatars, user_profiles),
+            original_created_at: bundle_ref.original_created_at,
+            reply_to_message: None,
+            attachments: Vec::new(),
+            mentions: Vec::new(),
+            sticker: None,
             forwarded_bundle_id: Some(bundle_ref.forwarded_bundle_id),
-            forwarded_preview: Some(forwarded_messages_preview_response(bundle_ref.preview.total, bundle_ref.preview.contains_forwarded_messages, &bundle_ref.preview.messages, user_avatars, user_profiles)),
+            forwarded_preview: Some(forwarded_messages_preview_response(
+                bundle_ref.preview.total,
+                bundle_ref.preview.contains_forwarded_messages,
+                &bundle_ref.preview.messages,
+                user_avatars,
+                user_profiles,
+            )),
         },
     }
 }
@@ -920,10 +1011,15 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
             MessageType::Sticker => Some(sticker_preview_text(
                 response.sticker.as_ref().map(|s| s.emoji.as_str()),
             )),
-            MessageType::File => Some(attachment_preview_text(
-                response.attachments.first().map(|attachment| attachment.kind.as_str()),
-            )
-            .to_string()),
+            MessageType::File => Some(
+                attachment_preview_text(
+                    response
+                        .attachments
+                        .first()
+                        .map(|attachment| attachment.kind.as_str()),
+                )
+                .to_string(),
+            ),
             MessageType::Forwarded => Some("forwarded messages".to_string()),
             _ => rendered_message.clone(),
         }
@@ -1532,8 +1628,8 @@ pub async fn send_prepared_message(
             state,
             &mut response,
             prepared.forwarded_preview_total,
-        prepared.forwarded_preview_contains_forwarded_messages,
-        prepared.forwarded_preview_items.as_deref(),
+            prepared.forwarded_preview_contains_forwarded_messages,
+            prepared.forwarded_preview_items.as_deref(),
         );
         return Ok(SendMessageOutcome::Duplicate(Box::new(response)));
     };
@@ -1662,9 +1758,11 @@ fn apply_forwarded_preview_override(
     contains_forwarded_messages: Option<bool>,
     items: Option<&[ForwardedBundlePayloadItem]>,
 ) {
-    let (Some(total), Some(contains_forwarded_messages), Some(items)) =
-        (total, contains_forwarded_messages, items.filter(|_| !response.is_deleted))
-    else {
+    let (Some(total), Some(contains_forwarded_messages), Some(items)) = (
+        total,
+        contains_forwarded_messages,
+        items.filter(|_| !response.is_deleted),
+    ) else {
         return;
     };
     let mut forwarded_uids = std::collections::HashSet::new();
@@ -1758,6 +1856,18 @@ pub async fn attach_metadata(
             })
         })
     });
+    let forwarded_bundle_ids: Vec<i64> = messages_to_process
+        .iter()
+        .filter(|message| {
+            message.deleted_at.is_none() && matches!(&message.message_type, MessageType::Forwarded)
+        })
+        .filter_map(|message| message.forwarded_bundle_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    // Forwarded-list metadata needs only immutable preview JSON, not bundle payloads.
+    let forwarded_bundle_previews =
+        load_forwarded_bundle_previews(conn, &forwarded_bundle_ids).unwrap_or_default();
 
     let mut avatar_uids = std::collections::HashSet::new();
     for m in &messages_to_process {
@@ -1765,6 +1875,9 @@ pub async fn attach_metadata(
     }
     for reply_msg in reply_messages_map.values() {
         avatar_uids.insert(reply_msg.sender_uid);
+    }
+    for preview in forwarded_bundle_previews.values() {
+        collect_forwarded_bundle_item_uids(&preview.messages, &mut avatar_uids);
     }
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
     let mut user_avatars = avatars.lookup(&target_uids);
@@ -2044,6 +2157,23 @@ pub async fn attach_metadata(
         }
 
         let is_deleted = m.deleted_at.is_some();
+        let forwarded_bundle_id =
+            if !is_deleted && matches!(&m.message_type, MessageType::Forwarded) {
+                m.forwarded_bundle_id
+            } else {
+                None
+            };
+        let forwarded_preview = forwarded_bundle_id
+            .and_then(|bundle_id| forwarded_bundle_previews.get(&bundle_id))
+            .map(|preview| {
+                forwarded_messages_preview_response(
+                    preview.total,
+                    preview.contains_forwarded_messages,
+                    &preview.messages,
+                    &user_avatars,
+                    &user_profiles,
+                )
+            });
         let mut response = MessageResponse {
             id: m.id,
             message: if is_deleted { None } else { m.message },
@@ -2086,8 +2216,8 @@ pub async fn attach_metadata(
                     .map(|&uid| build_mention_info(uid, &user_avatars, &user_profiles))
                     .collect()
             },
-            forwarded_bundle_id: None,
-            forwarded_preview: None,
+            forwarded_bundle_id,
+            forwarded_preview,
         };
         redact_deleted_message_response(&mut response);
         responses.push(response);
@@ -2102,12 +2232,14 @@ pub async fn attach_metadata(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_message_preview, build_push_preview_bundle, extract_mention_uids,
+        build_forwarded_message_snapshot, build_forwarded_preview_payload, build_message_preview,
+        build_push_preview_bundle, collect_forwarded_bundle_item_uids, extract_mention_uids,
         message_is_visible_in_thread_scope, parse_attachment_ids, redact_deleted_message_response,
         render_mentions_as_text, sticker_preview_text, validate_message, validate_message_shape,
-        MentionInfo, MessagePreview, MessagePreviewAttachment, MessagePreviewInput,
-        MessageResponse, MessageSendAuthorizationError, MessageStickerResponse,
-        PreparedMessageSend, ReactionSummary, StickerMediaResponse,
+        ForwardedBundlePayloadItem, ForwardedMessageSnapshot, MentionInfo, MessagePreview,
+        MessagePreviewAttachment, MessagePreviewInput, MessagePreviewSnapshot, MessageResponse,
+        MessageSendAuthorizationError, MessageStickerResponse, PreparedMessageSend,
+        ReactionSummary, StickerMediaResponse,
     };
     use crate::{
         dto::{attachments::AttachmentResponse, users::User},
@@ -2234,6 +2366,7 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
+            forwarded_bundle_id: None,
         };
         patch(&mut message);
         message
@@ -2278,6 +2411,90 @@ mod tests {
                 height: Some(128),
             },
         }
+    }
+
+    #[test]
+    fn forwarded_snapshot_keeps_sticker_media_without_viewer_favorite_state() {
+        let snapshot = build_forwarded_message_snapshot(
+            MessageResponse {
+                id: 10,
+                message: None,
+                message_type: MessageType::Sticker,
+                sticker: Some(MessageStickerResponse {
+                    is_favorited: true,
+                    ..sticker_response()
+                }),
+                reply_root_id: None,
+                client_generated_id: "client-10".to_string(),
+                sender: sender(),
+                chat_id: 20,
+                created_at: Utc::now(),
+                is_edited: false,
+                is_deleted: false,
+                has_attachments: false,
+                thread_info: None,
+                reply_to_message: None,
+                attachments: Vec::new(),
+                reactions: Vec::new(),
+                mentions: Vec::new(),
+                forwarded_bundle_id: None,
+                forwarded_preview: None,
+            },
+            &HashMap::new(),
+        )
+        .expect("sticker snapshot");
+
+        let sticker = snapshot.sticker.expect("sticker is retained");
+        assert!(!sticker.is_favorited);
+        assert_eq!(sticker.media.url, "https://example.com/sticker.webp");
+    }
+
+    #[test]
+    fn forwarded_preview_payload_is_limited_and_collector_includes_reply_people() {
+        let item = |id, sender_uid, mention_uids, reply_to_message| {
+            ForwardedBundlePayloadItem::MessageSnapshot {
+                snapshot: ForwardedMessageSnapshot {
+                    original_message_id: id,
+                    original_chat_id: 20,
+                    message: Some(format!("message {id}")),
+                    message_type: MessageType::Text,
+                    sender_uid,
+                    original_created_at: Utc::now(),
+                    sticker: None,
+                    reply_to_message,
+                    attachments: Vec::new(),
+                    mention_uids,
+                },
+            }
+        };
+        let reply = Box::new(MessagePreviewSnapshot {
+            id: 4,
+            client_generated_id: "client-4".to_string(),
+            created_at: Utc::now(),
+            sender_uid: 8,
+            message: Some("reply".to_string()),
+            message_type: MessageType::Text,
+            sticker: None,
+            attachments: Vec::new(),
+            is_deleted: false,
+            mention_uids: vec![9],
+        });
+        let items = vec![
+            item(1, 6, vec![7], Some(reply)),
+            item(2, 10, Vec::new(), None),
+            item(3, 11, Vec::new(), None),
+            item(4, 12, Vec::new(), None),
+        ];
+
+        let preview = build_forwarded_preview_payload(&items).expect("preview serialization");
+        assert_eq!(
+            preview.as_array().map(Vec::len),
+            Some(super::FORWARDED_PREVIEW_LIMIT)
+        );
+
+        let mut uids = std::collections::HashSet::new();
+        collect_forwarded_bundle_item_uids(&items, &mut uids);
+        assert!(uids.is_superset(&std::collections::HashSet::from([6, 7, 8, 9])));
     }
     #[test]
     fn parse_attachment_ids_preserves_request_order() {
@@ -2456,7 +2673,6 @@ mod tests {
             sticker_id: None,
             is_published: true,
             transcode_status: TranscodeStatus::None,
-            forwarded_messages_payload: None,
             forwarded_bundle_id: None,
         }
     }
@@ -2465,6 +2681,7 @@ mod tests {
         PreparedMessageSend {
             chat_id: 42,
             forwarded_bundle_id: None,
+            forwarded_preview_total: None,
             forwarded_preview_contains_forwarded_messages: None,
             forwarded_preview_items: None,
             sender_uid: 7,
@@ -2476,7 +2693,6 @@ mod tests {
             client_generated_id: "client-1".to_string(),
             attachment_ids: vec![10, 11],
             publish_immediately: true,
-            forwarded_messages_payload: None,
         }
     }
 
@@ -2506,62 +2722,14 @@ mod tests {
             attachments: Vec::new(),
             reactions: Vec::new(),
             mentions: Vec::new(),
+            forwarded_bundle_id: None,
+            forwarded_preview: None,
         };
 
         let preview = build_push_preview_bundle(&response);
         assert_eq!(preview.body_preview, Some("sent an invite".to_string()));
         assert_eq!(preview.message_preview.message_type, MessageType::Invite);
         assert_eq!(preview.message_preview.message, None);
-    }
-
-    #[test]
-    fn build_push_preview_bundle_uses_attachment_label_for_file_messages() {
-        let response = super::MessageResponse {
-            id: 1,
-            message: Some("look at this".to_string()),
-            message_type: MessageType::File,
-            sticker: None,
-            reply_root_id: None,
-            client_generated_id: "cgid".to_string(),
-            sender: User {
-                uid: 7,
-                avatar_url: None,
-                name: Some("Alice".to_string()),
-                gender: 0,
-                user_group: None,
-            },
-            chat_id: 10,
-            created_at: Utc::now(),
-            is_edited: false,
-            is_deleted: false,
-            has_attachments: true,
-            thread_info: None,
-            reply_to_message: None,
-            attachments: vec![AttachmentResponse {
-                id: 1,
-                url: "https://example.com/image.png".to_string(),
-                kind: "image/png".to_string(),
-                size: 123,
-                file_name: "image.png".to_string(),
-                width: Some(100),
-                height: Some(100),
-            }],
-            reactions: Vec::new(),
-            mentions: Vec::new(),
-        };
-
-        let preview = build_push_preview_bundle(&response);
-        assert_eq!(preview.body_preview, Some("[Attachment]".to_string()));
-        assert_eq!(
-            preview.message_preview.message,
-            Some("look at this".to_string())
-        );
-        assert_eq!(
-            preview.message_preview.attachments,
-            vec![MessagePreviewAttachment {
-                kind: "image/png".to_string()
-            }]
-        );
     }
 
     #[test]
@@ -2653,6 +2821,8 @@ mod tests {
                 gender: 0,
                 user_group: None,
             }],
+            forwarded_bundle_id: None,
+            forwarded_preview: None,
         };
 
         redact_deleted_message_response(&mut response);

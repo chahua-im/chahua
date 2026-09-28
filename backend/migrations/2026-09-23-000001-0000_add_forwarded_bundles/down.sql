@@ -1,3 +1,4 @@
+ALTER TABLE saved_messages DROP COLUMN forwarded_bundle_id;
 ALTER TABLE messages DROP COLUMN forwarded_bundle_id;
 DROP TABLE forwarded_bundles;
 

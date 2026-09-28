@@ -78,6 +78,9 @@ pub struct SavedMessageResponse {
     pub saved_at: DateTime<Utc>,
     pub message: Option<String>,
     pub message_type: MessageType,
+    #[serde(with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub forwarded_bundle_id: Option<i64>,
     pub attachments: Vec<SavedAttachmentSnapshot>,
     pub sticker: Option<SavedStickerSnapshot>,
     pub mentions: Vec<MentionInfo>,

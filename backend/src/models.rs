@@ -544,6 +544,7 @@ pub struct ForwardedBundle {
     pub item_count: i32,
     pub payload: serde_json::Value,
     pub child_bundle_ids: Vec<i64>,
+    pub preview: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -555,6 +556,7 @@ pub struct NewForwardedBundle {
     pub item_count: i32,
     pub payload: serde_json::Value,
     pub child_bundle_ids: Vec<i64>,
+    pub preview: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]
@@ -669,6 +671,7 @@ pub struct SavedMessage {
     pub snapshot_mentions: serde_json::Value,
     pub snapshot_sender: serde_json::Value,
     pub snapshot_chat: serde_json::Value,
+    pub forwarded_bundle_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -690,6 +693,7 @@ pub struct NewSavedMessage {
     pub snapshot_mentions: serde_json::Value,
     pub snapshot_sender: serde_json::Value,
     pub snapshot_chat: serde_json::Value,
+    pub forwarded_bundle_id: Option<i64>,
 }
 
 #[cfg(test)]
