@@ -91,6 +91,11 @@ That means:
 - the backend does not localize APNs message text
 - the iOS app must ship the notification string resources referenced by the APNs payload
 
+Message alerts include `aps.category: "chahua"`, matching the Apple client's text-input Reply
+action. Keep this identifier synchronized with the client; without it, the system does not show
+quick reply. Replies use the existing authenticated message API and the `wettyChat` routing
+envelope, including `threadRootId` when present.
+
 ### 6. Operational notes
 
 - One APNs signing key can be used for both sandbox and production.
