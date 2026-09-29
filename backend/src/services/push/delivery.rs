@@ -439,6 +439,8 @@ impl ApnsSender {
             .set_loc_key(notification.body_loc_key)
             .set_loc_args(&body_loc_args)
             .set_badge(notification.badge)
+            // Matches the Apple client's text-input Reply notification category.
+            .set_category("chahua")
             .set_sound("default");
         let options = NotificationOptions {
             apns_push_type: Some(ApnsPushType::Alert),
