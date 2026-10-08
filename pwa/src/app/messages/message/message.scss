@@ -15,10 +15,10 @@
   grid-template-columns: 44px fit-content(min(85%, calc(100% - 74px))) auto;
   align-items: end;
   justify-content: start;
-  padding: 4px 7px;
+  padding: 2px 7px;
 
   &.group-start {
-    padding-top: 8px;
+    padding-top: 4px;
   }
 
   > :not(.avatar-slot, .reply-button, .swipe-reply) {

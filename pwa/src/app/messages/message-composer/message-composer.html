@@ -1,8 +1,18 @@
 @if (suggestions().length) {
   <ion-list class="mentions">
     @for (member of suggestions(); track member.uid; let i = $index) {
-      <ion-item [button]="true" [class.selected]="i === selectedSuggestion()" (click)="mention(member)">
-        <ion-label>{{ member.username || member.uid }}</ion-label>
+      <ion-item
+        [button]="true"
+        [detail]="false"
+        lines="none"
+        [class.selected]="i === selectedSuggestion()"
+        (click)="mention(member)">
+        <app-chat-avatar
+          slot="start"
+          aria-hidden="true"
+          [size]="28"
+          [entry]="{ avatar: member.avatarUrl, title: member.username || member.uid.toString() }" />
+        <ion-label class="ion-text-nowrap">{{ member.username || member.uid }}</ion-label>
       </ion-item>
     }
   </ion-list>

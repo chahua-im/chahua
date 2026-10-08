@@ -38,6 +38,7 @@ import {
   type SnowflakeID,
   type StickerSummary,
 } from '../../../generated/models';
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { mayBeMediaFile } from '../media-processing/file-type';
 import type { MessageContent } from '../message/message';
 import { StickerPicker } from '../sticker-picker/sticker-picker';
@@ -64,6 +65,7 @@ enum Panel {
   styleUrl: './message-composer.scss',
   imports: [
     NgTemplateOutlet,
+    ChatAvatar,
     IonAlert,
     VoicePlayer,
     IonButton,
