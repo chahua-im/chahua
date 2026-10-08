@@ -87,6 +87,18 @@
   margin: 0;
 }
 
+.mentions ion-item {
+  --min-height: 44px;
+  --padding-start: 12px;
+  --inner-padding-end: 12px;
+  font-size: 14px;
+  text-align: start;
+}
+
+.mentions app-chat-avatar {
+  margin-inline-end: 8px;
+}
+
 .bar {
   display: flex;
   align-items: flex-end;
