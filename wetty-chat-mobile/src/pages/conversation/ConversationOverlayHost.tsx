@@ -5,12 +5,7 @@ import { UserProfileModal } from '@/components/chat/profiles/UserProfileModal';
 import { ReactionDetailsModal } from '@/components/chat/reactions/ReactionDetailsModal';
 import { StickerPreviewModal } from '@/components/chat/compose/StickerPreviewModal';
 import { PinListModal } from '@/components/chat/pins/PinListModal';
-
-interface OverlayMessageState {
-  message: MessageResponse;
-  sourceRect: DOMRect;
-  interactionPos?: { x: number; y: number };
-}
+import type { OverlayRequest } from './hooks/useMessageOverlayCoordinator';
 
 interface ConversationOverlayHostProps {
   chatId: string;
@@ -29,7 +24,7 @@ interface ConversationOverlayHostProps {
   onDismissPinList: () => void;
   onSelectPin: (messageId: string) => void;
   onSelectThread: (messageId: string) => void;
-  overlayMessage: OverlayMessageState | null;
+  overlayMessage: OverlayRequest | null;
   overlayActions: MessageOverlayAction[];
   quickReactionEmojis: string[];
   onReactionToggle: (message: MessageResponse, emoji: string, currentlyReacted: boolean) => void;
