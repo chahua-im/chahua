@@ -104,7 +104,9 @@ describe('useChatMessageSender', () => {
     root = createRoot(host);
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.mocked(sendMessage).mockResolvedValue(response(message({ id: 'server-1' })));
-    vi.mocked(markMessagesAsRead).mockResolvedValue(response({ lastReadMessageId: 'server-1', unreadCount: 0 }));
+    vi.mocked(markMessagesAsRead).mockResolvedValue(
+      response({ lastReadMessageId: 'server-1', unreadCount: 0, unreadMentions: 0 }),
+    );
   });
 
   afterEach(() => {

@@ -11,10 +11,9 @@ import {
   selectChatMeta,
   selectChatUnreadCount,
   selectIsChatMuted,
-  setChatLastReadMessageId,
   setChatMeta,
   setChatMutedUntil,
-  setChatUnreadCount,
+  setChatReadState,
 } from '@/store/chatsSlice';
 import type { RootState } from '@/store/index';
 import store from '@/store';
@@ -47,7 +46,9 @@ export interface UseChatMetadataResult {
   role: GroupRole | null;
   isAdmin: boolean;
   isMuted: boolean;
+  /** Chat-level read position; thread timelines keep theirs in threadsSlice. */
   lastReadMessageId: string | null;
+  /** Chat-level unread count; thread timelines keep theirs in threadsSlice. */
   unreadCount: number;
   metaLoading: boolean;
   kind: GroupKind | undefined;
@@ -105,8 +106,7 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
         if (currentReadComparableId != null) {
           if (responseComparableId == null || responseComparableId <= currentReadComparableId) return;
         }
-        dispatch(setChatLastReadMessageId({ chatId, lastReadMessageId: res.data.lastReadMessageId }));
-        dispatch(setChatUnreadCount({ chatId, unreadCount: res.data.unreadCount }));
+        dispatch(setChatReadState({ chatId, ...res.data }));
       })
       .catch(() => {});
 
@@ -122,7 +122,7 @@ export function useChatMetadata({ chatId, threadId }: UseChatMetadataArgs): UseC
     isAdmin: role === 'admin',
     isMuted,
     lastReadMessageId,
-    unreadCount: threadId ? 0 : unreadCount,
+    unreadCount,
     metaLoading,
     kind,
     isDm,

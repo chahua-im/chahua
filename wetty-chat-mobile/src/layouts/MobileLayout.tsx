@@ -30,8 +30,8 @@ import ComponentDemoPage from '@/pages/component-demo';
 import { safariSafeRouteAnimation } from '@/utils/navigationHistory';
 import { formatUnreadBadge } from '@/utils/unreadBadge';
 import { featureGatedList, isFeatureEnabled, whenFeature } from '@/features';
-import { selectChatsWithUnreadCount } from '@/store/chatsSlice';
-import { selectThreadsWithUnreadCount } from '@/store/threadsSlice';
+import { selectChatsWithUnreadCount, selectHasChatsWithUnreadMentions } from '@/store/chatsSlice';
+import { selectThreadsWithUnreadCount, selectHasThreadsWithUnreadMentions } from '@/store/threadsSlice';
 import { ARCHIVED_FRIEND_REQUESTS_PATH, CHAT_LIST_TABS } from '@/components/chat/lists/chatListTabs';
 import styles from './MobileLayout.module.scss';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -45,6 +45,9 @@ const MobileLayout: React.FC = () => {
   const unreadChatCount = useSelector(selectChatsWithUnreadCount);
   const unreadThreadCount = useSelector(selectThreadsWithUnreadCount);
   const totalUnreadCount = unreadChatCount + unreadThreadCount;
+  const chatsHaveMentions = useSelector(selectHasChatsWithUnreadMentions);
+  const threadsHaveMentions = useSelector(selectHasThreadsWithUnreadMentions);
+  const hasUnreadMentions = isFeatureEnabled('mentionNotifications') && (chatsHaveMentions || threadsHaveMentions);
   const isTabRoot = TAB_ROOT_PATHS.includes(location.pathname);
   const chatMatch = matchPath<{ id: string }>(location.pathname, { path: '/chats/chat/:id', exact: true });
   const threadMatch = matchPath<{ id: string; threadId: string }>(location.pathname, {
@@ -61,7 +64,11 @@ const MobileLayout: React.FC = () => {
         <IonLabel>
           <Trans>Chats</Trans>
         </IonLabel>
-        {totalUnreadCount > 0 && <IonBadge color="primary">{formatUnreadBadge(totalUnreadCount)}</IonBadge>}
+        {hasUnreadMentions ? (
+          <IonBadge color="primary">@</IonBadge>
+        ) : (
+          totalUnreadCount > 0 && <IonBadge color="primary">{formatUnreadBadge(totalUnreadCount)}</IonBadge>
+        )}
       </IonTabButton>,
       <IonTabButton tab="settings" href="/settings" key="settings">
         <IonIcon icon={settings} />
@@ -77,7 +84,7 @@ const MobileLayout: React.FC = () => {
         </IonTabButton>,
       ),
     ]);
-  }, [totalUnreadCount]);
+  }, [totalUnreadCount, hasUnreadMentions]);
 
   return (
     <IonTabs className={`${isTabRoot ? '' : styles.tabBarHidden}`}>
