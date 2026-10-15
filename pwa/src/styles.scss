@@ -9,7 +9,7 @@
 @import '@ionic/angular/css/padding.css';
 @import '@ionic/angular/css/text-alignment.css';
 
-@import '@ionic/angular/css/palettes/dark.system.css';
+@import '@ionic/angular/css/palettes/dark.class.css';
 
 :root {
   --ion-color-primary: #2b7acd;
@@ -348,10 +348,5 @@ ion-alert.notification-prompt {
 }
 
 .avatar-placeholder {
-  --avatar-background: var(--avatar-light);
-}
-@media (prefers-color-scheme: dark) {
-  .avatar-placeholder {
-    --avatar-background: var(--avatar-dark);
-  }
+  --avatar-background: light-dark(var(--avatar-light), var(--avatar-dark));
 }

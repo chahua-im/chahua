@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
+import { ColorMode } from './color-mode';
 import { Preferences } from './preferences';
 
 describe('Preferences', () => {
@@ -40,5 +41,19 @@ describe('Preferences', () => {
     for (const emoji of ['👍', '❤️', '😂', '😮', '😢', '🍵', '❤️']) preferences.rememberReaction(emoji);
     TestBed.resetTestingModule();
     expect(TestBed.inject(Preferences).recentReactions()).toEqual(['❤️', '🍵', '😢', '😮', '😂']);
+  });
+
+  it('follows the system color mode by default and persists an explicit choice', () => {
+    const preferences = TestBed.inject(Preferences);
+    expect(preferences.colorMode()).toBe(ColorMode.System);
+    preferences.setColorMode(ColorMode.Dark);
+    expect(localStorage.getItem('chahua.preferences.colorMode')).toBe('dark');
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).colorMode()).toBe(ColorMode.Dark);
+  });
+
+  it('falls back to the system color mode when the stored value is unknown', () => {
+    localStorage.setItem('chahua.preferences.colorMode', 'sepia');
+    expect(TestBed.inject(Preferences).colorMode()).toBe(ColorMode.System);
   });
 });

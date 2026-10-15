@@ -29,4 +29,21 @@
       </ion-toggle>
     </ion-item>
   </ion-list>
+  <ion-list [inset]="true">
+    <ion-list-header>颜色模式</ion-list-header>
+    <ion-radio-group [value]="preferences.colorMode()" (ionChange)="setColorMode($event.detail.value)">
+      <ion-item>
+        <ion-icon slot="start" [icon]="systemIcon" color="primary"></ion-icon>
+        <ion-radio [value]="ColorMode.System">跟随系统</ion-radio>
+      </ion-item>
+      <ion-item>
+        <ion-icon slot="start" [icon]="lightIcon" color="primary"></ion-icon>
+        <ion-radio [value]="ColorMode.Light">浅色</ion-radio>
+      </ion-item>
+      <ion-item lines="none">
+        <ion-icon slot="start" [icon]="darkIcon" color="primary"></ion-icon>
+        <ion-radio [value]="ColorMode.Dark">深色</ion-radio>
+      </ion-item>
+    </ion-radio-group>
+  </ion-list>
 </ion-content>

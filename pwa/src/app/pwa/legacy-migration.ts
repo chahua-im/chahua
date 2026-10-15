@@ -1,4 +1,5 @@
 import { Service } from '@angular/core';
+import { isColorMode } from '../settings/color-mode';
 import type { Draft } from '../conversations/draft-store';
 
 const DATABASE = 'wetty';
@@ -39,6 +40,8 @@ export class LegacyMigration {
       for (const name of ['showThreadsInMessages', 'showAllAvatars']) {
         if (typeof settings?.[name] === 'boolean') saveMissing(`chahua.preferences.${name}`, String(settings[name]));
       }
+      const colorMode = settings?.['colorMode'];
+      if (isColorMode(colorMode)) saveMissing('chahua.preferences.colorMode', colorMode);
       if (Array.isArray(settings?.['recentReactions'])) {
         saveMissing(
           'chahua.preferences.recentReactions',

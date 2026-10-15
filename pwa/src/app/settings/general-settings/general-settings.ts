@@ -7,13 +7,24 @@ import {
   IonIcon,
   IonItem,
   IonList,
+  IonListHeader,
+  IonRadio,
+  IonRadioGroup,
   IonTitle,
   IonToggle,
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
-import { chatbubblesOutline, chevronBackOutline, personCircleOutline } from 'ionicons/icons';
+import {
+  chatbubblesOutline,
+  chevronBackOutline,
+  contrastOutline,
+  moonOutline,
+  personCircleOutline,
+  sunnyOutline,
+} from 'ionicons/icons';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { ColorMode } from '../color-mode';
 import { Preferences } from '../preferences';
 
 @Component({
@@ -29,6 +40,9 @@ import { Preferences } from '../preferences';
     IonIcon,
     IonItem,
     IonList,
+    IonListHeader,
+    IonRadio,
+    IonRadioGroup,
     IonTitle,
     IonToggle,
     IonToolbar,
@@ -38,7 +52,15 @@ import { Preferences } from '../preferences';
 export class GeneralSettings {
   protected readonly preferences = inject(Preferences);
   protected readonly modals = inject(ModalController);
+  protected readonly ColorMode = ColorMode;
   protected readonly threadsIcon = chatbubblesOutline;
   protected readonly avatarsIcon = personCircleOutline;
+  protected readonly systemIcon = contrastOutline;
+  protected readonly lightIcon = sunnyOutline;
+  protected readonly darkIcon = moonOutline;
   protected readonly backIcon = chevronBackOutline;
+
+  protected setColorMode(value: ColorMode) {
+    this.preferences.setColorMode(value);
+  }
 }

@@ -44,7 +44,7 @@ describe('LegacyMigration', () => {
     await vi.waitFor(async () => expect(await indexedDB.databases()).toEqual([]));
   });
 
-  it('converts drafts and preferences before deleting the legacy database, preserving login and unsupported settings', async () => {
+  it('converts drafts and preferences before deleting the legacy database, preserving login and remaining settings', async () => {
     await legacy({
       jwt_token: token(7),
       settings: {
@@ -67,6 +67,7 @@ describe('LegacyMigration', () => {
     expect(localStorage.getItem('jwt_token')).toBe(token(7));
     expect(localStorage.getItem('chahua.preferences.showThreadsInMessages')).toBe('false');
     expect(localStorage.getItem('chahua.preferences.showAllAvatars')).toBe('true');
+    expect(localStorage.getItem('chahua.preferences.colorMode')).toBe('dark');
     expect(JSON.parse(localStorage.getItem('chahua.preferences.recentReactions')!)).toEqual([
       '❤️',
       '😂',

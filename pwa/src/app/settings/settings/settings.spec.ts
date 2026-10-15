@@ -13,6 +13,7 @@ import { testUser } from '../../api/testing';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
+import { ColorMode } from '../color-mode';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
 import { Preferences } from '../preferences';
 import { Settings } from './settings';
@@ -183,6 +184,22 @@ describe('Settings', () => {
     )!;
     done.click();
     expect(dismiss).toHaveBeenCalledOnce();
+  });
+
+  it('switches and persists the color mode from general settings', async () => {
+    await openPage('通用');
+    expect(Array.from(page.querySelectorAll('ion-radio')).map((radio) => radio.value)).toEqual([
+      ColorMode.System,
+      ColorMode.Light,
+      ColorMode.Dark,
+    ]);
+    const group: HTMLIonRadioGroupElement = page.querySelector('ion-radio-group')!;
+    group.value = ColorMode.Dark;
+    group.dispatchEvent(new CustomEvent('ionChange', { detail: { value: ColorMode.Dark } }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(TestBed.inject(Preferences).colorMode()).toBe(ColorMode.Dark);
+    expect(localStorage.getItem('chahua.preferences.colorMode')).toBe('dark');
   });
 
   it('loads all four modes, requires a nonblank question and saves its trimmed text', async () => {
