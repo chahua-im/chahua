@@ -96,7 +96,8 @@ export enum ThreadError {
 
 type ScrollPosition =
   | { type: PositionKind.Bottom }
-  | { type: PositionKind.Unread }
+  // Unread anchors on the divider captured on entry unless a messageId names the live unread start.
+  | { type: PositionKind.Unread; messageId?: SnowflakeID }
   | { type: PositionKind.Message; messageId: SnowflakeID }
   | { type: PositionKind.Anchor; messageId: SnowflakeID; offset: number };
 
@@ -349,6 +350,11 @@ export class ConversationPage {
     const rows = this.rows();
     return this.messageElements().filter((_, index) => !!rows[index]?.confirmed);
   });
+  /** Message node by id; messageElements stays index-aligned with messages. */
+  private messageElement(messageId: SnowflakeID) {
+    const index = this.messages().findIndex((message) => message.message().id === messageId);
+    return this.messageElements()[index]?.nativeElement;
+  }
   private readonly peerUid = computed(() => this.chatInfo.get(this.id())?.peer?.uid);
   protected readonly relationship = computed(() => {
     const uid = this.peerUid();
@@ -367,14 +373,18 @@ export class ConversationPage {
   private retryAction = () => {};
   private readonly position = signal<ScrollPosition | undefined>(undefined);
   private readonly entryReadId = signal<SnowflakeID | undefined>(undefined);
-  protected readonly firstUnreadId = computed(() => {
-    const boundary = this.entryReadId();
+  private firstUnreadAfter(boundary?: SnowflakeID) {
+    if (!boundary) return undefined;
     const uid = this.session.user()?.uid;
-    return boundary
-      ? this.rows().find(({ confirmed }) => confirmed && confirmed.id > boundary && confirmed.sender.uid !== uid)
-          ?.confirmed?.id
-      : undefined;
-  });
+    return this.rows().find(({ confirmed }) => confirmed && confirmed.id > boundary && confirmed.sender.uid !== uid)
+      ?.confirmed?.id;
+  }
+  /** Divider on screen: the read position captured on entry, so it does not follow reading progress. */
+  protected readonly firstUnreadId = computed(() => this.firstUnreadAfter(this.entryReadId()));
+  /** Live unread start: the first unread after the shared read state's current boundary. */
+  private readonly unreadStartId = computed(() =>
+    this.firstUnreadAfter(this.chatInfo.unreadBoundary(this.id(), this.threadId())),
+  );
   private readonly positioned = linkedSignal({ source: this.entryKey, computation: () => false });
   protected readonly atBottom = signal(true);
   private readonly returnMessageIds = linkedSignal({
@@ -714,6 +724,9 @@ export class ConversationPage {
   protected async navigateDown() {
     if (this.pendingNavigation()) return;
     const entry = this.entryKey();
+    // A return point is an explicit destination, so the unread start only applies below an empty stack.
+    if (!this.returnMessageIds().length && (await this.revealUnreadBoundary())) return;
+    if (entry !== this.entryKey()) return;
     const messageId = this.returnMessageIds().at(-1);
     this.navigatingDown.set(true);
     try {
@@ -727,6 +740,24 @@ export class ConversationPage {
     } finally {
       if (entry === this.entryKey()) this.navigatingDown.set(false);
     }
+  }
+
+  /**
+   * Stop at the live unread start before going on to the latest messages. Anchoring on the shared read
+   * state instead of the divider on screen keeps the step in sync with the unread badge.
+   * Returns false when the press should keep its normal destination.
+   */
+  private async revealUnreadBoundary() {
+    const unread = this.unreadStartId();
+    if (!unread) return false;
+    const entry = this.entryKey();
+    const element = this.messageElement(unread);
+    const scroll = await this.content()?.getScrollElement();
+    if (!element || !scroll || !this.isCurrent(entry)) return false;
+    // Unread already on screen counts as reached; the press would not move at all otherwise.
+    if (element.getBoundingClientRect().top <= scroll.getBoundingClientRect().bottom) return false;
+    this.position.set({ type: PositionKind.Unread, messageId: unread });
+    return true;
   }
 
   protected retry() {
@@ -769,14 +800,15 @@ export class ConversationPage {
       if (position.type === PositionKind.Bottom) {
         scroll.scrollTop = scroll.scrollHeight;
       } else if (position.type === PositionKind.Unread) {
-        const separator = this.unreadSeparator()?.nativeElement;
-        if (separator) {
-          const top = scroll.scrollTop + separator.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+        const element = position.messageId
+          ? this.messageElement(position.messageId)
+          : this.unreadSeparator()?.nativeElement;
+        if (element) {
+          const top = scroll.scrollTop + element.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
           scroll.scrollTop = Math.max(0, Math.min(top, scroll.scrollHeight - scroll.clientHeight));
         }
       } else {
-        const index = this.messages().findIndex((message) => message.message().id === position.messageId);
-        const element = this.messageElements()[index]?.nativeElement;
+        const element = this.messageElement(position.messageId);
         if (element) {
           const rect = element.getBoundingClientRect();
           const edge = position.type === PositionKind.Anchor ? rect.bottom : rect.top;
