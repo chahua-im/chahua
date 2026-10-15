@@ -105,8 +105,8 @@ function normalizePreviewMessage({
 }
 
 export function truncatePreview(preview: string, maxLength = MESSAGE_PREVIEW_MAX): string {
-  const truncated = preview.slice(0, maxLength);
-  return preview.length > maxLength ? `${truncated}...`.slice(0, maxLength) + '…' : truncated;
+  if (preview.length <= maxLength) return preview;
+  return preview.slice(0, maxLength - 1) + '…';
 }
 
 export function resolvePreviewLocale(locale?: string | null): keyof typeof PREVIEW_LABELS_BY_LOCALE {

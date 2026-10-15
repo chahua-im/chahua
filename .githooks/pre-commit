@@ -15,9 +15,14 @@ backend_rust_files=()
 mobile_format_files=()
 
 for file in "${staged_files[@]}"; do
+    # Patterns are duplicated because `*` does not cross `/`: one for files directly under the
+    # directory, one for files in any nested subdirectory.
     case "$file" in
-        backend/*.rs)
+        backend/*.rs|backend/*/*.rs)
             backend_rust_files+=("${file#backend/}")
+            ;;
+        wetty-chat-mobile/src/*/*.js|wetty-chat-mobile/src/*/*.jsx|wetty-chat-mobile/src/*/*.ts|wetty-chat-mobile/src/*/*.tsx|wetty-chat-mobile/src/*/*.json|wetty-chat-mobile/src/*/*.scss|wetty-chat-mobile/src/*/*.css)
+            mobile_format_files+=("${file#wetty-chat-mobile/}")
             ;;
         wetty-chat-mobile/src/*.js|wetty-chat-mobile/src/*.jsx|wetty-chat-mobile/src/*.ts|wetty-chat-mobile/src/*.tsx|wetty-chat-mobile/src/*.json|wetty-chat-mobile/src/*.scss|wetty-chat-mobile/src/*.css)
             mobile_format_files+=("${file#wetty-chat-mobile/}")

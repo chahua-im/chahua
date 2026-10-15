@@ -15,8 +15,8 @@ bugs as well, you should explain what the problem is & what the proposed fix is 
 ## Project Layout
 
 ### Frontend
-Frontend is located in `wetty-chat-mobile` directory. It is a Progressive Web Applicaiton (PWA)
-When working on frontend reference @wetty-chat-mobile/AGENTS.md
+Frontend is located in `wetty-chat-mobile` directory. It is a Progressive Web Application (PWA)
+When working on frontend load `wetty-chat-mobile/AGENTS.md`
 
 ### Backend
 Backend is a Rust + Axum project located in `backend` directory.

@@ -51,7 +51,12 @@ DATABASE_URL=postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat
 
 This repo includes a shared Git pre-commit hook at `.githooks/pre-commit`.
 
-It runs:
+It checks the formatting of **staged files only**:
+
+- `cargo fmt --check` for staged `backend/**/*.rs`
+- `npx prettier --check` for staged `wetty-chat-mobile/src/**` files (`.js` `.jsx` `.ts` `.tsx` `.json` `.scss` `.css`)
+
+To fix everything the hook complains about:
 
 - `cargo fmt` in `backend/`
 - `npm run format` in `wetty-chat-mobile/`
