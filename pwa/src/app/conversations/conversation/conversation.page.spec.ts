@@ -793,6 +793,90 @@ describe('ConversationPage', () => {
     expect(component['returnMessageIds']()).toEqual([]);
   });
 
+  async function openUnreadHistory() {
+    const opening = component['conversation'].open(encodeId('100'));
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      messages: [100, 101, 102].map((id) => ({
+        ...wireMessage,
+        id: String(id),
+        clientGeneratedId: `unread-${id}`,
+        ...(id === 100 ? {} : { sender: otherSender }),
+      })),
+      newerCursor: '102',
+    });
+    await opening;
+    await fixture.whenStable();
+  }
+
+  /** Places message 101 at offsetTop inside a viewport spanning 0..500. */
+  function mockUnreadStartAt(offsetTop: number) {
+    Object.defineProperties(scroll, { scrollHeight: { value: 2000 }, clientHeight: { value: 500 } });
+    scroll.scrollTop = 0;
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 500));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('data-message-id') === '101'
+        ? new DOMRect(0, offsetTop, 300, 60)
+        : new DOMRect(0, 0, 300, 0);
+    });
+  }
+
+  it('stops at the live unread start before reaching the latest messages', async () => {
+    const data = TestBed.inject(ChatStore);
+    data.acceptChats([{ ...testChat, unreadCount: 2, lastReadMessageId: encodeId('100') }], data.snapshot());
+    await openUnreadHistory();
+    mockUnreadStartAt(900);
+    expect(component['unreadStartId']()).toBe(encodeId('101'));
+    await component['navigateDown']();
+    await component['positionAndRead']();
+    expect(scroll.scrollTop).toBe(900);
+    expect(component['navigatingDown']()).toBe(false);
+    http.expectNone(() => true);
+  });
+
+  it('keeps going to the latest messages when the unread start is already on screen', async () => {
+    const data = TestBed.inject(ChatStore);
+    data.acceptChats([{ ...testChat, unreadCount: 2, lastReadMessageId: encodeId('100') }], data.snapshot());
+    await openUnreadHistory();
+    mockUnreadStartAt(100);
+    const navigating = component['navigateDown']();
+    await vi.waitFor(() =>
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [{ ...wireMessage }] }),
+    );
+    await navigating;
+    expect(component['conversation'].page()?.messages).toEqual([testMessage]);
+  });
+
+  it('ignores the frozen divider once the unread messages have been read', async () => {
+    const data = TestBed.inject(ChatStore);
+    await openUnreadHistory();
+    component['entryReadId'].set(encodeId('100'));
+    data.acceptChats([{ ...testChat, unreadCount: 0, lastReadMessageId: encodeId('102') }], data.snapshot());
+    expect(component['firstUnreadId']()).toBe(encodeId('101'));
+    expect(component['unreadStartId']()).toBeUndefined();
+    const navigating = component['navigateDown']();
+    await vi.waitFor(() =>
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [{ ...wireMessage }] }),
+    );
+    await navigating;
+    expect(component['conversation'].page()?.messages).toEqual([testMessage]);
+  });
+
+  it('returns through a reply jump before stopping at the unread start', async () => {
+    const data = TestBed.inject(ChatStore);
+    data.acceptChats([{ ...testChat, unreadCount: 2, lastReadMessageId: encodeId('100') }], data.snapshot());
+    await openUnreadHistory();
+    mockUnreadStartAt(900);
+    component['returnMessageIds'].set([encodeId('300')]);
+    const navigating = component['navigateDown']();
+    await vi.waitFor(() =>
+      http
+        .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`)
+        .flush({ messages: [{ ...wireMessage, id: '300' }] }),
+    );
+    await navigating;
+    expect(component['returnMessageIds']()).toEqual([]);
+  });
+
   it('refreshes an offscreen conversation count on incoming messages without jumping down', async () => {
     const data = TestBed.inject(ChatStore);
     component['atBottom'].set(false);

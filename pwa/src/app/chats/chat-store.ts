@@ -346,6 +346,15 @@ export class ChatStore {
     return read?.state.unreadCount ?? 0;
   }
 
+  /**
+   * Last read message before the current unread messages; undefined when nothing is unread.
+   * Shares its source and dirty tolerance with unreadCount so navigation can use it mid-refresh.
+   */
+  unreadBoundary(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
+    return read?.state.unreadCount ? read.state.lastReadMessageId : undefined;
+  }
+
   invalidateReads(ids?: ReadonlySet<SnowflakeID>) {
     const version = ++this.version;
     this.readStates.update(
