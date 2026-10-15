@@ -11,7 +11,10 @@
   min-height: var(--app-item-height);
   padding: 8px var(--message-padding-inline);
   background: transparent;
-  color: var(--thread-color, var(--ion-color-primary-shade));
+  color: light-dark(
+    var(--thread-color, var(--ion-color-primary-shade)),
+    var(--thread-color, var(--ion-color-primary-tint))
+  );
   text-align: start;
   font-size: var(--app-font-compact);
   line-height: var(--app-line-compact);
@@ -27,9 +30,4 @@
 ion-icon {
   flex-shrink: 0;
   font-size: 18px;
-}
-@media (prefers-color-scheme: dark) {
-  .thread-entry {
-    color: var(--thread-color, var(--ion-color-primary-tint));
-  }
 }

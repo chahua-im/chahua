@@ -12,6 +12,7 @@ import { App } from './app/app/app';
 import { provideChahuaBaseUrl } from './generated/endpoints/chahua.base-url';
 import { authInterceptor } from './app/api/auth.interceptor';
 import { jsonInterceptor } from './app/api/json.interceptor';
+import { Appearance } from './app/settings/appearance';
 
 // https://stackoverflow.com/a/2117523/2800218
 if (isDevMode() && typeof crypto.randomUUID !== 'function')
@@ -30,6 +31,7 @@ bootstrapApplication(App, {
       updateViaCache: 'none',
     }),
     provideAppInitializer(() => {
+      inject(Appearance);
       inject(AppUpdates);
       return inject(LegacyMigration).run();
     }),

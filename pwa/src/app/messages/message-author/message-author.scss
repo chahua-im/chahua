@@ -15,7 +15,10 @@
   color: var(--sender-color);
 }
 .sender-group {
-  background: var(--group-light, rgba(var(--ion-text-color-rgb), 0.25));
+  background: light-dark(
+    var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)),
+    var(--group-dark, var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)))
+  );
   color: var(--ion-color-primary-contrast);
   padding: 0 5px;
   border-radius: 2px;
@@ -36,9 +39,4 @@
 }
 :host(.own) .sender-group {
   background: rgba(var(--ion-color-primary-contrast-rgb), 0.25);
-}
-@media (prefers-color-scheme: dark) {
-  :host(:not(.own)) .sender-group {
-    background: var(--group-dark, var(--group-light, rgba(var(--ion-text-color-rgb), 0.25)));
-  }
 }

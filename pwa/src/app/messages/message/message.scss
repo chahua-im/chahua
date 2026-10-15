@@ -4,8 +4,8 @@
   touch-action: pan-y pinch-zoom;
   --message-padding-inline: 11px;
   --message-padding-block: 8px;
-  --sender-color: var(--sender-light);
-  --reply-color: var(--reply-light);
+  --sender-color: light-dark(var(--sender-light), var(--sender-dark));
+  --reply-color: light-dark(var(--reply-light), var(--reply-dark));
 }
 
 .chat-row {
@@ -283,13 +283,6 @@
 
 .chat-row:hover .reply-button {
   opacity: 1;
-}
-
-@media (prefers-color-scheme: dark) {
-  :host {
-    --sender-color: var(--sender-dark);
-    --reply-color: var(--reply-dark);
-  }
 }
 
 .chat-row.dragging {
