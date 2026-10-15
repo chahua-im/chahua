@@ -21,6 +21,7 @@ use crate::schema::{self, group_membership, groups};
 use crate::services::user::{
     lookup_user_profiles, parse_user_search_query, search_group_member_uids, UserSearchMode,
 };
+use crate::services::user_settings;
 use crate::utils::{auth::CurrentUid, pagination::validate_limit};
 use crate::{AppState, MAX_MEMBERS_LIMIT};
 
@@ -267,19 +268,25 @@ async fn post_add_member(
         .optional()?
         .flatten();
     let now = Utc::now();
-    let new_membership = NewGroupMembership {
-        chat_id,
-        uid: body.uid,
-        role: role.clone(),
-        joined_at: now,
-        join_reason: GroupJoinReason::DirectInvite,
-        join_reason_extra: Some(json!({ "inviter_uid": uid })),
-        last_read_message_id: last_message_id,
-    };
 
-    diesel::insert_into(group_membership::table)
-        .values(&new_membership)
-        .execute(conn)?;
+    conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        user_settings::seed_membership_reaction_views(conn, body.uid, chat_id)?;
+        let new_membership = NewGroupMembership {
+            chat_id,
+            uid: body.uid,
+            role: role.clone(),
+            joined_at: now,
+            join_reason: GroupJoinReason::DirectInvite,
+            join_reason_extra: Some(json!({ "inviter_uid": uid })),
+            last_read_message_id: last_message_id,
+        };
+
+        diesel::insert_into(group_membership::table)
+            .values(&new_membership)
+            .execute(conn)?;
+
+        Ok(())
+    })?;
 
     let target_username = profile
         .and_then(|p| p.username.clone())
