@@ -10,6 +10,7 @@ import { MessageDelivery } from '../message-delivery';
 import { MessageStatus } from '../message-status/message-status';
 import { type AttachmentUpload, UploadStatus } from '../upload';
 import { UploadProgress } from '../upload-progress/upload-progress';
+import { type VoiceDock } from '../voice-player/voice-playback';
 import { VoicePlayer } from '../voice-player/voice-player';
 
 import { albumLayout, canCrop } from './album-layout';
@@ -17,7 +18,8 @@ import { attachmentKind, MediaKind } from './media-kind';
 
 type Attachment = MessageResponse['attachments'][number];
 type Sticker = NonNullable<MessageResponse['sticker']>;
-export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'createdAt'> & {
+export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'createdAt' | 'sender' | 'chatId'> & {
+  id?: SnowflakeID;
   attachments: readonly (Pick<Attachment, 'url' | 'kind' | 'fileName' | 'size' | 'width' | 'height'> &
     Partial<Pick<Attachment, 'id'>>)[];
   sticker?: Pick<Sticker, 'id' | 'emoji' | 'name'> & {
@@ -49,6 +51,11 @@ export class MessageAttachments {
   readonly overlayTime = input(false);
   readonly delivery = input<MessageDelivery>();
   readonly uploads = input<readonly AttachmentUpload[]>([]);
+  /** Confirmed messages hand their identity to the voice player so the docked bar can label and locate them. */
+  protected readonly dock = computed<VoiceDock | undefined>(() => {
+    const { id, chatId, sender, createdAt } = this.message();
+    return id ? { messageId: id, chatId, label: sender.name ?? String(sender.uid), createdAt } : undefined;
+  });
   protected readonly MediaKind = MediaKind;
   protected readonly canCrop = canCrop;
   protected readonly items = computed(() => {

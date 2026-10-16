@@ -28,6 +28,7 @@ describe('MessageAttachments', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ providers: [provideRouter([])] });
     disconnect.mockClear();
+    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     vi.stubGlobal(
       'ResizeObserver',
       class {

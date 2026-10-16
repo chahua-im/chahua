@@ -224,6 +224,7 @@
   .bubble {
     --thread-color: var(--ion-color-primary-contrast);
     --voice-color: var(--ion-color-primary-contrast);
+    --voice-wave-color: rgba(var(--ion-color-primary-contrast-rgb), 0.35);
     --voice-play-color: var(--ion-color-primary-shade);
     background: var(--ion-color-primary-shade);
     color: var(--ion-color-primary-contrast);

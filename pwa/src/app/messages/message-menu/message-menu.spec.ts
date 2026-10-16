@@ -125,6 +125,7 @@ describe('MessageMenu', () => {
 
   function openQueued(
     message: MessageContent = {
+      chatId: testChat.id,
       messageType: MessageType.text,
       message: '待发送的文字',
       sender: { ...testMessage.sender, uid: testMessage.sender.uid + 1 },
@@ -175,6 +176,7 @@ describe('MessageMenu', () => {
     [MessageType.file, ['复制', '撤回']],
   ])('limits queued %s actions to its supported content', (messageType, expected) => {
     openQueued({
+      chatId: testChat.id,
       messageType,
       message: '文件说明',
       sender: testMessage.sender,

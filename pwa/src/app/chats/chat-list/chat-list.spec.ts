@@ -5,7 +5,11 @@ import { provideRouter, Router } from '@angular/router';
 import { IonPopover, NavController } from '@ionic/angular';
 import { beforeAll, afterAll, vi } from 'vitest';
 import { Connection } from '../../api/connection';
-import { mockRealtime, testUser } from '../../api/testing';
+import { encodeId } from '../../api/snowflake-id';
+import { mockRealtime, testChat, testUser } from '../../api/testing';
+import WaveSurfer from 'wavesurfer.js';
+import { VoicePlayback, type VoiceDock } from '../../messages/voice-player/voice-playback';
+import { VoicePlayer } from '../../messages/voice-player/voice-player';
 import { PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
@@ -56,7 +60,84 @@ describe('ChatList', () => {
     await fixture.whenStable();
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    TestBed.inject(VoicePlayback).active.set(undefined);
+  });
+
+  it('shows the playing voice bar in the header and releases it on dismissal', () => {
+    vi.stubGlobal(
+      'Audio',
+      class {
+        preload = 'none';
+        play = vi.fn(async () => {});
+        pause = vi.fn();
+        addEventListener = () => {};
+        removeEventListener = () => {};
+        removeAttribute = () => {};
+      },
+    );
+    vi.spyOn(WaveSurfer, 'create').mockReturnValue({
+      on: () => {},
+      load: () => Promise.resolve(),
+      destroy: () => {},
+    } as unknown as WaveSurfer);
+    const dock: VoiceDock = {
+      messageId: encodeId('9007199254741003'),
+      chatId: testChat.id,
+      label: '张三',
+      createdAt: '2026-10-16T10:00:00Z',
+    };
+    const player = TestBed.createComponent(VoicePlayer);
+    player.componentRef.setInput('src', '/voice.ogg');
+    player.componentRef.setInput('dock', dock);
+    player.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).toBeNull();
+    player.componentInstance.toggle();
+    fixture.detectChanges();
+    const bar: HTMLElement = fixture.nativeElement.querySelector('.voice-bar');
+    expect(bar).not.toBeNull();
+    expect(bar.querySelector('.voice-name')?.textContent).toBe('张三');
+    (bar.querySelector('ion-button') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).toBeNull();
+    expect(TestBed.inject(VoicePlayback).active()).toBeUndefined();
+  });
+
+  it('hides the voice bar for the desktop sidebar instance', () => {
+    vi.stubGlobal(
+      'Audio',
+      class {
+        preload = 'none';
+        play = vi.fn(async () => {});
+        pause = vi.fn();
+        addEventListener = () => {};
+        removeEventListener = () => {};
+        removeAttribute = () => {};
+      },
+    );
+    vi.spyOn(WaveSurfer, 'create').mockReturnValue({
+      on: () => {},
+      load: () => Promise.resolve(),
+      destroy: () => {},
+    } as unknown as WaveSurfer);
+    const player = TestBed.createComponent(VoicePlayer);
+    player.componentRef.setInput('src', '/voice.ogg');
+    player.componentRef.setInput('dock', {
+      messageId: encodeId('9007199254741003'),
+      chatId: testChat.id,
+      label: '张三',
+      createdAt: '2026-10-16T10:00:00Z',
+    });
+    player.detectChanges();
+    player.componentInstance.toggle();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).not.toBeNull();
+    fixture.componentRef.setInput('sidebar', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).toBeNull();
+  });
 
   it('shows authoritative chat and thread counts and follows the thread display preference', async () => {
     const badges = () =>

@@ -1,7 +1,7 @@
 import { MessageType } from '../../generated/models';
 import { attachmentKind, MediaKind } from './message-attachments/media-kind';
 
-/** Images, videos and stickers without a caption carry their time on the media. */
+/** Images, videos, voice messages and stickers without a caption carry their time on the media. */
 export function mediaOverlay(message: {
   messageType: MessageType;
   message?: string;
@@ -13,7 +13,7 @@ export function mediaOverlay(message: {
       message.attachments.length > 0 &&
       message.attachments.every((attachment) => {
         const kind = attachmentKind(message.messageType, attachment.kind);
-        return kind === MediaKind.Image || kind === MediaKind.Video;
+        return kind === MediaKind.Image || kind === MediaKind.Video || kind === MediaKind.Audio;
       }))
   );
 }

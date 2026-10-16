@@ -1,0 +1,68 @@
+.voice-bar {
+  --background: var(--ion-background-color, #fff);
+  --min-height: 48px;
+}
+
+.voice-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 8px 4px;
+}
+
+.voice-button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  color: var(--ion-color-primary);
+  font-size: 20px;
+}
+
+.voice-label {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--ion-text-color);
+  text-align: start;
+}
+
+.voice-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--app-font-compact);
+  line-height: var(--app-line-compact);
+  font-weight: 600;
+}
+
+.voice-date {
+  flex-shrink: 0;
+  color: var(--ion-color-medium);
+  font-size: var(--app-font-micro);
+  line-height: var(--app-line-micro);
+}
+
+.voice-time {
+  flex-shrink: 0;
+  font-size: var(--app-font-micro);
+  line-height: var(--app-line-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-speed {
+  flex-shrink: 0;
+  padding: 3px;
+  background: transparent;
+  color: var(--ion-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}

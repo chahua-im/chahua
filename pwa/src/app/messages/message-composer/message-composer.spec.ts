@@ -65,6 +65,7 @@ describe('Message composer upload ownership', () => {
   };
 
   const pendingMessage: MessageContent = {
+    chatId: testMessage.chatId,
     sender: testMessage.sender,
     createdAt: testMessage.createdAt,
     messageType: MessageType.text,

@@ -1,0 +1,28 @@
+@if (voice(); as voice) {
+  <ion-toolbar class="voice-bar">
+    <div class="voice-controls">
+      <button type="button" class="voice-button" (click)="voice.toggle()">
+        @if (voice.loading()) {
+          <ion-spinner class="action-icon"></ion-spinner>
+        } @else {
+          <ion-icon
+            class="action-icon"
+            [icon]="voice.failed() ? icons.refreshOutline : voice.playing() ? icons.pause : icons.play" />
+        }
+      </button>
+      @if (voice.dock(); as dock) {
+        <button type="button" class="voice-label" (click)="locate()">
+          <span class="voice-name">{{ dock.label }}</span>
+          <span class="voice-date">{{ dock.createdAt | date: 'M月d日 HH:mm' }}</span>
+        </button>
+      }
+      <span class="voice-time">{{ time(voice.elapsed()) }}</span>
+      <button type="button" class="voice-speed" (click)="playback.speed()">{{ rate() }}×</button>
+      <ion-buttons slot="end">
+        <ion-button (click)="voice.dismiss()">
+          <ion-icon slot="icon-only" [icon]="icons.close" />
+        </ion-button>
+      </ion-buttons>
+    </div>
+  </ion-toolbar>
+}

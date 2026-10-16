@@ -189,6 +189,10 @@ export class Message<T extends MessageContent = MessageResponse> {
     () => !this.message().isDeleted && this.message().messageType === MessageType.sticker,
   );
   protected readonly mediaOverlay = computed(() => !this.message().isDeleted && mediaOverlay(this.message()));
+  // Voice bars are transparent controls: they carry the overlaid time but keep the bubble's own padding and tail.
+  protected readonly mediaOnly = computed(
+    () => this.mediaOverlay() && this.message().messageType !== MessageType.audio,
+  );
   protected readonly hasReactions = computed(() => !this.message().isDeleted && !!this.message().reactions?.length);
   protected readonly threadInfo = computed(() => {
     const message = this.message();

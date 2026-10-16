@@ -12,8 +12,10 @@ import { UploadStatus, type AttachmentUpload } from '../upload';
 import { Message, type MessageContent } from './message';
 
 describe('Message', () => {
+  beforeEach(() => vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false })));
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -227,7 +229,7 @@ describe('Message', () => {
     ['video/mp4', MessageType.text, '   ', true],
     ['image/jpeg', MessageType.text, '图片说明', false],
     ['image/jpeg', MessageType.file, '', false],
-    ['audio/ogg', MessageType.audio, '', false],
+    ['audio/ogg', MessageType.audio, '', true],
     ['application/pdf', MessageType.file, '', false],
   ] as const)(
     'keeps reactions below the bubble and time with the content for %s / %s / %j',

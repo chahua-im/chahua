@@ -28,10 +28,13 @@ import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
 import { MessageOutbox } from '../../messages/message-outbox';
 import { Message, type MessageContent } from '../../messages/message/message';
+import { VoicePlayback, type VoiceDock } from '../../messages/voice-player/voice-playback';
+import { VoicePlayer } from '../../messages/voice-player/voice-player';
 import { UploadStatus, type AttachmentUpload } from '../../messages/upload';
+import WaveSurfer from 'wavesurfer.js';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { ConversationNavigation, ConversationTargetKind } from '../conversation-navigation';
+import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
 import { ConversationError, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
 import { ConversationPage, ThreadError } from './conversation.page';
@@ -96,7 +99,7 @@ describe('ConversationPage', () => {
     scroll = document.createElement('div');
     vi.spyOn(IonContent.prototype, 'getScrollElement').mockResolvedValue(scroll);
     await TestBed.configureTestingModule({
-      imports: [ConversationPage],
+      imports: [ConversationPage, VoicePlayer],
       providers: [
         provideRouter([]),
         { provide: Connection, useValue: mockRealtime({ messages$: incoming, events$: events, resync$: resync }) },
@@ -141,6 +144,7 @@ describe('ConversationPage', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    TestBed.inject(VoicePlayback).active.set(undefined);
     http.verify();
   });
 
@@ -420,6 +424,33 @@ describe('ConversationPage', () => {
     expect(component['conversation'].items()).toHaveLength(2);
   });
 
+  const testDock: VoiceDock = {
+    messageId: encodeId('9007199254741003'),
+    chatId: testChat.id,
+    label: '张三',
+    createdAt: '2026-10-16T10:00:00Z',
+  };
+
+  function stubVoiceMedia() {
+    vi.stubGlobal(
+      'Audio',
+      class {
+        preload = 'none';
+        playbackRate = 1;
+        play = vi.fn(async () => {});
+        pause = vi.fn();
+        addEventListener = () => {};
+        removeEventListener = () => {};
+        removeAttribute = () => {};
+      },
+    );
+    vi.spyOn(WaveSurfer, 'create').mockReturnValue({
+      on: () => {},
+      load: () => Promise.resolve(),
+      destroy: () => {},
+    } as unknown as WaveSurfer);
+  }
+
   function pinMessage(id: string, message = testMessage) {
     events.next({
       type: component.threadId() ? ServerWsMessageType.threadPinAdded : ServerWsMessageType.pinAdded,
@@ -545,6 +576,54 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('.pinned-bar')).toBe(bar);
     expect(bar.textContent).toContain('修改后的置顶内容');
+  });
+
+  it('docks a playing message voice into the header bar and keeps it across page switches', async () => {
+    stubVoiceMedia();
+    const player = TestBed.createComponent(VoicePlayer);
+    player.componentRef.setInput('src', '/voice.ogg');
+    player.componentRef.setInput('dock', { ...testDock });
+    player.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).toBeNull();
+    player.componentInstance.toggle();
+    fixture.detectChanges();
+    const bar: HTMLElement = fixture.nativeElement.querySelector('.voice-bar');
+    expect(bar).not.toBeNull();
+    expect(bar.querySelector('.voice-name')?.textContent).toBe('张三');
+    expect(bar.querySelector('.voice-date')?.textContent).toContain('10月16日');
+    bar.querySelector<HTMLButtonElement>('.voice-speed')!.click();
+    expect(TestBed.inject(VoicePlayback).rate()).toBe(1.5);
+    // Switching conversations destroys the message rows; the bar keeps controlling the voice.
+    player.destroy();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).toBe(bar);
+    bar.querySelector<HTMLButtonElement>('.voice-button')!.click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).toBe(bar);
+    (fixture.nativeElement.querySelector('.voice-bar ion-button') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.voice-bar')).toBeNull();
+    expect(TestBed.inject(VoicePlayback).active()).toBeUndefined();
+  });
+
+  it('opens the docked voice conversation from the bar label', () => {
+    stubVoiceMedia();
+    const open = vi.spyOn(TestBed.inject(ConversationNavigation), 'open').mockResolvedValue(true);
+    const player = TestBed.createComponent(VoicePlayer);
+    player.componentRef.setInput('src', '/voice.ogg');
+    player.componentRef.setInput('dock', { ...testDock });
+    player.detectChanges();
+    player.componentInstance.toggle();
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('.voice-bar .voice-label') as HTMLElement).click();
+    expect(open).toHaveBeenCalledWith(testDock.chatId, undefined, testDock.messageId);
+    player.destroy();
+    // The voice is adopted and keeps playing even though its player is gone.
+    const orphan = TestBed.inject(VoicePlayback).active()!;
+    expect(orphan).not.toBe(player.componentInstance);
+    expect(orphan.playing()).toBe(true);
+    orphan.dismiss();
+    expect(TestBed.inject(VoicePlayback).active()).toBeUndefined();
   });
 
   it('discards deferred pin visibility on topic changes and uses current pins on cached reentry', async () => {

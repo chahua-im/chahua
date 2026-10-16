@@ -1,44 +1,59 @@
 :host {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 260px;
   max-width: 100%;
-  height: 52px;
   color: var(--voice-color, var(--ion-color-primary));
+}
+.wave-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .play {
   display: grid;
   place-items: center;
-  flex: 0 0 42px;
-  height: 42px;
+  flex: 0 0 32px;
+  height: 32px;
   border-radius: 50%;
   color: var(--voice-play-color, var(--ion-color-primary-contrast));
   background: var(--voice-color, var(--ion-color-primary));
-  font-size: 24px;
+  font-size: 18px;
 }
 .track {
   position: relative;
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 .wave {
-  height: 28px;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  // The container carries the unplayed colour, which the placeholder inherits; the played colour stays on :host.
+  color: var(--voice-wave-color, var(--ion-color-medium));
 }
-.fallback {
+.time-row {
+  display: flex;
+  align-items: center;
+  height: var(--app-line-micro);
+}
+// Minimum-height bars (2×2 px dots on a 4 px pitch) until the real waveform is decoded.
+.placeholder {
   position: absolute;
-  top: 4px;
-  left: 0;
-  width: 100%;
-  height: 20px;
-  margin: 0;
-  accent-color: var(--voice-color, var(--ion-color-primary));
+  inset: 0 0 auto;
+  height: 26px;
+  background: radial-gradient(circle at 1px 1px, currentColor 0 1px, transparent 1px) left bottom / 4px 2px repeat-x;
 }
 .time {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.speed {
+.trailing {
+  align-self: center;
   padding: 3px;
   background: transparent;
   color: inherit;
@@ -50,12 +65,21 @@
   width: 42px;
   height: 42px;
 }
-:host(.compact) .track,
-:host(.compact) .speed {
+:host(.compact) .play {
+  flex-basis: 42px;
+  height: 42px;
+}
+:host(.compact) .play :is(ion-icon, ion-spinner) {
+  width: 24px;
+  height: 24px;
+}
+:host(.compact) .time-row,
+:host(.compact) .wave,
+:host(.compact) .trailing {
   display: none;
 }
 
 .play :is(ion-icon, ion-spinner) {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
 }
