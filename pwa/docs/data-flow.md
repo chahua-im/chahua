@@ -10,7 +10,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | Connection             | 唯一 WebSocket、认证/心跳/重连、最近 256 个新消息 ID                    | 应用                                                        |
 | ChatStore              | 聊天资料、摘要、归档/静音、已读、话题摘要与订阅、好友关系查询、ChatPins | 应用缓存，不保存全部历史消息                                |
 | ChatListStore          | 查询成员 ID、游标、覆盖范围、消费者、好友请求与共享未读响应             | 应用；无消费者时取消读取                                    |
-| ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁                        | 每个 ConversationPage；由页面生命周期控制                   |
+| ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、期间撤回的消息 ID     | 每个 ConversationPage；由页面生命周期控制                   |
 | MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                             | 应用内存；跨页面，整页刷新不恢复                            |
 | DraftStore             | 文字、回复目标 ID、保存时间                                             | 按账号和聊天/话题保存到 localStorage                        |
 | Preferences            | 话题/头像显示偏好、最近表情                                             | localStorage                                                |

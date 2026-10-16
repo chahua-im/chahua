@@ -29,6 +29,7 @@ import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { Message } from '../../messages/message/message';
+import { isVisibleMessage } from '../../messages/message-visibility';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
@@ -63,7 +64,7 @@ export class PinnedMessagesPage {
     this.pins()
       .items()
       .map((pin) => pin.message)
-      .filter((message) => !message.isDeleted)
+      .filter((message) => isVisibleMessage(message))
       .sort((a, b) => a.id - b.id),
   );
   protected readonly rows = computed(() => messageRows(this.messages()));

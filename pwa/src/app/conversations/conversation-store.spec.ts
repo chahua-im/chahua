@@ -508,6 +508,55 @@ describe('ConversationStore', () => {
     expect(timeline.items()).toEqual([]);
   });
 
+  it('keeps a recalled thread root as an exact target', async () => {
+    const opening = timeline.open(encodeId('100'), true);
+    http.expectOne(`${root}?max=50&around=100`).flush({
+      messages: [{ ...wire('100'), isDeleted: true, message: null, threadInfo: { replyCount: 2 } }],
+    });
+    expect(await opening).toBe(true);
+    expect(timeline.error()).toBeUndefined();
+    expect(timeline.items()).toHaveLength(1);
+    expect(await timeline.open(encodeId('100'), true)).toBe(true);
+  });
+
+  it('drops the recalled body and the quote snapshots that reference it', async () => {
+    const opening = timeline.open(encodeId('100'));
+    http.expectOne(`${root}?max=50&around=100`).flush({
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+    });
+    await opening;
+    expect(timeline.items()[1].replyToMessage?.message).toBe('测试消息');
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: { chatId: testChat.id, messageIds: [encodeId('100')] },
+    });
+    expect(timeline.items()[0]).toMatchObject({
+      isDeleted: true,
+      message: undefined,
+      attachments: [],
+      mentions: [],
+      sticker: undefined,
+    });
+    expect(timeline.items()[1].replyToMessage).toMatchObject({
+      isDeleted: true,
+      message: undefined,
+      attachments: [],
+      mentions: [],
+      sticker: undefined,
+    });
+  });
+
+  it('redacts quote snapshots in a page that arrives after the recall event', async () => {
+    const opening = timeline.open(encodeId('100'));
+    timeline.update({ ...message('100'), isDeleted: true, message: undefined, attachments: [] });
+    http.expectOne(`${root}?max=50&around=100`).flush({
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+    });
+    await opening;
+    expect(timeline.items()[1].replyToMessage?.isDeleted).toBe(true);
+    expect(timeline.items()[1].replyToMessage?.message).toBeUndefined();
+  });
+
   it('keeps updates scoped to the active topic and clears pending updates after navigation', async () => {
     timeline.reset(testChat.id, encodeId('100'));
     const oldOpening = timeline.open(encodeId('100'));

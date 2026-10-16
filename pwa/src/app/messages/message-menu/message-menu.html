@@ -109,7 +109,9 @@
   [header]="confirmation()?.action === Action.Recall ? '撤回消息' : confirmation()?.pinned ? '取消置顶' : '置顶消息'"
   [message]="
     confirmation()?.action === Action.Recall
-      ? '撤回后，其他成员将无法查看这条消息。'
+      ? recallAuthor()
+        ? '确定要撤回 ' + recallAuthor() + ' 的这条消息吗？'
+        : '撤回后，其他成员将无法查看这条消息。'
       : confirmation()?.pinned
         ? '确定取消这条消息的置顶？'
         : '置顶后，此会话的成员都能看到这条置顶消息。'

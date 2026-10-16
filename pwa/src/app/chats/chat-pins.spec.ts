@@ -287,6 +287,12 @@ describe('ChatStore pins', () => {
       type: ServerWsMessageType.messagesBulkDeleted,
       payload: { chatId: testChat.id, messageIds: [testMessage.id] },
     });
-    expect(conversation.get(testMessage.id)?.message.isDeleted).toBe(true);
+    expect(conversation.get(testMessage.id)?.message).toMatchObject({
+      isDeleted: true,
+      message: undefined,
+      attachments: [],
+      mentions: [],
+      sticker: undefined,
+    });
   });
 });
