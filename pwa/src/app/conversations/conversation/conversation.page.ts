@@ -67,6 +67,7 @@ import { MessageComposer, type Composition } from '../../messages/message-compos
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { isVisibleMessage } from '../../messages/message-visibility';
 import { Message, type MessageContent } from '../../messages/message/message';
 import { pauseVoicePlayback } from '../../messages/voice-player/voice-player';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -313,7 +314,7 @@ export class ConversationPage {
     const entries: { key: string; message: MessageContent; confirmed?: MessageResponse; outgoing?: OutgoingMessage }[] =
       [];
     for (const message of messages) {
-      if (message.isDeleted) continue;
+      if (!isVisibleMessage(message)) continue;
       const outgoing = this.outgoing().find(
         (item) => item.editId === message.id || item.clientGeneratedId === message.clientGeneratedId,
       );
@@ -376,8 +377,9 @@ export class ConversationPage {
   private firstUnreadAfter(boundary?: SnowflakeID) {
     if (!boundary) return undefined;
     const uid = this.session.user()?.uid;
-    return this.rows().find(({ confirmed }) => confirmed && confirmed.id > boundary && confirmed.sender.uid !== uid)
-      ?.confirmed?.id;
+    return this.rows().find(
+      ({ confirmed }) => confirmed && !confirmed.isDeleted && confirmed.id > boundary && confirmed.sender.uid !== uid,
+    )?.confirmed?.id;
   }
   /** Divider on screen: the read position captured on entry, so it does not follow reading progress. */
   protected readonly firstUnreadId = computed(() => this.firstUnreadAfter(this.entryReadId()));
@@ -421,7 +423,7 @@ export class ConversationPage {
       idle: this.scrolling.idle(),
       pins: this.pins()
         .items()
-        .filter((pin) => !pin.message.isDeleted)
+        .filter((pin) => isVisibleMessage(pin.message))
         .sort((a, b) => b.message.id - a.message.id),
     }),
     computation: ({ entry, idle, pins }, previous): PinResponse[] =>

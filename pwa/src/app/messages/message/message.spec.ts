@@ -152,7 +152,7 @@ describe('Message', () => {
     fixture.componentRef.setInput('showAllAvatars', false);
   });
 
-  it('renders attachments with captions and suppresses all media on deletion', async () => {
+  it('renders attachments with captions and replaces the recalled body with a tombstone', async () => {
     const fixture = await render();
     const message = {
       ...testMessage,
@@ -174,14 +174,22 @@ describe('Message', () => {
     const element: HTMLElement = fixture.nativeElement;
     expect(element.querySelector('app-message-attachments img')).not.toBeNull();
     expect(element.querySelector('.message-text')?.textContent).toBe('图片说明 🙂');
-    fixture.componentRef.setInput('message', { ...message, isDeleted: true });
+    // A recalled message keeps only its tombstone row: the server and the stores clear the body.
+    fixture.componentRef.setInput('message', {
+      ...message,
+      isDeleted: true,
+      message: undefined,
+      attachments: [],
+    });
     fixture.detectChanges();
     expect(element.querySelector('app-message-attachments')).toBeNull();
-    expect(element.querySelector('.chat-row, .system-message')).toBeNull();
-    expect(element.textContent?.trim()).toBe('');
+    expect(element.querySelector('.chat-row')).not.toBeNull();
+    expect(element.querySelector('.message-text')?.textContent).toBe('消息已删除');
+    expect(element.textContent).toContain('消息已删除');
+    expect(element.textContent).not.toContain('图片说明 🙂');
   });
 
-  it('opens a topic from a root message and hides the entry inside topics or deleted messages', async () => {
+  it('keeps the topic entry on a recalled root and hides it inside topics or without a thread', async () => {
     const fixture = await render();
     const open = vi.fn();
     fixture.componentInstance.openThread.subscribe(open);
@@ -204,9 +212,9 @@ describe('Message', () => {
     fixture.detectChanges();
     expect(element.querySelector('.thread-entry')).toBeNull();
     fixture.componentRef.setInput('canOpenThread', true);
-    fixture.componentRef.setInput('message', { ...testMessage, isDeleted: true });
+    fixture.componentRef.setInput('message', { ...testMessage, threadInfo: { replyCount: 12 }, isDeleted: true });
     fixture.detectChanges();
-    expect(element.querySelector('.thread-entry')).toBeNull();
+    expect(element.querySelector('.thread-entry')).not.toBeNull();
 
     fixture.componentRef.setInput('message', testMessage);
     fixture.detectChanges();

@@ -81,7 +81,17 @@ export class ChatPins {
               : pin;
           case ServerWsMessageType.messagesBulkDeleted:
             return event.payload.messageIds.includes(message.id)
-              ? { ...pin, message: { ...message, isDeleted: true } }
+              ? {
+                  ...pin,
+                  message: {
+                    ...message,
+                    isDeleted: true,
+                    message: undefined,
+                    attachments: [],
+                    mentions: [],
+                    sticker: undefined,
+                  },
+                }
               : pin;
           case ServerWsMessageType.reactionUpdated:
             return message.id === event.payload.messageId

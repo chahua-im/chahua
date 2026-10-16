@@ -399,6 +399,28 @@ describe('MessageMenu', () => {
     expect(reply).toHaveBeenCalledWith(messages()[0]);
   });
 
+  it('names the author when confirming the recall of another member’s message', async () => {
+    const alert = () =>
+      (fixture.nativeElement.querySelector('ion-alert') as HTMLElement & { message?: string }).message;
+    await menu['choose'](MessageAction.Recall);
+    fixture.detectChanges();
+    expect(menu['confirmation']()?.action).toBe(MessageAction.Recall);
+    expect(alert()).toBe('确定要撤回 测试用户 的这条消息吗？');
+  });
+
+  it('confirms the recall of an own message without naming anyone', async () => {
+    const alert = () =>
+      (fixture.nativeElement.querySelector('ion-alert') as HTMLElement & { message?: string }).message;
+    menu.reset();
+    setMessages([{ ...testMessage, sender: { ...testMessage.sender, uid: testUser.uid + 1 } }]);
+    fixture.detectChanges();
+    menu.open(selection());
+    await menu['choose'](MessageAction.Recall);
+    fixture.detectChanges();
+    expect(menu['recallAuthor']()).toBeUndefined();
+    expect(alert()).toBe('撤回后，其他成员将无法查看这条消息。');
+  });
+
   it('allows an admin to remove a deleted pin but never offers it to members', () => {
     setMessages([{ ...testMessage, isDeleted: true }]);
     pinned.set(true);

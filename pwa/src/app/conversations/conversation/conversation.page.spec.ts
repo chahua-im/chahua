@@ -2350,6 +2350,59 @@ describe('ConversationPage', () => {
     expect(component['firstUnreadId']()).toBe(third.id);
   });
 
+  it('keeps a recalled thread root as a tombstone row with its topic entry', async () => {
+    const root = {
+      ...testMessage,
+      id: encodeId('9007199254741101'),
+      clientGeneratedId: 'thread-root',
+      message: '话题根',
+      threadInfo: { replyCount: 2 },
+      sender: otherSender,
+    };
+    incoming.next(root);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(2);
+    component['entryReadId'].set(encodeId('9007199254741003'));
+    expect(component['firstUnreadId']()).toBe(root.id);
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...root, isDeleted: true, message: undefined, mentions: [], attachments: [], reactions: [] },
+    });
+    fixture.detectChanges();
+    expect(component['rows']().map((row) => row.message.id)).toEqual([testMessage.id, root.id]);
+    expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(2);
+    expect(fixture.nativeElement.querySelector('.message-list').textContent).toContain('消息已删除');
+    expect(fixture.nativeElement.querySelectorAll('.thread-entry')).toHaveLength(1);
+    // A tombstone is row content, not a read boundary.
+    expect(component['firstUnreadId']()).toBeUndefined();
+  });
+
+  it('keeps a recalled pin while its topic is still reachable and drops one without a topic', async () => {
+    const root = {
+      ...testMessage,
+      id: encodeId('9007199254741201'),
+      message: '话题根',
+      threadInfo: { replyCount: 1 },
+    };
+    pinMessage('301', root);
+    pinMessage('302');
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar').textContent).toContain('话题根');
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...testMessage, isDeleted: true, message: undefined, mentions: [], attachments: [], reactions: [] },
+    });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar').textContent).toContain('话题根');
+    events.next({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...root, isDeleted: true, message: undefined, mentions: [], attachments: [], reactions: [] },
+    });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.pinned-bar').textContent).toContain('消息已删除');
+    expect(component['selectedPin']()?.message.id).toBe(root.id);
+  });
+
   it('removes a recalled message when the local delete request succeeds', async () => {
     const recalling = component['menu']()!['messageActions'].recall(testMessage);
     http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`).flush(null);

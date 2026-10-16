@@ -131,6 +131,29 @@ describe('PinnedMessagesPage', () => {
     },
   );
 
+  it('keeps a recalled pin while its topic is still reachable', async () => {
+    fixture.componentRef.setInput('id', wireChat.id);
+    fixture.detectChanges();
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.admin });
+    http.expectOne(`/_api/chats/${wireChat.id}/pins`).flush({
+      pins: [
+        {
+          id: '200',
+          chatId: wireChat.id,
+          pinnedAt: '2026-09-07T12:00:00Z',
+          pinnedBy: 1,
+          message: { ...structuredClone(wireMessage), isDeleted: true, message: null, threadInfo: { replyCount: 2 } },
+        },
+      ],
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(page['messages']()).toHaveLength(1);
+    expect(fixture.nativeElement.querySelector('app-message')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.message-list').textContent).toContain('消息已删除');
+    expect(fixture.nativeElement.querySelector('.message-list').textContent).not.toContain('暂无置顶消息');
+  });
+
   it('requires confirmation before deleting a pin from its own thread scope', async () => {
     const pin = await pins(GroupRole.admin, true);
     select(pin.message);

@@ -192,9 +192,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected readonly hasReactions = computed(() => !this.message().isDeleted && !!this.message().reactions?.length);
   protected readonly threadInfo = computed(() => {
     const message = this.message();
-    return this.canOpenThread() && message.id != null && !message.isDeleted && !message.replyRootId
-      ? message.threadInfo
-      : undefined;
+    return this.canOpenThread() && message.id != null && !message.replyRootId ? message.threadInfo : undefined;
   });
   protected readonly quoted = computed(() => {
     const message = this.message();

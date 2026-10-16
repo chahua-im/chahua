@@ -14,6 +14,7 @@ import { Connection } from '../api/connection';
 import { type SnowflakeID } from '../api/snowflake-id';
 import { type MessageChange } from '../messages/message-change';
 import { mergeMessages } from '../messages/message-merge';
+import { isVisibleMessage } from '../messages/message-visibility';
 import { preserveReactionOwnership } from '../messages/reaction-state';
 export enum PageDirection {
   Older,
@@ -36,6 +37,8 @@ export class ConversationStore {
   private latestSeenId?: SnowflakeID;
   private needsResync = false;
   private readonly pendingUpdates = new Map<SnowflakeID, MessageUpdate>();
+  /** Ids recalled in this context; their snapshots inside quoting messages must be redacted too. */
+  private readonly deletedIds = new Set<SnowflakeID>();
   private readonly currentPage = signal<MessageRange | undefined>(undefined);
   private readonly isLoading = signal(false);
   private readonly pageDirection = signal<PageDirection | undefined>(undefined);
@@ -76,6 +79,7 @@ export class ConversationStore {
     this.version++;
     this.cancel.next();
     this.pendingUpdates.clear();
+    this.deletedIds.clear();
     this.isLoading.set(false);
     this.pageDirection.set(undefined);
     this.currentError.set(undefined);
@@ -85,10 +89,11 @@ export class ConversationStore {
     const version = ++this.version;
     this.cancel.next();
     this.pendingUpdates.clear();
+    this.deletedIds.clear();
     this.pageDirection.set(undefined);
     this.isLoading.set(false);
     this.currentError.set(undefined);
-    if (exact && this.items().some((message) => message.id === around && !message.isDeleted)) return true;
+    if (exact && this.items().some((message) => message.id === around && isVisibleMessage(message))) return true;
     if (!around && this.atLatest()) return true;
     this.isLoading.set(true);
     this.needsResync = false;
@@ -107,7 +112,7 @@ export class ConversationStore {
       }
       page = this.applyPendingUpdates(page);
       // `around` also returns neighbours when the target has been deleted.
-      if (exact && !page.messages.some((message) => message.id === around && !message.isDeleted)) {
+      if (exact && !page.messages.some((message) => message.id === around && isVisibleMessage(message))) {
         this.currentError.set(ConversationError.Missing);
         return false;
       }
@@ -120,6 +125,7 @@ export class ConversationStore {
       if (version === this.version) {
         this.isLoading.set(false);
         this.pendingUpdates.clear();
+        this.deletedIds.clear();
       }
     }
   }
@@ -130,6 +136,7 @@ export class ConversationStore {
     const cursor = direction === PageDirection.Older ? current.olderCursor : current.newerCursor;
     const version = this.version;
     this.pendingUpdates.clear();
+    this.deletedIds.clear();
     if (direction === PageDirection.Newer) this.needsResync = false;
     this.pageDirection.set(direction);
     this.currentError.set(undefined);
@@ -154,6 +161,7 @@ export class ConversationStore {
       if (version === this.version) {
         this.pageDirection.set(undefined);
         this.pendingUpdates.clear();
+        this.deletedIds.clear();
       }
     }
   }
@@ -189,6 +197,7 @@ export class ConversationStore {
 
   update(message: MessageResponse) {
     if (!this.accepts(message)) return;
+    if (message.isDeleted) this.deletedIds.add(message.id);
     const known = this.items().find((item) => item.id === message.id);
     this.patch(message.id, (current) => ({
       ...message,
@@ -197,7 +206,16 @@ export class ConversationStore {
   }
 
   delete(messageId: SnowflakeID) {
-    this.patch(messageId, (message) => ({ ...message, isDeleted: true }));
+    this.deletedIds.add(messageId);
+    // Bulk deletion carries ids only, so the recalled body must be dropped here.
+    this.patch(messageId, (message) => ({
+      ...message,
+      isDeleted: true,
+      message: undefined,
+      attachments: [],
+      mentions: [],
+      sticker: undefined,
+    }));
   }
 
   updateReactions(messageId: SnowflakeID, reactions: ReactionSummary[]) {
@@ -218,7 +236,9 @@ export class ConversationStore {
       (page) =>
         page && {
           ...page,
-          messages: page.messages.map((message) => (message.id === messageId ? update(message) : message)),
+          messages: page.messages.map((message) =>
+            message.id === messageId ? update(message) : this.redactCitation(message),
+          ),
         },
     );
   }
@@ -226,7 +246,26 @@ export class ConversationStore {
   private applyPendingUpdates(page: MessageRange): MessageRange {
     return {
       ...page,
-      messages: page.messages.map((message) => this.pendingUpdates.get(message.id)?.(message) ?? message),
+      messages: page.messages.map((message) =>
+        this.redactCitation(this.pendingUpdates.get(message.id)?.(message) ?? message),
+      ),
+    };
+  }
+
+  /** The recalled message stays in the timeline as a tombstone; messages quoting it lose their snapshot. */
+  private redactCitation(message: MessageResponse) {
+    const quote = message.replyToMessage;
+    if (!quote || !this.deletedIds.has(quote.id)) return message;
+    return {
+      ...message,
+      replyToMessage: {
+        ...quote,
+        isDeleted: true,
+        message: undefined,
+        attachments: [],
+        mentions: [],
+        sticker: undefined,
+      },
     };
   }
 

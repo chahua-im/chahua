@@ -144,6 +144,12 @@ export class MessageMenu {
       }
     | undefined
   >(undefined);
+  /** Recalling someone else's message names its author; recall of an own message confirms instead. */
+  protected readonly recallAuthor = computed(() => {
+    const sender = this.confirmation()?.message.sender;
+    if (!sender || sender.uid === this.session.user()?.uid) return undefined;
+    return sender.name ?? String(sender.uid);
+  });
   protected readonly Action = MessageAction;
   protected readonly icons = { addOutline, chevronDown, chevronUp };
   protected readonly actionIcons: Record<MessageAction, string> = {
