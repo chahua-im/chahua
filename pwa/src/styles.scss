@@ -332,6 +332,27 @@ ion-list > app-chat-list-item:last-child ion-item {
   color: var(--ion-color-danger);
 }
 
+// Toasts belong to the page, not to the component that declares them, and stay a compact centered
+// pill clear of the footer; the composer publishes its height for the bottom offset.
+ion-toast {
+  position: fixed;
+  --width: fit-content;
+  --max-width: calc(100% - 32px);
+
+  &::part(message) {
+    text-align: center;
+    width: auto;
+  }
+
+  &::part(button) {
+    flex-shrink: 0;
+  }
+
+  &::part(wrapper) {
+    bottom: calc(var(--app-footer-height, 0px) + 8px);
+  }
+}
+
 // These elements are created by Ionic outside Angular's template style scope.
 ion-alert.notification-prompt {
   .alert-wrapper {

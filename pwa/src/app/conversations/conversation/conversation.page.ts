@@ -236,6 +236,8 @@ export class ConversationPage {
   protected readonly realtime = inject(Connection);
   private readonly navigation = inject(ConversationNavigation);
   protected readonly document = inject(DOCUMENT);
+  private readonly hostElement = inject(ElementRef<HTMLElement>);
+  private readonly composerFooter = viewChild.required('composerFooter', { read: ElementRef<HTMLElement> });
   private readonly content = viewChild(IonContent);
   private readonly messageContent = viewChild.required<ElementRef<HTMLElement>>('messageContent');
   protected readonly composer = viewChild(MessageComposer);
@@ -548,6 +550,7 @@ export class ConversationPage {
       if (target && 'delivery' in target && target.cancelled()) untracked(() => this.cancelEdit());
     });
     afterNextRender(() => void this.observeResize());
+    afterNextRender(() => this.observeComposer());
     afterRenderEffect(() => {
       this.messageElements();
       this.position();
@@ -764,6 +767,16 @@ export class ConversationPage {
 
   protected retry() {
     this.retryAction();
+  }
+
+  /** Publish the composer height so page overlays can sit above it. */
+  private observeComposer() {
+    const footer = this.composerFooter().nativeElement;
+    const resize = new ResizeObserver(() => {
+      this.hostElement.nativeElement.style.setProperty('--app-footer-height', `${footer.offsetHeight}px`);
+    });
+    resize.observe(footer);
+    this.destroyRef.onDestroy(() => resize.disconnect());
   }
 
   private async observeResize() {
