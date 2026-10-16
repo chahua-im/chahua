@@ -24,6 +24,7 @@ import {
   type InviteResponse,
   type SnowflakeID,
 } from '../../../generated/models';
+import { copyText } from '../../api/clipboard';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { inviteStatus, InviteStatus } from '../invite';
 @Component({
@@ -133,7 +134,7 @@ export class ChatInvites {
   }
   protected async copy(invite: InviteResponse) {
     try {
-      await navigator.clipboard.writeText(new URL('/chats/join/' + invite.code, location.origin).href);
+      await copyText(new URL('/chats/join/' + invite.code, location.origin).href);
       this.copied.set(true);
     } catch {
       this.error.set(true);

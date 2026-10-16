@@ -21,7 +21,7 @@ pwa/
     └── app/
         ├── app/               App 根组件的模板、逻辑、样式和测试
         ├── app.routes.ts      所有路由的静态导入
-        ├── api/               Connection、拦截器、ID 编码、查询与测试工具
+        ├── api/               Connection、拦截器、ID 编码、剪贴板、查询与测试工具
         ├── session/           SessionStore
         ├── scrolling/         悬浮滚动条、首屏补页、触摸和惯性状态
         ├── chats/             聊天关系、列表与信息
@@ -49,7 +49,7 @@ pwa/
 - ChatPins 是 ChatStore 内部的普通对象，MessageActions 是菜单提供的操作集合；无跨组件状态的逻辑用函数，不为每个 API 单独增加手写服务。
 - 用户显示色在 `messages/user-colors.ts`，沿用旧版用户名 hash；用户组色由 MessageAuthor 直接消费后端字段。发送状态是纯枚举，队列不依赖图标组件。
 - 不同协议的分页由对应组件持有游标，仅共享 `fillScrollViewport` 这种 DOM 行为；不使用通用分页页面、继承层级或全局搜索结果 Store。
-- `scrolling` 不知道聊天或消息模型；`api` 只负责边界与通用请求机制，不持有业务页面状态。
+- `scrolling` 不知道聊天或消息模型；`api` 只负责边界（请求、ID 编解码与剪贴板等浏览器能力），不持有业务页面状态。
 - `src/generated` 只保存生成代码。`scripts/api-codegen.ts` 处理契约与生成规则，`api/snowflake-id.ts` 和 `api/json-ids.ts` 处理运行时边界；不转换 null/undefined。生成代码随仓库保存，普通构建不要求后端运行。
 - 所有路由静态导入；非路由的表情选择器和编解码资源可以延迟加载。没有额外的通用 utils、messaging 总目录或 Service 包装层。
 

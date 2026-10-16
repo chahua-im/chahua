@@ -33,6 +33,7 @@ import {
 } from 'ionicons/icons';
 import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
+import { copyText } from '../../api/clipboard';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
 import { SessionStore } from '../../session/session-store';
@@ -452,7 +453,7 @@ export class MessageMenu {
         .map((part) => part.text)
         .join('');
       void this.close();
-      await this.perform(() => navigator.clipboard.writeText(text), MessageNotice.Copied);
+      await this.perform(() => copyText(text), MessageNotice.Copied);
       return;
     }
     const queued = this.queued();
@@ -479,7 +480,7 @@ export class MessageMenu {
         .replace(/=+$/, '');
       const text = new URL(`/m/${encoded}`, this.document.baseURI).href;
       void this.close();
-      await this.perform(() => navigator.clipboard.writeText(text), MessageNotice.Copied);
+      await this.perform(() => copyText(text), MessageNotice.Copied);
       return;
     }
     const pinned = this.pinned();
