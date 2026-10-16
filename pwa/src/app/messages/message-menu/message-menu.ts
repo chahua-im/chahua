@@ -383,7 +383,7 @@ export class MessageMenu {
     const to = entering ? '1' : '0';
     const animation = createAnimation()
       .duration(entering ? 180 : 120)
-      .easing('cubic-bezier(0.2, 0.8, 0.2, 1)')
+      .easing('cubic-bezier(0.16, 1, 0.3, 1)')
       .addAnimation([
         createAnimation().addElement(element.shadowRoot!.querySelector('ion-backdrop')!).fromTo('opacity', from, to),
         createAnimation()
@@ -391,8 +391,8 @@ export class MessageMenu {
           .beforeStyles({ transform: 'none' })
           .fromTo('opacity', from, to),
         createAnimation()
-          .addElement(element.querySelectorAll('.panel'))
-          .fromTo('transform', entering ? 'scale(0.96)' : 'scale(1)', entering ? 'scale(1)' : 'scale(0.96)'),
+          .addElement(element.querySelectorAll('.panel, .preview'))
+          .fromTo('transform', `scale(${entering ? 0.92 : 1})`, `scale(${entering ? 1 : 0.92})`),
       ]);
     if (entering) {
       animation.addAnimation(
