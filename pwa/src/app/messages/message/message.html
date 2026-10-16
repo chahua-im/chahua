@@ -24,7 +24,8 @@
       <div
         class="swipe-reply"
         [style.translate]="swipe() + 'px -50%'"
-        [style.opacity]="swipe() / 60"
+        [style.opacity]="progress()"
+        [style.scale]="0.5 + progress() * 0.5"
         [class.burst]="burst()"
         (animationend)="burst.set(false)">
         <svg viewBox="0 0 512 512">
@@ -37,7 +38,7 @@
           <path
             d="M240 424v-96c116.4 0 159.39 33.76 208 96 0-119.23-39.57-240-208-240V88L64 256Z"
             fill="currentColor"
-            [style.clip-path]="'inset(' + (100 - (swipe() > 30 ? ((swipe() - 30) / 30) * 100 : 0)) + '% 0 0)'" />
+            [style.clip-path]="'inset(0 0 0 ' + (1 - fillProgress()) * 100 + '%)'" />
         </svg>
       </div>
     }

@@ -134,6 +134,9 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected readonly swipe = signal(0);
   protected readonly dragging = signal(false);
   protected readonly burst = signal(false);
+  protected readonly progress = computed(() => Math.min(this.swipe() / 60, 1));
+  // Fill only starts after 50% of the threshold — maps progress [0.5,1] → [0,1]
+  protected readonly fillProgress = computed(() => Math.max(0, this.progress() * 2 - 1));
   private touch?: { x: number; y: number; horizontal: boolean };
   protected startSwipe(event: PointerEvent) {
     if (
