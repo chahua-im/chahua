@@ -65,7 +65,7 @@ iOS 根布局保留 Ionic 默认 body 样式，不根据 VisualViewport 的 resi
 
 ## 样式归属
 
-NotificationPrompt 使用 Angular 默认的 Emulated 封装，模板内 spinner 的定位和显隐由组件样式负责。Ionic 动态生成的通知弹窗按钮与外框样式放在 `styles.scss`，通过 `ion-alert.notification-prompt` 限定作用范围。
+NotificationPrompt 使用 Angular 默认的 Emulated 封装，模板内 spinner 的定位和显隐由组件样式负责。Ionic 动态生成的通知弹窗按钮与外框样式放在 `styles.scss`，通过 `ion-alert.notification-prompt` 限定作用范围。底部 Toast 的紧凑宽度、居中文字和上移距离同样放在 `styles.scss`，避让距离读取 `--app-footer-height`；会话页把输入区高度写入该变量，没有输入区的页面按 0 处理。
 
 下表覆盖手写 SCSS 和内联样式。每一组样式对应可见需求或布局约束，框架及库内部样式不在应用中复制。按钮的默认零内边距、零边框和点击光标由 Ionic normalize 提供；单图标按钮使用 grid 居中。收藏与置顶页面通过 IonContent 的 color 设置背景，不需要专用 SCSS。Ionic display 工具样式负责布局占位页的响应式隐藏；padding 和 text-alignment 工具样式用于内容排版。
 
