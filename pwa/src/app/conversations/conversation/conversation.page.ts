@@ -214,7 +214,9 @@ export class ConversationPage {
   protected escapeComposer() {
     if (this.editing()) {
       if (this.editText() === (this.editing()?.message ?? '')) this.cancelEdit();
-    } else this.cancelReply();
+    } else if (this.replyTo() || this.savedReplyId()) this.cancelReply();
+    // Blur so the next Esc reaches the page-level navigation handler.
+    else this.composer()?.blur();
   }
   protected cancelEdit() {
     this.editTarget.set(undefined);

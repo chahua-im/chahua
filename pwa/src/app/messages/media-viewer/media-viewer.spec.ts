@@ -70,6 +70,15 @@ describe('MediaViewer', () => {
     element.querySelector<HTMLButtonElement>('.close')!.click();
     expect(dismiss).toHaveBeenCalledTimes(2);
   });
+  it('dismisses on Escape and navigates with the arrow keys', () => {
+    const fixture = open(album);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+    expect(dismiss).toHaveBeenCalledOnce();
+    fixture.detectChanges();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', cancelable: true }));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.counter')?.textContent).toBe('2 / 3');
+  });
   it('clears zoom and errors when selecting another medium', () => {
     const fixture = open();
     const component = fixture.componentInstance;

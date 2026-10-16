@@ -195,6 +195,9 @@ export class MessageComposer {
   setFocus() {
     return this.textarea()?.setFocus();
   }
+  blur() {
+    void this.textarea()?.getInputElement().then((input) => input.blur());
+  }
   reset() {
     for (const upload of this.uploads()) upload.dispose();
     this.uploads.set([]);

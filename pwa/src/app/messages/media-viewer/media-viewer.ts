@@ -102,6 +102,11 @@ export class MediaViewer {
     else await this.host.nativeElement.requestFullscreen();
   }
   protected key(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      void this.modals.dismiss();
+      return;
+    }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault();
       this.move(event.key === 'ArrowRight' ? 1 : -1);
