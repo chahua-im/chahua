@@ -19,10 +19,6 @@ ion-header > ion-toolbar:first-of-type {
   height: 26px;
 }
 
-ion-content {
-  --background: var(--ion-color-light);
-}
-
 // The page restores an explicit message anchor after an idle prepend.
 ion-content::part(scroll) {
   overflow-anchor: none;
@@ -37,7 +33,10 @@ ion-content::part(scroll) {
 
 .history-navigation {
   ion-fab-button {
-    --background: var(--ion-background-color, #fff);
+    --background: var(--ion-background-color-step-100, #f0f0f0);
+    --background-hover: var(--ion-background-color-step-150, var(--ion-color-light-shade));
+    --background-activated: var(--ion-background-color-step-150, var(--ion-color-light-shade));
+    --background-focused: var(--ion-background-color-step-150, var(--ion-color-light-shade));
     --color: var(--ion-color-primary);
     --box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
   }
