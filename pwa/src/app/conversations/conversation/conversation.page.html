@@ -6,6 +6,13 @@
     <ion-buttons slot="start" class="ion-hide-md-up">
       <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
     </ion-buttons>
+    @if (threadId()) {
+      <ion-buttons slot="start" class="ion-hide-md-down">
+        <ion-button (click)="backToChat()">
+          <ion-icon slot="icon-only" [icon]="toolbarIcons.chevronBack" />
+        </ion-button>
+      </ion-buttons>
+    }
     <ion-title (click)="details()">
       <span class="conversation-title">
         <app-chat-avatar [entry]="chatTitle().avatar" [size]="32" />
