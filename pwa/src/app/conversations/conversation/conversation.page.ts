@@ -37,6 +37,7 @@ import {
 import {
   archive,
   archiveOutline,
+  chevronBack,
   chevronDown,
   closeCircleOutline,
   informationCircleOutline,
@@ -162,7 +163,7 @@ export class ConversationPage {
         'info',
       ]);
   }
-  protected readonly toolbarIcons = { searchOutline, notificationsOutline, notificationsOffOutline };
+  protected readonly toolbarIcons = { searchOutline, notificationsOutline, notificationsOffOutline, chevronBack };
   protected search() {
     return this.router.navigate(['/chats/chat', decodeId(this.id()), 'search']);
   }
@@ -304,6 +305,15 @@ export class ConversationPage {
     }
   }
   protected readonly backHref = computed(() => (this.threadId() ? `/chats/chat/${decodeId(this.id())}` : '/chats'));
+
+  /** Desktop has no browser-style back button; mirror the Escape shortcut's return-to-chat. */
+  protected backToChat() {
+    const threadId = this.threadId();
+    if (!threadId) return;
+    void this.router.navigate(['/chats/chat', decodeId(this.id())], {
+      fragment: `msg=${decodeId(threadId)}`,
+    });
+  }
   protected readonly subscription = computed(() => {
     const threadId = this.threadId();
     return threadId ? this.chatInfo.subscription(this.id(), threadId) : undefined;
