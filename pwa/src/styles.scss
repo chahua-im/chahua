@@ -315,11 +315,6 @@ ion-content.custom-scrollbars::part(scroll) {
   --os-handle-bg-active: rgba(var(--ion-text-color-rgb, 0, 0, 0), 0.65);
 }
 
-// WaveSurfer renders its waveform in a library-owned shadow root.
-app-voice-player ::part(canvases) {
-  opacity: 0.35;
-}
-
 // Ionic's item line belongs between rows, including rows wrapped by our shared component.
 ion-list > ion-item:last-child,
 ion-list > ion-item-sliding:last-child ion-item,

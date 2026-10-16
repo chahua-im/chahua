@@ -155,6 +155,7 @@ export class MessageOutbox {
       uploads: [...(composition.uploads ?? [])],
       revision: 0,
       local: {
+        chatId,
         sender: this.sender()!,
         createdAt: new Date().toISOString(),
         messageType: composition.messageType,
@@ -613,6 +614,7 @@ export class MessageOutbox {
         revision: intent.revision,
         uploads: [],
         local: {
+          chatId: intent.local.chatId,
           sender: intent.local.sender,
           createdAt: intent.local.createdAt,
           messageType: body.messageType,

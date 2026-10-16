@@ -5,6 +5,7 @@ export function savedMessageContent(saved: SavedMessageResponse): MessageContent
   const sticker = saved.sticker;
   return {
     id: saved.originalMessageId,
+    chatId: saved.originalChatId,
     sender: saved.sender,
     createdAt: saved.originalCreatedAt,
     message: saved.message,

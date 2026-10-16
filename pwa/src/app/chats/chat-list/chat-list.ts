@@ -37,6 +37,7 @@ import { addCircleOutline } from 'ionicons/icons';
 import { Connection } from '../../api/connection';
 import { PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { SessionStore } from '../../session/session-store';
 import { ChatListStore } from '../chat-list-store';
 import { Preferences } from '../../settings/preferences';
@@ -70,6 +71,7 @@ import { isListTab, ListTab, type ListSelection } from '../list-tabs';
     IonList,
     IonPopover,
     IonSearchbar,
+    VoiceBar,
     IonSegment,
     IonSegmentButton,
     IonSpinner,
@@ -80,6 +82,8 @@ import { isListTab, ListTab, type ListSelection } from '../list-tabs';
 export class ChatList {
   readonly selection = input.required<ListSelection>();
   readonly active = input(true);
+  /** The desktop split-pane sidebar instance; its voice bar lives in the main column instead. */
+  readonly sidebar = input(false);
   readonly openList = output<ListSelection>();
   protected readonly list = this.selection;
   protected readonly tabs = Object.values(ListTab);

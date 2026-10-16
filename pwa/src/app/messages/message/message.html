@@ -59,7 +59,7 @@
     <div
       #bubble
       [class]="isSticker() ? 'sticker-content' : 'bubble'"
-      [class.media-only]="mediaOverlay()"
+      [class.media-only]="mediaOnly()"
       [class.has-thread]="!!threadInfo()"
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">

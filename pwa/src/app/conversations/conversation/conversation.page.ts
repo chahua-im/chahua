@@ -69,7 +69,8 @@ import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outb
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { isVisibleMessage } from '../../messages/message-visibility';
 import { Message, type MessageContent } from '../../messages/message/message';
-import { pauseVoicePlayback } from '../../messages/voice-player/voice-player';
+import { VoicePlayback } from '../../messages/voice-player/voice-playback';
+import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
@@ -126,6 +127,7 @@ type ScrollPosition =
     MessageMenu,
     MessageComposer,
     MessagePreview,
+    VoiceBar,
     IonBackButton,
     IonBadge,
     IonButton,
@@ -403,6 +405,7 @@ export class ConversationPage {
   );
   protected readonly navigatingDown = linkedSignal({ source: this.entryKey, computation: () => false });
   protected readonly unreadCount = computed(() => this.chatInfo.unreadCount(this.id(), this.threadId()));
+  private readonly playback = inject(VoicePlayback);
   protected readonly savedReplyId = linkedSignal({
     source: this.entryVersion,
     computation: (): SnowflakeID | undefined => undefined,
@@ -465,6 +468,7 @@ export class ConversationPage {
     const index = pins.findIndex((item) => item.id === pin.id);
     this.selectedPinId.set(pins[(index + 1) % pins.length]?.id);
   }
+
 
   protected readonly pinsHref = computed(
     () => `/chats/chat/${decodeId(this.id())}${this.threadId() ? `/thread/${decodeId(this.threadId()!)}` : ''}/pins`,
@@ -649,7 +653,7 @@ export class ConversationPage {
     if (retainRange) {
       this.conversation.cancelLoading();
       if (!retainComposer) this.cancelEdit();
-      pauseVoicePlayback();
+      this.playback.pause();
     } else {
       this.entryVersion.update((version) => version + 1);
       this.conversation.reset();

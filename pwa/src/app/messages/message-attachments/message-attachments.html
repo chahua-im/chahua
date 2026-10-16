@@ -53,9 +53,15 @@
       </div>
     } @else if (item.kind === MediaKind.Audio) {
       <div class="audio-frame">
-        <app-voice-player [src]="item.url" />
+        <app-voice-player [src]="item.url" [dock]="dock()" />
         @if (item.progress != null) {
           <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
+        }
+        @if (last && overlayTime()) {
+          <span class="media-time">
+            <time [attr.datetime]="message().createdAt">{{ message().createdAt | date: 'HH:mm' }}</time>
+            <app-message-status [delivery]="delivery()" />
+          </span>
         }
       </div>
     } @else {

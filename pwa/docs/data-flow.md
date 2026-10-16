@@ -168,7 +168,7 @@ Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceU
 
 静态图片长边限制 1920，尝试 AVIF/WebP/JPEG，低于原体积 75% 才采用；视频通过 Mediabunny 转码，低于原体积 50% 且轨道完整才采用。保留动图，HEIC 必要时解码，编码失败回退原文件。浏览器已启动的不可取消编码结束后丢弃结果，不再上传。
 
-录音保存阶段只留本地 Blob，明确发送才上传。VoicePlayer 点击后同步启动 Audio 保留 Safari 用户激活，WaveSurfer 读取真实波形；波形 CORS 失败不影响可用播放，同一时间只播放一条。MediaViewer 仅浏览当前消息的图片/视频，不合并整聊天媒体。
+录音保存阶段只留本地 Blob，明确发送才上传。VoicePlayer 挂载时创建 Audio 并用 WaveSurfer 读取真实波形，播放仍在点击手势里调用 play() 以保留 Safari 用户激活；播放中的音频由根服务 VoicePlayback 独占，离开或切换会话时由它接管音频继续播放，回到该会话时播放器重新绑定同一元素；吸顶播放条读取其状态，点击发送者名经 ConversationNavigation 打开消息所属会话并锚定到该消息；倍速由服务全局记忆并应用到正在播放的音频；波形 CORS 失败不影响可用播放，同一时间只播放一条。MediaViewer 仅浏览当前消息的图片/视频，不合并整聊天媒体。
 
 ## 通知与静音
 

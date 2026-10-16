@@ -42,6 +42,7 @@ describe('Voice recording gesture', () => {
         }),
     );
     vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:recording');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     stop.mockClear();

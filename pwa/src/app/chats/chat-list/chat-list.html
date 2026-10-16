@@ -67,6 +67,9 @@
       }
     </ion-toolbar>
   }
+    @if (!sidebar()) {
+      <app-voice-bar />
+    }
 </ion-header>
 @if (searching()) {
   <ion-content appScrollbars><app-directory-search [query]="search()" /></ion-content>

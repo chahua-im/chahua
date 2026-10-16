@@ -6,13 +6,14 @@ import { chatbubblesOutline } from 'ionicons/icons';
 import { filter, fromEvent, map } from 'rxjs';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { ChatList } from '../chat-list/chat-list';
+import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { listSelection, ListTab, type ListSelection } from '../list-tabs';
 
 @Component({
   selector: 'app-chats',
   templateUrl: './chat-list.page.html',
   styleUrl: './chat-list.page.scss',
-  imports: [ContentScrollbars, ChatList, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, RouterOutlet],
+  imports: [ContentScrollbars, ChatList, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, RouterOutlet, VoiceBar],
 })
 export class ChatListPage {
   private readonly nav = inject(NavController);
