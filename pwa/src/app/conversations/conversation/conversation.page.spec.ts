@@ -1200,6 +1200,27 @@ describe('ConversationPage', () => {
     expect(drafts.get(testChat.id)).toMatchObject({ text: '还没有发送', replyTo: wireMessage.id });
   });
 
+  it('Escape cancels an unchanged edit or the reply and blurs the composer otherwise', () => {
+    const blur = vi.spyOn(component['composer']()!, 'blur').mockImplementation(() => {});
+    component['startReply'](testMessage);
+    component['escapeComposer']();
+    expect(component['replyTo']()).toBeUndefined();
+    expect(blur).not.toHaveBeenCalled();
+
+    component['startEdit'](testMessage);
+    component['escapeComposer']();
+    expect(component['editTarget']()).toBeUndefined();
+
+    component['startEdit'](testMessage);
+    component['updateDraft']('改动过的编辑');
+    component['escapeComposer']();
+    expect(component['editTarget']()).toBeDefined();
+
+    component['cancelEdit']();
+    component['escapeComposer']();
+    expect(blur).toHaveBeenCalledOnce();
+  });
+
   it.each(['background', 'transition', 'left'])(
     'persists only the next draft while an earlier send finishes: %s',
     async (mode) => {

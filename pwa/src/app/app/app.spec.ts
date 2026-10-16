@@ -103,6 +103,82 @@ describe('App', () => {
     }
   });
 
+  describe('Escape navigation', () => {
+    beforeEach(() => {
+      TestBed.overrideComponent(App, { set: { template: '' } });
+    });
+
+    const pressEscape = () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+
+    const configure = async (url: string) => {
+      const router = TestBed.inject(Router);
+      router.resetConfig([
+        { path: 'chats', children: [] },
+        { path: 'chats/chat/:id', children: [] },
+        { path: 'chats/chat/:id/thread/:threadId', children: [] },
+      ]);
+      const fixture = TestBed.createComponent(App);
+      await router.navigateByUrl(url);
+      await fixture.whenStable();
+      return { router, fixture };
+    };
+
+    it('leaves a thread for the parent chat positioned at the thread root', async () => {
+      const { router, fixture } = await configure('/chats/chat/123/thread/456');
+      pressEscape();
+      await fixture.whenStable();
+      expect(router.url).toBe('/chats/chat/123#msg=456');
+    });
+
+    it('leaves a chat for the chat list', async () => {
+      const { router, fixture } = await configure('/chats/chat/123');
+      pressEscape();
+      await fixture.whenStable();
+      expect(router.url).toBe('/chats');
+    });
+
+    it('defers to a focused input', async () => {
+      const { router, fixture } = await configure('/chats/chat/123');
+      const input = document.createElement('input');
+      document.body.append(input);
+      input.focus();
+      try {
+        pressEscape();
+        await fixture.whenStable();
+        expect(router.url).toBe('/chats/chat/123');
+      } finally {
+        input.remove();
+      }
+    });
+
+    it('defers to a presented Ionic overlay', async () => {
+      const { router, fixture } = await configure('/chats/chat/123');
+      const modal = document.createElement('ion-modal');
+      document.body.append(modal);
+      try {
+        pressEscape();
+        await fixture.whenStable();
+        expect(router.url).toBe('/chats/chat/123');
+      } finally {
+        modal.remove();
+      }
+    });
+
+    it('does not defer to a closed split-pane menu, which is visible without show-menu', async () => {
+      const { router, fixture } = await configure('/chats/chat/123');
+      const menu = document.createElement('ion-menu');
+      menu.classList.add('menu-pane-visible', 'split-pane-side', 'menu-enabled');
+      document.body.append(menu);
+      try {
+        pressEscape();
+        await fixture.whenStable();
+        expect(router.url).toBe('/chats');
+      } finally {
+        menu.remove();
+      }
+    });
+  });
+
   describe('iOS visual viewport', () => {
     const platforms = getPlatforms();
     const originalPlatforms = [...platforms];

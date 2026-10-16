@@ -30,7 +30,10 @@ import { SessionStore } from '../session/session-store';
   selector: 'app-root',
   templateUrl: './app.html',
   styleUrl: './app.scss',
-  host: { '(window:popstate)': 'browserTransition.set($event.hasUAVisualTransition)' },
+  host: {
+    '(window:popstate)': 'browserTransition.set($event.hasUAVisualTransition)',
+    '(document:keydown)': 'escapeKey($event)',
+  },
   imports: [
     ContentScrollbars,
     IonApp,
@@ -50,6 +53,7 @@ import { SessionStore } from '../session/session-store';
 })
 export class App {
   private readonly router = inject(Router);
+  private readonly document = inject(DOCUMENT);
   private readonly notifications = inject(PushNotifications);
   protected readonly landingPage = toSignal(
     this.router.events.pipe(
@@ -81,11 +85,10 @@ export class App {
   protected readonly updates = inject(AppUpdates);
 
   constructor() {
-    const document = inject(DOCUMENT);
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event instanceof NavigationStart) {
         // Snapshot existing overlays so a newly opened page cannot be dismissed by an older transition.
-        document
+        this.document
           .querySelectorAll<
             HTMLIonModalElement | HTMLIonPopoverElement | HTMLIonAlertElement | HTMLIonActionSheetElement
           >('ion-modal, ion-popover, ion-alert, ion-action-sheet')
@@ -108,6 +111,29 @@ export class App {
       this.browserTransition() && this.router.currentNavigation()?.trigger === 'popstate'
         ? (baseEl, options) => iosTransitionAnimation(baseEl, options).duration(0)
         : iosTransitionAnimation;
+  }
+
+  /**
+   * Page-level Escape: in a thread → parent chat positioned at the thread root message, in a chat →
+   * the chat list. Defers to inputs and Ionic overlays, which handle Escape themselves.
+   */
+  protected escapeKey(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    const active = this.document.activeElement;
+    if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) return;
+    // A closed inline toast or alert stays in the DOM as .overlay-hidden, and a split-pane menu is
+    // permanently visible without it, so each overlay needs its own "presented" marker.
+    if (
+      this.document.querySelector(
+        'ion-alert:not(.overlay-hidden), ion-action-sheet:not(.overlay-hidden), ion-menu.show-menu, ion-modal:not(.overlay-hidden), ion-toast:not(.overlay-hidden)',
+      )
+    )
+      return;
+    const segments = this.router.parseUrl(this.router.url).root.children['primary']?.segments.map((s) => s.path);
+    if (segments?.length === 5 && segments[0] === 'chats' && segments[1] === 'chat' && segments[3] === 'thread')
+      void this.router.navigate(['/chats/chat', segments[2]], { replaceUrl: true, fragment: `msg=${segments[4]}` });
+    else if (segments?.length === 3 && segments[0] === 'chats' && segments[1] === 'chat')
+      void this.router.navigate(['/chats'], { replaceUrl: true });
   }
 
   protected async initialize() {
