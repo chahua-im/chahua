@@ -2,7 +2,7 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { ServerWsMessageType } from '../../generated/models';
+import { MessageType, ServerWsMessageType } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { encodeId } from '../api/snowflake-id';
@@ -555,6 +555,38 @@ describe('ConversationStore', () => {
     await opening;
     expect(timeline.items()[1].replyToMessage?.isDeleted).toBe(true);
     expect(timeline.items()[1].replyToMessage?.message).toBeUndefined();
+  });
+
+  it('refreshes quote snapshots when the cited message is edited', async () => {
+    const opening = timeline.open(encodeId('100'));
+    http.expectOne(`${root}?max=50&around=100`).flush({
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+    });
+    await opening;
+    timeline.update({ ...message('100'), message: '编辑后的消息', isEdited: true });
+    expect(timeline.items()[0].message).toBe('编辑后的消息');
+    expect(timeline.items()[1].replyToMessage).toEqual({
+      id: encodeId('100'),
+      clientGeneratedId: 'test-message',
+      createdAt: '2026-09-05T12:00:00Z',
+      sender: { uid: 1, name: '测试用户', gender: 0 },
+      message: '编辑后的消息',
+      messageType: MessageType.text,
+      sticker: undefined,
+      attachments: [],
+      isDeleted: false,
+      mentions: [],
+    });
+  });
+
+  it('refreshes quote snapshots in a page that arrives after the edit event', async () => {
+    const opening = timeline.open(encodeId('100'));
+    timeline.update({ ...message('100'), message: '编辑后的消息', isEdited: true });
+    http.expectOne(`${root}?max=50&around=100`).flush({
+      messages: [wire('100'), { ...wire('101'), replyToMessage: { ...message('100'), mentions: [] } }],
+    });
+    await opening;
+    expect(timeline.items()[1].replyToMessage?.message).toBe('编辑后的消息');
   });
 
   it('keeps updates scoped to the active topic and clears pending updates after navigation', async () => {
