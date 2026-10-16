@@ -4,8 +4,9 @@ import { of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
-import { encodeId } from '../../api/snowflake-id';
+import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { StickerPreferences } from '../../settings/sticker-preferences';
 import { StickerPicker } from './sticker-picker';
 
 const sticker: StickerSummary = {
@@ -45,6 +46,15 @@ describe('StickerPicker selection during requests', () => {
     putSubscription: vi.fn(() => of(undefined)),
   };
   const modals = { dismiss: vi.fn().mockResolvedValue(true) };
+  const preferences = {
+    autoSortPacksEnabled: vi.fn(() => false),
+    autoSortFavoritesEnabled: vi.fn(() => false),
+    packOrder: vi.fn(() => [] as { stickerPackId: SnowflakeID; lastUsedOn: number }[]),
+    favoriteStickerOrder: vi.fn(() => [] as { stickerId: SnowflakeID; lastUsedOn: number }[]),
+    upsertPackOrderItem: vi.fn(),
+    syncPackOrder: vi.fn(async () => {}),
+    upsertFavoriteStickerOrderItem: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,6 +71,7 @@ describe('StickerPicker selection during requests', () => {
       providers: [
         { provide: StickersService, useValue: api },
         { provide: ModalController, useValue: modals },
+        { provide: StickerPreferences, useValue: preferences },
         {
           provide: AlertController,
           useValue: {
@@ -348,5 +359,42 @@ describe('StickerPicker selection during requests', () => {
     await operation;
     expect(picker['pack']()).toEqual(previous);
     expect(picker['error']()).toBe(true);
+  });
+
+  it('records pack usage only inside the auto-sort window while sending', async () => {
+    preferences.autoSortPacksEnabled.mockReturnValue(true);
+    const { fixture } = await render();
+    await fixture.componentInstance['openPack'](pack.id);
+    fixture.componentInstance['send'](sticker);
+    const item = { stickerPackId: pack.id, lastUsedOn: expect.any(Number) };
+    expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith(item);
+    expect(preferences.syncPackOrder).toHaveBeenCalledWith([{ ...item, isAutoSort: true }]);
+
+    preferences.upsertPackOrderItem.mockClear();
+    preferences.syncPackOrder.mockClear();
+    preferences.packOrder.mockReturnValue(
+      Array.from({ length: 20 }, (_, index) => ({ stickerPackId: encodeId(String(900 + index)), lastUsedOn: 1000 - index })),
+    );
+    fixture.componentInstance['packs'].update((packs) => [
+      ...Array.from({ length: 20 }, (_, index) => ({ ...pack, id: encodeId(String(900 + index)) })),
+      pack,
+    ]);
+    fixture.componentInstance['send'](sticker);
+    expect(preferences.upsertPackOrderItem).not.toHaveBeenCalled();
+  });
+
+  it('records favorite usage and re-sorts the favorites view', async () => {
+    preferences.autoSortFavoritesEnabled.mockReturnValue(true);
+    const other = { ...sticker, id: encodeId('104') };
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: [sticker, other] }));
+    const { fixture, button, selected } = await render();
+    preferences.favoriteStickerOrder.mockReturnValue([{ stickerId: other.id, lastUsedOn: Date.now() }]);
+    button.click();
+    expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
+    expect(preferences.upsertFavoriteStickerOrderItem).toHaveBeenCalledWith({
+      stickerId: sticker.id,
+      lastUsedOn: expect.any(Number),
+    });
+    expect(fixture.componentInstance['stickers']().map((item) => item.id)).toEqual([other.id, sticker.id]);
   });
 });

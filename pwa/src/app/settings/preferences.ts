@@ -3,6 +3,7 @@ import { ColorMode, isColorMode } from './color-mode';
 
 const THREADS_KEY = 'chahua.preferences.showThreadsInMessages';
 const REACTIONS_KEY = 'chahua.preferences.recentReactions';
+const PINNED_REACTIONS_KEY = 'chahua.preferences.pinnedReactions';
 
 const AVATARS_KEY = 'chahua.preferences.showAllAvatars';
 
@@ -11,9 +12,17 @@ const COLOR_MODE_KEY = 'chahua.preferences.colorMode';
 @Service()
 export class Preferences {
   readonly recentReactions = signal<readonly string[]>(readReactions());
+  readonly pinnedReactions = signal<readonly string[]>(readPinnedReactions());
   rememberReaction(emoji: string) {
+    if (this.pinnedReactions().includes(emoji)) return;
     this.recentReactions.update((items) => [emoji, ...items.filter((item) => item !== emoji)].slice(0, 5));
     window.localStorage.setItem(REACTIONS_KEY, JSON.stringify(this.recentReactions()));
+  }
+
+  setPinnedReactions(reactions: string[]) {
+    const pinned = [...new Set(reactions)].slice(0, 5);
+    window.localStorage.setItem(PINNED_REACTIONS_KEY, JSON.stringify(pinned));
+    this.pinnedReactions.set(pinned);
   }
 
   private readonly threads = signal(window.localStorage.getItem(THREADS_KEY) !== 'false');
@@ -46,9 +55,21 @@ function readColorMode(): ColorMode {
 
 function readReactions(): string[] {
   try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(REACTIONS_KEY) ?? '[]');
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 5) : [];
+    const value: unknown = JSON.parse(window.localStorage.getItem(REACTIONS_KEY) ?? 'null');
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 5) : DEFAULT_REACTIONS;
   } catch {
-    return [];
+    return DEFAULT_REACTIONS;
+  }
+}
+
+const DEFAULT_REACTIONS = ['❤️', '😂', '😮', '😢', '🎉'];
+const DEFAULT_PINNED_REACTIONS = ['👍'];
+
+function readPinnedReactions(): string[] {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(PINNED_REACTIONS_KEY) ?? 'null');
+    return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === 'string'))].slice(0, 5) : DEFAULT_PINNED_REACTIONS;
+  } catch {
+    return DEFAULT_PINNED_REACTIONS;
   }
 }

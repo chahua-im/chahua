@@ -3,7 +3,8 @@ import { inject, isDevMode, Service, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../generated/endpoints/auth/auth.service';
 import { UsersService } from '../../generated/endpoints/users/users.service';
-import type { MeResponse, User } from '../../generated/models';
+import type { MeResponse, StickerPackOrderItem, User } from '../../generated/models';
+import type { SnowflakeID } from '../api/snowflake-id';
 
 declare const CHAHUA_DEV_TOKEN: string | undefined;
 
@@ -63,6 +64,29 @@ export class SessionStore {
           ? profile.userGroup
           : current.userGroup,
     });
+  }
+
+  replaceStickerPackOrder(order: StickerPackOrderItem[]) {
+    const seen = new Set<SnowflakeID>();
+    const merged = order
+      .filter((item) => !seen.has(item.stickerPackId) && seen.add(item.stickerPackId))
+      .map((item) => ({ ...item, lastUsedOn: Math.trunc(item.lastUsedOn) }));
+    this.updateOrder(() => merged);
+  }
+
+  upsertStickerPackOrderItem(item: StickerPackOrderItem) {
+    const normalized = { ...item, lastUsedOn: Math.trunc(item.lastUsedOn) };
+    this.updateOrder((current) => [normalized, ...current.filter((existing) => existing.stickerPackId !== item.stickerPackId)]);
+  }
+
+  removeStickerPackOrderItem(packId: SnowflakeID) {
+    this.updateOrder((current) => current.filter((item) => item.stickerPackId !== packId));
+  }
+
+  private updateOrder(update: (current: StickerPackOrderItem[]) => StickerPackOrderItem[]) {
+    const current = this.user();
+    if (!current) return;
+    this.user.set({ ...current, stickerPackOrder: update(current.stickerPackOrder) });
   }
 
   logout() {

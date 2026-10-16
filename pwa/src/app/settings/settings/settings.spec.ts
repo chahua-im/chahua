@@ -16,6 +16,8 @@ import { SessionStore } from '../../session/session-store';
 import { ColorMode } from '../color-mode';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
 import { Preferences } from '../preferences';
+import { StickerSettings } from '../sticker-settings/sticker-settings';
+import { StickerPreferences } from '../sticker-preferences';
 import { Settings } from './settings';
 
 @Component({ imports: [IonNav], template: '<ion-nav [root]="root"></ion-nav>' })
@@ -82,6 +84,16 @@ describe('Settings', () => {
         { provide: ModalController, useValue: { dismiss } },
         { provide: PushNotifications, useValue: notifications },
         { provide: AppUpdates, useValue: updates },
+        {
+          provide: StickerPreferences,
+          useValue: {
+            autoSortPacksEnabled: signal(false),
+            autoSortFavoritesEnabled: signal(false),
+            packOrder: signal([]),
+            upsertPackOrderItem: vi.fn(),
+            syncPackOrder: vi.fn(async () => {}),
+          },
+        },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -272,6 +284,19 @@ describe('Settings', () => {
     await retry;
     await fixture.whenStable();
     expect(page.textContent).toContain('已保存');
+  });
+
+  it('links to the sticker settings page and loads its pack list', async () => {
+    const item = Array.from(page.querySelectorAll('ion-item')).find(
+      (entry) => entry.textContent?.trim() === '表情和贴纸',
+    )!;
+    expect(item.getAttribute('href')).toBe('/settings/stickers');
+    await nav.push(StickerSettings);
+    page = (await nav.getActive())!.element!;
+    http.expectOne('/_api/stickers/packs/mine/owned').flush({ packs: [] });
+    http.expectOne('/_api/stickers/packs/mine/subscribed').flush({ packs: [] });
+    await fixture.whenStable();
+    expect(page.querySelector('ion-title')!.textContent).toBe('表情和贴纸');
   });
 
   it('replaces the settings page with saved messages', async () => {

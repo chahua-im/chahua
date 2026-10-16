@@ -10,6 +10,8 @@ flowchart TD
   APP --> OUTLET[IonRouterOutlet]
   APP --> LIST[ChatList：分栏侧栏]
   LINK --> SETTINGS[Settings]
+  SETTINGS --> STICKERSET[StickerSettings]
+  STICKERSET --> PACKDETAIL[StickerPackDetail]
   APP --> NOTIFICATIONS[NotificationPrompt]
   OUTLET --> LISTPAGE[ChatListPage]
   LISTPAGE --> MOBILE[ChatList：单列内容]
@@ -45,6 +47,7 @@ flowchart TD
   ATTACH --> VOICE
   MENU --> REACTORS[ReactionDetails]
   MENU --> EMOJI[EmojiPicker]
+  STICKERSET --> EMOJI
   DETAILS --> TOPICS[ChatThreads]
   DETAILS --> MEMBERS[ChatMembers]
   DETAILS --> PARTICIPANTS[ThreadParticipants]
@@ -121,12 +124,12 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 | UploadProgress  | value（0–1）                                                                                                   | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                                   |
 | VoicePlayer     | src、dock；playing、loading、failed、elapsed、duration、波形状态                                               | 挂载时创建 Audio 和 WaveSurfer 并读取波形；同一时间播放一条；带 dock 的消息语音把播放状态交给吸顶播放条，销毁时由 VoicePlayback 接管音频继续播放 |
 | VoiceBar        | 无输入，读取 VoicePlayback；toggle/dismiss/speed 经活跃语音执行，locate 经 ConversationNavigation 打开消息所属会话 | 只负责呈现吸顶播放条，挂在主栏 header 底部：会话页、聊天列表移动端页与桌面空态页各挂一个，桌面侧栏列表实例不挂 |
-| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；详情选中项按 ID 从当前列表派生，不复制包内贴纸 |
+| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；详情选中项按 ID 从当前列表派生，不复制包内贴纸；包列表按用户贴纸包顺序排序，发送贴纸时按开关记录包使用顺序 |
 | MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                               | 当前消息的媒体集合与本地画布，不写入聊天状态                                                            |
 
 上传任务提交后归 MessageOutbox，编辑只借用任务引用。输入区可以继续输入和录音。VoicePlayer 不显示原生音频控制条，挂载即下载音频并解码波形，波形读取失败时仍保留可用播放。消息语音的播放由根服务 VoicePlayback 独占：播放中的语音在离开或切换会话后继续播放，VoiceBar 吸顶播放条随语音出现在会话页和聊天列表页的 header 底部，接管播放/暂停、跳转原消息、已播时长与倍速，关闭或播完即收起；倍速由 VoicePlayback 全局记忆，跨语音保持；录音预览与待发送预览不进吸顶条。
 
-创建贴纸包直接使用创建响应中的完整详情，并追加到包列表；上传新贴纸后重读该包。收藏状态写回当前 content，随后订阅更新不会恢复过期的收藏值。
+创建贴纸包直接使用创建响应中的完整详情，并追加到包列表；贴纸库上传新贴纸后重读该包，包详情页上传后把响应追加到当前列表。收藏状态写回当前 content，随后订阅更新不会恢复过期的收藏值。
 
 ## 资料、搜索与管理
 
@@ -153,6 +156,8 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | Settings                   | 当前用户、通知和更新状态；持有权限拒绝 toast、局部更新结果，打开设置子页和收藏 |
 | GeneralSettings            | 直接编辑 Preferences，无额外状态副本                                           |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |
+| StickerSettings            | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、创建贴纸包、贴纸包重排列表 | StickersService、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
+| StickerPackDetail          | packId；包详情、owned 状态、重命名/删除/退订与添加、点按移除贴纸               | StickersService、StickerPreferences；删除与退订移除顺序条目并关闭弹窗 |
 | Landing                    | 检测平台与选中平台；公开安装指引                                               |
 
 设置与详情统一由 ChatLink 路由托管 modal，关闭恢复浏览器历史；会话缓存保留底层状态。Landing 只提供安装指引，普通浏览器中 App 在该入口只同步恢复并保存 token；已安装 PWA 由路由 guard 重定向到聊天并正常初始化登录。

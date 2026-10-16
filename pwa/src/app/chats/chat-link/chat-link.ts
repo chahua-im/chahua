@@ -103,6 +103,7 @@ export class ChatLink {
             ...(messageId ? { messageId: encodeId(messageId) } : {}),
             ...(id ? { chatId: encodeId(id) } : {}),
             ...(threadId ? { threadId: encodeId(threadId) } : {}),
+            ...(route.paramMap.get('packId') ? { packId: encodeId(route.paramMap.get('packId')!) } : {}),
           },
         };
       } else if (route.paramMap.get('packId') || route.paramMap.get('stickerId')) {

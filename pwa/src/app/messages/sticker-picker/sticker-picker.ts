@@ -35,6 +35,7 @@ import type {
 import { decodeId } from '../../api/snowflake-id';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
+import { StickerPreferences, sortStickerPacksByPreference, sortFavoriteStickersByPreference, AUTO_SORT_LIMIT } from '../../settings/sticker-preferences';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../media-processing/file-type';
 
 type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] };
@@ -71,6 +72,7 @@ export class StickerPicker {
   readonly selected = output<StickerSummary>();
   protected readonly icons = { heart, cubeOutline, addOutline, cloudUploadOutline };
   protected readonly session = inject(SessionStore);
+  private readonly preferences = inject(StickerPreferences);
   private readonly alerts = inject(AlertController);
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
@@ -124,6 +126,7 @@ export class StickerPicker {
       const pack = await firstValueFrom(this.api.postPack({ name }));
       this.content.set(pack);
       this.packs.update((packs) => [...packs, pack]);
+      this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
     } catch {
       this.error.set(true);
     } finally {
@@ -189,8 +192,13 @@ export class StickerPicker {
         firstValueFrom(this.api.getMySubscribedPacks()),
         firstValueFrom(this.api.getMyOwnedPacks()),
       ]);
-      this.content.set({ stickers: favorites.stickers });
-      this.packs.set([...new Map([...subscribed.packs, ...owned.packs].map((pack) => [pack.id, pack])).values()]);
+      const merged = [...new Map([...subscribed.packs, ...owned.packs].map((pack) => [pack.id, pack])).values()];
+      this.content.set({
+        stickers: this.preferences.autoSortFavoritesEnabled()
+          ? sortFavoriteStickersByPreference(favorites.stickers, this.preferences.favoriteStickerOrder())
+          : favorites.stickers,
+      });
+      this.packs.set(sortStickerPacksByPreference(merged, this.preferences.packOrder()));
     } catch {
       this.error.set(true);
     } finally {
@@ -277,8 +285,25 @@ export class StickerPicker {
       this.chosenId.set(sticker.id);
       return;
     }
+    this.recordUsage(sticker);
     if (this.embedded()) this.selected.emit(sticker);
     else void this.modals.dismiss(sticker, 'send');
+  }
+  private recordUsage(sticker: StickerSummary) {
+    const pack = this.pack();
+    if (pack) {
+      if (!this.preferences.autoSortPacksEnabled()) return;
+      const index = this.packs().findIndex((item) => item.id === pack.id);
+      if (index < 0 || index >= AUTO_SORT_LIMIT) return;
+      const item = { stickerPackId: pack.id, lastUsedOn: Date.now() };
+      this.preferences.upsertPackOrderItem(item);
+      void this.preferences.syncPackOrder([{ ...item, isAutoSort: true }]);
+    } else if (this.preferences.autoSortFavoritesEnabled()) {
+      this.preferences.upsertFavoriteStickerOrderItem({ stickerId: sticker.id, lastUsedOn: Date.now() });
+      const content = this.content();
+      if (!('id' in content))
+        this.content.set({ stickers: sortFavoriteStickersByPreference(content.stickers, this.preferences.favoriteStickerOrder()) });
+    }
   }
   protected press(sticker: StickerSummary, event: PointerEvent) {
     if (!this.selectable()) return;

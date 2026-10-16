@@ -21,6 +21,7 @@ import {
 import type { ToggleCustomEvent } from '@ionic/core';
 import {
   bookmarkOutline,
+  happyOutline,
   notificationsOutline,
   refreshOutline,
   settingsOutline,
@@ -69,6 +70,7 @@ export class Settings {
   protected readonly bookmarkIcon = bookmarkOutline;
   protected readonly generalIcon = settingsOutline;
   protected readonly verificationIcon = shieldCheckmarkOutline;
+  protected readonly stickerIcon = happyOutline;
   protected readonly notificationIcon = notificationsOutline;
   protected readonly updateIcon = refreshOutline;
 

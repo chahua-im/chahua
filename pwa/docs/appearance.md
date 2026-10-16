@@ -101,6 +101,8 @@ NotificationPrompt 使用 Angular 默认的 Emulated 封装，模板内 spinner 
 | MessagePreview（内联） | 系统行为摘要继承调用位置指定的颜色。                                                                                                     |
 | MessageStatus（内联）  | 时间旁的状态图标对齐。                                                                                                                   |
 | EmojiPicker（内联）    | 第三方表情选择器的尺寸和主题变量。                                                                                                       |
+| StickerSettings（内联）| 列表行内 32px 贴纸包预览框、自有徽标与自动排序分隔线。                                                                   |
+| StickerPackDetail（内联）| 贴纸网格、虚线添加格与移除角标。                                                                                       |
 
 资源占位、Safari 惯性期间的稳定布局、安全区、隐藏控件与预览禁用命中属于功能需求。它们和装饰样式一起审查，但不因默认截图里没有出现就判定为无效。外观验证覆盖亮暗色、单列/多列、长文字、回复、媒体、贴纸和菜单。
 
