@@ -60,6 +60,7 @@ iOS 根布局保留 Ionic 默认 body 样式，不根据 VisualViewport 的 resi
 - 只有用户发布的 URL 显示下划线；收到的消息链接使用主题蓝色，自己的蓝色气泡内使用白色。系统消息的用户名链接和用户 mention 均不显示下划线。
 - 同消息的多张图片/视频按附件顺序拼成相册，最大宽度 360px、间距 2px；两张横图上下排、其他双图并排，三张按首图方向选左一右二或上一下二，四张用四宫格，五至九张按每行两至三张选择均衡布局。宽高比小于 0.5 或大于 2.5 的媒体独占一行，最大高度 360px；其余格子裁切超过 20% 时完整显示并留背景。超过九项只显示九个预览，末格显示 +N，查看器仍包含全部媒体。单图、贴纸、语音和文件沿用各自尺寸框。相册尺寸由元数据与容器宽度确定，边界对齐物理像素，末格吸收舍入余量；缺少尺寸的方形占位在资源加载与上传处理中保持不变。时间仅在末个可见媒体上显示一次，说明文字位于相册下方。
 - 发送气泡保留应用蓝色与白色文字。媒体预览从顶部开始，按钮悬浮，底部为同消息 gallery。
+- 背景色与 main 对齐：会话消息区使用 Ionic 默认页面背景（浅色 #fff、深色 #000），接收气泡用 `--ion-background-color-step-100`（浅色 #f0f0f0、深色 #1a1a1a），发送气泡用 `--ion-color-primary`；创建/加入/加好友页（StartChat）与资料类页面一样通过 IonContent 的 `color="light"` 设置背景。
 
 引用形状、气泡内边距和消息分组参考 [TG iOS 引用布局](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageReplyInfoNode/Sources/ChatMessageReplyInfoNode.swift)与[消息布局常量](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramUI/Components/Chat/ChatMessageItemCommon/Sources/ChatMessageItemCommon.swift)。参数表达应用的外观选择，不意味着在所有主题和系统字体设置下与 TG 逐像素一致。
 

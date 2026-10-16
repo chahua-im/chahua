@@ -66,7 +66,7 @@
   min-width: 0;
   min-height: calc(var(--app-line-body) + 2 * var(--message-padding-block));
   padding: var(--message-padding-block) var(--message-padding-inline);
-  background: var(--ion-background-color, #fff);
+  background: var(--ion-background-color-step-100, #f0f0f0);
   color: var(--ion-text-color);
   border-radius: 16px 16px 16px 8px;
 }
@@ -226,7 +226,7 @@
     --voice-color: var(--ion-color-primary-contrast);
     --voice-wave-color: rgba(var(--ion-color-primary-contrast-rgb), 0.35);
     --voice-play-color: var(--ion-color-primary-shade);
-    background: var(--ion-color-primary-shade);
+    background: var(--ion-color-primary);
     color: var(--ion-color-primary-contrast);
     border-radius: 16px 16px 8px 16px;
   }
