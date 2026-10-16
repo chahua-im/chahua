@@ -6,6 +6,7 @@ import {
   ServerWsMessageType,
   type GetMessagesParams,
   type ListMessagesResponse,
+  type MessagePreview,
   type MessageResponse,
   type ReactionSummary,
   type ThreadUpdatePayload,
@@ -39,6 +40,8 @@ export class ConversationStore {
   private readonly pendingUpdates = new Map<SnowflakeID, MessageUpdate>();
   /** Ids recalled in this context; their snapshots inside quoting messages must be redacted too. */
   private readonly deletedIds = new Set<SnowflakeID>();
+  /** Latest previews of messages updated in this context; quoting messages' snapshots refresh from here. */
+  private readonly editedPreviews = new Map<SnowflakeID, MessagePreview>();
   private readonly currentPage = signal<MessageRange | undefined>(undefined);
   private readonly isLoading = signal(false);
   private readonly pageDirection = signal<PageDirection | undefined>(undefined);
@@ -80,6 +83,7 @@ export class ConversationStore {
     this.cancel.next();
     this.pendingUpdates.clear();
     this.deletedIds.clear();
+    this.editedPreviews.clear();
     this.isLoading.set(false);
     this.pageDirection.set(undefined);
     this.currentError.set(undefined);
@@ -90,6 +94,7 @@ export class ConversationStore {
     this.cancel.next();
     this.pendingUpdates.clear();
     this.deletedIds.clear();
+    this.editedPreviews.clear();
     this.pageDirection.set(undefined);
     this.isLoading.set(false);
     this.currentError.set(undefined);
@@ -126,6 +131,7 @@ export class ConversationStore {
         this.isLoading.set(false);
         this.pendingUpdates.clear();
         this.deletedIds.clear();
+        this.editedPreviews.clear();
       }
     }
   }
@@ -137,6 +143,7 @@ export class ConversationStore {
     const version = this.version;
     this.pendingUpdates.clear();
     this.deletedIds.clear();
+    this.editedPreviews.clear();
     if (direction === PageDirection.Newer) this.needsResync = false;
     this.pageDirection.set(direction);
     this.currentError.set(undefined);
@@ -162,6 +169,7 @@ export class ConversationStore {
         this.pageDirection.set(undefined);
         this.pendingUpdates.clear();
         this.deletedIds.clear();
+        this.editedPreviews.clear();
       }
     }
   }
@@ -198,6 +206,7 @@ export class ConversationStore {
   update(message: MessageResponse) {
     if (!this.accepts(message)) return;
     if (message.isDeleted) this.deletedIds.add(message.id);
+    else this.editedPreviews.set(message.id, toMessagePreview(message));
     const known = this.items().find((item) => item.id === message.id);
     this.patch(message.id, (current) => ({
       ...message,
@@ -237,7 +246,7 @@ export class ConversationStore {
         page && {
           ...page,
           messages: page.messages.map((message) =>
-            message.id === messageId ? update(message) : this.redactCitation(message),
+            message.id === messageId ? update(message) : this.refreshCitation(message),
           ),
         },
     );
@@ -247,7 +256,7 @@ export class ConversationStore {
     return {
       ...page,
       messages: page.messages.map((message) =>
-        this.redactCitation(this.pendingUpdates.get(message.id)?.(message) ?? message),
+        this.refreshCitation(this.pendingUpdates.get(message.id)?.(message) ?? message),
       ),
     };
   }
@@ -267,6 +276,15 @@ export class ConversationStore {
         sticker: undefined,
       },
     };
+  }
+
+  /** Quoting messages embed a server snapshot of the cited message; edits and recalls reach them through here. */
+  private refreshCitation(message: MessageResponse): MessageResponse {
+    const quote = message.replyToMessage;
+    if (!quote) return message;
+    if (this.deletedIds.has(quote.id)) return this.redactCitation(message);
+    const fresh = this.editedPreviews.get(quote.id);
+    return fresh ? { ...message, replyToMessage: fresh } : message;
   }
 
   accepts(message: MessageResponse) {
@@ -316,4 +334,20 @@ export class ConversationStore {
       ? { ...page, newerCursor: lastId }
       : page;
   }
+}
+
+/** Mirrors the server's MessagePreview shape embedded as replyToMessage. */
+function toMessagePreview(message: MessageResponse): MessagePreview {
+  return {
+    id: message.id,
+    clientGeneratedId: message.clientGeneratedId,
+    createdAt: message.createdAt,
+    sender: message.sender,
+    message: message.message,
+    messageType: message.messageType,
+    sticker: message.sticker ? { emoji: message.sticker.emoji } : undefined,
+    attachments: message.attachments.map(({ kind }) => ({ kind })),
+    isDeleted: message.isDeleted,
+    mentions: message.mentions ?? [],
+  };
 }
