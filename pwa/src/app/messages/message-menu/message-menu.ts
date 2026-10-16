@@ -135,6 +135,10 @@ export class MessageMenu {
   private readonly preferences = inject(Preferences);
   private readonly router = inject(Router);
   protected readonly recent = this.preferences.recentReactions;
+  protected readonly pinnedReactions = this.preferences.pinnedReactions;
+  protected readonly quickEmojis = computed(() =>
+    [...this.pinnedReactions(), ...this.recent().filter((emoji) => !this.pinnedReactions().includes(emoji))].slice(0, 5),
+  );
   protected readonly notice = signal<MessageNotice | undefined>(undefined);
   protected readonly Notice = MessageNotice;
   protected readonly confirmation = signal<
@@ -398,10 +402,6 @@ export class MessageMenu {
       );
     }
     return animation;
-  }
-
-  protected emojis(defaults: readonly string[]) {
-    return [...new Set([defaults[0], ...this.recent(), ...defaults])].slice(0, 5);
   }
 
   protected selected(emoji: string) {

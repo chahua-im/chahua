@@ -81,7 +81,7 @@ describe('MessageMenu', () => {
       imports: [MessageMenu],
       providers: [
         { provide: StickersService, useValue: { putFavorite: vi.fn(() => of(undefined)) } },
-        { provide: Preferences, useValue: { recentReactions: signal([]), rememberReaction: vi.fn() } },
+        { provide: Preferences, useValue: { recentReactions: signal([]), pinnedReactions: signal(['👍']), rememberReaction: vi.fn() } },
         provideRouter([]),
         { provide: MessageOutbox, useValue: outbox },
         {

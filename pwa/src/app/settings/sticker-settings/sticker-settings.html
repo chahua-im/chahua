@@ -1,0 +1,92 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-button (click)="modals.dismiss()">
+        <ion-icon slot="start" [icon]="backIcon"></ion-icon>
+        返回
+      </ion-button>
+    </ion-buttons>
+    <ion-title>表情和贴纸</ion-title>
+    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars color="light">
+  <ion-list [inset]="true">
+    <ion-item>
+      <ion-input
+        label="置顶表态表情 ({{ reactions.pinnedReactions().length }}/5)"
+        [value]="reactions.pinnedReactions().join('')"
+        placeholder="🙂"
+        (ionInput)="editPinned($event)"></ion-input>
+      <ion-button slot="end" fill="clear" (click)="choosingPinned.set(true)">
+        <ion-icon slot="icon-only" [icon]="icons.happyOutline"></ion-icon>
+      </ion-button>
+      <ion-popover [isOpen]="choosingPinned()" (didDismiss)="choosingPinned.set(false)">
+        <ng-template>
+          @defer {
+            <app-emoji-picker (chosen)="addPinned($event)" />
+          } @loading (after 100ms) {
+            <div class="loading-status"><ion-spinner /></div>
+          } @error {
+            <p class="ion-padding">表情加载失败，请关闭后重试。</p>
+          }
+        </ng-template>
+      </ion-popover>
+    </ion-item>
+  </ion-list>
+  <ion-list [inset]="true">
+    <ion-item lines="full">
+      <ion-toggle
+        [checked]="preferences.autoSortPacksEnabled()"
+        (ionChange)="preferences.setAutoSortPacks($event.detail.checked)">按最近使用自动排序贴纸包</ion-toggle>
+    </ion-item>
+    <ion-item lines="full">
+      <ion-toggle
+        [checked]="preferences.autoSortFavoritesEnabled()"
+        (ionChange)="preferences.setAutoSortFavorites($event.detail.checked)">按最近使用自动排序收藏贴纸</ion-toggle>
+    </ion-item>
+    <ion-item [button]="true" [detail]="false" (click)="createPack()">
+      <ion-icon slot="start" [icon]="icons.addOutline" color="primary"></ion-icon>
+      <ion-label color="primary">创建贴纸包</ion-label>
+    </ion-item>
+  </ion-list>
+  <ion-list [inset]="true">
+    @if (loading()) {
+      <ion-item lines="none"><ion-spinner /></ion-item>
+    } @else if (loadError()) {
+      <ion-item lines="none">
+        <ion-label class="ion-text-wrap" color="danger">贴纸包加载失败。</ion-label>
+        <ion-button slot="end" fill="clear" (click)="load()">重试</ion-button>
+      </ion-item>
+    } @else {
+      <ion-reorder-group [disabled]="false" (ionItemReorder)="reorder($event)">
+        @for (pack of orderedPacks(); track pack.id) {
+          @if (preferences.autoSortPacksEnabled() && orderedPacks().length > autoSortLimit && $index === autoSortLimit) {
+            <div class="sort-divider"><span>此行以下的贴纸包不会自动排序</span></div>
+          }
+          <ion-item [button]="true" [detail]="false" (click)="openPack(pack)">
+            <div slot="start" class="pack-preview">
+              @if (pack.previewSticker?.media.contentType.startsWith('video/')) {
+                <video [src]="pack.previewSticker!.media.url" autoplay loop [muted]="true" playsinline preload="metadata"></video>
+              } @else if (pack.previewSticker) {
+                <img [src]="pack.previewSticker.media.url" loading="lazy" decoding="async" />
+              } @else {
+                <ion-icon [icon]="icons.cubeOutline" color="medium"></ion-icon>
+              }
+            </div>
+            <ion-label>
+              <h2>
+                @if (ownedIds().has(pack.id)) {
+                  <ion-badge color="primary">我的</ion-badge>
+                }
+                <span class="pack-name">{{ pack.name }}</span>
+              </h2>
+              <p>{{ pack.stickerCount }} 张贴纸</p>
+            </ion-label>
+            <ion-reorder slot="end" (click)="$event.stopPropagation()" />
+          </ion-item>
+        }
+      </ion-reorder-group>
+    }
+  </ion-list>
+</ion-content>

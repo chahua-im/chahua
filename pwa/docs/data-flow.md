@@ -13,7 +13,8 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、期间撤回的消息 ID     | 每个 ConversationPage；由页面生命周期控制                   |
 | MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                             | 应用内存；跨页面，整页刷新不恢复                            |
 | DraftStore             | 文字、回复目标 ID、保存时间                                             | 按账号和聊天/话题保存到 localStorage                        |
-| Preferences            | 话题/头像显示偏好、最近表情                                             | localStorage                                                |
+| Preferences            | 话题/头像显示偏好、最近表情、置顶表态表情                               | localStorage                                                |
+| StickerPreferences     | 自动整理开关、收藏贴纸使用顺序；读写 SessionStore 中的贴纸包顺序        | 应用；开关与收藏顺序保存到 localStorage，包顺序以服务器为准 |
 | MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                                            |
 | ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                      | 应用；当前页面消费                                          |
 | PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                            | 应用；本机意图保存到 localStorage，去重保存到独立 IndexedDB |
@@ -60,7 +61,7 @@ flowchart TD
 
 LegacyMigration 通过 Angular 初始化器先于组件和偏好服务运行，只读取旧数据库 `wetty`。不存在旧库时中止创建；有旧库时将 Token 补入 `jwt_token`，把 `draft:聊天ID_thread_话题ID` 转为按原 Token uid 归属的 `chahua.drafts.uid` 与 `聊天ID/话题ID` 键，回复字段转为 `replyTo`，保留保存时间和更晚的新草稿。话题显示、全部头像、最近表情转换为 Preferences 的 localStorage 格式；已有新偏好不覆盖。
 
-没有对应界面的旧设置、贴纸排序以及无法确认归属的草稿保存在 `chahua.migration.wetty.backup`，不新建设置入口。所有写入成功后标记已转换，再后台删除旧库；失败保留旧库供下次重试。旧标签页阻挡删除时不阻塞应用启动，后续启动跳过读取、继续删除；连接释放后完成删除并标记迁移完成。通知独立数据库不受影响。
+没有对应界面的旧设置以及无法确认归属的草稿保存在 `chahua.migration.wetty.backup`；旧贴纸排序同样留在备份中，现用贴纸包顺序以服务器 `stickerPackOrder` 为准。所有写入成功后标记已转换，再后台删除旧库；失败保留旧库供下次重试。旧标签页阻挡删除时不阻塞应用启动，后续启动跳过读取、继续删除；连接释放后完成删除并标记迁移完成。通知独立数据库不受影响。
 
 ## 身份、协议与入口
 
@@ -108,10 +109,12 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 聊天内消息搜索                | `GET /chats/{c}/messages/search`，q、sort、limit、offset               | ChatSearch 局部分页                         |
 | 邀请预览与管理                | `GET /invites/invite?inviteCode=...`、`GET /invites`                   | InviteCard、StartChat、ChatInvites          |
 | 查看完整表态                  | `GET /chats/{c}/messages/{m}/reactions`                                | ReactionDetails；按表情本地过滤             |
-| 打开贴纸库                    | 收藏、已订阅包、自有包三个 GET                                         | StickerPicker；切包读取该包详情             |
+| 打开贴纸库                    | 收藏、已订阅包、自有包三个 GET                                         | StickerPicker；切包读取该包详情，包列表按用户贴纸包顺序排序 |
+| 打开表情和贴纸设置            | `GET /stickers/packs/mine/owned`、`GET /stickers/packs/mine/subscribed` | StickerSettings 合并展示                                    |
+| 打开贴纸包详情                | `GET /stickers/packs/{id}`                                             | StickerPackDetail                                           |
 | 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                                    |
 
-创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。请求期间的具体反馈见[加载标识](loading-indicators.md)。
+创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。发送贴纸（自动整理开启且所属包在统计范围内）与拖拽重排后 `PUT /users/me/stickerpack-order`；同步失败时重新读取 `GET /users/me`，以服务器顺序恢复。请求期间的具体反馈见[加载标识](loading-indicators.md)。
 
 ## 分页、刷新与页面生命周期
 
@@ -146,9 +149,9 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | chatArchiveStateChanged                                   | 更新归档/静音字段，刷新受影响列表与计数                                                               |
 | 首次 presenceUpdate、恢复前台                             | Connection 发出 resync；活跃查询刷新，当前页面补必要元数据                                            |
 
-Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者，stickerPackOrderUpdated 也无界面消费者。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。
+Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。
 
-没有推送的数据靠本地写响应、页面进入、手动刷新或 resync。好友验证配置进入时读取；贴纸库进入时读取；创建贴纸包直接使用完整响应，上传后只重读该包。静音和远端已读没有专门跨设备推送，不增设轮询。较早开始的读取不能覆盖较新推送或本地操作；已读交错时补取对应读状态，不猜增减值。
+没有推送的数据靠本地写响应、页面进入、手动刷新或 resync。好友验证配置进入时读取；贴纸库与表情和贴纸设置进入时读取；创建贴纸包直接使用完整响应，贴纸库上传后只重读该包，包详情页上传后把响应追加到当前列表。自动整理开关与收藏贴纸顺序保存在本机，不跨设备同步。静音和远端已读没有专门跨设备推送，不增设轮询。较早开始的读取不能覆盖较新推送或本地操作；已读交错时补取对应读状态，不猜增减值。
 
 ## 输入、草稿与队列
 

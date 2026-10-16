@@ -43,6 +43,23 @@ describe('Preferences', () => {
     expect(TestBed.inject(Preferences).recentReactions()).toEqual(['❤️', '🍵', '😢', '😮', '😂']);
   });
 
+  it('pins reactions by default and keeps pinned out of recents', () => {
+    const preferences = TestBed.inject(Preferences);
+    expect(preferences.pinnedReactions()).toEqual(['👍']);
+    expect(preferences.recentReactions()).toEqual(['❤️', '😂', '😮', '😢', '🎉']);
+    preferences.setPinnedReactions(['👍', '👍', '❤️', '😂', '😮', '😢', '🎉']);
+    expect(preferences.pinnedReactions()).toEqual(['👍', '❤️', '😂', '😮', '😢']);
+    preferences.rememberReaction('👍');
+    preferences.rememberReaction('🍵');
+    expect(preferences.recentReactions()).toEqual(['🍵', '❤️', '😂', '😮', '😢']);
+  });
+
+  it('restores pinned reactions in a fresh service', () => {
+    TestBed.inject(Preferences).setPinnedReactions(['🍵', '🫡']);
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).pinnedReactions()).toEqual(['🍵', '🫡']);
+  });
+
   it('follows the system color mode by default and persists an explicit choice', () => {
     const preferences = TestBed.inject(Preferences);
     expect(preferences.colorMode()).toBe(ColorMode.System);

@@ -25,7 +25,7 @@
             <div #stack class="menu-stack" [style.visibility]="placed() ? null : 'hidden'" [class.own]="selection.own">
               @if (canReact() && serverMessage(); as serverMessage) {
                 <div #reactionBar class="reactions panel">
-                  @for (emoji of emojis(['👍', '❤️', '😂', '😮', '😢']); track emoji) {
+                  @for (emoji of quickEmojis(); track emoji) {
                     <button type="button" [class.selected]="selected(emoji)" (click)="reactTo(serverMessage, emoji)">
                       {{ emoji }}
                     </button>

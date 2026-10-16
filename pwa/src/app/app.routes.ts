@@ -15,6 +15,8 @@ import { StartChatKind } from './chats/start-chat/start-chat';
 import { Settings } from './settings/settings/settings';
 import { GeneralSettings } from './settings/general-settings/general-settings';
 import { FriendVerificationSettings } from './settings/friend-verification-settings/friend-verification-settings';
+import { StickerSettings } from './settings/sticker-settings/sticker-settings';
+import { StickerPackDetail } from './settings/sticker-pack-detail/sticker-pack-detail';
 import { Landing } from './pwa/landing/landing';
 
 const matchListTab: CanMatchFn = (_route, segments) => isListTab(segments[1].path);
@@ -51,6 +53,8 @@ export const routes: Routes = [
     component: ChatLink,
     data: { modal: true, component: FriendVerificationSettings },
   },
+  { path: 'settings/stickers', component: ChatLink, data: { modal: true, component: StickerSettings } },
+  { path: 'settings/stickers/:packId', component: ChatLink, data: { modal: true, component: StickerPackDetail } },
   {
     path: 'chats/chat/:id/info',
     component: ChatLink,
