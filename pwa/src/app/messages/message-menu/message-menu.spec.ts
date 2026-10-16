@@ -7,7 +7,7 @@ import { provideRouter } from '@angular/router';
 import { IonModal } from '@ionic/angular';
 import { timeOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
-import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
+import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../../api/testing';
 import { ChatStore } from '../../chats/chat-store';
@@ -18,7 +18,7 @@ import { MessageDelivery } from '../message-delivery';
 import { MessageNotice } from '../message-notice';
 import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
 import { Message, type MessageContent } from '../message/message';
-import { MessageAction, MessageMenu } from './message-menu';
+import { MessageAction, MessageMenu, pageSlots, type MenuSlot } from './message-menu';
 
 describe('MessageMenu', () => {
   let fixture: ComponentFixture<MessageMenu>;
@@ -30,6 +30,8 @@ describe('MessageMenu', () => {
   }
   const admin = signal(false);
   const pinned = signal(false);
+  const kind = signal(GroupKind.group);
+  const canDm = signal(true);
   const conversation = {
     items: messages,
     loading: signal(false),
@@ -63,6 +65,8 @@ describe('MessageMenu', () => {
     setMessages([testMessage]);
     admin.set(false);
     pinned.set(false);
+    kind.set(GroupKind.group);
+    canDm.set(true);
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -84,7 +88,12 @@ describe('MessageMenu', () => {
           provide: ChatStore,
           useValue: {
             pins: () => conversation,
-            get: () => ({ myRole: admin() ? GroupRole.admin : GroupRole.member }),
+            get: () => ({
+              kind: kind(),
+              myRole: admin() ? GroupRole.admin : GroupRole.member,
+              peer: kind() === GroupKind.dm ? { uid: 2, username: '朋友' } : undefined,
+            }),
+            relationship: () => ({ value: () => ({ canDm: canDm() }), activate: () => () => {} }),
             ensureDetails,
           },
         },
@@ -150,7 +159,7 @@ describe('MessageMenu', () => {
     admin.set(true);
     fixture.componentRef.setInput('canReply', false);
     const { content } = openQueued();
-    expect(labels()).toEqual(['编辑', '复制', '撤回']);
+    expect(labels()).toEqual(['复制', '编辑', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     expect(fixture.nativeElement.querySelector('.actions button').disabled).toBe(false);
     const preview = fixture.debugElement.query(By.directive(Message)).componentInstance as Message<MessageContent>;
@@ -244,14 +253,14 @@ describe('MessageMenu', () => {
     };
     setMessages([confirmed]);
     fixture.detectChanges();
-    expect(labels()).toEqual(['编辑', '复制', '撤回']);
+    expect(labels()).toEqual(['复制', '编辑', '撤回']);
     expect(ensureDetails).not.toHaveBeenCalled();
     outbox.items.set([]);
     fixture.detectChanges();
     expect(menu['selection']()?.messageId).toBeUndefined();
     expect(menu['serverMessage']()).toBe(confirmed);
     expect(menu['message']()).toBe(confirmed);
-    expect(labels()).toEqual(['回复', '编辑', '话题', '复制', '收藏', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '话题', '复制', '编辑', '收藏', '链接', '撤回']);
     expect(ensureDetails).toHaveBeenCalledExactlyOnceWith(testChat.id);
     expect(conversation.ensure).toHaveBeenCalledOnce();
     await menu['choose'](MessageAction.Save);
@@ -278,7 +287,7 @@ describe('MessageMenu', () => {
     expect(
       (fixture.nativeElement.querySelector('.preview app-message-status ion-icon') as HTMLIonIconElement).icon,
     ).toBe(timeOutline);
-    expect(labels()).toEqual(['编辑', '复制', '撤回']);
+    expect(labels()).toEqual(['复制', '编辑', '撤回']);
     const reply = vi.fn();
     const thread = vi.fn();
     menu.reply.subscribe(reply);
@@ -323,6 +332,39 @@ describe('MessageMenu', () => {
     pinned.set(true);
     fixture.detectChanges();
     expect(labels()).toContain('取消置顶');
+  });
+
+  it('lets a DM participant pin without group admin rights and drops the link action', () => {
+    kind.set(GroupKind.dm);
+    fixture.detectChanges();
+    expect(labels()).toEqual(['回复', '话题', '置顶', '复制', '收藏']);
+    expect(menu['admin']()).toBe(false);
+  });
+
+  it('reduces a DM whose friendship ended to read-only actions', () => {
+    kind.set(GroupKind.dm);
+    canDm.set(false);
+    setMessages([{ ...testMessage, reactions: [{ emoji: '👍', count: 1, reactedByMe: false }] }]);
+    fixture.detectChanges();
+    expect(labels()).toEqual(['复制', '收藏', '查看表态']);
+  });
+
+  it('leaves group actions unaffected by the DM relationship', () => {
+    canDm.set(false);
+    fixture.detectChanges();
+    expect(labels()).toEqual(['回复', '话题', '复制', '收藏', '链接']);
+  });
+
+  it('dismisses a reaction in a read-only DM without sending it', async () => {
+    kind.set(GroupKind.dm);
+    canDm.set(false);
+    setMessages([{ ...testMessage, reactions: [{ emoji: '👍', count: 1, reactedByMe: true }] }]);
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('.reactions button.selected') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(actions.toggleReaction).not.toHaveBeenCalled();
+    expect(menu['notice']()).toBeUndefined();
+    expect(menu['selection']()).toBeUndefined();
   });
 
   it('keeps topic, deleted and special-message actions within their supported scope', () => {
@@ -471,5 +513,36 @@ describe('MessageMenu', () => {
     await menu['choose'](MessageAction.FavoriteSticker);
     expect(TestBed.inject(StickersService).putFavorite).toHaveBeenCalledWith(sticker.id);
     expect(actions.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('pageSlots', () => {
+  function layout(count: number, page: number) {
+    const list: MenuSlot[] = Array.from({ length: count }, () => ({
+      kind: 'action',
+      action: MessageAction.Reply,
+      disabled: false,
+      destructive: false,
+    }));
+    return pageSlots(list, page).map((slot) => (slot.kind === 'paging' ? slot.direction : list.indexOf(slot)));
+  }
+
+  it('keeps two rows of five without paging', () => {
+    expect(layout(10, 0)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
+  it('pages from the second row once a third row exists', () => {
+    expect(layout(14, 0)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 'down']);
+    expect(layout(14, 1)).toEqual([5, 6, 7, 8, 'up', 9, 10, 11, 12, 13]);
+  });
+
+  it('keeps two rows visible for a fourth row and reaches eighteen actions', () => {
+    expect(layout(18, 0)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 'down']);
+    expect(layout(18, 1)).toEqual([9, 10, 11, 12, 'up', 13, 14, 15, 16, 17]);
+  });
+
+  it('shows the remaining actions on the last page', () => {
+    expect(layout(11, 1)).toEqual([5, 6, 7, 8, 'up', 9, 10]);
+    expect(layout(15, 1)).toEqual([9, 10, 11, 12, 'up', 13, 14]);
   });
 });

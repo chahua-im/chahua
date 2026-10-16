@@ -21,6 +21,8 @@ import {
   arrowUndoOutline,
   bookmarkOutline,
   chatbubblesOutline,
+  chevronDown,
+  chevronUp,
   copyOutline,
   linkOutline,
   peopleOutline,
@@ -29,7 +31,7 @@ import {
   pinOutline,
   trashOutline,
 } from 'ionicons/icons';
-import { GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
+import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
@@ -54,6 +56,23 @@ export enum MessageAction {
   Edit,
   Reactions,
   FavoriteSticker,
+}
+
+const COLUMNS = 5;
+
+export type MenuSlot =
+  | { kind: 'action'; action: MessageAction; disabled: boolean; destructive: boolean }
+  | { kind: 'paging'; direction: 'up' | 'down' };
+
+/** Two rows of five; beyond ten actions the last slot pages through the remaining rows, up to eighteen. */
+export function pageSlots(actions: readonly MenuSlot[], page: number): readonly MenuSlot[] {
+  if (actions.length <= COLUMNS * 2) return actions;
+  const rows = actions.length <= COLUMNS * 3 - 1 ? 3 : 4;
+  const up = page > 0;
+  const start = up ? (rows === 3 ? COLUMNS : COLUMNS * 2 - 1) : 0;
+  const paging: MenuSlot = { kind: 'paging', direction: up ? 'up' : 'down' };
+  const data = actions.slice(start, start + COLUMNS * 2 - 1);
+  return up ? [...data.slice(0, COLUMNS - 1), paging, ...data.slice(COLUMNS - 1)] : [...data, paging];
 }
 
 @Component({
@@ -100,7 +119,14 @@ export class MessageMenu {
   protected readonly message = computed<MessageContent | undefined>(
     () => this.queued()?.message() ?? this.serverMessage(),
   );
-  protected readonly admin = computed(() => this.chatInfo.get(this.chatId())?.myRole === GroupRole.admin);
+  private readonly chat = computed(() => this.chatInfo.get(this.chatId()));
+  protected readonly admin = computed(() => this.chat()?.myRole === GroupRole.admin);
+  private readonly dm = computed(() => this.chat()?.kind === GroupKind.dm);
+  /** A DM whose friendship ended keeps its history readable but accepts no writes. */
+  private readonly readOnly = computed(() => {
+    const uid = this.chat()?.peer?.uid;
+    return this.dm() && !!uid && this.chatInfo.relationship(uid).value()?.canDm === false;
+  });
   protected readonly pinned = computed(() => {
     const message = this.serverMessage();
     return !this.queued() && !!message && !!this.pins().get(message.id);
@@ -119,19 +145,18 @@ export class MessageMenu {
     | undefined
   >(undefined);
   protected readonly Action = MessageAction;
-  protected readonly MessageType = MessageType;
-  protected readonly icons = {
-    peopleOutline,
-    addOutline,
-    arrowUndoOutline,
-    bookmarkOutline,
-    chatbubblesOutline,
-    copyOutline,
-    linkOutline,
-    createOutline,
-    heartOutline,
-    pinOutline,
-    trashOutline,
+  protected readonly icons = { addOutline, chevronDown, chevronUp };
+  protected readonly actionIcons: Record<MessageAction, string> = {
+    [MessageAction.Reply]: arrowUndoOutline,
+    [MessageAction.Thread]: chatbubblesOutline,
+    [MessageAction.Pin]: pinOutline,
+    [MessageAction.Copy]: copyOutline,
+    [MessageAction.Edit]: createOutline,
+    [MessageAction.Save]: bookmarkOutline,
+    [MessageAction.FavoriteSticker]: heartOutline,
+    [MessageAction.Link]: linkOutline,
+    [MessageAction.Recall]: trashOutline,
+    [MessageAction.Reactions]: peopleOutline,
   };
   protected readonly choosingEmoji = signal(false);
   protected readonly placed = signal(false);
@@ -192,6 +217,48 @@ export class MessageMenu {
     const message = this.serverMessage();
     return !!this.queued() || (!!message && !message.isDeleted && this.canRecallMessage(message));
   });
+  /** Available actions in menu order; write actions drop out while a DM is read-only. */
+  protected readonly menuActions = computed<readonly MenuSlot[]>(() => {
+    const message = this.message();
+    const slots: MenuSlot[] = [];
+    const add = (action: MessageAction, options: { disabled?: boolean; destructive?: boolean } = {}) =>
+      slots.push({
+        kind: 'action',
+        action,
+        disabled: !!options.disabled,
+        destructive: !!options.destructive,
+      });
+    const writable = !this.readOnly();
+    if (!this.queued() && writable) add(MessageAction.Reply, { disabled: !this.canReply() });
+    if (writable && this.canThread()) add(MessageAction.Thread);
+    // DMs let both participants manage shared pins; groups stay admin-only.
+    if (
+      message &&
+      !this.queued() &&
+      writable &&
+      (this.admin() || this.dm()) &&
+      message.messageType !== MessageType.sticker &&
+      (this.pinned() || !message.isDeleted)
+    )
+      add(MessageAction.Pin, { disabled: this.pins().loading() || this.busy() });
+    if (this.canCopy()) add(MessageAction.Copy);
+    if (writable && this.canEdit()) add(MessageAction.Edit, { disabled: !this.queued() && !this.canReply() });
+    if (this.canSave()) add(MessageAction.Save);
+    else if (
+      message &&
+      !this.queued() &&
+      !message.isDeleted &&
+      message.messageType === MessageType.sticker &&
+      message.sticker
+    )
+      add(MessageAction.FavoriteSticker);
+    if (message && !this.queued() && !this.dm() && message.messageType !== MessageType.invite) add(MessageAction.Link);
+    if (writable && this.canRecall()) add(MessageAction.Recall, { destructive: true });
+    if (this.canReact() && message?.reactions?.length) add(MessageAction.Reactions);
+    return slots;
+  });
+  private readonly page = signal(0);
+  protected readonly slots = computed(() => pageSlots(this.menuActions(), this.page()));
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.reset());
@@ -203,6 +270,10 @@ export class MessageMenu {
           if (version === this.version) this.notice.set(MessageNotice.MetadataFailed);
         });
       });
+    });
+    effect((onCleanup) => {
+      const uid = this.chat()?.peer?.uid;
+      if (this.selection() && uid) onCleanup(this.chatInfo.relationship(uid).activate());
     });
     afterRenderEffect((onCleanup) => {
       const stack = this.stack()?.nativeElement;
@@ -334,12 +405,17 @@ export class MessageMenu {
     if (event.target === event.currentTarget) void this.close();
   }
 
+  protected turnPage() {
+    this.page.update((page) => (page === 0 ? 1 : 0));
+  }
+
   open(selection: MessageMenuSelection) {
     if (this.busy() || this.selection()) return;
     const focused = this.document.activeElement;
     if (focused instanceof HTMLElement) focused.blur();
     this.choosingEmoji.set(false);
     this.placed.set(false);
+    this.page.set(0);
     this.selection.set(selection);
   }
 
@@ -350,6 +426,7 @@ export class MessageMenu {
     this.notice.set(undefined);
     this.pending.set(false);
     this.choosingEmoji.set(false);
+    this.page.set(0);
   }
 
   protected async close() {
@@ -460,6 +537,8 @@ export class MessageMenu {
     }
     const version = this.version;
     void this.close();
+    // The server refuses reactions in a read-only DM, so the tap only dismisses the menu.
+    if (this.readOnly()) return;
     await this.perform(async () => {
       await this.messageActions.toggleReaction(message, emoji);
       if (version === this.version) this.preferences.rememberReaction(emoji);

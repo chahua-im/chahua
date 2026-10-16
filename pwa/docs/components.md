@@ -104,7 +104,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                     |
 | EmojiPicker        | chosen 输出；封装第三方选择器的尺寸、中文数据与加载状态                                                                                      |
 
-MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。确认意图、操作提示、选择表情和弹窗状态属于菜单；菜单测量完整预览与面板的尺寸，预览保留原横向位置与宽度，面板各自避让左右边缘；高度能容纳时整体竖向定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
+MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。可用操作、排序和翻页页码由消息状态、聊天类型与好友关系派生，页码在 open 和 reset 时归零。确认意图、操作提示、选择表情和弹窗状态属于菜单；菜单测量完整预览与面板的尺寸，预览保留原横向位置与宽度，面板各自避让左右边缘；高度能容纳时整体竖向定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
 
 MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执行置顶。菜单关闭后的 busy 由页面 toolbar 消费。复制在点击处理内发起，以保留 Safari 用户激活。菜单 reset 使旧操作的界面反馈失效，最近表情保存到 Preferences。
 
