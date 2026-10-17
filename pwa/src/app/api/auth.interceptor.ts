@@ -1,6 +1,7 @@
 import { HttpInterceptorFn, HttpResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { tap } from 'rxjs';
+import { appVersion } from '../app-version';
 import { CHAHUA_BASE_URL } from '../../generated/endpoints/chahua.base-url';
 import { SessionStore } from '../session/session-store';
 
@@ -14,7 +15,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   return next(
     request.clone({
       setHeaders: {
-        'X-App-Version': CHAHUA_APP_VERSION,
+        'X-App-Version': appVersion,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     }),

@@ -18,10 +18,9 @@ describe('AppUpdates', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows the default build version and reports unavailable without a registered worker', async () => {
+  it('reports unavailable without a registered worker', async () => {
     worker.isEnabled = false;
     const service = TestBed.inject(AppUpdates);
-    expect(service.version).toBe('PWA2-dev');
     expect(await service.check()).toBe(UpdateCheckResult.Unavailable);
     expect(worker.checkForUpdate).not.toHaveBeenCalled();
   });

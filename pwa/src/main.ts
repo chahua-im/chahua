@@ -36,7 +36,7 @@ bootstrapApplication(App, {
       return inject(LegacyMigration).run();
     }),
     provideHttpClient(withInterceptors([authInterceptor, jsonInterceptor])),
-    provideChahuaBaseUrl('/_api'),
+    provideChahuaBaseUrl(CHAHUA_API_BASE),
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
     provideIonicAngular({
       mode: 'ios',

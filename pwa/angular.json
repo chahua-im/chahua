@@ -19,7 +19,7 @@
           "options": {
             "browser": "src/main.ts",
             "define": {
-              "CHAHUA_APP_VERSION": "'PWA2-dev'"
+              "CHAHUA_API_BASE": "'/_api'"
             },
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
@@ -52,6 +52,14 @@
               ],
               "outputHashing": "all",
               "serviceWorker": "ngsw-config.json"
+            },
+            "prod": {
+              "outputPath": "dist/prod",
+              "deployUrl": "https://chahui.app/",
+              "crossOrigin": "anonymous",
+              "define": {
+                "CHAHUA_API_BASE": "'https://chahui.app/_api'"
+              }
             },
             "development": {
               "optimization": false,

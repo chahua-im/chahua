@@ -1,0 +1,14 @@
+DirectoryIndex index.html
+RewriteEngine On
+
+# Serve existing files and directories unchanged.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [END]
+
+# API and missing static resources must never receive the application HTML.
+RewriteRule ^(?:_api(?:/|$)|(?:icon|icon-maskable|emoji|media)/) - [END]
+RewriteRule \.[^/]+$ - [END]
+
+RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$
+RewriteRule ^ index.html [END]

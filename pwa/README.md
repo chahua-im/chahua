@@ -24,9 +24,15 @@ npm run test:pwa
 
 安装指引位于 `/landing`；已安装应用从该入口直接进入聊天。
 
-开发服务地址为 `http://localhost:4200`，生产构建输出位于 `dist/app`。HTTP 和 WebSocket 使用同源的 `/_api` 路径；开发服务代理到 `https://chahui.app/_api`。
+开发服务地址为 `http://localhost:4200`，默认 `npm run build` 生成同源构建，部署目录为 `dist/app/browser`；开发服务代理到 `https://chahui.app/_api`。HTTP 与 WebSocket 的基地址见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。
 
-构建版本使用 Angular `define` 注入的 `CHAHUA_APP_VERSION`，设置页和 API 请求头 `X-App-Version` 共用该值。`angular.json` 默认值为 `PWA2-dev`；Jenkins 通过 `npm run build -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"` 覆盖为 CI 构建号，不修改 `package.json`。 修改 `angular.json` 中的构建常量后需要重启开发服务，代码热更新不会重新读取这些配置。
+`npm run build:prod` 生成跨域生产构建，部署目录为 `dist/prod/browser`。编译后的 JS、CSS 和延迟加载模块从 `https://chahui.app/` 加载；HTML、manifest、图标、表情数据和 Service Worker 保留在页面源。构建脚本同步改写 `ngsw.json` 中的编译资源 URL 与哈希表键，保留内容校验；不要用单独的 `ng build --configuration production,prod` 替代完整脚本。
+
+资源域必须实际部署对应构建的文件，以正确 MIME 类型返回，并通过 CORS 允许页面源；缺失的 JS/CSS 不能回退为 HTML。当前资源域允许的页面源为 `https://chahua.app`，不能直接在 localhost 或任意 staging 域验证跨域生产包。发布时先上传资源，再发布页面源的 HTML 和 Worker manifest，并保留旧版本仍需使用的资源。
+
+Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite`，并为站点目录允许 `AllowOverride FileInfo Indexes`。规则将不存在的 GET/HEAD 页面路径回退到 `index.html`；已有文件、目录、`/_api`、静态资源目录和带扩展名的文件路径不参与回退，避免把缺失的 JS/CSS、Worker 或 `ngsw.json` 返回为 HTML。nginx 不读取 `.htaccess`，需在站点配置中提供等效规则。
+
+构建版本使用 Angular `define` 注入的 `CHAHUA_APP_VERSION`，设置页和 API 请求头 `X-App-Version` 共用 `app-version.ts` 中的值；未注入时回退为 `PWA2-dev`。Jenkins 通过 `npm run build -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"` 注入 CI 构建号，跨域构建使用 `npm run build:prod -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"`，不修改 `package.json`。修改构建常量后需要重启开发服务。
 
 登录 token 的优先级是 URL 的 `token` 参数、localStorage、开发预设。
 开发预设放在 Git 忽略的 `.env.local`，格式见 `.env.example`。`npm start` 通过编译常量注入 `CHAHUA_DEV_TOKEN`，修改后需要重启开发服务。生产构建不读取该文件。预设会随开发页面下发，能够访问开发服务的浏览器可以使用该身份；真实 token 不应提交到仓库。

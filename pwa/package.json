@@ -6,6 +6,7 @@
     "api:generate": "orval --config orval.config.ts",
     "start": "node --env-file-if-exists=.env.local scripts/dev.mjs",
     "build": "ng build",
+    "build:prod": "node scripts/build-prod.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "test:pwa": "node --test scripts/push-worker.test.mjs scripts/startup-updates.test.mjs"
