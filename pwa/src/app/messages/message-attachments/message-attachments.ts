@@ -32,7 +32,13 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
   imports: [VoicePlayer, DatePipe, IonBadge, IonIcon, UploadProgress, MessageStatus],
-  host: { '[class.overlay-time]': 'overlayTime()', '[class.album]': 'album()' },
+  host: {
+    '[class.overlay-time]': 'overlayTime()',
+    '[class.album]': 'album()',
+    '[class.visual]': 'visual()',
+    '[class.fill]': 'fill()',
+    '[style.width.px]': 'fillWidth()',
+  },
 })
 export class MessageAttachments {
   private readonly router = inject(Router);
@@ -79,7 +85,7 @@ export class MessageAttachments {
       // Older animated stickers and uploads can lack dimensions. Keep their fallback frame after loading.
       const knownSize = width != null && height != null && width > 0 && height > 0;
       const dimensions = knownSize ? { width, height } : { width: 240, height: 240 };
-      const limit = sticker ? 200 : 360;
+      const limit = sticker ? 200 : 420;
       return {
         ...attachment,
         kind: attachmentKind(message.messageType, attachment.kind),
@@ -96,10 +102,23 @@ export class MessageAttachments {
   });
   protected readonly album = computed(() => {
     const items = this.items();
-    return items.length > 1 && items.every((item) => item.kind === MediaKind.Image || item.kind === MediaKind.Video);
+    return items.length > 1 && this.visual();
   });
+  /** Images and videos stretch with the bubble; audio and files keep their own width. */
+  protected readonly visual = computed(() =>
+    this.items().every((item) => item.kind === MediaKind.Image || item.kind === MediaKind.Video),
+  );
+  /** A single known-size image or video fills the bubble width on a blurred backdrop, like a wide caption card. */
+  protected readonly fill = computed(() => {
+    const items = this.items();
+    return !this.album() && items.length === 1 && this.visual() && items[0].knownSize && !items[0].sticker;
+  });
+  /** The unstretched display width gives the bubble its intrinsic size; flex-grow stretches beyond it.
+   *  A real width (not flex-basis) is required: flex-basis is ignored when sizing the flex container,
+   *  and the absolutely-positioned media contributes zero, collapsing media-only bubbles. */
+  protected readonly fillWidth = computed(() => (this.fill() ? this.items()[0].displayWidth : null));
   protected readonly visibleItems = computed(() => (this.album() ? this.items().slice(0, 9) : this.items()));
-  private readonly albumWidth = signal(360);
+  private readonly albumWidth = signal(420);
   private readonly albumSizes = linkedSignal({
     source: this.items,
     computation: (items, previous): { width: number; height: number }[] =>

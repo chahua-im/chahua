@@ -5,8 +5,15 @@
 }
 
 :host(.album) {
-  width: 360px;
+  width: 420px;
   max-width: 100%;
+  // A caption wider than the album stretches it to the bubble width.
+  flex: 1 1 auto;
+}
+
+// A single image or video also stretches; the bubble is sized by the host's inline width.
+:host(.fill) {
+  flex: 1 1 auto;
 }
 
 .attachments {
@@ -38,6 +45,34 @@
 .media-frame.cover img,
 .media-frame.cover video {
   object-fit: cover;
+}
+
+// Stretched single media keeps the image's aspect ratio against the bubble width, capped at the
+// media height limit, and letterboxes on a blurred copy of itself, centred by object-fit: contain.
+// width stays definite (100%) so the max-height clamp transfers to height only, not back to width.
+.media-frame.fill {
+  width: 100%;
+  max-height: 420px;
+  background: #000;
+  isolation: isolate;
+}
+
+.backdrop {
+  position: absolute;
+  inset: -20px;
+  z-index: -1;
+  background-position: center;
+  background-size: cover;
+  filter: blur(20px);
+  opacity: 0.8;
+}
+
+.media-frame.fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgb(0 0 0 / 0.2);
 }
 
 .media-frame,

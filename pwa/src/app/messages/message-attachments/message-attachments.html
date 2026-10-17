@@ -10,11 +10,15 @@
         class="media-frame"
         [class.sticker]="item.sticker"
         [class.cover]="frame && item.knownSize && canCrop(item, frame)"
+        [class.fill]="fill()"
         [style.left.px]="frame?.x"
         [style.top.px]="frame?.y"
-        [style.width.px]="frame?.width ?? item.displayWidth"
+        [style.width.px]="frame?.width ?? (fill() ? null : item.displayWidth)"
         [style.height.px]="frame?.height"
         [style.aspect-ratio]="frame ? null : item.width + ' / ' + item.height">
+        @if (!frame && fill() && item.kind === MediaKind.Image && !failed().has(item.id ?? item.url)) {
+          <div class="backdrop" [style.background-image]="'url(' + item.url + ')'"></div>
+        }
         @if (failed().has(item.id ?? item.url)) {
           <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
         } @else if (item.kind === MediaKind.Image) {

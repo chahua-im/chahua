@@ -256,17 +256,25 @@
   }
 }
 
+.media-content {
+  display: flex;
+}
+
+// Visual media (images/videos) runs edge to edge, with or without a caption;
+// audio and files keep the bubble's padding.
+.bubble:has(app-message-attachments.visual) .media-content {
+  overflow: hidden;
+  margin-inline: calc(-1 * var(--message-padding-inline));
+}
+.bubble:has(app-message-attachments.visual):not(:has(.sender, .reply-preview)) {
+  padding-top: 0;
+}
 .bubble.media-only {
   padding-bottom: 0;
 }
-.bubble.media-only:not(:has(.sender, .reply-preview)) {
-  padding-top: 0;
-}
-.media-only .media-content {
-  overflow: hidden;
-}
-.bubble.media-only .media-content {
-  margin-inline: calc(-1 * var(--message-padding-inline));
+// The menu preview row spans the full overlay width, so the album keeps a fixed size there.
+.preview .media-content {
+  display: block;
 }
 .media-only app-message-thread {
   margin-top: 0;
