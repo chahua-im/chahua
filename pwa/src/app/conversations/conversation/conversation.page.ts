@@ -39,6 +39,7 @@ import {
   archiveOutline,
   chevronBack,
   chevronDown,
+  chevronUpOutline,
   closeCircleOutline,
   informationCircleOutline,
   listOutline,
@@ -80,6 +81,7 @@ import { ConversationNavigation, ConversationTargetKind, type ConversationTarget
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
 import { messageRows } from '../message-rows';
+import { LoadError } from '../../ui/load-error/load-error';
 
 function parseMessageId(id: string | null | undefined) {
   return id && /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n ? encodeId(id) : undefined;
@@ -129,6 +131,7 @@ type ScrollPosition =
     MessageComposer,
     MessagePreview,
     VoiceBar,
+    LoadError,
     IonBackButton,
     IonBadge,
     IonButton,
@@ -431,6 +434,7 @@ export class ConversationPage {
   });
   protected readonly closeIcon = closeCircleOutline;
   protected readonly downIcon = chevronDown;
+  protected readonly upIcon = chevronUpOutline;
   protected readonly listIcon = listOutline;
   protected readonly threadIcons = { starOutline, archiveOutline, archive, informationCircleOutline };
   protected readonly pins = computed(() => this.chatInfo.pins(this.id(), this.threadId()));
@@ -480,7 +484,6 @@ export class ConversationPage {
     const index = pins.findIndex((item) => item.id === pin.id);
     this.selectedPinId.set(pins[(index + 1) % pins.length]?.id);
   }
-
 
   protected readonly pinsHref = computed(
     () => `/chats/chat/${decodeId(this.id())}${this.threadId() ? `/thread/${decodeId(this.threadId()!)}` : ''}/pins`,

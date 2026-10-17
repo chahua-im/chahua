@@ -20,13 +20,10 @@
       <ion-infinite-scroll-content />
     </ion-infinite-scroll>
   }
-  @if (loading()) {
-    <div class="loading-status"><ion-spinner /></div>
+  @if (loading() && cursor() == null) {
+    <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <p class="ion-padding">
-      搜索失败。
-      <ion-button fill="clear" (click)="load()">重试</ion-button>
-    </p>
+    <app-load-error message="搜索失败，请重试。" (retry)="load()" />
   } @else if (query().trim() && !messages().length) {
     <p class="ion-padding ion-text-center">没有找到消息</p>
   }

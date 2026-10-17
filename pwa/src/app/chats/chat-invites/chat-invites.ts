@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, effect, inject, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import {
   AlertController,
@@ -27,6 +27,13 @@ import {
 import { copyText } from '../../api/clipboard';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { inviteStatus, InviteStatus } from '../invite';
+
+enum InviteAction {
+  Create,
+  Share,
+  Revoke,
+}
+
 @Component({
   selector: 'app-chat-invites',
   templateUrl: './chat-invites.html',
@@ -50,6 +57,7 @@ export class ChatInvites {
   private readonly groupsApi = inject(GroupsService);
   private readonly alerts = inject(AlertController);
   protected readonly Type = InviteType;
+  protected readonly Action = InviteAction;
   protected readonly status = inviteStatus;
   protected readonly Status = InviteStatus;
   protected readonly targetQuery = signal('');
@@ -66,7 +74,10 @@ export class ChatInvites {
   protected readonly requiredGroup = signal<SnowflakeID | undefined>(undefined);
   protected readonly destination = signal<SnowflakeID | undefined>(undefined);
   protected readonly invites = signal<InviteResponse[]>([]);
-  protected readonly busy = signal(false);
+  protected readonly pending = signal<{ action: InviteAction; id?: SnowflakeID } | undefined>(undefined);
+  protected readonly loading = signal(false);
+  protected readonly busy = computed(() => this.pending() != null || this.loading());
+  protected readonly loadingGroups = signal(false);
   protected readonly error = signal(false);
   protected readonly copied = signal(false);
   constructor() {
@@ -80,17 +91,18 @@ export class ChatInvites {
     });
   }
   protected async load() {
-    this.busy.set(true);
+    this.loading.set(true);
     this.error.set(false);
     try {
       this.invites.set((await firstValueFrom(this.api.getInvites({ groupId: this.chatId(), limit: 100 }))).invites);
     } catch {
       this.error.set(true);
     } finally {
-      this.busy.set(false);
+      this.loading.set(false);
     }
   }
   protected async loadGroups(more = false) {
+    if (more) this.loadingGroups.set(true);
     try {
       const page = await firstValueFrom(
         this.groupsApi.getGroups({
@@ -105,6 +117,8 @@ export class ChatInvites {
       this.cursor.set(page.nextCursor);
     } catch {
       this.error.set(true);
+    } finally {
+      if (more) this.loadingGroups.set(false);
     }
   }
   protected change(value: unknown) {
@@ -112,7 +126,7 @@ export class ChatInvites {
   }
   protected async create() {
     if (this.busy()) return;
-    this.busy.set(true);
+    this.pending.set({ action: InviteAction.Create });
     this.error.set(false);
     try {
       const values = this.values();
@@ -129,7 +143,7 @@ export class ChatInvites {
     } catch {
       this.error.set(true);
     } finally {
-      this.busy.set(false);
+      this.pending.set(undefined);
     }
   }
   protected async copy(invite: InviteResponse) {
@@ -150,20 +164,20 @@ export class ChatInvites {
     });
     await alert.present();
     if ((await alert.onDidDismiss()).role !== 'confirm') return;
-    this.busy.set(true);
+    this.pending.set({ action: InviteAction.Revoke, id: invite.id });
     try {
       await firstValueFrom(this.api.deleteInvite(invite.id));
       this.invites.update((items) => items.filter((item) => item.id !== invite.id));
     } catch {
       this.error.set(true);
     } finally {
-      this.busy.set(false);
+      this.pending.set(undefined);
     }
   }
   protected async share(invite: InviteResponse) {
     const destination = this.destination();
     if (!destination || this.busy()) return;
-    this.busy.set(true);
+    this.pending.set({ action: InviteAction.Share, id: invite.id });
     this.error.set(false);
     try {
       await firstValueFrom(
@@ -177,7 +191,7 @@ export class ChatInvites {
     } catch {
       this.error.set(true);
     } finally {
-      this.busy.set(false);
+      this.pending.set(undefined);
     }
   }
 }

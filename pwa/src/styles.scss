@@ -220,14 +220,29 @@ ion-infinite-scroll-content > .infinite-loading {
   visibility: visible;
 }
 
-// First-page and viewport-fill feedback yields to Ionic during scroll-triggered paging.
-ion-infinite-scroll.infinite-scroll-loading + .loading-status {
-  display: none;
-}
-
 .loading-status {
   padding: 16px;
   text-align: center;
+}
+
+// One centered block for a page's first content load; paging and refreshes use Ionic's own indicators.
+.page-loading {
+  display: grid;
+  place-items: center;
+  min-height: min(240px, 40vh);
+  padding: 24px;
+  pointer-events: none;
+}
+
+.skeleton-block {
+  background: var(--ion-background-color-step-100, #f0f0f0);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .message-list {

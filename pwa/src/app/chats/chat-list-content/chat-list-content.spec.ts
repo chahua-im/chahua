@@ -378,14 +378,14 @@ describe('ChatListContent', () => {
     expect(history.activate).toHaveBeenCalledOnce();
   });
 
-  it('keeps navigation entries visible alongside the initial list spinner', async () => {
+  it('keeps navigation entries visible alongside the initial list skeleton', async () => {
     chats.items.set([]);
     chats.loading.set(true);
     counts.chats.loading.set(true);
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('ion-content ion-item')).not.toBeNull();
     expect(fixture.nativeElement.textContent).toContain('已归档');
-    expect(fixture.nativeElement.querySelector('.loading-status')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.chat-skeleton-row')).not.toBeNull();
   });
 
   it('shows the archive entry in every category and the request entry only in friends', async () => {
@@ -400,18 +400,19 @@ describe('ChatListContent', () => {
     }
   });
 
-  it('shows only the native refresher during a pull refresh and restores the spinner for later loads', async () => {
+  it('shows only the native refresher and never re-shows the skeleton over existing rows', async () => {
+    chats.items.set([{ ...testChat, kind: GroupKind.dm }]);
     chats.refresh.mockImplementationOnce(() => chats.loading.set(true));
     fixture.debugElement.query(By.css('ion-refresher')).triggerEventHandler('ionRefresh');
     await fixture.whenStable();
     expect(fixture.componentInstance['refreshing']()).toBe(true);
-    expect(fixture.nativeElement.querySelector('.loading-status')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.chat-skeleton-row')).toBeNull();
     chats.loading.set(false);
     await fixture.whenStable();
     expect(fixture.componentInstance['refreshing']()).toBe(false);
     chats.loading.set(true);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('.loading-status')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.chat-skeleton-row')).toBeNull();
   });
 
   it('reveals a shared time range and pages only the source with the newer boundary', async () => {

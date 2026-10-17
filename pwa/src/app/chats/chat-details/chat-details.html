@@ -178,10 +178,13 @@
           }
         </div>
       } @else if (loading()) {
-        <div class="loading-status"><ion-spinner /></div>
+        <div class="page-loading"><ion-spinner /></div>
+      }
+      @if (error() || relationshipQuery()?.error()) {
+        <app-load-error compact message="加载失败，请重试。" (retry)="load(); relationshipQuery()?.refresh()" />
       }
       @if (id()) {
-        <div class="attachments">
+        <div class="attachments" [class.pending]="loading() && !chat() && !person()">
           <ion-segment [value]="tab()" (ionChange)="changeTab($event.detail.value)">
             @if (!threadId()) {
               <ion-segment-button [value]="InfoTab.Threads"><ion-label>话题</ion-label></ion-segment-button>
@@ -214,12 +217,6 @@
         </div>
       }
     }
-  }
-  @if (error() || relationshipQuery()?.error()) {
-    <p class="ion-padding">
-      操作失败，请重试。
-      <ion-button fill="clear" (click)="load(); relationshipQuery()?.refresh()">刷新</ion-button>
-    </p>
   }
 </ion-content>
 <ion-toast #saveError message="保存失败，请重试。" [duration]="3000" />

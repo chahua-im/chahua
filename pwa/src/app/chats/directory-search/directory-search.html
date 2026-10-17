@@ -13,7 +13,14 @@
       </ion-item>
     }
     @if (cursor()) {
-      <ion-button fill="clear" [disabled]="loading()" (click)="search(true)">加载更多群组</ion-button>
+      <ion-button fill="clear" [disabled]="loading()" (click)="search(true)">
+        <span class="action-content" [class.busy]="loading()">
+          <span class="action-label">加载更多群组</span>
+          @if (loading()) {
+            <ion-spinner />
+          }
+        </span>
+      </ion-button>
     }
     @if (people().length) {
       <ion-list-header>用户</ion-list-header>
@@ -28,13 +35,10 @@
       </ion-item>
     }
   </ion-list>
-  @if (loading()) {
-    <div class="loading-status"><ion-spinner /></div>
+  @if (loading() && cursor() == null) {
+    <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <p class="ion-padding">
-      搜索失败。
-      <ion-button fill="clear" (click)="search()">重试</ion-button>
-    </p>
+    <app-load-error compact message="搜索失败，请重试。" (retry)="search()" />
   } @else if (!groups().length && !people().length) {
     <p class="ion-padding ion-text-center">没有找到结果</p>
   }

@@ -28,13 +28,11 @@ import {
   IonSearchbar,
   IonSegment,
   IonSegmentButton,
-  IonSpinner,
   IonTitle,
   IonToolbar,
   type SegmentCustomEvent,
 } from '@ionic/angular';
 import { addCircleOutline } from 'ionicons/icons';
-import { Connection } from '../../api/connection';
 import { PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { VoiceBar } from '../../messages/voice-player/voice-bar';
@@ -74,7 +72,6 @@ import { isListTab, ListTab, type ListSelection } from '../list-tabs';
     VoiceBar,
     IonSegment,
     IonSegmentButton,
-    IonSpinner,
     IonTitle,
     IonToolbar,
   ],
@@ -126,7 +123,6 @@ export class ChatList {
     });
   }
 
-  protected readonly realtime = inject(Connection);
   protected readonly session = inject(SessionStore);
   protected readonly searching = signal(false);
   protected readonly search = signal('');

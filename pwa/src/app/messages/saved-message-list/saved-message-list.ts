@@ -2,7 +2,6 @@ import { DatePipe } from '@angular/common';
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  IonButton,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
   IonSpinner,
@@ -20,6 +19,7 @@ import type { SnowflakeID } from '../../api/snowflake-id';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { SessionStore } from '../../session/session-store';
+import { LoadError } from '../../ui/load-error/load-error';
 import { Message, type MessageMenuSelection } from '../message/message';
 import { savedMessageContent } from './saved-message-content';
 
@@ -29,7 +29,7 @@ import { savedMessageContent } from './saved-message-content';
   styleUrl: './saved-message-list.scss',
   imports: [
     DatePipe,
-    IonButton,
+    LoadError,
     IonInfiniteScroll,
     IonInfiniteScrollContent,
     IonSpinner,

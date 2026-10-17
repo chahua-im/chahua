@@ -119,6 +119,63 @@ ion-title app-message-preview {
   color: var(--ion-text-color);
 }
 
+.pagination-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--ion-color-medium);
+}
+
+.message-skeleton {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 100%;
+  padding: 16px 7px 8px;
+}
+
+.message-skeleton-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding-inline: 7px;
+}
+
+.message-skeleton-row.sent {
+  justify-content: flex-end;
+}
+
+.message-skeleton-avatar {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+
+.message-skeleton-bubble {
+  flex-shrink: 0;
+  width: 62%;
+  height: 42px;
+  border-radius: 16px 16px 16px 8px;
+}
+
+.message-skeleton-row.sent .message-skeleton-bubble {
+  width: 48%;
+  border-radius: 16px 16px 8px 16px;
+}
+
+.message-skeleton-row.short .message-skeleton-bubble {
+  width: 38%;
+}
+
+.message-skeleton-row.sent.short .message-skeleton-bubble {
+  width: 32%;
+}
+
+.message-skeleton-row.tall .message-skeleton-bubble {
+  height: 58px;
+}
+
 .pinned-bar {
   --background: var(--ion-background-color, #fff);
   --min-height: 48px;
@@ -160,7 +217,6 @@ ion-title app-message-preview {
   top: 50%;
   transform: translateY(-50%);
 }
-
 
 .floating-date,
 .message-date > span {

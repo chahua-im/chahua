@@ -106,6 +106,7 @@ export class Message<T extends MessageContent = MessageResponse> {
         (this.message().messageType !== MessageType.system && (this.canInteract() || !!this.outgoingId()))),
   );
   readonly delivery = input<MessageDelivery>();
+  readonly busy = input(false);
   readonly uploads = input<readonly AttachmentUpload[]>([]);
   readonly retry = output<void>();
   protected readonly Delivery = MessageDelivery;

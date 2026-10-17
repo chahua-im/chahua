@@ -54,10 +54,7 @@
     @if (loading()) {
       <ion-item lines="none"><ion-spinner /></ion-item>
     } @else if (loadError()) {
-      <ion-item lines="none">
-        <ion-label class="ion-text-wrap" color="danger">贴纸包加载失败。</ion-label>
-        <ion-button slot="end" fill="clear" (click)="load()">重试</ion-button>
-      </ion-item>
+      <app-load-error compact message="贴纸包加载失败。" (retry)="load()" />
     } @else {
       <ion-reorder-group [disabled]="false" (ionItemReorder)="reorder($event)">
         @for (pack of orderedPacks(); track pack.id) {

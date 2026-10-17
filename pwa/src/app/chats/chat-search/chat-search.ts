@@ -24,12 +24,14 @@ import { ConversationNavigation } from '../../conversations/conversation-navigat
 import { Message } from '../../messages/message/message';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-chat-search',
   host: { class: 'ion-page' },
   templateUrl: './chat-search.html',
   imports: [
     ContentScrollbars,
+    LoadError,
     IonHeader,
     IonToolbar,
     IonTitle,

@@ -16,12 +16,9 @@
   }
 </ion-list>
 @if ((loading() && cursor() == null) || opening()) {
-  <div class="loading-status"><ion-spinner /></div>
+  <div class="page-loading"><ion-spinner /></div>
 } @else if (error()) {
-  <p class="ion-padding">
-    加载失败。
-    <ion-button fill="clear" (click)="load(!!cursor())">重试</ion-button>
-  </p>
+  <app-load-error compact message="加载失败，请重试。" (retry)="load(!!cursor())" />
 } @else if (!items().length) {
   <p class="ion-padding ion-text-center">{{ cursor() ? '暂无近期话题' : '暂无话题' }}</p>
 }

@@ -16,9 +16,9 @@
 </ion-header>
 <ion-content appScrollbars>
   @if (loading()) {
-    <div class="loading-status"><ion-spinner /></div>
+    <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <ion-button fill="clear" (click)="load()">加载失败，重试</ion-button>
+    <app-load-error message="加载失败，请重试。" (retry)="load()" />
   } @else {
     <ion-list>
       @for (group of visible(); track group.emoji) {

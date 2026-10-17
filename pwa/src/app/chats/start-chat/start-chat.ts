@@ -29,6 +29,11 @@ export enum StartChatKind {
   Join,
   Friend,
 }
+
+enum StartChatAction {
+  Lookup,
+  Submit,
+}
 @Component({
   selector: 'app-start-chat',
   templateUrl: './start-chat.html',
@@ -65,7 +70,9 @@ export class StartChat {
   protected readonly values = signal({ name: '', code: '' });
   protected readonly fields = form(this.values);
   protected readonly query = signal('');
-  protected readonly busy = signal(false);
+  protected readonly Action = StartChatAction;
+  protected readonly pending = signal<StartChatAction | undefined>(undefined);
+  protected readonly busy = computed(() => this.pending() != null);
   protected readonly error = signal(false);
   protected readonly preview = signal<InvitePreviewResponse | undefined>(undefined);
   constructor() {
@@ -78,7 +85,7 @@ export class StartChat {
     });
   }
   protected async lookup() {
-    this.busy.set(true);
+    this.pending.set(StartChatAction.Lookup);
     this.error.set(false);
     this.preview.set(undefined);
     try {
@@ -88,7 +95,7 @@ export class StartChat {
     } catch {
       this.error.set(true);
     } finally {
-      this.busy.set(false);
+      this.pending.set(undefined);
     }
   }
   protected readonly previewValid = computed(
@@ -99,7 +106,7 @@ export class StartChat {
   );
   protected async submit() {
     if (this.busy() || (this.kind() === StartChatKind.Join && !this.previewValid())) return;
-    this.busy.set(true);
+    this.pending.set(StartChatAction.Submit);
     this.error.set(false);
     try {
       const chat =
@@ -113,7 +120,7 @@ export class StartChat {
     } catch {
       this.error.set(true);
     } finally {
-      this.busy.set(false);
+      this.pending.set(undefined);
     }
   }
 }

@@ -18,11 +18,12 @@ import { ConversationNavigation } from '../../conversations/conversation-navigat
 import { openMediaViewer } from '../../messages/media-viewer/media-viewer';
 import { mediaKind, MediaKind } from '../../messages/message-attachments/media-kind';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
+import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-chat-attachments',
   templateUrl: './chat-attachments.html',
   styleUrl: './chat-attachments.scss',
-  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonLabel, IonItem, IonList, IonButton, IonSpinner],
+  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonLabel, IonItem, IonList, IonButton, IonSpinner, LoadError],
 })
 export class ChatAttachments {
   readonly chatId = input.required<SnowflakeID>();

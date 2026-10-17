@@ -23,6 +23,7 @@ import { firstValueFrom } from 'rxjs';
 import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
 import { FriendAddVerificationMode } from '../../../generated/models';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { LoadError } from '../../ui/load-error/load-error';
 
 @Component({
   selector: 'app-friend-verification-settings',
@@ -31,6 +32,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   imports: [
     ContentScrollbars,
     FormField,
+    LoadError,
     IonButton,
     IonButtons,
     IonContent,

@@ -17,10 +17,7 @@
         <ion-spinner slot="start"></ion-spinner>
       </ion-item>
     } @else if (loadError()) {
-      <ion-item lines="none">
-        <ion-label class="ion-text-wrap" color="danger">好友验证设置加载失败。</ion-label>
-        <ion-button slot="end" fill="clear" (click)="loadVerification()">重试</ion-button>
-      </ion-item>
+      <app-load-error compact message="好友验证设置加载失败。" (retry)="loadVerification()" />
     } @else {
       <div>
         <ion-radio-group [formField]="verificationForm.mode" (ionChange)="saved.set(false)">

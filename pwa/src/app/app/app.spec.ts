@@ -323,11 +323,7 @@ describe('App', () => {
     session.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
     const retry = fixture.componentInstance['initialize']();
     fixture.detectChanges();
-    expect(
-      fixture.nativeElement.querySelector(
-        'ion-toolbar ion-buttons[slot="end"] ion-button ion-spinner.action-icon[slot="icon-only"]',
-      ),
-    ).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.page-loading ion-spinner')).not.toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('正在登录');
     expect(fixture.nativeElement.querySelector('p')).toBeNull();
     finish();

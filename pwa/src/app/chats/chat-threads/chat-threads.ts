@@ -1,7 +1,6 @@
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  IonButton,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
   IonList,
@@ -14,11 +13,12 @@ import type { MessageResponse, SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
+import { LoadError } from '../../ui/load-error/load-error';
 
 @Component({
   selector: 'app-chat-threads',
   templateUrl: './chat-threads.html',
-  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonButton, IonList, IonSpinner, ChatListItem, MessagePreview],
+  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonList, IonSpinner, LoadError, ChatListItem, MessagePreview],
 })
 export class ChatThreads {
   readonly chatId = input.required<SnowflakeID>();

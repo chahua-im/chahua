@@ -4,8 +4,6 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, NavigationStart, Router } from '@angular/router';
 import {
   IonApp,
-  IonButton,
-  IonButtons,
   IonContent,
   IonHeader,
   IonMenu,
@@ -20,6 +18,7 @@ import {
 import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
+import { LoadError } from '../ui/load-error/load-error';
 import { PushNotifications } from '../pwa/push-notifications';
 import { NotificationPrompt } from '../pwa/notification-prompt/notification-prompt';
 import { AppUpdates } from '../pwa/app-updates';
@@ -37,8 +36,6 @@ import { SessionStore } from '../session/session-store';
   imports: [
     ContentScrollbars,
     IonApp,
-    IonButton,
-    IonButtons,
     IonContent,
     IonHeader,
     IonMenu,
@@ -47,6 +44,7 @@ import { SessionStore } from '../session/session-store';
     IonSplitPane,
     IonToolbar,
     IonToast,
+    LoadError,
     ChatList,
     NotificationPrompt,
   ],

@@ -994,31 +994,31 @@ describe('ConversationPage', () => {
     },
   );
 
-  it('keeps the pagination button, spinner and content slots mounted while loading older messages', async () => {
+  it('keeps the pagination button and content slots mounted while loading older messages', async () => {
     await component['positionAndRead']();
     await fixture.whenStable();
     const content: HTMLElement = fixture.nativeElement.querySelector('ion-content');
     const children = [...content.children];
     const button = content.querySelector('button.pagination-control')!;
-    const spinner = button.querySelector('ion-spinner')!;
     expect(button.textContent?.trim()).toBe('');
-    expect(spinner.paused).toBe(true);
+    expect(button.querySelector('ion-icon')).not.toBeNull();
+    expect(button.querySelector('ion-spinner')).toBeNull();
     scroll.scrollTop = 50;
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
     const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`);
     await fixture.whenStable();
     expect(component['conversation'].pagingDirection()).toBe(PageDirection.Older);
-    expect(button.querySelector('ion-spinner')).toBe(spinner);
-    expect(spinner.paused).toBe(false);
+    expect(button.querySelector('ion-icon')).toBeNull();
+    expect(button.querySelector('ion-spinner')).not.toBeNull();
     expect([...content.children]).toEqual(children);
     expect(scroll.scrollTop).toBe(50);
     request.flush({ messages: [{ ...wireMessage, id: '9007199254741001' }], olderCursor: '9007199254741001' });
     await loading;
     await fixture.whenStable();
     expect([...content.children]).toEqual(children);
-    expect(button.querySelector('ion-spinner')).toBe(spinner);
-    expect(spinner.paused).toBe(true);
+    expect(button.querySelector('ion-icon')).not.toBeNull();
+    expect(button.querySelector('ion-spinner')).toBeNull();
     expect(component['conversation'].items()).toHaveLength(2);
   });
 
@@ -1122,7 +1122,7 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
     expect(row.querySelector('ion-avatar')).toBe(avatar);
     expect(component['draft']()).toBe('群里的草稿');
-    expect(fixture.nativeElement.querySelector('.loading-status')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.message-skeleton')).toBeNull();
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`).flush({
       messages: [
         {

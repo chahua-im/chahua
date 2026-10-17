@@ -38,13 +38,10 @@
     <ion-infinite-scroll-content />
   </ion-infinite-scroll>
 }
-@if (loading()) {
-  <div class="loading-status"><ion-spinner /></div>
+@if (loading() && cursor() == null) {
+  <div class="page-loading"><ion-spinner /></div>
 } @else if (error()) {
-  <p class="ion-padding">
-    加载失败。
-    <ion-button fill="clear" (click)="load()">重试</ion-button>
-  </p>
+  <app-load-error compact message="加载失败，请重试。" (retry)="load()" />
 } @else if (!items().length) {
   <p class="ion-padding ion-text-center">暂无内容</p>
 }

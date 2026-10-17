@@ -51,12 +51,9 @@
       }
     </div>
   } @else if (error()) {
-    <p class="ion-padding">
-      加载失败。
-      <ion-button fill="clear" (click)="retry()">重试</ion-button>
-    </p>
+    <app-load-error message="加载失败，请重试。" (retry)="retry()" />
   } @else {
-    <div class="loading-status"><ion-spinner /></div>
+    <div class="page-loading"><ion-spinner /></div>
   }
 </ion-content>
 <ion-toast [isOpen]="!!notice()" [message]="notice()" [duration]="2500" (didDismiss)="notice.set(undefined)" />

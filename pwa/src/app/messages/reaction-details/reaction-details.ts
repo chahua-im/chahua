@@ -19,12 +19,14 @@ import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import type { ReactionDetailGroup, SnowflakeID } from '../../../generated/models';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { LoadError } from '../../ui/load-error/load-error';
 
 @Component({
   selector: 'app-reaction-details',
   imports: [
     ChatAvatar,
     ContentScrollbars,
+    LoadError,
     IonHeader,
     IonToolbar,
     IonTitle,

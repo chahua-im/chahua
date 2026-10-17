@@ -2,7 +2,7 @@ import { Component, input, output, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
-import { IonPopover, NavController } from '@ionic/angular';
+import { NavController } from '@ionic/angular';
 import { beforeAll, afterAll, vi } from 'vitest';
 import { Connection } from '../../api/connection';
 import { encodeId } from '../../api/snowflake-id';
@@ -160,25 +160,6 @@ describe('ChatList', () => {
     fixture.debugElement.query(By.css('ion-buttons[slot="start"] ion-button')).triggerEventHandler('click');
     expect(navigate).toHaveBeenCalledOnce();
     expect(navigate).toHaveBeenCalledWith('/settings');
-  });
-
-  it('keeps the add menu available while its icon indicates a pending connection', async () => {
-    const connection = TestBed.inject(Connection);
-    connection.connected.set(false);
-    await fixture.whenStable();
-    const button = fixture.debugElement.query(By.css('ion-toolbar ion-buttons[slot="end"] ion-button'));
-    const popover = fixture.debugElement.query(By.directive(IonPopover)).componentInstance as IonPopover;
-    const present = vi.spyOn(popover, 'present').mockResolvedValue();
-    expect(fixture.nativeElement.querySelector('ion-toolbar > ion-spinner')).toBeNull();
-    expect(button.nativeElement.querySelector('ion-spinner')).not.toBeNull();
-    expect(button.componentInstance.disabled).toBe(false);
-    const event = new MouseEvent('click');
-    button.triggerEventHandler('click', event);
-    expect(present).toHaveBeenCalledWith(event);
-    connection.connected.set(true);
-    await fixture.whenStable();
-    expect(button.nativeElement.querySelector('ion-spinner')).toBeNull();
-    expect(button.nativeElement.querySelector('ion-icon')).not.toBeNull();
   });
 
   it('activates only the selected content and delegates selection without changing the conversation route', async () => {

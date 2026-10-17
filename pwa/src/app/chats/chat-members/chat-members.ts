@@ -3,7 +3,6 @@ import { RouterLink } from '@angular/router';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  IonButton,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
   IonItem,
@@ -17,19 +16,20 @@ import { firstValueFrom } from 'rxjs';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
 import { GroupRole, type MemberResponse, type SnowflakeID } from '../../../generated/models';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
+import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-chat-members',
   templateUrl: './chat-members.html',
   imports: [
     RouterLink,
     ChatAvatar,
+    LoadError,
     IonInfiniteScroll,
     IonInfiniteScrollContent,
     IonNote,
     IonList,
     IonItem,
     IonLabel,
-    IonButton,
     IonSpinner,
   ],
 })

@@ -68,6 +68,7 @@ import { uploadBlob } from '../../messages/upload';
 import { UploadProgress } from '../../messages/upload-progress/upload-progress';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
+import { LoadError } from '../../ui/load-error/load-error';
 import { ChatAttachments } from '../chat-attachments/chat-attachments';
 import { ChatAvatar, conversationAvatar } from '../chat-avatar/chat-avatar';
 import { ChatInvites } from '../chat-invites/chat-invites';
@@ -109,6 +110,7 @@ export enum DetailView {
   imports: [
     ContentScrollbars,
     FormField,
+    LoadError,
     IonButton,
     IonContent,
     IonLabel,

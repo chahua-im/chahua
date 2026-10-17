@@ -2,9 +2,6 @@
   <ion-toolbar>
     <ion-buttons slot="start"><ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button></ion-buttons>
     <ion-title>置顶消息</ion-title>
-    @if (menu()?.busy()) {
-      <ion-spinner slot="end"></ion-spinner>
-    }
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">
@@ -19,6 +16,7 @@
         [own]="row.message.sender.uid === session.user()?.uid"
         [first]="row.first"
         [last]="row.last"
+        [busy]="row.message.id != null && menu()?.busyMessageId() === row.message.id"
         [canReply]="!menu()?.busy()"
         [canOpenThread]="!threadId()"
         (reply)="replyTo($event)"
@@ -33,15 +31,12 @@
     }
   </div>
   @if (loading()) {
-    <div class="loading-status">
+    <div class="page-loading">
       <ion-spinner></ion-spinner>
     </div>
   }
   @if (failed()) {
-    <div class="ion-text-center">
-      <p>消息加载失败，请重试。</p>
-      <ion-button fill="clear" (click)="load()">重试</ion-button>
-    </div>
+    <app-load-error message="消息加载失败，请重试。" (retry)="load()" />
   }
 </ion-content>
 <app-message-menu

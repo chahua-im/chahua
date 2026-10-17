@@ -1,8 +1,5 @@
 <ion-header>
   <ion-toolbar>
-    @if (!realtime.connected()) {
-      <ion-spinner slot="end" />
-    }
     <ion-buttons slot="start" class="ion-hide-md-up">
       <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
     </ion-buttons>
@@ -29,26 +26,30 @@
         </span>
       </span>
     </ion-title>
-    @if (threadBusy() && !subscription()) {
-      <ion-spinner slot="end"></ion-spinner>
-    }
-    @if (menu()?.busy()) {
-      <ion-spinner slot="end"></ion-spinner>
-    }
-    @if (threadId() && subscription(); as status) {
+    @if (threadId()) {
       <ion-buttons slot="end">
-        <ion-button [disabled]="threadBusy()" (click)="updateThread()">
-          <ion-icon
-            class="action-icon"
-            slot="icon-only"
-            [icon]="
-              !status.subscribed
-                ? threadIcons.starOutline
-                : status.archived
-                  ? threadIcons.archive
-                  : threadIcons.archiveOutline
-            " />
-        </ion-button>
+        @if (subscription(); as status) {
+          <ion-button [disabled]="threadBusy()" (click)="updateThread()">
+            <span class="action-content" [class.busy]="threadBusy()">
+              <ion-icon
+                class="action-label action-icon"
+                [icon]="
+                  !status.subscribed
+                    ? threadIcons.starOutline
+                    : status.archived
+                      ? threadIcons.archive
+                      : threadIcons.archiveOutline
+                " />
+              @if (threadBusy()) {
+                <ion-spinner class="action-icon"></ion-spinner>
+              }
+            </span>
+          </ion-button>
+        } @else if (threadBusy()) {
+          <ion-button disabled>
+            <ion-spinner class="action-icon" slot="icon-only"></ion-spinner>
+          </ion-button>
+        }
       </ion-buttons>
     }
     <ion-buttons slot="end">
@@ -107,7 +108,7 @@
       }
     </ion-toolbar>
   }
-    <app-voice-bar />
+  <app-voice-bar />
 </ion-header>
 <ion-content
   appScrollbars
@@ -144,16 +145,10 @@
   <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
   <div #messageContent>
     @if (threadError()) {
-      <div class="ion-text-center">
-        <p>
-          @if (threadError() === ThreadError.Load) {
-            话题状态加载失败，请重试。
-          } @else {
-            话题更新失败，请重试。
-          }
-        </p>
-        <ion-button fill="clear" (click)="loadSubscription()">重新加载话题状态</ion-button>
-      </div>
+      <app-load-error
+        compact
+        [message]="threadError() === ThreadError.Load ? '话题状态加载失败，请重试。' : '话题更新失败，请重试。'"
+        (retry)="loadSubscription()" />
     }
     @if (conversation.page()?.olderCursor) {
       <div class="ion-text-center">
@@ -162,7 +157,11 @@
           class="pagination-control"
           [disabled]="!conversation.canLoad(PageDirection.Older)"
           (click)="loadPage(PageDirection.Older)">
-          <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Older"></ion-spinner>
+          @if (conversation.pagingDirection() === PageDirection.Older) {
+            <ion-spinner></ion-spinner>
+          } @else {
+            <ion-icon class="pagination-icon" [icon]="upIcon" />
+          }
         </button>
       </div>
     }
@@ -188,6 +187,7 @@
           [interactive]="!!row.confirmed && !row.outgoing"
           [outgoingId]="row.outgoing?.clientGeneratedId"
           [delivery]="row.outgoing?.delivery()"
+          [busy]="row.message.id != null && menu()?.busyMessageId() === row.message.id"
           [uploads]="row.outgoing?.uploads ?? []"
           (retry)="row.outgoing && outbox.retry(row.outgoing)"
           [own]="row.message.sender.uid === session.user()?.uid"
@@ -215,32 +215,42 @@
           class="pagination-control"
           [disabled]="!conversation.canLoad(PageDirection.Newer)"
           (click)="loadPage(PageDirection.Newer)">
-          <ion-spinner [paused]="conversation.pagingDirection() !== PageDirection.Newer"></ion-spinner>
+          @if (conversation.pagingDirection() === PageDirection.Newer) {
+            <ion-spinner></ion-spinner>
+          } @else {
+            <ion-icon class="pagination-icon" [icon]="downIcon" />
+          }
         </button>
       </div>
     }
     @if (!conversation.page() && conversation.loading()) {
-      <div class="loading-status">
-        <ion-spinner></ion-spinner>
+      <div class="message-skeleton">
+        @for (row of [0, 1, 2, 3, 4, 5]; track row) {
+          <div
+            class="message-skeleton-row"
+            [class.sent]="row % 3 === 2"
+            [class.short]="row % 2 === 0"
+            [class.tall]="row % 3 === 0">
+            @if (row % 3 !== 2) {
+              <span class="skeleton-block message-skeleton-avatar"></span>
+            }
+            <span class="skeleton-block message-skeleton-bubble"></span>
+          </div>
+        }
       </div>
     }
     @if (conversation.error()) {
-      <div class="ion-text-center">
-        <p>
-          @switch (conversation.error()) {
-            @case (ConversationError.Missing) {
-              这条消息已删除或无法查看。
-            }
-            @case (ConversationError.Open) {
-              消息加载失败，请重试。
-            }
-            @default {
-              加载消息失败，请重试。
-            }
-          }
-        </p>
-        <ion-button fill="clear" (click)="retry()">重试</ion-button>
-      </div>
+      <app-load-error
+        [compact]="!!conversation.page()"
+        [message]="
+          conversation.error() === ConversationError.Missing
+            ? '这条消息已删除或无法查看。'
+            : conversation.error() === ConversationError.Open
+              ? '消息加载失败，请重试。'
+              : '加载消息失败，请重试。'
+        "
+        [retryable]="conversation.error() !== ConversationError.Missing"
+        (retry)="retry()" />
     }
   </div>
   @if (conversation.page(); as page) {

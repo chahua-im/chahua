@@ -40,6 +40,10 @@ bootstrapApplication(App, {
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
     provideIonicAngular({
       mode: 'ios',
+      spinner: 'circular',
+      loadingSpinner: 'circular',
+      refreshingSpinner: 'circular',
+      infiniteLoadingSpinner: 'circular',
       useSetInputAPI: true,
     }),
     provideRouter(routes, withComponentInputBinding()),

@@ -29,6 +29,7 @@ import type { StickerPackSummary } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { EmojiPicker } from '../../messages/emoji-picker/emoji-picker';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { LoadError } from '../../ui/load-error/load-error';
 import { Preferences } from '../preferences';
 import { extractEmojiSequences } from '../emoji-sequences';
 import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } from '../sticker-preferences';
@@ -40,6 +41,7 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
   imports: [
     ContentScrollbars,
     EmojiPicker,
+    LoadError,
     IonBadge,
     IonButton,
     IonButtons,

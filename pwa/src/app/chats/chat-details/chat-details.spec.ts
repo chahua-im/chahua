@@ -116,7 +116,7 @@ describe('ChatDetails', () => {
     expect(fixture.nativeElement.querySelector('.profile h2').textContent.trim()).toBe(testChat.name);
     expect(fixture.componentInstance['chat']()).toBe(store.get(testChat.id));
     expect(fixture.componentInstance['busy']()).toBe(false);
-    expect(fixture.nativeElement.querySelector('ion-content > .loading-status')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).toBeNull();
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
     details.flush({ ...wireChat, description: '群介绍' });
     await fixture.whenStable();
@@ -171,7 +171,7 @@ describe('ChatDetails', () => {
     details.flush({ ...wireChat, kind: GroupKind.dm, peer });
     await vi.waitFor(() => expect(fixture.componentInstance['chat']()?.kind).toBe(GroupKind.dm));
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('ion-content > .loading-status')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).toBeNull();
     relationship.flush({ peerUid: 2, isFriend: true });
     await fixture.whenStable();
     fixture.detectChanges();
@@ -185,7 +185,7 @@ describe('ChatDetails', () => {
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('ion-content > .loading-status')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).not.toBeNull();
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
     http
       .expectOne(`/_api/group/${wireChat.id}`)
@@ -194,7 +194,7 @@ describe('ChatDetails', () => {
       fixture.detectChanges();
       expect(fixture.nativeElement.querySelector('.profile h2')?.textContent.trim()).toBe('朋友');
     });
-    expect(fixture.nativeElement.querySelector('ion-content > .loading-status')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).toBeNull();
     http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true });
     await fixture.whenStable();
     fixture.detectChanges();

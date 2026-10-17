@@ -41,7 +41,12 @@
     class="ion-margin"
     [disabled]="busy() || (type() === Type.membership && !requiredGroup()) || (type() === Type.targeted && !target())"
     (click)="create()">
-    创建邀请
+    <span class="action-content" [class.busy]="pending()?.action === Action.Create">
+      <span class="action-label">创建邀请</span>
+      @if (pending()?.action === Action.Create) {
+        <ion-spinner />
+      }
+    </span>
   </ion-button>
   <ion-searchbar
     placeholder="查找要分享或限定的群组"
@@ -55,7 +60,17 @@
     </ion-select>
   </ion-item>
   @if (cursor()) {
-    <ion-button fill="clear" (click)="loadGroups(true)">更多群组</ion-button>
+    <ion-button fill="clear" [disabled]="loadingGroups()" (click)="loadGroups(true)">
+      <span class="action-content" [class.busy]="loadingGroups()">
+        <span class="action-label">更多群组</span>
+        @if (loadingGroups()) {
+          <ion-spinner />
+        }
+      </span>
+    </ion-button>
+  }
+  @if (loading()) {
+    <div class="page-loading"><ion-spinner /></div>
   }
   @for (invite of invites(); track invite.id) {
     <ion-item>
@@ -96,21 +111,28 @@
         fill="clear"
         [disabled]="busy() || !destination() || status(invite) !== Status.Active"
         (click)="share(invite)">
-        分享
+        <span class="action-content" [class.busy]="pending()?.action === Action.Share && pending()?.id === invite.id">
+          <span class="action-label">分享</span>
+          @if (pending()?.action === Action.Share && pending()?.id === invite.id) {
+            <ion-spinner />
+          }
+        </span>
       </ion-button>
       <ion-button
         fill="clear"
         color="danger"
         [disabled]="busy() || status(invite) !== Status.Active"
         (click)="revoke(invite)">
-        撤销
+        <span class="action-content" [class.busy]="pending()?.action === Action.Revoke && pending()?.id === invite.id">
+          <span class="action-label">撤销</span>
+          @if (pending()?.action === Action.Revoke && pending()?.id === invite.id) {
+            <ion-spinner />
+          }
+        </span>
       </ion-button>
     </ion-item>
   }
 </ion-list>
-@if (busy()) {
-  <div class="loading-status"><ion-spinner /></div>
-}
 @if (copied()) {
   <p class="ion-padding">邀请链接已复制</p>
 }

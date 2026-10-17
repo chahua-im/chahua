@@ -64,6 +64,9 @@
       [class.has-thread]="!!threadInfo()"
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
+      @if (busy()) {
+        <span class="acting"><ion-spinner></ion-spinner></span>
+      }
       @if (first() && !isSticker()) {
         <app-message-author
           class="sender"

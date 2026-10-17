@@ -26,6 +26,7 @@ import {
 } from '../../messages/media-processing/file-type';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
+import { LoadError } from '../../ui/load-error/load-error';
 import { StickerPreferences } from '../sticker-preferences';
 
 @Component({
@@ -34,6 +35,7 @@ import { StickerPreferences } from '../sticker-preferences';
   styleUrl: '../settings/settings.scss',
   imports: [
     ContentScrollbars,
+    LoadError,
     IonButton,
     IonButtons,
     IonContent,

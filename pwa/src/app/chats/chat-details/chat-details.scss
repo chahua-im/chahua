@@ -135,6 +135,11 @@ ion-content {
   background: var(--ion-background-color, #fff);
 }
 
+// Keep requests parallel, but show only the profile spinner until that first load settles.
+.attachments.pending {
+  display: none;
+}
+
 .attachments ion-segment-button {
   min-width: 0;
   --padding-start: 4px;

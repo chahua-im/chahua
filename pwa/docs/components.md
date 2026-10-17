@@ -77,7 +77,7 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 | DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                | GroupsService、UsersService；选择用户或打开资料                                       |
 | ChatLink           | 路由参数；failed                                                                                                     | 解析链接和静态路由配置、按需查询消息/用户；负责详情弹窗与浏览器历史的生命周期         |
 
-ChatListContent 的行是共享资料、查询成员和草稿的派生结果。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。
+ChatListContent 的行是共享资料、查询成员和草稿的派生结果。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。加载失败统一使用 LoadError（message、compact、retryable → retry）：页面级居中，列表和设置分区使用紧凑行。
 
 ## 消息页面
 
@@ -98,7 +98,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 
 | 组件               | 输入、输出与局部状态                                                                                                                         |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Message            | message、own、分组标志、preview/interactive、待发状态/附件、跳转状态 → reply、jump、openThread、menu、react、retry；只持有手势和点击抑制状态 |
+| Message            | message、own、分组标志、preview/interactive、待发状态/附件、菜单操作等待、跳转状态 → reply、jump、openThread、menu、react、retry；只持有手势和点击抑制状态 |
 | MessageAuthor      | sender、own；派生用户名、用户组和性别                                                                                                        |
 | MessageText        | text、mentions、interactive；派生文本片段，点击提及才打开资料                                                                                |
 | MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文、系统短语枚举；交互模式下系统用户名链接资料                                  |
@@ -107,13 +107,13 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                                        |
 | MessageThread      | info、preview → open                                                                                                                         |
 | InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                               |
-| MessageMenu        | messages、chatId、threadId、canReply → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy                                  |
+| MessageMenu        | messages、chatId、threadId、canReply → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy、busyMessageId                       |
 | ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                     |
 | EmojiPicker        | chosen 输出；封装第三方选择器的尺寸、中文数据与加载状态                                                                                      |
 
-MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。可用操作、排序和翻页页码由消息状态、聊天类型与好友关系派生，页码在 open 和 reset 时归零。确认意图、操作提示、选择表情和弹窗状态属于菜单；菜单测量完整预览与面板的尺寸，预览保留原横向位置与宽度，面板各自避让左右边缘；高度能容纳时整体竖向定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
+MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。可用操作、排序和翻页页码由消息状态、聊天类型与好友关系派生，页码在 open 和 reset 时归零。确认意图、操作提示、选择表情和弹窗状态属于菜单，busyMessageId 标识正在执行操作的消息；菜单测量完整预览与面板的尺寸，预览保留原横向位置与宽度，面板各自避让左右边缘；高度能容纳时整体竖向定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
 
-MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执行置顶。菜单关闭后的 busy 由页面 toolbar 消费。复制在点击处理内发起，以保留 Safari 用户激活；缺少异步剪贴板（非安全上下文、部分 WebView）时由 `api/clipboard.ts` 降级到临时文本框和 `document.execCommand`，两者都失败才作为操作失败。菜单 reset 使旧操作的界面反馈失效，最近表情保存到 Preferences。
+MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执行置顶。菜单关闭后的 busyMessageId 由页面传给对应消息，在消息右上角显示等待。复制在点击处理内发起，以保留 Safari 用户激活；缺少异步剪贴板（非安全上下文、部分 WebView）时由 `api/clipboard.ts` 降级到临时文本框和 `document.execCommand`，两者都失败才作为操作失败。菜单 reset 使旧操作的界面反馈失效，最近表情保存到 Preferences。
 
 ## 输入和媒体
 

@@ -15,7 +15,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
   IonBackButton,
-  IonButton,
   IonButtons,
   IonContent,
   IonHeader,
@@ -33,6 +32,7 @@ import { isVisibleMessage } from '../../messages/message-visibility';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
+import { LoadError } from '../../ui/load-error/load-error';
 import { messageRows } from '../message-rows';
 
 @Component({
@@ -41,8 +41,8 @@ import { messageRows } from '../message-rows';
   imports: [
     ContentScrollbars,
     DatePipe,
+    LoadError,
     IonBackButton,
-    IonButton,
     IonButtons,
     IonContent,
     IonHeader,

@@ -23,19 +23,14 @@
     } @else {
       @if (loading()) {
         <ion-header>
-          <ion-toolbar>
-            <ion-buttons slot="end">
-              <ion-button>
-                <ion-spinner class="action-icon" slot="icon-only" />
-              </ion-button>
-            </ion-buttons>
-          </ion-toolbar>
+          <ion-toolbar></ion-toolbar>
         </ion-header>
       }
       <ion-content appScrollbars class="ion-text-center" [class.ion-padding]="!loading()">
-        @if (error()) {
-          <p>暂时无法登录，请重试。</p>
-          <ion-button (click)="initialize()">重试</ion-button>
+        @if (loading()) {
+          <div class="page-loading login-loading"><ion-spinner /></div>
+        } @else if (error()) {
+          <app-load-error message="暂时无法登录，请重试。" (retry)="initialize()" />
         }
       </ion-content>
     }

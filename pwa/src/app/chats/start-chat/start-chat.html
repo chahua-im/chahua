@@ -14,7 +14,14 @@
         <ion-item><input class="field" placeholder="群组名称" [formField]="fields.name" /></ion-item>
       } @else {
         <ion-item><input class="field" placeholder="邀请码或邀请链接" [formField]="fields.code" /></ion-item>
-        <ion-button fill="clear" [disabled]="busy() || !values().code.trim()" (click)="lookup()">查看邀请</ion-button>
+        <ion-button fill="clear" [disabled]="busy() || !values().code.trim()" (click)="lookup()">
+          <span class="action-content" [class.busy]="pending() === Action.Lookup">
+            <span class="action-label">查看邀请</span>
+            @if (pending() === Action.Lookup) {
+              <ion-spinner />
+            }
+          </span>
+        </ion-button>
         @if (preview(); as invite) {
           <ion-item>
             <app-chat-avatar
@@ -45,11 +52,15 @@
       expand="block"
       [disabled]="busy() || (kind() === Kind.Create ? !values().name.trim() : !previewValid())"
       (click)="submit()">
-      {{ kind() === Kind.Create ? '创建' : preview()?.alreadyMember ? '打开群组' : '加入' }}
+      <span class="action-content" [class.busy]="pending() === Action.Submit">
+        <span class="action-label">
+          {{ kind() === Kind.Create ? '创建' : preview()?.alreadyMember ? '打开群组' : '加入' }}
+        </span>
+        @if (pending() === Action.Submit) {
+          <ion-spinner />
+        }
+      </span>
     </ion-button>
-  }
-  @if (busy()) {
-    <div class="loading-status"><ion-spinner /></div>
   }
   @if (error()) {
     <p class="ion-padding">操作失败，请检查后重试。</p>

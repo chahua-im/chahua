@@ -103,7 +103,9 @@ export class MessageMenu {
   private readonly preview = viewChild<ElementRef<HTMLElement>>('preview');
   private version = 0;
   private readonly pending = signal(false);
+  private readonly actingOn = signal<SnowflakeID | undefined>(undefined);
   readonly busy = this.pending.asReadonly();
+  readonly busyMessageId = this.actingOn.asReadonly();
   protected readonly selection = signal<MessageMenuSelection | undefined>(undefined);
   protected readonly queued = computed(() => {
     const id = this.selection()?.clientGeneratedId;
@@ -137,7 +139,10 @@ export class MessageMenu {
   protected readonly recent = this.preferences.recentReactions;
   protected readonly pinnedReactions = this.preferences.pinnedReactions;
   protected readonly quickEmojis = computed(() =>
-    [...this.pinnedReactions(), ...this.recent().filter((emoji) => !this.pinnedReactions().includes(emoji))].slice(0, 5),
+    [...this.pinnedReactions(), ...this.recent().filter((emoji) => !this.pinnedReactions().includes(emoji))].slice(
+      0,
+      5,
+    ),
   );
   protected readonly notice = signal<MessageNotice | undefined>(undefined);
   protected readonly Notice = MessageNotice;
@@ -432,6 +437,7 @@ export class MessageMenu {
     this.confirmation.set(undefined);
     this.notice.set(undefined);
     this.pending.set(false);
+    this.actingOn.set(undefined);
     this.choosingEmoji.set(false);
     this.page.set(0);
   }
@@ -511,12 +517,16 @@ export class MessageMenu {
         this.confirmation.set({ action, message, pinned });
         break;
       case MessageAction.Save:
-        await this.perform(() => this.messageActions.save(message), MessageNotice.Saved);
+        await this.perform(() => this.messageActions.save(message), MessageNotice.Saved, message.id);
         break;
       case MessageAction.FavoriteSticker: {
         const sticker = message.sticker;
         if (sticker)
-          await this.perform(() => firstValueFrom(this.stickers.putFavorite(sticker.id)), MessageNotice.Saved);
+          await this.perform(
+            () => firstValueFrom(this.stickers.putFavorite(sticker.id)),
+            MessageNotice.Saved,
+            message.id,
+          );
         break;
       }
     }
@@ -527,11 +537,12 @@ export class MessageMenu {
     this.confirmation.set(undefined);
     if (event.detail.role !== 'confirm' || !pending) return;
     if (pending.action === MessageAction.Recall && this.canRecallMessage(pending.message)) {
-      await this.perform(() => this.messageActions.recall(pending.message), MessageNotice.Recalled);
+      await this.perform(() => this.messageActions.recall(pending.message), MessageNotice.Recalled, pending.message.id);
     } else if (pending.action === MessageAction.Pin && this.admin()) {
       await this.perform(
         () => this.pins().set(pending.message, !pending.pinned),
         pending.pinned ? MessageNotice.Unpinned : MessageNotice.Pinned,
+        pending.message.id,
       );
     }
   }
@@ -546,20 +557,25 @@ export class MessageMenu {
     void this.close();
     // The server refuses reactions in a read-only DM, so the tap only dismisses the menu.
     if (this.readOnly()) return;
-    await this.perform(async () => {
-      await this.messageActions.toggleReaction(message, emoji);
-      if (version === this.version) this.preferences.rememberReaction(emoji);
-    });
+    await this.perform(
+      async () => {
+        await this.messageActions.toggleReaction(message, emoji);
+        if (version === this.version) this.preferences.rememberReaction(emoji);
+      },
+      undefined,
+      message.id,
+    );
   }
 
   private canRecallMessage(message: MessageResponse) {
     return this.admin() || message.sender.uid === this.session.user()?.uid;
   }
 
-  private async perform(operation: () => Promise<unknown>, success?: MessageNotice) {
+  private async perform(operation: () => Promise<unknown>, success?: MessageNotice, messageId?: SnowflakeID) {
     if (this.busy()) return;
     const version = this.version;
     this.pending.set(true);
+    this.actingOn.set(messageId);
     this.notice.set(undefined);
     try {
       await operation();
@@ -567,7 +583,10 @@ export class MessageMenu {
     } catch {
       if (version === this.version) this.notice.set(MessageNotice.Failed);
     } finally {
-      if (version === this.version) this.pending.set(false);
+      if (version === this.version) {
+        this.pending.set(false);
+        this.actingOn.set(undefined);
+      }
     }
   }
 }

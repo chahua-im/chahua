@@ -11,7 +11,6 @@ import {
   viewChild,
 } from '@angular/core';
 import {
-  IonButton,
   IonContent,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
@@ -21,7 +20,6 @@ import {
   IonNote,
   IonRefresher,
   IonRefresherContent,
-  IonSpinner,
   IonText,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
@@ -42,6 +40,7 @@ import { ConversationNavigation, ConversationTargetKind } from '../../conversati
 import { DraftStore } from '../../conversations/draft-store';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { LoadError } from '../../ui/load-error/load-error';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { ChatListItem, type ChatListEntry } from '../chat-list-item/chat-list-item';
@@ -62,7 +61,7 @@ enum ListRowKind {
   imports: [
     ChatMute,
     ContentScrollbars,
-    IonButton,
+    LoadError,
     IonContent,
     IonItem,
     IonLabel,
@@ -72,7 +71,6 @@ enum ListRowKind {
     IonRefresherContent,
     IonInfiniteScroll,
     IonInfiniteScrollContent,
-    IonSpinner,
     IonText,
     ChatListItem,
     MessagePreview,

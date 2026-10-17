@@ -14,10 +14,11 @@ import {
   type SnowflakeID,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
+import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-directory-search',
   templateUrl: './directory-search.html',
-  imports: [ChatAvatar, IonItem, IonList, IonLabel, IonButton, IonSpinner, IonListHeader],
+  imports: [ChatAvatar, LoadError, IonItem, IonList, IonLabel, IonButton, IonSpinner, IonListHeader],
 })
 export class DirectorySearch {
   readonly query = input('');

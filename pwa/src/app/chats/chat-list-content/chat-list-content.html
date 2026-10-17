@@ -28,6 +28,23 @@
           }"></app-chat-list-item>
       }
     }
+    @if (!refreshing() && (!ready() || (loading() && !rows().length))) {
+      @for (row of [0, 1, 2, 3, 4, 5, 6, 7]; track row) {
+        <div class="chat-skeleton-row" [class.short-title]="row % 3 === 1" [class.short-preview]="row % 3 === 2">
+          <span class="skeleton-block chat-skeleton-avatar"></span>
+          <span class="chat-skeleton-lines">
+            <span class="skeleton-block chat-skeleton-title"></span>
+            <span class="skeleton-block chat-skeleton-preview"></span>
+          </span>
+          <span class="chat-skeleton-meta">
+            <span class="skeleton-block chat-skeleton-time"></span>
+            @if (row % 2 === 0) {
+              <span class="skeleton-block chat-skeleton-badge"></span>
+            }
+          </span>
+        </div>
+      }
+    }
     @if (ready()) {
       @if (showRequests() && requestRows().length) {
         @for (row of requestRows(); track row.request.id) {
@@ -155,32 +172,22 @@
           }
         }
         @if (showThreads() && threads().error()) {
-          <ion-item lines="none">
-            <ion-label color="danger">话题加载失败，请刷新重试。</ion-label>
-            <ion-button slot="end" (click)="refresh()">重试</ion-button>
-          </ion-item>
+          <app-load-error compact message="话题加载失败，请刷新重试。" (retry)="refresh()" />
         }
         @if (showChats()) {
           @if (chatQuery().error(); as error) {
-            <ion-item lines="none">
-              <ion-label color="danger">
-                @switch (error) {
-                  @case (ChatListError.Load) {
-                    会话加载失败，请刷新重试。
-                  }
-                  @case (ChatListError.Unread) {
-                    更新未读数量失败，请刷新重试。
-                  }
-                  @case (ChatListError.Recent) {
-                    更新会话失败，请下拉刷新重试。
-                  }
-                  @case (ChatListError.More) {
-                    加载更多会话失败，请重试。
-                  }
-                }
-              </ion-label>
-              <ion-button slot="end" (click)="refresh()">重试</ion-button>
-            </ion-item>
+            <app-load-error
+              compact
+              [message]="
+                error === ChatListError.Load
+                  ? '会话加载失败，请刷新重试。'
+                  : error === ChatListError.Unread
+                    ? '更新未读数量失败，请刷新重试。'
+                    : error === ChatListError.Recent
+                      ? '更新会话失败，请下拉刷新重试。'
+                      : '加载更多会话失败，请重试。'
+              "
+              (retry)="refresh()" />
           }
         }
       }
@@ -192,10 +199,5 @@
     (ionInfinite)="loadMore($event)">
     <ion-infinite-scroll-content></ion-infinite-scroll-content>
   </ion-infinite-scroll>
-  @if ((!ready() || loading()) && !refreshing()) {
-    <div class="loading-status">
-      <ion-spinner></ion-spinner>
-    </div>
-  }
 </ion-content>
 <app-chat-mute />
