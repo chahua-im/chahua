@@ -101,6 +101,57 @@ describe('MessageAttachments', () => {
     expect(element.querySelector('.media-error')?.getAttribute('href')).toBe(image.url);
   });
 
+  it('stretches a single image on a blurred backdrop and drops the backdrop when it fails', async () => {
+    const fixture = await render({ attachments: [{ ...image, width: 1080, height: 2400 }] });
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.classList.contains('fill')).toBe(true);
+    expect(element.style.width).toBe('189px');
+    const frame = element.querySelector<HTMLElement>('.media-frame')!;
+    expect(frame.classList.contains('fill')).toBe(true);
+    expect(frame.style.width).toBe('');
+    expect(frame.style.height).toBe('');
+    expect(frame.style.aspectRatio).toBe('1080 / 2400');
+    expect(frame.querySelector('.backdrop')).toBeTruthy();
+    element.querySelector('img')!.dispatchEvent(new Event('error'));
+    fixture.detectChanges();
+    expect(frame.querySelector('.backdrop')).toBeNull();
+    expect(element.querySelector('.media-error')).toBeTruthy();
+  });
+
+  it('keeps a narrow sticker unstretched', async () => {
+    const fixture = await render({
+      messageType: MessageType.sticker,
+      sticker: {
+        id: encodeId('9007199254741199'),
+        emoji: '🐱',
+        name: '猫',
+        media: { ...image, contentType: 'image/png' },
+      },
+    });
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.classList.contains('fill')).toBe(false);
+    expect(element.querySelector('.media-frame.fill')).toBeNull();
+  });
+
+  it('keeps multi-kind attachments unstretched', async () => {
+    const fixture = await render({
+      attachments: [
+        image,
+        {
+          id: encodeId('9007199254741104'),
+          kind: 'application/pdf',
+          url: 'https://example.com/doc.pdf',
+          size: 1,
+          fileName: 'doc.pdf',
+        },
+      ],
+    });
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.classList.contains('album')).toBe(false);
+    expect(element.classList.contains('fill')).toBe(false);
+    expect(element.querySelector('.media-frame.fill')).toBeNull();
+  });
+
   it('anchors one overlay timestamp to the last media frame in an album', async () => {
     const fixture = await render({
       message: '',
