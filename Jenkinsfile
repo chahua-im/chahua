@@ -45,12 +45,15 @@ case "$mode" in
   pr)
     git fetch --no-tags origin "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
     git diff --name-only "origin/${base_ref}...HEAD" > .ci-changed-files
+    printf 'true\n' > .ci-diff-base-found
     ;;
   branch)
     if [ -n "$base_ref" ] && git cat-file -e "${base_ref}^{commit}" 2>/dev/null; then
       git diff --name-only "${base_ref}..HEAD" > .ci-changed-files
+      printf 'true\n' > .ci-diff-base-found
     else
       : > .ci-changed-files
+      printf 'false\n' > .ci-diff-base-found
     fi
     ;;
   *)
@@ -85,7 +88,7 @@ esac
           if (isPr) {
             checkFiles = readChangedFiles('pr', env.CHANGE_TARGET)
 
-            env.RUN_PWA_CHECK = matchesAny(checkFiles, ['Jenkinsfile', 'wetty-chat-mobile/**']).toString()
+            env.RUN_PWA_CHECK = matchesAny(checkFiles, ['Jenkinsfile', 'ci/Jenkinsfile.pwa-build', 'pwa/**']).toString()
             env.RUN_BACKEND_CHECK = matchesAny(checkFiles, ['Jenkinsfile', 'backend/**']).toString()
             env.RUN_FLUTTER_CHECK = matchesAny(checkFiles, ['Jenkinsfile', 'wetty-chat-flutter/**']).toString()
 
@@ -101,8 +104,9 @@ esac
             if (env.BRANCH_NAME == 'main') {
               def baseCommit = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT?.trim() ?: env.GIT_PREVIOUS_COMMIT?.trim()
               releaseFiles = readChangedFiles('branch', baseCommit ?: '')
+              def hasBaseCommit = readFile('.ci-diff-base-found').trim() == 'true'
 
-              env.RUN_PWA_BUILD = matchesAny(releaseFiles, ['Jenkinsfile', 'ci/Jenkinsfile.pwa-build', 'wetty-chat-mobile/**']).toString()
+              env.RUN_PWA_BUILD = (!hasBaseCommit || matchesAny(releaseFiles, ['Jenkinsfile', 'ci/Jenkinsfile.pwa-build', 'pwa/**'])).toString()
               env.RUN_BACKEND_BUILD = matchesAny(releaseFiles, ['Jenkinsfile', 'ci/Jenkinsfile.backend-build', 'backend/**']).toString()
 
               echo "Change detection mode: main branch from ${baseCommit ?: 'no previous commit'}"
@@ -145,7 +149,7 @@ kind: Pod
 spec:
   containers:
     - name: node
-      image: node:22-bookworm
+      image: node:22.22.3-bookworm
       command:
         - cat
       tty: true
@@ -162,7 +166,7 @@ spec:
                   status: 'IN_PROGRESS',
                   conclusion: 'NONE'
 
-                dir('wetty-chat-mobile') {
+                dir('pwa') {
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
 
@@ -172,50 +176,25 @@ npm ci
               }
             }
 
-            stage('Format') {
+            stage('Build') {
               steps {
-                dir('wetty-chat-mobile') {
+                dir('pwa') {
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
 
-npm run format:ci
+npm run build
                   '''
                 }
               }
             }
 
-            stage('Typecheck') {
+            stage('Build Production') {
               steps {
-                dir('wetty-chat-mobile') {
+                dir('pwa') {
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
 
-npm run typecheck
-                  '''
-                }
-              }
-            }
-
-            stage('Lint') {
-              steps {
-                dir('wetty-chat-mobile') {
-                  sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-npm run lint
-                  '''
-                }
-              }
-            }
-
-            stage('Lingui') {
-              steps {
-                dir('wetty-chat-mobile') {
-                  sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-npm run lingui:extract
-npm run lingui:compile
+npm run build:prod
                   '''
                 }
               }
@@ -223,12 +202,16 @@ npm run lingui:compile
 
             stage('Test') {
               steps {
-                dir('wetty-chat-mobile') {
+                dir('pwa') {
                   sh '''#!/usr/bin/env bash
 set -euo pipefail
 
-npm run test:run
+npm run test:ci
+npm run test:pwa
                   '''
+                }
+                script {
+                  env.PWA_CHECKS_PASSED = 'true'
                 }
               }
             }
@@ -254,7 +237,17 @@ npm run test:run
             always {
               junit allowEmptyResults: true,
                 checksName: 'checks / PWA',
-                testResults: 'wetty-chat-mobile/test_output/report.xml'
+                testResults: 'pwa/test_output/*.xml'
+
+              script {
+                if (env.PWA_CHECKS_PASSED == 'true') {
+                  publishChecks name: 'checks / PWA',
+                    title: 'PWA',
+                    summary: 'PWA checks passed',
+                    status: 'COMPLETED',
+                    conclusion: 'SUCCESS'
+                }
+              }
             }
           }
         }

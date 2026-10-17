@@ -96,7 +96,15 @@
         },
         "test": {
           "builder": "@angular/build:unit-test",
-          "options": { "providersFile": "src/test-providers.ts" }
+          "options": {
+            "providersFile": "src/test-providers.ts"
+          },
+          "configurations": {
+            "ci": {
+              "watch": false,
+              "reporters": ["default", ["junit", { "outputFile": "test_output/unit.xml" }]]
+            }
+          }
         }
       }
     }

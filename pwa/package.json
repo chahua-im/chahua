@@ -9,6 +9,7 @@
     "build:prod": "node scripts/build-prod.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "test:ci": "ng test --configuration=ci",
     "test:pwa": "node --test scripts/push-worker.test.mjs scripts/startup-updates.test.mjs"
   },
   "private": true,

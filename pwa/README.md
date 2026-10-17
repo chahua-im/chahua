@@ -43,6 +43,28 @@ Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite
 
 单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身；浏览器自动化同样必须拦截 HTTP、WebSocket 与上传。禁止向生产服写测试数据，禁止测试上传 S3。必须实测写入时使用本地后端及开发数据库 `10.198.3.214`，并以临时代理配置覆盖默认生产代理，例如 `npm start -- --proxy-config /tmp/chahua-local-proxy.json`。本地前端地址本身不意味着后端也是本地。
 
+## CI 与发布
+
+根目录 `Jenkinsfile` 中的 PWA 检查针对 `pwa/`，执行 Angular 构建、单元测试和独立 Worker/启动更新测试；`npm run test:ci` 使用 Angular 的 CI 配置，一次性运行并同时输出终端结果与 `test_output/unit.xml`（相对于 `pwa/`）。开发时的 `npm test` 保留默认交互行为。后端与 Flutter 使用各自的检查阶段。PWA 检查与产物构建均使用 `node:22.22.3-bookworm`。
+
+`chahua/chahua-pwa-build` 使用 `ci/Jenkinsfile.pwa-build`，按上游传入的 `GIT_COMMIT_SHA` 检出源代码；手动构建未指定时使用 `origin/main`。同一次检出生成两个 ZIP，均使用 `PWA2-构建号`，归档根目录包含 `index.html`、`.htaccess` 和 Worker 文件，不包含外层 `browser/` 目录。
+
+| 归档 | 构建目录 | 用途 |
+| --- | --- | --- |
+| `pwa/chahua-staging.zip` | `pwa/dist/app/browser` | 同源 staging |
+| `pwa/chahua-prod.zip` | `pwa/dist/prod/browser` | 跨域生产 |
+
+根目录的 `pwa-artifact-metadata.json` 记录检出提交和构建信息。产物构建自动触发 `chahua/deploy/pwa-staging-deploy`；生产部署保持手动选择 `PWA_BUILD`。两个部署任务的参数项目均为 `chahua/chahua-pwa-build`，`copyArtifacts` 的过滤器分别为：
+
+```groovy
+// Staging
+filter: 'pwa/chahua-staging.zip,pwa-artifact-metadata.json'
+// Production
+filter: 'pwa/chahua-prod.zip,pwa-artifact-metadata.json'
+```
+
+ZIP 解压目录和现有 rsync 源目录无需因归档路径变化而改变。生产页面域和资源域共用生产 rsync 部署目录，不发布 PWA 容器镜像。直接向站点目录执行 `rsync --delete` 不是原子发布，且会删除旧构建资源；部署侧应遵守前述完整版本发布与旧资源保留约定。
+
 ## API 生成
 
 ```bash

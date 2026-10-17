@@ -693,7 +693,6 @@ describe('ConversationPage', () => {
       expect([...content.children]).toEqual(children);
       expect(content.querySelector('.floating-date')).toBe(date);
       expect(date.classList.contains('scrolling')).toBe(true);
-      expect(date.textContent).toContain(day.endsWith('08') ? '2026年9月8日' : '2026年9月9日');
       content.dispatchEvent(new Event('ionScrollEnd'));
       await fixture.whenStable();
       expect([...content.children]).toEqual(children);

@@ -1,0 +1,159 @@
+pipeline {
+  agent none
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '90'))
+  }
+
+  parameters {
+    string(name: 'GIT_COMMIT_SHA', defaultValue: '', description: 'Commit SHA that passed the main Jenkins checks.')
+  }
+
+  environment {
+    STAGING_ARTIFACT = 'pwa/chahua-staging.zip'
+    PROD_ARTIFACT = 'pwa/chahua-prod.zip'
+    ARTIFACT_METADATA = 'pwa-artifact-metadata.json'
+  }
+
+  stages {
+    stage('Validate Input') {
+      steps {
+        script {
+          env.PWA_BUILD_REF = params.GIT_COMMIT_SHA?.trim() ?: 'origin/main'
+        }
+      }
+    }
+
+    stage('Build PWA Artifacts') {
+      agent {
+        kubernetes {
+          defaultContainer 'node'
+          yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+  containers:
+    - name: node
+      image: node:22.22.3-bookworm
+      command:
+        - cat
+      tty: true
+'''
+        }
+      }
+
+      stages {
+        stage('Checkout') {
+          steps {
+            checkout([
+              $class: 'GitSCM',
+              branches: [[name: env.PWA_BUILD_REF]],
+              userRemoteConfigs: [[
+                credentialsId: 'github-app',
+                refspec: '+refs/heads/*:refs/remotes/origin/*',
+                url: 'https://github.com/chahua-im/chahua.git'
+              ]]
+            ])
+
+            script {
+              env.PWA_CHECKOUT_SHA = sh(
+                script: 'git rev-parse HEAD',
+                returnStdout: true
+              ).trim()
+            }
+          }
+        }
+
+        stage('Install Dependencies') {
+          steps {
+            dir('pwa') {
+              sh '''#!/usr/bin/env sh
+set -eu
+
+npm ci
+              '''
+            }
+          }
+        }
+
+        stage('Build Staging') {
+          steps {
+            dir('pwa') {
+              sh '''#!/usr/bin/env sh
+set -eu
+
+npm run build -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"
+              '''
+            }
+          }
+        }
+
+        stage('Archive Staging') {
+          steps {
+            zip zipFile: env.STAGING_ARTIFACT,
+              dir: 'pwa/dist/app/browser',
+              archive: false,
+              defaultExcludes: false,
+              overwrite: true
+          }
+        }
+
+        stage('Build Production') {
+          steps {
+            dir('pwa') {
+              sh '''#!/usr/bin/env sh
+set -eu
+
+npm run build:prod -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"
+              '''
+            }
+          }
+        }
+
+        stage('Archive Production') {
+          steps {
+            zip zipFile: env.PROD_ARTIFACT,
+              dir: 'pwa/dist/prod/browser',
+              archive: false,
+              defaultExcludes: false,
+              overwrite: true
+          }
+        }
+
+        stage('Archive Artifacts') {
+          steps {
+            writeJSON file: env.ARTIFACT_METADATA,
+              json: [
+                commitSha: env.PWA_CHECKOUT_SHA,
+                sourceRef: env.PWA_BUILD_REF,
+                buildNumber: env.BUILD_NUMBER,
+                version: "PWA2-${env.BUILD_NUMBER}"
+              ],
+              pretty: 2
+
+            archiveArtifacts artifacts: "${env.STAGING_ARTIFACT},${env.PROD_ARTIFACT},${env.ARTIFACT_METADATA}",
+              fingerprint: true,
+              onlyIfSuccessful: true
+          }
+        }
+      }
+    }
+
+    stage('Trigger Staging Deploy') {
+      steps {
+        build job: 'chahua/deploy/pwa-staging-deploy',
+          wait: false,
+          parameters: [
+            [
+              $class: 'RunParameterValue',
+              name: 'PWA_BUILD',
+              runId: "chahua/chahua-pwa-build#${env.BUILD_NUMBER}"
+            ]
+          ]
+      }
+    }
+  }
+}
