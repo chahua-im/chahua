@@ -44,7 +44,7 @@ Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite
 
 修改前以[需求与边界](docs/requirements.md)为准；需求记录产品行为，其他文档分别描述尺寸、组件所有权与请求时机，避免同一规则多处维护。回归测试随实现放置，关键覆盖包括分页范围、导航生命周期、滚动锚点、队列顺序/撤回、媒体取消和通知去重。
 
-单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身；浏览器自动化同样必须拦截 HTTP、WebSocket 与上传。禁止向生产服写测试数据，禁止测试上传 S3。必须实测写入时使用本地后端及开发数据库 `10.198.3.214`，并使用 `npm run dev` 代理到本地后端；后端不在 `http://localhost:3000` 时设置 `API_PROXY_TARGET`，例如 `API_PROXY_TARGET=http://10.198.3.214:3000 npm run dev`。`npm start` 不读取该变量。本地前端地址本身不意味着后端也是本地。
+单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身。测试拦截 HTTP、WebSocket 和上传，禁止生产写入与 S3 测试上传等约定见[代码约定](AGENTS.md)；必须实测写入时使用本地后端与开发数据库，并用 `npm run dev` 代理到本地后端，后端不在 `http://localhost:3000` 时设置 `API_PROXY_TARGET`（如 `API_PROXY_TARGET=http://<内网后端主机>:3000 npm run dev`）。`npm start` 不读取该变量。本地前端地址本身不意味着后端也是本地。
 
 ## CI 与发布
 
@@ -66,7 +66,7 @@ filter: 'pwa/chahua-staging.zip,pwa-artifact-metadata.json'
 filter: 'pwa/chahua-prod.zip,pwa-artifact-metadata.json'
 ```
 
-ZIP 解压目录和现有 rsync 源目录无需因归档路径变化而改变。生产页面域和资源域共用生产 rsync 部署目录，不发布 PWA 容器镜像。直接向站点目录执行 `rsync --delete` 不是原子发布，且会删除旧构建资源；部署侧应遵守前述完整版本发布与旧资源保留约定。
+生产页面域和资源域共用生产 rsync 部署目录，不发布 PWA 容器镜像。直接向站点目录执行 `rsync --delete` 不是原子发布，且会删除旧构建资源；部署侧应遵守前述完整版本发布与旧资源保留约定。
 
 ## API 生成
 
