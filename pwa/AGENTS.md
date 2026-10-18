@@ -3,7 +3,7 @@
 - 修改前阅读 [需求与边界](docs/requirements.md)，按改动范围查阅 [数据流](docs/data-flow.md)、[组件](docs/components.md)、[外观](docs/appearance.md) 和 [加载反馈](docs/loading-indicators.md)。简化必须保留已有交互和协议边界。
 - 文档只描述当前状态与约定，不写“本次修改”“迁移过程”等过程记录；产品行为、请求时机、组件字段和尺寸各有单一归属，通过链接引用。
 - 不因对象有多个引用就改成 ID；只为避免过期副本、导航定位或查询成员关系使用 ID。不为局部状态增加共享服务或通用框架。
-- 测试拦截 HTTP、WebSocket 和上传；禁止生产写入和 S3 测试上传。必要的写入实测使用本地后端和开发数据库 `10.198.3.214`。开发默认代理指向生产，不能直接用于写入测试。
+- 测试拦截 HTTP、WebSocket 和上传；禁止生产写入和 S3 测试上传。必要的写入实测使用本地后端和开发数据库。开发默认代理指向生产，不能直接用于写入测试。
 
 固定界面文案写在 `src/i18n/*.json`，模板通过 `transloco` pipe 引用，TypeScript 中需要随语言变化的文案使用 `translateSignal`；静态展示配置留在 HTML 模板中，TypeScript 保存数据、状态和操作。业务判别值使用枚举，优先由 Orval 根据 OpenAPI 生成；普通枚举即可。数值编码的 Snowflake ID 使用 SnowflakeID 品牌类型，与普通 number 区分；这是有意的性能选择，保留无损 number 编码。
 
