@@ -18,6 +18,7 @@ import {
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import type { ToggleCustomEvent } from '@ionic/core';
 import {
   bookmarkOutline,
@@ -54,6 +55,7 @@ import { SessionStore } from '../../session/session-store';
     IonToggle,
     IonSpinner,
     IonToolbar,
+    TranslocoPipe,
   ],
   host: { class: 'ion-page' },
 })

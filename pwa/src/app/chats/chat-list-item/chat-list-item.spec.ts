@@ -37,7 +37,7 @@ describe('ChatListItem', () => {
   it('renders an archive shortcut without conversation data or conversation actions', async () => {
     fixture.componentRef.setInput('entry', {
       title: '已归档',
-      subtitle: '查看已归档的对话',
+      subtitle: '查看已归档的会话',
       icon: archiveOutline,
       link: ['/chats/messages/archived'],
       unreadCount: 37,
@@ -46,7 +46,7 @@ describe('ChatListItem', () => {
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('ion-item').getAttribute('href')).toBe('/chats/messages/archived');
     expect(fixture.nativeElement.querySelector('ion-label h3').textContent.trim()).toBe('已归档');
-    expect(fixture.nativeElement.querySelector('ion-label p').textContent).toContain('查看已归档的对话');
+    expect(fixture.nativeElement.querySelector('ion-label p').textContent).toContain('查看已归档的会话');
     expect(fixture.nativeElement.querySelector('ion-badge').textContent.trim()).toBe('37');
     expect(fixture.nativeElement.querySelector('ion-avatar.icon-avatar ion-icon')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('ion-button')).toBeNull();

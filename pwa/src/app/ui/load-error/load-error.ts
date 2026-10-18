@@ -1,16 +1,17 @@
 import { booleanAttribute, Component, input, output } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonButton, IonIcon } from '@ionic/angular';
 import { alertCircleOutline } from 'ionicons/icons';
 
 @Component({
   selector: 'app-load-error',
-  imports: [IonButton, IonIcon],
+  imports: [IonButton, IonIcon, TranslocoPipe],
   template: `
     <div class="load-error">
       <span class="icon"><ion-icon [icon]="icon" /></span>
       <p>{{ message() }}</p>
       @if (retryable()) {
-        <ion-button fill="outline" size="small" (click)="retry.emit()">重试</ion-button>
+        <ion-button fill="outline" size="small" (click)="retry.emit()">{{ 'common.retry' | transloco }}</ion-button>
       }
     </div>
   `,

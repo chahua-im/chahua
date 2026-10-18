@@ -1,61 +1,61 @@
 @if (message().isDeleted) {
-  <ng-container>消息已删除</ng-container>
+  <ng-container>{{ 'messages.preview.deleted' | transloco }}</ng-container>
 } @else if (message().messageType === MessageType.system) {
   @if (message().sender; as sender) {
-    @let name = sender.name ?? '用户 ' + sender.uid;
+    @let name = sender.name ?? ('chats.content.userWithUid' | transloco: { uid: sender.uid });
     @if (interactive()) {
       <a [routerLink]="['/profile', sender.uid]" (click)="$event.stopPropagation()">{{ name }}</a>
     } @else {
       <ng-container>{{ name }}</ng-container>
     }
   } @else {
-    <ng-container>有人</ng-container>
+    <ng-container>{{ 'messages.preview.someone' | transloco }}</ng-container>
   }
   @switch (systemMessage()?.kind) {
     @case (SystemMessageKind.Joined) {
-      加入了群
+      {{ 'messages.preview.system.joined' | transloco }}
     }
     @case (SystemMessageKind.Left) {
-      退出了群
+      {{ 'messages.preview.system.left' | transloco }}
     }
     @case (SystemMessageKind.Added) {
-      邀请了 {{ systemMessage()?.target }} 加入群
+      {{ 'messages.preview.system.added' | transloco: { target: systemMessage()?.target } }}
     }
     @case (SystemMessageKind.Removed) {
-      将 {{ systemMessage()?.target }} 移出了群
+      {{ 'messages.preview.system.removed' | transloco: { target: systemMessage()?.target } }}
     }
     @case (SystemMessageKind.Pinned) {
-      置顶了一条消息
+      {{ 'messages.preview.system.pinned' | transloco }}
     }
     @case (SystemMessageKind.Unpinned) {
-      取消了一条消息的置顶
+      {{ 'messages.preview.system.unpinned' | transloco }}
     }
     @case (SystemMessageKind.ThreadPinned) {
-      在话题中置顶了一条消息
+      {{ 'messages.preview.system.threadPinned' | transloco }}
     }
     @case (SystemMessageKind.ThreadUnpinned) {
-      取消了话题中一条消息的置顶
+      {{ 'messages.preview.system.threadUnpinned' | transloco }}
     }
     @default {
       {{ message().message }}
     }
   }
 } @else if (message().messageType === MessageType.invite) {
-  <ng-container>[邀请]</ng-container>
+  <ng-container>{{ 'messages.preview.invite' | transloco }}</ng-container>
 } @else {
   @for (kind of media(); track kind) {
     @switch (kind) {
       @case (MediaKind.Image) {
-        <ng-container>[图片]</ng-container>
+        <ng-container>{{ 'messages.preview.image' | transloco }}</ng-container>
       }
       @case (MediaKind.Video) {
-        <ng-container>[视频]</ng-container>
+        <ng-container>{{ 'messages.preview.video' | transloco }}</ng-container>
       }
       @case (MediaKind.Audio) {
-        <ng-container>[语音]</ng-container>
+        <ng-container>{{ 'messages.preview.audio' | transloco }}</ng-container>
       }
       @case (MediaKind.File) {
-        <ng-container>[文件]</ng-container>
+        <ng-container>{{ 'messages.preview.file' | transloco }}</ng-container>
       }
     }
   }
@@ -64,16 +64,16 @@
   } @else if (!media().length) {
     @switch (message().messageType) {
       @case (MessageType.sticker) {
-        <ng-container>[表情]</ng-container>
+        <ng-container>{{ 'messages.preview.sticker' | transloco }}</ng-container>
       }
       @case (MessageType.audio) {
-        <ng-container>[语音]</ng-container>
+        <ng-container>{{ 'messages.preview.audio' | transloco }}</ng-container>
       }
       @case (MessageType.file) {
-        <ng-container>[文件]</ng-container>
+        <ng-container>{{ 'messages.preview.file' | transloco }}</ng-container>
       }
       @default {
-        <ng-container>[非文本消息]</ng-container>
+        <ng-container>{{ 'messages.preview.other' | transloco }}</ng-container>
       }
     }
   }

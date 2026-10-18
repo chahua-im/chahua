@@ -18,7 +18,7 @@
   </div>
 </div>
 @if (failed()) {
-  <a class="trailing" [href]="src()" target="_blank">原文件</a>
+  <a class="trailing" [href]="src()" target="_blank">{{ 'messages.voice.original' | transloco }}</a>
 } @else if (!dock()) {
   <button type="button" class="trailing" (click)="speed()">{{ playback.rate() }}×</button>
 }

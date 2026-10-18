@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { applyWhen, disabled, form, FormField, maxLength, pattern, required } from '@angular/forms/signals';
 import {
   IonButton,
@@ -48,6 +49,7 @@ import { LoadError } from '../../ui/load-error/load-error';
     IonTextarea,
     IonTitle,
     IonToolbar,
+    TranslocoPipe,
   ],
   host: { class: 'ion-page' },
 })

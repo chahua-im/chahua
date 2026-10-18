@@ -130,9 +130,9 @@
           }
           <time class="timestamp" [attr.datetime]="message().createdAt">
             @if (message().isEdited) {
-              <span>已编辑</span>
+              <span>{{ 'messages.message.edited' | transloco }}</span>
             }
-            {{ message().createdAt | date: 'HH:mm' }}
+            {{ message().createdAt | localDate: 'time' }}
             <app-message-status [delivery]="status()" />
           </time>
         </div>
@@ -142,7 +142,9 @@
       }
     </div>
     @if (status() === Delivery.Failed && !preview()) {
-      <button type="button" class="retry-button" (click)="retry.emit()">发送失败，点击重试</button>
+      <button type="button" class="retry-button" (click)="retry.emit()">
+        {{ 'messages.message.sendFailed' | transloco }}
+      </button>
     }
     @if (hasReactions()) {
       <app-message-reactions

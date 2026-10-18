@@ -1,5 +1,6 @@
 import { Service, signal } from '@angular/core';
 import { ColorMode, isColorMode } from './color-mode';
+import { type AppLocale, isAppLocale } from './locale';
 
 const THREADS_KEY = 'chahua.preferences.showThreadsInMessages';
 const REACTIONS_KEY = 'chahua.preferences.recentReactions';
@@ -9,11 +10,13 @@ const AVATARS_KEY = 'chahua.preferences.showAllAvatars';
 const DM_DETAILS_KEY = 'chahua.preferences.showDmDetails';
 
 const COLOR_MODE_KEY = 'chahua.preferences.colorMode';
+const LOCALE_KEY = 'chahua.preferences.locale';
 
 @Service()
 export class Preferences {
   readonly recentReactions = signal<readonly string[]>(readReactions());
   readonly pinnedReactions = signal<readonly string[]>(readPinnedReactions());
+  private readonly locale = signal<AppLocale | null>(readLocale());
   rememberReaction(emoji: string) {
     if (this.pinnedReactions().includes(emoji)) return;
     this.recentReactions.update((items) => [emoji, ...items.filter((item) => item !== emoji)].slice(0, 5));
@@ -34,6 +37,7 @@ export class Preferences {
   readonly showAllAvatars = this.avatars.asReadonly();
   readonly showDmDetails = this.dmDetails.asReadonly();
   readonly colorMode = this.mode.asReadonly();
+  readonly selectedLocale = this.locale.asReadonly();
 
   setShowThreadsInMessages(value: boolean) {
     window.localStorage.setItem(THREADS_KEY, String(value));
@@ -54,11 +58,22 @@ export class Preferences {
     window.localStorage.setItem(COLOR_MODE_KEY, value);
     this.mode.set(value);
   }
+
+  setLocale(value: AppLocale | null) {
+    if (value) window.localStorage.setItem(LOCALE_KEY, value);
+    else window.localStorage.removeItem(LOCALE_KEY);
+    this.locale.set(value);
+  }
 }
 
 function readColorMode(): ColorMode {
   const value = window.localStorage.getItem(COLOR_MODE_KEY);
   return isColorMode(value) ? value : ColorMode.System;
+}
+
+function readLocale(): AppLocale | null {
+  const value = window.localStorage.getItem(LOCALE_KEY);
+  return isAppLocale(value) ? value : null;
 }
 
 function readReactions(): string[] {

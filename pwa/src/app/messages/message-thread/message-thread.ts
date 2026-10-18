@@ -1,4 +1,5 @@
 import { Component, input, output } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonIcon } from '@ionic/angular';
 import { chatbubbles, chevronForward } from 'ionicons/icons';
 import type { ThreadInfo } from '../../../generated/models';
@@ -7,7 +8,7 @@ import type { ThreadInfo } from '../../../generated/models';
   selector: 'app-message-thread',
   templateUrl: './message-thread.html',
   styleUrl: './message-thread.scss',
-  imports: [IonIcon],
+  imports: [IonIcon, TranslocoPipe],
 })
 export class MessageThread {
   readonly info = input.required<ThreadInfo>();

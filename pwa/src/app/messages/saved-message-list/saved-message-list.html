@@ -2,7 +2,7 @@
   @for (row of savedRows(); track row.item.id) {
     @let item = row.item;
     <div>
-      <p class="saved-source">{{ item.chat.name }} · {{ item.originalCreatedAt | date: 'yyyy年M月d日' }}</p>
+      <p class="saved-source">{{ item.chat.name }} · {{ item.originalCreatedAt | localDate: 'date' }}</p>
       <app-message
         [message]="row.content"
         [interactive]="false"
@@ -12,7 +12,7 @@
     </div>
   } @empty {
     @if (!loading() && !failed()) {
-      <p class="ion-text-center">暂无收藏</p>
+      <p class="ion-text-center">{{ 'conversation.emptySaved' | transloco }}</p>
     }
   }
 </div>
@@ -27,11 +27,11 @@
   </div>
 }
 @if (failed()) {
-  <app-load-error message="消息加载失败，请重试。" (retry)="load(!!nextCursor())" />
+  <app-load-error [message]="'conversation.loadFailed' | transloco" (retry)="load(!!nextCursor())" />
 }
 <ion-toast
   [isOpen]="removeFailed()"
-  message="操作失败，请重试。"
+  [message]="'messages.menu.notice.failed' | transloco"
   [duration]="2500"
   (didDismiss)="removeFailed.set(false)"></ion-toast>
 
@@ -40,14 +40,14 @@
     @if (menu(); as selected) {
       <ion-list>
         <ion-item [button]="true" [disabled]="!selected.item.canLocateContext" (click)="locateSaved(selected.item)">
-          查看原消息
+          {{ 'conversation.viewOriginal' | transloco }}
         </ion-item>
         <ion-item
           [button]="true"
           [disabled]="removing() || loading()"
           (click)="removeSaved(selected.item)"
           color="danger">
-          取消收藏
+          {{ 'conversation.unsave' | transloco }}
         </ion-item>
       </ion-list>
     }

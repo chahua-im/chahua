@@ -1,5 +1,5 @@
-import { DatePipe } from '@angular/common';
 import { Component, inject } from '@angular/core';
+import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import { IonButton, IonButtons, IonIcon, IonSpinner, IonToolbar } from '@ionic/angular';
 import { closeCircleOutline, pause, play, refreshOutline } from 'ionicons/icons';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
@@ -8,7 +8,7 @@ import { voiceTime } from './voice-player';
 
 @Component({
   selector: 'app-voice-bar',
-  imports: [DatePipe, IonButton, IonButtons, IonIcon, IonSpinner, IonToolbar],
+  imports: [LocalDatePipe, IonButton, IonButtons, IonIcon, IonSpinner, IonToolbar],
   templateUrl: './voice-bar.html',
   styleUrl: './voice-bar.scss',
 })

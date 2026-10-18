@@ -3,21 +3,28 @@
     <ion-buttons slot="start">
       <ion-button (click)="modals.dismiss()">
         <ion-icon slot="start" [icon]="backIcon"></ion-icon>
-        返回
+        {{ 'common.back' | transloco }}
       </ion-button>
     </ion-buttons>
-    <ion-title>通用</ion-title>
-    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
+    <ion-title>{{ 'settings.general.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">
   <ion-list [inset]="true">
+    <ion-item [button]="true" [detail]="true" routerLink="/settings/language">
+      <ion-icon slot="start" [icon]="languageIcon" color="primary"></ion-icon>
+      <ion-label>{{ 'settings.general.language' | transloco }}</ion-label>
+      <ion-note slot="end" color="medium">{{ localeLabel() }}</ion-note>
+    </ion-item>
     <ion-item>
       <ion-icon slot="start" [icon]="threadsIcon" color="primary"></ion-icon>
       <ion-toggle
         [checked]="preferences.showThreadsInMessages()"
         (ionChange)="preferences.setShowThreadsInMessages($event.detail.checked)">
-        <span class="ion-text-wrap">在“消息”标签页中显示话题</span>
+        <span class="ion-text-wrap">{{ 'settings.general.showThreads' | transloco }}</span>
       </ion-toggle>
     </ion-item>
     <ion-item>
@@ -25,7 +32,7 @@
       <ion-toggle
         [checked]="preferences.showAllAvatars()"
         (ionChange)="preferences.setShowAllAvatars($event.detail.checked)">
-        <span class="ion-text-wrap">在所有消息旁显示头像</span>
+        <span class="ion-text-wrap">{{ 'settings.general.showAllAvatars' | transloco }}</span>
       </ion-toggle>
     </ion-item>
     <ion-item lines="none">
@@ -33,24 +40,24 @@
       <ion-toggle
         [checked]="preferences.showDmDetails()"
         (ionChange)="preferences.setShowDmDetails($event.detail.checked)">
-        <span class="ion-text-wrap">在私聊中显示双方头像和用户名</span>
+        <span class="ion-text-wrap">{{ 'settings.general.showDmDetails' | transloco }}</span>
       </ion-toggle>
     </ion-item>
   </ion-list>
   <ion-list [inset]="true">
-    <ion-list-header>颜色模式</ion-list-header>
+    <ion-list-header>{{ 'settings.general.colorMode' | transloco }}</ion-list-header>
     <ion-radio-group [value]="preferences.colorMode()" (ionChange)="setColorMode($event.detail.value)">
       <ion-item>
         <ion-icon slot="start" [icon]="systemIcon" color="primary"></ion-icon>
-        <ion-radio [value]="ColorMode.System">跟随系统</ion-radio>
+        <ion-radio [value]="ColorMode.System">{{ 'settings.general.colorModeSystem' | transloco }}</ion-radio>
       </ion-item>
       <ion-item>
         <ion-icon slot="start" [icon]="lightIcon" color="primary"></ion-icon>
-        <ion-radio [value]="ColorMode.Light">浅色</ion-radio>
+        <ion-radio [value]="ColorMode.Light">{{ 'settings.general.colorModeLight' | transloco }}</ion-radio>
       </ion-item>
       <ion-item lines="none">
         <ion-icon slot="start" [icon]="darkIcon" color="primary"></ion-icon>
-        <ion-radio [value]="ColorMode.Dark">深色</ion-radio>
+        <ion-radio [value]="ColorMode.Dark">{{ 'settings.general.colorModeDark' | transloco }}</ion-radio>
       </ion-item>
     </ion-radio-group>
   </ion-list>

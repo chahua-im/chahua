@@ -1,7 +1,9 @@
 <ion-header>
   <ion-toolbar>
-    <ion-buttons slot="start"><ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button></ion-buttons>
-    <ion-title>置顶消息</ion-title>
+    <ion-buttons slot="start">
+      <ion-back-button [text]="'common.back' | transloco" [defaultHref]="backHref()"></ion-back-button>
+    </ion-buttons>
+    <ion-title>{{ 'conversation.pinned' | transloco }}</ion-title>
   </ion-toolbar>
 </ion-header>
 <ion-content
@@ -19,7 +21,7 @@
     class="floating-date"
     [class.scrolling]="scrolling.moving() && visibleDate()"
     [class.colliding]="dateColliding() || !visibleDate()">
-    {{ visibleDate() | date: 'yyyy年M月d日' }}
+    {{ visibleDate() | localDate: 'date' }}
   </span>
   <div class="message-list">
     @for (row of rows(); track row.message.id; let index = $index) {
@@ -30,7 +32,7 @@
           [style.visibility]="
             scrolling.moving() && !dateColliding() && hiddenDateKey() === index ? 'hidden' : 'visible'
           ">
-          <span>{{ row.message.createdAt | date: 'yyyy年M月d日' }}</span>
+          <span>{{ row.message.createdAt | localDate: 'date' }}</span>
         </p>
       }
       <app-message
@@ -49,7 +51,7 @@
         (openThread)="openThread(row.message.chatId, $event)"></app-message>
     } @empty {
       @if (!loading() && !failed()) {
-        <p class="ion-text-center">暂无置顶消息</p>
+        <p class="ion-text-center">{{ 'conversation.emptyPinned' | transloco }}</p>
       }
     }
   </div>
@@ -59,7 +61,7 @@
     </div>
   }
   @if (failed()) {
-    <app-load-error message="消息加载失败，请重试。" (retry)="load()" />
+    <app-load-error [message]="'conversation.loadFailed' | transloco" (retry)="load()" />
   }
 </ion-content>
 <app-message-menu

@@ -1,5 +1,6 @@
 import { ChangeDetectorRef, Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { NavigationEnd, Router } from '@angular/router';
 import { IonBackButton, IonButtons, IonContent, IonHeader, IonTitle, IonToolbar } from '@ionic/angular';
 import { SavedMessageList } from '../../messages/saved-message-list/saved-message-list';
@@ -9,6 +10,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   selector: 'app-saved-messages',
   templateUrl: './saved-messages.page.html',
   imports: [
+    TranslocoPipe,
     ContentScrollbars,
     IonBackButton,
     IonButtons,

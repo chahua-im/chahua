@@ -1,6 +1,7 @@
 import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { Router } from '@angular/router';
 import { IonButton, IonItem, IonLabel, IonList, IonListHeader, IonSpinner } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
@@ -18,7 +19,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-directory-search',
   templateUrl: './directory-search.html',
-  imports: [ChatAvatar, LoadError, IonItem, IonList, IonLabel, IonButton, IonSpinner, IonListHeader],
+  imports: [ChatAvatar, LoadError, IonItem, IonList, IonLabel, IonButton, IonSpinner, IonListHeader, TranslocoPipe],
 })
 export class DirectorySearch {
   readonly query = input('');

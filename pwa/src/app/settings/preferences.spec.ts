@@ -9,6 +9,7 @@ describe('Preferences', () => {
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
     });
   });
 
@@ -64,6 +65,23 @@ describe('Preferences', () => {
     TestBed.inject(Preferences).setPinnedReactions(['🍵', '🫡']);
     TestBed.resetTestingModule();
     expect(TestBed.inject(Preferences).pinnedReactions()).toEqual(['🍵', '🫡']);
+  });
+
+  it('persists an explicit locale and clears it for auto', () => {
+    const preferences = TestBed.inject(Preferences);
+    expect(preferences.selectedLocale()).toBeNull();
+    preferences.setLocale('zh-TW');
+    expect(localStorage.getItem('chahua.preferences.locale')).toBe('zh-TW');
+    TestBed.resetTestingModule();
+    const restored = TestBed.inject(Preferences);
+    expect(restored.selectedLocale()).toBe('zh-TW');
+    restored.setLocale(null);
+    expect(localStorage.getItem('chahua.preferences.locale')).toBeNull();
+  });
+
+  it('ignores an unsupported saved locale', () => {
+    localStorage.setItem('chahua.preferences.locale', 'ja-JP');
+    expect(TestBed.inject(Preferences).selectedLocale()).toBeNull();
   });
 
   it('follows the system color mode by default and persists an explicit choice', () => {

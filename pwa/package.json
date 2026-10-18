@@ -24,6 +24,7 @@
     "@angular/router": "^22.1.5",
     "@angular/service-worker": "22.1.5",
     "@ionic/angular": "^9.0.2",
+    "@jsverse/transloco": "^8.4.0",
     "emoji-picker-element": "^1.29.1",
     "emoji-picker-element-data": "^1.8.0",
     "file-type": "^21.3.4",

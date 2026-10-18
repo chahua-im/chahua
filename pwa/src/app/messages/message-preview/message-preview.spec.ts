@@ -17,10 +17,10 @@ describe('MessagePreview', () => {
   }
 
   it.each([
-    ['joined the chat', '测试用户 加入了群'],
-    ['left the chat', '测试用户 退出了群'],
-    ['added 小花', '测试用户 邀请了 小花 加入群'],
-    ['removed 小花', '测试用户 将 小花 移出了群'],
+    ['joined the chat', '测试用户 加入了群聊'],
+    ['left the chat', '测试用户 退出了群聊'],
+    ['added 小花', '测试用户 邀请了 小花 加入群聊'],
+    ['removed 小花', '测试用户 将 小花 移出了群聊'],
     ['pinned a message', '测试用户 置顶了一条消息'],
     ['unpinned a message', '测试用户 取消了一条消息的置顶'],
     ['pinned a message in this thread', '测试用户 在话题中置顶了一条消息'],
@@ -32,15 +32,15 @@ describe('MessagePreview', () => {
 
   it('preserves the full target name as text, including spaces and markup', () => {
     expect(render({ messageType: MessageType.system, message: 'added 小花 <b>And Bob</b>' })).toBe(
-      '测试用户 邀请了 小花 <b>And Bob</b> 加入群',
+      '测试用户 邀请了 小花 <b>And Bob</b> 加入群聊',
     );
     expect(fixture.nativeElement.querySelector('b')).toBeNull();
   });
 
   it('updates the displayed actor from the message and falls back to the uid when the name is missing', () => {
     const message = { messageType: MessageType.system, message: 'joined the chat' };
-    expect(render({ ...message, sender: { uid: 2, name: '小花', gender: 0 } })).toBe('小花 加入了群');
-    expect(render({ ...message, sender: { uid: 2, gender: 0 } })).toBe('用户 2 加入了群');
+    expect(render({ ...message, sender: { uid: 2, name: '小花', gender: 0 } })).toBe('小花 加入了群聊');
+    expect(render({ ...message, sender: { uid: 2, gender: 0 } })).toBe('用户 2 加入了群聊');
   });
 
   it('opens the actor profile only when the system message is interactive', async () => {

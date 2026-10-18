@@ -1,14 +1,14 @@
 <ion-header [translucent]="true">
   <ion-toolbar>
-    <ion-title>安装 茶话</ion-title>
+    <ion-title>{{ 'pwa.landing.title' | transloco }}</ion-title>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars [fullscreen]="true" class="landing-page">
   <section class="landing-hero">
     <div class="landing-hero__copy">
-      <h1>把茶话添加到主屏幕</h1>
-      <p>安装后可以像原生应用一样从桌面直接启动。</p>
-      <p>如果你要向朋友推荐，请发送论坛帖子的地址，不要直接发送当前页面地址。当前页面的地址包含你的账号登录信息。</p>
+      <h1>{{ 'pwa.landing.hero.title' | transloco }}</h1>
+      <p>{{ 'pwa.landing.hero.install' | transloco }}</p>
+      <p>{{ 'pwa.landing.hero.share' | transloco }}</p>
     </div>
   </section>
 
@@ -45,38 +45,38 @@
         <ion-card-content>
           <ol class="landing-steps">
             <li>
-              使用
+              {{ 'pwa.landing.android.step1Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.logoChrome" class="landing-inline-text__icon" />
-                <span>Chrome 浏览器</span>
+                <span>{{ 'pwa.landing.browserChrome' | transloco }}</span>
               </span>
-              访问本页
+              {{ 'pwa.landing.android.step1After' | transloco }}
             </li>
             <li>
-              点击
+              {{ 'pwa.landing.android.step2Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.ellipsisVertical" class="landing-inline-text__icon" />
-                <span>菜单</span>
+                <span>{{ 'pwa.landing.menu' | transloco }}</span>
               </span>
             </li>
-            <li>选择 "安装并创建快捷方式"，然后点“安装”</li>
-            <li>确认安装，之后即可从桌面直接打开</li>
+            <li>{{ 'pwa.landing.android.step3' | transloco }}</li>
+            <li>{{ 'pwa.landing.android.step4' | transloco }}</li>
           </ol>
           <ion-text color="medium">
-            <p class="landing-note">如果浏览器主动弹出了安装界面，直接点安装即可。</p>
+            <p class="landing-note">{{ 'pwa.landing.android.note' | transloco }}</p>
             <p class="landing-note">
-              如果无法使用 Chrome，也可以用
+              {{ 'pwa.landing.android.note2Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.logoEdge" class="landing-inline-text__icon" />
-                <span>Edge 浏览器</span>
+                <span>{{ 'pwa.landing.browserEdge' | transloco }}</span>
               </span>
               <br />
-              点击
+              {{ 'pwa.landing.android.note2Mid' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.menuOutline" class="landing-inline-text__icon" />
-                <span>菜单</span>
+                <span>{{ 'pwa.landing.menu' | transloco }}</span>
               </span>
-              ，选择“添加至手机” (可能会在第二页)。
+              {{ 'pwa.landing.android.note2After' | transloco }}
             </p>
           </ion-text>
         </ion-card-content>
@@ -86,27 +86,27 @@
         <ion-card-content>
           <ol class="landing-steps">
             <li>
-              使用
+              {{ 'pwa.landing.ios.step1Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.logoApple" class="landing-inline-text__icon" />
-                <span>Safari 浏览器</span>
+                <span>{{ 'pwa.landing.browserSafari' | transloco }}</span>
               </span>
-              访问本页
+              {{ 'pwa.landing.ios.step1After' | transloco }}
             </li>
             <li>
-              点击
+              {{ 'pwa.landing.ios.step2Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.ellipsisHorizontal" class="landing-inline-text__icon" />
-                <span>菜单</span>
+                <span>{{ 'pwa.landing.menu' | transloco }}</span>
               </span>
-              ，选择
+              {{ 'pwa.landing.ios.step2Between' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.shareOutline" class="landing-inline-text__icon" />
-                <span>共享</span>
+                <span>{{ 'pwa.landing.share' | transloco }}</span>
               </span>
             </li>
-            <li>选择 “添加到主屏幕” (可能会在 “查看更多” 里面)</li>
-            <li>确认添加，之后即可从桌面直接打开</li>
+            <li>{{ 'pwa.landing.ios.step3' | transloco }}</li>
+            <li>{{ 'pwa.landing.ios.step4' | transloco }}</li>
           </ol>
         </ion-card-content>
       }
@@ -115,25 +115,25 @@
         <ion-card-content>
           <ol class="landing-steps">
             <li>
-              使用
+              {{ 'pwa.landing.windows.step1Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.logoEdge" class="landing-inline-text__icon" />
-                <span>Edge 浏览器</span>
+                <span>{{ 'pwa.landing.browserEdge' | transloco }}</span>
               </span>
-              访问本页。
+              {{ 'pwa.landing.windows.step1After' | transloco }}
             </li>
             <li>
-              点击
+              {{ 'pwa.landing.windows.step2Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.ellipsisHorizontal" class="landing-inline-text__icon" />
-                <span>菜单</span>
+                <span>{{ 'pwa.landing.menu' | transloco }}</span>
               </span>
             </li>
-            <li>选择“更多工具” &gt; “应用” &gt; “将此站点安装为应用”。</li>
-            <li>自行选择将图标创建在任务栏、开始菜单或桌面。</li>
+            <li>{{ 'pwa.landing.windows.step3' | transloco }}</li>
+            <li>{{ 'pwa.landing.windows.step4' | transloco }}</li>
           </ol>
           <ion-text color="medium">
-            <p class="landing-note">如果浏览器在地址栏显示了安装应用按钮，直接点安装即可</p>
+            <p class="landing-note">{{ 'pwa.landing.windows.note' | transloco }}</p>
           </ion-text>
         </ion-card-content>
       }
@@ -142,22 +142,22 @@
         <ion-card-content>
           <ol class="landing-steps">
             <li>
-              使用
+              {{ 'pwa.landing.macos.step1Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.logoApple" class="landing-inline-text__icon" />
-                <span>Safari 浏览器</span>
+                <span>{{ 'pwa.landing.browserSafari' | transloco }}</span>
               </span>
-              访问本页
+              {{ 'pwa.landing.macos.step1After' | transloco }}
             </li>
             <li>
-              点击
+              {{ 'pwa.landing.macos.step2Before' | transloco }}
               <span class="landing-inline-text">
                 <ion-icon [icon]="icons.shareOutline" class="landing-inline-text__icon" />
-                <span>共享</span>
+                <span>{{ 'pwa.landing.share' | transloco }}</span>
               </span>
             </li>
-            <li>选择“添加到程序坞”</li>
-            <li>确认添加，之后即可从程序坞或“App”中打开</li>
+            <li>{{ 'pwa.landing.macos.step3' | transloco }}</li>
+            <li>{{ 'pwa.landing.macos.step4' | transloco }}</li>
           </ol>
         </ion-card-content>
       }
@@ -165,7 +165,7 @@
       @if (selected() === Platform.linux) {
         <ion-card-content>
           <ion-text color="medium">
-            <p class="landing-note landing-note--compact">这点小问题想必难不住你 :)</p>
+            <p class="landing-note landing-note--compact">{{ 'pwa.landing.linux.note' | transloco }}</p>
           </ion-text>
         </ion-card-content>
       }

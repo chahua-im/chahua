@@ -1,4 +1,5 @@
 import { Component, computed, input } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { RouterLink } from '@angular/router';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { MediaKind, attachmentKind } from '../message-attachments/media-kind';
@@ -24,7 +25,7 @@ enum SystemMessageKind {
 @Component({
   selector: 'app-message-preview',
   templateUrl: './message-preview.html',
-  imports: [MessageText, RouterLink],
+  imports: [MessageText, RouterLink, TranslocoPipe],
   host: {
     '[class.action]':
       'message().isDeleted || message().messageType === MessageType.system || message().messageType === MessageType.invite || !message().message?.trim()',

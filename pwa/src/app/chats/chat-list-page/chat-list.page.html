@@ -3,14 +3,16 @@
 }
 <div class="ion-page ion-hide-md-down">
   <ion-header>
-    <ion-toolbar><ion-title>茶话</ion-title></ion-toolbar>
+    <ion-toolbar>
+      <ion-title>{{ 'app.name' | transloco }}</ion-title>
+    </ion-toolbar>
     <app-voice-bar />
   </ion-header>
   <ion-content appScrollbars>
     <div class="empty-state ion-padding ion-text-center">
       <ion-icon [icon]="chatIcon"></ion-icon>
-      <h1>开始聊天</h1>
-      <p>从左侧选择一个会话</p>
+      <h1>{{ 'chats.list.startChat' | transloco }}</h1>
+      <p>{{ 'chats.list.selectConversation' | transloco }}</p>
     </div>
   </ion-content>
 </div>

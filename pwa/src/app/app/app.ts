@@ -1,5 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import { afterRenderEffect, Component, inject, isDevMode, linkedSignal, signal } from '@angular/core';
+import { afterRenderEffect, Component, computed, inject, isDevMode, linkedSignal, signal } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, NavigationStart, Router } from '@angular/router';
 import {
@@ -15,6 +15,7 @@ import {
   iosTransitionAnimation,
   isPlatform,
 } from '@ionic/angular';
+import { translateSignal, TranslocoPipe } from '@jsverse/transloco';
 import { filter, map } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
@@ -47,6 +48,7 @@ import { SessionStore } from '../session/session-store';
     LoadError,
     ChatList,
     NotificationPrompt,
+    TranslocoPipe,
   ],
 })
 export class App {
@@ -79,8 +81,15 @@ export class App {
   protected readonly session = inject(SessionStore);
   protected readonly loading = signal(true);
   protected readonly error = signal(false);
-  protected readonly splitPaneVisible = signal(false);
   protected readonly updates = inject(AppUpdates);
+  protected readonly updateReady = translateSignal('app.updateReady');
+  private readonly updateLater = translateSignal('app.updateLater');
+  private readonly updateNow = translateSignal('app.updateNow');
+  protected readonly updateButtons = computed(() => [
+    { text: this.updateLater(), role: 'cancel' },
+    { text: this.updateNow(), handler: this.updates.reload },
+  ]);
+  protected readonly splitPaneVisible = signal(false);
 
   constructor() {
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {

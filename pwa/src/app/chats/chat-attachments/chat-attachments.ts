@@ -1,6 +1,7 @@
 import { Router } from '@angular/router';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonInfiniteScroll,
@@ -23,7 +24,17 @@ import { LoadError } from '../../ui/load-error/load-error';
   selector: 'app-chat-attachments',
   templateUrl: './chat-attachments.html',
   styleUrl: './chat-attachments.scss',
-  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonLabel, IonItem, IonList, IonButton, IonSpinner, LoadError],
+  imports: [
+    IonInfiniteScroll,
+    IonInfiniteScrollContent,
+    IonLabel,
+    IonItem,
+    IonList,
+    IonButton,
+    IonSpinner,
+    LoadError,
+    TranslocoPipe,
+  ],
 })
 export class ChatAttachments {
   readonly chatId = input.required<SnowflakeID>();

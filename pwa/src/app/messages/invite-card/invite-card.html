@@ -1,28 +1,31 @@
 <app-chat-avatar
   [size]="44"
-  [entry]="{ avatar: preview()?.chat?.avatar, title: preview()?.chat?.name ?? '群组邀请' }" />
+  [entry]="{
+    avatar: preview()?.chat?.avatar,
+    title: preview()?.chat?.name ?? ('messages.invite.groupInvite' | transloco),
+  }" />
 <div>
-  <strong>{{ preview()?.chat?.name || '群组邀请' }}</strong>
+  <strong>{{ preview()?.chat?.name || ('messages.invite.groupInvite' | transloco) }}</strong>
   <small>
     @if (loading()) {
       <ion-spinner />
     } @else if (failed()) {
-      邀请失效或无法加载，点击重试
+      {{ 'messages.invite.failed' | transloco }}
     } @else if (preview()?.alreadyMember) {
-      已加入，打开群组
+      {{ 'messages.invite.joined' | transloco }}
     } @else {
       @switch (status(preview()!.invite)) {
         @case (Status.Expired) {
-          邀请已过期
+          {{ 'chats.inviteStatus.expired' | transloco }}
         }
         @case (Status.Revoked) {
-          邀请已撤销
+          {{ 'chats.inviteStatus.revoked' | transloco }}
         }
         @case (Status.Used) {
-          邀请已使用
+          {{ 'chats.inviteStatus.used' | transloco }}
         }
         @default {
-          查看群资料并加入
+          {{ 'messages.invite.view' | transloco }}
         }
       }
     }

@@ -3,6 +3,16 @@ import { encodeId } from '../api/snowflake-id';
 import { testMessage, testUser } from '../api/testing';
 import { notificationText, shouldNotify } from './notification-policy';
 
+const zhCNPlaceholders: Record<string, string> = {
+  'pwa.notification.invite': '[邀请]',
+  'pwa.notification.sticker': '[表情]',
+  'pwa.notification.audio': '[语音]',
+  'pwa.notification.file': '[文件]',
+  'pwa.notification.image': '[图片]',
+  'pwa.notification.video': '[视频]',
+  'pwa.notification.message': '[消息]',
+};
+
 const message = { ...testMessage, sender: { uid: 2, name: '朋友', gender: 0 } };
 const muted = { mutedUntil: '9999-12-31T23:59:59Z' };
 const mention = { ...message, mentions: [{ uid: testUser.uid, username: '我', gender: 0 }] };
@@ -40,13 +50,15 @@ describe('notification policy', () => {
       expect(shouldNotify({ ...topic, mentions: mention.mentions }, 1, muted, state)).toBe(true);
     }
   });
+  const t = (key: string) => zhCNPlaceholders[key] ?? key;
+
   it('describes an invitation without exposing the protocol code and preserves ordinary captions', () => {
-    expect(notificationText({ ...message, messageType: MessageType.invite, message: 'abcdefghij' })).toBe('[邀请]');
-    expect(notificationText({ ...message, messageType: MessageType.file, message: '文件说明' })).toBe('文件说明');
+    expect(notificationText({ ...message, messageType: MessageType.invite, message: 'abcdefghij' }, t)).toBe('[邀请]');
+    expect(notificationText({ ...message, messageType: MessageType.file, message: '文件说明' }, t)).toBe('文件说明');
   });
   it('expands mentions and describes media when the system notification has no text', () => {
-    expect(notificationText({ ...mention, message: '你好 @[uid:1]' })).toBe('你好 @我');
-    expect(notificationText({ ...message, message: '', messageType: MessageType.audio })).toBe('[语音]');
-    expect(notificationText({ ...message, message: '', messageType: MessageType.file })).toBe('[文件]');
+    expect(notificationText({ ...mention, message: '你好 @[uid:1]' }, t)).toBe('你好 @我');
+    expect(notificationText({ ...message, message: '', messageType: MessageType.audio }, t)).toBe('[语音]');
+    expect(notificationText({ ...message, message: '', messageType: MessageType.file }, t)).toBe('[文件]');
   });
 });

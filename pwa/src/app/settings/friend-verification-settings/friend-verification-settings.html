@@ -3,11 +3,13 @@
     <ion-buttons slot="start">
       <ion-button (click)="modals.dismiss()">
         <ion-icon slot="start" [icon]="backIcon"></ion-icon>
-        返回
+        {{ 'common.back' | transloco }}
       </ion-button>
     </ion-buttons>
-    <ion-title>好友验证</ion-title>
-    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
+    <ion-title>{{ 'settings.friendVerification.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">
@@ -17,32 +19,35 @@
         <ion-spinner slot="start"></ion-spinner>
       </ion-item>
     } @else if (loadError()) {
-      <app-load-error compact message="好友验证设置加载失败。" (retry)="loadVerification()" />
+      <app-load-error
+        compact
+        [message]="'settings.friendVerification.loadFailed' | transloco"
+        (retry)="loadVerification()" />
     } @else {
       <div>
         <ion-radio-group [formField]="verificationForm.mode" (ionChange)="saved.set(false)">
           <ion-item>
             <ion-icon slot="start" [icon]="allowIcon" color="primary"></ion-icon>
             <ion-radio [value]="Mode.direct" [disabled]="saving()" justify="space-between">
-              <span class="ion-text-wrap">允许任何人添加我</span>
+              <span class="ion-text-wrap">{{ 'settings.friendVerification.allowAnyone' | transloco }}</span>
             </ion-radio>
           </ion-item>
           <ion-item>
             <ion-icon slot="start" [icon]="messageIcon" color="primary"></ion-icon>
             <ion-radio [value]="Mode.need_message" [disabled]="saving()" justify="space-between">
-              <span class="ion-text-wrap">需要验证消息</span>
+              <span class="ion-text-wrap">{{ 'settings.friendVerification.needMessage' | transloco }}</span>
             </ion-radio>
           </ion-item>
           <ion-item>
             <ion-icon slot="start" [icon]="questionIcon" color="primary"></ion-icon>
             <ion-radio [value]="Mode.question" [disabled]="saving()" justify="space-between">
-              <span class="ion-text-wrap">需要回答问题</span>
+              <span class="ion-text-wrap">{{ 'settings.friendVerification.needQuestion' | transloco }}</span>
             </ion-radio>
           </ion-item>
           <ion-item lines="none">
             <ion-icon slot="start" [icon]="forbidIcon" color="primary"></ion-icon>
             <ion-radio [value]="Mode.forbid" [disabled]="saving()" justify="space-between">
-              <span class="ion-text-wrap">拒绝任何人添加我</span>
+              <span class="ion-text-wrap">{{ 'settings.friendVerification.forbid' | transloco }}</span>
             </ion-radio>
           </ion-item>
         </ion-radio-group>
@@ -50,23 +55,27 @@
       @if (verification().mode === Mode.question) {
         <ion-item>
           <ion-textarea
-            label="设置问题"
+            [label]="'settings.friendVerification.questionLabel' | transloco"
             labelPlacement="stacked"
-            placeholder="填写申请者需要回答的问题"
+            [placeholder]="'settings.friendVerification.questionPlaceholder' | transloco"
             [autoGrow]="true"
             [maxlength]="100"
             [formField]="verificationForm.question"
             (ionInput)="saved.set(false)"></ion-textarea>
         </ion-item>
         @if (verificationForm.question().invalid()) {
-          <ion-item lines="none"><ion-note color="danger">请填写 1–100 字的问题。</ion-note></ion-item>
+          <ion-item lines="none">
+            <ion-note color="danger">{{ 'settings.friendVerification.questionInvalid' | transloco }}</ion-note>
+          </ion-item>
         }
       }
       <ion-item lines="none">
         @if (saveError()) {
-          <ion-label class="ion-text-wrap" color="danger">保存失败，请重试。</ion-label>
+          <ion-label class="ion-text-wrap" color="danger">
+            {{ 'settings.friendVerification.saveFailed' | transloco }}
+          </ion-label>
         } @else if (saved()) {
-          <ion-label color="medium">已保存</ion-label>
+          <ion-label color="medium">{{ 'common.saved' | transloco }}</ion-label>
         }
         <ion-button
           slot="end"
@@ -74,7 +83,7 @@
           [disabled]="verificationForm().disabled() || verificationForm().invalid()"
           (click)="saveVerification()">
           <span class="action-content" [class.busy]="saving()">
-            <span class="action-label">保存</span>
+            <span class="action-label">{{ 'common.save' | transloco }}</span>
             @if (saving()) {
               <ion-spinner></ion-spinner>
             }

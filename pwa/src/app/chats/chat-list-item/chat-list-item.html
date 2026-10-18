@@ -71,7 +71,9 @@
   }
 </ion-item-sliding>
 @if (error()) {
-  <ion-item lines="none"><ion-label color="danger">操作失败，请重试。</ion-label></ion-item>
+  <ion-item lines="none">
+    <ion-label color="danger">{{ 'chats.listItem.actionFailed' | transloco }}</ion-label>
+  </ion-item>
 }
 
 <ng-template #swipeOptions let-side>

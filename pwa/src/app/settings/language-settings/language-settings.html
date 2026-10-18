@@ -1,0 +1,28 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-button (click)="modals.dismiss()">
+        <ion-icon slot="start" [icon]="backIcon"></ion-icon>
+        {{ 'common.back' | transloco }}
+      </ion-button>
+    </ion-buttons>
+    <ion-title>{{ 'settings.language.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars color="light">
+  <ion-list [inset]="true">
+    <ion-radio-group [value]="current()" (ionChange)="select($event)">
+      <ion-item>
+        <ion-radio value="auto">{{ 'settings.language.auto' | transloco }}</ion-radio>
+      </ion-item>
+      @for (entry of locales; track entry.locale) {
+        <ion-item>
+          <ion-radio [value]="entry.locale">{{ entry.label }}</ion-radio>
+        </ion-item>
+      }
+    </ion-radio-group>
+  </ion-list>
+</ion-content>

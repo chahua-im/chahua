@@ -601,7 +601,7 @@ describe('ChatListContent', () => {
       expect(requestList().nativeElement.textContent).toContain('小王');
       expect(requestList().nativeElement.textContent).toContain('好友请求已发送');
       expect(requestList().nativeElement.textContent).toContain('等待通过');
-      expect(requestList().nativeElement.textContent).toContain('Q: 你是谁？ · A: 同学');
+      expect(requestList().nativeElement.textContent).toContain('问：你是谁？ · 答：同学');
       expect(requestList().nativeElement.textContent).toContain('已接受');
       expect(requestList().nativeElement.textContent).toContain('已拒绝');
       const rows = requestList().queryAll(By.directive(ChatListItem));

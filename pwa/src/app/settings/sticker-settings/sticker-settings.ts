@@ -1,5 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import type { ItemReorderEventDetail } from '@ionic/angular';
 import {
   AlertController,
@@ -59,6 +60,7 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
     IonTitle,
     IonToggle,
     IonToolbar,
+    TranslocoPipe,
   ],
   host: { class: 'ion-page' },
   styles: `
@@ -118,6 +120,7 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
 export class StickerSettings {
   private readonly api = inject(StickersService);
   private readonly alerts = inject(AlertController);
+  private readonly transloco = inject(TranslocoService);
   private readonly router = inject(Router);
   protected readonly modals = inject(ModalController);
   protected readonly preferences = inject(StickerPreferences);
@@ -173,11 +176,11 @@ export class StickerSettings {
 
   protected async createPack() {
     const alert = await this.alerts.create({
-      header: '创建贴纸包',
-      inputs: [{ name: 'name', placeholder: '名称' }],
+      header: this.transloco.translate('stickers.createPack'),
+      inputs: [{ name: 'name', placeholder: this.transloco.translate('common.name') }],
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '创建', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.create'), role: 'confirm' },
       ],
     });
     await alert.present();
@@ -191,7 +194,10 @@ export class StickerSettings {
       this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
       await this.router.navigate(['/settings/stickers', decodeId(pack.id)]);
     } catch {
-      const failure = await this.alerts.create({ header: '创建贴纸包失败', buttons: ['知道了'] });
+      const failure = await this.alerts.create({
+        header: this.transloco.translate('stickers.createFailed'),
+        buttons: [this.transloco.translate('common.ok')],
+      });
       await failure.present();
     }
   }

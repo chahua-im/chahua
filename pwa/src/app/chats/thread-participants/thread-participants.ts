@@ -1,6 +1,7 @@
 import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { RouterLink } from '@angular/router';
 import { Component, computed, inject, input } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonItem, IonLabel, IonList } from '@ionic/angular';
 import type { MessagePreview, MessageResponse, SnowflakeID } from '../../../generated/models';
 import { ChatStore } from '../chat-store';
@@ -8,7 +9,7 @@ import { ChatStore } from '../chat-store';
 @Component({
   selector: 'app-thread-participants',
   templateUrl: './thread-participants.html',
-  imports: [RouterLink, ChatAvatar, IonItem, IonLabel, IonList],
+  imports: [RouterLink, ChatAvatar, IonItem, IonLabel, IonList, TranslocoPipe],
 })
 export class ThreadParticipants {
   readonly rootId = input.required<SnowflakeID>();

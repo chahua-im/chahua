@@ -2,6 +2,7 @@ import { Router } from '@angular/router';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, output, signal } from '@angular/core';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import {
   AlertController,
   IonButton,
@@ -35,7 +36,12 @@ import type {
 import { decodeId } from '../../api/snowflake-id';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
-import { StickerPreferences, sortStickerPacksByPreference, sortFavoriteStickersByPreference, AUTO_SORT_LIMIT } from '../../settings/sticker-preferences';
+import {
+  StickerPreferences,
+  sortStickerPacksByPreference,
+  sortFavoriteStickersByPreference,
+  AUTO_SORT_LIMIT,
+} from '../../settings/sticker-preferences';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../media-processing/file-type';
 
 type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] };
@@ -48,6 +54,7 @@ type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] }
     ContentScrollbars,
     IonIcon,
     IonPopover,
+    TranslocoPipe,
     NgTemplateOutlet,
     IonHeader,
     IonFooter,
@@ -74,6 +81,7 @@ export class StickerPicker {
   protected readonly session = inject(SessionStore);
   private readonly preferences = inject(StickerPreferences);
   private readonly alerts = inject(AlertController);
+  private readonly transloco = inject(TranslocoService);
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
   protected readonly menu = signal<{ sticker: StickerSummary; event: Event } | undefined>(undefined);
@@ -109,11 +117,11 @@ export class StickerPicker {
   }
   protected async createPack() {
     const alert = await this.alerts.create({
-      header: '创建贴纸包',
-      inputs: [{ name: 'name', placeholder: '名称' }],
+      header: this.transloco.translate('stickers.createPack'),
+      inputs: [{ name: 'name', placeholder: this.transloco.translate('common.name') }],
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '创建', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.create'), role: 'confirm' },
       ],
     });
     await alert.present();
@@ -146,22 +154,22 @@ export class StickerPicker {
       file.size > 10 * 1024 * 1024
     ) {
       const alert = await this.alerts.create({
-        header: '无法添加贴纸',
-        message: '请选择 10 MB 以内的图片或 WebM 视频。',
-        buttons: ['知道了'],
+        header: this.transloco.translate('stickers.invalidUploadTitle'),
+        message: this.transloco.translate('stickers.invalidUploadMessage'),
+        buttons: [this.transloco.translate('common.ok')],
       });
       await alert.present();
       return;
     }
     const alert = await this.alerts.create({
-      header: '添加贴纸',
+      header: this.transloco.translate('stickers.addTitle'),
       inputs: [
-        { name: 'emoji', placeholder: '对应表情，例如 🙂' },
-        { name: 'name', placeholder: '名称（选填）' },
+        { name: 'emoji', placeholder: this.transloco.translate('stickers.emojiPlaceholder') },
+        { name: 'name', placeholder: this.transloco.translate('stickers.optionalName') },
       ],
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '上传', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.upload'), role: 'confirm' },
       ],
     });
     await alert.present();
@@ -302,7 +310,9 @@ export class StickerPicker {
       this.preferences.upsertFavoriteStickerOrderItem({ stickerId: sticker.id, lastUsedOn: Date.now() });
       const content = this.content();
       if (!('id' in content))
-        this.content.set({ stickers: sortFavoriteStickersByPreference(content.stickers, this.preferences.favoriteStickerOrder()) });
+        this.content.set({
+          stickers: sortFavoriteStickersByPreference(content.stickers, this.preferences.favoriteStickerOrder()),
+        });
     }
   }
   protected press(sticker: StickerSummary, event: PointerEvent) {

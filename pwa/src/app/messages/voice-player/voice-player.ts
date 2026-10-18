@@ -1,4 +1,5 @@
 import { Component, DestroyRef, ElementRef, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonIcon, IonSpinner } from '@ionic/angular';
 import { pause, play, refreshOutline } from 'ionicons/icons';
 import WaveSurfer from 'wavesurfer.js';
@@ -11,7 +12,7 @@ export function voiceTime(seconds: number) {
 
 @Component({
   selector: 'app-voice-player',
-  imports: [IonIcon, IonSpinner],
+  imports: [IonIcon, IonSpinner, TranslocoPipe],
   templateUrl: './voice-player.html',
   styleUrl: './voice-player.scss',
 })

@@ -154,13 +154,14 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | 组件                       | 状态与职责                                                                     |
 | -------------------------- | ------------------------------------------------------------------------------ |
 | Settings                   | 当前用户、通知和更新状态；持有权限拒绝 toast、局部更新结果，打开设置子页和收藏 |
-| GeneralSettings            | 直接编辑 Preferences，无额外状态副本                                           |
+| GeneralSettings            | 直接编辑 Preferences，无额外状态副本；语言项显示当前选择                       |
+| LanguageSettings           | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog         |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |
 | StickerSettings            | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、创建贴纸包、贴纸包重排列表 | StickersService、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
 | StickerPackDetail          | packId；包详情、owned 状态、重命名/删除/退订与添加、点按移除贴纸               | StickersService、StickerPreferences；删除与退订移除顺序条目并关闭弹窗 |
 | Landing                    | 检测平台与选中平台；公开安装指引                                               |
 
-设置与详情统一由 ChatLink 路由托管 modal，关闭恢复浏览器历史；会话缓存保留底层状态。Landing 只提供安装指引，普通浏览器中 App 在该入口只同步恢复并保存 token；已安装 PWA 由路由 guard 重定向到聊天并正常初始化登录。
+设置与详情统一由 ChatLink 路由托管 modal，关闭恢复浏览器历史；会话缓存保留底层状态。Localization 在首个页面渲染前读取保存的语言并加载 catalog；语言页切换时先加载目标 catalog，再更新活动语言。Landing 只提供安装指引，普通浏览器中 App 在该入口只同步恢复并保存 token；已安装 PWA 由路由 guard 重定向到聊天并正常初始化登录。
 
 消息、提及、成员和目录结果通过 Router 打开资料，不直接依赖 ChatDetails；弹窗组件的静态导入集中在路由入口，展示组件之间没有循环依赖。
 

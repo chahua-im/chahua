@@ -176,6 +176,9 @@ describe('Settings', () => {
   it('links to general settings and persists preferences across page visits', async () => {
     await openPage('通用');
     expect(page.querySelector('ion-title')!.textContent).toBe('通用');
+    const language = Array.from(page.querySelectorAll('ion-item')).find((item) => item.textContent?.includes('语言'))!;
+    expect(language.getAttribute('href')).toBe('/settings/language');
+    expect(language.textContent).toContain('自动');
     const toggles = Array.from(page.querySelectorAll('ion-toggle'));
     toggles[0].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     toggles[1].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));

@@ -2,12 +2,14 @@
   <ion-header>
     <ion-toolbar>
       <ion-title>
-        {{ pack()?.name || '贴纸' }}
+        {{ pack()?.name || ('stickers.title' | transloco) }}
         @if (!selectable() && pack(); as pack) {
-          <p class="subtitle">{{ pack.stickerCount }} 张贴纸</p>
+          <p class="subtitle">{{ 'stickers.count' | transloco: { count: pack.stickerCount } }}</p>
         }
       </ion-title>
-      <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
+      <ion-buttons slot="end">
+        <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
+      </ion-buttons>
     </ion-toolbar>
   </ion-header>
   <ion-content appScrollbars><ng-container [ngTemplateOutlet]="library" /></ion-content>
@@ -22,7 +24,7 @@
                 [color]="chosen()?.isFavorited ? 'danger' : 'primary'"
                 [disabled]="busy() || !chosen()"
                 (click)="favorite(chosen()!)">
-                {{ chosen()?.isFavorited ? '取消收藏' : '收藏单个' }}
+                {{ (chosen()?.isFavorited ? 'stickers.unfavorite' : 'stickers.favoriteOne') | transloco }}
               </ion-button>
             </ion-col>
             <ion-col size="6">
@@ -31,7 +33,7 @@
                 [color]="pack()?.isSubscribed ? 'danger' : 'primary'"
                 [disabled]="busy() || !pack()"
                 (click)="subscribe()">
-                {{ pack()?.isSubscribed ? '取消订阅' : '订阅整组' }}
+                {{ (pack()?.isSubscribed ? 'stickers.unsubscribe' : 'stickers.subscribeAll') | transloco }}
               </ion-button>
             </ion-col>
           </ion-row>
@@ -45,7 +47,7 @@
 <ng-template #library>
   @if (selectable() && !embedded() && pack(); as pack) {
     <ion-button fill="clear" [disabled]="busy()" (click)="subscribe()">
-      {{ pack.isSubscribed ? '移除贴纸包' : '添加贴纸包' }}
+      {{ (pack.isSubscribed ? 'stickers.removePack' : 'stickers.addPack') | transloco }}
     </ion-button>
   }
   <div class="sticker-grid">
@@ -71,18 +73,18 @@
       <div class="loading-status"><ion-spinner /></div>
     } @else if (error()) {
       <p class="empty">
-        加载失败。
-        <ion-button fill="clear" (click)="retry()">重试</ion-button>
+        {{ 'stickers.loadFailed' | transloco }}
+        <ion-button fill="clear" (click)="retry()">{{ 'common.retry' | transloco }}</ion-button>
       </p>
     } @else if (!stickers().length) {
-      <p class="empty">暂无贴纸</p>
+      <p class="empty">{{ 'stickers.empty' | transloco }}</p>
     }
   </div>
   @if (selectable() && pack()?.ownerUid === session.user()?.uid) {
     <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event)" />
     <ion-button fill="clear" [disabled]="busy()" (click)="stickerFile.click()">
       <ion-icon slot="start" [icon]="icons.cloudUploadOutline" />
-      添加贴纸
+      {{ 'stickers.add' | transloco }}
     </ion-button>
   }
   @if (selectable() || packs().length > 1) {
@@ -103,7 +105,13 @@
           @if (item.previewSticker?.media?.contentType?.startsWith('image/')) {
             <img [src]="item.previewSticker!.media.url" />
           } @else if (item.previewSticker?.media?.contentType?.startsWith('video/')) {
-            <video [src]="item.previewSticker!.media.url" autoplay loop [muted]="true" playsinline preload="metadata"></video>
+            <video
+              [src]="item.previewSticker!.media.url"
+              autoplay
+              loop
+              [muted]="true"
+              playsinline
+              preload="metadata"></video>
           } @else {
             <ion-icon [icon]="icons.cubeOutline" />
           }
@@ -121,7 +129,9 @@
   <ng-template>
     <ion-list>
       <ion-item [button]="true" (click)="toggleFavorite()">
-        <ion-label>{{ menu()?.sticker?.isFavorited ? '取消收藏' : '收藏贴纸' }}</ion-label>
+        <ion-label>
+          {{ (menu()?.sticker?.isFavorited ? 'stickers.unfavorite' : 'stickers.favorite') | transloco }}
+        </ion-label>
       </ion-item>
     </ion-list>
   </ng-template>

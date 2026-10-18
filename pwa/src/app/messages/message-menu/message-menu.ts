@@ -14,6 +14,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import {
@@ -80,7 +81,7 @@ export function pageSlots(actions: readonly MenuSlot[], page: number): readonly 
   selector: 'app-message-menu',
   templateUrl: './message-menu.html',
   styleUrl: './message-menu.scss',
-  imports: [Message, EmojiPicker, IonAlert, IonIcon, IonModal, IonSpinner, IonToast],
+  imports: [Message, EmojiPicker, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, TranslocoPipe],
   providers: [MessageActions],
 })
 export class MessageMenu {

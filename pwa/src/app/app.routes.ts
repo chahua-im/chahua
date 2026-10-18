@@ -14,6 +14,7 @@ import { ChatSearch } from './chats/chat-search/chat-search';
 import { StartChatKind } from './chats/start-chat/start-chat';
 import { Settings } from './settings/settings/settings';
 import { GeneralSettings } from './settings/general-settings/general-settings';
+import { LanguageSettings } from './settings/language-settings/language-settings';
 import { FriendVerificationSettings } from './settings/friend-verification-settings/friend-verification-settings';
 import { StickerSettings } from './settings/sticker-settings/sticker-settings';
 import { StickerPackDetail } from './settings/sticker-pack-detail/sticker-pack-detail';
@@ -48,6 +49,7 @@ export const routes: Routes = [
   { path: 'chats/chat/:id/stickers/:packId', component: ChatLink, data: { modal: true } },
   { path: 'settings', component: ChatLink, data: { modal: true, component: Settings } },
   { path: 'settings/general', component: ChatLink, data: { modal: true, component: GeneralSettings } },
+  { path: 'settings/language', component: ChatLink, data: { modal: true, component: LanguageSettings } },
   {
     path: 'settings/friend-verification',
     component: ChatLink,

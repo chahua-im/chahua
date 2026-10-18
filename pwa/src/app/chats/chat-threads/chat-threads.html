@@ -6,21 +6,26 @@
       (selected)="open(root)">
       <span slot="title">
         @if (root.isDeleted) {
-          话题
+          {{ 'chats.threads.title' | transloco }}
         } @else {
           <app-message-preview [message]="root" />
         }
       </span>
-      <span slot="preview">{{ root.sender.name ?? root.sender.uid }} · {{ root.threadInfo?.replyCount }} 条回复</span>
+      <span slot="preview">
+        {{ root.sender.name ?? root.sender.uid }} ·
+        {{ 'chats.threads.replies' | transloco: { count: root.threadInfo?.replyCount } }}
+      </span>
     </app-chat-list-item>
   }
 </ion-list>
 @if ((loading() && cursor() == null) || opening()) {
   <div class="page-loading"><ion-spinner /></div>
 } @else if (error()) {
-  <app-load-error compact message="加载失败，请重试。" (retry)="load(!!cursor())" />
+  <app-load-error compact [message]="'common.loadFailed' | transloco" (retry)="load(!!cursor())" />
 } @else if (!items().length) {
-  <p class="ion-padding ion-text-center">{{ cursor() ? '暂无近期话题' : '暂无话题' }}</p>
+  <p class="ion-padding ion-text-center">
+    {{ (cursor() ? 'chats.threads.emptyRecent' : 'chats.threads.empty') | transloco }}
+  </p>
 }
 @if (cursor() != null && !error()) {
   <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
@@ -28,5 +33,5 @@
   </ion-infinite-scroll>
 }
 @if (openFailed()) {
-  <p class="ion-padding">无法打开话题，请重试。</p>
+  <p class="ion-padding">{{ 'chats.threads.openFailed' | transloco }}</p>
 }

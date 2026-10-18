@@ -1,5 +1,6 @@
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -24,6 +25,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-reaction-details',
   imports: [
+    TranslocoPipe,
     ChatAvatar,
     ContentScrollbars,
     LoadError,

@@ -1,20 +1,20 @@
 <ion-list>
   <ion-item>
-    <ion-select label="邀请类型" [value]="type()" (ionChange)="change($event.detail.value)">
-      <ion-select-option [value]="Type.generic">普通邀请</ion-select-option>
-      <ion-select-option [value]="Type.targeted">指定用户</ion-select-option>
-      <ion-select-option [value]="Type.membership">指定群成员</ion-select-option>
+    <ion-select [label]="'chats.invites.type' | transloco" [value]="type()" (ionChange)="change($event.detail.value)">
+      <ion-select-option [value]="Type.generic">{{ 'chats.invites.typeGeneric' | transloco }}</ion-select-option>
+      <ion-select-option [value]="Type.targeted">{{ 'chats.invites.typeTargeted' | transloco }}</ion-select-option>
+      <ion-select-option [value]="Type.membership">{{ 'chats.invites.typeMembership' | transloco }}</ion-select-option>
     </ion-select>
   </ion-item>
   @if (type() === Type.targeted) {
     @if (target(); as person) {
       <ion-item>
         <ion-label>{{ person.username || person.uid }}</ion-label>
-        <ion-button fill="clear" (click)="target.set(undefined)">更改</ion-button>
+        <ion-button fill="clear" (click)="target.set(undefined)">{{ 'chats.invites.change' | transloco }}</ion-button>
       </ion-item>
     } @else {
       <ion-searchbar
-        placeholder="搜索用户名或 UID"
+        [placeholder]="'chats.start.searchUsers' | transloco"
         [debounce]="300"
         (ionInput)="targetQuery.set($event.detail.value || '')" />
       <app-directory-search
@@ -26,7 +26,10 @@
   }
   @if (type() === Type.membership) {
     <ion-item>
-      <ion-select label="限定群组的成员" [value]="requiredGroup()" (ionChange)="requiredGroup.set($event.detail.value)">
+      <ion-select
+        [label]="'chats.invites.requiredGroup' | transloco"
+        [value]="requiredGroup()"
+        (ionChange)="requiredGroup.set($event.detail.value)">
         @for (group of groups(); track group.id) {
           <ion-select-option [value]="group.id">{{ group.name }}</ion-select-option>
         }
@@ -34,7 +37,7 @@
     </ion-item>
   }
   <ion-item>
-    <ion-label>过期时间</ion-label>
+    <ion-label>{{ 'chats.invites.expiry' | transloco }}</ion-label>
     <input class="field" type="datetime-local" [formField]="fields.expiry" />
   </ion-item>
   <ion-button
@@ -42,18 +45,21 @@
     [disabled]="busy() || (type() === Type.membership && !requiredGroup()) || (type() === Type.targeted && !target())"
     (click)="create()">
     <span class="action-content" [class.busy]="pending()?.action === Action.Create">
-      <span class="action-label">创建邀请</span>
+      <span class="action-label">{{ 'chats.invites.create' | transloco }}</span>
       @if (pending()?.action === Action.Create) {
         <ion-spinner />
       }
     </span>
   </ion-button>
   <ion-searchbar
-    placeholder="查找要分享或限定的群组"
+    [placeholder]="'chats.invites.groupSearch' | transloco"
     [debounce]="300"
     (ionInput)="groupQuery.set($event.detail.value || '')" />
   <ion-item>
-    <ion-select label="分享至群组" [value]="destination()" (ionChange)="destination.set($event.detail.value)">
+    <ion-select
+      [label]="'chats.invites.shareTo' | transloco"
+      [value]="destination()"
+      (ionChange)="destination.set($event.detail.value)">
       @for (group of groups(); track group.id) {
         <ion-select-option [value]="group.id">{{ group.name }}</ion-select-option>
       }
@@ -62,7 +68,7 @@
   @if (cursor()) {
     <ion-button fill="clear" [disabled]="loadingGroups()" (click)="loadGroups(true)">
       <span class="action-content" [class.busy]="loadingGroups()">
-        <span class="action-label">更多群组</span>
+        <span class="action-label">{{ 'chats.invites.moreGroups' | transloco }}</span>
         @if (loadingGroups()) {
           <ion-spinner />
         }
@@ -79,40 +85,46 @@
         <p>
           @switch (invite.inviteType) {
             @case (Type.generic) {
-              普通邀请
+              {{ 'chats.invites.generic' | transloco }}
             }
             @case (Type.targeted) {
-              指定用户：{{ invite.targetUid }}
+              {{ 'chats.invites.targetedUid' | transloco: { uid: invite.targetUid } }}
             }
             @case (Type.membership) {
-              限定 {{ groupName(invite.requiredChatId!) }} 的成员
+              {{ 'chats.invites.membershipGroup' | transloco: { group: groupName(invite.requiredChatId!) } }}
             }
           }
         </p>
         <p>
           @switch (status(invite)) {
             @case (Status.Expired) {
-              已过期
+              {{ 'chats.inviteStatus.expired' | transloco }}
             }
             @case (Status.Revoked) {
-              已撤销
+              {{ 'chats.inviteStatus.revoked' | transloco }}
             }
             @case (Status.Used) {
-              已使用
+              {{ 'chats.inviteStatus.used' | transloco }}
             }
             @default {
-              {{ invite.expiresAt ? (invite.expiresAt | date: 'short') : '长期有效' }}
+              {{
+                invite.expiresAt
+                  ? (invite.expiresAt | localDate: 'short')
+                  : ('chats.inviteStatus.neverExpires' | transloco)
+              }}
             }
           }
         </p>
       </ion-label>
-      <ion-button fill="clear" [disabled]="status(invite) !== Status.Active" (click)="copy(invite)">复制</ion-button>
+      <ion-button fill="clear" [disabled]="status(invite) !== Status.Active" (click)="copy(invite)">
+        {{ 'chats.invites.copy' | transloco }}
+      </ion-button>
       <ion-button
         fill="clear"
         [disabled]="busy() || !destination() || status(invite) !== Status.Active"
         (click)="share(invite)">
         <span class="action-content" [class.busy]="pending()?.action === Action.Share && pending()?.id === invite.id">
-          <span class="action-label">分享</span>
+          <span class="action-label">{{ 'chats.invites.share' | transloco }}</span>
           @if (pending()?.action === Action.Share && pending()?.id === invite.id) {
             <ion-spinner />
           }
@@ -124,7 +136,7 @@
         [disabled]="busy() || status(invite) !== Status.Active"
         (click)="revoke(invite)">
         <span class="action-content" [class.busy]="pending()?.action === Action.Revoke && pending()?.id === invite.id">
-          <span class="action-label">撤销</span>
+          <span class="action-label">{{ 'chats.invites.revoke' | transloco }}</span>
           @if (pending()?.action === Action.Revoke && pending()?.id === invite.id) {
             <ion-spinner />
           }
@@ -134,11 +146,11 @@
   }
 </ion-list>
 @if (copied()) {
-  <p class="ion-padding">邀请链接已复制</p>
+  <p class="ion-padding">{{ 'chats.invites.copied' | transloco }}</p>
 }
 @if (error()) {
   <p class="ion-padding">
-    操作失败，请重试。
-    <ion-button fill="clear" (click)="load()">刷新</ion-button>
+    {{ 'chats.invites.failed' | transloco }}
+    <ion-button fill="clear" (click)="load()">{{ 'chats.invites.refresh' | transloco }}</ion-button>
   </p>
 }

@@ -2,6 +2,7 @@ import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { RouterLink } from '@angular/router';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonInfiniteScroll,
   IonInfiniteScrollContent,
@@ -31,6 +32,7 @@ import { LoadError } from '../../ui/load-error/load-error';
     IonItem,
     IonLabel,
     IonSpinner,
+    TranslocoPipe,
   ],
 })
 export class ChatMembers {

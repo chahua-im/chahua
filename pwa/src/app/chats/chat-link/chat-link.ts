@@ -2,6 +2,7 @@ import { Location } from '@angular/common';
 import type { ViewerMedia } from '../../messages/media-viewer/media-viewer';
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonButton, IonContent, IonSpinner, ModalController, type ModalOptions } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
@@ -19,13 +20,14 @@ function decodePermalink(encoded: string) {
 }
 @Component({
   selector: 'app-chat-link',
-  imports: [ContentScrollbars, IonContent, IonSpinner, IonButton],
+  imports: [ContentScrollbars, IonContent, IonSpinner, IonButton, TranslocoPipe],
   host: { class: 'ion-page' },
   template: `<ion-content appScrollbars>
     @if (failed()) {
       <p class="ion-padding">
-        链接无法打开。<ion-button fill="clear" (click)="open()">重试</ion-button
-        ><ion-button fill="clear" (click)="home()">返回消息</ion-button>
+        {{ 'chats.link.failed' | transloco
+        }}<ion-button fill="clear" (click)="open()">{{ 'common.retry' | transloco }}</ion-button
+        ><ion-button fill="clear" (click)="home()">{{ 'chats.link.backToMessages' | transloco }}</ion-button>
       </p>
     } @else {
       <div class="loading-status"><ion-spinner /></div>

@@ -7,7 +7,7 @@
         [entry]="{ avatar: member.avatarUrl, title: member.username ?? member.uid.toString() }" />
       <ion-label>{{ member.username || member.uid }}</ion-label>
       @if (member.role === Role.admin) {
-        <ion-note slot="end">管理员</ion-note>
+        <ion-note slot="end">{{ 'chats.members.admin' | transloco }}</ion-note>
       }
     </ion-item>
   }
@@ -21,5 +21,5 @@
   <div class="page-loading"><ion-spinner /></div>
 }
 @if (error()) {
-  <app-load-error compact message="加载失败，请重试。" (retry)="load()" />
+  <app-load-error compact [message]="'common.loadFailed' | transloco" (retry)="load()" />
 }

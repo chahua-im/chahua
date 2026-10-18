@@ -4,7 +4,7 @@
     <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
   </ion-button>
   @if (view() !== View.Info) {
-    <ion-button fill="clear" (click)="modals.dismiss()">返回</ion-button>
+    <ion-button fill="clear" (click)="modals.dismiss()">{{ 'common.back' | transloco }}</ion-button>
   }
   @switch (view()) {
     @case (View.Invites) {
@@ -33,10 +33,10 @@
                   @if (threadRoot(); as root) {
                     <app-message-preview [message]="root" />
                   } @else {
-                    话题
+                    {{ 'chats.details.topic' | transloco }}
                   }
                 } @else {
-                  {{ person()?.username ?? chat()?.name ?? '用户' }}
+                  {{ person()?.username ?? chat()?.name ?? ('common.user' | transloco) }}
                 }
               </span>
               @if (canManage() && edits().name != null) {
@@ -62,7 +62,7 @@
             }
           </h2>
           @if (threadId()) {
-            <p>{{ chat()?.peer?.username ?? chat()?.name }} 中的话题</p>
+            <p>{{ 'chats.details.topicIn' | transloco: { name: chat()?.peer?.username ?? chat()?.name } }}</p>
           } @else if (person(); as user) {
             @if (user.userGroup; as group) {
               <p>{{ group.name }}</p>
@@ -77,7 +77,7 @@
                   [readOnly]="pending() === Action.Description"
                   (keydown)="editKeydown($event, Field.Description)"></textarea>
               } @else {
-                <span>{{ chat()?.description || '添加群简介' }}</span>
+                <span>{{ chat()?.description || ('chats.details.addDescription' | transloco) }}</span>
               }
               @if (canManage()) {
                 <button
@@ -103,7 +103,7 @@
               target="_blank">
               <span>
                 <ion-icon [icon]="icons.globeOutline" />
-                个人空间
+                {{ 'chats.details.space' | transloco }}
               </span>
             </ion-button>
             @if (otherUser()) {
@@ -112,7 +112,7 @@
                   <ion-button fill="clear" [disabled]="!id()" (click)="messageUser()">
                     <span>
                       <ion-icon [icon]="icons.chatbubbleOutline" />
-                      发消息
+                      {{ 'chats.details.message' | transloco }}
                     </span>
                   </ion-button>
                 }
@@ -124,7 +124,7 @@
                     } @else {
                       <ion-icon [icon]="icons.personAddOutline" />
                     }
-                    添加好友
+                    {{ 'chats.details.addFriend' | transloco }}
                   </span>
                 </ion-button>
               }
@@ -139,7 +139,14 @@
                     [icon]="
                       !status?.subscribed ? icons.starOutline : status?.archived ? icons.archive : icons.archiveOutline
                     " />
-                  {{ !status?.subscribed ? '订阅' : status?.archived ? '已归档' : '归档' }}
+                  {{
+                    (status?.subscribed
+                      ? status?.archived
+                        ? 'chats.details.archived'
+                        : 'chats.details.archive'
+                      : 'chats.details.subscribe'
+                    ) | transloco
+                  }}
                 </span>
               </ion-button>
             }
@@ -148,7 +155,7 @@
             <ion-button fill="clear" (click)="invites()">
               <span>
                 <ion-icon [icon]="icons.linkOutline" />
-                邀请
+                {{ 'chats.details.invite' | transloco }}
               </span>
             </ion-button>
           }
@@ -160,7 +167,7 @@
                 } @else {
                   <ion-icon [icon]="person() ? icons.personRemoveOutline : icons.exitOutline" />
                 }
-                {{ person() ? '解除好友' : '退群' }}
+                {{ (person() ? 'chats.details.unfriend' : 'chats.details.leaveGroup') | transloco }}
               </span>
             </ion-button>
           }
@@ -172,7 +179,7 @@
                 } @else {
                   <ion-icon [icon]="icons.banOutline" />
                 }
-                {{ relationship()?.blocking ? '解除拉黑' : '拉黑' }}
+                {{ (relationship()?.blocking ? 'chats.details.unblock' : 'chats.details.block') | transloco }}
               </span>
             </ion-button>
           }
@@ -181,20 +188,33 @@
         <div class="page-loading"><ion-spinner /></div>
       }
       @if (error() || relationshipQuery()?.error()) {
-        <app-load-error compact message="加载失败，请重试。" (retry)="load(); relationshipQuery()?.refresh()" />
+        <app-load-error
+          compact
+          [message]="'chats.details.loadFailed' | transloco"
+          (retry)="load(); relationshipQuery()?.refresh()" />
       }
       @if (id()) {
         <div class="attachments" [class.pending]="loading() && !chat() && !person()">
           <ion-segment [value]="tab()" (ionChange)="changeTab($event.detail.value)">
             @if (!threadId()) {
-              <ion-segment-button [value]="InfoTab.Threads"><ion-label>话题</ion-label></ion-segment-button>
+              <ion-segment-button [value]="InfoTab.Threads">
+                <ion-label>{{ 'chats.details.tabs.threads' | transloco }}</ion-label>
+              </ion-segment-button>
             }
             @if (threadId() || chat()?.kind === Kind.group) {
-              <ion-segment-button [value]="InfoTab.Members"><ion-label>成员</ion-label></ion-segment-button>
+              <ion-segment-button [value]="InfoTab.Members">
+                <ion-label>{{ 'chats.details.tabs.members' | transloco }}</ion-label>
+              </ion-segment-button>
             }
-            <ion-segment-button [value]="AttachmentKind.image"><ion-label>图片</ion-label></ion-segment-button>
-            <ion-segment-button [value]="AttachmentKind.video"><ion-label>视频</ion-label></ion-segment-button>
-            <ion-segment-button [value]="AttachmentKind.other"><ion-label>文件</ion-label></ion-segment-button>
+            <ion-segment-button [value]="AttachmentKind.image">
+              <ion-label>{{ 'chats.details.tabs.images' | transloco }}</ion-label>
+            </ion-segment-button>
+            <ion-segment-button [value]="AttachmentKind.video">
+              <ion-label>{{ 'chats.details.tabs.videos' | transloco }}</ion-label>
+            </ion-segment-button>
+            <ion-segment-button [value]="AttachmentKind.other">
+              <ion-label>{{ 'chats.details.tabs.files' | transloco }}</ion-label>
+            </ion-segment-button>
           </ion-segment>
           @let selected = tab();
           @switch (selected) {
@@ -219,4 +239,4 @@
     }
   }
 </ion-content>
-<ion-toast #saveError message="保存失败，请重试。" [duration]="3000" />
+<ion-toast #saveError [message]="'chats.details.saveFailed' | transloco" [duration]="3000" />

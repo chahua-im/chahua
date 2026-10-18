@@ -17,8 +17,8 @@ export function shouldNotify(
 }
 
 /** System notifications need plain text, including expanded mentions and media-only messages. */
-export function notificationText(message: MessageResponse): string {
-  if (message.messageType === MessageType.invite) return '[邀请]';
+export function notificationText(message: MessageResponse, translate: (key: string) => string): string {
+  if (message.messageType === MessageType.invite) return translate('pwa.notification.invite');
   if (message.message?.trim()) {
     return message.message.replace(
       /@\[uid:(\d+)\]/g,
@@ -27,12 +27,16 @@ export function notificationText(message: MessageResponse): string {
   }
   switch (message.messageType) {
     case MessageType.sticker:
-      return message.sticker?.emoji ?? '[表情]';
+      return message.sticker?.emoji ?? translate('pwa.notification.sticker');
     case MessageType.audio:
-      return '[语音]';
+      return translate('pwa.notification.audio');
     case MessageType.file:
-      return '[文件]';
+      return translate('pwa.notification.file');
   }
   const kind = message.attachments[0]?.kind;
-  return kind?.startsWith('image/') ? '[图片]' : kind?.startsWith('video/') ? '[视频]' : '[消息]';
+  return kind?.startsWith('image/')
+    ? translate('pwa.notification.image')
+    : kind?.startsWith('video/')
+      ? translate('pwa.notification.video')
+      : translate('pwa.notification.message');
 }

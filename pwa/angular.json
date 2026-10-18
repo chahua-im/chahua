@@ -29,9 +29,19 @@
                 "input": "public"
               },
               {
+                "glob": "*.json",
+                "input": "src/i18n",
+                "output": "i18n"
+              },
+              {
                 "glob": "data.json",
                 "input": "node_modules/emoji-picker-element-data/zh/emojibase",
                 "output": "emoji"
+              },
+              {
+                "glob": "data.json",
+                "input": "node_modules/emoji-picker-element-data/en/emojibase",
+                "output": "emoji/en"
               }
             ],
             "styles": ["src/styles.scss"]

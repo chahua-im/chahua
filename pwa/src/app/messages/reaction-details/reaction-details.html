@@ -1,11 +1,13 @@
 <ion-header>
   <ion-toolbar>
-    <ion-title>表态</ion-title>
-    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">完成</ion-button></ion-buttons>
+    <ion-title>{{ 'reactions.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
   </ion-toolbar>
   <ion-segment [scrollable]="true" [value]="emoji()" (ionChange)="emoji.set($event.detail.value?.toString() ?? '')">
     <ion-segment-button value="">
-      <ion-label>全部 {{ count() }}</ion-label>
+      <ion-label>{{ 'reactions.all' | transloco: { count: count() } }}</ion-label>
     </ion-segment-button>
     @for (group of groups(); track group.emoji) {
       <ion-segment-button [value]="group.emoji">
@@ -18,7 +20,7 @@
   @if (loading()) {
     <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <app-load-error message="加载失败，请重试。" (retry)="load()" />
+    <app-load-error [message]="'common.loadFailed' | transloco" (retry)="load()" />
   } @else {
     <ion-list>
       @for (group of visible(); track group.emoji) {

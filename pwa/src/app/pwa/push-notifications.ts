@@ -12,6 +12,7 @@ import {
   ServerWsMessageType,
   type MessageResponse,
 } from '../../generated/models';
+import { TranslocoService } from '@jsverse/transloco';
 import { Connection } from '../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { ChatListStore } from '../chats/chat-list-store';
@@ -34,6 +35,7 @@ export enum PushNotificationError {
 @Service()
 export class PushNotifications {
   private readonly push = inject(SwPush);
+  private readonly transloco = inject(TranslocoService);
   private readonly api = inject(PushService);
   private readonly permissionState = signal<NotificationPermission>(
     'Notification' in window ? Notification.permission : 'default',
@@ -194,7 +196,7 @@ export class PushNotifications {
       (chat?.kind === GroupKind.dm ? chat.peer?.username : chat?.name) ??
       message.sender.name ??
       String(message.sender.uid);
-    const text = notificationText(message);
+    const text = notificationText(message, (key) => this.transloco.translate(key));
     this.remember(message.id);
     await this.workerCommand({
       type: 'CHAHUA_NOTIFY',

@@ -11,8 +11,8 @@
         [button]="true"
         (selected)="openList.emit({ tab: list().tab, archived: true, requestHistory: false })"
         [entry]="{
-          title: '已归档',
-          subtitle: '查看已归档的对话',
+          title: ('chats.list.archived' | transloco),
+          subtitle: ('chats.content.archivedSubtitle' | transloco),
           icon: archiveIcon,
           unreadCount: archivedUnreadCount(),
           unreadColor: 'medium',
@@ -22,8 +22,8 @@
           [button]="true"
           (selected)="openList.emit({ tab: ListTab.Friends, archived: false, requestHistory: true })"
           [entry]="{
-            title: '好友请求',
-            subtitle: '查看好友请求记录',
+            title: ('chats.list.friendRequests' | transloco),
+            subtitle: ('chats.content.requestHistorySubtitle' | transloco),
             icon: requestsIcon,
           }"></app-chat-list-item>
       }
@@ -48,22 +48,41 @@
     @if (ready()) {
       @if (showRequests() && requestRows().length) {
         @for (row of requestRows(); track row.request.id) {
-          @let name = row.peer.username ?? '用户 ' + row.peer.uid;
+          @let name = row.peer.username ?? ('chats.content.userWithUid' | transloco: { uid: row.peer.uid });
           <app-chat-list-item
             [entry]="{
               title: name,
               subtitle: row.request.question
-                ? 'Q: ' + row.request.question + ' · A: ' + (row.request.message ?? '')
-                : row.request.message || (row.incoming ? '好友请求' : '好友请求已发送'),
+                ? ('chats.content.requestQuestion'
+                  | transloco
+                    : {
+                        question: row.request.question,
+                        answer: row.request.message ?? '',
+                      })
+                : row.request.message ||
+                  (row.incoming
+                    ? ('chats.content.friendRequest' | transloco)
+                    : ('chats.content.friendRequestSent' | transloco)),
               avatar: row.peer.avatarUrl,
             }"
             [endActions]="
               row.canDecide
                 ? [
-                    { label: '接受来自 ' + name + ' 的好友请求', icon: acceptIcon, run: row.accept },
-                    { label: '拒绝来自 ' + name + ' 的好友请求', icon: rejectIcon, color: 'danger', run: row.reject },
+                    { label: ('chats.content.acceptRequest' | transloco: { name }), icon: acceptIcon, run: row.accept },
+                    {
+                      label: ('chats.content.rejectRequest' | transloco: { name }),
+                      icon: rejectIcon,
+                      color: 'danger',
+                      run: row.reject,
+                    },
                     ...(row.request.status === FriendRequestStatus.pending
-                      ? [{ label: '归档来自 ' + name + ' 的好友请求', icon: archiveIcon, run: row.archive }]
+                      ? [
+                          {
+                            label: ('chats.content.archiveRequest' | transloco: { name }),
+                            icon: archiveIcon,
+                            run: row.archive,
+                          },
+                        ]
                       : []),
                   ]
                 : []
@@ -73,13 +92,13 @@
               <ion-note slot="end" class="ion-text-nowrap">
                 @switch (row.request.status) {
                   @case (FriendRequestStatus.accepted) {
-                    已接受
+                    {{ 'chats.content.requestAccepted' | transloco }}
                   }
                   @case (FriendRequestStatus.rejected) {
-                    已拒绝
+                    {{ 'chats.content.requestRejected' | transloco }}
                   }
                   @default {
-                    等待通过
+                    {{ 'chats.content.requestPending' | transloco }}
                   }
                 }
               </ion-note>
@@ -94,10 +113,16 @@
               <app-chat-list-item
                 [entry]="row.entry"
                 [startActions]="
-                  row.thread.unreadCount > 0 ? [{ label: '标为已读', icon: readIcon, run: row.markRead }] : []
+                  row.thread.unreadCount > 0
+                    ? [{ label: ('chats.content.markRead' | transloco), icon: readIcon, run: row.markRead }]
+                    : []
                 "
                 [endActions]="[
-                  { label: row.thread.archived ? '取消归档' : '归档', icon: archiveIcon, run: row.toggleArchived },
+                  {
+                    label: (row.thread.archived ? 'chats.content.unarchive' : 'chats.content.archive') | transloco,
+                    icon: archiveIcon,
+                    run: row.toggleArchived,
+                  },
                 ]"
                 (selected)="
                   navigation.goTo(row.thread.chatId, { type: latestTarget }, row.thread.threadRootMessage.id)
@@ -105,12 +130,12 @@
                 <app-message-preview slot="title" [message]="row.thread.threadRootMessage"></app-message-preview>
                 <span slot="preview">
                   @if (row.draft; as draft) {
-                    <ion-text color="danger">草稿：</ion-text>
+                    <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
                     {{ draft.text }}
                   } @else if (row.thread.lastReply; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {
-                    暂无回复
+                    {{ 'chats.content.noReplies' | transloco }}
                   }
                 </span>
               </app-chat-list-item>
@@ -119,13 +144,17 @@
               <app-chat-list-item
                 [entry]="{
                   ...row.entry,
-                  title: row.isDm ? (row.chat.peer?.username ?? '私聊') : (row.chat.name ?? '未命名群聊'),
+                  title: row.isDm
+                    ? (row.chat.peer?.username ?? ('chats.content.dm' | transloco))
+                    : (row.chat.name ?? ('chats.content.unnamedGroup' | transloco)),
                 }"
                 [startActions]="
                   row.toggleRead
                     ? [
                         {
-                          label: row.chat.unreadCount > 0 ? '标为已读' : '标为未读',
+                          label:
+                            (row.chat.unreadCount > 0 ? 'chats.content.markRead' : 'chats.content.markUnread')
+                            | transloco,
                           icon: row.chat.unreadCount > 0 ? readIcon : unreadIcon,
                           run: row.toggleRead,
                         },
@@ -137,23 +166,27 @@
                     ? []
                     : [
                         {
-                          label: row.muted ? '取消静音' : '静音',
+                          label: (row.muted ? 'chats.content.unmute' : 'chats.content.mute') | transloco,
                           icon: row.muted ? unmutedIcon : mutedIcon,
                           color: 'medium',
                           run: row.toggleMuted,
                         },
                       ]),
-                  { label: row.chat.archived ? '取消归档' : '归档', icon: archiveIcon, run: row.toggleArchived },
+                  {
+                    label: (row.chat.archived ? 'chats.content.unarchive' : 'chats.content.archive') | transloco,
+                    icon: archiveIcon,
+                    run: row.toggleArchived,
+                  },
                 ]"
                 (selected)="navigation.goTo(row.chat.id, { type: latestTarget })">
                 <span slot="preview">
                   @if (row.draft; as draft) {
-                    <ion-text color="danger">草稿：</ion-text>
+                    <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
                     {{ draft.text }}
                   } @else if (row.chat.lastMessage; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {
-                    暂无消息
+                    {{ 'chats.content.noMessages' | transloco }}
                   }
                 </span>
               </app-chat-list-item>
@@ -167,12 +200,17 @@
             (!showRequests() || !friendRequests().items().length)
           ) {
             <ion-item lines="none">
-              <ion-label>{{ list().tab === ListTab.Threads ? '暂无话题' : '暂无会话' }}</ion-label>
+              <ion-label>
+                {{
+                  (list().tab === ListTab.Threads ? 'chats.content.emptyThreads' : 'chats.content.emptyChats')
+                    | transloco
+                }}
+              </ion-label>
             </ion-item>
           }
         }
         @if (showThreads() && threads().error()) {
-          <app-load-error compact message="话题加载失败，请刷新重试。" (retry)="refresh()" />
+          <app-load-error compact [message]="'chats.content.threadsLoadFailed' | transloco" (retry)="refresh()" />
         }
         @if (showChats()) {
           @if (chatQuery().error(); as error) {
@@ -180,12 +218,12 @@
               compact
               [message]="
                 error === ChatListError.Load
-                  ? '会话加载失败，请刷新重试。'
+                  ? ('chats.content.chatsLoadFailed' | transloco)
                   : error === ChatListError.Unread
-                    ? '更新未读数量失败，请刷新重试。'
+                    ? ('chats.content.unreadLoadFailed' | transloco)
                     : error === ChatListError.Recent
-                      ? '更新会话失败，请下拉刷新重试。'
-                      : '加载更多会话失败，请重试。'
+                      ? ('chats.content.recentLoadFailed' | transloco)
+                      : ('chats.content.moreLoadFailed' | transloco)
               "
               (retry)="refresh()" />
           }

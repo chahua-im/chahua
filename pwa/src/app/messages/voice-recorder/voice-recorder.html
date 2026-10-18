@@ -13,7 +13,7 @@
         <span class="recording-dot"></span>
       }
       <span class="timer">{{ elapsed() }}</span>
-      <span class="hint">松开保存</span>
+      <span class="hint">{{ 'messages.voice.holdToSave' | transloco }}</span>
     }
   </div>
 }
@@ -54,13 +54,15 @@
   }
 </div>
 @if (tooShort()) {
-  <div class="voice-error">录音太短</div>
+  <div class="voice-error">{{ 'messages.voice.tooShort' | transloco }}</div>
 }
 <ion-alert
   [isOpen]="failure() != null"
-  header="无法录音"
+  [header]="'messages.voice.errorTitle' | transloco"
   [message]="
-    failure() === Failure.Unsupported ? '当前浏览器不支持录音，请使用其他浏览器。' : '无法录音，请检查麦克风权限。'
+    failure() === Failure.Unsupported
+      ? ('messages.voice.unsupported' | transloco)
+      : ('messages.voice.permission' | transloco)
   "
-  [buttons]="['知道了']"
+  [buttons]="['common.ok' | transloco]"
   (didDismiss)="failure.set(undefined)" />

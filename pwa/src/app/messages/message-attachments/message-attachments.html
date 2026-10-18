@@ -20,7 +20,9 @@
           <div class="backdrop" [style.background-image]="'url(' + item.url + ')'"></div>
         }
         @if (failed().has(item.id ?? item.url)) {
-          <a class="media-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
+          <a class="media-error" [href]="item.url" target="_blank" rel="noopener">
+            {{ 'messages.media.openOriginal' | transloco }}
+          </a>
         } @else if (item.kind === MediaKind.Image) {
           <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id ?? item.url, $event)">
             <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id ?? item.url)" />
@@ -50,7 +52,7 @@
         }
         @if (last && overlayTime()) {
           <ion-badge class="media-time" color="medium">
-            <time [attr.datetime]="message().createdAt">{{ message().createdAt | date: 'HH:mm' }}</time>
+            <time [attr.datetime]="message().createdAt">{{ message().createdAt | localDate: 'time' }}</time>
             <app-message-status [delivery]="delivery()" />
           </ion-badge>
         }
@@ -63,7 +65,7 @@
         }
         @if (last && overlayTime()) {
           <span class="media-time">
-            <time [attr.datetime]="message().createdAt">{{ message().createdAt | date: 'HH:mm' }}</time>
+            <time [attr.datetime]="message().createdAt">{{ message().createdAt | localDate: 'time' }}</time>
             <app-message-status [delivery]="delivery()" />
           </span>
         }

@@ -36,7 +36,9 @@
     <div class="canvas" (click)="background($event)">
       @for (item of [current()]; track item.url) {
         @if (failed()) {
-          <a class="load-error" [href]="item.url" target="_blank" rel="noopener">加载失败，打开原文件</a>
+          <a class="load-error" [href]="item.url" target="_blank" rel="noopener">
+            {{ 'messages.media.openOriginal' | transloco }}
+          </a>
         } @else if (item.kind === Kind.Video) {
           <video
             #video

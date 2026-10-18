@@ -1,6 +1,7 @@
-import { DatePipe } from '@angular/common';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import {
   AlertController,
   IonButton,
@@ -38,7 +39,7 @@ enum InviteAction {
   selector: 'app-chat-invites',
   templateUrl: './chat-invites.html',
   imports: [
-    DatePipe,
+    LocalDatePipe,
     DirectorySearch,
     FormField,
     IonList,
@@ -49,6 +50,7 @@ enum InviteAction {
     IonSelect,
     IonSelectOption,
     IonSearchbar,
+    TranslocoPipe,
   ],
 })
 export class ChatInvites {
@@ -56,6 +58,7 @@ export class ChatInvites {
   private readonly api = inject(InvitesService);
   private readonly groupsApi = inject(GroupsService);
   private readonly alerts = inject(AlertController);
+  private readonly transloco = inject(TranslocoService);
   protected readonly Type = InviteType;
   protected readonly Action = InviteAction;
   protected readonly status = inviteStatus;
@@ -63,7 +66,9 @@ export class ChatInvites {
   protected readonly targetQuery = signal('');
   protected readonly target = signal<MemberSummary | undefined>(undefined);
   protected groupName(id: SnowflakeID) {
-    return this.groups().find((group) => group.id === id)?.name ?? '群组';
+    return (
+      this.groups().find((group) => group.id === id)?.name ?? this.transloco.translate('chats.invites.groupFallback')
+    );
   }
   protected readonly type = signal(InviteType.generic);
   protected readonly values = signal({ target: '', group: '', expiry: '' });
@@ -156,10 +161,10 @@ export class ChatInvites {
   }
   protected async revoke(invite: InviteResponse) {
     const alert = await this.alerts.create({
-      header: '撤销邀请',
+      header: this.transloco.translate('chats.invites.revokeTitle'),
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '撤销', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('chats.invites.revoke'), role: 'confirm' },
       ],
     });
     await alert.present();

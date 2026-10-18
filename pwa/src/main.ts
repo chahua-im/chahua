@@ -5,6 +5,7 @@ import { LegacyMigration } from './app/pwa/legacy-migration';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { RouteReuseStrategy, provideRouter, withComponentInputBinding } from '@angular/router';
+import { provideTransloco } from '@jsverse/transloco';
 import { IonicRouteStrategy, provideIonicAngular } from '@ionic/angular';
 
 import { routes } from './app/app.routes';
@@ -13,6 +14,9 @@ import { provideChahuaBaseUrl } from './generated/endpoints/chahua.base-url';
 import { authInterceptor } from './app/api/auth.interceptor';
 import { jsonInterceptor } from './app/api/json.interceptor';
 import { Appearance } from './app/settings/appearance';
+import { Localization } from './app/i18n/localization';
+import { TranslocoHttpLoader } from './app/i18n/transloco-http-loader';
+import { defaultLocale, supportedLocales } from './app/settings/locale';
 
 // https://stackoverflow.com/a/2117523/2800218
 if (isDevMode() && typeof crypto.randomUUID !== 'function')
@@ -30,10 +34,24 @@ bootstrapApplication(App, {
       registrationStrategy: 'registerWhenStable:3000',
       updateViaCache: 'none',
     }),
-    provideAppInitializer(() => {
+    provideTransloco({
+      config: {
+        availableLangs: [...supportedLocales],
+        defaultLang: defaultLocale,
+        fallbackLang: defaultLocale,
+        reRenderOnLangChange: true,
+        prodMode: !isDevMode(),
+        missingHandler: { logMissingKey: isDevMode(), useFallbackTranslation: true, allowEmpty: true },
+      },
+      loader: TranslocoHttpLoader,
+    }),
+    provideAppInitializer(async () => {
       inject(Appearance);
       inject(AppUpdates);
-      return inject(LegacyMigration).run();
+      const legacyMigration = inject(LegacyMigration);
+      const localization = inject(Localization);
+      await legacyMigration.run();
+      await localization.initialize();
     }),
     provideHttpClient(withInterceptors([authInterceptor, jsonInterceptor])),
     provideChahuaBaseUrl(CHAHUA_API_BASE),

@@ -1,6 +1,7 @@
 import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -53,6 +54,7 @@ enum StartChatAction {
     IonSpinner,
     IonSearchbar,
     DirectorySearch,
+    TranslocoPipe,
   ],
   host: { class: 'ion-page' },
 })

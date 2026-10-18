@@ -1,4 +1,5 @@
 import { Component, DestroyRef, computed, inject, model, output, signal } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonAlert, IonIcon, IonSpinner } from '@ionic/angular';
 import { arrowUp, micOffOutline, micOutline, send, trash } from 'ionicons/icons';
 import { VoicePlayer } from '../voice-player/voice-player';
@@ -24,7 +25,7 @@ enum Failure {
   selector: 'app-voice-recorder',
   templateUrl: './voice-recorder.html',
   styleUrl: './voice-recorder.scss',
-  imports: [VoicePlayer, IonAlert, IonIcon, IonSpinner],
+  imports: [VoicePlayer, IonAlert, IonIcon, IonSpinner, TranslocoPipe],
   host: { '[class.active]': 'active()' },
 })
 export class VoiceRecorder {

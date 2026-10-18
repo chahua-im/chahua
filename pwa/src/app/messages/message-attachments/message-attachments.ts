@@ -1,6 +1,7 @@
 import { Router } from '@angular/router';
-import { DatePipe } from '@angular/common';
 import { afterRenderEffect, Component, computed, ElementRef, inject, input, linkedSignal, signal } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import { IonBadge, IonIcon } from '@ionic/angular';
 import { documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
 import { type MessageResponse, MessageType } from '../../../generated/models';
@@ -31,7 +32,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   selector: 'app-message-attachments',
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
-  imports: [VoicePlayer, DatePipe, IonBadge, IonIcon, UploadProgress, MessageStatus],
+  imports: [VoicePlayer, IonBadge, IonIcon, UploadProgress, MessageStatus, LocalDatePipe, TranslocoPipe],
   host: {
     '[class.overlay-time]': 'overlayTime()',
     '[class.album]': 'album()',

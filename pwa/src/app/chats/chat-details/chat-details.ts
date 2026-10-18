@@ -15,6 +15,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { form, FormField } from '@angular/forms/signals';
 import { Router } from '@angular/router';
 import {
@@ -127,6 +128,7 @@ export enum DetailView {
     ChatThreads,
     ChatInvites,
     ChatAttachments,
+    TranslocoPipe,
   ],
   host: { class: 'ion-page' },
 })
@@ -181,6 +183,7 @@ export class ChatDetails {
   private readonly store = inject(ChatStore);
   private readonly lists = inject(ChatListStore);
   private readonly alerts = inject(AlertController);
+  private readonly transloco = inject(TranslocoService);
   private readonly injector = inject(Injector);
   protected readonly chat = computed(() => (this.id() ? this.store.get(this.id()!) : undefined));
   protected readonly loading = signal(false);
@@ -382,10 +385,13 @@ export class ChatDetails {
     const person = this.person();
     const isDm = !!person;
     const alert = await this.alerts.create({
-      header: isDm ? '解除好友' : '退出群组',
+      header: this.transloco.translate(isDm ? 'chats.details.leaveDmTitle' : 'chats.details.leaveGroupTitle'),
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: isDm ? '删除' : '退出', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        {
+          text: this.transloco.translate(isDm ? 'chats.details.leaveDmAction' : 'chats.details.leaveGroupAction'),
+          role: 'confirm',
+        },
       ],
     });
     await alert.present();
@@ -431,22 +437,32 @@ export class ChatDetails {
       );
       if (!this.isCurrent(scope)) return;
       const unavailable = relation.hasPendingOutgoingRequest
-        ? '好友请求已发送'
+        ? this.transloco.translate('chats.content.friendRequestSent')
         : relation.blocking
-          ? '请先解除拉黑'
+          ? this.transloco.translate('chats.details.blockedFirst')
           : relation.blockedBy || info.mode === FriendAddVerificationMode.forbid
-            ? '对方暂不接受好友请求'
+            ? this.transloco.translate('chats.details.notAccepting')
             : undefined;
       const needsMessage = !unavailable && info.mode !== FriendAddVerificationMode.direct;
       const alert = await this.alerts.create({
-        header: unavailable ?? '添加好友',
-        message: needsMessage ? (info.question ?? '发送验证信息') : undefined,
-        inputs: needsMessage ? [{ name: 'message', type: 'text', placeholder: '验证信息' }] : [],
+        header: unavailable ?? this.transloco.translate('chats.details.addFriend'),
+        message: needsMessage
+          ? (info.question ?? this.transloco.translate('chats.details.verificationMessage'))
+          : undefined,
+        inputs: needsMessage
+          ? [
+              {
+                name: 'message',
+                type: 'text',
+                placeholder: this.transloco.translate('chats.details.verificationPlaceholder'),
+              },
+            ]
+          : [],
         buttons: unavailable
-          ? [{ text: '好', role: 'cancel' }]
+          ? [{ text: this.transloco.translate('common.okay'), role: 'cancel' }]
           : [
-              { text: '取消', role: 'cancel' },
-              { text: '添加', role: 'confirm' },
+              { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+              { text: this.transloco.translate('common.add'), role: 'confirm' },
             ],
       });
       await alert.present();
@@ -468,10 +484,10 @@ export class ChatDetails {
     const scope = this.scope();
     const blocking = this.relationship()!.blocking;
     const alert = await this.alerts.create({
-      header: blocking ? '解除拉黑' : '拉黑用户',
+      header: this.transloco.translate(blocking ? 'chats.details.unblockTitle' : 'chats.details.blockTitle'),
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '确定', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.confirm'), role: 'confirm' },
       ],
     });
     await alert.present();

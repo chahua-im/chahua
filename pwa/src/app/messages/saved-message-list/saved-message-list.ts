@@ -1,6 +1,7 @@
-import { DatePipe } from '@angular/common';
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import {
   IonInfiniteScroll,
   IonInfiniteScrollContent,
@@ -28,7 +29,8 @@ import { savedMessageContent } from './saved-message-content';
   templateUrl: './saved-message-list.html',
   styleUrl: './saved-message-list.scss',
   imports: [
-    DatePipe,
+    LocalDatePipe,
+    TranslocoPipe,
     LoadError,
     IonInfiniteScroll,
     IonInfiniteScrollContent,

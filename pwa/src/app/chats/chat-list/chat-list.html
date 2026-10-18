@@ -2,7 +2,7 @@
   @if (searching()) {
     <ion-toolbar>
       <ion-searchbar
-        placeholder="搜索群组和用户"
+        [placeholder]="'chats.list.searchGroupsAndUsers' | transloco"
         [debounce]="300"
         showCancelButton="always"
         (ionInput)="search.set($event.detail.value || '')"
@@ -14,11 +14,13 @@
         <ion-buttons slot="start">
           <ion-back-button
             class="show-back-button"
-            text="返回"
+            [text]="'common.back' | transloco"
             [defaultHref]="outlet ? '/chats/' + list().tab : undefined"
             (click)="back()"></ion-back-button>
         </ion-buttons>
-        <ion-title>{{ list().requestHistory ? '好友请求' : '已归档' }}</ion-title>
+        <ion-title>
+          {{ (list().requestHistory ? 'chats.list.friendRequests' : 'chats.list.archived') | transloco }}
+        </ion-title>
       } @else {
         <ion-buttons slot="start">
           <ion-button (click)="openSettings()">
@@ -34,21 +36,21 @@
         <ion-segment mode="ios" [value]="list().tab" (ionChange)="selectTab($event)">
           <ion-segment-button [value]="ListTab.Messages">
             <ion-label>
-              消息
+              {{ 'chats.list.tabs.messages' | transloco }}
               @if (messageUnread(); as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Groups">
-            <ion-label>群组</ion-label>
+            <ion-label>{{ 'chats.list.tabs.groups' | transloco }}</ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Friends">
-            <ion-label>好友</ion-label>
+            <ion-label>{{ 'chats.list.tabs.friends' | transloco }}</ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Threads">
             <ion-label>
-              话题
+              {{ 'chats.list.tabs.threads' | transloco }}
               @if (lists.threadUnread.value()?.unreadThreadCount; as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
@@ -63,9 +65,9 @@
       }
     </ion-toolbar>
   }
-    @if (!sidebar()) {
-      <app-voice-bar />
-    }
+  @if (!sidebar()) {
+    <app-voice-bar />
+  }
 </ion-header>
 @if (searching()) {
   <ion-content appScrollbars><app-directory-search [query]="search()" /></ion-content>
@@ -86,10 +88,18 @@
 <ion-popover #addMenu [dismissOnSelect]="true">
   <ng-template>
     <ion-list>
-      <ion-item [button]="true" routerLink="/chats/new"><ion-label>创建群组</ion-label></ion-item>
-      <ion-item [button]="true" routerLink="/chats/join"><ion-label>加入群组</ion-label></ion-item>
-      <ion-item [button]="true" routerLink="/chats/add-friend"><ion-label>添加好友</ion-label></ion-item>
-      <ion-item [button]="true" (click)="searching.set(true)"><ion-label>搜索</ion-label></ion-item>
+      <ion-item [button]="true" routerLink="/chats/new">
+        <ion-label>{{ 'chats.list.add.createGroup' | transloco }}</ion-label>
+      </ion-item>
+      <ion-item [button]="true" routerLink="/chats/join">
+        <ion-label>{{ 'chats.list.add.joinGroup' | transloco }}</ion-label>
+      </ion-item>
+      <ion-item [button]="true" routerLink="/chats/add-friend">
+        <ion-label>{{ 'chats.list.add.addFriend' | transloco }}</ion-label>
+      </ion-item>
+      <ion-item [button]="true" (click)="searching.set(true)">
+        <ion-label>{{ 'chats.list.add.search' | transloco }}</ion-label>
+      </ion-item>
     </ion-list>
   </ng-template>
 </ion-popover>

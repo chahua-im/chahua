@@ -1,5 +1,5 @@
 @if (!complete()) {
-  <p class="ion-padding-horizontal">仅显示已加载消息中的参与者</p>
+  <p class="ion-padding-horizontal">{{ 'chats.threads.partial' | transloco }}</p>
 }
 <ion-list>
   @for (user of participants(); track user.uid) {
@@ -11,6 +11,6 @@
       <ion-label>{{ user.name || user.uid }}</ion-label>
     </ion-item>
   } @empty {
-    <p class="ion-padding ion-text-center">暂无参与者信息</p>
+    <p class="ion-padding ion-text-center">{{ 'chats.threads.noParticipants' | transloco }}</p>
   }
 </ion-list>

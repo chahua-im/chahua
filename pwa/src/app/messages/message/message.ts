@@ -1,6 +1,7 @@
 import { Router } from '@angular/router';
-import { DatePipe } from '@angular/common';
 import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
 import { arrowUndoOutline } from 'ionicons/icons';
 import { MessageType, type MessageResponse } from '../../../generated/models';
@@ -44,7 +45,8 @@ export interface MessageMenuSelection {
   imports: [
     AvatarTextPipe,
     InviteCard,
-    DatePipe,
+    LocalDatePipe,
+    TranslocoPipe,
     IonAvatar,
     IonIcon,
     IonSpinner,

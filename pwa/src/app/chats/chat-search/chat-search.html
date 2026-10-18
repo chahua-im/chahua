@@ -1,16 +1,25 @@
 <ion-header>
   <ion-toolbar>
-    <ion-title>搜索</ion-title>
-    <ion-buttons slot="end"><ion-button (click)="modals.dismiss()">关闭</ion-button></ion-buttons>
+    <ion-title>{{ 'chats.search.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="modals.dismiss()">{{ 'common.close' | transloco }}</ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars>
-  <ion-searchbar placeholder="搜索聊天消息" [debounce]="300" (ionInput)="query.set($event.detail.value || '')" />
+  <ion-searchbar
+    [placeholder]="'chats.search.placeholder' | transloco"
+    [debounce]="300"
+    (ionInput)="query.set($event.detail.value || '')" />
   <ion-segment
     [value]="sort()"
     (ionChange)="sort.set($event.detail.value === Sort.newest ? Sort.newest : Sort.relevance)">
-    <ion-segment-button [value]="Sort.relevance"><ion-label>相关度</ion-label></ion-segment-button>
-    <ion-segment-button [value]="Sort.newest"><ion-label>最新</ion-label></ion-segment-button>
+    <ion-segment-button [value]="Sort.relevance">
+      <ion-label>{{ 'chats.search.relevance' | transloco }}</ion-label>
+    </ion-segment-button>
+    <ion-segment-button [value]="Sort.newest">
+      <ion-label>{{ 'chats.search.newest' | transloco }}</ion-label>
+    </ion-segment-button>
   </ion-segment>
   @for (message of messages(); track message.id) {
     <div (click)="locate(message)"><app-message [message]="message" [own]="false" [interactive]="false" inert /></div>
@@ -23,8 +32,8 @@
   @if (loading() && cursor() == null) {
     <div class="page-loading"><ion-spinner /></div>
   } @else if (error()) {
-    <app-load-error message="搜索失败，请重试。" (retry)="load()" />
+    <app-load-error [message]="'chats.search.failed' | transloco" (retry)="load()" />
   } @else if (query().trim() && !messages().length) {
-    <p class="ion-padding ion-text-center">没有找到消息</p>
+    <p class="ion-padding ion-text-center">{{ 'chats.search.noResults' | transloco }}</p>
   }
 </ion-content>

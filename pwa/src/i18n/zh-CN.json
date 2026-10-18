@@ -1,0 +1,524 @@
+{
+  "app": {
+    "loginFailed": "暂时无法登录，请重试。",
+    "updateReady": "新版本已准备好",
+    "updateLater": "暂不更新",
+    "updateNow": "立即更新",
+    "name": "茶话"
+  },
+  "common": {
+    "back": "返回",
+    "done": "完成",
+    "save": "保存",
+    "saved": "已保存",
+    "cancel": "取消",
+    "create": "创建",
+    "delete": "删除",
+    "remove": "移除",
+    "upload": "上传",
+    "ok": "知道了",
+    "retry": "重试",
+    "loadFailed": "加载失败，请重试。",
+    "name": "名称",
+    "close": "关闭",
+    "confirm": "确认",
+    "add": "添加",
+    "okay": "好",
+    "user": "用户"
+  },
+  "settings": {
+    "title": "设置",
+    "menu": {
+      "general": "通用",
+      "saved": "收藏",
+      "friendVerification": "好友验证",
+      "stickers": "表情和贴纸",
+      "notifications": "消息通知",
+      "notificationsUnsupported": "不支持",
+      "pushRegisterFailed": "后台推送注册失败",
+      "tryAgain": "请重试",
+      "checkUpdates": "检查更新",
+      "upToDate": "已是最新版本",
+      "updateCheckFailed": "检查失败，请重试",
+      "updateNow": "立即更新",
+      "notificationDenied": "通知权限已被拒绝"
+    },
+    "general": {
+      "title": "通用",
+      "language": "语言",
+      "showThreads": "在“消息”标签页中显示话题",
+      "showAllAvatars": "在所有消息旁显示头像",
+      "showDmDetails": "在私聊中显示双方头像和用户名",
+      "colorMode": "颜色模式",
+      "colorModeSystem": "跟随系统",
+      "colorModeLight": "浅色",
+      "colorModeDark": "深色"
+    },
+    "language": {
+      "title": "语言",
+      "auto": "自动"
+    },
+    "friendVerification": {
+      "title": "好友验证",
+      "loadFailed": "好友验证设置加载失败。",
+      "allowAnyone": "允许任何人添加我",
+      "needMessage": "需要验证消息",
+      "needQuestion": "需要回答问题",
+      "forbid": "拒绝任何人添加我",
+      "questionLabel": "设置问题",
+      "questionPlaceholder": "填写申请者需要回答的问题",
+      "questionInvalid": "请填写 1–100 字的问题。",
+      "saveFailed": "保存失败，请重试。"
+    },
+    "stickers": {
+      "title": "表情和贴纸",
+      "pinnedReactions": "置顶表态表情 ({{ count }}/5)",
+      "autoSortPacks": "按最近使用自动排序贴纸包",
+      "autoSortFavorites": "按最近使用自动排序收藏贴纸",
+      "loadFailed": "贴纸包加载失败。",
+      "sortDivider": "此行以下的贴纸包不会自动排序",
+      "owned": "我的"
+    },
+    "stickerPack": {
+      "title": "贴纸包",
+      "unsubscribe": "取消订阅",
+      "removeHint": "点按贴纸可将其从贴纸包中移除。",
+      "renameTitle": "重命名贴纸包",
+      "namePlaceholder": "贴纸包名称",
+      "renamed": "贴纸包已重命名",
+      "renameFailed": "重命名失败，请重试",
+      "deleteTitle": "删除贴纸包",
+      "deleteMessage": "删除这个贴纸包吗？贴纸本身会保留，但这个贴纸包以及其中的收录关系将被移除。",
+      "deleteFailed": "删除失败，请重试",
+      "unsubscribeMessage": "要将这个贴纸包从你的收藏中移除吗？",
+      "unsubscribeFailed": "取消订阅失败，请重试",
+      "removeStickerTitle": "移除贴纸",
+      "removeStickerMessage": "要从贴纸包中移除此表情吗？",
+      "removeStickerFailed": "移除失败，请重试"
+    }
+  },
+  "chats": {
+    "list": {
+      "startChat": "开始聊天",
+      "selectConversation": "从左侧选择一个会话",
+      "searchGroupsAndUsers": "搜索群组和用户",
+      "friendRequests": "好友请求",
+      "archived": "已归档",
+      "tabs": {
+        "messages": "消息",
+        "groups": "群聊",
+        "friends": "好友",
+        "threads": "话题"
+      },
+      "add": {
+        "createGroup": "创建群聊",
+        "joinGroup": "加入群聊",
+        "addFriend": "添加好友",
+        "search": "搜索"
+      },
+      "mute": {
+        "title": "静音通知",
+        "oneHour": "1 小时",
+        "eightHours": "8 小时",
+        "oneDay": "1 天",
+        "sevenDays": "7 天",
+        "forever": "永久"
+      }
+    },
+    "content": {
+      "archivedSubtitle": "查看已归档的会话",
+      "requestHistorySubtitle": "查看好友请求记录",
+      "userWithUid": "用户 {{ uid }}",
+      "requestQuestion": "问：{{ question }} · 答：{{ answer }}",
+      "friendRequest": "好友请求",
+      "friendRequestSent": "好友请求已发送",
+      "acceptRequest": "接受来自 {{ name }} 的好友请求",
+      "rejectRequest": "拒绝来自 {{ name }} 的好友请求",
+      "archiveRequest": "归档来自 {{ name }} 的好友请求",
+      "requestAccepted": "已接受",
+      "requestRejected": "已拒绝",
+      "requestPending": "等待通过",
+      "markRead": "标为已读",
+      "markUnread": "标为未读",
+      "archive": "归档",
+      "unarchive": "取消归档",
+      "mute": "静音",
+      "unmute": "取消静音",
+      "draft": "草稿：",
+      "noReplies": "暂无回复",
+      "noMessages": "暂无消息",
+      "dm": "私聊",
+      "unnamedGroup": "未命名群聊",
+      "emptyThreads": "暂无话题",
+      "emptyChats": "暂无会话",
+      "threadsLoadFailed": "话题加载失败，请刷新重试。",
+      "chatsLoadFailed": "会话加载失败，请刷新重试。",
+      "unreadLoadFailed": "更新未读数量失败，请刷新重试。",
+      "recentLoadFailed": "更新会话失败，请下拉刷新重试。",
+      "moreLoadFailed": "加载更多会话失败，请重试。"
+    },
+    "inviteStatus": {
+      "expired": "邀请已过期",
+      "revoked": "邀请已撤销",
+      "used": "邀请已使用",
+      "neverExpires": "长期有效"
+    },
+    "start": {
+      "createTitle": "创建群聊",
+      "joinTitle": "加入群聊",
+      "friendTitle": "添加好友",
+      "searchUsers": "搜索用户名或 UID",
+      "groupName": "群聊名称",
+      "inviteCode": "邀请码或邀请链接",
+      "viewInvite": "查看邀请",
+      "submitCreate": "创建",
+      "submitOpen": "打开群组",
+      "submitJoin": "加入",
+      "failed": "操作失败，请检查后重试。"
+    },
+    "invites": {
+      "type": "邀请类型",
+      "typeGeneric": "普通邀请",
+      "typeTargeted": "指定用户",
+      "typeMembership": "指定群聊成员",
+      "change": "更改",
+      "requiredGroup": "仅限群成员",
+      "expiry": "过期时间",
+      "create": "创建邀请",
+      "groupSearch": "查找要分享或限定的群组",
+      "shareTo": "分享至群聊",
+      "moreGroups": "更多群组",
+      "targetedUid": "指定用户：{{ uid }}",
+      "membershipGroup": "限定 {{ group }} 的成员",
+      "generic": "普通邀请",
+      "copy": "复制",
+      "share": "分享",
+      "revoke": "撤销",
+      "copied": "邀请链接已复制",
+      "failed": "操作失败，请重试。",
+      "refresh": "刷新",
+      "revokeTitle": "撤销邀请",
+      "groupFallback": "群聊"
+    },
+    "details": {
+      "topic": "话题",
+      "topicIn": "{{ name }} 中的话题",
+      "addDescription": "添加群简介",
+      "space": "个人空间",
+      "message": "发消息",
+      "addFriend": "添加好友",
+      "subscribe": "订阅",
+      "archived": "已归档",
+      "archive": "归档",
+      "invite": "邀请",
+      "unfriend": "解除好友",
+      "leaveGroup": "退群",
+      "unblock": "解除拉黑",
+      "block": "拉黑",
+      "loadFailed": "加载失败，请重试。",
+      "tabs": {
+        "threads": "话题",
+        "members": "成员",
+        "images": "图片",
+        "videos": "视频",
+        "files": "文件"
+      },
+      "saveFailed": "保存失败，请重试",
+      "leaveDmTitle": "解除好友",
+      "leaveGroupTitle": "退出群聊",
+      "leaveDmAction": "删除",
+      "leaveGroupAction": "退出",
+      "blockedFirst": "请先解除拉黑",
+      "notAccepting": "对方暂不接受好友请求",
+      "verificationMessage": "发送验证信息",
+      "verificationPlaceholder": "验证信息",
+      "blockTitle": "拉黑用户",
+      "unblockTitle": "解除拉黑"
+    },
+    "directory": {
+      "groups": "群聊",
+      "users": "用户",
+      "moreGroups": "加载更多群组",
+      "failed": "搜索失败，请重试。",
+      "noResults": "没有找到结果",
+      "prompt": "搜索群组和用户"
+    },
+    "search": {
+      "title": "搜索",
+      "placeholder": "搜索聊天消息",
+      "relevance": "相关度",
+      "newest": "最新",
+      "failed": "搜索失败，请重试。",
+      "noResults": "没有找到消息"
+    },
+    "threads": {
+      "partial": "仅显示已加载消息中的参与者",
+      "empty": "暂无话题",
+      "title": "话题",
+      "replies": "{{ count }} 条回复",
+      "emptyRecent": "暂无近期话题",
+      "openFailed": "无法打开话题，请重试。",
+      "noParticipants": "暂无参与者信息"
+    },
+    "link": {
+      "failed": "链接无法打开",
+      "backToMessages": "返回消息"
+    },
+    "attachments": {
+      "locate": "定位",
+      "empty": "暂无内容",
+      "locateFailed": "无法定位原消息，请重试。",
+      "openFailed": "无法打开媒体，请重试。"
+    },
+    "members": {
+      "admin": "管理员"
+    },
+    "listItem": {
+      "actionFailed": "操作失败，请重试"
+    }
+  },
+  "conversation": {
+    "thread": "话题",
+    "chat": "会话",
+    "pinned": "置顶消息",
+    "pinnedLoadFailed": "置顶消息加载失败，请重试",
+    "unreadBelow": "未读消息",
+    "threadLoadFailed": "话题状态加载失败，请重试。",
+    "threadUpdateFailed": "话题更新失败，请重试。",
+    "empty": "暂无消息",
+    "missing": "这条消息已删除或无法查看。",
+    "loadFailed": "消息加载失败，请重试。",
+    "editing": "编辑消息",
+    "replyingTo": "正在回复 {{ name }}",
+    "reply": "回复消息",
+    "muteFailed": "静音设置失败，请重试",
+    "savedTitle": "收藏",
+    "emptyPinned": "暂无置顶消息",
+    "emptySaved": "暂无收藏",
+    "viewOriginal": "查看原消息",
+    "unsave": "取消收藏",
+    "loadMoreFailed": "加载消息失败，请重试。"
+  },
+  "messages": {
+    "preview": {
+      "deleted": "消息已删除",
+      "someone": "有人",
+      "system": {
+        "joined": "加入了群聊",
+        "left": "退出了群聊",
+        "added": "邀请了 {{ target }} 加入群聊",
+        "removed": "将 {{ target }} 移出了群聊",
+        "pinned": "置顶了一条消息",
+        "unpinned": "取消了一条消息的置顶",
+        "threadPinned": "在话题中置顶了一条消息",
+        "threadUnpinned": "取消了话题中一条消息的置顶"
+      },
+      "invite": "[邀请]",
+      "image": "[图片]",
+      "video": "[视频]",
+      "audio": "[语音]",
+      "file": "[文件]",
+      "sticker": "[表情]",
+      "other": "[非文本消息]"
+    },
+    "menu": {
+      "backToActions": "返回消息操作",
+      "actions": {
+        "reply": "回复",
+        "thread": "话题",
+        "pin": "置顶",
+        "unpin": "取消置顶",
+        "copy": "复制",
+        "edit": "编辑",
+        "save": "收藏",
+        "favoriteSticker": "收藏表情",
+        "link": "链接",
+        "recall": "撤回",
+        "reactions": "查看表态"
+      },
+      "confirm": {
+        "recallTitle": "撤回消息",
+        "unpinTitle": "取消置顶",
+        "pinTitle": "置顶消息",
+        "recallAuthor": "确定要撤回 {{ name }} 的这条消息吗？",
+        "recall": "撤回后，其他成员将无法查看这条消息。",
+        "unpin": "确定取消这条消息的置顶？",
+        "pin": "置顶后，此会话的成员都能看到这条置顶消息。"
+      },
+      "notice": {
+        "copied": "已复制",
+        "saved": "已收藏",
+        "pinned": "已置顶",
+        "unpinned": "已取消置顶",
+        "recalled": "已撤回",
+        "reactionLimit": "每人最多添加 5 种表态，每条消息最多 50 种",
+        "metadataFailed": "操作权限或置顶状态加载失败，请重新打开菜单重试",
+        "failed": "操作失败，请重试"
+      }
+    },
+    "message": {
+      "edited": "已编辑",
+      "sendFailed": "发送失败，点击重试"
+    },
+    "composer": {
+      "tooManyAttachments": "每条消息最多添加 20 个附件。",
+      "editMediaOnly": "编辑消息时只能添加图片或视频。",
+      "processingFailed": "处理失败，请检查文件大小、权限或网络后重试。",
+      "placeholder": "输入消息",
+      "photos": "照片",
+      "files": "文件",
+      "blockedTitle": "无法发送消息",
+      "blockedSelf": "你已将对方拉黑，解除拉黑后可以继续聊天。",
+      "blockedBy": "对方暂时无法接收你的消息。",
+      "notFriends": "你们已不是好友，重新添加好友后可以继续聊天。"
+    },
+    "invite": {
+      "groupInvite": "群聊邀请",
+      "failed": "邀请失效或无法加载，点击重试",
+      "joined": "已加入，打开群组",
+      "view": "查看群资料并加入"
+    },
+    "voice": {
+      "holdToSave": "松开保存",
+      "tooShort": "录音太短",
+      "errorTitle": "无法录音",
+      "unsupported": "当前浏览器不支持录音，请使用其他浏览器。",
+      "permission": "无法录音，请检查麦克风权限。",
+      "original": "原文件"
+    },
+    "media": {
+      "openOriginal": "加载失败，打开原文件"
+    },
+    "thread": {
+      "replies": "{{ count }} 条回复"
+    }
+  },
+  "stickers": {
+    "title": "贴纸",
+    "count": "{{ count }} 张贴纸",
+    "invalidUploadTitle": "无法添加贴纸",
+    "invalidUploadMessage": "请选择 10 MB 以内的图片或 WebM 视频。",
+    "addTitle": "添加贴纸",
+    "emojiPlaceholder": "对应表情，例如 🙂",
+    "optionalName": "名称（选填）",
+    "loadFailed": "加载失败。",
+    "empty": "暂无贴纸",
+    "add": "添加贴纸",
+    "added": "贴纸已添加",
+    "addFailed": "添加表情失败",
+    "favorite": "收藏表情",
+    "unfavorite": "取消收藏",
+    "favoriteOne": "收藏单个",
+    "unsubscribe": "取消订阅",
+    "subscribeAll": "订阅整组",
+    "removePack": "移除贴纸包",
+    "addPack": "添加贴纸包",
+    "emojiLoadFailed": "表情加载失败，请关闭后重试。",
+    "createPack": "创建贴纸包",
+    "createFailed": "创建贴纸包失败"
+  },
+  "emojiPicker": {
+    "loadFailed": "表情加载失败，请关闭后重试。",
+    "unsupported": "浏览器不支持彩色表情。",
+    "loading": "正在加载…",
+    "networkError": "表情加载失败，请重新打开重试。",
+    "search": "搜索表情",
+    "skinTone": "选择肤色（当前为 {skinTone}）",
+    "skinTones": {
+      "default": "默认",
+      "light": "浅色",
+      "mediumLight": "较浅",
+      "medium": "中等",
+      "mediumDark": "较深",
+      "dark": "深色"
+    },
+    "categories": {
+      "custom": "自定义",
+      "smileys": "笑脸和表情",
+      "people": "人物和身体",
+      "animals": "动物与自然",
+      "food": "食品饮料",
+      "travel": "旅行和地点",
+      "activities": "活动",
+      "objects": "物品",
+      "symbols": "符号",
+      "flags": "旗帜"
+    }
+  },
+  "pwa": {
+    "notificationPrompt": {
+      "title": "允许“茶话”发送通知吗",
+      "message": "以后可以在设置内修改",
+      "decline": "不允许",
+      "allow": "允许",
+      "failed": "授权失败，请再试一次"
+    },
+    "notification": {
+      "invite": "[邀请]",
+      "sticker": "[表情]",
+      "audio": "[语音]",
+      "file": "[文件]",
+      "image": "[图片]",
+      "video": "[视频]",
+      "message": "[消息]"
+    },
+    "landing": {
+      "title": "安装 茶话",
+      "hero": {
+        "title": "把茶话添加到主屏幕",
+        "install": "安装后可以像原生应用一样从桌面直接启动。",
+        "share": "如果你要向朋友推荐，请发送论坛帖子的地址，不要直接发送当前页面地址。当前页面的地址包含你的账号登录信息。"
+      },
+      "browsers": {},
+      "android": {
+        "step3": "选择“安装并创建快捷方式”，然后点“安装”",
+        "step4": "确认安装，之后即可从桌面直接打开",
+        "note": "如果浏览器主动弹出了安装界面，直接点安装即可。",
+        "step1Before": "使用",
+        "step1After": "访问本页",
+        "step2Before": "点击",
+        "step2After": "",
+        "note2Before": "如果无法使用 Chrome，也可以用",
+        "note2Mid": "点击",
+        "note2After": "，选择“添加至手机” (可能会在第二页)。"
+      },
+      "ios": {
+        "step3": "选择 “添加到主屏幕” (可能会在 “查看更多” 里面)",
+        "step4": "确认添加，之后即可从桌面直接打开",
+        "step1Before": "使用",
+        "step1After": "访问本页",
+        "step2Before": "点击",
+        "step2Between": "，选择",
+        "step2After": ""
+      },
+      "windows": {
+        "step3": "选择“更多工具” > “应用” > “将此站点安装为应用”。",
+        "step4": "自行选择将图标创建在任务栏、开始菜单或桌面。",
+        "note": "如果浏览器在地址栏显示了安装应用按钮，直接点安装即可",
+        "step1Before": "使用",
+        "step1After": "访问本页。",
+        "step2Before": "点击",
+        "step2After": ""
+      },
+      "macos": {
+        "step3": "选择“添加到程序坞”",
+        "step4": "确认添加，之后即可从程序坞或“App”中打开",
+        "step1Before": "使用",
+        "step1After": "访问本页",
+        "step2Before": "点击"
+      },
+      "linux": {
+        "note": "这点小问题想必难不住你 :)"
+      },
+      "browserChrome": "Chrome 浏览器",
+      "browserSafari": "Safari 浏览器",
+      "browserEdge": "Edge 浏览器",
+      "menu": "菜单",
+      "share": "共享"
+    }
+  },
+  "reactions": {
+    "title": "表态",
+    "all": "全部 {{ count }}"
+  }
+}

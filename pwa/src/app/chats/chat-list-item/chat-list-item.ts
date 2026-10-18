@@ -1,6 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, input, output, signal, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonBadge,
   IonButton,
@@ -58,6 +59,7 @@ export interface ChatListAction {
     IonLabel,
     IonText,
     IonSpinner,
+    TranslocoPipe,
   ],
 })
 export class ChatListItem {

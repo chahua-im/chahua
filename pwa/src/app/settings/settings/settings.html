@@ -1,7 +1,9 @@
 <ion-header>
   <ion-toolbar>
-    <ion-title>设置</ion-title>
-    <ion-buttons slot="end"><ion-button (click)="close()">完成</ion-button></ion-buttons>
+    <ion-title>{{ 'settings.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="close()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">
@@ -14,42 +16,44 @@
   <ion-list [inset]="true">
     <ion-item [button]="true" [detail]="true" routerLink="/settings/general">
       <ion-icon slot="start" [icon]="generalIcon" color="primary"></ion-icon>
-      <ion-label>通用</ion-label>
+      <ion-label>{{ 'settings.menu.general' | transloco }}</ion-label>
     </ion-item>
     <ion-item [button]="true" [detail]="true" (click)="openSaved()">
       <ion-icon slot="start" [icon]="bookmarkIcon" color="primary"></ion-icon>
-      <ion-label>收藏</ion-label>
+      <ion-label>{{ 'settings.menu.saved' | transloco }}</ion-label>
     </ion-item>
     <ion-item [button]="true" [detail]="true" routerLink="/settings/friend-verification">
       <ion-icon slot="start" [icon]="verificationIcon" color="primary"></ion-icon>
-      <ion-label>好友验证</ion-label>
+      <ion-label>{{ 'settings.menu.friendVerification' | transloco }}</ion-label>
     </ion-item>
     <ion-item [button]="true" [detail]="true" routerLink="/settings/stickers">
       <ion-icon slot="start" [icon]="stickerIcon" color="primary"></ion-icon>
-      <ion-label>表情和贴纸</ion-label>
+      <ion-label>{{ 'settings.menu.stickers' | transloco }}</ion-label>
     </ion-item>
     <ion-item lines="none">
       <ion-icon slot="start" [icon]="notificationIcon" color="primary"></ion-icon>
       @if (!notifications.supported) {
-        <ion-label>消息通知</ion-label>
-        <ion-note slot="end" color="medium">不支持</ion-note>
+        <ion-label>{{ 'settings.menu.notifications' | transloco }}</ion-label>
+        <ion-note slot="end" color="medium">{{ 'settings.menu.notificationsUnsupported' | transloco }}</ion-note>
       } @else if (notifications.busy()) {
-        <ion-label>消息通知</ion-label>
+        <ion-label>{{ 'settings.menu.notifications' | transloco }}</ion-label>
         <ion-spinner slot="end"></ion-spinner>
       } @else {
-        <ion-toggle [checked]="notifications.enabled()" (ionChange)="setNotifications($event)">消息通知</ion-toggle>
+        <ion-toggle [checked]="notifications.enabled()" (ionChange)="setNotifications($event)">
+          {{ 'settings.menu.notifications' | transloco }}
+        </ion-toggle>
         @let error = notifications.error();
         @if (error && error !== PushError.PermissionDenied) {
           <ion-note slot="end" color="danger">
             @switch (error) {
               @case (PushError.SubscribeFailed) {
-                后台推送注册失败
+                {{ 'settings.menu.pushRegisterFailed' | transloco }}
               }
               @case (PushError.BackendSubscribeFailed) {
-                后台推送注册失败
+                {{ 'settings.menu.pushRegisterFailed' | transloco }}
               }
               @default {
-                请重试
+                {{ 'settings.menu.tryAgain' | transloco }}
               }
             }
           </ion-note>
@@ -78,19 +82,21 @@
       lines="none"
       (click)="checkUpdates()">
       <ion-icon slot="start" [icon]="updateIcon" color="primary"></ion-icon>
-      <ion-label>检查更新</ion-label>
+      <ion-label>{{ 'settings.menu.checkUpdates' | transloco }}</ion-label>
       @if (updates.checking()) {
         <ion-spinner slot="end"></ion-spinner>
       } @else if (updates.available()) {
-        <ion-button slot="end" fill="clear" (click)="$event.stopPropagation(); updates.reload()">立即更新</ion-button>
+        <ion-button slot="end" fill="clear" (click)="$event.stopPropagation(); updates.reload()">
+          {{ 'settings.menu.updateNow' | transloco }}
+        </ion-button>
       } @else {
         <ion-note slot="end" color="medium">
           @switch (updateResult()) {
             @case (UpdateResult.Current) {
-              已是最新版本
+              {{ 'settings.menu.upToDate' | transloco }}
             }
             @case (UpdateResult.Failed) {
-              检查失败，请重试
+              {{ 'settings.menu.updateCheckFailed' | transloco }}
             }
             @default {
               {{ updates.version }}
@@ -102,4 +108,4 @@
   </ion-list>
 </ion-content>
 
-<ion-toast message="通知权限已被拒绝" [duration]="2500" />
+<ion-toast [message]="'settings.menu.notificationDenied' | transloco" [duration]="2500" />

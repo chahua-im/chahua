@@ -11,6 +11,7 @@ import {
   viewChildren,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonAvatar,
   IonBadge,
@@ -74,6 +75,7 @@ import { isListTab, ListTab, type ListSelection } from '../list-tabs';
     IonSegmentButton,
     IonTitle,
     IonToolbar,
+    TranslocoPipe,
   ],
 })
 export class ChatList {

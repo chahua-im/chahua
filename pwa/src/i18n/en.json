@@ -1,0 +1,524 @@
+{
+  "app": {
+    "loginFailed": "Unable to sign in. Please try again.",
+    "updateReady": "A new version is ready",
+    "updateLater": "Not now",
+    "updateNow": "Update now",
+    "name": "Chahua"
+  },
+  "common": {
+    "back": "Back",
+    "done": "Done",
+    "save": "Save",
+    "saved": "Saved",
+    "cancel": "Cancel",
+    "create": "Create",
+    "delete": "Delete",
+    "remove": "Remove",
+    "upload": "Upload",
+    "ok": "OK",
+    "retry": "Retry",
+    "loadFailed": "Failed to load. Please try again.",
+    "name": "Name",
+    "close": "Close",
+    "confirm": "Confirm",
+    "add": "Add",
+    "okay": "OK",
+    "user": "User"
+  },
+  "settings": {
+    "title": "Settings",
+    "menu": {
+      "general": "General",
+      "saved": "Saved",
+      "friendVerification": "Friend Verification",
+      "stickers": "Emojis & Stickers",
+      "notifications": "Notifications",
+      "notificationsUnsupported": "Not supported",
+      "pushRegisterFailed": "Push registration failed",
+      "tryAgain": "Please try again",
+      "checkUpdates": "Check for updates",
+      "upToDate": "You're up to date",
+      "updateCheckFailed": "Update check failed. Please try again.",
+      "updateNow": "Update now",
+      "notificationDenied": "Notification permission was not granted"
+    },
+    "general": {
+      "title": "General",
+      "language": "Language",
+      "showThreads": "Show 'Threads' in Messages",
+      "showAllAvatars": "Show Avatars Next to All Messages",
+      "showDmDetails": "Show Both Avatars and Usernames in Direct Messages",
+      "colorMode": "Color Mode",
+      "colorModeSystem": "Follow System",
+      "colorModeLight": "Light",
+      "colorModeDark": "Dark"
+    },
+    "language": {
+      "title": "Language",
+      "auto": "Auto"
+    },
+    "friendVerification": {
+      "title": "Friend Verification",
+      "loadFailed": "Failed to load friend verification settings.",
+      "allowAnyone": "Allow anyone to add me",
+      "needMessage": "Require a verification message",
+      "needQuestion": "Require an answer to a question",
+      "forbid": "Reject all friend requests",
+      "questionLabel": "Question",
+      "questionPlaceholder": "Enter the question the requester must answer",
+      "questionInvalid": "Enter a question between 1 and 100 characters.",
+      "saveFailed": "Save failed. Please try again."
+    },
+    "stickers": {
+      "title": "Emojis & Stickers",
+      "pinnedReactions": "Pinned reactions ({{ count }}/5)",
+      "autoSortPacks": "Auto-sort sticker packs by recent use",
+      "autoSortFavorites": "Auto-sort favorite stickers by recent use",
+      "loadFailed": "Failed to load sticker packs.",
+      "sortDivider": "Packs below this line are not auto-sorted",
+      "owned": "Mine"
+    },
+    "stickerPack": {
+      "title": "Sticker Pack",
+      "unsubscribe": "Unsubscribe",
+      "removeHint": "Tap a sticker to remove it from this pack.",
+      "renameTitle": "Rename Sticker Pack",
+      "namePlaceholder": "Sticker pack name",
+      "renamed": "Sticker pack renamed",
+      "renameFailed": "Rename failed. Please try again.",
+      "deleteTitle": "Delete Sticker Pack",
+      "deleteMessage": "Delete this sticker pack? Stickers will stay available elsewhere, but this pack and its contents list will be removed.",
+      "deleteFailed": "Delete failed. Please try again.",
+      "unsubscribeMessage": "Remove this sticker pack from your collection?",
+      "unsubscribeFailed": "Unsubscribe failed. Please try again.",
+      "removeStickerTitle": "Remove Sticker",
+      "removeStickerMessage": "Remove this sticker from the pack?",
+      "removeStickerFailed": "Remove failed. Please try again."
+    }
+  },
+  "chats": {
+    "list": {
+      "startChat": "Start chatting",
+      "selectConversation": "Select a conversation",
+      "searchGroupsAndUsers": "Search groups and users",
+      "friendRequests": "Friend requests",
+      "archived": "Archived",
+      "tabs": {
+        "messages": "Messages",
+        "groups": "Groups",
+        "friends": "Friends",
+        "threads": "Threads"
+      },
+      "add": {
+        "createGroup": "Create group",
+        "joinGroup": "Join group",
+        "addFriend": "Add friend",
+        "search": "Search"
+      },
+      "mute": {
+        "title": "Mute notifications",
+        "oneHour": "1 hour",
+        "eightHours": "8 hours",
+        "oneDay": "1 day",
+        "sevenDays": "7 days",
+        "forever": "Forever"
+      }
+    },
+    "content": {
+      "archivedSubtitle": "View archived conversations",
+      "requestHistorySubtitle": "View friend request history",
+      "userWithUid": "User {{ uid }}",
+      "requestQuestion": "Q: {{ question }} · A: {{ answer }}",
+      "friendRequest": "Friend request",
+      "friendRequestSent": "Friend request sent",
+      "acceptRequest": "Accept friend request from {{ name }}",
+      "rejectRequest": "Reject friend request from {{ name }}",
+      "archiveRequest": "Archive friend request from {{ name }}",
+      "requestAccepted": "Accepted",
+      "requestRejected": "Rejected",
+      "requestPending": "Pending",
+      "markRead": "Mark as read",
+      "markUnread": "Mark as unread",
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "mute": "Mute",
+      "unmute": "Unmute",
+      "draft": "Draft:",
+      "noReplies": "No replies yet",
+      "noMessages": "No messages yet",
+      "dm": "Direct message",
+      "unnamedGroup": "Unnamed group",
+      "emptyThreads": "No threads yet",
+      "emptyChats": "No conversations yet",
+      "threadsLoadFailed": "Failed to load threads. Refresh and try again.",
+      "chatsLoadFailed": "Failed to load conversations. Refresh and try again.",
+      "unreadLoadFailed": "Failed to update unread counts. Refresh and try again.",
+      "recentLoadFailed": "Failed to update conversations. Pull to refresh.",
+      "moreLoadFailed": "Failed to load more conversations. Try again."
+    },
+    "inviteStatus": {
+      "expired": "Invite expired",
+      "revoked": "Invite revoked",
+      "used": "Invite already used",
+      "neverExpires": "Never expires"
+    },
+    "start": {
+      "createTitle": "Create group",
+      "joinTitle": "Join group",
+      "friendTitle": "Add friend",
+      "searchUsers": "Search by username or UID",
+      "groupName": "Group name",
+      "inviteCode": "Invite code or link",
+      "viewInvite": "View invite",
+      "submitCreate": "Create",
+      "submitOpen": "Open group",
+      "submitJoin": "Join",
+      "failed": "Something went wrong. Check and try again."
+    },
+    "invites": {
+      "type": "Invite type",
+      "typeGeneric": "General invite",
+      "typeTargeted": "Specific user",
+      "typeMembership": "Specific group members",
+      "change": "Change",
+      "requiredGroup": "Limit to members of",
+      "expiry": "Expires",
+      "create": "Create invite",
+      "groupSearch": "Search for a group to share or restrict",
+      "shareTo": "Share to group",
+      "moreGroups": "More groups",
+      "targetedUid": "Specific user: {{ uid }}",
+      "membershipGroup": "Members of {{ group }}",
+      "generic": "General invite",
+      "copy": "Copy",
+      "share": "Share",
+      "revoke": "Revoke",
+      "copied": "Invite link copied",
+      "failed": "Something went wrong. Try again.",
+      "refresh": "Refresh",
+      "revokeTitle": "Revoke invite",
+      "groupFallback": "Group"
+    },
+    "details": {
+      "topic": "Thread",
+      "topicIn": "Thread in {{ name }}",
+      "addDescription": "Add group description",
+      "space": "Forum profile",
+      "message": "Send message",
+      "addFriend": "Add friend",
+      "subscribe": "Subscribe",
+      "archived": "Archived",
+      "archive": "Archive",
+      "invite": "Invite",
+      "unfriend": "Remove friend",
+      "leaveGroup": "Leave group",
+      "unblock": "Unblock",
+      "block": "Block",
+      "loadFailed": "Failed to load. Try again.",
+      "tabs": {
+        "threads": "Threads",
+        "members": "Members",
+        "images": "Photos",
+        "videos": "Videos",
+        "files": "Files"
+      },
+      "saveFailed": "Save failed. Please try again.",
+      "leaveDmTitle": "Remove friend",
+      "leaveGroupTitle": "Leave group",
+      "leaveDmAction": "Remove",
+      "leaveGroupAction": "Leave",
+      "blockedFirst": "Unblock this user first",
+      "notAccepting": "This user is not accepting friend requests",
+      "verificationMessage": "Send a verification message",
+      "verificationPlaceholder": "Verification message",
+      "blockTitle": "Block user",
+      "unblockTitle": "Unblock user"
+    },
+    "directory": {
+      "groups": "Groups",
+      "users": "Users",
+      "moreGroups": "Load more groups",
+      "failed": "Search failed. Please try again.",
+      "noResults": "No results found",
+      "prompt": "Search groups and users"
+    },
+    "search": {
+      "title": "Search",
+      "placeholder": "Search messages",
+      "relevance": "Relevance",
+      "newest": "Newest",
+      "failed": "Search failed. Please try again.",
+      "noResults": "No messages found"
+    },
+    "threads": {
+      "partial": "Only participants from loaded messages are shown.",
+      "empty": "No threads yet",
+      "title": "Thread",
+      "replies": "{{ count }} replies",
+      "emptyRecent": "No recent threads",
+      "openFailed": "Couldn't open the thread. Try again.",
+      "noParticipants": "No participants yet"
+    },
+    "link": {
+      "failed": "This link can't be opened.",
+      "backToMessages": "Back to messages"
+    },
+    "attachments": {
+      "locate": "Locate",
+      "empty": "No content yet",
+      "locateFailed": "Couldn't locate the original message. Try again.",
+      "openFailed": "Couldn't open the media file. Try again."
+    },
+    "members": {
+      "admin": "Admin"
+    },
+    "listItem": {
+      "actionFailed": "Something went wrong. Try again."
+    }
+  },
+  "conversation": {
+    "thread": "Thread",
+    "chat": "Conversation",
+    "pinned": "Pinned message",
+    "pinnedLoadFailed": "Failed to load pinned messages. Retry",
+    "unreadBelow": "Unread messages",
+    "threadLoadFailed": "Failed to load thread status. Try again.",
+    "threadUpdateFailed": "Failed to update thread. Try again.",
+    "empty": "No messages yet",
+    "missing": "This message was deleted or is unavailable.",
+    "loadFailed": "Failed to load messages. Try again.",
+    "editing": "Editing message",
+    "replyingTo": "Replying to {{ name }}",
+    "reply": "Replying to a message",
+    "muteFailed": "Failed to update mute settings. Try again.",
+    "savedTitle": "Saved",
+    "emptyPinned": "No pinned messages",
+    "emptySaved": "No saved messages",
+    "viewOriginal": "View original message",
+    "unsave": "Remove from saved",
+    "loadMoreFailed": "Failed to load messages. Try again."
+  },
+  "messages": {
+    "preview": {
+      "deleted": "Message deleted",
+      "someone": "Someone",
+      "system": {
+        "joined": "joined the group",
+        "left": "left the group",
+        "added": "invited {{ target }} to the group",
+        "removed": "removed {{ target }} from the group",
+        "pinned": "pinned a message",
+        "unpinned": "unpinned a message",
+        "threadPinned": "pinned a message in the thread",
+        "threadUnpinned": "unpinned a message in the thread"
+      },
+      "invite": "[Invite]",
+      "image": "[Photo]",
+      "video": "[Video]",
+      "audio": "[Voice]",
+      "file": "[File]",
+      "sticker": "[Sticker]",
+      "other": "[Attachment]"
+    },
+    "menu": {
+      "backToActions": "Back to message actions",
+      "actions": {
+        "reply": "Reply",
+        "thread": "Thread",
+        "pin": "Pin",
+        "unpin": "Unpin",
+        "copy": "Copy",
+        "edit": "Edit",
+        "save": "Save",
+        "favoriteSticker": "Favorite sticker",
+        "link": "Link",
+        "recall": "Recall",
+        "reactions": "View reactions"
+      },
+      "confirm": {
+        "recallTitle": "Recall message",
+        "unpinTitle": "Unpin message",
+        "pinTitle": "Pin message",
+        "recallAuthor": "Recall this message from {{ name }}?",
+        "recall": "Other members will no longer be able to see this message.",
+        "unpin": "Unpin this message?",
+        "pin": "After pinning, all members of this conversation will see it."
+      },
+      "notice": {
+        "copied": "Copied",
+        "saved": "Saved",
+        "pinned": "Pinned",
+        "unpinned": "Unpinned",
+        "recalled": "Recalled",
+        "reactionLimit": "Each person can add up to 5 reactions, and each message can have up to 50.",
+        "metadataFailed": "Failed to load permissions or pin status. Reopen the menu and try again.",
+        "failed": "Something went wrong. Try again."
+      }
+    },
+    "message": {
+      "edited": "Edited",
+      "sendFailed": "Failed to send. Tap to retry."
+    },
+    "composer": {
+      "tooManyAttachments": "You can add up to 20 attachments per message.",
+      "editMediaOnly": "You can only add photos or videos while editing.",
+      "processingFailed": "Processing failed. Check the file size, permissions, or network and try again.",
+      "placeholder": "Type a message",
+      "photos": "Photos",
+      "files": "Files",
+      "blockedTitle": "Can't send messages",
+      "blockedSelf": "You blocked this user. Unblock them to continue chatting.",
+      "blockedBy": "This user can't receive your messages right now.",
+      "notFriends": "You're no longer friends. Send a new friend request to continue chatting."
+    },
+    "invite": {
+      "groupInvite": "Group invite",
+      "failed": "Invite is invalid or couldn't load. Tap to retry.",
+      "joined": "Already joined. Open group.",
+      "view": "View group info and join"
+    },
+    "voice": {
+      "holdToSave": "Release to save",
+      "tooShort": "Recording is too short",
+      "errorTitle": "Can't record",
+      "unsupported": "This browser doesn't support recording. Try another browser.",
+      "permission": "Can't record. Check microphone permissions.",
+      "original": "Original file"
+    },
+    "media": {
+      "openOriginal": "Failed to load. Open the original file."
+    },
+    "thread": {
+      "replies": "{{ count }} replies"
+    }
+  },
+  "stickers": {
+    "title": "Stickers",
+    "count": "Stickers: {{ count }}",
+    "invalidUploadTitle": "Can't add sticker",
+    "invalidUploadMessage": "Choose an image or WebM video under 10 MB.",
+    "addTitle": "Add sticker",
+    "emojiPlaceholder": "Emoji, e.g. 🙂",
+    "optionalName": "Name (optional)",
+    "loadFailed": "Failed to load.",
+    "empty": "No stickers yet",
+    "add": "Add sticker",
+    "added": "Sticker added",
+    "addFailed": "Failed to add sticker",
+    "favorite": "Favorite sticker",
+    "unfavorite": "Remove favorite",
+    "favoriteOne": "Favorite",
+    "unsubscribe": "Unsubscribe",
+    "subscribeAll": "Subscribe to pack",
+    "removePack": "Remove pack",
+    "addPack": "Add pack",
+    "emojiLoadFailed": "Failed to load emojis. Close and try again.",
+    "createPack": "Create sticker pack",
+    "createFailed": "Failed to create sticker pack"
+  },
+  "emojiPicker": {
+    "loadFailed": "Failed to load emojis. Close and try again.",
+    "unsupported": "Your browser doesn't support color emoji.",
+    "loading": "Loading…",
+    "networkError": "Failed to load emojis. Reopen and try again.",
+    "search": "Search emoji",
+    "skinTone": "Choose a skin tone (currently {skinTone})",
+    "skinTones": {
+      "default": "Default",
+      "light": "Light",
+      "mediumLight": "Medium light",
+      "medium": "Medium",
+      "mediumDark": "Medium dark",
+      "dark": "Dark"
+    },
+    "categories": {
+      "custom": "Custom",
+      "smileys": "Smileys & emotion",
+      "people": "People & body",
+      "animals": "Animals & nature",
+      "food": "Food & drink",
+      "travel": "Travel & places",
+      "activities": "Activities",
+      "objects": "Objects",
+      "symbols": "Symbols",
+      "flags": "Flags"
+    }
+  },
+  "pwa": {
+    "notificationPrompt": {
+      "title": "Allow “Chahua” to send notifications?",
+      "message": "You can change this later in Settings.",
+      "decline": "Don't allow",
+      "allow": "Allow",
+      "failed": "Authorization failed. Please try again."
+    },
+    "notification": {
+      "invite": "[Invite]",
+      "sticker": "[Sticker]",
+      "audio": "[Voice message]",
+      "file": "[File]",
+      "image": "[Photo]",
+      "video": "[Video]",
+      "message": "[Message]"
+    },
+    "landing": {
+      "title": "Install Chahua",
+      "hero": {
+        "title": "Add Chahua to your home screen",
+        "install": "Once installed, it launches from your desktop like a native app.",
+        "share": "To recommend this to a friend, share the forum post URL instead of this page. This page's URL contains your account login information."
+      },
+      "browsers": {},
+      "android": {
+        "step3": "Choose “Install and create shortcut”, then tap “Install”.",
+        "step4": "Confirm the installation, then open it from your desktop.",
+        "note": "If the browser shows an install prompt, just tap Install.",
+        "step1Before": "Use",
+        "step1After": "to open this page",
+        "step2Before": "Tap the",
+        "step2After": "",
+        "note2Before": "If Chrome isn't available, use",
+        "note2Mid": "tap the",
+        "note2After": "and choose “Add to phone” (it may be on the second page)."
+      },
+      "ios": {
+        "step3": "Choose “Add to Home Screen” (it may be under “More”).",
+        "step4": "Confirm, then open it from your home screen.",
+        "step1Before": "Use",
+        "step1After": "to open this page",
+        "step2Before": "Tap the",
+        "step2Between": "and choose",
+        "step2After": ""
+      },
+      "windows": {
+        "step3": "Choose “More tools” > “Apps” > “Install this site as an app”.",
+        "step4": "Choose where to create the icon: taskbar, Start menu, or desktop.",
+        "note": "If the browser shows an install button in the address bar, just tap Install.",
+        "step1Before": "Use",
+        "step1After": "to open this page.",
+        "step2Before": "Tap the",
+        "step2After": ""
+      },
+      "macos": {
+        "step3": "Choose “Add to Dock”.",
+        "step4": "Confirm, then open it from the Dock or “Apps”.",
+        "step1Before": "Use",
+        "step1After": "to open this page",
+        "step2Before": "Tap"
+      },
+      "linux": {
+        "note": "This shouldn't be a problem for you :)"
+      },
+      "browserChrome": "Chrome",
+      "browserSafari": "Safari",
+      "browserEdge": "Edge",
+      "menu": "menu",
+      "share": "Share"
+    }
+  },
+  "reactions": {
+    "title": "Reactions",
+    "all": "All {{ count }}"
+  }
+}

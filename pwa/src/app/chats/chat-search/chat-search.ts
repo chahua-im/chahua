@@ -1,5 +1,6 @@
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonInfiniteScroll,
@@ -46,6 +47,7 @@ import { LoadError } from '../../ui/load-error/load-error';
     IonButton,
     IonSpinner,
     Message,
+    TranslocoPipe,
   ],
 })
 export class ChatSearch {

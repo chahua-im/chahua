@@ -1,10 +1,10 @@
 <ion-action-sheet
-  header="静音通知"
+  [header]="'chats.list.mute.title' | transloco"
   [buttons]="[
-    { text: '1 小时', role: 'selected', data: { seconds: 3600 } },
-    { text: '8 小时', role: 'selected', data: { seconds: 28800 } },
-    { text: '1 天', role: 'selected', data: { seconds: 86400 } },
-    { text: '7 天', role: 'selected', data: { seconds: 604800 } },
-    { text: '永久', role: 'selected', cssClass: 'mute-permanent', data: {} },
-    { text: '取消', role: 'cancel' },
+    { text: ('chats.list.mute.oneHour' | transloco), role: 'selected', data: { seconds: 3600 } },
+    { text: ('chats.list.mute.eightHours' | transloco), role: 'selected', data: { seconds: 28800 } },
+    { text: ('chats.list.mute.oneDay' | transloco), role: 'selected', data: { seconds: 86400 } },
+    { text: ('chats.list.mute.sevenDays' | transloco), role: 'selected', data: { seconds: 604800 } },
+    { text: ('chats.list.mute.forever' | transloco), role: 'selected', cssClass: 'mute-permanent', data: {} },
+    { text: ('common.cancel' | transloco), role: 'cancel' },
   ]" />

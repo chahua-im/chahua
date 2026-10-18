@@ -30,17 +30,14 @@
         @if (loading()) {
           <div class="page-loading login-loading"><ion-spinner /></div>
         } @else if (error()) {
-          <app-load-error message="暂时无法登录，请重试。" (retry)="initialize()" />
+          <app-load-error [message]="'app.loginFailed' | transloco" (retry)="initialize()" />
         }
       </ion-content>
     }
     <ion-toast
       [isOpen]="updates.promptOpen()"
-      message="新版本已准备好"
-      [buttons]="[
-        { text: '暂不更新', role: 'cancel' },
-        { text: '立即更新', handler: updates.reload },
-      ]"
+      [message]="updateReady()"
+      [buttons]="updateButtons()"
       (didDismiss)="updates.dismiss()" />
   </ion-app>
 }

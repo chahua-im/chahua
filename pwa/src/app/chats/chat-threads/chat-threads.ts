@@ -1,5 +1,6 @@
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonInfiniteScroll,
   IonInfiniteScrollContent,
@@ -18,7 +19,16 @@ import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-chat-threads',
   templateUrl: './chat-threads.html',
-  imports: [IonInfiniteScroll, IonInfiniteScrollContent, IonList, IonSpinner, LoadError, ChatListItem, MessagePreview],
+  imports: [
+    IonInfiniteScroll,
+    IonInfiniteScrollContent,
+    IonList,
+    IonSpinner,
+    LoadError,
+    ChatListItem,
+    MessagePreview,
+    TranslocoPipe,
+  ],
 })
 export class ChatThreads {
   readonly chatId = input.required<SnowflakeID>();

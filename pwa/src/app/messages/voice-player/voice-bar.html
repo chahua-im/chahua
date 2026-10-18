@@ -13,7 +13,7 @@
       @if (voice.dock(); as dock) {
         <button type="button" class="voice-label" (click)="locate()">
           <span class="voice-name">{{ dock.label }}</span>
-          <span class="voice-date">{{ dock.createdAt | date: 'M月d日 HH:mm' }}</span>
+          <span class="voice-date">{{ dock.createdAt | localDate: 'monthDayTime' }}</span>
         </button>
       }
       <span class="voice-time">{{ time(voice.elapsed()) }}</span>

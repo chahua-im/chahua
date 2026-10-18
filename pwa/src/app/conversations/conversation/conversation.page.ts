@@ -1,4 +1,4 @@
-import { DatePipe, DOCUMENT } from '@angular/common';
+import { DOCUMENT } from '@angular/common';
 import {
   afterNextRender,
   afterRenderEffect,
@@ -17,7 +17,9 @@ import {
   viewChildren,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
+import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import {
   IonBackButton,
   IonBadge,
@@ -121,7 +123,8 @@ type ScrollPosition =
     AvatarColor,
     AvatarTextPipe,
     ContentScrollbars,
-    DatePipe,
+    LocalDatePipe,
+    TranslocoPipe,
     ChatDetails,
     ChatMute,
     ChatAvatar,

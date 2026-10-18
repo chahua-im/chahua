@@ -11,6 +11,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonIcon, IonSpinner, ModalController } from '@ionic/angular';
 import {
   chevronBackOutline,
@@ -34,7 +35,7 @@ export interface ViewerMedia {
   selector: 'app-media-viewer',
   templateUrl: './media-viewer.html',
   styleUrl: './media-viewer.scss',
-  imports: [IonIcon, IonSpinner],
+  imports: [IonIcon, IonSpinner, TranslocoPipe],
   host: { class: 'ion-page', '(document:keydown)': 'key($event)' },
 })
 export class MediaViewer {

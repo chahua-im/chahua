@@ -1,11 +1,12 @@
 import { Component, inject, signal, viewChild } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonActionSheet } from '@ionic/angular';
 import type { SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../chat-store';
 
 @Component({
   selector: 'app-chat-mute',
-  imports: [IonActionSheet],
+  imports: [IonActionSheet, TranslocoPipe],
   templateUrl: './chat-mute.html',
 })
 export class ChatMute {

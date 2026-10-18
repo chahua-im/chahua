@@ -50,7 +50,7 @@
         @if (state.status !== Status.Ready) {
           <div class="upload-status">
             @if (state.status === Status.Failed) {
-              <ion-button size="small" (click)="upload.retry()">重试</ion-button>
+              <ion-button size="small" (click)="upload.retry()">{{ 'common.retry' | transloco }}</ion-button>
             } @else {
               <app-upload-progress [value]="state.progress" />
             }
@@ -64,13 +64,13 @@
   </div>
 }
 @if (tooMany()) {
-  <p class="ion-padding-horizontal">每条消息最多添加20个附件。</p>
+  <p class="ion-padding-horizontal">{{ 'messages.composer.tooManyAttachments' | transloco }}</p>
 }
 @if (unsupported()) {
-  <p class="ion-padding-horizontal">编辑消息时只能添加图片或视频。</p>
+  <p class="ion-padding-horizontal">{{ 'messages.composer.editMediaOnly' | transloco }}</p>
 }
 @if (error()) {
-  <p class="ion-padding-horizontal">处理失败，请检查文件大小、权限或网络后重试。</p>
+  <p class="ion-padding-horizontal">{{ 'messages.composer.processingFailed' | transloco }}</p>
 }
 <input
   #photos
@@ -88,7 +88,7 @@
     <ng-content />
     <div class="input-row">
       <ion-textarea
-        placeholder="输入消息"
+        [placeholder]="'messages.composer.placeholder' | transloco"
         [autoGrow]="true"
         [rows]="1"
         [value]="display().text"
@@ -132,11 +132,11 @@
     <div class="attachment-panel">
       <button type="button" (click)="photos.click()">
         <span><ion-icon [icon]="icons.imageOutline" /></span>
-        照片
+        {{ 'messages.composer.photos' | transloco }}
       </button>
       <button type="button" [disabled]="!!editing()" (click)="filesInput.click()">
         <span><ion-icon [icon]="icons.documentOutline" /></span>
-        文件
+        {{ 'messages.composer.files' | transloco }}
       </button>
     </div>
   }
@@ -147,13 +147,13 @@
 
 <ion-alert
   [isOpen]="blocked()"
-  header="无法发送消息"
+  [header]="'messages.composer.blockedTitle' | transloco"
   [message]="
     relationship()?.blocking
-      ? '你已将对方拉黑，解除拉黑后可以继续聊天。'
+      ? ('messages.composer.blockedSelf' | transloco)
       : relationship()?.blockedBy
-        ? '对方暂时无法接收你的消息。'
-        : '你们已不是好友，重新添加好友后可以继续聊天。'
+        ? ('messages.composer.blockedBy' | transloco)
+        : ('messages.composer.notFriends' | transloco)
   "
-  [buttons]="['知道了']"
+  [buttons]="['common.ok' | transloco]"
   (didDismiss)="blocked.set(false)" />

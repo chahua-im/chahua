@@ -1,5 +1,6 @@
 import { Service } from '@angular/core';
 import { isColorMode } from '../settings/color-mode';
+import { isAppLocale } from '../settings/locale';
 import type { Draft } from '../conversations/draft-store';
 
 const DATABASE = 'wetty';
@@ -42,6 +43,8 @@ export class LegacyMigration {
       }
       const colorMode = settings?.['colorMode'];
       if (isColorMode(colorMode)) saveMissing('chahua.preferences.colorMode', colorMode);
+      const locale = settings?.['locale'];
+      if (isAppLocale(locale)) saveMissing('chahua.preferences.locale', locale);
       if (Array.isArray(settings?.['recentReactions'])) {
         saveMissing(
           'chahua.preferences.recentReactions',

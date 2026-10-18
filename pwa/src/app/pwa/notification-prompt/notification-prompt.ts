@@ -1,4 +1,5 @@
 import { Component, inject, signal, TemplateRef, viewChild, ViewContainerRef } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonAlert, IonSpinner, IonToast } from '@ionic/angular';
 import { PushNotifications } from '../push-notifications';
 
@@ -6,7 +7,7 @@ import { PushNotifications } from '../push-notifications';
   selector: 'app-notification-prompt',
   templateUrl: './notification-prompt.html',
   styleUrl: './notification-prompt.scss',
-  imports: [IonAlert, IonSpinner, IonToast],
+  imports: [IonAlert, IonSpinner, IonToast, TranslocoPipe],
 })
 export class NotificationPrompt {
   private readonly notifications = inject(PushNotifications);

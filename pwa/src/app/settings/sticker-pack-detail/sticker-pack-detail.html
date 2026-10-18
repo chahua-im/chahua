@@ -3,10 +3,10 @@
     <ion-buttons slot="start">
       <ion-button (click)="modals.dismiss()">
         <ion-icon slot="start" [icon]="backIcon"></ion-icon>
-        返回
+        {{ 'common.back' | transloco }}
       </ion-button>
     </ion-buttons>
-    <ion-title>{{ pack()?.name || '贴纸包' }}</ion-title>
+    <ion-title>{{ pack()?.name || ('settings.stickerPack.title' | transloco) }}</ion-title>
     <ion-buttons slot="end">
       @if (pack(); as pack) {
         @if (owned()) {
@@ -17,7 +17,9 @@
             <ion-icon slot="icon-only" [icon]="icons.trashOutline"></ion-icon>
           </ion-button>
         } @else {
-          <ion-button [disabled]="busy()" color="danger" (click)="unsubscribe()">取消订阅</ion-button>
+          <ion-button [disabled]="busy()" color="danger" (click)="unsubscribe()">
+            {{ 'settings.stickerPack.unsubscribe' | transloco }}
+          </ion-button>
         }
       }
     </ion-buttons>
@@ -27,7 +29,7 @@
   @if (pack(); as current) {
     <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event)" />
     @if (owned()) {
-      <p class="hint">点按贴纸可将其从贴纸包中移除。</p>
+      <p class="hint">{{ 'settings.stickerPack.removeHint' | transloco }}</p>
     }
     <div class="grid">
       @if (owned()) {
@@ -51,7 +53,7 @@
       }
     </div>
   } @else if (error()) {
-    <app-load-error message="加载失败，请重试。" (retry)="retry()" />
+    <app-load-error [message]="'common.loadFailed' | transloco" (retry)="retry()" />
   } @else {
     <div class="page-loading"><ion-spinner /></div>
   }

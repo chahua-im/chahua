@@ -1,7 +1,7 @@
 <ion-header>
   <ion-toolbar>
-    <ion-buttons slot="start"><ion-back-button text="返回" defaultHref="/chats" /></ion-buttons>
-    <ion-title>收藏</ion-title>
+    <ion-buttons slot="start"><ion-back-button [text]="'common.back' | transloco" defaultHref="/chats" /></ion-buttons>
+    <ion-title>{{ 'conversation.savedTitle' | transloco }}</ion-title>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">

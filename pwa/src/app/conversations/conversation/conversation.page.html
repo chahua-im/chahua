@@ -1,7 +1,7 @@
 <ion-header>
   <ion-toolbar>
     <ion-buttons slot="start" class="ion-hide-md-up">
-      <ion-back-button text="返回" [defaultHref]="backHref()"></ion-back-button>
+      <ion-back-button [text]="'common.back' | transloco" [defaultHref]="backHref()"></ion-back-button>
     </ion-buttons>
     @if (threadId()) {
       <ion-buttons slot="start" class="ion-hide-md-down">
@@ -18,10 +18,10 @@
             @if (threadRoot(); as root) {
               <app-message-preview [message]="root" />
             } @else {
-              话题
+              {{ 'conversation.thread' | transloco }}
             }
           } @else {
-            {{ chatTitle().name ?? (chatTitle().isDm ? '私聊' : '会话') }}
+            {{ chatTitle().name ?? ((chatTitle().isDm ? 'chats.content.dm' : 'conversation.chat') | transloco) }}
           }
         </span>
       </span>
@@ -83,7 +83,7 @@
           <ion-spinner class="pin-loading"></ion-spinner>
         }
         <span class="pinned-title">
-          置顶消息
+          {{ 'conversation.pinned' | transloco }}
           @if (visiblePins().length > 1) {
             · {{ selectedPinIndex() + 1 }}/{{ visiblePins().length }}
           }
@@ -101,7 +101,7 @@
       @if (pins().loading()) {
         <ion-spinner></ion-spinner>
       } @else {
-        <ion-button fill="clear" (click)="loadPins()">置顶消息加载失败，重试</ion-button>
+        <ion-button fill="clear" (click)="loadPins()">{{ 'conversation.pinnedLoadFailed' | transloco }}</ion-button>
       }
     </ion-toolbar>
   }
@@ -137,14 +137,17 @@
     class="floating-date"
     [class.scrolling]="scrolling.moving() && visibleDate()"
     [class.colliding]="dateColliding() || !visibleDate()">
-    {{ visibleDate() | date: 'yyyy年M月d日' }}
+    {{ visibleDate() | localDate: 'date' }}
   </span>
   <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
   <div #messageContent>
     @if (threadError()) {
       <app-load-error
         compact
-        [message]="threadError() === ThreadError.Load ? '话题状态加载失败，请重试。' : '话题更新失败，请重试。'"
+        [message]="
+          (threadError() === ThreadError.Load ? 'conversation.threadLoadFailed' : 'conversation.threadUpdateFailed')
+            | transloco
+        "
         (retry)="loadSubscription()" />
     }
     @if (conversation.page()?.olderCursor) {
@@ -171,11 +174,11 @@
             [style.visibility]="
               scrolling.moving() && !dateColliding() && hiddenDateKey() === row.key ? 'hidden' : 'visible'
             ">
-            <span>{{ row.message.createdAt | date: 'yyyy年M月d日' }}</span>
+            <span>{{ row.message.createdAt | localDate: 'date' }}</span>
           </p>
         }
         @if (firstUnreadId() && row.message.id === firstUnreadId()) {
-          <p #unreadSeparator class="unread-separator">以下是未读消息</p>
+          <p #unreadSeparator class="unread-separator">{{ 'conversation.unreadBelow' | transloco }}</p>
         }
         <app-message
           [stickyAvatar]="stickyRow() === index"
@@ -202,7 +205,7 @@
           (openThread)="openThread($event)"></app-message>
       } @empty {
         @if (conversation.page()) {
-          <p class="ion-text-center">暂无消息</p>
+          <p class="ion-text-center">{{ 'conversation.empty' | transloco }}</p>
         }
       }
     </div>
@@ -241,11 +244,12 @@
       <app-load-error
         [compact]="!!conversation.page()"
         [message]="
-          conversation.error() === ConversationError.Missing
-            ? '这条消息已删除或无法查看。'
+          (conversation.error() === ConversationError.Missing
+            ? 'conversation.missing'
             : conversation.error() === ConversationError.Open
-              ? '消息加载失败，请重试。'
-              : '加载消息失败，请重试。'
+              ? 'conversation.loadFailed'
+              : 'conversation.loadMoreFailed'
+          ) | transloco
         "
         [retryable]="conversation.error() !== ConversationError.Missing"
         (retry)="retry()" />
@@ -284,7 +288,7 @@
     @if (editing(); as edit) {
       <div class="reply-context">
         <div class="reply-description">
-          <strong>编辑消息</strong>
+          <strong>{{ 'conversation.editing' | transloco }}</strong>
           <span><app-message-preview [message]="edit" /></span>
         </div>
         <button type="button" class="reply-close" (click)="cancelEdit()">
@@ -298,7 +302,9 @@
           class="reply-description"
           [disabled]="!!pendingNavigation()"
           (click)="goTo({ type: ConversationTargetKind.Message, messageId: message.id })">
-          <strong>正在回复 {{ message.sender.name ?? message.sender.uid }}</strong>
+          <strong>
+            {{ 'conversation.replyingTo' | transloco: { name: message.sender.name ?? message.sender.uid } }}
+          </strong>
           <span><app-message-preview [message]="message" /></span>
         </button>
         <button type="button" class="reply-close" (click)="cancelReply()">
@@ -307,7 +313,9 @@
       </div>
     } @else if (savedReplyId()) {
       <div class="reply-context">
-        <div class="reply-description"><strong>回复消息</strong></div>
+        <div class="reply-description">
+          <strong>{{ 'conversation.reply' | transloco }}</strong>
+        </div>
         <button type="button" class="reply-close" (click)="cancelReply()">
           <ion-icon [icon]="closeIcon" />
         </button>
@@ -340,4 +348,4 @@
   (openThread)="openThread($event)"></app-message-menu>
 
 <app-chat-mute />
-<ion-toast #muteError message="静音设置失败，请重试" [duration]="3000" />
+<ion-toast #muteError [message]="'conversation.muteFailed' | transloco" [duration]="3000" />

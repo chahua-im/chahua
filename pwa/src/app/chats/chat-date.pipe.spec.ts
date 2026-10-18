@@ -1,14 +1,24 @@
+import { signal } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { Localization } from '../i18n/localization';
 import { ChatDatePipe } from './chat-date.pipe';
 
 const day = 24 * 60 * 60 * 1000;
 const now = new Date(2026, 8, 7, 12);
 
 describe('ChatDatePipe', () => {
-  const pipe = new ChatDatePipe();
+  let pipe: ChatDatePipe;
   const local = (date: Date, options: Intl.DateTimeFormatOptions) =>
-    new Intl.DateTimeFormat(undefined, options).format(date);
+    new Intl.DateTimeFormat('en', options).format(date);
 
   beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        ChatDatePipe,
+        { provide: Localization, useValue: { locale: signal('en') } as unknown as Localization },
+      ],
+    });
+    pipe = TestBed.inject(ChatDatePipe);
     vi.useFakeTimers();
     vi.setSystemTime(now);
   });

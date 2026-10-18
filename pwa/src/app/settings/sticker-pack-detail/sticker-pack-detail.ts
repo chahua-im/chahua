@@ -1,5 +1,6 @@
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import {
   AlertController,
   IonButton,
@@ -19,11 +20,7 @@ import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
-import {
-  detectFileMimeType,
-  isHeicLikeMedia,
-  withDetectedMimeType,
-} from '../../messages/media-processing/file-type';
+import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../../messages/media-processing/file-type';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -45,6 +42,7 @@ import { StickerPreferences } from '../sticker-preferences';
     IonTitle,
     IonToast,
     IonToolbar,
+    TranslocoPipe,
   ],
   host: { class: 'ion-page' },
   styles: `
@@ -104,6 +102,7 @@ import { StickerPreferences } from '../sticker-preferences';
 export class StickerPackDetail {
   readonly packId = input.required<SnowflakeID>();
   private readonly api = inject(StickersService);
+  private readonly transloco = inject(TranslocoService);
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
   private readonly alerts = inject(AlertController);
@@ -142,11 +141,18 @@ export class StickerPackDetail {
     const pack = this.pack();
     if (!pack || this.busy()) return;
     const alert = await this.alerts.create({
-      header: '重命名贴纸包',
-      inputs: [{ name: 'name', type: 'text', value: pack.name, placeholder: '贴纸包名称' }],
+      header: this.transloco.translate('settings.stickerPack.renameTitle'),
+      inputs: [
+        {
+          name: 'name',
+          type: 'text',
+          value: pack.name,
+          placeholder: this.transloco.translate('settings.stickerPack.namePlaceholder'),
+        },
+      ],
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '保存', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.save'), role: 'confirm' },
       ],
     });
     await alert.present();
@@ -156,9 +162,9 @@ export class StickerPackDetail {
     this.busy.set(true);
     try {
       this.pack.set(await firstValueFrom(this.api.patchPack(pack.id, { name })));
-      this.notice.set('贴纸包已重命名');
+      this.notice.set(this.transloco.translate('settings.stickerPack.renamed'));
     } catch {
-      this.notice.set('重命名失败，请重试。');
+      this.notice.set(this.transloco.translate('settings.stickerPack.renameFailed'));
     } finally {
       this.busy.set(false);
     }
@@ -168,11 +174,11 @@ export class StickerPackDetail {
     const pack = this.pack();
     if (!pack || this.busy()) return;
     const alert = await this.alerts.create({
-      header: '删除贴纸包',
-      message: '删除这个贴纸包吗？贴纸本身会保留，但这个贴纸包以及其中的收录关系将被移除。',
+      header: this.transloco.translate('settings.stickerPack.deleteTitle'),
+      message: this.transloco.translate('settings.stickerPack.deleteMessage'),
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '删除', role: 'destructive' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.delete'), role: 'destructive' },
       ],
     });
     await alert.present();
@@ -184,7 +190,7 @@ export class StickerPackDetail {
       await this.modals.dismiss();
     } catch {
       this.busy.set(false);
-      this.notice.set('删除失败，请重试。');
+      this.notice.set(this.transloco.translate('settings.stickerPack.deleteFailed'));
     }
   }
 
@@ -192,11 +198,11 @@ export class StickerPackDetail {
     const pack = this.pack();
     if (!pack || this.busy()) return;
     const alert = await this.alerts.create({
-      header: '取消订阅',
-      message: '要将这个表情包从你的收藏中移除吗？',
+      header: this.transloco.translate('settings.stickerPack.unsubscribe'),
+      message: this.transloco.translate('settings.stickerPack.unsubscribeMessage'),
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '取消订阅', role: 'destructive' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('settings.stickerPack.unsubscribe'), role: 'destructive' },
       ],
     });
     await alert.present();
@@ -208,7 +214,7 @@ export class StickerPackDetail {
       await this.modals.dismiss();
     } catch {
       this.busy.set(false);
-      this.notice.set('取消订阅失败，请重试。');
+      this.notice.set(this.transloco.translate('settings.stickerPack.unsubscribeFailed'));
     }
   }
 
@@ -216,11 +222,11 @@ export class StickerPackDetail {
     const pack = this.pack();
     if (!pack || this.busy()) return;
     const alert = await this.alerts.create({
-      header: '移除贴纸',
-      message: '要从表情包中移除此表情吗？',
+      header: this.transloco.translate('settings.stickerPack.removeStickerTitle'),
+      message: this.transloco.translate('settings.stickerPack.removeStickerMessage'),
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '移除', role: 'destructive' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.remove'), role: 'destructive' },
       ],
     });
     await alert.present();
@@ -236,7 +242,7 @@ export class StickerPackDetail {
           stickers: current.stickers.filter((item) => item.id !== sticker.id),
         });
     } catch {
-      this.notice.set('移除失败，请重试。');
+      this.notice.set(this.transloco.translate('settings.stickerPack.removeStickerFailed'));
     } finally {
       this.busy.set(false);
     }
@@ -255,22 +261,22 @@ export class StickerPackDetail {
       file.size > 10 * 1024 * 1024
     ) {
       const invalid = await this.alerts.create({
-        header: '无法添加贴纸',
-        message: '请选择 10 MB 以内的图片或 WebM 视频。',
-        buttons: ['知道了'],
+        header: this.transloco.translate('stickers.invalidUploadTitle'),
+        message: this.transloco.translate('stickers.invalidUploadMessage'),
+        buttons: [this.transloco.translate('common.ok')],
       });
       await invalid.present();
       return;
     }
     const alert = await this.alerts.create({
-      header: '添加贴纸',
+      header: this.transloco.translate('stickers.addTitle'),
       inputs: [
-        { name: 'emoji', placeholder: '对应表情，例如 🙂' },
-        { name: 'name', placeholder: '名称（选填）' },
+        { name: 'emoji', placeholder: this.transloco.translate('stickers.emojiPlaceholder') },
+        { name: 'name', placeholder: this.transloco.translate('stickers.optionalName') },
       ],
       buttons: [
-        { text: '取消', role: 'cancel' },
-        { text: '上传', role: 'confirm' },
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('common.upload'), role: 'confirm' },
       ],
     });
     await alert.present();
@@ -293,9 +299,9 @@ export class StickerPackDetail {
           stickerCount: current.stickerCount + 1,
           stickers: [...current.stickers, sticker],
         });
-      this.notice.set('贴纸已添加');
+      this.notice.set(this.transloco.translate('stickers.added'));
     } catch {
-      this.notice.set('添加表情失败');
+      this.notice.set(this.transloco.translate('stickers.addFailed'));
     } finally {
       this.busy.set(false);
     }

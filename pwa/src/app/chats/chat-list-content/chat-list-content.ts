@@ -10,6 +10,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonContent,
   IonInfiniteScroll,
@@ -74,6 +75,7 @@ enum ListRowKind {
     IonText,
     ChatListItem,
     MessagePreview,
+    TranslocoPipe,
   ],
 })
 export class ChatListContent {

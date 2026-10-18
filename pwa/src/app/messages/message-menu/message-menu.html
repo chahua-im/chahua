@@ -10,7 +10,9 @@
         <div class="menu-surface" (click)="dismissBackdrop($event)">
           @if (choosingEmoji() && serverMessage(); as serverMessage) {
             <div class="emoji-panel">
-              <button type="button" class="picker-back" (click)="choosingEmoji.set(false)">返回消息操作</button>
+              <button type="button" class="picker-back" (click)="choosingEmoji.set(false)">
+                {{ 'messages.menu.backToActions' | transloco }}
+              </button>
               @defer {
                 <app-emoji-picker (chosen)="reactTo(serverMessage, $event)"></app-emoji-picker>
               } @loading (after 100ms) {
@@ -18,7 +20,7 @@
                   <ion-spinner></ion-spinner>
                 </div>
               } @error {
-                <p>表情加载失败，请关闭后重试。</p>
+                <p>{{ 'emojiPicker.loadFailed' | transloco }}</p>
               }
             </div>
           } @else {
@@ -62,34 +64,34 @@
                       <span>
                         @switch (slot.action) {
                           @case (Action.Reply) {
-                            回复
+                            {{ 'messages.menu.actions.reply' | transloco }}
                           }
                           @case (Action.Thread) {
-                            话题
+                            {{ 'messages.menu.actions.thread' | transloco }}
                           }
                           @case (Action.Pin) {
-                            {{ pinned() ? '取消置顶' : '置顶' }}
+                            {{ (pinned() ? 'messages.menu.actions.unpin' : 'messages.menu.actions.pin') | transloco }}
                           }
                           @case (Action.Copy) {
-                            复制
+                            {{ 'messages.menu.actions.copy' | transloco }}
                           }
                           @case (Action.Edit) {
-                            编辑
+                            {{ 'messages.menu.actions.edit' | transloco }}
                           }
                           @case (Action.Save) {
-                            收藏
+                            {{ 'messages.menu.actions.save' | transloco }}
                           }
                           @case (Action.FavoriteSticker) {
-                            收藏表情
+                            {{ 'messages.menu.actions.favoriteSticker' | transloco }}
                           }
                           @case (Action.Link) {
-                            链接
+                            {{ 'messages.menu.actions.link' | transloco }}
                           }
                           @case (Action.Recall) {
-                            撤回
+                            {{ 'messages.menu.actions.recall' | transloco }}
                           }
                           @case (Action.Reactions) {
-                            查看表态
+                            {{ 'messages.menu.actions.reactions' | transloco }}
                           }
                         }
                       </span>
@@ -106,19 +108,26 @@
 </ion-modal>
 <ion-alert
   [isOpen]="!!confirmation()"
-  [header]="confirmation()?.action === Action.Recall ? '撤回消息' : confirmation()?.pinned ? '取消置顶' : '置顶消息'"
+  [header]="
+    (confirmation()?.action === Action.Recall
+      ? 'messages.menu.confirm.recallTitle'
+      : confirmation()?.pinned
+        ? 'messages.menu.confirm.unpinTitle'
+        : 'messages.menu.confirm.pinTitle'
+    ) | transloco
+  "
   [message]="
     confirmation()?.action === Action.Recall
       ? recallAuthor()
-        ? '确定要撤回 ' + recallAuthor() + ' 的这条消息吗？'
-        : '撤回后，其他成员将无法查看这条消息。'
+        ? ('messages.menu.confirm.recallAuthor' | transloco: { name: recallAuthor() })
+        : ('messages.menu.confirm.recall' | transloco)
       : confirmation()?.pinned
-        ? '确定取消这条消息的置顶？'
-        : '置顶后，此会话的成员都能看到这条置顶消息。'
+        ? ('messages.menu.confirm.unpin' | transloco)
+        : ('messages.menu.confirm.pin' | transloco)
   "
   [buttons]="[
-    { text: '取消', role: 'cancel' },
-    { text: '确认', role: 'confirm' },
+    { text: ('common.cancel' | transloco), role: 'cancel' },
+    { text: ('common.confirm' | transloco), role: 'confirm' },
   ]"
   (didDismiss)="confirm($event)"></ion-alert>
 <ion-toast
@@ -127,18 +136,18 @@
   (didDismiss)="notice.set(undefined)"
   [message]="
     notice() === Notice.Copied
-      ? '已复制'
+      ? ('messages.menu.notice.copied' | transloco)
       : notice() === Notice.Saved
-        ? '已收藏'
+        ? ('messages.menu.notice.saved' | transloco)
         : notice() === Notice.Pinned
-          ? '已置顶'
+          ? ('messages.menu.notice.pinned' | transloco)
           : notice() === Notice.Unpinned
-            ? '已取消置顶'
+            ? ('messages.menu.notice.unpinned' | transloco)
             : notice() === Notice.Recalled
-              ? '已撤回'
+              ? ('messages.menu.notice.recalled' | transloco)
               : notice() === Notice.ReactionLimit
-                ? '每人最多添加 5 种表态，每条消息最多 50 种。'
+                ? ('messages.menu.notice.reactionLimit' | transloco)
                 : notice() === Notice.MetadataFailed
-                  ? '操作权限或置顶状态加载失败，请重新打开菜单重试。'
-                  : '操作失败，请重试。'
+                  ? ('messages.menu.notice.metadataFailed' | transloco)
+                  : ('messages.menu.notice.failed' | transloco)
   "></ion-toast>

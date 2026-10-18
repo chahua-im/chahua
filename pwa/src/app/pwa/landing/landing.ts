@@ -1,4 +1,5 @@
 import { Component, signal } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonCard,
   IonCardContent,
@@ -22,6 +23,7 @@ import {
   shareOutline,
 } from 'ionicons/icons';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+
 enum LandingPlatform {
   android = 'android',
   ios = 'ios',
@@ -29,6 +31,7 @@ enum LandingPlatform {
   macos = 'macos',
   linux = 'linux',
 }
+
 function platform() {
   if (isPlatform('ios')) return LandingPlatform.ios;
   if (isPlatform('android')) return LandingPlatform.android;
@@ -40,6 +43,7 @@ function platform() {
   if (name.includes('linux') || name.includes('x11')) return LandingPlatform.linux;
   return LandingPlatform.android;
 }
+
 @Component({
   selector: 'app-landing',
   templateUrl: './landing.html',
@@ -56,6 +60,7 @@ function platform() {
     IonText,
     IonTitle,
     IonToolbar,
+    TranslocoPipe,
   ],
   host: { class: 'ion-page' },
 })
@@ -72,6 +77,7 @@ export class Landing {
     menuOutline,
     shareOutline,
   };
+
   protected select(value: unknown) {
     if (Object.values(LandingPlatform).includes(value as LandingPlatform)) this.selected.set(value as LandingPlatform);
   }

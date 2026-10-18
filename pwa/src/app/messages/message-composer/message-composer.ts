@@ -14,6 +14,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { IonAlert, IonButton, IonIcon, IonItem, IonLabel, IonList, IonTextarea, isPlatform } from '@ionic/angular';
 import {
   addCircleOutline,
@@ -64,6 +65,7 @@ enum Panel {
   templateUrl: './message-composer.html',
   styleUrl: './message-composer.scss',
   imports: [
+    TranslocoPipe,
     NgTemplateOutlet,
     ChatAvatar,
     IonAlert,
@@ -196,7 +198,9 @@ export class MessageComposer {
     return this.textarea()?.setFocus();
   }
   blur() {
-    void this.textarea()?.getInputElement().then((input) => input.blur());
+    void this.textarea()
+      ?.getInputElement()
+      .then((input) => input.blur());
   }
   reset() {
     for (const upload of this.uploads()) upload.dispose();

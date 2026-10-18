@@ -1,4 +1,5 @@
 import { ChangeDetectorRef, Component, inject, signal } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, NavController } from '@ionic/angular';
@@ -13,7 +14,18 @@ import { listSelection, ListTab, type ListSelection } from '../list-tabs';
   selector: 'app-chats',
   templateUrl: './chat-list.page.html',
   styleUrl: './chat-list.page.scss',
-  imports: [ContentScrollbars, ChatList, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar, RouterOutlet, VoiceBar],
+  imports: [
+    ContentScrollbars,
+    ChatList,
+    IonContent,
+    IonHeader,
+    IonIcon,
+    IonTitle,
+    IonToolbar,
+    RouterOutlet,
+    VoiceBar,
+    TranslocoPipe,
+  ],
 })
 export class ChatListPage {
   private readonly nav = inject(NavController);
