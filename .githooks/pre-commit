@@ -21,11 +21,11 @@ for file in "${staged_files[@]}"; do
         backend/*.rs|backend/*/*.rs)
             backend_rust_files+=("${file#backend/}")
             ;;
-        wetty-chat-mobile/src/*/*.js|wetty-chat-mobile/src/*/*.jsx|wetty-chat-mobile/src/*/*.ts|wetty-chat-mobile/src/*/*.tsx|wetty-chat-mobile/src/*/*.json|wetty-chat-mobile/src/*/*.scss|wetty-chat-mobile/src/*/*.css)
-            mobile_format_files+=("${file#wetty-chat-mobile/}")
+        pwa/src/*/*.js|pwa/src/*/*.jsx|pwa/src/*/*.ts|pwa/src/*/*.tsx|pwa/src/*/*.json|pwa/src/*/*.scss|pwa/src/*/*.css)
+            mobile_format_files+=("${file#pwa/}")
             ;;
-        wetty-chat-mobile/src/*.js|wetty-chat-mobile/src/*.jsx|wetty-chat-mobile/src/*.ts|wetty-chat-mobile/src/*.tsx|wetty-chat-mobile/src/*.json|wetty-chat-mobile/src/*.scss|wetty-chat-mobile/src/*.css)
-            mobile_format_files+=("${file#wetty-chat-mobile/}")
+        pwa/src/*.js|pwa/src/*.jsx|pwa/src/*.ts|pwa/src/*.tsx|pwa/src/*.json|pwa/src/*.scss|pwa/src/*.css)
+            mobile_format_files+=("${file#pwa/}")
             ;;
     esac
 done
@@ -41,9 +41,9 @@ fi
 
 if [ "${#mobile_format_files[@]}" -gt 0 ]; then
     echo "pre-commit: checking Prettier formatting for staged frontend files"
-    if ! (cd wetty-chat-mobile && npx prettier --check "${mobile_format_files[@]}"); then
+    if ! (cd pwa && npx prettier --check "${mobile_format_files[@]}"); then
         echo "pre-commit: Prettier formatting check failed."
-        echo "Run: (cd wetty-chat-mobile && npx prettier --write ${mobile_format_files[*]})"
+        echo "Run: (cd pwa && npx prettier --write ${mobile_format_files[*]})"
         exit 1
     fi
 fi

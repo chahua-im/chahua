@@ -9,7 +9,7 @@ This guide gets a full local chat stack running on **macOS** or **Linux** with *
 
 Recommended layout for day-to-day work: **Postgres (and optionally object storage) in Docker; backend and frontend outside Docker.**
 
-Commands that differ by OS are labeled **macOS** or **Linux**. Shared steps (clone, `.env`, `cargo run`, seed SQL, Vite) are the same on both.
+Commands that differ by OS are labeled **macOS** or **Linux**. Shared steps (clone, `.env`, `cargo run`, seed SQL, the frontend dev server) are the same on both.
 
 ---
 
@@ -20,7 +20,7 @@ Commands that differ by OS are labeled **macOS** or **Linux**. Shared steps (clo
 | Git | Clone the repo | any recent |
 | Docker + Docker Compose | Run PostgreSQL | Docker 24+ |
 | Rust (`rustc` / `cargo`) | Build & run the API | **1.95** (matches CI) |
-| Node.js + npm | Frontend Vite app | **^20.19** or **≥22.12** |
+| Node.js + npm | Frontend Angular app | **^20.19** or **≥22.12** |
 | `openssl` | Generate JWT signing key | usually preinstalled / via Homebrew |
 | `psql` (optional but helpful) | Insert the seed user | `libpq` / `postgresql-client` |
 | Xcode Command Line Tools (macOS) | Compilers / headers for native crates | — |
@@ -69,7 +69,7 @@ psql --version
 **How to read the results**
 
 - `command not found` → install that tool in the next section.
-- Node must be `v20.19.x` or `v22.12+` (Vite 7 requirement). `v20.18` or `v21` will fail.
+- Node must be `v20.19.x` or `v22.12+` (Angular CLI requirement). `v20.18` or `v21` will fail.
 - Rust should be recent; if `cargo run` later fails on language features, update with `rustup update`.
 - On macOS, if `git` or `clang` is missing, run `xcode-select --install` first.
 
@@ -244,7 +244,7 @@ curl -sS -X POST http://localhost:3000/auth/dev-session \
   -d '{"uid":1}'
 ```
 
-The response is `{"token":"<jwt>"}`. Use that value as `Authorization: Bearer <jwt>` for API calls. The Vite development client performs this bootstrap automatically for its configured local uid.
+The response is `{"token":"<jwt>"}`. Use that value as `Authorization: Bearer <jwt>` for API calls. The development client performs this bootstrap automatically for its configured local uid.
 
 ### 4.4 Web Push (VAPID) keys
 
@@ -289,13 +289,13 @@ S3_BASE_URL=http://127.0.0.1:9000/wetty-chat-local-dev
 
 ### 4.6 Optional CORS
 
-If you ever call the API from a browser origin other than the Vite proxy, set:
+If you ever call the API from a browser origin other than the dev proxy, set:
 
 ```bash
-CORS_ALLOWED_ORIGINS=http://localhost:5173
+CORS_ALLOWED_ORIGINS=http://localhost:4300
 ```
 
-With the default Vite proxy you usually do not need this.
+With the default dev proxy you usually do not need this.
 
 Discuz avatar variables and Meilisearch can stay commented out for a first run.
 
@@ -371,18 +371,18 @@ psql "postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat" -c \
 In a new terminal:
 
 ```bash
-cd wetty-chat-mobile
-cp .env.example .env   # optional; only needed to override the API proxy
+cd pwa
+cp .env.example .env.local   # optional; only needed for a fixed dev identity
 npm ci
 npm run dev
 ```
 
-Open the URL Vite prints (typically http://localhost:5173).
+Open http://localhost:4300.
 
 How the pieces connect:
 
-- Dev API calls go to `/_api/...` on the Vite origin.
-- Vite proxies `/_api` → `http://localhost:3000` (override with `API_PROXY_TARGET` in `.env` if needed).
+- Dev API calls go to `/_api/...` on the dev server origin.
+- The dev server proxies `/_api` → `http://localhost:3000` (override with `API_PROXY_TARGET`; HTTP and WebSocket both apply).
 - In development, the client requests `POST /auth/dev-session` for its configured local uid and sends `X-Client-Id` with that bootstrap request.
 - The backend returns a JWT, which the client stores and sends as `Authorization: Bearer <token>` on API calls.
 
@@ -413,7 +413,7 @@ curl -sS -H 'Authorization: Bearer <token from the previous response>' \
 |----------|---------|
 | Start DB | `docker compose up -d postgres` (repo root) |
 | Start API | `cd backend && cargo run` |
-| Start UI | `cd wetty-chat-mobile && npm run dev` |
+| Start UI | `cd pwa && npm run dev` |
 | Stop DB | `docker compose stop postgres` |
 | Reset DB data | `docker compose down -v` then start postgres again, re-run backend (migrations), re-run §6 |
 | Format before commit | enable `.githooks`, or run `cargo fmt` / `npm run format` |
@@ -435,7 +435,7 @@ Debug the backend like any local Rust binary: breakpoints in your IDE, `RUST_LOG
 | Username shows `Unknown` | Missing `discuz.common_member` row for uid `1` |
 | Cannot create chat | Missing `policy_assignments` row for uid `1` → policy `1` |
 | Frontend cannot reach API | Backend not on `:3000`, or wrong `API_PROXY_TARGET` |
-| `npm ci` / Vite engine error | Upgrade Node to ^20.19 or ≥22.12 |
+| `npm ci` engine error | Upgrade Node to ^20.19 or ≥22.12 |
 | Linker / OpenSSL / pq errors on `cargo build` (**macOS**) | `brew install pkg-config openssl@3 libpq`; set `PKG_CONFIG_PATH` as in §0; ensure Xcode CLT installed |
 | Linker / OpenSSL / pq errors on `cargo build` (**Linux**) | Install `libssl-dev`, `libpq-dev`, `pkg-config`, `build-essential` |
 | `psql: command not found` (**macOS**) | `brew install libpq && brew link --force libpq` |
@@ -448,4 +448,4 @@ Debug the backend like any local Rust binary: breakpoints in your IDE, `RUST_LOG
 - Root overview (shorter): [`README.md`](../README.md)
 - Backend env template: [`backend/.env.example`](../backend/.env.example)
 - Compose services: [`docker-compose.yml`](../docker-compose.yml)
-- Frontend proxy notes: [`wetty-chat-mobile/.env.example`](../wetty-chat-mobile/.env.example)
+- Frontend proxy notes: [`pwa/.env.example`](../pwa/.env.example)
