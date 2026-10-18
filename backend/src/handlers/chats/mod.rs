@@ -612,7 +612,7 @@ struct UnreadMentionsQuery {
     get,
     path = "/mentions",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope mentions"),
         ("max" = Option<i64>, Query, description = "Max ids to return (default 1000, capped at 1000)"),
     ),
@@ -673,7 +673,7 @@ async fn get_chat_mentions(
     get,
     path = "/reactions",
     params(
-        ("chat_id" = i64, Path, description = "Chat ID"),
+        ("chat_id" = String, Path, description = "Chat ID"),
         ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope reactions"),
         ("max" = Option<i64>, Query, description = "Max ids to return (default 1000, capped at 1000)"),
     ),

@@ -1,5 +1,19 @@
 # Backend
 
+## OpenAPI contract
+
+Snowflake IDs in URL path parameters are documented as decimal strings, including
+`chat_id` on `/chats/{chat_id}/mentions` and `/chats/{chat_id}/reactions`. This
+preserves IDs beyond JavaScript's safe-integer range in generated clients; Rust
+handlers still parse them as `i64`. User UIDs and pagination counts are not
+Snowflake IDs.
+
+Validate the generated document with:
+
+```bash
+cargo test --locked openapi::tests::
+```
+
 ## APNs setup
 
 This backend talks to Apple Push Notification service directly using **token-based auth**.
