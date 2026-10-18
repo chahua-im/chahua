@@ -47,6 +47,8 @@ export * from './pinUpdatePayload';
 export * from './userPresenceResponse';
 export * from './presenceSnapshotPayload';
 export * from './presenceUpdatePayload';
+export * from './notificationPayload';
+export * from './notificationType';
 export * from './reactionUpdatePayload';
 export * from './readReceiptChangedPayload';
 export * from './threadUpdatePayload';

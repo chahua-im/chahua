@@ -410,6 +410,41 @@ export class ChatStore {
     return read?.state.unreadCount ?? 0;
   }
 
+  unreadReactions(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
+    return read?.state.unreadReactions ?? 0;
+  }
+
+  /** Apply a chat-level reaction acknowledge response (count for the scope). */
+  applyReactionRead(chatId: SnowflakeID, threadId: SnowflakeID | undefined, unreadReactions: number) {
+    const version = ++this.version;
+    if (threadId) {
+      const current = this.threadReads().get(threadId);
+      if (!current) return;
+      this.threadReads.update((reads) =>
+        new Map(reads).set(threadId, {
+          ...current,
+          state: { ...current.state, unreadReactions },
+          version,
+        }),
+      );
+      return;
+    }
+    // Invalidate any in-flight read response so it cannot restore the old count.
+    const operation = this.readOperation(chatId);
+    operation.version++;
+    this.releaseReadOperation(chatId, operation);
+    const current = this.readStates().get(chatId);
+    if (!current) return;
+    this.readStates.update((states) =>
+      new Map(states).set(chatId, {
+        ...current,
+        state: { ...current.state, unreadReactions },
+        version,
+      }),
+    );
+  }
+
   /**
    * Last read message before the current unread messages; undefined when nothing is unread.
    * Shares its source and dirty tolerance with unreadCount so navigation can use it mid-refresh.

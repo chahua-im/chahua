@@ -24,6 +24,7 @@ import {
   GroupKind,
   GroupRole,
   MessageType,
+  NotificationType,
   ServerWsMessageType,
   type MessageResponse,
   type ServerWsMessage,
@@ -1921,6 +1922,76 @@ describe('ConversationPage', () => {
     expect(scroll.scrollTop).toBe(200);
     fixture.destroy();
     expect(resizes.has(scroll)).toBe(false);
+  });
+
+  it('fetches reaction IDs and acknowledges the conversation on entry', async () => {
+    const chatInfo = TestBed.inject(ChatStore);
+    vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
+    const applied = vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
+    const ids = [encodeId('101'), encodeId('102')];
+
+    component.ionViewDidEnter();
+    await Promise.resolve();
+    const reactions = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    reactions.flush({ messageIds: ids.map(decodeId) });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
+    expect(ack.request.body).toEqual({ threadId: null });
+    ack.flush({ unreadReactions: 0 });
+    await Promise.resolve();
+
+    expect(applied).toHaveBeenCalledWith(testChat.id, undefined, 0);
+    expect(component['reactionJumpIds']()).toEqual(ids);
+    expect(component['canJumpReaction']()).toBe(true);
+  });
+
+  it('acknowledges a reaction notification received while the conversation is active', async () => {
+    const chatInfo = TestBed.inject(ChatStore);
+    vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
+
+    events.next({
+      type: ServerWsMessageType.notification,
+      payload: {
+        notificationType: NotificationType.reaction,
+        chatId: testChat.id,
+        messageId: testMessage.id,
+        threadRootId: null,
+        actorUid: 2,
+      },
+    });
+    await Promise.resolve();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: [decodeId(testMessage.id)] });
+    await Promise.resolve();
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await Promise.resolve();
+
+    expect(component['reactionJumpIds']()).toEqual([testMessage.id]);
+  });
+
+  it('acknowledges reactions again when leaving the conversation', async () => {
+    const chatInfo = TestBed.inject(ChatStore);
+    vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
+    vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
+
+    component.ionViewDidEnter();
+    await Promise.resolve();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: [decodeId(testMessage.id)] });
+    await Promise.resolve();
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await Promise.resolve();
+
+    component.ionViewWillLeave();
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await Promise.resolve();
   });
 
   it('marks only a visible message bottom and stops tracking hidden or departed pages', async () => {

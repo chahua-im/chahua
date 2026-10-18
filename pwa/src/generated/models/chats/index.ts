@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './acknowledgeReactionsBody';
 export * from './chatAttachmentKindFilter';
 export * from './chatAttachmentResponse';
 export * from './chatListItem';
@@ -28,4 +29,6 @@ export * from './readReceiptResponse';
 export * from './searchMessagesParams';
 export * from './searchMessagesResponse';
 export * from './unreadCountResponse';
+export * from './unreadReactionIdsResponse';
+export * from './unreadReactionsAckResponse';
 export * from './updateMessageBody';

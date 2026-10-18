@@ -16,7 +16,7 @@ import {
   IonSpinner,
   IonText,
 } from '@ionic/angular';
-import { notificationsOffOutline } from 'ionicons/icons';
+import { heartOutline, notificationsOffOutline } from 'ionicons/icons';
 import { ChatAvatar, type ChatAvatarData } from '../chat-avatar/chat-avatar';
 import { ChatDatePipe } from '../chat-date.pipe';
 
@@ -27,6 +27,7 @@ export interface ChatListEntry extends ChatAvatarData {
   sender?: string;
   time?: string;
   unreadCount?: number;
+  unreadReactions?: number;
   unreadColor?: string;
   muted?: boolean;
 }
@@ -65,6 +66,7 @@ export interface ChatListAction {
 })
 export class ChatListItem {
   protected readonly mutedIcon = notificationsOffOutline;
+  protected readonly reactionIcon = heartOutline;
   readonly entry = input.required<ChatListEntry>();
   readonly button = input(false);
   readonly online = input(false);

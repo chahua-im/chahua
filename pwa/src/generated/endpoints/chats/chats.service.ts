@@ -11,6 +11,7 @@ import type { HttpContext, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type {
+  AcknowledgeReactionsBody,
   CreateMessageBody,
   GetChatAttachmentsParams,
   GetChatReadReceiptParams,
@@ -31,6 +32,8 @@ import type {
   SearchMessagesResponse,
   SnowflakeID,
   UnreadCountResponse,
+  UnreadReactionIdsResponse,
+  UnreadReactionsAckResponse,
   UpdateMessageBody,
 } from '../../models';
 import type { HttpHeaders, HttpResponse as AngularHttpResponse } from '@angular/common/http';
@@ -932,6 +935,90 @@ export class ChatsService {
       });
     }
     return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/unread`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  /**
+   * @summary GET /chats/:chat_id/reactions — Message ids with unread reactions.
+   */
+  getChatReactions<TData = UnreadReactionIdsResponse>(
+    chatId: SnowflakeID,
+    params?: { threadId?: SnowflakeID },
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getChatReactions<TData = UnreadReactionIdsResponse>(
+    chatId: SnowflakeID,
+    params?: { threadId?: SnowflakeID },
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getChatReactions<TData = UnreadReactionIdsResponse>(
+    chatId: SnowflakeID,
+    params?: { threadId?: SnowflakeID },
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getChatReactions<TData = UnreadReactionIdsResponse>(
+    chatId: SnowflakeID,
+    params?: { threadId?: SnowflakeID },
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/reactions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/reactions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/reactions`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
+    });
+  }
+  /**
+   * @summary POST /chats/:chat_id/reactions/read — Mark the conversation scope's reactions read.
+   */
+  acknowledgeChatReactions<TData = UnreadReactionsAckResponse>(
+    chatId: SnowflakeID,
+    acknowledgeReactionsBody: AcknowledgeReactionsBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  acknowledgeChatReactions<TData = UnreadReactionsAckResponse>(
+    chatId: SnowflakeID,
+    acknowledgeReactionsBody: AcknowledgeReactionsBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  acknowledgeChatReactions<TData = UnreadReactionsAckResponse>(
+    chatId: SnowflakeID,
+    acknowledgeReactionsBody: AcknowledgeReactionsBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  acknowledgeChatReactions<TData = UnreadReactionsAckResponse>(
+    chatId: SnowflakeID,
+    acknowledgeReactionsBody: AcknowledgeReactionsBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.post<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/reactions/read`, acknowledgeReactionsBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.post<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/reactions/read`, acknowledgeReactionsBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.post<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/reactions/read`, acknowledgeReactionsBody, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

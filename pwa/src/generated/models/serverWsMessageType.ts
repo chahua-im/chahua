@@ -12,6 +12,7 @@ export enum ServerWsMessageType {
   messageDeleted = 'messageDeleted',
   messagesBulkDeleted = 'messagesBulkDeleted',
   reactionUpdated = 'reactionUpdated',
+  notification = 'notification',
   presenceUpdate = 'presenceUpdate',
   presenceSnapshot = 'presenceSnapshot',
   threadUpdate = 'threadUpdate',

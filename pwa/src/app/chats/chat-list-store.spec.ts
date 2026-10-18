@@ -5,7 +5,13 @@ import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { GroupKind, ServerWsMessageType, type MessageResponse } from '../../generated/models';
+import {
+  GroupKind,
+  NotificationType,
+  ServerWsMessageType,
+  type MessageResponse,
+  type ServerWsMessage,
+} from '../../generated/models';
 import { Connection } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
@@ -20,10 +26,12 @@ describe('ChatListStore', () => {
   let messages: Connection;
   let http: HttpTestingController;
   let incoming: Subject<MessageResponse>;
+  let events: Subject<ServerWsMessage>;
   let resync: Subject<void>;
   let connected: WritableSignal<boolean>;
   beforeEach(() => {
     incoming = new Subject<MessageResponse>();
+    events = new Subject<ServerWsMessage>();
     resync = new Subject<void>();
     connected = signal(true);
     TestBed.configureTestingModule({
@@ -33,7 +41,7 @@ describe('ChatListStore', () => {
         provideChahuaBaseUrl('/_api'),
         {
           provide: Connection,
-          useValue: mockRealtime({ messages$: incoming, resync$: resync, events$: new Subject(), connected }),
+          useValue: mockRealtime({ messages$: incoming, resync$: resync, events$: events, connected }),
         },
       ],
     });
@@ -66,6 +74,29 @@ describe('ChatListStore', () => {
     connected.set(true);
     TestBed.tick();
   }
+  it('refreshes the chat reaction count on a directed reaction notification', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+
+    events.next({
+      type: ServerWsMessageType.notification,
+      payload: {
+        notificationType: NotificationType.reaction,
+        chatId: testChat.id,
+        messageId: testMessage.id,
+        threadRootId: null,
+        actorUid: 2,
+      },
+    });
+    await settle();
+
+    http
+      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
+      .flush({ lastReadMessageId: wireMessage.id, unreadCount: 0, unreadReactions: 1 });
+    await settle();
+    TestBed.tick();
+    expect(query.items()[0].unreadReactions).toBe(1);
+  });
 
   it('loads archives separately and excludes topic messages from main chat previews', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
@@ -917,6 +948,7 @@ describe('ChatListStore', () => {
     expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('200'),
       unreadCount: 3,
+      unreadReactions: 0,
     });
     data.refreshChats();
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
@@ -932,6 +964,7 @@ describe('ChatListStore', () => {
     expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('199'),
       unreadCount: 4,
+      unreadReactions: 0,
     });
   });
 
@@ -1160,6 +1193,7 @@ describe('ChatListStore', () => {
     expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('205'),
       unreadCount: 0,
+      unreadReactions: 0,
     });
   });
   it('refreshes the loaded conversation depth and keeps the final paging cursor', async () => {

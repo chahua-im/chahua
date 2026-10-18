@@ -30,6 +30,22 @@ ion-item:not(.ion-color) .meta > span {
   line-height: var(--app-line-caption);
 }
 
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reaction-badge {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+}
+
 ion-item.ion-color app-chat-avatar {
   --avatar-badge-border: var(--ion-color-primary);
 }

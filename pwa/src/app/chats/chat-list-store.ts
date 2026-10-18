@@ -16,6 +16,7 @@ import { FriendsService } from '../../generated/endpoints/friends/friends.servic
 import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import {
   FriendRequestStatus,
+  NotificationType,
   ServerWsMessageType,
   type ChatListItem,
   type FriendRequestHistoryEntry,
@@ -189,6 +190,15 @@ export class ChatListStore {
           this.refreshChatUnread();
           break;
         }
+        case ServerWsMessageType.notification:
+          if (event.payload.notificationType === NotificationType.reaction) {
+            if (event.payload.threadRootId) {
+              void this.invalidateThreads();
+            } else {
+              this.syncUnread(event.payload.chatId);
+            }
+          }
+          break;
         case ServerWsMessageType.friendshipRemoved:
           this.refreshChatUnread();
           break;

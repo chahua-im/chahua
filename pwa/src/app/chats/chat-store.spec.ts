@@ -8,8 +8,8 @@ import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url'
 import { GroupKind, GroupRole, type ServerWsMessage } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
-import { decodeId } from '../api/snowflake-id';
-import { mockRealtime, testChat, wireChat } from '../api/testing';
+import { decodeId, encodeId } from '../api/snowflake-id';
+import { mockRealtime, testChat, testMessage, wireChat } from '../api/testing';
 import { ChatStore } from './chat-store';
 
 describe('ChatStore', () => {
@@ -62,6 +62,39 @@ describe('ChatStore', () => {
       avatar: testChat.avatar,
       peer: testChat.peer,
     });
+    http.expectNone(url);
+  });
+
+  it('carries chat-level unread reactions and clears them on acknowledge', () => {
+    store.acceptChats([{ ...testChat, unreadReactions: 2 }], store.snapshot());
+    expect(store.unreadReactions(testChat.id)).toBe(2);
+    expect(store.chat(testChat.id).unreadReactions).toBe(2);
+
+    store.applyReactionRead(testChat.id, undefined, 0);
+    expect(store.unreadReactions(testChat.id)).toBe(0);
+    expect(store.chat(testChat.id).unreadReactions).toBe(0);
+    http.expectNone(url);
+  });
+
+  it('keeps thread reaction counts independent from the chat scope', () => {
+    const rootId = encodeId('9007199254741999');
+    const thread = {
+      chatId: testChat.id,
+      chatName: testChat.name ?? '测试群',
+      threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
+      participants: [],
+      replyCount: 0,
+      lastReplyAt: '2026-09-05T12:00:00Z',
+      subscribedAt: '2026-09-05T12:00:00Z',
+      archived: false,
+      unreadCount: 3,
+      unreadReactions: 2,
+    };
+    store.acceptThreads([thread], store.snapshot(), store.subscriptionSnapshot());
+    expect(store.thread(rootId)?.unreadReactions).toBe(2);
+
+    store.applyReactionRead(testChat.id, rootId, 0);
+    expect(store.thread(rootId)?.unreadReactions).toBe(0);
     http.expectNone(url);
   });
 
