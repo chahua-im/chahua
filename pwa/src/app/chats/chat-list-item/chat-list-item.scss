@@ -11,7 +11,6 @@ ion-item {
 
 ion-item:not(.ion-color) ion-label p {
   color: var(--ion-color-step-400, var(--ion-text-color-step-600, #999));
-  --message-action-color: var(--ion-color-primary);
 }
 
 ion-label ion-text {
