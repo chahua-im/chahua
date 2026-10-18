@@ -5,11 +5,13 @@ import {
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   input,
   signal,
   untracked,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
@@ -30,6 +32,7 @@ import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { Message } from '../../messages/message/message';
 import { isVisibleMessage } from '../../messages/message-visibility';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -74,6 +77,14 @@ export class PinnedMessagesPage {
   private readonly destroyRef = inject(DestroyRef);
   private readonly changeDetector = inject(ChangeDetectorRef);
   protected readonly menu = viewChild(MessageMenu);
+  private readonly content = viewChild.required(IonContent);
+  private readonly floatingDate = viewChild.required<ElementRef<HTMLElement>>('floatingDate');
+  private readonly dateSeparators = viewChildren<ElementRef<HTMLElement>>('dateSeparator');
+  private readonly messageElements = viewChildren(Message, { read: ElementRef<HTMLElement> });
+  protected readonly scrolling = scrollActivity();
+  protected readonly dateColliding = signal(false);
+  protected readonly hiddenDateKey = signal<number | undefined>(undefined);
+  protected readonly visibleDate = signal<string | undefined>(undefined);
   private active = false;
   private version = 0;
   protected readonly loading = signal(false);
@@ -112,6 +123,7 @@ export class PinnedMessagesPage {
     this.version++;
     this.loading.set(false);
     this.menu()?.reset();
+    this.scrolling.reset();
   }
   protected async load() {
     const version = this.version;
@@ -124,6 +136,38 @@ export class PinnedMessagesPage {
     } finally {
       if (version === this.version) this.loading.set(false);
     }
+  }
+  protected async onScroll() {
+    const rows = this.rows();
+    const elements = this.messageElements();
+    const scroll = await this.content().getScrollElement();
+    if (!scroll || !rows.length || elements.length !== rows.length) return;
+    const viewport = scroll.getBoundingClientRect();
+    let first = 0;
+    let last = elements.length - 1;
+    while (first < last) {
+      const middle = (first + last) >>> 1;
+      if (elements[middle].nativeElement.getBoundingClientRect().bottom <= viewport.top) first = middle + 1;
+      else last = middle;
+    }
+    this.visibleDate.set(rows[first]?.message.createdAt);
+    const floating = this.floatingDate().nativeElement;
+    const floatingTop = viewport.top + floating.offsetTop;
+    const floatingBottom = floatingTop + floating.offsetHeight;
+    const overlapMargin = 1;
+    const dates = this.dateSeparators();
+    let dateLow = 0;
+    let dateHigh = dates.length;
+    while (dateLow < dateHigh) {
+      const mid = (dateLow + dateHigh) >>> 1;
+      if (dates[mid].nativeElement.getBoundingClientRect().bottom < floatingTop - overlapMargin) dateLow = mid + 1;
+      else dateHigh = mid;
+    }
+    const nextDate = dates[dateLow]?.nativeElement.getBoundingClientRect();
+    this.dateColliding.set(!!nextDate && nextDate.top <= floatingBottom + overlapMargin);
+    let dateRow = first;
+    while (dateRow > 0 && !rows[dateRow]?.dateBreak) dateRow--;
+    this.hiddenDateKey.set(dateRow);
   }
   protected locateMessage(message: MessageResponse, messageId: SnowflakeID) {
     void this.router.navigate(this.originalCommands(message), { fragment: `msg=${decodeId(messageId)}` });

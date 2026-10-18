@@ -4,11 +4,34 @@
     <ion-title>置顶消息</ion-title>
   </ion-toolbar>
 </ion-header>
-<ion-content appScrollbars color="light">
+<ion-content
+  appScrollbars
+  [scrollEvents]="true"
+  (ionScroll)="onScroll()"
+  (ionScrollStart)="scrolling.scrollStart()"
+  (ionScrollEnd)="scrolling.scrollEnd()"
+  (touchstart)="scrolling.touchStart()"
+  (touchend)="scrolling.touchEnd()"
+  (touchcancel)="scrolling.touchEnd()">
+  <span
+    slot="fixed"
+    #floatingDate
+    class="floating-date"
+    [class.scrolling]="scrolling.moving() && visibleDate()"
+    [class.colliding]="dateColliding() || !visibleDate()">
+    {{ visibleDate() | date: 'yyyy年M月d日' }}
+  </span>
   <div class="message-list">
-    @for (row of rows(); track row.message.id) {
+    @for (row of rows(); track row.message.id; let index = $index) {
       @if (row.dateBreak) {
-        <p class="message-date">{{ row.message.createdAt | date: 'yyyy年M月d日' }}</p>
+        <p
+          #dateSeparator
+          class="message-date"
+          [style.visibility]="
+            scrolling.moving() && !dateColliding() && hiddenDateKey() === index ? 'hidden' : 'visible'
+          ">
+          <span>{{ row.message.createdAt | date: 'yyyy年M月d日' }}</span>
+        </p>
       }
       <app-message
         [showAllAvatars]="preferences.showAllAvatars()"
