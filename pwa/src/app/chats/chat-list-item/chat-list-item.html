@@ -40,17 +40,26 @@
         <ng-content select="[slot=preview]"></ng-content>
       </p>
     </ion-label>
-    @if (!actionsAlwaysVisible() && (entry().time || entry().unreadCount)) {
+    @if (!actionsAlwaysVisible() && (entry().time || entry().unreadCount || entry().unreadReactions)) {
       <div slot="end" class="meta">
         @if (entry().time) {
           <span>{{ entry().time | chatDate }}</span>
         }
-        @if (entry().unreadCount; as count) {
-          <ion-badge
-            [color]="entry().unreadColor ?? (active.isActive ? 'light' : entry().muted ? 'medium' : 'primary')">
-            {{ count >= 1000 ? '999+' : count }}
-          </ion-badge>
-        }
+        <div class="badges">
+          @if (entry().unreadReactions) {
+            <ion-badge
+              class="reaction-badge"
+              [color]="active.isActive ? 'light' : entry().muted ? 'medium' : 'primary'">
+              <ion-icon [icon]="reactionIcon"></ion-icon>
+            </ion-badge>
+          }
+          @if (entry().unreadCount; as count) {
+            <ion-badge
+              [color]="entry().unreadColor ?? (active.isActive ? 'light' : entry().muted ? 'medium' : 'primary')">
+              {{ count >= 1000 ? '999+' : count }}
+            </ion-badge>
+          }
+        </div>
       </div>
     }
     @if (actionsAlwaysVisible() && endActions().length) {

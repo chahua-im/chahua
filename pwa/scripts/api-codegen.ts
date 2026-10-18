@@ -56,6 +56,7 @@ const idFields = new Set([
   'stickerId',
   'stickerPackId',
   'threadRootId',
+  'threadId',
 ]);
 const idArrays = new Set(['attachmentIds', 'messageIds']);
 const cursorFields: Record<string, string[]> = {
@@ -83,6 +84,8 @@ const queryIds: Record<string, string[]> = {
   '/chats/{chat_id}/attachments': ['before', 'after'],
   '/chats/{chat_id}/messages': ['before', 'after', 'around', 'threadId'],
   '/chats/{chat_id}/read-receipt': ['threadId'],
+  '/chats/{chat_id}/mentions': ['threadId'],
+  '/chats/{chat_id}/reactions': ['threadId'],
   '/chats/{chat_id}/saved-messages': ['before'],
   '/saved-messages': ['before'],
   '/invites': ['groupId'],

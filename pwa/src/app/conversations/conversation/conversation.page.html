@@ -247,6 +247,18 @@
       </ion-fab-button>
       <ion-badge [style.opacity]="unreadCount() ? 1 : 0">{{ unreadCount() }}</ion-badge>
     </ion-fab>
+    <ion-fab
+      class="history-navigation reaction-navigation"
+      slot="fixed"
+      vertical="bottom"
+      horizontal="end"
+      [style.margin-bottom.px]="showDownButton() ? 72 : 16"
+      [style.visibility]="canJumpReaction() ? 'visible' : 'hidden'">
+      <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextReaction()">
+        <ion-icon class="action-icon" [icon]="reactionIcon"></ion-icon>
+      </ion-fab-button>
+      <ion-badge>{{ reactionRemaining() }}</ion-badge>
+    </ion-fab>
   }
 </ion-content>
 <ion-footer #composerFooter>

@@ -51,6 +51,7 @@ import {
   chevronBack,
   chevronDown,
   chevronUpOutline,
+  heartOutline,
   closeCircleOutline,
   ellipsisVertical,
   informationCircleOutline,
@@ -66,6 +67,7 @@ import { ThreadsService } from '../../../generated/endpoints/threads/threads.ser
 import {
   GroupKind,
   MessageType,
+  NotificationType,
   ServerWsMessageType,
   type MessageResponse,
   type PinResponse,
@@ -133,7 +135,7 @@ type ScrollPosition =
   host: {
     '(dragover)': 'composer()?.dragover($event)',
     '(drop)': 'composer()?.drop($event)',
-    '(document:visibilitychange)': 'document.hidden && saveDraft()',
+    '(document:visibilitychange)': 'visibilityChanged()',
     '(window:pagehide)': 'saveDraft()',
   },
   imports: [
@@ -577,6 +579,12 @@ export class ConversationPage {
   );
   protected readonly navigatingDown = linkedSignal({ source: this.entryKey, computation: () => false });
   protected readonly unreadCount = computed(() => this.chatInfo.unreadCount(this.id(), this.threadId()));
+  protected readonly reactionIcon = heartOutline;
+  protected readonly reactionJumpIds = signal<SnowflakeID[]>([]);
+  protected readonly reactionRemaining = computed(() => this.reactionJumpIds().length);
+  protected readonly canJumpReaction = computed(() => this.active() && this.reactionRemaining() > 0);
+  private reactionSessionEntered = false;
+  private reactionRequest?: { again: boolean };
   private readonly playback = inject(VoicePlayback);
   protected readonly savedReplyId = linkedSignal({
     source: this.entryVersion,
@@ -709,10 +717,19 @@ export class ConversationPage {
       ) {
         void this.loadSubscription();
       }
+      if (
+        event.type === ServerWsMessageType.notification &&
+        event.payload.notificationType === NotificationType.reaction &&
+        event.payload.chatId === this.id() &&
+        event.payload.threadRootId === (this.threadId() ?? null)
+      ) {
+        void this.enterReactionSession();
+      }
     });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
       if (this.isCurrent()) {
         const entry = this.entryKey();
+        void this.enterReactionSession();
         void this.conversation.reconnect();
         void this.loadPins();
         this.invalidateReadReceipt();
@@ -773,6 +790,7 @@ export class ConversationPage {
   }
 
   private activate(id: SnowflakeID, threadId?: SnowflakeID) {
+    this.resetReactionSession();
     this.scrolling.reset();
     this.entryVersion.update((version) => version + 1);
     this.active.set(true);
@@ -781,6 +799,9 @@ export class ConversationPage {
     this.savedReplyId.set(draft?.replyTo ? encodeId(draft.replyTo) : undefined);
     if (draft?.replyTo && !this.reply()) void this.restoreReply(encodeId(draft.replyTo));
     this.conversation.reset(id, threadId);
+    if (this.entered) {
+      void this.enterReactionSession();
+    }
     void this.loadPins();
     void this.loadThreadRoot();
     this.entryReadId.set(undefined);
@@ -805,10 +826,12 @@ export class ConversationPage {
   ionViewDidEnter() {
     this.entered = true;
     void this.positionAndRead();
+    void this.enterReactionSession();
   }
 
   ionViewWillLeave() {
     this.saveDraft();
+    void this.leaveReactionSession();
   }
 
   ionViewDidLeave() {
@@ -847,6 +870,7 @@ export class ConversationPage {
     this.entered = false;
     this.navigationVersion++;
     this.position.set(undefined);
+    this.resetReactionSession();
     if (retainRange) {
       this.conversation.cancelLoading();
       if (!retainComposer) this.cancelEdit();
@@ -964,6 +988,87 @@ export class ConversationPage {
     if (element.getBoundingClientRect().top <= scroll.getBoundingClientRect().bottom) return false;
     this.position.set({ type: PositionKind.Unread, messageId: unread });
     return true;
+  }
+
+  protected visibilityChanged() {
+    if (this.document.hidden) this.saveDraft();
+    else {
+      void this.enterReactionSession();
+    }
+  }
+
+  private resetReactionSession() {
+    this.reactionSessionEntered = false;
+    this.reactionRequest = undefined;
+    this.reactionJumpIds.set([]);
+  }
+
+  private async enterReactionSession() {
+    if (this.document.hidden || !this.isCurrent()) return;
+    if (this.reactionRequest) {
+      this.reactionRequest.again = true;
+      return;
+    }
+    const entry = this.entryKey();
+    const chatId = this.id();
+    const threadId = this.threadId();
+    this.reactionSessionEntered = true;
+    const request = { again: false };
+    this.reactionRequest = request;
+    try {
+      do {
+        request.again = false;
+        const response = await firstValueFrom(
+          this.api.getChatReactions(chatId, { threadId }).pipe(takeUntilDestroyed(this.destroyRef)),
+        );
+        if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden) return;
+        this.reactionJumpIds.update((ids) => [...new Set([...ids, ...response.messageIds])].sort((a, b) => b - a));
+        const unread = await this.ackReactions(entry, chatId, threadId, response.readThrough);
+        if (unread != null && unread > 0) request.again = true;
+      } while (request.again && this.reactionRequest === request && this.isCurrent(entry) && !this.document.hidden);
+    } catch {
+      // Keep the server cursor and session targets on failure; entry/resync retries.
+    } finally {
+      if (this.reactionRequest === request) this.reactionRequest = undefined;
+    }
+  }
+
+  private async ackReactions(
+    entry = this.entryKey(),
+    chatId = this.id(),
+    threadId = this.threadId(),
+    readThrough?: string,
+  ) {
+    try {
+      const response = await firstValueFrom(this.api.acknowledgeChatReactions(chatId, { threadId, readThrough }));
+      if (entry === this.entryKey()) this.chatInfo.applyReactionRead(chatId, threadId, response.unreadReactions);
+      return response.unreadReactions;
+    } catch {
+      // Leave the cursor unchanged so the next entry retries.
+      return undefined;
+    }
+  }
+
+  private async leaveReactionSession() {
+    const entered = this.reactionSessionEntered;
+    const entry = this.entryKey();
+    const chatId = this.id();
+    const threadId = this.threadId();
+    this.resetReactionSession();
+    // The router already points at the destination during ionViewWillLeave.
+    if (entered && !this.document.hidden) await this.ackReactions(entry, chatId, threadId);
+  }
+
+  protected async jumpToNextReaction() {
+    while (this.reactionJumpIds().length) {
+      const target = this.reactionJumpIds().at(-1)!;
+      const entry = this.entryKey();
+      const reached = await this.goTo({ type: ConversationTargetKind.Message, messageId: target });
+      if (entry !== this.entryKey()) return;
+      const missing = this.conversation.error() === ConversationError.Missing;
+      if (reached === true || missing) this.reactionJumpIds.update((ids) => ids.filter((id) => id !== target));
+      if (reached === true || !missing) return;
+    }
   }
 
   protected retry() {

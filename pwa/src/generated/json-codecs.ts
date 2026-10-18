@@ -8,6 +8,9 @@ export interface JsonOperationCodec {
   query?: Record<string, JsonCodec>;
 }
 export const jsonSchemas: Record<string, JsonCodec> = {
+  AcknowledgeReactionsBody: {
+    threadId: 1,
+  },
   AttachmentResponse: {
     id: 1,
   },
@@ -386,6 +389,15 @@ export const jsonOperations: JsonOperationCodec[] = [
     method: 'GET',
     path: '/chats/{chat_id}/reactions',
     response: 'UnreadReactionIdsResponse',
+    query: {
+      threadId: 1,
+    },
+  },
+  {
+    method: 'POST',
+    path: '/chats/{chat_id}/reactions/read',
+    body: 'AcknowledgeReactionsBody',
+    response: 'UnreadReactionsAckResponse',
   },
   {
     method: 'POST',

@@ -104,6 +104,8 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 回复预览或话题根缺失          | `GET /chats/{c}/messages/{m}`                                          | 页面局部预览                                |
 | 活跃可见消息进入视口          | 普通/话题 read 的 POST，1 秒合并目标                                   | ChatStore 更新读状态和计数                  |
 | 活跃私聊或私聊话题的对方已读 | `GET /chats/{c}/read-receipt`；话题回复加 threadId，话题根另读普通范围 | ConversationPage；范围切换、重连和 `readReceiptChanged` 时刷新 |
+| 进入会话/话题（active）       | `GET /chats/{c}/reactions`（话题加 threadId）；随后 `POST /chats/{c}/reactions/read` | 先保留本次会话的跳转 ID，再把该 scope 的 reaction 游标推到当前 |
+| 离开会话/话题                 | `POST /chats/{c}/reactions/read`                                       | 清掉会话期间新到的 reaction                  |
 | 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                               |
 | 全局收藏                      | `GET /saved-messages`，limit=50、before                                | SavedMessageList 快照                       |
 | 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标       |
@@ -118,6 +120,8 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 打开表情和贴纸设置            | `GET /stickers/packs/mine/owned`、`GET /stickers/packs/mine/subscribed` | StickerSettings 合并展示                                    |
 | 打开贴纸包详情                | `GET /stickers/packs/{id}`                                             | StickerPackDetail                                           |
 | 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                                    |
+
+Reaction 的已读是会话级：进入 active 会话/话题时先读取本次的 messageIds 供会话内跳转，再 ack 该 scope；离开时再 ack 一次清掉会话期间新到的 reaction。普通消息已读不推进 reaction 游标，未进入会话不会产生 reaction 已读副作用。
 
 创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。发送贴纸（自动整理开启且所属包在统计范围内）与拖拽重排后 `PUT /users/me/stickerpack-order`；同步失败时重新读取 `GET /users/me`，以服务器顺序恢复。请求期间的具体反馈见[加载标识](loading-indicators.md)。
 
@@ -148,6 +152,7 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；隐藏列表记录待补未读或首页位置；当前页面决定接收和是否跟随底部 |
 | messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；编辑按服务器预览形状改写引用方内嵌的引用快照，撤回将其改为墓碑；正在读取的区间保留补丁 |
 | reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                            |
+| notification（reaction）                                  | 服务端定向发给消息作者；非话题刷新该 chat 的 `unreadReactions`，话题刷新话题列表；当前会话在计数变正时读取跳转 ID 并按会话级 ack 清除 |
 | pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                 |
 | threadUpdate                                              | 更新根消息统计，刷新活跃话题列表与计数                                                                |
 | threadMembershipChanged                                   | 订阅失效，当前页面补读，列表和计数刷新                                                                |
