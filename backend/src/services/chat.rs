@@ -52,16 +52,10 @@ pub fn mark_chat_as_read(
     .set(gm_dsl::last_read_message_id.eq(Some(message_id)))
     .execute(conn)?;
 
-    // Advancing the read position also acknowledges unread reactions: they are
-    // derived from a reaction-timestamp cursor (see UnreadService), which only
-    // moves forward.
-    diesel::update(
-        group_membership::table
-            .filter(gm_dsl::chat_id.eq(chat_id))
-            .filter(gm_dsl::uid.eq(uid)),
-    )
-    .set(gm_dsl::last_reactions_read_at.eq(Utc::now()))
-    .execute(conn)?;
+    // Unread reactions are NOT acknowledged here: the reaction cursor is
+    // independent of the message read position and only advances through the
+    // explicit reaction-acknowledge endpoint, so entering/reading messages
+    // never clears a reaction badge as a side effect.
 
     Ok(updated > 0)
 }

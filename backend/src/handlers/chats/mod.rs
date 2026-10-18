@@ -16,8 +16,9 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         chats::{
-            ChatListItem, ListChatsResponse, MarkChatReadStateResponse, UnreadCountResponse,
-            UnreadMentionIdsResponse, UnreadReactionIdsResponse,
+            AcknowledgeReactionsBody, ChatListItem, ListChatsResponse, MarkChatReadStateResponse,
+            UnreadCountResponse, UnreadMentionIdsResponse, UnreadReactionIdsResponse,
+            UnreadReactionsAckResponse,
         },
         messages::MessageResponse,
         read_receipts::ReadReceiptResponse,
@@ -420,8 +421,8 @@ async fn mark_as_read(
         read_state.last_read_message_id,
         None,
     )?;
-    // The reaction cursor was just advanced by mark_chat_as_read, so this is
-    // normally 0; computed for consistency with the mention count.
+    // Ordinary message reads no longer advance the reaction cursor; this is
+    // the live unread-reaction count for the unchanged cursor.
     let unread_reactions = state
         .unread_service
         .count_chat_unread_reactions(conn, uid, chat_id, None)?;
@@ -738,10 +739,11 @@ async fn get_chat_mentions(
 /// thread. Ids are newest-first, one entry per message regardless of how many
 /// new reactions it carries (default 1000, hard cap 1000). A reaction is
 /// unread while `created_at > last_reactions_read_at` (cursor-derived; the
-/// cursor advances on mark-read).
+/// cursor advances only through the explicit reaction acknowledgement).
 #[utoipa::path(
     get,
     path = "/reactions",
+    tag = "chats",
     params(
         ("chat_id" = String, Path, description = "Chat ID"),
         ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope reactions"),
@@ -765,14 +767,80 @@ async fn get_chat_reactions(
 
     let limit = validate_limit(q.max, crate::constants::MAX_UNREAD_COUNT);
 
-    let ids =
-        state
-            .unread_service
-            .list_chat_unread_reactions(conn, uid, chat_id, q.thread_id, limit)?;
+    let read_through = Utc::now();
+    let ids = state.unread_service.list_chat_unread_reactions(
+        conn,
+        uid,
+        chat_id,
+        q.thread_id,
+        limit,
+        read_through,
+    )?;
 
     Ok(Json(UnreadReactionIdsResponse {
+        read_through,
         message_ids: ids.into_iter().map(|id| id.to_string()).collect(),
     }))
+}
+
+/// POST /chats/{chat_id}/reactions/read — Mark the conversation scope's reactions read.
+///
+/// Chat-level read state: entering a chat or thread acknowledges every reaction
+/// in the returned snapshot (readThrough), even if no reacted message was opened.
+/// Omitting readThrough acknowledges through the current time on exit. The cursor
+/// only advances; ordinary message reads never call this. Returns the fresh
+/// unread-reaction count (normally 0).
+#[utoipa::path(
+    post,
+    path = "/reactions/read",
+    tag = "chats",
+    params(
+        ("chat_id" = String, Path, description = "Chat ID"),
+    ),
+    request_body = AcknowledgeReactionsBody,
+    responses(
+        (status = 200, description = "Fresh unread-reaction state", body = UnreadReactionsAckResponse),
+    ),
+    security(("uid_header" = []), ("bearer_jwt" = [])),
+)]
+async fn acknowledge_chat_reactions(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<AcknowledgeReactionsBody>,
+) -> Result<Json<UnreadReactionsAckResponse>, AppError> {
+    let conn = &mut *conn;
+
+    if let Some(thread_id) = body.thread_id {
+        super::threads::authorize_thread_in_chat(conn, chat_id, thread_id, uid)?;
+        // The reaction cursor is per thread root; a reply id must not create
+        // a bogus thread-user-state row.
+        let is_root: bool = diesel::select(diesel::dsl::exists(
+            messages_schema::table.filter(
+                messages_schema::id
+                    .eq(thread_id)
+                    .and(messages_schema::chat_id.eq(chat_id))
+                    .and(messages_schema::reply_root_id.is_null()),
+            ),
+        ))
+        .get_result(conn)?;
+        if !is_root {
+            return Err(AppError::NotFound("Thread root message not found"));
+        }
+    } else {
+        check_membership(conn, chat_id, uid)?;
+    }
+
+    let unread_reactions = state.unread_service.acknowledge_chat_unread_reactions(
+        conn,
+        uid,
+        chat_id,
+        body.thread_id,
+        body.read_through,
+    )?;
+
+    Ok(Json(UnreadReactionsAckResponse { unread_reactions }))
 }
 
 /// GET /chats/unread — Get total unread message and chat counts for the current user.
@@ -935,6 +1003,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(get_chat_unread_count))
                 .routes(utoipa_axum::routes!(get_chat_mentions))
                 .routes(utoipa_axum::routes!(get_chat_reactions))
+                .routes(utoipa_axum::routes!(acknowledge_chat_reactions))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
                 .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())

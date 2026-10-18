@@ -70,7 +70,30 @@ pub struct UnreadMentionIdsResponse {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnreadReactionIdsResponse {
+    /// Snapshot boundary to pass back when acknowledging these reactions.
+    pub read_through: DateTime<Utc>,
     /// Message ids with unread reactions, newest-first, one entry per message
     /// regardless of how many new reactions it carries. Serialized as strings.
     pub message_ids: Vec<String>,
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcknowledgeReactionsBody {
+    /// Acknowledge only through this snapshot; omit when leaving the conversation.
+    pub read_through: Option<DateTime<Utc>>,
+    /// Thread scope to acknowledge; omit/null for the main chat scope.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub thread_id: Option<i64>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadReactionsAckResponse {
+    /// Fresh unread-reaction message count after the cursor advance.
+    pub unread_reactions: i64,
 }

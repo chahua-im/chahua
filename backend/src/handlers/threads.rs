@@ -134,7 +134,7 @@ fn resolve_chat_id_for_thread(
 /// be used to probe which chat a thread belongs to. Reversing the order would
 /// let an outsider distinguish "root lives in this chat" (403) from "root
 /// lives elsewhere" (404).
-fn authorize_thread_in_chat(
+pub(crate) fn authorize_thread_in_chat(
     conn: &mut PgConnection,
     chat_id: i64,
     thread_root_id: i64,
@@ -181,12 +181,14 @@ fn apply_thread_read(
             chat_id,
             thread_root_id,
         )?;
+        let unread_reactions =
+            unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
         return Ok(AppliedThreadRead {
             response: MarkThreadReadResponse {
                 last_read_message_id: None,
                 unread_count: 0,
                 unread_mentions: 0,
-                unread_reactions: 0,
+                unread_reactions,
             },
             receipt_advanced: false,
         });
