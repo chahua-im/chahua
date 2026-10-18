@@ -12,6 +12,10 @@ const TOKEN_KEY = 'jwt_token';
 // Angular releases before the storage-name alignment used this key in both stores.
 const LEGACY_TOKEN_KEY = 'chahua.auth.token';
 
+const DEV_UID_KEY = 'uid';
+const DEFAULT_DEV_UID = 1;
+const CLIENT_ID_KEY = 'chahua.client-id';
+
 @Service()
 export class SessionStore {
   private readonly auth = inject(AuthService);
@@ -33,6 +37,12 @@ export class SessionStore {
 
   async initialize() {
     try {
+      if (!this.token() && isDevMode()) {
+        const { token } = await firstValueFrom(
+          this.auth.postDevSession({ uid: developmentUid() }, { headers: { 'X-Client-Id': developmentClientId() } }),
+        );
+        this.saveToken(token);
+      }
       if (!this.token()) return;
       const refreshed = await firstValueFrom(this.auth.postRefresh());
       this.saveToken(refreshed.token);
@@ -103,6 +113,20 @@ export class SessionStore {
     window.localStorage.removeItem(LEGACY_TOKEN_KEY);
     document.cookie = `${LEGACY_TOKEN_KEY}=; Path=/; Max-Age=0`;
   }
+}
+
+function developmentUid() {
+  const uid = Number(sessionStorage.getItem(DEV_UID_KEY));
+  return Number.isInteger(uid) && uid > 0 ? uid : DEFAULT_DEV_UID;
+}
+
+function developmentClientId() {
+  const stored = localStorage.getItem(CLIENT_ID_KEY);
+  if (stored) return stored;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const clientId = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  localStorage.setItem(CLIENT_ID_KEY, clientId);
+  return clientId;
 }
 
 function storedToken(key: string) {

@@ -1,5 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import { afterRenderEffect, Component, inject, linkedSignal, signal } from '@angular/core';
+import { afterRenderEffect, Component, inject, isDevMode, linkedSignal, signal } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, NavigationStart, Router } from '@angular/router';
 import {
@@ -95,7 +95,7 @@ export class App {
     });
     afterRenderEffect(() => this.updates.setInteractive(!this.landingPage() && !!this.session.user()));
     this.session.restoreToken();
-    if (!this.session.token() || (this.landingPage() && !isPlatform('pwa'))) {
+    if ((!this.session.token() && !isDevMode()) || (this.landingPage() && !isPlatform('pwa'))) {
       this.loading.set(false);
     } else {
       void this.initialize();

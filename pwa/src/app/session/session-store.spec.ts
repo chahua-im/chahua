@@ -16,6 +16,7 @@ describe('SessionStore', () => {
   let http: HttpTestingController;
   beforeEach(() => {
     document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0`;
+    sessionStorage.clear();
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -35,6 +36,7 @@ describe('SessionStore', () => {
   });
   afterEach(() => {
     document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0`;
+    sessionStorage.clear();
     http.verify();
     vi.unstubAllGlobals();
     history.replaceState(null, '', '/');
@@ -130,8 +132,7 @@ describe('SessionStore', () => {
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
     session.restoreToken();
-    await session.initialize();
-    http.expectNone(() => true);
+    expect(session.token()).toBeUndefined();
   });
 
   it('keeps login usable when the optional group lookup fails', async () => {
@@ -217,12 +218,50 @@ describe('SessionStore', () => {
     expect(session.user()).toBeUndefined();
   });
 
-  it('does not start authenticated requests without a URL or stored token', async () => {
+  it('issues a development session without a token using the stored UID', async () => {
+    sessionStorage.setItem('uid', '7');
     history.replaceState(null, '', '/chats');
     session.restoreToken();
-    await session.initialize();
-    http.expectNone(() => true);
-    expect(session.user()).toBeUndefined();
+    const login = session.initialize();
+    const devSession = http.expectOne('/_api/auth/dev-session');
+    expect(devSession.request.body).toEqual({ uid: 7 });
+    expect(devSession.request.headers.get('X-Client-Id')).toMatch(/^[0-9a-f]{32}$/);
+    devSession.flush({ token: 'development-token' });
+    await Promise.resolve();
+    const refresh = http.expectOne('/_api/auth/refresh');
+    expect(refresh.request.headers.get('Authorization')).toBe('Bearer development-token');
+    refresh.flush({ token: 'refreshed-token' });
+    await Promise.resolve();
+    http.expectOne('/_api/users/me').flush(testUser);
+    await profile();
+    await login;
+    expect(session.user()).toEqual(testUser);
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('refreshed-token');
+  });
+
+  it('defaults the development session UID to 1', async () => {
+    history.replaceState(null, '', '/chats');
+    session.restoreToken();
+    const login = session.initialize();
+    const devSession = http.expectOne('/_api/auth/dev-session');
+    expect(devSession.request.body).toEqual({ uid: 1 });
+    devSession.flush({ token: 'development-token' });
+    await Promise.resolve();
+    http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
+    await Promise.resolve();
+    http.expectOne('/_api/users/me').flush(testUser);
+    await profile();
+    await login;
+  });
+
+  it('surfaces a failed development session without refreshing', async () => {
+    history.replaceState(null, '', '/chats');
+    session.restoreToken();
+    const login = session.initialize();
+    http.expectOne('/_api/auth/dev-session').flush('', { status: 404, statusText: 'Not Found' });
+    await expect(login).rejects.toMatchObject({ status: 404 });
+    http.expectNone('/_api/auth/refresh');
+    expect(session.token()).toBeUndefined();
   });
 
   it('clears both stores on logout so the cookie cannot sign the user back in', async () => {
@@ -239,7 +278,6 @@ describe('SessionStore', () => {
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
     session.restoreToken();
-    await session.initialize();
-    http.expectNone(() => true);
+    expect(session.token()).toBeUndefined();
   });
 });

@@ -16,7 +16,9 @@
 
 ```bash
 npm ci
-npm start
+npm run dev              # localhost:4300，本地后端
+npm run dev:online       # localhost:4200，生产后端
+npm start                # localhost:4200，同 npm run dev:online
 npm run build
 npm test -- --watch=false
 npm run test:pwa
@@ -24,7 +26,7 @@ npm run test:pwa
 
 安装指引位于 `/landing`；已安装应用从该入口直接进入聊天。
 
-开发服务地址为 `http://localhost:4200`，默认 `npm run build` 生成同源构建，部署目录为 `dist/app/browser`；开发服务代理到 `https://chahui.app/_api`。HTTP 与 WebSocket 的基地址见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。
+`npm start` 和 `npm run dev:online` 的开发服务地址为 `http://localhost:4200`，`npm run dev` 使用 `http://localhost:4300`；两者源不同，可各自保留登录状态。默认 `npm run build` 生成同源构建，部署目录为 `dist/app/browser`。`npm run dev` 使用 `proxy.conf.dev.mjs` 代理到 `API_PROXY_TARGET`（默认 `http://localhost:3000`），并去掉 `/_api` 前缀，HTTP 与 WebSocket 均生效；该变量可在命令前或 `.env.local` 中设置。`npm run dev:online` 将目标设为 `https://chahui.app/_api`，`npm start` 仍使用 `proxy.conf.json` 代理到生产。HTTP 与 WebSocket 的基地址见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。
 
 `npm run build:prod` 生成跨域生产构建，部署目录为 `dist/prod/browser`。编译后的 JS、CSS 和延迟加载模块从 `https://chahui.app/` 加载；HTML、manifest、图标、表情数据和 Service Worker 保留在页面源。构建脚本同步改写 `ngsw.json` 中的编译资源 URL 与哈希表键，保留内容校验；不要用单独的 `ng build --configuration production,prod` 替代完整脚本。
 
@@ -35,13 +37,14 @@ Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite
 构建版本使用 Angular `define` 注入的 `CHAHUA_APP_VERSION`，设置页和 API 请求头 `X-App-Version` 共用 `app-version.ts` 中的值；未注入时回退为 `PWA2-dev`。Jenkins 通过 `npm run build -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"` 注入 CI 构建号，跨域构建使用 `npm run build:prod -- --define "CHAHUA_APP_VERSION='PWA2-${BUILD_NUMBER}'"`，不修改 `package.json`。修改构建常量后需要重启开发服务。
 
 登录 token 的优先级是 URL 的 `token` 参数、localStorage、开发预设。
-开发预设放在 Git 忽略的 `.env.local`，格式见 `.env.example`。`npm start` 通过编译常量注入 `CHAHUA_DEV_TOKEN`，修改后需要重启开发服务。生产构建不读取该文件。预设会随开发页面下发，能够访问开发服务的浏览器可以使用该身份；真实 token 不应提交到仓库。
+开发构建在没有 token 时请求 `POST /auth/dev-session`，使用 sessionStorage 的 `uid`（默认 1）获取身份，不需要填写 JWT；切换用户可在控制台执行 `sessionStorage.setItem('uid', '7')` 后刷新。该接口要求后端启用 `debug_auth_enabled`，否则返回 404。
+开发预设放在 Git 忽略的 `.env.local`，格式见 `.env.example`；存在预设时优先于自动开发会话。`npm start`、`npm run dev` 和 `npm run dev:online` 通过编译常量注入 `CHAHUA_DEV_TOKEN`，修改后需要重启开发服务。生产构建不读取该文件。预设会随开发页面下发，能够访问开发服务的浏览器可以使用该身份；真实 token 不应提交到仓库。
 
 ## 测试与行为约定
 
 修改前以[需求与边界](docs/requirements.md)为准；需求记录产品行为，其他文档分别描述尺寸、组件所有权与请求时机，避免同一规则多处维护。回归测试随实现放置，关键覆盖包括分页范围、导航生命周期、滚动锚点、队列顺序/撤回、媒体取消和通知去重。
 
-单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身；浏览器自动化同样必须拦截 HTTP、WebSocket 与上传。禁止向生产服写测试数据，禁止测试上传 S3。必须实测写入时使用本地后端及开发数据库 `10.198.3.214`，并以临时代理配置覆盖默认生产代理，例如 `npm start -- --proxy-config /tmp/chahua-local-proxy.json`。本地前端地址本身不意味着后端也是本地。
+单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身；浏览器自动化同样必须拦截 HTTP、WebSocket 与上传。禁止向生产服写测试数据，禁止测试上传 S3。必须实测写入时使用本地后端及开发数据库 `10.198.3.214`，并使用 `npm run dev` 代理到本地后端；后端不在 `http://localhost:3000` 时设置 `API_PROXY_TARGET`，例如 `API_PROXY_TARGET=http://10.198.3.214:3000 npm run dev`。`npm start` 不读取该变量。本地前端地址本身不意味着后端也是本地。
 
 ## CI 与发布
 

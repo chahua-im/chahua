@@ -292,27 +292,38 @@ describe('App', () => {
     expect(sidebar()).toEqual({ tab: ListTab.Groups, archived: false, requestHistory: false });
   });
 
-  it.each(['/landing', '/chats', '/chats/join/example'])(
-    'shows 418 immediately without a token at %s',
-    async (path) => {
-      history.replaceState(null, '', path);
-      session.token.set(undefined);
-      try {
-        const fixture = TestBed.createComponent(App);
-        fixture.detectChanges();
-        const element: HTMLElement = fixture.nativeElement;
-        expect(element.querySelector(':scope > h1')?.textContent).toBe("418 I'm a teapot");
-        expect(element.querySelector('ion-app, ion-router-outlet')).toBeNull();
-        expect(session.restoreToken).toHaveBeenCalledOnce();
-        expect(session.initialize).not.toHaveBeenCalled();
-        expect(TestBed.inject(PushNotifications).start).not.toHaveBeenCalled();
-        await fixture.whenStable();
-        expect(TestBed.inject(AppUpdates).setInteractive).toHaveBeenLastCalledWith(false);
-      } finally {
-        history.replaceState(null, '', '/');
-      }
-    },
-  );
+  it('shows 418 immediately without a token on landing when not installed', () => {
+    history.replaceState(null, '', '/landing');
+    session.token.set(undefined);
+    try {
+      const fixture = TestBed.createComponent(App);
+      fixture.detectChanges();
+      const element: HTMLElement = fixture.nativeElement;
+      expect(element.querySelector(':scope > h1')?.textContent).toBe("418 I'm a teapot");
+      expect(element.querySelector('ion-app, ion-router-outlet')).toBeNull();
+      expect(session.restoreToken).toHaveBeenCalledOnce();
+      expect(session.initialize).not.toHaveBeenCalled();
+      expect(TestBed.inject(PushNotifications).start).not.toHaveBeenCalled();
+    } finally {
+      history.replaceState(null, '', '/');
+    }
+  });
+
+  it.each(['/chats', '/chats/join/example'])('starts a development session without a token at %s', async (path) => {
+    history.replaceState(null, '', path);
+    session.token.set(undefined);
+    try {
+      const fixture = TestBed.createComponent(App);
+      fixture.detectChanges();
+      expect(session.restoreToken).toHaveBeenCalledOnce();
+      expect(session.initialize).toHaveBeenCalledOnce();
+      expect(TestBed.inject(PushNotifications).start).not.toHaveBeenCalled();
+      await fixture.whenStable();
+      expect(TestBed.inject(AppUpdates).setInteractive).toHaveBeenLastCalledWith(false);
+    } finally {
+      history.replaceState(null, '', '/');
+    }
+  });
 
   it('owns startup loading and clears a transient error when retrying', async () => {
     session.initialize.mockRejectedValueOnce(new HttpErrorResponse({ status: 503 }));
