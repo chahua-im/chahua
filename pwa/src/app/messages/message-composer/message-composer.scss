@@ -85,6 +85,10 @@
   max-height: 200px;
   overflow: auto;
   margin: 0;
+  border: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
+  border-bottom: none;
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.12);
 }
 
 .mentions ion-item {

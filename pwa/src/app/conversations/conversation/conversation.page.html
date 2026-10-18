@@ -26,8 +26,11 @@
         </span>
       </span>
     </ion-title>
-    @if (threadId()) {
-      <ion-buttons slot="end">
+    <ion-buttons slot="end">
+      <ion-button (click)="search()">
+        <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
+      </ion-button>
+      @if (threadId()) {
         @if (subscription(); as status) {
           <ion-button [disabled]="threadBusy()" (click)="updateThread()">
             <span class="action-content" [class.busy]="threadBusy()">
@@ -50,13 +53,7 @@
             <ion-spinner class="action-icon" slot="icon-only"></ion-spinner>
           </ion-button>
         }
-      </ion-buttons>
-    }
-    <ion-buttons slot="end">
-      <ion-button (click)="search()">
-        <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
-      </ion-button>
-      @if (!threadId()) {
+      } @else {
         <ion-button [disabled]="muteBusy()" (click)="toggleMute()">
           <ion-icon
             class="action-icon"
