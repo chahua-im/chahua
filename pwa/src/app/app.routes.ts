@@ -58,17 +58,17 @@ export const routes: Routes = [
   {
     path: 'chats/chat/:id/info',
     component: ChatLink,
-    data: { modal: true, component: ChatDetails, props: { modal: true, currentConversation: true } },
+    data: { modal: true, component: ChatDetails, props: { asModal: true, currentConversation: true } },
   },
   {
     path: 'chats/chat/:id/thread/:threadId/info',
     component: ChatLink,
-    data: { modal: true, component: ChatDetails, props: { modal: true, currentConversation: true } },
+    data: { modal: true, component: ChatDetails, props: { asModal: true, currentConversation: true } },
   },
   {
     path: 'chats/chat/:id/invites',
     component: ChatLink,
-    data: { modal: true, component: ChatDetails, props: { modal: true, view: DetailView.Invites } },
+    data: { modal: true, component: ChatDetails, props: { asModal: true, view: DetailView.Invites } },
   },
   { path: 'chats/chat/:id/search', component: ChatLink, data: { modal: true, component: ChatSearch } },
   {

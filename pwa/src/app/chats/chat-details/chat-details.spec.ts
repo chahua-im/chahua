@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { AlertController, IonToast } from '@ionic/angular';
+import { AlertController, IonToast, ModalController } from '@ionic/angular';
 import { archive, archiveOutline, starOutline } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -360,6 +360,15 @@ describe('ChatDetails', () => {
     await leaving;
     expect(TestBed.inject(ChatListStore).refreshChats).toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('dismisses the overlay when the close button is tapped in a modal context', async () => {
+    const fixture = await open();
+    fixture.componentRef.setInput('asModal', true);
+    fixture.detectChanges();
+    const dismiss = vi.spyOn(TestBed.inject(ModalController), 'dismiss').mockResolvedValue(true);
+    (fixture.nativeElement.querySelector('.close-button') as HTMLElement).click();
+    expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
   it('shows thread details and switches one action from subscription to archive and unarchive', async () => {

@@ -132,7 +132,7 @@ export enum DetailView {
 })
 export class ChatDetails {
   readonly chatId = input<SnowflakeID>();
-  readonly modal = input(false);
+  readonly asModal = input(false);
   readonly view = input(DetailView.Info);
   readonly user = input<MemberSummary>();
   readonly currentConversation = input(false);
@@ -413,7 +413,7 @@ export class ChatDetails {
 
   protected close() {
     this.closed.emit();
-    if (this.user() || this.modal()) void this.modals.dismiss();
+    if (this.user() || this.asModal()) void this.modals.dismiss();
   }
   protected messageUser() {
     const id = this.id();
