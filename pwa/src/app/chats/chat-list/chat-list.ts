@@ -126,6 +126,10 @@ export class ChatList {
   }
 
   protected readonly session = inject(SessionStore);
+  protected readonly canCreateGroup = computed(() => {
+    const permissions = this.session.user()?.permissions;
+    return !!permissions && (permissions.includes('permission.all') || permissions.includes('chat.create'));
+  });
   protected readonly searching = signal(false);
   protected readonly search = signal('');
   protected readonly ListTab = ListTab;

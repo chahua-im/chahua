@@ -88,9 +88,11 @@
 <ion-popover #addMenu [dismissOnSelect]="true">
   <ng-template>
     <ion-list>
-      <ion-item [button]="true" routerLink="/chats/new">
-        <ion-label>{{ 'chats.list.add.createGroup' | transloco }}</ion-label>
-      </ion-item>
+      @if (canCreateGroup()) {
+        <ion-item [button]="true" routerLink="/chats/new">
+          <ion-label>{{ 'chats.list.add.createGroup' | transloco }}</ion-label>
+        </ion-item>
+      }
       <ion-item [button]="true" routerLink="/chats/join">
         <ion-label>{{ 'chats.list.add.joinGroup' | transloco }}</ion-label>
       </ion-item>
