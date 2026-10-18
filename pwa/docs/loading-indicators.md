@@ -11,7 +11,7 @@
 | 列表首次加载、切换分类、点击重试 | 列表行骨架屏；已有行时不再显示                        | 当前分类查询 loading 汇总与 ChatListContent.ready     |
 | 列表下拉刷新                     | Ionic refresher；不同时显示内容区加载图标             | ChatListContent.refreshing 与查询 loading             |
 | 列表续页                         | Ionic infinite-scroll spinner                         | 查询 loadingMore                                      |
-| 对话首次加载                     | 消息气泡骨架屏，贴底对齐                              | ConversationStore.loading                             |
+| 对话首次加载                     | 消息气泡骨架屏，贴底对齐；私聊关闭作者信息偏好时不显示头像占位 | ConversationStore.loading                             |
 | 对话历史/后续消息分页            | 顶部/底部固定尺寸分页控件，空闲箭头、加载圆弧         | ConversationStore.pagingDirection                     |
 | 收藏/置顶页面加载                | 内容区居中的 page-loading                             | SavedMessageList.loading / PinnedMessagesPage.loading |
 | 好友验证设置加载                 | 列表内 spinner                                        | FriendVerificationSettings.loading                    |

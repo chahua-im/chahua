@@ -283,6 +283,9 @@ export class ConversationPage {
       avatar: conversationAvatar(chat, this.threadRoot(), !!this.threadId()),
     };
   });
+  protected readonly showMessageDetails = computed(
+    () => this.chatInfo.get(this.id())?.kind !== GroupKind.dm || this.preferences.showDmDetails(),
+  );
   private readonly loadedThreadRoot = linkedSignal({
     source: this.entryKey,
     computation: (): MessageResponse | undefined => undefined,

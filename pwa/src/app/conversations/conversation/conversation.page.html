@@ -183,6 +183,7 @@
         <app-message
           [stickyAvatar]="stickyRow() === index"
           [showAllAvatars]="preferences.showAllAvatars()"
+          [showDetails]="showMessageDetails()"
           [message]="row.message"
           [interactive]="!!row.confirmed && !row.outgoing"
           [outgoingId]="row.outgoing?.clientGeneratedId"
@@ -231,7 +232,7 @@
             [class.sent]="row % 3 === 2"
             [class.short]="row % 2 === 0"
             [class.tall]="row % 3 === 0">
-            @if (row % 3 !== 2) {
+            @if (row % 3 !== 2 && showMessageDetails()) {
               <span class="skeleton-block message-skeleton-avatar"></span>
             }
             <span class="skeleton-block message-skeleton-bubble"></span>

@@ -13,7 +13,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、用于改写引用快照的撤回与编辑记录 | 每个 ConversationPage；由页面生命周期控制                   |
 | MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                             | 应用内存；跨页面，整页刷新不恢复                            |
 | DraftStore             | 文字、回复目标 ID、保存时间                                             | 按账号和聊天/话题保存到 localStorage                        |
-| Preferences            | 话题/头像显示偏好、最近表情、置顶表态表情                               | localStorage                                                |
+| Preferences            | 话题/头像/私聊作者信息显示偏好、最近表情、置顶表态表情                     | localStorage                                                |
 | StickerPreferences     | 自动整理开关、收藏贴纸使用顺序；读写 SessionStore 中的贴纸包顺序        | 应用；开关与收藏顺序保存到 localStorage，包顺序以服务器为准 |
 | MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                                            |
 | ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                      | 应用；当前页面消费                                          |

@@ -11,6 +11,7 @@
     class="chat-row"
     [class.sent]="own()"
     [class.group-start]="first()"
+    [class.no-details]="!showDetails()"
     [class.group-end]="last()"
     [class.last]="showAvatar()"
     [class.preview]="preview()"
@@ -42,21 +43,23 @@
         </svg>
       </div>
     }
-    <span class="avatar-slot">
-      @if (showAvatar()) {
-        <ion-avatar
-          (click)="profile()"
-          class="avatar"
-          [style.visibility]="stickyAvatar() ? 'hidden' : null"
-          [class.placeholder]="!message().sender.avatarUrl">
-          @if (message().sender.avatarUrl; as src) {
-            <img [src]="src" width="34" height="34" decoding="async" />
-          } @else {
-            {{ (name() | avatarText: 2).toUpperCase() }}
-          }
-        </ion-avatar>
-      }
-    </span>
+    @if (showDetails()) {
+      <span class="avatar-slot">
+        @if (showAvatar()) {
+          <ion-avatar
+            (click)="profile()"
+            class="avatar"
+            [style.visibility]="stickyAvatar() ? 'hidden' : null"
+            [class.placeholder]="!message().sender.avatarUrl">
+            @if (message().sender.avatarUrl; as src) {
+              <img [src]="src" width="34" height="34" decoding="async" />
+            } @else {
+              {{ (name() | avatarText: 2).toUpperCase() }}
+            }
+          </ion-avatar>
+        }
+      </span>
+    }
     <div
       #bubble
       [class]="isSticker() ? 'sticker-content' : 'bubble'"
@@ -67,7 +70,7 @@
       @if (busy()) {
         <span class="acting"><ion-spinner></ion-spinner></span>
       }
-      @if (first() && !isSticker()) {
+      @if (first() && !isSticker() && showDetails()) {
         <app-message-author
           class="sender"
           [sender]="message().sender"

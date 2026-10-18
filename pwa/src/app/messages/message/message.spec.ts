@@ -154,6 +154,21 @@ describe('Message', () => {
     fixture.componentRef.setInput('showAllAvatars', false);
   });
 
+  it('hides the avatar and sender name and collapses the avatar column when details are hidden', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('showDetails', false);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelector('.avatar-slot')).toBeNull();
+    expect(element.querySelector('.sender')).toBeNull();
+    expect(element.querySelector('.chat-row.no-details')).not.toBeNull();
+    fixture.componentRef.setInput('showDetails', true);
+    fixture.detectChanges();
+    expect(element.querySelector('.avatar-slot')).not.toBeNull();
+    expect(element.querySelector('.sender')).not.toBeNull();
+    expect(element.querySelector('.chat-row.no-details')).toBeNull();
+  });
+
   it('renders attachments with captions and replaces the recalled body with a tombstone', async () => {
     const fixture = await render();
     const message = {

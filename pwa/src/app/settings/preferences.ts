@@ -6,6 +6,7 @@ const REACTIONS_KEY = 'chahua.preferences.recentReactions';
 const PINNED_REACTIONS_KEY = 'chahua.preferences.pinnedReactions';
 
 const AVATARS_KEY = 'chahua.preferences.showAllAvatars';
+const DM_DETAILS_KEY = 'chahua.preferences.showDmDetails';
 
 const COLOR_MODE_KEY = 'chahua.preferences.colorMode';
 
@@ -27,9 +28,11 @@ export class Preferences {
 
   private readonly threads = signal(window.localStorage.getItem(THREADS_KEY) !== 'false');
   private readonly avatars = signal(window.localStorage.getItem(AVATARS_KEY) === 'true');
+  private readonly dmDetails = signal(window.localStorage.getItem(DM_DETAILS_KEY) !== 'false');
   private readonly mode = signal(readColorMode());
   readonly showThreadsInMessages = this.threads.asReadonly();
   readonly showAllAvatars = this.avatars.asReadonly();
+  readonly showDmDetails = this.dmDetails.asReadonly();
   readonly colorMode = this.mode.asReadonly();
 
   setShowThreadsInMessages(value: boolean) {
@@ -40,6 +43,11 @@ export class Preferences {
   setShowAllAvatars(value: boolean) {
     window.localStorage.setItem(AVATARS_KEY, String(value));
     this.avatars.set(value);
+  }
+
+  setShowDmDetails(value: boolean) {
+    window.localStorage.setItem(DM_DETAILS_KEY, String(value));
+    this.dmDetails.set(value);
   }
 
   setColorMode(value: ColorMode) {

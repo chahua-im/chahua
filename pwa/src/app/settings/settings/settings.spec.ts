@@ -179,10 +179,13 @@ describe('Settings', () => {
     const toggles = Array.from(page.querySelectorAll('ion-toggle'));
     toggles[0].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     toggles[1].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
+    toggles[2].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     expect(TestBed.inject(Preferences).showThreadsInMessages()).toBe(false);
     expect(TestBed.inject(Preferences).showAllAvatars()).toBe(true);
+    expect(TestBed.inject(Preferences).showDmDetails()).toBe(false);
     expect(localStorage.getItem('chahua.preferences.showThreadsInMessages')).toBe('false');
     expect(localStorage.getItem('chahua.preferences.showAllAvatars')).toBe('true');
+    expect(localStorage.getItem('chahua.preferences.showDmDetails')).toBe('false');
     await back();
     expect(page.tagName).toBe('APP-SETTINGS');
     expect(await nav.canGoBack()).toBe(false);
@@ -191,6 +194,7 @@ describe('Settings', () => {
     const restored = Array.from(page.querySelectorAll('ion-toggle'));
     expect(restored[0].checked).toBe(false);
     expect(restored[1].checked).toBe(true);
+    expect(restored[2].checked).toBe(false);
     const done = Array.from(page.querySelectorAll('ion-button')).find(
       (button) => button.textContent?.trim() === '完成',
     )!;

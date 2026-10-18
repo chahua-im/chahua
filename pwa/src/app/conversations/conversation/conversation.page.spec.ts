@@ -11,6 +11,7 @@ import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-u
 import { PinsService } from '../../../generated/endpoints/pins/pins.service';
 import {
   AttachmentUploadPurpose,
+  GroupKind,
   GroupRole,
   MessageType,
   ServerWsMessageType,
@@ -62,6 +63,7 @@ describe('ConversationPage', () => {
   let scroll: HTMLElement;
   let resizes: Map<Element, () => void>;
   const avatars = signal(false);
+  const dmDetails = signal(true);
   beforeEach(async () => {
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
@@ -92,6 +94,7 @@ describe('ConversationPage', () => {
     });
     vi.spyOn(IonModal.prototype, 'isOpen', 'set').mockImplementation(() => {});
     avatars.set(false);
+    dmDetails.set(true);
     incoming = new Subject<MessageResponse>();
     events = new Subject<ServerWsMessage>();
     resync = new Subject<void>();
@@ -104,7 +107,7 @@ describe('ConversationPage', () => {
         provideRouter([]),
         { provide: Connection, useValue: mockRealtime({ messages$: incoming, events$: events, resync$: resync }) },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
-        { provide: Preferences, useValue: { showAllAvatars: avatars } },
+        { provide: Preferences, useValue: { showAllAvatars: avatars, showDmDetails: dmDetails } },
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
@@ -146,6 +149,27 @@ describe('ConversationPage', () => {
     vi.restoreAllMocks();
     TestBed.inject(VoicePlayback).active.set(undefined);
     http.verify();
+  });
+
+  it('hides skeleton avatars and collapses message details for dm chats when the preference is off', async () => {
+    TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
+    dmDetails.set(false);
+    fixture.destroy();
+    fixture = TestBed.createComponent(ConversationPage);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('id', wireChat.id);
+    fixture.detectChanges();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
+    expect(fixture.nativeElement.querySelector('.message-skeleton')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.message-skeleton-avatar')).toBeNull();
+    request.flush({ messages: [{ ...wireMessage }], olderCursor: wireMessage.id });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.message-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message .chat-row.no-details')).not.toBeNull();
+    dmDetails.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message .chat-row.no-details')).toBeNull();
   });
 
   it('opens search from the conversation toolbar', () => {

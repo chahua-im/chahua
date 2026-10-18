@@ -93,6 +93,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly last = input(true);
   protected readonly showAvatar = computed(() => this.last() || this.showAllAvatars());
   readonly showAllAvatars = input(false);
+  readonly showDetails = input(true);
   readonly stickyAvatar = input(false);
   readonly preview = input(false);
   readonly interactive = input(true);

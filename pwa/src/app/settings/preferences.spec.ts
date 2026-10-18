@@ -14,27 +14,33 @@ describe('Preferences', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('starts with threads visible and grouped avatars', () => {
+  it('starts with threads visible, grouped avatars and dm details', () => {
     const preferences = TestBed.inject(Preferences);
     expect(preferences.showThreadsInMessages()).toBe(true);
     expect(preferences.showAllAvatars()).toBe(false);
+    expect(preferences.showDmDetails()).toBe(true);
   });
 
   it('persists both settings and restores them in a fresh service', () => {
     const preferences = TestBed.inject(Preferences);
     preferences.setShowThreadsInMessages(false);
     preferences.setShowAllAvatars(true);
+    preferences.setShowDmDetails(false);
     expect(preferences.showThreadsInMessages()).toBe(false);
     expect(preferences.showAllAvatars()).toBe(true);
+    expect(preferences.showDmDetails()).toBe(false);
     TestBed.resetTestingModule();
     const restored = TestBed.inject(Preferences);
     expect(restored.showThreadsInMessages()).toBe(false);
     expect(restored.showAllAvatars()).toBe(true);
+    expect(restored.showDmDetails()).toBe(false);
     restored.setShowThreadsInMessages(true);
     restored.setShowAllAvatars(false);
+    restored.setShowDmDetails(true);
     TestBed.resetTestingModule();
     expect(TestBed.inject(Preferences).showThreadsInMessages()).toBe(true);
     expect(TestBed.inject(Preferences).showAllAvatars()).toBe(false);
+    expect(TestBed.inject(Preferences).showDmDetails()).toBe(true);
   });
   it('remembers the last five distinct reactions across fresh service instances', () => {
     const preferences = TestBed.inject(Preferences);

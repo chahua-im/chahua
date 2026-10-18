@@ -20,12 +20,20 @@
         <span class="ion-text-wrap">在“消息”标签页中显示话题</span>
       </ion-toggle>
     </ion-item>
-    <ion-item lines="none">
+    <ion-item>
       <ion-icon slot="start" [icon]="avatarsIcon" color="primary"></ion-icon>
       <ion-toggle
         [checked]="preferences.showAllAvatars()"
         (ionChange)="preferences.setShowAllAvatars($event.detail.checked)">
         <span class="ion-text-wrap">在所有消息旁显示头像</span>
+      </ion-toggle>
+    </ion-item>
+    <ion-item lines="none">
+      <ion-icon slot="start" [icon]="dmDetailsIcon" color="primary"></ion-icon>
+      <ion-toggle
+        [checked]="preferences.showDmDetails()"
+        (ionChange)="preferences.setShowDmDetails($event.detail.checked)">
+        <span class="ion-text-wrap">在私聊中显示双方头像和用户名</span>
       </ion-toggle>
     </ion-item>
   </ion-list>

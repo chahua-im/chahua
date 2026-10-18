@@ -21,6 +21,7 @@ import {
   contrastOutline,
   moonOutline,
   personCircleOutline,
+  personOutline,
   sunnyOutline,
 } from 'ionicons/icons';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -55,6 +56,7 @@ export class GeneralSettings {
   protected readonly ColorMode = ColorMode;
   protected readonly threadsIcon = chatbubblesOutline;
   protected readonly avatarsIcon = personCircleOutline;
+  protected readonly dmDetailsIcon = personOutline;
   protected readonly systemIcon = contrastOutline;
   protected readonly lightIcon = sunnyOutline;
   protected readonly darkIcon = moonOutline;
