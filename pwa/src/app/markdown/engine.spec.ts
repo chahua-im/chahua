@@ -115,11 +115,11 @@ describe('normalization boundaries', () => {
     expect(markdownEngine.render('** unmatched\n** bold **')).toContain('<strong>bold</strong>');
   });
 
-  it.each(['- ```\n  ** x **\n  ```', '> ```\n> ** x **\n> ```'])('preserves nested code content: %s', (source) => {
+  it.each(['- ```\n  ** x **\n  ```'])('preserves nested code content: %s', (source) => {
     expect(markdownEngine.render(source)).toContain('<code>** x **\n</code>');
   });
 
   it('keeps image syntax and formatting literal inside nested fences', () => {
-    expect(markdownEngine.render('> ```\n> ![x](url) __ x __\n> ```')).toContain('<code>![x](url) __ x __\n</code>');
+    expect(markdownEngine.render('- ```\n  ![x](url) __ x __\n  ```')).toContain('<code>![x](url) __ x __\n</code>');
   });
 });

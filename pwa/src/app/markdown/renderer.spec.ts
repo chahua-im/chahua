@@ -140,7 +140,7 @@ describe('renderMarkdownText — blocks', () => {
     // Heading and horizontal-rule syntax are out of the allowlist.
     expect(html).toContain('<p># Title</p>');
     expect(html).not.toContain('<h1');
-    expect(html).toContain('<blockquote><p>Quote <strong>bold</strong></p></blockquote>');
+    expect(html).toContain('<p>&gt; Quote <strong>bold</strong></p>');
     // Tight lists must not wrap items in <p>.
     expect(html).toContain('<ul><li>a</li><li>b</li></ul>');
     expect(html).not.toContain('<hr');
@@ -205,8 +205,8 @@ describe('renderMarkdownPreview — single line', () => {
     expect(renderPreview('3. three\n4. four')).toBe('3. three 4. four');
   });
 
-  it('flattens blockquotes and code blocks', () => {
-    expect(renderPreview('> quoted\n\nrest')).toBe('quoted rest');
+  it('preserves quote markers and flattens code blocks', () => {
+    expect(renderPreview('> quoted\n\nrest')).toBe('&gt; quoted rest');
     expect(renderPreview('```\na\nb\n```')).toBe('<code>a b</code>');
   });
 
