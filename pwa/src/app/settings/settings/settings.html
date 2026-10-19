@@ -106,6 +106,22 @@
       }
     </ion-item>
   </ion-list>
+  @if (devMode) {
+    <ion-list [inset]="true">
+      <ion-item>
+        <ion-icon slot="start" [icon]="devIcon" color="primary"></ion-icon>
+        <ion-input
+          [label]="'settings.menu.devUid' | transloco"
+          type="number"
+          [value]="devUidInput()"
+          (ionInput)="editDevUid($event)"
+          (keydown.enter)="switchDevUid()"></ion-input>
+        <ion-button slot="end" fill="clear" [disabled]="!devUidValid()" (click)="switchDevUid()">
+          {{ 'settings.menu.devUidSwitch' | transloco }}
+        </ion-button>
+      </ion-item>
+    </ion-list>
+  }
 </ion-content>
 
 <ion-toast [message]="'settings.menu.notificationDenied' | transloco" [duration]="2500" />

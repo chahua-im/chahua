@@ -41,7 +41,9 @@
       "upToDate": "已是最新版本",
       "updateCheckFailed": "檢查失敗，請重試",
       "updateNow": "立即更新",
-      "notificationDenied": "未授予通知權限"
+      "notificationDenied": "未授予通知權限",
+      "devUid": "開發 UID",
+      "devUidSwitch": "切換"
     },
     "general": {
       "title": "一般",

@@ -1,6 +1,6 @@
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { RouterLink, Router } from '@angular/router';
-import { afterRenderEffect, Component, inject, signal, viewChild } from '@angular/core';
+import { afterRenderEffect, Component, computed, inject, isDevMode, signal, viewChild } from '@angular/core';
 import {
   IonButton,
   IonButtons,
@@ -11,6 +11,7 @@ import {
   IonLabel,
   IonList,
   IonNote,
+  IonInput,
   IonSpinner,
   IonTitle,
   IonToast,
@@ -23,6 +24,7 @@ import type { ToggleCustomEvent } from '@ionic/core';
 import {
   bookmarkOutline,
   happyOutline,
+  constructOutline,
   notificationsOutline,
   refreshOutline,
   settingsOutline,
@@ -31,7 +33,7 @@ import {
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
-import { SessionStore } from '../../session/session-store';
+import { devBackendEnabled, SessionStore } from '../../session/session-store';
 
 @Component({
   selector: 'app-settings',
@@ -50,6 +52,7 @@ import { SessionStore } from '../../session/session-store';
     IonLabel,
     IonList,
     IonNote,
+    IonInput,
     IonTitle,
     IonToast,
     IonToggle,
@@ -75,12 +78,30 @@ export class Settings {
   protected readonly stickerIcon = happyOutline;
   protected readonly notificationIcon = notificationsOutline;
   protected readonly updateIcon = refreshOutline;
+  protected readonly devIcon = constructOutline;
+  protected readonly devMode = isDevMode() && devBackendEnabled();
+  protected readonly devUidInput = signal('');
+  protected readonly devUidValid = computed(() => {
+    const uid = Number(this.devUidInput());
+    return Number.isInteger(uid) && uid > 0;
+  });
 
   constructor() {
+    if (this.devMode) this.devUidInput.set(String(this.session.devUid()));
     void this.notifications.refresh();
     afterRenderEffect(() => {
       if (this.notifications.error() === PushNotificationError.PermissionDenied) void this.permissionToast().present();
     });
+  }
+
+  protected editDevUid(event: Event) {
+    this.devUidInput.set(String((event.target as HTMLIonInputElement).value ?? ''));
+  }
+
+  protected switchDevUid() {
+    if (!this.devUidValid()) return;
+    this.session.switchDevUid(Number(this.devUidInput()));
+    window.location.reload();
   }
 
   protected close() {

@@ -41,7 +41,9 @@
       "upToDate": "You're up to date",
       "updateCheckFailed": "Update check failed. Please try again.",
       "updateNow": "Update now",
-      "notificationDenied": "Notification permission was not granted"
+      "notificationDenied": "Notification permission was not granted",
+      "devUid": "Dev UID",
+      "devUidSwitch": "Switch"
     },
     "general": {
       "title": "General",
