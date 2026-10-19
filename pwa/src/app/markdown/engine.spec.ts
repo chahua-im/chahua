@@ -79,3 +79,34 @@ describe('single-asterisk italic space-adaptation', () => {
     expect(markdownEngine.render('`*a *`', {}).trim()).toBe('<p><code>*a *</code></p>');
   });
 });
+
+describe('normalization boundaries', () => {
+  it('does not pair different marker types', () => {
+    expect(markdownEngine.render('** bold ~~').trim()).toBe('<p>** bold ~~</p>');
+    expect(markdownEngine.render('~~ gone __').trim()).toBe('<p>~~ gone __</p>');
+  });
+
+  it('reflows nested pairs without changing their marker types', () => {
+    expect(markdownEngine.render('** bold __italic__ end **').trim()).toBe(
+      '<p><strong>bold <em>italic</em> end</strong></p>',
+    );
+    expect(markdownEngine.render('** bold __ italic __ end **').trim()).toBe(
+      '<p><strong>bold  <em>italic</em>  end</strong></p>',
+    );
+  });
+
+  it('does not let an unmatched marker on a previous line consume a pair', () => {
+    expect(markdownEngine.render('** unmatched\n** bold **')).toContain('<strong>bold</strong>');
+  });
+
+  it.each(['- ~~~\n  ** x **\n  ~~~', '> ~~~\n> ** x **\n> ~~~', '- ```\n  ** x **\n  ```', '> ```\n> ** x **\n> ```'])(
+    'preserves nested code content: %s',
+    (source) => {
+      expect(markdownEngine.render(source)).toContain('<code>** x **\n</code>');
+    },
+  );
+
+  it('keeps image syntax and formatting literal inside nested fences', () => {
+    expect(markdownEngine.render('> ~~~\n> ![x](url) __ x __\n> ~~~')).toContain('<code>![x](url) __ x __\n</code>');
+  });
+});
