@@ -1,0 +1,148 @@
+:host {
+  display: inline;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:host(.blocks) {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+:host(:not(.blocks)) > p {
+  display: inline;
+}
+
+:host(.summary) {
+  white-space: nowrap;
+  color: inherit;
+  pointer-events: none;
+
+  a {
+    color: inherit;
+  }
+}
+
+p,
+ul,
+ol,
+blockquote,
+pre {
+  margin: 0;
+}
+
+:is(p, ul, ol, blockquote, pre) + :is(p, ul, ol, blockquote, pre) {
+  margin-block-start: 6px;
+}
+
+ul,
+ol {
+  padding-inline-start: 22px;
+}
+
+li + li,
+li > ul,
+li > ol {
+  margin-block-start: 2px;
+}
+
+blockquote {
+  padding-inline-start: 8px;
+  border-inline-start: 3px solid
+    color-mix(in srgb, var(--message-link-color, var(--ion-color-primary)) 50%, transparent);
+}
+
+a {
+  color: var(--message-link-color, var(--ion-color-primary));
+  text-decoration: underline;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.92em;
+  border-radius: 4px;
+  padding: 0.5px 4px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+pre {
+  max-width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+
+  code {
+    display: block;
+    padding: 0;
+    background: none;
+  }
+}
+
+.mention {
+  font: inherit;
+  font-weight: 600;
+  border: 0;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: 0;
+  vertical-align: baseline;
+  white-space: inherit;
+  overflow-wrap: anywhere;
+  color: var(--message-link-color, var(--ion-color-primary));
+  background: color-mix(in srgb, currentColor 10%, transparent);
+
+  &.mention-self {
+    background: color-mix(in srgb, currentColor 20%, transparent);
+  }
+}
+
+button.mention {
+  cursor: pointer;
+}
+
+.spoiler {
+  position: relative;
+}
+
+.spoiler-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.spoiler:not(.revealed) {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  box-decoration-break: slice;
+  -webkit-box-decoration-break: slice;
+
+  &.particles-ready {
+    background: none;
+  }
+
+  > .spoiler-content {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .spoiler-content * {
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+.spoiler.revealed > .spoiler-canvas {
+  display: none;
+}

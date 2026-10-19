@@ -150,12 +150,6 @@ describe('Composer formatting toolbar', () => {
     await flush();
     expect(composer.text()).toBe('**hello** world');
 
-    type('**hello** world');
-    focusAndSelect(10, 15);
-    key('u', { ctrlKey: true });
-    await flush();
-    expect(composer.text()).toBe('**hello** __world__');
-
     type('**hello** __world__');
     focusAndSelect(12, 17);
     key('q', { ctrlKey: true });

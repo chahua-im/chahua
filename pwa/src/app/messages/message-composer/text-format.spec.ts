@@ -13,7 +13,6 @@ describe('wrapInlineFormat', () => {
     { kind: 'bold', open: '**', close: '**' },
     { kind: 'italic', open: '*', close: '*' },
     { kind: 'strike', open: '~~', close: '~~' },
-    { kind: 'underline', open: '__', close: '__' },
   ];
 
   it.each(KINDS.map(({ kind, open, close }) => [kind, open, close]))(
@@ -33,7 +32,7 @@ describe('wrapInlineFormat', () => {
     expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'bold')).toBeNull();
     expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'italic')).toBeNull();
     expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'strike')).toBeNull();
-    expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'underline')).toBeNull();
+    expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'strike')).toBeNull();
   });
 
   it('clamps out-of-range selections to the text bounds', () => {
@@ -117,15 +116,14 @@ describe('normalizeLinkHref', () => {
 });
 
 describe('shortcutFormatKind', () => {
-  it('maps Ctrl/Cmd + B / I / D / U / Q to the matching format', () => {
+  it('maps Ctrl/Cmd + B / I / D / Q to the matching format', () => {
     expect(shortcutFormatKind({ key: 'b' })).toBe('bold');
     expect(shortcutFormatKind({ key: 'B' })).toBe('bold');
     expect(shortcutFormatKind({ key: 'i' })).toBe('italic');
     expect(shortcutFormatKind({ key: 'I' })).toBe('italic');
     expect(shortcutFormatKind({ key: 'd' })).toBe('strike');
     expect(shortcutFormatKind({ key: 'D' })).toBe('strike');
-    expect(shortcutFormatKind({ key: 'u' })).toBe('underline');
-    expect(shortcutFormatKind({ key: 'U' })).toBe('underline');
+
     expect(shortcutFormatKind({ key: 'q' })).toBe('quote');
     expect(shortcutFormatKind({ key: 'Q' })).toBe('quote');
   });

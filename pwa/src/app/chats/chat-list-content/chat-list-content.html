@@ -131,7 +131,7 @@
                 <span slot="preview">
                   @if (row.draft; as draft) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
-                    {{ draft.text }}
+                    <app-markdown-summary [text]="draft.text" />
                   } @else if (row.thread.lastReply; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {
@@ -182,7 +182,7 @@
                 <span slot="preview">
                   @if (row.draft; as draft) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
-                    {{ draft.text }}
+                    <app-markdown-summary [text]="draft.text" />
                   } @else if (row.chat.lastMessage; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {

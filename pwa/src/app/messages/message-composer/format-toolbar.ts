@@ -13,8 +13,8 @@ export interface FormatToolbarAnchor {
 }
 
 /**
- * Floating formatting pill (bold / italic / strike / underline / code / quote /
- * link) shown next to the textarea while text is selected. Mousedowns are
+ * Floating formatting pill (bold / italic / strike / code / quote / link)
+ * shown next to the textarea while text is selected. Mousedowns are
  * prevented from defaulting so the textarea never loses its selection.
  */
 @Component({
@@ -54,15 +54,6 @@ export interface FormatToolbarAnchor {
         (click)="format.emit('strike')"
       >
         <span class="strike-glyph">S</span>
-      </button>
-      <button
-        type="button"
-        class="button"
-        title="{{ 'messages.composer.format.underline' | transloco }}"
-        data-format-underline
-        (click)="format.emit('underline')"
-      >
-        <span class="underline-glyph">U</span>
       </button>
       <button
         type="button"
@@ -166,11 +157,6 @@ export interface FormatToolbarAnchor {
 
     .strike-glyph {
       text-decoration: line-through;
-    }
-
-    .underline-glyph {
-      text-decoration: underline;
-      text-underline-offset: 2px;
     }
 
     .code-glyph {

@@ -44,13 +44,19 @@ describe('renderMarkdownText — inline', () => {
     );
   });
 
-  it('renders underline from double underscores', () => {
-    expect(renderText('__under__')).toBe('<p><u>under</u></p>');
-    expect(renderText('__a__ and **b**')).toBe('<p><u>a</u> and <strong>b</strong></p>');
+  it('renders italic from double underscores', () => {
+    expect(renderText('__em__')).toBe('<p><em>em</em></p>');
+    expect(renderText('__a__ and **b**')).toBe('<p><em>a</em> and <strong>b</strong></p>');
+  });
+
+  it('renders a spoiler span for double pipes', () => {
+    expect(renderText('||secret|| and **bold**')).toBe(
+      '<p><span class="spoiler">secret</span> and <strong>bold</strong></p>',
+    );
   });
 
   it('renders single underscore markers as literal text', () => {
-    expect(renderText('_literal_ and __under__')).toBe('<p>_literal_ and <u>under</u></p>');
+    expect(renderText('_literal_ and __em__')).toBe('<p>_literal_ and <em>em</em></p>');
   });
 
   it('renders nested emphasis', () => {
@@ -181,8 +187,9 @@ describe('renderMarkdownText — blocks', () => {
 });
 
 describe('renderMarkdownPreview — single line', () => {
-  it('flattens inline formatting onto one line', () => {
+  it('flattens inline formatting while preserving spoiler masks on one line', () => {
     expect(renderPreview('**bold** and `code`')).toBe('<strong>bold</strong> and <code>code</code>');
+    expect(renderPreview('||secret|| plan')).toBe('<span class="spoiler">secret</span> plan');
   });
 
   it('collapses line breaks to spaces', () => {

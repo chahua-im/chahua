@@ -370,7 +370,6 @@
         "bold": "粗體 (Ctrl+B)",
         "italic": "斜體 (Ctrl+I)",
         "strike": "刪除線 (Ctrl+D)",
-        "underline": "底線 (Ctrl+U)",
         "code": "程式碼區塊",
         "quote": "引用 (Ctrl+Q)",
         "link": "連結"

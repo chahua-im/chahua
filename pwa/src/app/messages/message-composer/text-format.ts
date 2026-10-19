@@ -4,7 +4,7 @@
  * returned text back into the controlled value.
  */
 
-export type InlineFormatKind = 'bold' | 'italic' | 'strike' | 'underline';
+export type InlineFormatKind = 'bold' | 'italic' | 'strike';
 
 export type BlockFormatKind = 'code' | 'quote';
 
@@ -25,7 +25,6 @@ const WRAP_MARKERS: Record<InlineFormatKind, readonly [string, string]> = {
   bold: ['**', '**'],
   italic: ['*', '*'],
   strike: ['~~', '~~'],
-  underline: ['__', '__'],
 };
 
 function clampSelection(text: string, selection: TextSelection): TextSelection {
@@ -64,7 +63,7 @@ export function normalizeLinkHref(raw: string): string {
 }
 
 /**
- * Wraps the selected range in `**`/`*`/`~~`/`__` markers. Returns `null` on a
+ * Wraps the selected range in `**`/`*`/`~~` markers. Returns `null` on a
  * collapsed selection so a no-selection shortcut never injects stray markers.
  */
 export function wrapInlineFormat(
@@ -122,7 +121,7 @@ export function applyLink(text: string, selection: TextSelection, rawUrl: string
   return { text: next, selectionStart: labelStart, selectionEnd: labelStart + 'text'.length };
 }
 
-/** Ctrl/Cmd+B / I / D / U / Q shortcuts; `Q` is blockquote, never `link`. */
+/** Ctrl/Cmd+B / I / D / Q shortcuts; `Q` is blockquote, never `link`. */
 const SHORTCUT_KIND: Record<string, TextFormatKind> = {
   b: 'bold',
   B: 'bold',
@@ -130,8 +129,7 @@ const SHORTCUT_KIND: Record<string, TextFormatKind> = {
   I: 'italic',
   d: 'strike',
   D: 'strike',
-  u: 'underline',
-  U: 'underline',
+
   q: 'quote',
   Q: 'quote',
 };

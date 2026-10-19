@@ -1,6 +1,6 @@
-import { DOCUMENT } from '@angular/common';
-import { Component, DestroyRef, effect, ElementRef, inject, input, output } from '@angular/core';
+import { Component, DestroyRef, effect, ElementRef, inject, input, output, Renderer2 } from '@angular/core';
 import type { MarkdownNode } from './nodes';
+import { SpoilerParticles } from './spoiler-particles';
 
 /**
  * Renders a {@link MarkdownNode} tree as DOM. Never uses HTML strings or
@@ -11,122 +11,25 @@ import type { MarkdownNode } from './nodes';
 @Component({
   selector: 'app-markdown-body',
   template: '',
-  styles: `
-    :host {
-      display: contents;
-      min-width: 0;
-      word-break: break-word;
-      white-space: pre-wrap;
-
-      p {
-        margin: 0;
-      }
-
-      p + p {
-        margin-top: 6px;
-      }
-
-      > * + * {
-        margin-top: 6px;
-      }
-
-      code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-        font-size: 0.92em;
-        border-radius: 4px;
-        padding: 0.5px 4px;
-        word-break: break-all;
-        background: rgba(var(--ion-text-color-rgb, 26, 26, 26), 0.08);
-      }
-
-      a {
-        color: inherit;
-        text-decoration: underline;
-      }
-
-      blockquote {
-        margin: 4px 0;
-        padding-left: 8px;
-        border-left: 3px solid rgba(var(--ion-color-primary-rgb, 56, 128, 255), 0.5);
-      }
-
-      ul,
-      ol {
-        margin: 2px 0;
-        padding-left: 22px;
-      }
-
-      li > p {
-        margin: 0;
-      }
-
-      pre {
-        margin: 6px 0;
-        padding: 8px 10px;
-        border-radius: 8px;
-        overflow-x: auto;
-        font-size: 0.92em;
-        background: rgba(var(--ion-text-color-rgb, 26, 26, 26), 0.06);
-
-        code {
-          display: block;
-          padding: 0;
-          background: none;
-          white-space: pre;
-          word-break: normal;
-        }
-      }
-    }
-
-    // Sent bubbles are primary-colored, so accents come from the contrast color.
-    :host-context(.sent) {
-      code {
-        background: rgba(var(--ion-color-primary-contrast-rgb, 255, 255, 255), 0.16);
-      }
-
-      pre {
-        background: rgba(var(--ion-color-primary-contrast-rgb, 255, 255, 255), 0.12);
-      }
-
-      blockquote {
-        border-left-color: rgba(var(--ion-color-primary-contrast-rgb, 255, 255, 255), 0.6);
-      }
-    }
-
-    .mention {
-      font-weight: 600;
-      font-size: 0.9em;
-      border-radius: 4px;
-      padding: 1px 4px;
-      margin: 0 -1px;
-      white-space: nowrap;
-      color: var(--ion-color-primary, #3880ff);
-      background: rgba(var(--ion-color-primary-rgb, 56, 128, 255), 0.1);
-
-      &.mention-self {
-        background: rgba(var(--ion-color-primary-rgb, 56, 128, 255), 0.2);
-      }
-    }
-
-    :host-context(.sent) .mention {
-      color: var(--ion-color-primary-contrast, #fff);
-      background: rgba(var(--ion-color-primary-contrast-rgb, 255, 255, 255), 0.18);
-
-      &.mention-self {
-        background: rgba(var(--ion-color-primary-contrast-rgb, 255, 255, 255), 0.28);
-      }
-    }
-  `,
+  host: {
+    '[class.blocks]': 'blocks()',
+    '[class.summary]': 'summary()',
+  },
+  styleUrl: './markdown-body.scss',
 })
 export class MarkdownBody {
   readonly nodes = input.required<readonly MarkdownNode[]>();
+  readonly blocks = input(false);
+  readonly summary = input(false);
   readonly mention = output<number>();
   /** An anchor with an `internal` target was activated; the value is the in-app path. */
   readonly follow = output<string>();
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  private readonly document = inject(DOCUMENT);
+  private readonly renderer = inject(Renderer2);
   private readonly destroy = inject(DestroyRef);
+
+  private readonly spoilers: SpoilerParticles[] = [];
 
   constructor() {
     effect(() => this.render(this.nodes()));
@@ -134,6 +37,8 @@ export class MarkdownBody {
   }
 
   private render(nodes: readonly MarkdownNode[]) {
+    for (const spoiler of this.spoilers) spoiler.destroy();
+    this.spoilers.length = 0;
     const parent = this.host.nativeElement;
     parent.replaceChildren();
     for (const node of nodes) parent.append(this.build(node));
@@ -142,9 +47,10 @@ export class MarkdownBody {
   private build(node: MarkdownNode): Node {
     switch (node.type) {
       case 'text':
-        return this.document.createTextNode(node.text);
+        return this.renderer.createText(node.text);
       case 'mention': {
-        const element = this.document.createElement(node.clickable ? 'button' : 'span');
+        const element: HTMLElement = this.renderer.createElement(node.clickable ? 'button' : 'span');
+        if (node.clickable) element.setAttribute('type', 'button');
         element.className = node.self ? 'mention mention-self' : 'mention';
         element.textContent = '@' + node.name;
         if (node.clickable) {
@@ -158,7 +64,7 @@ export class MarkdownBody {
       case 'widget':
         return this.build(node.node);
       default: {
-        const element = this.document.createElement(node.tag);
+        const element: HTMLElement = this.renderer.createElement(node.tag);
         for (const [key, value] of Object.entries(node.attrs ?? {})) element.setAttribute(key, value);
         if (node.tag === 'a') {
           if (element.hasAttribute('internal')) {
@@ -174,6 +80,31 @@ export class MarkdownBody {
           }
         }
         for (const child of node.children) element.append(this.build(child));
+        if (node.attrs?.['class'] === 'spoiler') {
+          const content: HTMLElement = this.renderer.createElement('span');
+          content.className = 'spoiler-content';
+          content.append(...element.childNodes);
+          const canvas: HTMLCanvasElement = this.renderer.createElement('canvas');
+          canvas.className = 'spoiler-canvas';
+          element.append(content, canvas);
+          const particles = new SpoilerParticles(element, canvas, this.host.nativeElement);
+          this.spoilers.push(particles);
+          element.addEventListener(
+            'click',
+            (event) => {
+              if (this.summary()) return;
+              if (!element.classList.contains('revealed')) {
+                event.stopPropagation();
+                event.preventDefault();
+                particles.reveal();
+              } else if (!(event.target as Element).closest('a, button')) {
+                event.stopPropagation();
+                particles.hide();
+              }
+            },
+            { capture: true },
+          );
+        }
         return element;
       }
     }
