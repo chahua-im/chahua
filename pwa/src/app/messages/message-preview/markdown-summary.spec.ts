@@ -66,6 +66,15 @@ describe('MarkdownSummary', () => {
     expect(element.querySelector('code')?.textContent).toBe('@[uid:2]');
   });
 
+  it.each(['`hello\n@[uid:2]`', '> ```\n> @[uid:2]\n> ```', '- ~~~\n  @[uid:2]\n  ~~~', '```\n```oops\n@[uid:2]\n```'])(
+    'preserves code mentions in previews: %s',
+    (source) => {
+      const element = render(source + '\n\n@[uid:2]', [{ uid: 2, username: '小花', gender: 0 }]);
+      expect(element.querySelector('code')?.textContent).toContain('@[uid:2]');
+      expect(element.textContent).toContain('@小花');
+    },
+  );
+
   it('keeps marker-free text on the plain path without wrapping elements', () => {
     const element = render('5 * 3 * 4 和 1.2 段落');
 

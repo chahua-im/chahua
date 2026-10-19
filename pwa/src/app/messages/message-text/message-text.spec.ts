@@ -90,3 +90,25 @@ describe('prepareMessageContent', () => {
     expect(prepareMessageContent('one\n\ntwo', [], null, true).hasBlocks).toBe(false);
   });
 });
+
+describe('code region mention preservation', () => {
+  it.each([
+    ['`hello\n@[uid:7]`', 'hello @[uid:7]'],
+    ['> ```\n> @[uid:7]\n> ```', '@[uid:7]\n'],
+    ['- ~~~\n  @[uid:7]\n  ~~~', '@[uid:7]\n'],
+    ['```\n```oops\n@[uid:7]\n```', '```oops\n@[uid:7]\n'],
+    ['> ~~~\r\n> @[uid:7]\r\n> ~~~', '@[uid:7]\n'],
+    ['~~~\n@[uid:7]', '@[uid:7]'],
+  ])('keeps code mentions verbatim: %s', (source, content) => {
+    const html = toHtml(prepareMessageContent(source + '\n\n**@[uid:7]**', [mention(7, 'Alice')], null, true).nodes!);
+    expect(html).toContain(content);
+    expect(html).not.toContain('\uFFF0');
+    if (!source.startsWith('~~~')) expect(html).toContain('@Alice');
+  });
+
+  it('does not treat escaped backticks as code delimiters', () => {
+    const html = toHtml(prepareMessageContent('\\`@[uid:7]` **ok**', [mention(7, 'Alice')], null, true).nodes!);
+    expect(html).toContain('@Alice');
+    expect(html).not.toContain('<code>');
+  });
+});

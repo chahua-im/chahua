@@ -15,108 +15,17 @@
  * content are skipped.
  */
 
-/** Returns a mask of character indexes inside code spans/fences or escapes. */
+import { findCodeRegions } from './code-regions';
+
+/** Code and escaped characters must remain verbatim during normalization. */
 function maskCodeRegions(src: string): boolean[] {
-  const n = src.length;
-  const masked = new Array<boolean>(n).fill(false);
-  const atLineStart = (idx: number): boolean => idx === 0 || src[idx - 1] === '\n';
-
-  const maskRange = (from: number, to: number): void => {
-    for (let x = from; x < to && x < n; x++) masked[x] = true;
-  };
-
-  let i = 0;
-  while (i < n) {
-    const ch = src[i];
-
-    if (ch === '\\' && i + 1 < n) {
-      masked[i] = true;
-      masked[i + 1] = true;
-      i += 2;
-      continue;
+  const masked = new Array<boolean>(src.length).fill(false);
+  for (const { start, end } of findCodeRegions(src)) masked.fill(true, start, end);
+  for (let i = 0; i < src.length - 1; i++) {
+    if (!masked[i] && src[i] === '\\') {
+      masked[i] = masked[i + 1] = true;
+      i++;
     }
-
-    // Fenced code block: a line with ≤3 leading spaces whose first non-space
-    // chars are a fence run (``` or ~~~, ≥3). Mask through the closing fence;
-    // an unclosed fence masks to EOF.
-    if (atLineStart(i) && (ch === ' ' || ch === '\t' || ch === '`' || ch === '~')) {
-      let probe = i;
-      let lead = 0;
-      while (probe < n && (src[probe] === ' ' || src[probe] === '\t') && lead < 3) {
-        probe++;
-        lead++;
-      }
-      if (probe < n && (src[probe] === '`' || src[probe] === '~')) {
-        const fenceChar = src[probe];
-        let run = probe;
-        while (run < n && src[run] === fenceChar) run++;
-        const openLen = run - probe;
-        if (openLen >= 3) {
-          let lineEnd = run;
-          while (lineEnd < n && src[lineEnd] !== '\n') lineEnd++;
-          maskRange(i, lineEnd);
-          // Closing fence must live on a later line than the opening one.
-          let cursor = lineEnd < n ? lineEnd + 1 : n;
-          while (cursor < n) {
-            let e = cursor;
-            while (e < n && src[e] !== '\n') e++;
-            let p2 = cursor;
-            let l2 = 0;
-            while (p2 < e && (src[p2] === ' ' || src[p2] === '\t') && l2 < 3) {
-              p2++;
-              l2++;
-            }
-            let isClosing = false;
-            if (p2 < e && src[p2] === fenceChar) {
-              let r2 = p2;
-              while (r2 < e && src[r2] === fenceChar) r2++;
-              if (r2 - p2 >= openLen) {
-                let t2 = r2;
-                while (t2 < e && (src[t2] === ' ' || src[t2] === '\t')) t2++;
-                isClosing = t2 === e; // only trailing spaces may follow the fence
-              }
-            }
-            maskRange(cursor, e);
-            cursor = e < n ? e + 1 : n;
-            if (isClosing) break;
-          }
-          i = cursor;
-          continue;
-        }
-      }
-    }
-
-    // Inline code span: a run of L backticks closes at the next run of exactly
-    // L backticks on the same line; unclosed spans stay unmasked.
-    if (ch === '`') {
-      let run = i;
-      while (run < n && src[run] === '`') run++;
-      const L = run - i;
-      let j = run;
-      let closeAt = -1;
-      while (j < n) {
-        if (src[j] === '`') {
-          let rr = j;
-          while (rr < n && src[rr] === '`') rr++;
-          if (rr - j === L) {
-            closeAt = j;
-            break;
-          }
-          j = rr;
-        } else {
-          j++;
-        }
-      }
-      if (closeAt === -1) {
-        i = run;
-        continue;
-      }
-      maskRange(i, closeAt + L);
-      i = closeAt + L;
-      continue;
-    }
-
-    i++;
   }
   return masked;
 }
@@ -149,9 +58,21 @@ function collectPairs(src: string, masked: boolean[], mode: ReflowMode): Array<[
   }
 
   const pairs: Array<[number, number]> = [];
-  for (let t = 0; t + 1 < runs.length; t += 2) {
-    pairs.push([runs[t].start, runs[t + 1].start]);
+  const open: MarkerRun[] = [];
+  let previous = 0;
+  for (const run of runs) {
+    if (/[\r\n]/.test(src.slice(previous, run.start))) open.length = 0;
+    previous = run.start;
+    const index = open.findIndex((candidate) => candidate.ch === run.ch);
+    if (index === -1) {
+      open.push(run);
+    } else {
+      pairs.push([open[index].start, run.start]);
+      open.splice(index);
+    }
   }
+  // Reflow inner pairs before outer pairs; every replacement preserves length.
+  pairs.sort((a, b) => a[0] - b[0]);
   return pairs;
 }
 
