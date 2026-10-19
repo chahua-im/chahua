@@ -222,7 +222,7 @@ describe('Message', () => {
     expect(entry.textContent).toContain('12 条回复');
     expect(entry.textContent).toContain('12');
     expect(entry.querySelectorAll('ion-avatar')).toHaveLength(0);
-    expect(element.querySelector('.bubble')?.lastElementChild?.tagName).toBe('APP-MESSAGE-THREAD');
+    expect(element.querySelector('.bubble-surface')?.lastElementChild?.tagName).toBe('APP-MESSAGE-THREAD');
     entry.click();
     expect(open).toHaveBeenCalledWith(testMessage.id);
     fixture.componentRef.setInput('canOpenThread', false);

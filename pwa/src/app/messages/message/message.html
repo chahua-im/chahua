@@ -67,80 +67,82 @@
       [class.has-thread]="!!threadInfo()"
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
-      @if (busy()) {
-        <span class="acting"><ion-spinner></ion-spinner></span>
-      }
-      @if (first() && !isSticker() && showDetails()) {
-        <app-message-author
-          class="sender"
-          [sender]="message().sender"
-          [own]="own()"
-          (click)="profile()"></app-message-author>
-      }
-      @if (quoted(); as quote) {
-        <button
-          type="button"
-          class="reply-preview"
-          [attr.inert]="preview() ? '' : null"
-          [disabled]="jumpDisabled() || !canInteract()"
-          [class.busy]="jumpingTo() === quote.id"
-          (click)="jump.emit(quote.id)">
-          <span class="reply-content">
-            <span class="reply-name">{{ quoteName() }}</span>
-            <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
-          </span>
-          @if (jumpingTo() === quote.id) {
-            <ion-spinner></ion-spinner>
-          }
-        </button>
-      }
-      @if (hasMedia()) {
-        <div class="media-content" [attr.inert]="preview() ? '' : null" (click)="sticker($event)">
-          <app-message-attachments
-            [message]="message()"
-            [overlayTime]="mediaOverlay()"
-            [outgoing]="own()"
-            [delivery]="status()"
-            [uploads]="uploads()"></app-message-attachments>
-        </div>
-      }
-      @if (!mediaOverlay()) {
-        <div class="message-body">
-          @if (!hasMedia()) {
-            <span class="message-text">
-              @if (message().messageType === Type.invite) {
-                <button type="button" class="invite-card" [disabled]="!canInteract()" (click)="invite($event)">
-                  <app-invite-card [code]="message().message ?? ''" />
-                </button>
-              } @else if (message().message) {
+      <div class="bubble-surface">
+        @if (busy()) {
+          <span class="acting"><ion-spinner></ion-spinner></span>
+        }
+        @if (first() && !isSticker() && showDetails()) {
+          <app-message-author
+            class="sender"
+            [sender]="message().sender"
+            [own]="own()"
+            (click)="profile()"></app-message-author>
+        }
+        @if (quoted(); as quote) {
+          <button
+            type="button"
+            class="reply-preview"
+            [attr.inert]="preview() ? '' : null"
+            [disabled]="jumpDisabled() || !canInteract()"
+            [class.busy]="jumpingTo() === quote.id"
+            (click)="jump.emit(quote.id)">
+            <span class="reply-content">
+              <span class="reply-name">{{ quoteName() }}</span>
+              <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
+            </span>
+            @if (jumpingTo() === quote.id) {
+              <ion-spinner></ion-spinner>
+            }
+          </button>
+        }
+        @if (hasMedia()) {
+          <div class="media-content" [attr.inert]="preview() ? '' : null" (click)="sticker($event)">
+            <app-message-attachments
+              [message]="message()"
+              [overlayTime]="mediaOverlay()"
+              [outgoing]="own()"
+              [delivery]="status()"
+              [uploads]="uploads()"></app-message-attachments>
+          </div>
+        }
+        @if (!mediaOverlay()) {
+          <div class="message-body">
+            @if (!hasMedia()) {
+              <span class="message-text">
+                @if (message().messageType === Type.invite) {
+                  <button type="button" class="invite-card" [disabled]="!canInteract()" (click)="invite($event)">
+                    <app-invite-card [code]="message().message ?? ''" />
+                  </button>
+                } @else if (message().message) {
+                  <app-message-text
+                    [text]="message().message!"
+                    [mentions]="message().mentions ?? []"
+                    [interactive]="canInteract()" />
+                } @else {
+                  <app-message-preview [message]="message()" />
+                }
+              </span>
+            } @else if (message().message) {
+              <span class="message-text">
                 <app-message-text
                   [text]="message().message!"
                   [mentions]="message().mentions ?? []"
                   [interactive]="canInteract()" />
-              } @else {
-                <app-message-preview [message]="message()" />
-              }
-            </span>
-          } @else if (message().message) {
-            <span class="message-text">
-              <app-message-text
-                [text]="message().message!"
-                [mentions]="message().mentions ?? []"
-                [interactive]="canInteract()" />
-            </span>
-          }
-          <time class="timestamp" [attr.datetime]="message().createdAt">
-            @if (message().isEdited) {
-              <span>{{ 'messages.message.edited' | transloco }}</span>
+              </span>
             }
-            {{ message().createdAt | localDate: 'time' }}
-            <app-message-status [delivery]="status()" />
-          </time>
-        </div>
-      }
-      @if (threadInfo(); as info) {
-        <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
-      }
+            <time class="timestamp" [attr.datetime]="message().createdAt">
+              @if (message().isEdited) {
+                <span>{{ 'messages.message.edited' | transloco }}</span>
+              }
+              {{ message().createdAt | localDate: 'time' }}
+              <app-message-status [delivery]="status()" />
+            </time>
+          </div>
+        }
+        @if (threadInfo(); as info) {
+          <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
+        }
+      </div>
     </div>
     @if (status() === Delivery.Failed && !preview()) {
       <button type="button" class="retry-button" (click)="retry.emit()">

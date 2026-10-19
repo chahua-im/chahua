@@ -6,13 +6,13 @@ describe('albumLayout', () => {
   it('stacks landscape pairs, places portraits side by side and preserves three-item reading order', () => {
     const wide = albumLayout(sizes([16 / 9, 16 / 9]), 360).frames;
     expect(wide[0].width).toBe(360);
-    expect(wide[1].y).toBe(wide[0].height + 7);
+    expect(wide[1].y).toBe(wide[0].height + 2);
     const portrait = albumLayout(sizes([2 / 3, 2 / 3]), 360).frames;
     expect(portrait[1].x).toBe(portrait[0].width + 2);
     expect(portrait[1].y).toBe(0);
     const mixed = albumLayout(sizes([2 / 3, 1.5, 16 / 9]), 360).frames;
     expect(mixed[1].x).toBe(mixed[2].x);
-    expect(mixed[2].y).toBe(mixed[1].height + 7);
+    expect(mixed[2].y).toBe(mixed[1].height + 2);
     expect(mixed[0].height).toBe(mixed[2].y + mixed[2].height);
   });
 
@@ -27,12 +27,12 @@ describe('albumLayout', () => {
     }
   });
 
-  it('rounds sibling heights separately before adding the 7dp compensation', () => {
+  it('rounds sibling heights separately and includes the 2px gap in spanning frames', () => {
     const layout = albumLayout(sizes([0.45, 0.45, 0.45]), 300, 1, undefined, { parentWidth: 360, displayHeight: 801 });
     // Upstream uses 414/814 and 400/814, not equal halves, at normalized width 800.
-    expect(layout.frames.map((frame) => frame.height)).toEqual([408, 204, 197]);
-    expect(layout.frames[2].y).toBe(211);
-    expect(layout.height).toBe(408);
+    expect(layout.frames.map((frame) => frame.height)).toEqual([403, 204, 197]);
+    expect(layout.frames[2].y).toBe(206);
+    expect(layout.height).toBe(403);
   });
 
   it('allows the upstream optimizer to give a panorama its own row', () => {
@@ -69,7 +69,7 @@ describe('albumLayout', () => {
     expect(right[0].y).toBe(0);
     expect(right.at(-1)!.y + right.at(-1)!.height).toBe(height);
     for (let i = 1; i < right.length; i++) {
-      expect(right[i].y).toBe(right[i - 1].y + right[i - 1].height + 7);
+      expect(right[i].y).toBe(right[i - 1].y + right[i - 1].height + 2);
     }
   });
 
@@ -87,19 +87,22 @@ describe('albumLayout', () => {
     }
   });
 
-  it.each([1, 2, 3])('keeps all frame edges on physical pixels without gaps at the right edge (scale %s)', (scale) => {
+  it.each([1, 2, 3])('aligns internal edges to physical pixels and fills the exact outer width (scale %s)', (scale) => {
     for (const width of [240, 282.5, 333, 360]) {
       for (let count = 2; count <= 9; count++) {
         const ratios = Array.from({ length: count }, (_, i) => [0.2, 0.45, 1.5, 1, 4][i % 5]);
         const layout = albumLayout(sizes(ratios), width, scale);
         expect(layout.frames).toHaveLength(count);
+        expect(layout.width).toBe(width);
         expect(Math.max(...layout.frames.map((frame) => frame.x + frame.width))).toBeCloseTo(layout.width);
         expect(Math.max(...layout.frames.map((frame) => frame.y + frame.height))).toBeCloseTo(layout.height);
         layout.frames.forEach((frame, i) => {
           expect(frame.width).toBeGreaterThan(0);
           expect(frame.height).toBeGreaterThan(0);
-          for (const value of [frame.x, frame.y, frame.width, frame.height])
+          for (const value of [frame.x, frame.y, frame.height])
             expect(value * scale).toBeCloseTo(Math.round(value * scale));
+          if (frame.x + frame.width < layout.width)
+            expect((frame.x + frame.width) * scale).toBeCloseTo(Math.round((frame.x + frame.width) * scale));
           for (const other of layout.frames.slice(i + 1)) {
             const overlapX = Math.min(frame.x + frame.width, other.x + other.width) - Math.max(frame.x, other.x);
             const overlapY = Math.min(frame.y + frame.height, other.y + other.height) - Math.max(frame.y, other.y);

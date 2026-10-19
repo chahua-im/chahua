@@ -100,11 +100,11 @@ describe('MessageAttachments', () => {
     await fixture.whenStable();
     resize(282.5);
     await fixture.whenStable();
-    expect(element.querySelector<HTMLElement>('.attachments')!.style.width).toBe('282px');
+    expect(element.querySelector<HTMLElement>('.attachments')!.style.width).toBe('282.5px');
     expect(element.querySelector('video')).toBe(video);
     resize(0);
     await fixture.whenStable();
-    expect(element.querySelector<HTMLElement>('.attachments')!.style.width).toBe('282px');
+    expect(element.querySelector<HTMLElement>('.attachments')!.style.width).toBe('282.5px');
     fixture.destroy();
     expect(disconnect).toHaveBeenCalled();
   });
@@ -192,7 +192,7 @@ describe('MessageAttachments', () => {
     expect(element.querySelector('.media-error')?.getAttribute('href')).toBe(image.url);
   });
 
-  it('stretches a single image on a blurred backdrop and drops the backdrop when it fails', async () => {
+  it('backs a stretched image with its own aspect ratio and removes the blurred gutters on failure', async () => {
     const fixture = await render({ attachments: [{ ...image, width: 1080, height: 2400 }] });
     const element: HTMLElement = fixture.nativeElement;
     expect(element.classList.contains('fill')).toBe(true);
@@ -203,6 +203,7 @@ describe('MessageAttachments', () => {
     expect(frame.style.height).toBe('');
     expect(frame.style.aspectRatio).toBe('1080 / 2400');
     expect(frame.querySelector('.backdrop')).toBeTruthy();
+    expect(frame.style.getPropertyValue('--media-aspect-ratio')).toBe('0.45');
     element.querySelector('img')!.dispatchEvent(new Event('error'));
     fixture.detectChanges();
     expect(frame.querySelector('.backdrop')).toBeNull();
