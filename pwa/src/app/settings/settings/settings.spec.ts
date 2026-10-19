@@ -80,7 +80,14 @@ describe('Settings', () => {
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
-        { provide: SessionStore, useValue: { user: signal({ ...testUser, avatarUrl: '/avatar.jpg' }) } },
+        {
+          provide: SessionStore,
+          useValue: {
+            user: signal({ ...testUser, avatarUrl: '/avatar.jpg' }),
+            devUid: () => 1,
+            switchDevUid: () => {},
+          },
+        },
         { provide: ModalController, useValue: { dismiss } },
         { provide: PushNotifications, useValue: notifications },
         { provide: AppUpdates, useValue: updates },

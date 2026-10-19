@@ -7,6 +7,7 @@ import type { MeResponse, StickerPackOrderItem, User } from '../../generated/mod
 import type { SnowflakeID } from '../api/snowflake-id';
 
 declare const CHAHUA_DEV_TOKEN: string | undefined;
+declare const CHAHUA_DEV_BACKEND: boolean | undefined;
 
 const TOKEN_KEY = 'jwt_token';
 // Angular releases before the storage-name alignment used this key in both stores.
@@ -18,30 +19,39 @@ const CLIENT_ID_KEY = 'chahua.client-id';
 
 @Service()
 export class SessionStore {
+  private urlTokenAdopted = false;
   private readonly auth = inject(AuthService);
   private readonly users = inject(UsersService);
   readonly token = signal<string | undefined>(undefined);
   readonly user = signal<(MeResponse & Pick<User, 'userGroup'>) | undefined>(undefined);
   restoreToken() {
     const url = new URL(window.location.href);
-    const token =
-      url.searchParams.get('token') ??
-      storedToken(TOKEN_KEY) ??
-      storedToken(LEGACY_TOKEN_KEY) ??
-      (isDevMode() && typeof CHAHUA_DEV_TOKEN !== 'undefined' ? CHAHUA_DEV_TOKEN : undefined);
+    const urlToken = url.searchParams.get('token');
+    const token = urlToken ?? storedToken(TOKEN_KEY) ?? storedToken(LEGACY_TOKEN_KEY) ?? developmentToken();
     url.searchParams.delete('token');
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 
+    if (urlToken) this.urlTokenAdopted = true;
     if (token) this.saveToken(token);
   }
 
   async initialize() {
     try {
-      if (!this.token() && isDevMode()) {
-        const { token } = await firstValueFrom(
-          this.auth.postDevSession({ uid: developmentUid() }, { headers: { 'X-Client-Id': developmentClientId() } }),
-        );
-        this.saveToken(token);
+      // The dev UID lives in per-tab sessionStorage, so every page load mints a
+      // fresh dev session instead of reusing the shared stored token; that is
+      // what lets two tabs run different UIDs at once. An explicit ?token= URL
+      // token or CHAHUA_DEV_TOKEN still wins.
+      if (isDevMode() && devBackendEnabled() && !this.urlTokenAdopted && !developmentToken()) {
+        try {
+          const { token } = await firstValueFrom(
+            this.auth.postDevSession({ uid: developmentUid() }, { headers: { 'X-Client-Id': developmentClientId() } }),
+          );
+          this.saveToken(token);
+        } catch (error) {
+          // If the dev-session endpoint is down, continue with a previously
+          // issued token when one exists.
+          if (!this.token()) throw error;
+        }
       }
       if (!this.token()) return;
       const refreshed = await firstValueFrom(this.auth.postRefresh());
@@ -86,7 +96,10 @@ export class SessionStore {
 
   upsertStickerPackOrderItem(item: StickerPackOrderItem) {
     const normalized = { ...item, lastUsedOn: Math.trunc(item.lastUsedOn) };
-    this.updateOrder((current) => [normalized, ...current.filter((existing) => existing.stickerPackId !== item.stickerPackId)]);
+    this.updateOrder((current) => [
+      normalized,
+      ...current.filter((existing) => existing.stickerPackId !== item.stickerPackId),
+    ]);
   }
 
   removeStickerPackOrderItem(packId: SnowflakeID) {
@@ -102,6 +115,15 @@ export class SessionStore {
   logout() {
     this.saveToken(undefined);
     this.user.set(undefined);
+  }
+
+  devUid() {
+    return developmentUid();
+  }
+
+  switchDevUid(uid: number) {
+    sessionStorage.setItem(DEV_UID_KEY, String(uid));
+    this.logout();
   }
 
   private saveToken(token: string | undefined) {
@@ -120,6 +142,15 @@ function developmentUid() {
   return Number.isInteger(uid) && uid > 0 ? uid : DEFAULT_DEV_UID;
 }
 
+function developmentToken() {
+  return isDevMode() && typeof CHAHUA_DEV_TOKEN !== 'undefined' ? CHAHUA_DEV_TOKEN : undefined;
+}
+
+/** Dev-session tooling only runs against a local backend; tests have no define and stay enabled. */
+export function devBackendEnabled() {
+  return typeof CHAHUA_DEV_BACKEND === 'undefined' ? true : CHAHUA_DEV_BACKEND;
+}
+
 function developmentClientId() {
   const stored = localStorage.getItem(CLIENT_ID_KEY);
   if (stored) return stored;
@@ -132,7 +163,10 @@ function developmentClientId() {
 function storedToken(key: string) {
   return (
     window.localStorage.getItem(key) ??
-    document.cookie.split('; ').find((cookie) => cookie.startsWith(`${key}=`))?.slice(key.length + 1)
+    document.cookie
+      .split('; ')
+      .find((cookie) => cookie.startsWith(`${key}=`))
+      ?.slice(key.length + 1)
   );
 }
 
