@@ -36,21 +36,35 @@
           <ion-segment-button [value]="ListTab.Messages">
             <ion-label>
               {{ 'chats.list.tabs.messages' | transloco }}
-              @if (messageUnread(); as count) {
+              @if (tabMentions().messages) {
+                <ion-badge>@</ion-badge>
+              } @else if (messageUnread(); as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Groups">
-            <ion-label>{{ 'chats.list.tabs.groups' | transloco }}</ion-label>
+            <ion-label>
+              {{ 'chats.list.tabs.groups' | transloco }}
+              @if (tabMentions().groups) {
+                <ion-badge>@</ion-badge>
+              }
+            </ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Friends">
-            <ion-label>{{ 'chats.list.tabs.friends' | transloco }}</ion-label>
+            <ion-label>
+              {{ 'chats.list.tabs.friends' | transloco }}
+              @if (tabMentions().friends) {
+                <ion-badge>@</ion-badge>
+              }
+            </ion-label>
           </ion-segment-button>
           <ion-segment-button [value]="ListTab.Threads">
             <ion-label>
               {{ 'chats.list.tabs.threads' | transloco }}
-              @if (lists.threadUnread.value()?.unreadThreadCount; as count) {
+              @if (tabMentions().threads) {
+                <ion-badge>@</ion-badge>
+              } @else if (lists.threadUnread.value()?.unreadThreadCount; as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>

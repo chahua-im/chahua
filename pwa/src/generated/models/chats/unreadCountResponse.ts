@@ -5,11 +5,15 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { MentionBadges } from './mentionBadges';
 
 export interface UnreadCountResponse {
+  archivedMentionBadges?: MentionBadges;
   archivedUnreadChatCount: number;
   archivedUnreadCount: number;
+  /** Complete mention/reply presence for each active list category. */
+  mentionBadges?: MentionBadges;
   unreadChatCount: number;
   unreadCount: number;
-  unreadMentions: number;
+  unreadMentions?: number;
 }

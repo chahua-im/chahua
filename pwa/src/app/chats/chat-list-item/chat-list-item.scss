@@ -36,6 +36,7 @@ ion-item:not(.ion-color) .meta > span {
   gap: 4px;
 }
 
+.mention-badge,
 .reaction-badge {
   display: grid;
   place-items: center;
@@ -44,6 +45,11 @@ ion-item:not(.ion-color) .meta > span {
   padding: 0;
   border-radius: 50%;
   font-size: 12px;
+}
+
+.mention-badge {
+  font-weight: 600;
+  line-height: 1;
 }
 
 ion-item.ion-color app-chat-avatar {

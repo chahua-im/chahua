@@ -40,12 +40,20 @@
         <ng-content select="[slot=preview]"></ng-content>
       </p>
     </ion-label>
-    @if (!actionsAlwaysVisible() && (entry().time || entry().unreadCount || entry().unreadReactions)) {
+    @if (
+      !actionsAlwaysVisible() &&
+      (entry().time || entry().unreadCount || entry().unreadMentions || entry().unreadReactions)
+    ) {
       <div slot="end" class="meta">
         @if (entry().time) {
           <span>{{ entry().time | chatDate }}</span>
         }
         <div class="badges">
+          @if (entry().unreadMentions) {
+            <ion-badge
+              class="mention-badge"
+              [color]="active.isActive ? 'light' : entry().muted ? 'medium' : 'primary'">@</ion-badge>
+          }
           @if (entry().unreadReactions) {
             <ion-badge
               class="reaction-badge"

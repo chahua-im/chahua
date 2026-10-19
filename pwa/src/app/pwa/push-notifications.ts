@@ -94,8 +94,15 @@ export class PushNotifications {
     );
     effect(
       () => {
-        const count = this.lists.unread.value()?.unreadCount ?? 0;
-        document.title = hidden() && this.session.user() && count ? `(${count}) ${baseTitle}` : baseTitle;
+        if (!hidden() || !this.session.user()) {
+          document.title = baseTitle;
+          return;
+        }
+        const counts = this.lists.unread.value();
+        const count = counts?.unreadCount ?? 0;
+        // Unread mentions take priority over the message count.
+        document.title =
+          (counts?.unreadMentions ?? 0) > 0 ? `(@) ${baseTitle}` : count > 0 ? `(${count}) ${baseTitle}` : baseTitle;
       },
       { injector: this.injector },
     );

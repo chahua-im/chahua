@@ -16,7 +16,6 @@ import { FriendsService } from '../../generated/endpoints/friends/friends.servic
 import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import {
   FriendRequestStatus,
-  NotificationType,
   ServerWsMessageType,
   type ChatListItem,
   type FriendRequestHistoryEntry,
@@ -190,13 +189,24 @@ export class ChatListStore {
           this.refreshChatUnread();
           break;
         }
+        case ServerWsMessageType.messageUpdated:
+          if (!event.payload.replyRootId) this.chatInfo.invalidateReads(new Set([event.payload.chatId]));
+          this.refreshChatUnread();
+          if (this.chatInfo.unreadMentions(event.payload.chatId, event.payload.replyRootId) > 0) {
+            if (event.payload.replyRootId) void this.invalidateThreads();
+            else this.syncUnread(event.payload.chatId);
+          }
+          break;
         case ServerWsMessageType.notification:
-          if (event.payload.notificationType === NotificationType.reaction) {
-            if (event.payload.threadRootId) {
-              void this.invalidateThreads();
-            } else {
-              this.syncUnread(event.payload.chatId);
-            }
+          // Every notification type (mention/reply/reaction) changes a count
+          // carried by the list, thread read state, or the global title
+          // totals; refetch the authoritative scopes instead of guessing.
+          this.refreshChatUnread();
+          if (event.payload.threadRootId) {
+            void this.invalidateThreads();
+          } else {
+            this.chatInfo.invalidateReads(new Set([event.payload.chatId]));
+            this.syncUnread(event.payload.chatId);
           }
           break;
         case ServerWsMessageType.friendshipRemoved:

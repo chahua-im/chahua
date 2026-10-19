@@ -18,6 +18,7 @@ import {
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
+import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { PinsService } from '../../../generated/endpoints/pins/pins.service';
 import {
   AttachmentUploadPurpose,
@@ -153,6 +154,12 @@ describe('ConversationPage', () => {
       of({ pins: [] })) as unknown as PinsService['listPins']);
     vi.spyOn(TestBed.inject(PinsService), 'listThreadPins').mockImplementation((() =>
       of({ pins: [] })) as unknown as PinsService['listThreadPins']);
+    vi.spyOn(TestBed.inject(ChatsService), 'getChatReactions').mockImplementation((() =>
+      of({ messageIds: [], readThrough: '2026-10-20T00:00:00Z' })) as unknown as ChatsService['getChatReactions']);
+    vi.spyOn(TestBed.inject(ChatsService), 'getChatMentions').mockImplementation((() =>
+      of({ messageIds: [] })) as unknown as ChatsService['getChatMentions']);
+    vi.spyOn(TestBed.inject(ChatsService), 'acknowledgeChatReactions').mockImplementation((() =>
+      of({ unreadReactions: 0 })) as unknown as ChatsService['acknowledgeChatReactions']);
     vi.spyOn(TestBed.inject(Router), 'isActive').mockReturnValue(true);
     Object.assign(TestBed.inject(ChatStore), {
       threadReadState: vi.fn().mockReturnValue(undefined),
@@ -1924,21 +1931,47 @@ describe('ConversationPage', () => {
     expect(resizes.has(scroll)).toBe(false);
   });
 
+  function useReactionHttp() {
+    const api = TestBed.inject(ChatsService);
+    if (vi.isMockFunction(api.getChatReactions)) vi.mocked(api.getChatReactions).mockRestore();
+    if (vi.isMockFunction(api.acknowledgeChatReactions)) vi.mocked(api.acknowledgeChatReactions).mockRestore();
+  }
+  function useMentionHttp() {
+    vi.mocked(TestBed.inject(ChatsService).getChatMentions).mockRestore();
+  }
+  async function notificationSettled() {
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  }
+  const reactionBoundary = '2026-10-20T00:00:00Z';
+  function reactionNotification(id = testMessage.id) {
+    events.next({
+      type: ServerWsMessageType.notification,
+      payload: {
+        notificationType: NotificationType.reaction,
+        chatId: testChat.id,
+        messageId: id,
+        threadRootId: undefined,
+        actorUid: 2,
+      },
+    });
+  }
+
   it('fetches reaction IDs and acknowledges the conversation on entry', async () => {
+    useReactionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
     const applied = vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
-    const ids = [encodeId('101'), encodeId('102')];
+    const ids = [encodeId('102'), encodeId('101')];
 
     component.ionViewDidEnter();
     await Promise.resolve();
     const reactions = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
-    reactions.flush({ messageIds: ids.map(decodeId) });
+    reactions.flush({ messageIds: ids.map(decodeId), readThrough: reactionBoundary });
     await Promise.resolve();
     await Promise.resolve();
 
     const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
-    expect(ack.request.body).toEqual({ threadId: null });
+    expect(ack.request.body).toEqual({ threadId: undefined, readThrough: reactionBoundary });
     ack.flush({ unreadReactions: 0 });
     await Promise.resolve();
 
@@ -1947,7 +1980,49 @@ describe('ConversationPage', () => {
     expect(component['canJumpReaction']()).toBe(true);
   });
 
+  it('fetches mention IDs on entry without acknowledging', async () => {
+    useMentionHttp();
+    const chatInfo = TestBed.inject(ChatStore);
+    vi.spyOn(chatInfo, 'unreadMentions').mockReturnValue(2);
+    const ids = [encodeId('202'), encodeId('201')];
+
+    component.ionViewDidEnter();
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ids.map(decodeId) });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(component['mentionJumpIds']()).toEqual(ids);
+    expect(component['canJumpMention']()).toBe(true);
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+  });
+
+  it('refreshes mention IDs on a mention notification while the conversation is active', async () => {
+    useMentionHttp();
+    const chatInfo = TestBed.inject(ChatStore);
+    vi.spyOn(chatInfo, 'unreadMentions').mockReturnValue(0);
+
+    events.next({
+      type: ServerWsMessageType.notification,
+      payload: {
+        notificationType: NotificationType.mention,
+        chatId: testChat.id,
+        messageId: testMessage.id,
+        threadRootId: undefined,
+        actorUid: 2,
+      },
+    });
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: [decodeId(testMessage.id)] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(component['mentionJumpIds']()).toEqual([testMessage.id]);
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+  });
+
   it('acknowledges a reaction notification received while the conversation is active', async () => {
+    useReactionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
 
@@ -1957,14 +2032,14 @@ describe('ConversationPage', () => {
         notificationType: NotificationType.reaction,
         chatId: testChat.id,
         messageId: testMessage.id,
-        threadRootId: null,
+        threadRootId: undefined,
         actorUid: 2,
       },
     });
     await Promise.resolve();
     http
       .expectOne(`/_api/chats/${wireChat.id}/reactions`)
-      .flush({ messageIds: [decodeId(testMessage.id)] });
+      .flush({ messageIds: [decodeId(testMessage.id)], readThrough: reactionBoundary });
     await Promise.resolve();
     await Promise.resolve();
     http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
@@ -1974,6 +2049,7 @@ describe('ConversationPage', () => {
   });
 
   it('acknowledges reactions again when leaving the conversation', async () => {
+    useReactionHttp();
     const chatInfo = TestBed.inject(ChatStore);
     vi.spyOn(chatInfo, 'unreadReactions').mockReturnValue(2);
     vi.spyOn(chatInfo, 'applyReactionRead').mockImplementation(() => {});
@@ -1982,7 +2058,7 @@ describe('ConversationPage', () => {
     await Promise.resolve();
     http
       .expectOne(`/_api/chats/${wireChat.id}/reactions`)
-      .flush({ messageIds: [decodeId(testMessage.id)] });
+      .flush({ messageIds: [decodeId(testMessage.id)], readThrough: reactionBoundary });
     await Promise.resolve();
     await Promise.resolve();
     http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
@@ -1992,6 +2068,160 @@ describe('ConversationPage', () => {
     await Promise.resolve();
     http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
     await Promise.resolve();
+  });
+
+  it('preserves unvisited reaction targets when another notification arrives', async () => {
+    useReactionHttp();
+    reactionNotification(encodeId('101'));
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+    reactionNotification(encodeId('102'));
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: ['102'], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+  });
+
+  it('requeries a notification received between the reaction snapshot and its acknowledgement', async () => {
+    useReactionHttp();
+    reactionNotification(encodeId('101'));
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    reactionNotification(encodeId('102'));
+    await notificationSettled();
+    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
+    expect(ack.request.body.readThrough).toBe(reactionBoundary);
+    ack.flush({ unreadReactions: 1 });
+    await notificationSettled();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: ['102'], readThrough: '2026-10-20T00:00:01Z' });
+    await notificationSettled();
+    const nextAck = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
+    expect(nextAck.request.body.readThrough).toBe('2026-10-20T00:00:01Z');
+    nextAck.flush({ unreadReactions: 0 });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+  });
+
+  it('defers hidden notifications until the page becomes visible', async () => {
+    useReactionHttp();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    reactionNotification();
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    hidden.mockReturnValue(false);
+    component['visibilityChanged']();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
+  it('does not acknowledge a snapshot that finishes after the document becomes hidden', async () => {
+    useReactionHttp();
+    reactionNotification();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+  });
+
+  it('acknowledges the saved scope after navigation changes the active route', async () => {
+    useReactionHttp();
+    reactionNotification();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: [wireMessage.id], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+    vi.mocked(TestBed.inject(Router).isActive).mockReturnValue(false);
+    component.ionViewWillLeave();
+    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
+    expect(ack.request.body.readThrough).toBeUndefined();
+    ack.flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
+  it('loads both notification scopes on direct thread entry without cached counts', async () => {
+    await enterThread();
+    useReactionHttp();
+    useMentionHttp();
+    component.ionViewDidEnter();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=100`)
+      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=100`).flush({ messageIds: ['102'] });
+    await notificationSettled();
+    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
+    expect(ack.request.body.threadId).toBe('100');
+    ack.flush({ unreadReactions: 0 });
+    await notificationSettled();
+    expect(component['reactionRemaining']()).toBe(1);
+    expect(component['mentionRemaining']()).toBe(1);
+  });
+
+  it('refreshes a thread on reconnect even when cached notification counts are zero', async () => {
+    await enterThread();
+    vi.spyOn(component['conversation'], 'reconnect').mockResolvedValue();
+    useReactionHttp();
+    useMentionHttp();
+    resync.next();
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, myRole: GroupRole.member });
+    for (const request of http.match(`/_api/chats/${wireChat.id}/messages/100`)) {
+      request.flush({ ...wireMessage, id: '100' });
+    }
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=100`)
+      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=100`).flush({ messageIds: [] });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+    expect(component['reactionRemaining']()).toBe(1);
+  });
+
+  it('coalesces mention notifications during a fetch and retains their targets', async () => {
+    useMentionHttp();
+    const notify = () =>
+      events.next({
+        type: ServerWsMessageType.notification,
+        payload: {
+          notificationType: NotificationType.mention,
+          chatId: testChat.id,
+          messageId: testMessage.id,
+          threadRootId: undefined,
+          actorUid: 2,
+        },
+      });
+    notify();
+    notify();
+    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ['101'] });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ['102', '101'] });
+    await notificationSettled();
+    expect(component['mentionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+  });
+
+  it('keeps the server reaction cursor unchanged when fetching targets fails', async () => {
+    useReactionHttp();
+    reactionNotification();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions`).flush({}, { status: 500, statusText: 'Failed' });
+    await notificationSettled();
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
   });
 
   it('marks only a visible message bottom and stops tracking hidden or departed pages', async () => {

@@ -173,6 +173,7 @@ export class ChatListContent {
               ? new Date(draft.savedAt).toISOString()
               : (preview?.createdAt ?? chat.lastMessageAt),
           unreadCount: chat.unreadCount,
+          unreadMentions: chat.unreadMentions,
           unreadReactions: chat.unreadReactions,
           muted,
         } satisfies ChatListEntry,
@@ -239,6 +240,7 @@ export class ChatListContent {
                 : undefined,
             time: draft && draft.savedAt > Date.parse(latestAt) ? new Date(draft.savedAt).toISOString() : latestAt,
             unreadCount: thread.unreadCount,
+            unreadMentions: thread.unreadMentions,
             unreadReactions: thread.unreadReactions,
             muted: thread.archived,
             link: ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(root.id)],

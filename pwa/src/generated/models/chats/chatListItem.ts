@@ -23,10 +23,10 @@ export interface ChatListItem {
   /** The other participant, for DM chats; `None` for regular groups. */
   peer?: MemberSummary;
   unreadCount: number;
-  unreadMentions: number;
+  unreadMentions?: number;
   /**
    * Unread-reaction message count (reactions on my messages newer than my
    * reaction cursor). Never folded into `unread_count`.
    */
-  unreadReactions: number;
+  unreadReactions?: number;
 }

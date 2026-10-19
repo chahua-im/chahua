@@ -27,6 +27,7 @@ export interface ChatListEntry extends ChatAvatarData {
   sender?: string;
   time?: string;
   unreadCount?: number;
+  unreadMentions?: number;
   unreadReactions?: number;
   unreadColor?: string;
   muted?: boolean;

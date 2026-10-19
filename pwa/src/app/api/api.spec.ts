@@ -47,6 +47,27 @@ describe('Generated API client', () => {
     http.verify();
   });
 
+  it('round-trips reaction snapshot boundaries and thread IDs without precision loss', () => {
+    const api = TestBed.inject(ChatsService);
+    const http = TestBed.inject(HttpTestingController);
+    const threadId = '9007199254741999';
+    const boundary = '2026-10-20T00:00:00.123456Z';
+    const receive = vi.fn();
+    api.getChatReactions(testChat.id, { threadId: encodeId(threadId) }).subscribe(receive);
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=${threadId}`).flush({
+      messageIds: [wireMessage.id],
+      readThrough: boundary,
+    });
+    expect(receive).toHaveBeenCalledWith({ messageIds: [testMessage.id], readThrough: boundary });
+    api.acknowledgeChatReactions(testChat.id, { threadId: encodeId(threadId), readThrough: boundary }).subscribe();
+    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
+    expect(ack.request.body).toEqual({ threadId, readThrough: boundary });
+    ack.flush({ unreadReactions: 0 });
+    api.getChatMentions(testChat.id, { threadId: encodeId(threadId) }).subscribe();
+    http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=${threadId}`).flush({ messageIds: [] });
+    http.verify();
+  });
+
   it('preserves null in nested response fields and preserves explicit cache clears for both clients', async () => {
     const body = () => ({
       messages: [{ ...wireMessage, message: null, sticker: null, replyToMessage: null }],

@@ -84,7 +84,7 @@ describe('ChatListStore', () => {
         notificationType: NotificationType.reaction,
         chatId: testChat.id,
         messageId: testMessage.id,
-        threadRootId: null,
+        threadRootId: undefined,
         actorUid: 2,
       },
     });
@@ -96,6 +96,67 @@ describe('ChatListStore', () => {
     await settle();
     TestBed.tick();
     expect(query.items()[0].unreadReactions).toBe(1);
+  });
+
+  it('refreshes the chat mention count on a directed mention notification', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+
+    events.next({
+      type: ServerWsMessageType.notification,
+      payload: {
+        notificationType: NotificationType.mention,
+        chatId: testChat.id,
+        messageId: testMessage.id,
+        threadRootId: undefined,
+        actorUid: 2,
+      },
+    });
+    await settle();
+
+    http
+      .expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`)
+      .flush({ lastReadMessageId: wireMessage.id, unreadCount: 0, unreadMentions: 1 });
+    await settle();
+    TestBed.tick();
+    expect(query.items()[0].unreadMentions).toBe(1);
+  });
+
+  it('clears the last reaction badge after its removal broadcast', async () => {
+    http.expectOne('/_api/chats?limit=50').flush({ chats: [{ ...wireChat, unreadReactions: 1 }] });
+    await settle();
+    events.next({
+      type: ServerWsMessageType.notification,
+      payload: {
+        notificationType: NotificationType.reaction,
+        chatId: testChat.id,
+        messageId: testMessage.id,
+        threadRootId: undefined,
+        actorUid: 2,
+      },
+    });
+    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 0, unreadReactions: 0 });
+    await settle();
+    expect(query.items()[0].unreadReactions).toBe(0);
+  });
+
+  it('clears a mention badge and refreshes the global summary when an edit removes it', async () => {
+    http.expectOne('/_api/chats?limit=50').flush({ chats: [{ ...wireChat, unreadMentions: 1 }] });
+    const release = data.unread.activate();
+    await settle();
+    http.expectOne('/_api/chats/unread').flush({ unreadCount: 1, unreadMentions: 1 });
+    await settle();
+    messages.acceptChange({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, message: 'edited', mentions: [] },
+    });
+    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 1, unreadMentions: 0 });
+    await settle();
+    http.expectOne('/_api/chats/unread').flush({ unreadCount: 1, unreadMentions: 0 });
+    await settle();
+    expect(query.items()[0].unreadMentions).toBe(0);
+    expect(data.unread.value()?.unreadMentions).toBe(0);
+    release();
   });
 
   it('loads archives separately and excludes topic messages from main chat previews', async () => {
@@ -308,7 +369,7 @@ describe('ChatListStore', () => {
     expect(query.items()[0].unreadCount).toBe(4);
   });
 
-  it('ignores topic edits and reactions, and refreshes hidden changed chats only on return', async () => {
+  it('ignores topic edits and reaction broadcasts, and reloads hidden changed chats on return', async () => {
     http
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastMessage: wireMessage }] }));
@@ -948,6 +1009,7 @@ describe('ChatListStore', () => {
     expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('200'),
       unreadCount: 3,
+      unreadMentions: 0,
       unreadReactions: 0,
     });
     data.refreshChats();
@@ -964,6 +1026,7 @@ describe('ChatListStore', () => {
     expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('199'),
       unreadCount: 4,
+      unreadMentions: 0,
       unreadReactions: 0,
     });
   });
@@ -1193,6 +1256,7 @@ describe('ChatListStore', () => {
     expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('205'),
       unreadCount: 0,
+      unreadMentions: 0,
       unreadReactions: 0,
     });
   });

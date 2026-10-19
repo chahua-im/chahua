@@ -104,8 +104,9 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 回复预览或话题根缺失          | `GET /chats/{c}/messages/{m}`                                          | 页面局部预览                                |
 | 活跃可见消息进入视口          | 普通/话题 read 的 POST，1 秒合并目标                                   | ChatStore 更新读状态和计数                  |
 | 活跃私聊或私聊话题的对方已读 | `GET /chats/{c}/read-receipt`；话题回复加 threadId，话题根另读普通范围 | ConversationPage；范围切换、重连和 `readReceiptChanged` 时刷新 |
-| 进入会话/话题（active）       | `GET /chats/{c}/reactions`（话题加 threadId）；随后 `POST /chats/{c}/reactions/read` | 先保留本次会话的跳转 ID，再把该 scope 的 reaction 游标推到当前 |
+| 进入会话/话题（active）       | `GET /chats/{c}/reactions`（话题加 threadId）；随后 `POST /chats/{c}/reactions/read` | 先合并本次会话的跳转 ID，再用响应 readThrough 确认该快照，不清除快照之后的表态 |
 | 离开会话/话题                 | `POST /chats/{c}/reactions/read`                                       | 清掉会话期间新到的 reaction                  |
+| 进入会话/话题（mention）      | `GET /chats/{c}/mentions`（话题加 threadId）                            | 保留本次会话的跳转 ID；mention 计数由消息已读游标派生，不单独 ack |
 | 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                               |
 | 全局收藏                      | `GET /saved-messages`，limit=50、before                                | SavedMessageList 快照                       |
 | 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标       |
@@ -121,7 +122,9 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 打开贴纸包详情                | `GET /stickers/packs/{id}`                                             | StickerPackDetail                                           |
 | 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                                    |
 
-Reaction 的已读是会话级：进入 active 会话/话题时先读取本次的 messageIds 供会话内跳转，再 ack 该 scope；离开时再 ack 一次清掉会话期间新到的 reaction。普通消息已读不推进 reaction 游标，未进入会话不会产生 reaction 已读副作用。
+Reaction 的已读是会话级：进入前台会话/话题、恢复可见或重连时读取 messageIds 与 readThrough；保留未跳转的目标，将新目标去重合并，再按 readThrough 确认快照。请求期间到达的通知合并为后续查询；查询失败不确认。后台不查询或确认，前台离开时使用保存的聊天/话题身份再确认一次，不依赖旧路由仍激活。普通消息已读不推进 reaction 游标。
+
+Mention/reply 的未读由消息已读游标派生（`message_id > last_read_message_id`），没有单独的 ack：进入会话时读取 messageIds 供会话内跳转，读到最新后计数自然清零；跳转同样按时间从旧到新。
 
 创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。发送贴纸（自动整理开启且所属包在统计范围内）与拖拽重排后 `PUT /users/me/stickerpack-order`；同步失败时重新读取 `GET /users/me`，以服务器顺序恢复。请求期间的具体反馈见[加载标识](loading-indicators.md)。
 
@@ -150,9 +153,9 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | 事件                                                      | 更新路径                                                                                              |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；隐藏列表记录待补未读或首页位置；当前页面决定接收和是否跟随底部 |
-| messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；编辑按服务器预览形状改写引用方内嵌的引用快照，撤回将其改为墓碑；正在读取的区间保留补丁 |
+| messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；编辑按服务器预览形状改写引用方内嵌的引用快照，撤回将其改为墓碑；正在读取的区间保留补丁；编辑刷新提及计数与全局汇总 |
 | reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                            |
-| notification（reaction）                                  | 服务端定向发给消息作者；非话题刷新该 chat 的 `unreadReactions`，话题刷新话题列表；当前会话在计数变正时读取跳转 ID 并按会话级 ack 清除 |
+| notification（mention/reply/reaction）                    | 服务端定向发送（包括撤销他人消息上的表态）；非话题刷新该 chat 的读状态，话题刷新话题列表；当前会话重新读取对应跳转 ID（reaction 还会按会话级 ack 清除） |
 | pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                 |
 | threadUpdate                                              | 更新根消息统计，刷新活跃话题列表与计数                                                                |
 | threadMembershipChanged                                   | 订阅失效，当前页面补读，列表和计数刷新                                                                |
@@ -224,3 +227,5 @@ ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c
 静音与归档通过 ChatStore 乐观修改共享字段，话题订阅修改已知订阅状态；未知状态在写入后读取。失败只回退版本仍属于本次操作的字段，后到的推送或选择优先。汇总计数在写入确认后刷新。SavedMessageList 取消收藏时先移除快照，失败且列表未重置时按原位置恢复。
 
 媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。每次路由导航关闭已经存在的 modal、popover、alert 和 action-sheet，Toast 保留自己的生命周期。
+
+聊天分类的 `@` 使用 `/chats/unread` 的 `mentionBadges` 与 `archivedMentionBadges`，分别包含完整的 groups、friends、threads 布尔值。消息分类按“在消息中显示话题”偏好合并；不依赖已加载分页。`unreadMentions` 汇总主聊天与已订阅话题的提及/回复，包含归档。
