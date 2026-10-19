@@ -156,7 +156,7 @@ describe('Attachment upload tasks', () => {
     );
     createBitmap = vi.fn().mockResolvedValue({ width: 1866, height: 1400, close: vi.fn() });
     vi.stubGlobal('createImageBitmap', createBitmap);
-    convertToBlob = vi.fn().mockImplementation(() => Promise.resolve(new Blob(['small'], { type: 'image/avif' })));
+    convertToBlob = vi.fn().mockImplementation(() => Promise.resolve(new Blob(['small'], { type: 'image/webp' })));
     vi.stubGlobal(
       'OffscreenCanvas',
       class {
@@ -248,12 +248,12 @@ describe('Attachment upload tasks', () => {
     expect(task.state()).toEqual({ status: UploadStatus.Processing, progress: 0.25 });
     expect(task.retry()).toBe(pending);
     http.expectNone('/_api/attachments/upload-url');
-    compressed(new Blob(['small'], { type: 'image/avif' }));
+    compressed(new Blob(['small'], { type: 'image/webp' }));
     await vi.waitFor(() => {
       const request = http.expectOne('/_api/attachments/upload-url');
       expect(request.request.body).toEqual({
-        filename: 'photo.jpg.avif',
-        contentType: 'image/avif',
+        filename: 'photo.jpg.webp',
+        contentType: 'image/webp',
         size: 5,
         purpose: AttachmentUploadPurpose.media,
         width: 1866,
@@ -345,7 +345,7 @@ describe('Attachment upload tasks', () => {
     task.dispose();
     await expect(pending).resolves.toBeUndefined();
     const state = task.state();
-    compressed(new Blob(['small'], { type: 'image/avif' }));
+    compressed(new Blob(['small'], { type: 'image/webp' }));
     // Drain the compression continuation, which cannot start a signing request after disposal.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(task.state()).toBe(state);

@@ -33,13 +33,11 @@ const MAX_IMAGE_LONG_SIDE = 16_000;
 const VIDEO_COMPRESSION_RATIO = 0.5;
 const IMAGE_COMPRESSION_RATIO = 0.75;
 const IMAGE_EXPORT_FORMATS = [
-  { type: 'image/avif', quality: 0.6, extension: '.avif' },
   { type: 'image/webp', quality: 0.6, extension: '.webp' },
   { type: 'image/jpeg', quality: 0.8, extension: '.jpg' },
 ] as const;
 const TRANSPARENT_IMAGE_EXPORT_FORMATS = [
   IMAGE_EXPORT_FORMATS[0],
-  IMAGE_EXPORT_FORMATS[1],
   { type: 'image/png', quality: undefined, extension: '.png' },
 ] as const;
 
