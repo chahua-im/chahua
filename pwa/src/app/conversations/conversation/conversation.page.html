@@ -117,7 +117,7 @@
   (touchend)="scrolling.touchEnd()"
   (touchcancel)="scrolling.touchEnd()">
   <div slot="fixed" class="sticky-avatar-container" [class.sent]="stickySender()?.uid === session.user()?.uid">
-    @if (stickySender(); as sender) {
+    @if (showMessageDetails() && stickySender(); as sender) {
       <button
         class="sticky-avatar"
         [avatarColor]="sender.avatarUrl ? null : (sender.name ?? sender.uid.toString())"

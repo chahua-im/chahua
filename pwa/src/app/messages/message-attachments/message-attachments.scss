@@ -47,31 +47,22 @@
 }
 
 // Stretched single media keeps the image's aspect ratio against the bubble width, capped at the
-// media height limit, and letterboxes on a blurred copy of itself, centred by object-fit: contain.
+// media height limit. Images fill the remaining space with a blurred backdrop.
 // width stays definite (100%) so the max-height clamp transfers to height only, not back to width.
 .media-frame.fill {
+  --media-max-height: 420px;
   width: 100%;
-  max-height: 420px;
-  background: #000;
-  isolation: isolate;
+  max-height: var(--media-max-height);
 }
 
 .backdrop {
   position: absolute;
   inset: -20px;
-  z-index: -1;
   background-position: center;
   background-size: cover;
   filter: blur(20px);
   opacity: 0.8;
-}
-
-.media-frame.fill::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: rgb(0 0 0 / 0.2);
+  pointer-events: none;
 }
 
 .media-frame,
@@ -81,9 +72,10 @@
   overflow: hidden;
 }
 
-// Only media needs a placeholder tint; a voice bar sits directly on the bubble.
-.media-frame {
-  background: rgba(var(--ion-text-color-rgb), 0.06);
+// An opaque neutral background keeps transparent media independent of the bubble color.
+.media-frame,
+.attachments.album {
+  background: var(--ion-color-medium);
 }
 
 .sticker {
@@ -119,6 +111,15 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+// The frame keeps the image ratio until its height is capped. Size the image element to
+// the contained image itself so its opaque backing never covers the blurred side gutters.
+.media-frame.fill img {
+  width: min(100%, calc(var(--media-max-height) * var(--media-aspect-ratio)));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ion-color-medium);
 }
 
 .audio-frame {

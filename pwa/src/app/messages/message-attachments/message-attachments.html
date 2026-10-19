@@ -11,12 +11,13 @@
         [class.sticker]="item.sticker"
         [class.cover]="!!frame"
         [class.fill]="fill()"
+        [style.--media-aspect-ratio]="fill() ? item.width / item.height : null"
         [style.left.px]="frame?.x"
         [style.top.px]="frame?.y"
         [style.width.px]="frame?.width ?? (fill() ? null : item.displayWidth)"
         [style.height.px]="frame?.height"
         [style.aspect-ratio]="frame ? null : item.width + ' / ' + item.height">
-        @if (!frame && fill() && item.kind === MediaKind.Image && !failed().has(item.id ?? item.url)) {
+        @if (fill() && item.kind === MediaKind.Image && !failed().has(item.id ?? item.url)) {
           <div class="backdrop" [style.background-image]="'url(' + item.url + ')'"></div>
         }
         @if (failed().has(item.id ?? item.url)) {

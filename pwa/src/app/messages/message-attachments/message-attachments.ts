@@ -109,7 +109,7 @@ export class MessageAttachments {
   protected readonly visual = computed(() =>
     this.items().every((item) => item.kind === MediaKind.Image || item.kind === MediaKind.Video),
   );
-  /** A single known-size image or video fills the bubble width on a blurred backdrop, like a wide caption card. */
+  /** A single known-size image or video fills the bubble width; images blur only the side gutters. */
   protected readonly fill = computed(() => {
     const items = this.items();
     return !this.album() && items.length === 1 && this.visual() && items[0].knownSize && !items[0].sticker;

@@ -899,7 +899,12 @@ export class ConversationPage {
     const bottomElement = allElements[bottomLow]?.nativeElement;
     const bubble = bottomElement?.querySelector('.bubble, .sticker-content')?.getBoundingClientRect();
     const avatar = bottomElement?.querySelector('.avatar')?.getBoundingClientRect();
-    const sticky = bottomRow && bubble && bubble.top < viewport.bottom && (!avatar || avatar.bottom > viewport.bottom);
+    const sticky =
+      this.showMessageDetails() &&
+      bottomRow &&
+      bubble &&
+      bubble.top < viewport.bottom &&
+      (!avatar || avatar.bottom > viewport.bottom);
     this.stickySender.set(sticky ? bottomRow.message.sender : undefined);
     this.stickyRow.set(sticky ? bottomLow : undefined);
     this.stickyOffset.set(sticky && bottomRow.first ? Math.max(0, bubble.top + 34 - viewport.bottom) : 0);

@@ -21,7 +21,7 @@ export function albumLayout(
   viewport = { parentWidth: 360, displayHeight: 640 },
 ) {
   const snap = (value: number) => Math.round(value * scale) / scale;
-  const width = Math.floor((availableWidth ?? 420) * scale) / scale;
+  const width = availableWidth ?? 420;
   if (!sizes.length) return { width: 0, intrinsicWidth: 0, height: 0, frames: [] };
   // Single media uses the existing PWA preview; Telegram's grouped algorithm starts at two items.
   if (sizes.length === 1) {
@@ -34,7 +34,7 @@ export function albumLayout(
   );
   // ChatMessageCell: physical pixels, float multiplication, then ceil per row.
   const maxHeight = Math.fround(Math.max(viewport.parentWidth, viewport.displayHeight) * scale * 0.5);
-  const rowGap = Math.round(Math.fround(7 * scale)) / scale;
+  const rowGap = snap(2);
   const rowCount = Math.max(...plan.positions.map((position) => position.maxY)) + 1;
   const rowHeights = Array.from({ length: rowCount }, (_, row) =>
     Math.max(
@@ -62,11 +62,11 @@ export function albumLayout(
   const contentWidth = availableWidth == null ? intrinsicWidth : width;
   const factor = contentWidth / extent;
   const height = rowTops.at(-1)! - rowGap;
-  // Keep horizontal PWA gutters; vertical gaps provide Telegram sibling-height compensation.
+  // Use matching 2px gutters; spanning frames include the gaps between their rows.
   const frames = boxes.map((box) => {
     const x = snap(box.left * factor + (box.left > 0 ? 1 : 0));
     const y = snap(box.top);
-    const right = snap(box.right * factor - (box.right < extent ? 1 : 0));
+    const right = box.right === extent ? contentWidth : snap(box.right * factor - 1);
     const bottom = snap(box.bottom);
     return { x, y, width: right - x, height: bottom - y };
   });
