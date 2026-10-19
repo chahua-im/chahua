@@ -99,7 +99,11 @@ describe('prepareMessageContent', () => {
   it('reports block structure only for block-level Markdown', () => {
     expect(prepareMessageContent('**bold** only', [], null, true).hasBlocks).toBe(false);
     expect(prepareMessageContent('- one\n- two', [], null, true).hasBlocks).toBe(true);
-    expect(prepareMessageContent('> quoted', [], null, true).hasBlocks).toBe(true);
+    expect(prepareMessageContent('> quoted', [], null, true)).toEqual({
+      isMarkdown: false,
+      hasBlocks: false,
+      nodes: null,
+    });
     // Plain multi-paragraph text carries no markup and stays on the legacy path.
     expect(prepareMessageContent('one\n\ntwo', [], null, true).hasBlocks).toBe(false);
   });
@@ -108,16 +112,24 @@ describe('prepareMessageContent', () => {
 describe('code region mention preservation', () => {
   it.each([
     ['`hello\n@[uid:7]`', 'hello @[uid:7]'],
-    ['> ```\n> @[uid:7]\n> ```', '@[uid:7]\n'],
     ['- ```\n  @[uid:7]\n  ```', '@[uid:7]\n'],
     ['```\n```oops\n@[uid:7]\n```', '```oops\n@[uid:7]\n'],
-    ['> ```\r\n> @[uid:7]\r\n> ```', '@[uid:7]\n'],
     ['```\n@[uid:7]', '@[uid:7]'],
   ])('keeps code mentions verbatim: %s', (source, content) => {
     const html = toHtml(prepareMessageContent(source + '\n\n**@[uid:7]**', [mention(7, 'Alice')], null, true).nodes!);
     expect(html).toContain(content);
     expect(html).not.toContain('\uFFF0');
     if (source !== '```\n@[uid:7]') expect(html).toContain('@Alice');
+  });
+
+  it.each(['\n', '\r\n'])('treats backticks after literal > as inline code with %j line endings', (newline) => {
+    const source = ['> ```', '> @[uid:7]', '> ```', '', '**@[uid:7]**'].join(newline);
+    const html = toHtml(prepareMessageContent(source, [mention(7, 'Alice')], null, true).nodes!);
+    expect(html).toContain('<p>> <code>> @[uid:7] ></code></p>');
+    expect(html).not.toContain('<blockquote>');
+    expect(html).not.toContain('<pre>');
+    expect(html).not.toContain('\uFFF0');
+    expect(html).toContain('<strong>@Alice[self=false click=true]</strong>');
   });
 
   it('does not treat escaped backticks as code delimiters', () => {
