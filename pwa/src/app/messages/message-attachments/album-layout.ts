@@ -1,115 +1,74 @@
+import { telegramAlbumLayout, type TelegramAlbumEnvironment } from './telegram-album-layout';
+
 interface Size {
   width: number;
   height: number;
 }
 
-interface Frame extends Size {
-  x: number;
-  y: number;
-}
-
-export function canCrop(source: Size, frame: Size) {
-  const ratio = frame.width / frame.height / (source.width / source.height);
-  return Math.min(ratio, 1 / ratio) >= 0.8;
-}
-
-/** Layout uses metadata only; loading an image or video must not move its neighbours. */
-export function albumLayout(sizes: readonly Size[], availableWidth: number, scale = 1) {
+/** Converts Telegram geometry to the measured content width, with a separate intrinsic width.
+ * Intrinsic width uses the 420px nominal canvas and never depends on ResizeObserver feedback.
+ */
+export function albumLayout(
+  sizes: readonly Size[],
+  availableWidth: number | undefined,
+  scale = 1,
+  environment: TelegramAlbumEnvironment = {
+    displayMin: 360 * scale,
+    density: scale,
+    outgoing: false,
+    needShare: false,
+  },
+  viewport = { parentWidth: 360, displayHeight: 640 },
+) {
   const snap = (value: number) => Math.round(value * scale) / scale;
-  const width = Math.floor(availableWidth * scale) / scale;
-  const gap = 2;
-  const ratios = sizes.map(({ width, height }) => width / height);
-  const bounded = ratios.map((ratio) => Math.max(0.75, Math.min(1.8, ratio)));
-  const frames: Frame[] = [];
-  let y = 0;
-
-  function frame(left: number, top: number, right: number, bottom: number) {
-    const x = snap(left);
-    const y = snap(top);
-    const w = snap(right) - x;
-    const h = snap(bottom) - y;
-    frames.push({ x, y, width: w, height: h });
+  const width = Math.floor((availableWidth ?? 420) * scale) / scale;
+  if (!sizes.length) return { width: 0, intrinsicWidth: 0, height: 0, frames: [] };
+  // Single media uses the existing PWA preview; Telegram's grouped algorithm starts at two items.
+  if (sizes.length === 1) {
+    const height = snap(Math.min(360, (width * sizes[0].height) / sizes[0].width));
+    return { width, intrinsicWidth: width, height, frames: [{ x: 0, y: 0, width, height }] };
   }
-
-  function row(start: number, count: number, proportions = bounded) {
-    const sum = proportions.slice(start, start + count).reduce((sum, ratio) => sum + ratio, 0);
-    const height = snap((width - gap * (count - 1)) / sum);
-    let left = 0;
-    for (let i = start; i < start + count; i++) {
-      const right = i === start + count - 1 ? width : left + height * proportions[i];
-      frame(left, y, right, y + height);
-      left = snap(right) + gap;
-    }
-    y += height + gap;
-  }
-
-  function group(start: number, end: number) {
-    const count = end - start;
-    if (count === 1) {
-      const height = snap(Math.min(360, width / ratios[start]));
-      frame(0, y, width, y + height);
-      y += height + gap;
-    } else if (count === 2) {
-      if (ratios.slice(start, end).every((ratio) => ratio > 1.4)) {
-        row(start, 1, ratios);
-        row(start + 1, 1, ratios);
-      } else row(start, 2, ratios);
-    } else if (count === 3 && ratios[start] < 0.8) {
-      const rightRatio = 1 / ratios[start + 1] + 1 / ratios[start + 2];
-      const height = snap(Math.min(360, (width - gap + gap / rightRatio) / (ratios[start] + 1 / rightRatio)));
-      const right = (height - gap) / rightRatio;
-      const left = snap(width - right - gap);
-      const middle = snap(y + ((height - gap) * ratios[start + 2]) / (ratios[start + 1] + ratios[start + 2]));
-      frame(0, y, left, y + height);
-      frame(left + gap, y, width, middle);
-      frame(left + gap, middle + gap, width, y + height);
-      y += height + gap;
-    } else if (count === 3) {
-      row(start, 1, ratios);
-      row(start + 1, 2, ratios);
-    } else if (count === 4) {
-      const half = snap((width - gap) / 2);
-      frame(0, y, half, y + half);
-      frame(half + gap, y, width, y + half);
-      frame(0, y + half + gap, half, y + width);
-      frame(half + gap, y + half + gap, width, y + width);
-      y += width + gap;
-    } else {
-      // At most nine tiles: enumerate two-/three-item rows and favour balanced, lightly cropped rows.
-      let best = { score: Infinity, rows: [] as number[] };
-      function choose(index: number, rows: number[], score: number) {
-        if (index === end) {
-          if (score < best.score) best = { score, rows };
-          return;
-        }
-        for (const count of [2, 3]) {
-          if (index + count > end) continue;
-          const values = bounded.slice(index, index + count);
-          const height = (width - gap * (count - 1)) / values.reduce((a, b) => a + b, 0);
-          const crop = values.reduce((sum, ratio, i) => {
-            const relative = ratio / ratios[index + i];
-            return sum + 1 - Math.min(relative, 1 / relative);
-          }, 0);
-          const narrow = Math.max(0, 80 - height * Math.min(...values)) / width;
-          choose(index + count, [...rows, count], score + (height / width - 0.36) ** 2 + crop * 0.1 + narrow * 0.2);
-        }
-      }
-      choose(start, [], 0);
-      for (const count of best.rows) {
-        row(start, count);
-        start += count;
-      }
-    }
-  }
-
-  // Long screenshots and panoramas keep a full-width frame without reordering the surrounding media.
-  let start = 0;
-  for (let i = 0; i < ratios.length; i++) {
-    if (ratios[i] >= 0.5 && ratios[i] <= 2.5) continue;
-    if (i > start) group(start, i);
-    group(i, i + 1);
-    start = i + 1;
-  }
-  if (start < sizes.length) group(start, sizes.length);
-  return { width, height: y - gap, frames };
+  const plan = telegramAlbumLayout(
+    sizes.map((size) => size.width / size.height),
+    environment,
+  );
+  // ChatMessageCell: physical pixels, float multiplication, then ceil per row.
+  const maxHeight = Math.fround(Math.max(viewport.parentWidth, viewport.displayHeight) * scale * 0.5);
+  const rowGap = Math.round(Math.fround(7 * scale)) / scale;
+  const rowCount = Math.max(...plan.positions.map((position) => position.maxY)) + 1;
+  const rowHeights = Array.from({ length: rowCount }, (_, row) =>
+    Math.max(
+      ...plan.positions
+        .filter((position) => position.minY === row && position.maxY === row)
+        .map((position) => Math.ceil(Math.fround(maxHeight * position.ph)) / scale),
+    ),
+  );
+  const rowTops = [0];
+  for (const height of rowHeights) rowTops.push(rowTops.at(-1)! + height + rowGap);
+  const boxes = plan.positions.map((position, index) => {
+    const left = plan.positions
+      .slice(0, index)
+      .filter((other) => other.minY <= position.minY && other.maxY >= position.minY)
+      .reduce((sum, other) => sum + other.pw, 0);
+    return {
+      left,
+      right: left + position.pw,
+      top: rowTops[position.minY],
+      bottom: rowTops[position.maxY + 1] - rowGap,
+    };
+  });
+  const extent = Math.max(...boxes.map((box) => box.right));
+  const intrinsicWidth = snap((extent * 420) / plan.width);
+  const contentWidth = availableWidth == null ? intrinsicWidth : width;
+  const factor = contentWidth / extent;
+  const height = rowTops.at(-1)! - rowGap;
+  // Keep horizontal PWA gutters; vertical gaps provide Telegram sibling-height compensation.
+  const frames = boxes.map((box) => {
+    const x = snap(box.left * factor + (box.left > 0 ? 1 : 0));
+    const y = snap(box.top);
+    const right = snap(box.right * factor - (box.right < extent ? 1 : 0));
+    const bottom = snap(box.bottom);
+    return { x, y, width: right - x, height: bottom - y };
+  });
+  return { width: contentWidth, intrinsicWidth, height: snap(height), frames };
 }

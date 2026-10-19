@@ -5,9 +5,8 @@
 }
 
 :host(.album) {
-  width: 420px;
   max-width: 100%;
-  // A caption wider than the album stretches it to the bubble width.
+  // The inline intrinsic width sizes the bubble; flex sizing follows its available space.
   flex: 1 1 auto;
 }
 
