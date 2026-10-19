@@ -462,6 +462,76 @@ describe('MessageMenu', () => {
     expect(menu['selection']()).toBeUndefined();
   });
 
+  it('widens the preview when the sender row it adds does not fit the original bubble', () => {
+    menu.reset();
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('avatar-slot') ? 44 : 300;
+    });
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('sender-name') ? 320 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('sender-name') ? 120 : 0;
+    });
+    menu.open(selection());
+    fixture.detectChanges();
+    const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
+    // 180px original bubble + 44px avatar column + 200px of clipped sender name.
+    expect(parseFloat(preview.style.width)).toBe(424);
+  });
+
+  it('keeps the right edge of an own bubble aligned when its anchored preview widens', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('avatar-slot') ? 44 : 276;
+    });
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(2000);
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('sender-name') ? 320 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('sender-name') ? 120 : 0;
+    });
+    const rect = new DOMRect(400, 200, 180, 900);
+    menu['selection'].set({ ...selection(), rect, own: true });
+    fixture.detectChanges();
+    TestBed.tick();
+    const stack = fixture.nativeElement.querySelector('.menu-stack') as HTMLElement;
+    const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
+    expect(stack.classList.contains('anchored')).toBe(true);
+    expect(parseFloat(preview.style.width)).toBe(424);
+    const bubbleRight =
+      parseFloat(stack.style.left) + parseFloat(preview.style.left) + parseFloat(preview.style.width) - 44;
+    expect(bubbleRight).toBe(rect.right);
+  });
+
+  it('keeps the preview avatar on screen when the chat omits avatar details', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('avatar-slot') ? 44 : 276;
+    });
+    // A DM without avatar details leaves the bubble 15px from the edge; the overlay adds a 44px avatar column.
+    menu['selection'].set({ ...selection(), rect: new DOMRect(15, 200, 180, 70), own: false });
+    fixture.detectChanges();
+    TestBed.tick();
+    const stack = fixture.nativeElement.querySelector('.menu-stack') as HTMLElement;
+    const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
+    expect(stack.classList.contains('anchored')).toBe(false);
+    expect(parseFloat(stack.style.left) + parseFloat(preview.style.left)).toBeGreaterThanOrEqual(12);
+  });
+
+  it('keeps the anchored preview avatar on screen when the chat omits avatar details', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('avatar-slot') ? 44 : 276;
+    });
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(2000);
+    menu['selection'].set({ ...selection(), rect: new DOMRect(15, 200, 180, 70), own: false });
+    fixture.detectChanges();
+    TestBed.tick();
+    const stack = fixture.nativeElement.querySelector('.menu-stack') as HTMLElement;
+    const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
+    expect(stack.classList.contains('anchored')).toBe(true);
+    expect(parseFloat(stack.style.left) + parseFloat(preview.style.left)).toBeGreaterThanOrEqual(12);
+  });
+
   it('shows complete identity in the overlay independently of the message group', () => {
     fixture.detectChanges();
     const preview = fixture.debugElement.query(By.directive(Message)).componentInstance as Message;

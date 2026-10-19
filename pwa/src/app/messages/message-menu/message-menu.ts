@@ -301,6 +301,9 @@ export class MessageMenu {
       const actions = this.actions()?.nativeElement;
       const preview = this.preview()!.nativeElement;
       const row = preview.querySelector<HTMLElement>('.chat-row')!;
+      // The overlay always shows the sender row, which the chat may omit for grouped messages.
+      // Measure the name once at the original bubble width and widen the preview instead of eliding it.
+      let nameWidth = 0;
       const place = () => {
         if (!stack.offsetWidth) return;
         const rect = selection.element.isConnected ? selection.element.getBoundingClientRect() : selection.rect;
@@ -313,7 +316,13 @@ export class MessageMenu {
         const availableWidth = (viewport?.width ?? window.innerWidth) - horizontalInset - 24;
         const availableHeight = (viewport?.height ?? window.innerHeight) - verticalInset - 24;
         const avatarSpace = row.querySelector<HTMLElement>('.avatar-slot')!.offsetWidth;
-        const previewWidth = rect.width + avatarSpace;
+        const baseWidth = rect.width + avatarSpace;
+        if (!nameWidth) {
+          preview.style.width = `${baseWidth}px`;
+          const name = preview.querySelector<HTMLElement>('.sender-name');
+          nameWidth = name ? baseWidth + Math.max(0, name.scrollWidth - name.clientWidth) : baseWidth;
+        }
+        const previewWidth = Math.min(Math.max(baseWidth, nameWidth), availableWidth);
         preview.style.width = `${previewWidth}px`;
         stack.style.width = `${Math.min(Math.max(previewWidth, 276), availableWidth)}px`;
         const barHeight = bar?.offsetHeight ?? 0;
@@ -339,7 +348,12 @@ export class MessageMenu {
           const point = selection.point ?? { x: own ? rect.right : rect.left, y: top + availableHeight / 2 };
           x = clampX(own ? point.x - width : point.x, width);
           y = clampY(point.y - (bar ? barHeight + 8 : 0), barHeight + actionsHeight + (bar ? 8 : 0));
-          preview.style.left = `${rect.left - (own ? 0 : avatarSpace) - x}px`;
+          // Keep the whole preview, including the avatar column the chat may not have reserved, on screen.
+          const previewLeft = clampX(
+            own ? rect.right + avatarSpace - previewWidth : rect.left - avatarSpace,
+            previewWidth,
+          );
+          preview.style.left = `${previewLeft - x}px`;
           preview.style.top = `${previewTop - y}px`;
         } else {
           const width = stack.offsetWidth;
@@ -348,7 +362,9 @@ export class MessageMenu {
           x = originX;
           y = clampY(originY, totalHeight);
           fromY = originY - y;
-          preview.style.removeProperty('left');
+          // Keep the avatar column the chat may not have reserved inside the safe area.
+          const previewX = own ? x + width - previewWidth : x;
+          preview.style.left = `${clampX(previewX, previewWidth) - previewX}px`;
           preview.style.removeProperty('top');
         }
         const surface = stack.parentElement!.getBoundingClientRect();
