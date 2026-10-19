@@ -112,19 +112,18 @@ export function renderInlineTokens(tokens: readonly Token[], options: MarkdownRe
         i += 1;
         break;
       }
+      case 'spoiler_open': {
+        const closeIndex = findMatchingTokenEnd(tokens, i);
+        const children = renderInlineTokens(tokens.slice(i + 1, closeIndex), options);
+        out.push({ type: 'element', tag: 'span', attrs: { class: 'spoiler' }, children });
+        i = closeIndex + 1;
+        break;
+      }
       case 'em_open':
       case 'strong_open':
-      case 's_open':
-      case 'u_open': {
+      case 's_open': {
         const closeIndex = findMatchingTokenEnd(tokens, i);
-        const tag =
-          token.type === 'em_open'
-            ? 'em'
-            : token.type === 'strong_open'
-              ? 'strong'
-              : token.type === 's_open'
-                ? 's'
-                : 'u';
+        const tag = token.type === 'em_open' ? 'em' : token.type === 'strong_open' ? 'strong' : 's';
         out.push({ type: 'element', tag, children: renderInlineTokens(tokens.slice(i + 1, closeIndex), options) });
         i = closeIndex + 1;
         break;

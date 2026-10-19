@@ -370,7 +370,6 @@
         "bold": "Bold (Ctrl+B)",
         "italic": "Italic (Ctrl+I)",
         "strike": "Strikethrough (Ctrl+D)",
-        "underline": "Underline (Ctrl+U)",
         "code": "Code block",
         "quote": "Quote (Ctrl+Q)",
         "link": "Link"

@@ -11,11 +11,12 @@ describe('messageHasMarkdown', () => {
     expect(messageHasMarkdown('你好世界')).toBe(false);
   });
 
-  it('detects inline emphasis, code, underline and strikethrough', () => {
+  it('detects inline emphasis, code, spoilers and strikethrough', () => {
     expect(messageHasMarkdown('**bold** text')).toBe(true);
     expect(messageHasMarkdown('*italic*')).toBe(true);
     expect(messageHasMarkdown('a ~~strike~~ b')).toBe(true);
-    expect(messageHasMarkdown('a __underline__ b')).toBe(true);
+    expect(messageHasMarkdown('a __italic__ b')).toBe(true);
+    expect(messageHasMarkdown('a ||spoiler|| b')).toBe(true);
     expect(messageHasMarkdown('`inline code`')).toBe(true);
   });
 

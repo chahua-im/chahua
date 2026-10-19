@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MentionInfo } from '../../../generated/models';
 
 import { MarkdownSummary } from './markdown-summary';
@@ -72,6 +72,41 @@ describe('MarkdownSummary', () => {
     expect(element.textContent).toBe('5 * 3 * 4 和 1.2 段落');
     expect(element.querySelector('strong')).toBeNull();
     expect(element.querySelector('em')).toBeNull();
+  });
+
+  it('keeps spoilers masked in single-line previews without intercepting the parent click', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      const element = render('前文 ||**秘密** [链接](https://example.com)\n第二行|| 后文');
+      const spoiler = element.querySelector<HTMLElement>('.spoiler')!;
+      expect(spoiler).not.toBeNull();
+      expect(spoiler.querySelector('canvas.spoiler-canvas')).not.toBeNull();
+      expect(spoiler.querySelector('.spoiler-content')?.textContent).toBe('秘密 链接 第二行');
+      expect(element.querySelector('br')).toBeNull();
+      const openPreview = vi.fn();
+      element.addEventListener('click', openPreview);
+      spoiler.click();
+      expect(spoiler.classList.contains('revealed')).toBe(false);
+      expect(openPreview).toHaveBeenCalledTimes(1);
+    } finally {
+      fixture.destroy();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('renders nothing for an empty string', () => {

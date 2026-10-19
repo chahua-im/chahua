@@ -9,7 +9,7 @@ const MEANINGFUL_TOKEN_TYPES = new Set<string>([
   'em_open',
   'strong_open',
   's_open',
-  'u_open',
+  'spoiler_open',
   'code_inline',
   'link_open',
   'autolink',

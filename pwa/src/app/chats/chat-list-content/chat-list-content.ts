@@ -40,6 +40,7 @@ import { decodeId } from '../../api/snowflake-id';
 import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
 import { DraftStore } from '../../conversations/draft-store';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { MarkdownSummary } from '../../messages/message-preview/markdown-summary';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { SessionStore } from '../../session/session-store';
@@ -75,6 +76,7 @@ enum ListRowKind {
     IonText,
     ChatListItem,
     MessagePreview,
+    MarkdownSummary,
     TranslocoPipe,
   ],
 })

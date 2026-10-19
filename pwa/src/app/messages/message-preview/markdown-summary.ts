@@ -33,7 +33,7 @@ export function resolveMentionNames(text: string, mentions: readonly MentionInfo
   imports: [MarkdownBody, MessageText],
   template: `
     @if (nodes(); as nodes) {
-      <app-markdown-body [nodes]="nodes" />
+      <app-markdown-body [nodes]="nodes" [summary]="true" />
     } @else {
       <app-message-text [text]="text()" [mentions]="mentions()" [interactive]="false" />
     }

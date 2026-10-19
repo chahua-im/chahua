@@ -17,9 +17,9 @@ describe('FormatToolbar', () => {
     target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   }
 
-  it('renders all seven formatting buttons', () => {
+  it('renders all six formatting buttons', () => {
     const element = fixture.nativeElement as HTMLElement;
-    for (const kind of ['bold', 'italic', 'strike', 'underline', 'code', 'quote', 'link']) {
+    for (const kind of ['bold', 'italic', 'strike', 'code', 'quote', 'link']) {
       expect(element.querySelector(`[data-format-${kind}]`)).toBeTruthy();
     }
   });
