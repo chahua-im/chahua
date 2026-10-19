@@ -1,3 +1,5 @@
+@use 'sass:meta';
+
 @import '@ionic/angular/css/core.css';
 @import 'overlayscrollbars/overlayscrollbars.css';
 
@@ -422,4 +424,19 @@ ion-alert.notification-prompt {
 
 .avatar-placeholder {
   --avatar-background: light-dark(var(--avatar-light), var(--avatar-dark));
+}
+
+// highlight.js creates spans outside Angular's component style scope.
+app-markdown-body pre {
+  @include meta.load-css('highlight.js/styles/github');
+}
+
+.ion-palette-dark app-markdown-body pre {
+  @include meta.load-css('highlight.js/styles/github-dark');
+}
+
+app-markdown-body pre code.hljs {
+  padding: 0;
+  background: none;
+  overflow-x: visible;
 }
