@@ -40,6 +40,7 @@ function deferred<T>() {
 function mockCanvas(output: Blob) {
   const context = {
     drawImage: vi.fn(),
+    getImageData: vi.fn().mockReturnValue({ data: new Uint8ClampedArray([0, 0, 0, 255]) }),
     imageSmoothingQuality: 'low',
   };
   const convertToBlob = vi.fn().mockResolvedValue(output);
@@ -66,8 +67,13 @@ afterEach(() => {
 
 describe('image compression sources', () => {
   it.each([
-    [4032, 3024, 1920, 1440],
-    [3024, 4032, 1440, 1920],
+    [4032, 3024, 1866, 1400],
+    [3024, 4032, 1400, 1866],
+    [2000, 2000, 1400, 1400],
+    [20000, 2000, 8944, 894],
+    [2000, 20000, 894, 8944],
+    [40000, 400, 16000, 160],
+    [400, 40000, 160, 16000],
     [640, 480, 640, 480],
   ])('resizes %sx%s files to %sx%s while creating the bitmap', async (width, height, targetWidth, targetHeight) => {
     const file = new File([new Uint8Array(100)], 'photo.jpg', { type: 'image/jpeg' });
@@ -100,11 +106,78 @@ describe('image compression sources', () => {
     const result = await compressImage(file);
 
     expect(createImageBitmapMock).not.toHaveBeenCalled();
-    expect(context.drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1920, 1440);
+    expect(context.drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1866, 1400);
     expect(context.imageSmoothingQuality).toBe('high');
     expect(bitmap.close).toHaveBeenCalledOnce();
     expect(result.file.name).toBe('photo.heic.avif');
-    expect(result.dimensions).toEqual({ width: 1920, height: 1440 });
+    expect(result.dimensions).toEqual({ width: 1866, height: 1400 });
+  });
+
+  it.each([
+    [255, 'image/jpeg', '.jpg'],
+    [254, 'image/png', '.png'],
+    [0, 'image/png', '.png'],
+  ])('selects the final fallback from actual pixels with alpha %s', async (alpha, type, extension) => {
+    const file = new File([new Uint8Array(100)], 'photo.png', { type: 'image/png' });
+    const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue(bitmap));
+    const { context, convertToBlob } = mockCanvas(new Blob(['small'], { type }));
+    // A transparent pixel in a later readback must not be missed.
+    context.getImageData.mockReturnValueOnce({ data: new Uint8ClampedArray([0, 0, 0, 255]) });
+    context.getImageData.mockReturnValue({ data: new Uint8ClampedArray([0, 0, 0, alpha]) });
+    convertToBlob.mockRejectedValueOnce(new Error('AVIF unavailable'));
+    convertToBlob.mockResolvedValueOnce(new Blob(['browser fallback'], { type: 'image/png' }));
+
+    const result = await compressImage(file, { width: 640, height: 480 });
+
+    expect(result.file.type).toBe(type);
+    expect(result.file.name).toBe(`photo.png${extension}`);
+    expect(result.dimensions).toEqual({ width: 640, height: 480 });
+    expect(convertToBlob.mock.calls.map(([options]) => options.type)).toEqual(['image/avif', 'image/webp', type]);
+    expect(context.getImageData).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['image/avif', 'image/webp'])('prefers supported %s even when pixels are transparent', async (type) => {
+    const file = new File([new Uint8Array(100)], 'photo.png', { type: 'image/png' });
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ close: vi.fn() }));
+    const { context, convertToBlob } = mockCanvas(new Blob(['small'], { type }));
+    context.getImageData.mockReturnValue({ data: new Uint8ClampedArray([0, 0, 0, 0]) });
+
+    const result = await compressImage(file, { width: 640, height: 480 });
+
+    expect(result.file.type).toBe(type);
+    expect(convertToBlob.mock.calls.map(([options]) => options.type)).toEqual(
+      type === 'image/avif' ? ['image/avif'] : ['image/avif', 'image/webp'],
+    );
+  });
+
+  it.each([74, 75, 76])('requires strictly more than 25 percent savings for %s encoded bytes', async (size) => {
+    const file = new File([new Uint8Array(100)], 'photo.jpg', { type: 'image/jpeg' });
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ close: vi.fn() }));
+    const { convertToBlob } = mockCanvas(new Blob([new Uint8Array(size)], { type: 'image/avif' }));
+
+    const result = await compressImage(file, { width: 4032, height: 3024 });
+
+    expect(result.file === file).toBe(size >= 75);
+    expect(result.dimensions).toEqual(size < 75 ? { width: 1866, height: 1400 } : { width: 4032, height: 3024 });
+    expect(convertToBlob).toHaveBeenCalledOnce();
+  });
+
+  it('never tries JPEG when all transparency-preserving encoders fail', async () => {
+    const file = new File([new Uint8Array(100)], 'photo.webp', { type: 'image/webp' });
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ close: vi.fn() }));
+    const { context, convertToBlob } = mockCanvas(new Blob(['wrong type'], { type: 'image/jpeg' }));
+    context.getImageData.mockReturnValue({ data: new Uint8ClampedArray([0, 0, 0, 0]) });
+
+    const result = await compressImage(file, { width: 4032, height: 3024 });
+
+    expect(result.file).toBe(file);
+    expect(result.dimensions).toEqual({ width: 4032, height: 3024 });
+    expect(convertToBlob.mock.calls.map(([options]) => options.type)).toEqual([
+      'image/avif',
+      'image/webp',
+      'image/png',
+    ]);
   });
 
   it('closes a HEIC bitmap returned after cancellation without starting canvas encoding', async () => {

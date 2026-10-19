@@ -27,12 +27,20 @@ function appendFileExtension(fileName: string, extension: string) {
 }
 
 const MAX_MEDIA_DIMENSION = 1920;
+const MAX_IMAGE_SHORT_SIDE = 1400;
+const MAX_IMAGE_PIXELS = 8_000_000;
+const MAX_IMAGE_LONG_SIDE = 16_000;
 const VIDEO_COMPRESSION_RATIO = 0.5;
 const IMAGE_COMPRESSION_RATIO = 0.75;
 const IMAGE_EXPORT_FORMATS = [
   { type: 'image/avif', quality: 0.6, extension: '.avif' },
   { type: 'image/webp', quality: 0.6, extension: '.webp' },
   { type: 'image/jpeg', quality: 0.8, extension: '.jpg' },
+] as const;
+const TRANSPARENT_IMAGE_EXPORT_FORMATS = [
+  IMAGE_EXPORT_FORMATS[0],
+  IMAGE_EXPORT_FORMATS[1],
+  { type: 'image/png', quality: undefined, extension: '.png' },
 ] as const;
 
 function calculateTargetVideoDimensions(
@@ -155,16 +163,29 @@ export async function compressVideo(
   }
 }
 
-function calculateTargetImageDimensions(width: number, height: number, max = MAX_MEDIA_DIMENSION): Dimensions {
-  if (width <= max && height <= max) {
-    return { width, height };
-  }
-
-  const scale = max / Math.max(width, height);
+function calculateTargetImageDimensions(width: number, height: number): Dimensions {
+  const scale = Math.min(
+    1,
+    MAX_IMAGE_SHORT_SIDE / Math.min(width, height),
+    Math.sqrt(MAX_IMAGE_PIXELS / (width * height)),
+    MAX_IMAGE_LONG_SIDE / Math.max(width, height),
+  );
   return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale)),
   };
+}
+
+function canvasHasTransparency(context: OffscreenCanvasRenderingContext2D, { width, height }: Dimensions): boolean {
+  // Read every alpha value, keeping each readback near 1 MiB rather than copying the whole canvas.
+  const rowsPerRead = Math.max(1, Math.floor((256 * 1024) / width));
+  for (let y = 0; y < height; y += rowsPerRead) {
+    const { data } = context.getImageData(0, y, width, Math.min(rowsPerRead, height - y));
+    for (let index = 3; index < data.length; index += 4) {
+      if (data[index] !== 255) return true;
+    }
+  }
+  return false;
 }
 
 let heicToModulePromise: Promise<typeof import('heic-to/csp')> | undefined;
@@ -208,6 +229,7 @@ async function compressImageSource(
     : source;
 
   let canvas: OffscreenCanvas;
+  let hasTransparency: boolean;
   try {
     throwIfAborted(signal);
     canvas = new OffscreenCanvas(outputDimensions.width, outputDimensions.height);
@@ -215,12 +237,13 @@ async function compressImageSource(
     if (!context) throw new Error('Could not create image compression canvas');
     context.imageSmoothingQuality = 'high';
     context.drawImage(bitmap, 0, 0, outputDimensions.width, outputDimensions.height);
+    hasTransparency = canvasHasTransparency(context, outputDimensions);
   } finally {
     bitmap.close();
   }
   onProgress?.(0.5);
 
-  for (const format of IMAGE_EXPORT_FORMATS) {
+  for (const format of hasTransparency ? TRANSPARENT_IMAGE_EXPORT_FORMATS : IMAGE_EXPORT_FORMATS) {
     throwIfAborted(signal);
     try {
       const blob = await canvas.convertToBlob({ type: format.type, quality: format.quality });

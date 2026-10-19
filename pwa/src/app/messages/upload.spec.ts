@@ -154,14 +154,18 @@ describe('Attachment upload tasks', () => {
         decode = vi.fn().mockResolvedValue(undefined);
       },
     );
-    createBitmap = vi.fn().mockResolvedValue({ width: 1920, height: 1440, close: vi.fn() });
+    createBitmap = vi.fn().mockResolvedValue({ width: 1866, height: 1400, close: vi.fn() });
     vi.stubGlobal('createImageBitmap', createBitmap);
     convertToBlob = vi.fn().mockImplementation(() => Promise.resolve(new Blob(['small'], { type: 'image/avif' })));
     vi.stubGlobal(
       'OffscreenCanvas',
       class {
         getContext() {
-          return { drawImage: vi.fn(), imageSmoothingQuality: 'low' };
+          return {
+            drawImage: vi.fn(),
+            getImageData: vi.fn().mockReturnValue({ data: new Uint8ClampedArray([0, 0, 0, 255]) }),
+            imageSmoothingQuality: 'low',
+          };
         }
         convertToBlob = convertToBlob;
       },
@@ -252,18 +256,18 @@ describe('Attachment upload tasks', () => {
         contentType: 'image/avif',
         size: 5,
         purpose: AttachmentUploadPurpose.media,
-        width: 1920,
-        height: 1440,
+        width: 1866,
+        height: 1400,
       });
       request.flush({ attachmentId: encodeId('100'), uploadHeaders: {}, uploadUrl: 'https://storage.invalid/upload' });
     });
     await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(1));
-    expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0.5, width: 1920, height: 1440 });
+    expect(task.state()).toEqual({ status: UploadStatus.Uploading, progress: 0.5, width: 1866, height: 1400 });
     FakeUpload.requests[0].progress(1, 2);
     expect(task.state().progress).toBe(0.75);
     FakeUpload.requests[0].finish();
     await expect(pending).resolves.toBe(encodeId('100'));
-    expect(task.state()).toMatchObject({ status: UploadStatus.Ready, width: 1920, height: 1440 });
+    expect(task.state()).toMatchObject({ status: UploadStatus.Ready, width: 1866, height: 1400 });
     expect(task.url).toBe('blob:mock-1');
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
   });
@@ -274,7 +278,7 @@ describe('Attachment upload tasks', () => {
     http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
     (await sign()).finish(403);
     await expect(pending).resolves.toBeUndefined();
-    expect(task.state()).toMatchObject({ status: UploadStatus.Failed, width: 1920, height: 1440 });
+    expect(task.state()).toMatchObject({ status: UploadStatus.Failed, width: 1866, height: 1400 });
     expect(task.state().id).toBeUndefined();
     const retry = task.retry();
     expect(task.state().progress).toBe(0.5);
