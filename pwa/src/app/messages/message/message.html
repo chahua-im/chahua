@@ -99,6 +99,7 @@
           <app-message-attachments
             [message]="message()"
             [overlayTime]="mediaOverlay()"
+            [outgoing]="own()"
             [delivery]="status()"
             [uploads]="uploads()"></app-message-attachments>
         </div>

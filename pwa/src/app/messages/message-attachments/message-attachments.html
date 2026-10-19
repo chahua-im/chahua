@@ -9,7 +9,7 @@
       <div
         class="media-frame"
         [class.sticker]="item.sticker"
-        [class.cover]="frame && item.knownSize && canCrop(item, frame)"
+        [class.cover]="!!frame"
         [class.fill]="fill()"
         [style.left.px]="frame?.x"
         [style.top.px]="frame?.y"

@@ -32,10 +32,11 @@ describe('MessageAttachments', () => {
     vi.stubGlobal(
       'ResizeObserver',
       class {
-        constructor(callback: (entries: { contentRect: { width: number } }[]) => void) {
-          resize = (width) => callback([{ contentRect: { width } }]);
+        constructor(private callback: (entries: { target: Element; contentRect: { width: number } }[]) => void) {}
+        observe(target: Element) {
+          if (!target.classList.contains('chat-row'))
+            resize = (width) => this.callback([{ target, contentRect: { width } }]);
         }
-        observe() {}
         disconnect = disconnect;
       },
     );
@@ -48,6 +49,25 @@ describe('MessageAttachments', () => {
     fixture.detectChanges();
     return fixture;
   }
+
+  it('recomputes album height on viewport resize without changing album width', async () => {
+    vi.stubGlobal('innerWidth', 360);
+    vi.stubGlobal('innerHeight', 640);
+    vi.stubGlobal('devicePixelRatio', 1);
+    const fixture = await render({
+      attachments: [image, { ...image, id: encodeId('9007199254741102'), url: '/second.jpg' }],
+    });
+    await fixture.whenStable();
+    const gallery: HTMLElement = fixture.nativeElement.querySelector('.attachments');
+    const width = gallery.style.width;
+    const height = parseFloat(gallery.style.height);
+    vi.stubGlobal('innerHeight', 960);
+    window.dispatchEvent(new Event('resize'));
+    await fixture.whenStable();
+    expect(parseFloat(gallery.style.height)).toBeGreaterThan(height);
+    expect(gallery.style.width).toBe(width);
+    fixture.destroy();
+  });
 
   it('reserves an album before loading, resizes it without replacing media, and releases observation', async () => {
     const fixture = await render({
@@ -87,6 +107,77 @@ describe('MessageAttachments', () => {
     expect(element.querySelector<HTMLElement>('.attachments')!.style.width).toBe('282px');
     fixture.destroy();
     expect(disconnect).toHaveBeenCalled();
+  });
+
+  it('sizes a three-screenshot host to the album and fills it without resize feedback', async () => {
+    const fixture = await render({
+      attachments: Array.from({ length: 3 }, (_, i) => ({
+        ...image,
+        id: encodeId(String(9200 + i)),
+        width: 1080,
+        height: 2400,
+      })),
+    });
+    fixture.componentRef.setInput('overlayTime', true);
+    await fixture.whenStable();
+    const element: HTMLElement = fixture.nativeElement;
+    const intrinsicWidth = parseFloat(element.style.width);
+    expect(intrinsicWidth).toBeGreaterThan(0);
+    expect(intrinsicWidth).toBeLessThan(420);
+    const gallery = element.querySelector<HTMLElement>('.attachments')!;
+    expect(parseFloat(gallery.style.width)).toBe(intrinsicWidth);
+    for (const width of [intrinsicWidth, intrinsicWidth, 240, 390, intrinsicWidth]) {
+      resize(width);
+      await fixture.whenStable();
+      expect(parseFloat(element.style.width)).toBe(intrinsicWidth);
+      expect(parseFloat(gallery.style.width)).toBe(width);
+      const frames = [...element.querySelectorAll<HTMLElement>('.media-frame')];
+      expect(Math.max(...frames.map((frame) => parseFloat(frame.style.left) + parseFloat(frame.style.width)))).toBe(
+        width,
+      );
+      expect(frames[2].querySelector('.media-time')).toBeTruthy();
+      expect(element.querySelectorAll('.media-time')).toHaveLength(1);
+    }
+  });
+
+  it('fills every screenshot preview in a six-image album and opens the original dimensions', async () => {
+    const attachments = Array.from({ length: 6 }, (_, i) => ({
+      ...image,
+      id: encodeId(String(9000 + i)),
+      url: `https://example.com/screenshot-${i}.jpg`,
+      width: 1080,
+      height: 2400,
+    }));
+    const fixture = await render({ attachments });
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelectorAll('.media-frame.cover')).toHaveLength(6);
+    const router = TestBed.inject(Router);
+    const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+    element.querySelectorAll<HTMLAnchorElement>('.media-frame a')[2].click();
+    await fixture.whenStable();
+    const state = navigate.mock.calls[0][1]!.state!;
+    expect(state['initial']).toBe(2);
+    expect(state['media']).toHaveLength(6);
+    expect(state['media'][2]).toMatchObject({ width: 1080, height: 2400, url: attachments[2].url });
+    navigate.mockRestore();
+  });
+
+  it('assigns the upstream rounding remainder to the outgoing edge', async () => {
+    const fixture = await render({
+      attachments: Array.from({ length: 6 }, (_, i) => ({
+        ...image,
+        id: encodeId(String(9100 + i)),
+        width: 1080,
+        height: 2400,
+      })),
+    });
+    const element: HTMLElement = fixture.nativeElement;
+    const frames = element.querySelectorAll<HTMLElement>('.media-frame');
+    const incomingWidths = [...frames].map((frame) => parseFloat(frame.style.width));
+    fixture.componentRef.setInput('outgoing', true);
+    await fixture.whenStable();
+    expect(parseFloat(frames[0].style.width)).toBeGreaterThan(incomingWidths[0]);
+    expect(parseFloat(frames[2].style.width)).toBeLessThan(incomingWidths[2]);
   });
 
   it('preserves the frame on image failure and offers the original file', async () => {
@@ -199,13 +290,13 @@ describe('MessageAttachments', () => {
     const before = [...element.querySelectorAll('.attachments, .media-frame')].map((node) =>
       node.getAttribute('style'),
     );
-    expect(element.querySelector('.media-frame.cover')).toBeNull();
+    expect(element.querySelectorAll('.media-frame.cover')).toHaveLength(2);
     uploads[0].state.set({ status: UploadStatus.Uploading, progress: 0.5, width: 800, height: 2000 });
     await fixture.whenStable();
     expect(
       [...element.querySelectorAll('.attachments, .media-frame')].map((node) => node.getAttribute('style')),
     ).toEqual(before);
-    expect(element.querySelector('.media-frame.cover')).toBeNull();
+    expect(element.querySelectorAll('.media-frame.cover')).toHaveLength(2);
   });
 
   it('plays video stickers silently in a loop and gives missing dimensions a stable square', async () => {

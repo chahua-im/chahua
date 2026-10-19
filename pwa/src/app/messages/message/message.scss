@@ -131,6 +131,11 @@
   display: flow-root;
 }
 
+// Album captions wrap to the media width; their text must not enlarge the photo group.
+.bubble:has(app-message-attachments.album) .message-body {
+  contain: inline-size;
+}
+
 .message-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

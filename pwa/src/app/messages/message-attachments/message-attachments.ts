@@ -14,7 +14,7 @@ import { UploadProgress } from '../upload-progress/upload-progress';
 import { type VoiceDock } from '../voice-player/voice-playback';
 import { VoicePlayer } from '../voice-player/voice-player';
 
-import { albumLayout, canCrop } from './album-layout';
+import { albumLayout } from './album-layout';
 import { attachmentKind, MediaKind } from './media-kind';
 
 type Attachment = MessageResponse['attachments'][number];
@@ -38,7 +38,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
     '[class.album]': 'album()',
     '[class.visual]': 'visual()',
     '[class.fill]': 'fill()',
-    '[style.width.px]': 'fillWidth()',
+    '[style.width.px]': 'album() ? layout().intrinsicWidth : fillWidth()',
   },
 })
 export class MessageAttachments {
@@ -56,6 +56,7 @@ export class MessageAttachments {
   }
   readonly message = input.required<MessageAttachmentSource>();
   readonly overlayTime = input(false);
+  readonly outgoing = input(false);
   readonly delivery = input<MessageDelivery>();
   readonly uploads = input<readonly AttachmentUpload[]>([]);
   /** Confirmed messages hand their identity to the voice player so the docked bar can label and locate them. */
@@ -64,7 +65,6 @@ export class MessageAttachments {
     return id ? { messageId: id, chatId, label: sender.name ?? String(sender.uid), createdAt } : undefined;
   });
   protected readonly MediaKind = MediaKind;
-  protected readonly canCrop = canCrop;
   protected readonly items = computed(() => {
     const message = this.message();
     const sticker = message.messageType === MessageType.sticker ? message.sticker : undefined;
@@ -119,7 +119,22 @@ export class MessageAttachments {
    *  and the absolutely-positioned media contributes zero, collapsing media-only bubbles. */
   protected readonly fillWidth = computed(() => (this.fill() ? this.items()[0].displayWidth : null));
   protected readonly visibleItems = computed(() => (this.album() ? this.items().slice(0, 9) : this.items()));
-  private readonly albumWidth = signal(420);
+  private readonly viewport = signal(
+    {
+      parentWidth: window.innerWidth,
+      displayHeight: window.innerHeight,
+      displayWidth: window.innerWidth,
+      scale: window.devicePixelRatio,
+    },
+    {
+      equal: (a, b) =>
+        a.parentWidth === b.parentWidth &&
+        a.displayHeight === b.displayHeight &&
+        a.displayWidth === b.displayWidth &&
+        a.scale === b.scale,
+    },
+  );
+  private readonly albumWidth = signal<number | undefined>(undefined);
   private readonly albumSizes = linkedSignal({
     source: this.items,
     computation: (items, previous): { width: number; height: number }[] =>
@@ -131,22 +146,50 @@ export class MessageAttachments {
           : { width: item.width, height: item.height };
       }),
   });
-  protected readonly layout = computed(() =>
-    albumLayout(this.albumSizes().slice(0, 9), this.albumWidth(), window.devicePixelRatio),
-  );
+  protected readonly layout = computed(() => {
+    const viewport = this.viewport();
+    return albumLayout(
+      this.albumSizes().slice(0, 9),
+      this.albumWidth(),
+      viewport.scale,
+      {
+        displayMin: Math.min(viewport.displayWidth, viewport.displayHeight) * viewport.scale,
+        density: viewport.scale,
+        outgoing: this.outgoing(),
+        needShare: false,
+      },
+      viewport,
+    );
+  });
 
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     afterRenderEffect((onCleanup) => {
       if (!this.album()) return;
+      const parent = host.closest('.chat-row');
+      const updateViewport = () =>
+        this.viewport.set({
+          parentWidth: parent?.getBoundingClientRect().width || window.innerWidth,
+          displayHeight: window.innerHeight,
+          displayWidth: window.innerWidth,
+          scale: window.devicePixelRatio,
+        });
+      updateViewport();
       const width = host.getBoundingClientRect().width;
       if (width) this.albumWidth.set(width);
-      const observer = new ResizeObserver(([entry]) => {
+      const observer = new ResizeObserver((entries) => {
+        updateViewport();
+        const entry = entries.find((entry) => entry.target === host);
         // Ionic also caches hidden pages whose measured width is zero.
-        if (entry.contentRect.width) this.albumWidth.set(entry.contentRect.width);
+        if (entry?.contentRect.width) this.albumWidth.set(entry.contentRect.width);
       });
       observer.observe(host);
-      onCleanup(() => observer.disconnect());
+      if (parent) observer.observe(parent);
+      window.addEventListener('resize', updateViewport);
+      onCleanup(() => {
+        observer.disconnect();
+        window.removeEventListener('resize', updateViewport);
+      });
     });
   }
 
