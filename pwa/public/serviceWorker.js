@@ -74,8 +74,11 @@
       console.error('Unable to update notification badge', error);
     }
   };
+  // Directed mentions/replies are also normal messages; they must be shown,
+  // otherwise the server-composed mention/reply body would be dropped.
+  const notifiable = new Set(['newMessage', 'mention', 'reply']);
   const receive = async (payload, suppress = false) => {
-    if (account === null || payload.type !== 'newMessage' || typeof payload.title !== 'string') return;
+    if (account === null || !notifiable.has(payload.type) || typeof payload.title !== 'string') return;
     const { chatId, messageId, threadRootId } = payload.data;
     const seen = validId(messageId) && (await query('seen', 'readonly', (store) => store.get(key(messageId))));
     const read = await query('reads', 'readonly', (store) => store.get(key(scopeKey(payload.data))));

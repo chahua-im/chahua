@@ -257,7 +257,7 @@
       <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextReaction()">
         <ion-icon class="action-icon" [icon]="reactionIcon"></ion-icon>
       </ion-fab-button>
-      <ion-badge>{{ reactionRemaining() }}</ion-badge>
+      <ion-badge>{{ reactionRemaining() >= 1000 ? '999+' : reactionRemaining() }}</ion-badge>
     </ion-fab>
     <ion-fab
       class="history-navigation mention-navigation"
@@ -269,7 +269,7 @@
       <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextMention()">
         <ion-icon class="action-icon" [icon]="mentionIcon"></ion-icon>
       </ion-fab-button>
-      <ion-badge>{{ mentionRemaining() }}</ion-badge>
+      <ion-badge>{{ mentionRemaining() >= 1000 ? '999+' : mentionRemaining() }}</ion-badge>
     </ion-fab>
   }
 </ion-content>
