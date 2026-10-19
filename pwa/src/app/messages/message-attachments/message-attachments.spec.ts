@@ -318,7 +318,7 @@ describe('MessageAttachments', () => {
     });
     const element: HTMLElement = fixture.nativeElement;
     const frame = element.querySelector<HTMLElement>('.sticker')!;
-    expect(frame.style.width).toBe('200px');
+    expect(frame.style.width).toBe('160px');
     expect(frame.style.aspectRatio).toBe('240 / 240');
     const video = element.querySelector('video')!;
     expect(video.controls).toBe(false);

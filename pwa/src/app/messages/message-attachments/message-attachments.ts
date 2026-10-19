@@ -86,7 +86,7 @@ export class MessageAttachments {
       // Older animated stickers and uploads can lack dimensions. Keep their fallback frame after loading.
       const knownSize = width != null && height != null && width > 0 && height > 0;
       const dimensions = knownSize ? { width, height } : { width: 240, height: 240 };
-      const limit = sticker ? 200 : 420;
+      const limit = sticker ? 160 : 420;
       return {
         ...attachment,
         kind: attachmentKind(message.messageType, attachment.kind),
