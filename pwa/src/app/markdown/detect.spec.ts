@@ -13,7 +13,7 @@ describe('messageHasMarkdown', () => {
 
   it('detects inline emphasis, code, spoilers and strikethrough', () => {
     expect(messageHasMarkdown('**bold** text')).toBe(true);
-    expect(messageHasMarkdown('*italic*')).toBe(true);
+    expect(messageHasMarkdown('__italic__')).toBe(true);
     expect(messageHasMarkdown('a ~~strike~~ b')).toBe(true);
     expect(messageHasMarkdown('a __italic__ b')).toBe(true);
     expect(messageHasMarkdown('a ||spoiler|| b')).toBe(true);
@@ -34,6 +34,9 @@ describe('messageHasMarkdown', () => {
 
   it('keeps removed syntax literal (single underscore, headings, hr, image)', () => {
     expect(messageHasMarkdown('_underscore em_')).toBe(false);
+    expect(messageHasMarkdown('*italic*')).toBe(false);
+    expect(messageHasMarkdown('***bold italic***')).toBe(false);
+    expect(messageHasMarkdown('~~~\ncode\n~~~')).toBe(false);
     expect(messageHasMarkdown('# heading')).toBe(false);
     expect(messageHasMarkdown('---')).toBe(false);
     // A relative target avoids linkify, so the image macro stays pure text.

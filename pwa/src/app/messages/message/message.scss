@@ -276,6 +276,9 @@
 
 .sent {
   --message-link-color: var(--ion-color-primary-contrast);
+  --message-mention-color: var(--ion-color-primary-contrast);
+  --message-mention-background: rgba(var(--ion-color-primary-contrast-rgb), 0.18);
+  --message-mention-self-background: rgba(var(--ion-color-primary-contrast-rgb), 0.28);
   grid-template-columns: auto fit-content(var(--bubble-max-width)) 44px;
   justify-content: end;
 

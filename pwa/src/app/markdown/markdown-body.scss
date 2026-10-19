@@ -1,3 +1,5 @@
+@use './mention';
+
 :host {
   display: inline;
   white-space: pre-wrap;
@@ -82,28 +84,6 @@ pre {
     padding: 0;
     background: none;
   }
-}
-
-.mention {
-  font: inherit;
-  font-weight: 600;
-  border: 0;
-  border-radius: 4px;
-  padding: 1px 4px;
-  margin: 0;
-  vertical-align: baseline;
-  white-space: inherit;
-  overflow-wrap: anywhere;
-  color: var(--message-link-color, var(--ion-color-primary));
-  background: color-mix(in srgb, currentColor 10%, transparent);
-
-  &.mention-self {
-    background: color-mix(in srgb, currentColor 20%, transparent);
-  }
-}
-
-button.mention {
-  cursor: pointer;
 }
 
 .spoiler {

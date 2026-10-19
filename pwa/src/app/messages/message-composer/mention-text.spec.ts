@@ -140,3 +140,39 @@ describe('wireText code regions', () => {
     expect(wireText({ text: 'plain text', mentions: [] })).toBe('plain text');
   });
 });
+
+describe('same-name mention relocation', () => {
+  it.each([
+    ['**@小明 @小明**', '**@[uid:7] @[uid:8]**'],
+    ['__@小明 @小明__', '__@[uid:7] @[uid:8]__'],
+    ['**@小明**\n\n**@小明**', '**@[uid:7]**\n\n**@[uid:8]**'],
+  ])('keeps each identity in order after editing to %s', (next, expected) => {
+    const wire = next.includes('\n') ? '@[uid:7]\n\n@[uid:8]' : '@[uid:7] @[uid:8]';
+    const previous = displayText(
+      wire,
+      new Map([
+        [7, '小明'],
+        [8, '小明'],
+      ]),
+    );
+    expect(wireText(editText(previous, next))).toBe(expected);
+  });
+
+  it('never assigns two removed mentions to one remaining occurrence', () => {
+    const previous = displayText(
+      '@[uid:7] @[uid:8]',
+      new Map([
+        [7, '小明'],
+        [8, '小明'],
+      ]),
+    );
+    const next = editText(previous, '**@小明**');
+    expect(next.mentions).toHaveLength(1);
+    expect(wireText(next)).toBe('**@[uid:7]**');
+  });
+
+  it('keeps repeated mentions of the same user at distinct positions', () => {
+    const previous = displayText('@[uid:7] @[uid:7]', new Map([[7, '小明']]));
+    expect(wireText(editText(previous, '**@小明 @小明**'))).toBe('**@[uid:7] @[uid:7]**');
+  });
+});

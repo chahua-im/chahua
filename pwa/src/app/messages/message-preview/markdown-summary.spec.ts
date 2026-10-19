@@ -17,7 +17,7 @@ describe('MarkdownSummary', () => {
   }
 
   it('renders inline Markdown (bold/italic/strikethrough/code) without raw syntax', () => {
-    const element = render('**粗**、*斜*、~~删~~、`code`');
+    const element = render('**粗**、__斜__、~~删~~、`code`');
 
     expect(element.querySelector('strong')?.textContent).toBe('粗');
     expect(element.querySelector('em')?.textContent).toBe('斜');
@@ -43,11 +43,12 @@ describe('MarkdownSummary', () => {
     expect(element.textContent).toContain('2. 乙');
   });
 
-  it('renders autolinks and markdown links as inline anchors', () => {
+  it('renders link labels without interactive anchors', () => {
     const element = render('去 [链接](https://example.com) 看 https://auto.example/a');
 
     const anchors = Array.from(element.querySelectorAll('a'));
-    expect(anchors.map((a) => a.getAttribute('href'))).toEqual(['https://example.com', 'https://auto.example/a']);
+    expect(anchors).toEqual([]);
+    expect(element.textContent).toBe('去 链接 看 https://auto.example/a');
     expect(element.textContent).not.toContain('[链接]');
   });
 
@@ -66,7 +67,7 @@ describe('MarkdownSummary', () => {
     expect(element.querySelector('code')?.textContent).toBe('@[uid:2]');
   });
 
-  it.each(['`hello\n@[uid:2]`', '> ```\n> @[uid:2]\n> ```', '- ~~~\n  @[uid:2]\n  ~~~', '```\n```oops\n@[uid:2]\n```'])(
+  it.each(['`hello\n@[uid:2]`', '> ```\n> @[uid:2]\n> ```', '- ```\n  @[uid:2]\n  ```', '```\n```oops\n@[uid:2]\n```'])(
     'preserves code mentions in previews: %s',
     (source) => {
       const element = render(source + '\n\n@[uid:2]', [{ uid: 2, username: '小花', gender: 0 }]);
@@ -116,6 +117,44 @@ describe('MarkdownSummary', () => {
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
     }
+  });
+
+  it.each(['a||', '__小花__', '**名字**', '`name`', '[name](https://example.com)'])(
+    'keeps mention name %s literal inside the spoiler',
+    (username) => {
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+      vi.stubGlobal(
+        'IntersectionObserver',
+        class {
+          observe() {}
+          disconnect() {}
+        },
+      );
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe() {}
+          disconnect() {}
+        },
+      );
+      try {
+        const element = render('||@[uid:2] secret|| after', [{ uid: 2, username, gender: 0 }]);
+        expect(element.querySelectorAll('.spoiler')).toHaveLength(1);
+        expect(element.querySelector('.spoiler-content')?.textContent).toBe('@' + username + ' secret');
+        expect(element.textContent).toBe('@' + username + ' secret after');
+        expect(element.querySelector('.spoiler-content')?.querySelector('em, strong, code, a')).toBeNull();
+      } finally {
+        fixture.destroy();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('does not interpret Markdown syntax introduced by names in a plain summary', () => {
+    const element = render('call @[uid:2]', [{ uid: 2, username: '__名字__', gender: 0 }]);
+    expect(element.textContent).toBe('call @__名字__');
+    expect(element.querySelector('em')).toBeNull();
   });
 
   it('renders nothing for an empty string', () => {

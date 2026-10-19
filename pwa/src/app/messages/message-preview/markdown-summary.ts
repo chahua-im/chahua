@@ -1,26 +1,11 @@
 import { Component, computed, input } from '@angular/core';
 import type { MentionInfo } from '../../../generated/models';
-import { findCodeRegions } from '../../markdown/code-regions';
+import { extractMentionWidgets } from '../../markdown/mentions';
 import { MarkdownBody } from '../../markdown/markdown-body';
 import { messageHasMarkdown } from '../../markdown/detect';
 import { renderMarkdownPreview } from '../../markdown/preview';
 import type { MarkdownNode } from '../../markdown/nodes';
 import { MessageText } from '../message-text/message-text';
-
-/** Replaces mention macros outside code regions with their display names. */
-export function resolveMentionNames(text: string, mentions: readonly MentionInfo[]): string {
-  const names = new Map(mentions.map((m) => [m.uid, m.username]));
-  const regions = findCodeRegions(text);
-  let result = '';
-  let cursor = 0;
-  for (const match of text.matchAll(/@\[uid:(\d+)\]/g)) {
-    if (regions.some((region) => match.index! >= region.start && match.index! < region.end)) continue;
-    const uid = Number(match[1]);
-    result += text.slice(cursor, match.index) + '@' + (names.get(uid) || 'User ' + uid);
-    cursor = match.index! + match[0].length;
-  }
-  return result + text.slice(cursor);
-}
 
 /**
  * Single-line summary for chat-list / thread / reply / pin previews. Markdown
@@ -44,8 +29,16 @@ export class MarkdownSummary {
   readonly mentions = input<readonly MentionInfo[]>([]);
 
   protected readonly nodes = computed<MarkdownNode[] | undefined>(() => {
-    const text = resolveMentionNames(this.text(), this.mentions());
-    if (!messageHasMarkdown(text)) return undefined;
-    return renderMarkdownPreview(text);
+    const { body, widgets } = extractMentionWidgets(this.text());
+    if (!messageHasMarkdown(body)) return undefined;
+    const names = new Map(this.mentions().map((mention) => [mention.uid, mention.username]));
+    return renderMarkdownPreview(body, {
+      onPlaceholder: (index) => {
+        const widget = widgets[index];
+        if (!widget) return undefined;
+        return { type: 'text', text: '@' + (names.get(widget.uid) || 'User ' + widget.uid) };
+      },
+      renderLink: (_href, label) => ({ type: 'element', tag: 'span', children: label }),
+    });
   });
 }

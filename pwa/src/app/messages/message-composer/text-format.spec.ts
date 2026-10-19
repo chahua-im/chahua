@@ -1,135 +1,88 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyLink,
-  normalizeLinkHref,
-  shortcutFormatKind,
-  wrapBlockFormat,
-  wrapInlineFormat,
-  type TextFormatKind,
-} from './text-format';
+import { displayText, wireText } from './mention-text';
+import { markdownEngine } from '../../markdown/engine';
+import { shortcutFormatKind, wrapInlineFormat, type InlineFormatKind } from './text-format';
 
-describe('wrapInlineFormat', () => {
-  const KINDS: Array<{ kind: TextFormatKind; open: string; close: string }> = [
-    { kind: 'bold', open: '**', close: '**' },
-    { kind: 'italic', open: '*', close: '*' },
-    { kind: 'strike', open: '~~', close: '~~' },
-  ];
+const formats: { kind: InlineFormatKind; marker: string; tag: string }[] = [
+  { kind: 'bold', marker: '**', tag: 'strong' },
+  { kind: 'italic', marker: '__', tag: 'em' },
+];
 
-  it.each(KINDS.map(({ kind, open, close }) => [kind, open, close]))(
-    'wraps %s selection and places the cursor after the closing marker',
-    (kind, open, close) => {
-      const result = wrapInlineFormat('say hello there', { start: 4, end: 9 }, kind as never);
-
-      expect(result).not.toBeNull();
-      expect(result!.text).toBe(`say ${open}hello${close} there`);
-      const inserted = `${open}hello${close}`;
-      expect(result!.selectionStart).toBe(4 + inserted.length);
-      expect(result!.selectionEnd).toBe(4 + inserted.length);
-    },
-  );
-
-  it('returns null for a collapsed selection (no stray markers)', () => {
-    expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'bold')).toBeNull();
-    expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'italic')).toBeNull();
-    expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'strike')).toBeNull();
-    expect(wrapInlineFormat('nothing selected', { start: 3, end: 3 }, 'strike')).toBeNull();
+describe('formatting shortcuts', () => {
+  it.each(formats)('formats a selected word as $kind and restores the cursor', ({ kind, marker, tag }) => {
+    const result = wrapInlineFormat('say hello there', { start: 4, end: 9 }, kind)!;
+    expect(result.text).toBe(`say ${marker}hello${marker} there`);
+    expect(result.selectionStart).toBe(13);
+    expect(result.selectionEnd).toBe(13);
+    expect(markdownEngine.render(result.text)).toContain(`<${tag}>hello</${tag}>`);
   });
 
-  it('clamps out-of-range selections to the text bounds', () => {
-    const result = wrapInlineFormat('abc', { start: -5, end: 99 }, 'bold');
-    expect(result!.text).toBe('**abc**');
+  it.each(formats)('keeps edge whitespace outside $kind markers', ({ kind, marker, tag }) => {
+    const text = '  hello \t';
+    const result = wrapInlineFormat(text, { start: 0, end: text.length }, kind)!;
+    expect(result.text).toBe(`  ${marker}hello${marker} \t`);
+    expect(markdownEngine.render(result.text)).toContain(`<${tag}>hello</${tag}>`);
   });
 
-  it('keeps surrounding text intact when wrapping at the edges', () => {
-    const whole = wrapInlineFormat('abc', { start: 0, end: 3 }, 'italic');
-    expect(whole!.text).toBe('*abc*');
-    const prefix = wrapInlineFormat('abc', { start: 0, end: 1 }, 'bold');
-    expect(prefix!.text).toBe('**a**bc');
-  });
-});
-
-describe('wrapBlockFormat', () => {
-  it('wraps a selection in fenced code markers', () => {
-    const result = wrapBlockFormat('a\nconst x = 1;\nb', { start: 2, end: 14 }, 'code');
-    expect(result!.text).toBe('a\n```\nconst x = 1;\n```\nb');
-    expect(result!.selectionStart).toBe(result!.selectionEnd);
+  it.each(formats)('formats separate paragraphs as $kind without consuming blank lines', ({ kind, marker, tag }) => {
+    const text = ' first\ncontinued \n \t\n\n second \n\n third ';
+    const result = wrapInlineFormat(text, { start: 0, end: text.length }, kind)!;
+    expect(result.text).toBe(
+      ` ${marker}first\ncontinued${marker} \n \t\n\n ${marker}second${marker} \n\n ${marker}third${marker} `,
+    );
+    const html = markdownEngine.render(result.text);
+    expect(html).toContain(`<${tag}>first<br>\ncontinued</${tag}>`);
+    expect(html).toContain(`<${tag}>second</${tag}>`);
+    expect(html).toContain(`<${tag}>third</${tag}>`);
+    expect(html).not.toContain(marker);
   });
 
-  it('prefixes every selected line for a quote', () => {
-    const result = wrapBlockFormat('first\nsecond', { start: 0, end: 12 }, 'quote');
-    expect(result!.text).toBe('> first\n> second');
+  it('maps mentions exactly across multiple formatted paragraphs and leaves plain names alone', () => {
+    const value = displayText(
+      'before @[uid:7]\n\n@小明 @[uid:8] after',
+      new Map([
+        [7, '小明'],
+        [8, '小明'],
+      ]),
+    );
+    const result = wrapInlineFormat(value.text, { start: 7, end: value.text.length - 6 }, 'italic', value.mentions)!;
+    expect(wireText(result)).toBe('before __@[uid:7]__\n\n__@小明 @[uid:8]__ after');
   });
 
-  it('collapsed selection returns null (no stray prefixes)', () => {
-    expect(wrapBlockFormat('abc', { start: 1, end: 1 }, 'code')).toBeNull();
-    expect(wrapBlockFormat('abc', { start: 1, end: 1 }, 'quote')).toBeNull();
-  });
-});
-
-describe('applyLink', () => {
-  it('turns a selection into a Markdown link', () => {
-    // "docs" spans indexes 9..13 in "open the docs page now".
-    const result = applyLink('open the docs page now', { start: 9, end: 13 }, 'example.com');
-
-    expect(result.text).toBe('open the [docs](https://example.com) page now');
-    // Cursor collapses after the closing parenthesis.
-    expect(result.selectionStart).toBe(9 + '[docs](https://example.com)'.length);
-    expect(result.selectionEnd).toBe(result.selectionStart);
+  it('drops mention identity only when a marker is inserted inside its name', () => {
+    const value = displayText(
+      '@[uid:7] and @[uid:8]',
+      new Map([
+        [7, 'Alice'],
+        [8, 'Bob'],
+      ]),
+    );
+    const result = wrapInlineFormat(value.text, { start: 2, end: 4 }, 'bold', value.mentions)!;
+    expect(wireText(result)).toBe('@A**li**ce and @[uid:8]');
   });
 
-  it('inserts the text placeholder and selects it when there is no selection', () => {
-    const result = applyLink('hello ', { start: 6, end: 6 }, 'https://example.com');
-
-    expect(result.text).toBe('hello [text](https://example.com)');
-    expect(result.selectionStart).toBe(7); // inside the `[text]` label
-    expect(result.selectionEnd).toBe(11);
-    expect(result.text.slice(result.selectionStart, result.selectionEnd)).toBe('text');
+  it('preserves CRLF paragraph separators', () => {
+    const text = 'a\r\n\r\nb';
+    expect(wrapInlineFormat(text, { start: 0, end: text.length }, 'bold')!.text).toBe('**a**\r\n\r\n**b**');
   });
 
-  it('preserves explicit http(s) URLs', () => {
-    const result = applyLink('x', { start: 0, end: 1 }, 'HTTP://Example.COM/path?q=1');
-    expect(result.text).toBe('[x](HTTP://Example.COM/path?q=1)');
+  it.each(formats)('does not inject $kind markers into empty or whitespace-only selections', ({ kind }) => {
+    expect(wrapInlineFormat('abc', { start: 1, end: 1 }, kind)).toBeNull();
+    const text = ' \t\n\n ';
+    expect(wrapInlineFormat(text, { start: 0, end: text.length }, kind)!.text).toBe(text);
   });
 
-  it('normalises an empty raw URL to https://', () => {
-    const result = applyLink('x', { start: 0, end: 1 }, '   ');
-    expect(result.text).toBe('[x](https://)');
-  });
-});
-
-describe('normalizeLinkHref', () => {
-  it('prefixes scheme-less input with https://', () => {
-    expect(normalizeLinkHref('example.com/path')).toBe('https://example.com/path');
-    expect(normalizeLinkHref('  example.com  ')).toBe('https://example.com');
+  it('keeps text outside a selection intact', () => {
+    expect(wrapInlineFormat('before first\n\nsecond after', { start: 7, end: 20 }, 'italic')!.text).toBe(
+      'before __first__\n\n__second__ after',
+    );
   });
 
-  it('keeps http/https schemes untouched', () => {
-    expect(normalizeLinkHref('https://example.com')).toBe('https://example.com');
-    expect(normalizeLinkHref('http://example.com')).toBe('http://example.com');
+  it.each(['b', 'B', 'i', 'I'])('recognizes %s', (key) => {
+    expect(shortcutFormatKind({ key })).toBe(key.toLowerCase() === 'b' ? 'bold' : 'italic');
   });
 
-  it('never returns an executable scheme', () => {
-    expect(normalizeLinkHref('javascript:alert(1)')).toBe('https://alert(1)');
-    expect(normalizeLinkHref('vbscript:msgbox(1)')).toBe('https://msgbox(1)');
-    expect(normalizeLinkHref('data:text/html,x')).toBe('https://text/html,x');
-  });
-});
-
-describe('shortcutFormatKind', () => {
-  it('maps Ctrl/Cmd + B / I / D / Q to the matching format', () => {
-    expect(shortcutFormatKind({ key: 'b' })).toBe('bold');
-    expect(shortcutFormatKind({ key: 'B' })).toBe('bold');
-    expect(shortcutFormatKind({ key: 'i' })).toBe('italic');
-    expect(shortcutFormatKind({ key: 'I' })).toBe('italic');
-    expect(shortcutFormatKind({ key: 'd' })).toBe('strike');
-    expect(shortcutFormatKind({ key: 'D' })).toBe('strike');
-
-    expect(shortcutFormatKind({ key: 'q' })).toBe('quote');
-    expect(shortcutFormatKind({ key: 'Q' })).toBe('quote');
-  });
-
-  it('returns null for unrelated keys', () => {
-    expect(shortcutFormatKind({ key: 'x' })).toBeNull();
-    expect(shortcutFormatKind({ key: 'Enter' })).toBeNull();
+  it.each(['d', 'D', 'q', 'Q', 'k', 'Enter'])('does not intercept %s', (key) => {
+    expect(shortcutFormatKind({ key })).toBeNull();
   });
 });

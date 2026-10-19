@@ -48,8 +48,7 @@ import { UploadProgress } from '../upload-progress/upload-progress';
 import { VoicePlayer } from '../voice-player/voice-player';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { displayText, editText, wireText } from './mention-text';
-import { applyLink, shortcutFormatKind, wrapBlockFormat, wrapInlineFormat, type TextFormatKind } from './text-format';
-import { FormatToolbar, type FormatToolbarAnchor } from './format-toolbar';
+import { shortcutFormatKind, wrapInlineFormat, type InlineFormatKind } from './text-format';
 import { findCodeRegions } from '../../markdown/code-regions';
 export interface Composition {
   messageType: MessageType;
@@ -82,7 +81,6 @@ enum Panel {
     IonLabel,
     StickerPicker,
     VoiceRecorder,
-    FormatToolbar,
   ],
   host: {
     '(document:click)': 'outside($event)',
@@ -141,14 +139,6 @@ export class MessageComposer {
     this.selectedUploads().some((u) => u.state().status === UploadStatus.Failed),
   );
   protected readonly suggestions = signal<MemberResponse[]>([]);
-  protected readonly focused = signal(false);
-  protected readonly hasSelection = signal(false);
-  protected readonly isComposing = signal(false);
-  protected readonly linkMode = signal(false);
-  protected readonly toolbarAnchor = signal<FormatToolbarAnchor | undefined>(undefined, {
-    // Re-measuring yields a fresh object; keep bindings stable when the point is unchanged.
-    equal: (a, b) => a?.top === b?.top && a?.left === b?.left,
-  });
   protected readonly selectedSuggestion = linkedSignal(() => {
     this.suggestions();
     return 0;
@@ -205,76 +195,25 @@ export class MessageComposer {
       });
     });
     this.destroy.onDestroy(() => this.reset());
-    effect(() => {
-      const textarea = this.textarea();
-      if (!textarea || this.nativeInput) return;
-      void textarea.getInputElement().then((input) => {
-        this.nativeInput = input;
-        for (const type of ['select', 'keyup', 'mouseup'] as const) input.addEventListener(type, this.measureSelection);
-        input.addEventListener('focus', this.measureSelection);
-        input.addEventListener('compositionstart', () => this.isComposing.set(true));
-        input.addEventListener('compositionend', () => {
-          this.isComposing.set(false);
-          this.measureSelection();
-        });
-      });
-    });
   }
 
-  private nativeInput?: HTMLTextAreaElement;
-
-  private readonly measureSelection = () => {
-    const input = this.nativeInput;
+  private async applyFormat(kind: InlineFormatKind) {
+    const input = await this.textarea()?.getInputElement();
     if (!input) return;
-    this.hasSelection.set((input.selectionEnd ?? 0) > (input.selectionStart ?? 0));
-    const rect = input.getBoundingClientRect();
-    console.log(
-      'MEASURE',
-      JSON.stringify({
-        sel: (input.selectionEnd ?? 0) > (input.selectionStart ?? 0),
-        top: rect.top - 8,
-        left: rect.left + rect.width / 2,
-      }),
+    const display = this.display();
+    const result = wrapInlineFormat(
+      display.text,
+      {
+        start: input.selectionStart,
+        end: input.selectionEnd,
+      },
+      kind,
+      display.mentions,
     );
-    this.toolbarAnchor.set({ top: rect.top - 8, left: rect.left + rect.width / 2 });
-  };
-
-  protected readonly toolbarVisible = computed(() => {
-    if (this.suggestions().length) return false;
-    if (this.linkMode()) return true;
-    return this.focused() && this.hasSelection() && !this.isComposing();
-  });
-
-  protected readonly toolbar = computed(() => (this.toolbarVisible() ? this.toolbarAnchor() : undefined));
-
-  protected focusChanged(focused: boolean) {
-    this.focused.set(focused);
-    if (focused) {
-      this.panel.set(Panel.None);
-      this.measureSelection();
-    }
-  }
-
-  /** Wraps the current textarea selection in Markdown syntax and restores the selection. */
-  protected async applyFormat(kind: TextFormatKind, url?: string) {
-    const input = this.nativeInput;
-    if (!input) return;
-    const selection = { start: input.selectionStart ?? 0, end: input.selectionEnd ?? 0 };
-    const result =
-      kind === 'link'
-        ? url
-          ? applyLink(this.display().text, selection, url)
-          : null
-        : kind === 'code' || kind === 'quote'
-          ? wrapBlockFormat(this.display().text, selection, kind)
-          : wrapInlineFormat(this.display().text, selection, kind);
     if (!result) return;
-    if (kind === 'link') this.linkMode.set(false);
-    this.text.set(wireText(editText(this.display(), result.text)));
+    this.text.set(wireText(result));
     window.setTimeout(() => {
       input.setSelectionRange(result.selectionStart, result.selectionEnd);
-      input.focus();
-      this.measureSelection();
     }, 0);
   }
   setFocus() {
@@ -298,11 +237,6 @@ export class MessageComposer {
     this.suggestions.set([]);
     this.tooMany.set(false);
     this.unsupported.set(false);
-    this.focused.set(false);
-    this.hasSelection.set(false);
-    this.isComposing.set(false);
-    this.linkMode.set(false);
-    this.toolbarAnchor.set(undefined);
   }
   protected files(event: Event, purpose: AttachmentUploadPurpose) {
     const input = event.target as HTMLInputElement;

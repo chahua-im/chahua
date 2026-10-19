@@ -1,36 +1,20 @@
 import type { MarkdownIt, StateBlock, StateInline } from 'markdown-it';
 
-/**
- * Custom inline rules for chahua's Markdown subset. markdown-it's default
- * emphasis treats both `*` and `_` as markers; chahua keeps `*` / `**` for
- * emphasis only and repurposes `__…__` as italic (`<em>`, Telegram-style),
- * leaving single `_` literal. `~~strike~~` keeps markdown-it stock rule.
- *
- * `emphasis` is re-registered with a `*`-only clone of markdown-it's own
- * machinery; `underscoreItalic` and `spoiler` are new rules modelled on its
- * strikethrough.
- */
+/** Chat subset: exact double stars for bold, double underscores for italic. */
+const STAR = 0x2a;
+const UNDERLINE = 0x5f;
+const PIPE = 0x7c;
 
-const STAR = 0x2a; // *
-const UNDERLINE = 0x5f; // _
-const PIPE = 0x7c; // |
-
-/* ---------------------------------------------------------------------------
- * `*` / `**` emphasis — clone of markdown-it's rules_inline/emphasis.ts,
- * restricted to the `*` marker.
- * ------------------------------------------------------------------------- */
-
-function starEmphasisTokenize(state: StateInline, silent: boolean): boolean {
-  if (silent) return false;
-  const marker = state.src.charCodeAt(state.pos);
-  if (marker !== STAR) return false;
+function strongTokenize(state: StateInline, silent: boolean): boolean {
+  if (silent || state.src.charCodeAt(state.pos) !== STAR) return false;
   const scanned = state.scanDelims(state.pos, true);
-  for (let i = 0; i < scanned.length; i++) {
-    const token = state.push('text', '', 0);
-    token.content = String.fromCharCode(marker);
+  const token = state.push('text', '', 0);
+  token.content = '*'.repeat(scanned.length);
+  // Consume other runs intact so neither single nor triple stars become emphasis.
+  if (scanned.length === 2) {
     state.delimiters.push({
-      marker,
-      length: scanned.length,
+      marker: STAR,
+      length: 0,
       token: state.tokens.length - 1,
       end: -1,
       open: scanned.can_open,
@@ -41,56 +25,33 @@ function starEmphasisTokenize(state: StateInline, silent: boolean): boolean {
   return true;
 }
 
-function starEmphasisPostProcess(state: StateInline, delimiters: StateInline['delimiters']): void {
-  const max = delimiters.length;
-  for (let i = max - 1; i >= 0; i--) {
-    const startDelim = delimiters[i];
-    if (startDelim.marker !== STAR) continue;
-    if (startDelim.end === -1) continue;
-    const endDelim = delimiters[startDelim.end];
-    const isStrong =
-      i > 0 &&
-      delimiters[i - 1].end === startDelim.end + 1 &&
-      delimiters[i - 1].marker === startDelim.marker &&
-      delimiters[i - 1].token === startDelim.token - 1 &&
-      delimiters[startDelim.end + 1].token === endDelim.token + 1;
-    const ch = String.fromCharCode(startDelim.marker);
-    const tokenOpen = state.tokens[startDelim.token];
-    tokenOpen.type = isStrong ? 'strong_open' : 'em_open';
-    tokenOpen.tag = isStrong ? 'strong' : 'em';
-    tokenOpen.nesting = 1;
-    tokenOpen.markup = isStrong ? ch + ch : ch;
-    tokenOpen.content = '';
-    const tokenClose = state.tokens[endDelim.token];
-    tokenClose.type = isStrong ? 'strong_close' : 'em_close';
-    tokenClose.tag = isStrong ? 'strong' : 'em';
-    tokenClose.nesting = -1;
-    tokenClose.markup = isStrong ? ch + ch : ch;
-    tokenClose.content = '';
-    if (isStrong) {
-      state.tokens[delimiters[i - 1].token].content = '';
-      state.tokens[delimiters[startDelim.end + 1].token].content = '';
-      i--;
-    }
+function strongPostProcess(state: StateInline, delimiters: StateInline['delimiters']): void {
+  for (const start of delimiters) {
+    if (start.marker !== STAR || start.end === -1) continue;
+    const end = delimiters[start.end];
+    const open = state.tokens[start.token];
+    open.type = 'strong_open';
+    open.tag = 'strong';
+    open.nesting = 1;
+    open.markup = '**';
+    open.content = '';
+    const close = state.tokens[end.token];
+    close.type = 'strong_close';
+    close.tag = 'strong';
+    close.nesting = -1;
+    close.markup = '**';
+    close.content = '';
   }
 }
 
-function starEmphasisPost(state: StateInline): void {
-  const tokensMeta = state.tokens_meta;
-  const max = state.tokens_meta.length;
-  starEmphasisPostProcess(state, state.delimiters);
-  for (let curr = 0; curr < max; curr++) {
-    const delimiters = tokensMeta[curr]?.delimiters;
-    if (delimiters) starEmphasisPostProcess(state, delimiters);
+function strongPost(state: StateInline): void {
+  strongPostProcess(state, state.delimiters);
+  for (const meta of state.tokens_meta) {
+    if (meta?.delimiters) strongPostProcess(state, meta.delimiters);
   }
 }
 
-/* ---------------------------------------------------------------------------
- * `__` italic — clone of markdown-it rules_inline/strikethrough.ts using the
- * `_` marker (Telegram-style double-underscore italic). Single `_` is not
- * tokenized and stays literal text.
- * ------------------------------------------------------------------------- */
-
+/** Double underscores produce italic; a single underscore stays literal. */
 function underscoreItalicTokenize(state: StateInline, silent: boolean): boolean {
   if (silent) return false;
   const marker = state.src.charCodeAt(state.pos);
@@ -280,8 +241,8 @@ const TAB = 0x09;
 
 /**
  * Wraps the native `list` rule so a line starting with a `* ` bullet (or a
- * lone `*`) is NOT a list. `*` is reserved for emphasis in chahua's subset;
- * only `-` and `1.` start lists. Returning `false` lets the lower-priority
+ * lone `*`) is NOT a list. Dash/plus and numbered lists remain supported.
+ * Returning `false` lets the lower-priority
  * rules (paragraph) render the line literally, in every context the native
  * list rule is consulted (top level, inside blockquotes, nested items...).
  */
@@ -326,9 +287,9 @@ export function applyMarkdownSubset(md: MarkdownIt): void {
   // Keep the text rule ahead of the spoiler rule (see note above).
   md.inline.ruler.at('text', pipeAwareTextTokenize);
 
-  // `*`-only emphasis.
-  md.inline.ruler.at('emphasis', starEmphasisTokenize);
-  md.inline.ruler2.at('emphasis', starEmphasisPost);
+  // Only exact double-star runs produce bold.
+  md.inline.ruler.at('emphasis', strongTokenize);
+  md.inline.ruler2.at('emphasis', strongPost);
 
   // `__` italic (must pair after balance_pairs but before fragments_join).
   md.inline.ruler.before('link', 'underscoreItalic', underscoreItalicTokenize);
@@ -338,8 +299,20 @@ export function applyMarkdownSubset(md: MarkdownIt): void {
   md.inline.ruler.before('link', 'spoiler', spoilerTokenize);
   md.inline.ruler2.before('fragments_join', 'spoiler', spoilerPost);
 
-  // `*` is not a list marker.
+  // Tilde runs remain literal rather than opening code fences.
   const ruler = md.block.ruler as unknown as BlockRulerInternals;
+  const fenceRule = ruler.__rules__.find((rule) => rule.name === 'fence')!;
+  const nativeFence = fenceRule.fn;
+  md.block.ruler.at(
+    'fence',
+    (state, start, end, silent) => {
+      const pos = state.bMarks[start] + state.tShift[start];
+      return state.src[pos] === '`' && nativeFence(state, start, end, silent);
+    },
+    { alt: fenceRule.alt },
+  );
+
+  // `*` is not a list marker.
   const listRule = ruler.__rules__.find((rule) => rule.name === 'list');
   if (listRule) {
     md.block.ruler.at('list', starAwareListRule(listRule.fn), { alt: listRule.alt });

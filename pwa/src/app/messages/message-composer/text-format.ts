@@ -1,30 +1,21 @@
-/**
- * Pure, DOM-free text-editing helpers for the composer's formatting toolbar.
- * ComposeInput maps textarea selections to `TextSelection` and commits the
- * returned text back into the controlled value.
- */
+/** Text edits for the composer's bold and italic keyboard shortcuts. */
+import type { EditableText, MentionSpan } from './mention-text';
 
-export type InlineFormatKind = 'bold' | 'italic' | 'strike';
-
-export type BlockFormatKind = 'code' | 'quote';
-
-export type TextFormatKind = InlineFormatKind | 'link' | BlockFormatKind;
+export type InlineFormatKind = 'bold' | 'italic';
 
 export interface TextSelection {
   start: number;
   end: number;
 }
 
-export interface TextFormatResult {
-  text: string;
+export interface TextFormatResult extends EditableText {
   selectionStart: number;
   selectionEnd: number;
 }
 
-const WRAP_MARKERS: Record<InlineFormatKind, readonly [string, string]> = {
-  bold: ['**', '**'],
-  italic: ['*', '*'],
-  strike: ['~~', '~~'],
+const WRAP_MARKERS: Record<InlineFormatKind, string> = {
+  bold: '**',
+  italic: '__',
 };
 
 function clampSelection(text: string, selection: TextSelection): TextSelection {
@@ -36,104 +27,59 @@ function clampSelection(text: string, selection: TextSelection): TextSelection {
   return { start, end };
 }
 
-function insertAt(text: string, start: number, end: number, inserted: string): TextFormatResult {
-  const next = `${text.slice(0, start)}${inserted}${text.slice(end)}`;
-  const cursor = start + inserted.length;
-  return { text: next, selectionStart: cursor, selectionEnd: cursor };
-}
-
-/**
- * Normalises a toolbar URL. Only `http:`/`https:` survive; anything else has
- * its scheme stripped and is re-prefixed with `https://`, so a crafted
- * `javascript:` URL can never become an anchor href.
- */
-const SAFE_SCHEMES = new Set(['http:', 'https:']);
-
-export function normalizeLinkHref(raw: string): string {
-  const trimmed = (raw ?? '').trim();
-  if (!trimmed) return 'https://';
-  const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(trimmed);
-  if (schemeMatch) {
-    const scheme = schemeMatch[1].toLowerCase();
-    if (SAFE_SCHEMES.has(`${scheme}:`)) return trimmed;
-    const rest = trimmed.slice(schemeMatch[0].length);
-    return `https://${rest}`;
-  }
-  return `https://${trimmed}`;
-}
-
-/**
- * Wraps the selected range in `**`/`*`/`~~` markers. Returns `null` on a
- * collapsed selection so a no-selection shortcut never injects stray markers.
- */
+/** Keep edge whitespace outside markers and format each selected paragraph separately. */
 export function wrapInlineFormat(
   text: string,
   selection: TextSelection,
   kind: InlineFormatKind,
+  mentions: readonly MentionSpan[] = [],
 ): TextFormatResult | null {
   const { start, end } = clampSelection(text, selection);
   if (start === end) return null;
-  const [open, close] = WRAP_MARKERS[kind];
-  return insertAt(text, start, end, `${open}${text.slice(start, end)}${close}`);
+  const marker = WRAP_MARKERS[kind];
+  const insertions: number[] = [];
+  let offset = start;
+  const inserted = text
+    .slice(start, end)
+    .split(/(\r?\n(?:[ \t]*\r?\n)+)/)
+    .map((part, index) => {
+      const formatted =
+        index % 2
+          ? part
+          : part.replace(/^(\s*)([\s\S]*?)(\s*)$/, (_match, lead: string, body: string, trail: string) => {
+              if (!body) return part;
+              insertions.push(offset + lead.length, offset + part.length - trail.length);
+              return `${lead}${marker}${body}${marker}${trail}`;
+            });
+      offset += part.length;
+      return formatted;
+    })
+    .join('');
+  const cursor = start + inserted.length;
+  return {
+    text: text.slice(0, start) + inserted + text.slice(end),
+    // Formatting only inserts markers: map original offsets directly instead of
+    // guessing which occurrence of a repeated display name is the mention.
+    mentions: mentions
+      .filter((mention) => !insertions.some((at) => at > mention.start && at < mention.end))
+      .map((mention) => ({
+        ...mention,
+        start: mention.start + insertions.filter((at) => at <= mention.start).length * marker.length,
+        end: mention.end + insertions.filter((at) => at < mention.end).length * marker.length,
+      })),
+    selectionStart: cursor,
+    selectionEnd: cursor,
+  };
 }
 
-/**
- * Turns a selection into a fenced code block or a quote (every selected line
- * prefixed with `> `). Needs real content, like the inline formatters.
- */
-export function wrapBlockFormat(
-  text: string,
-  selection: TextSelection,
-  kind: BlockFormatKind,
-): TextFormatResult | null {
-  const { start, end } = clampSelection(text, selection);
-  if (start === end) return null;
-  const selected = text.slice(start, end);
-
-  if (kind === 'quote') {
-    const quoted = selected
-      .split('\n')
-      .map((line) => `> ${line}`)
-      .join('\n');
-    return insertAt(text, start, end, quoted);
+/** Only Ctrl/Cmd+B and Ctrl/Cmd+I are handled by the composer. */
+export function shortcutFormatKind(event: { key: string }): InlineFormatKind | null {
+  switch (event.key.toLowerCase()) {
+    case 'b':
+      return 'bold';
+    case 'i':
+      return 'italic';
+    default:
+      return null;
   }
-
-  const wrapped = `\`\`\`\n${selected}\n\`\`\``;
-  return insertAt(text, start, end, wrapped);
-}
-
-/**
- * Turns a selection into `[selection](url)`. With no selection, inserts
- * `[text](url)` and selects the placeholder label so the user can type over it.
- */
-export function applyLink(text: string, selection: TextSelection, rawUrl: string): TextFormatResult {
-  const { start, end } = clampSelection(text, selection);
-  const url = normalizeLinkHref(rawUrl);
-  const label = text.slice(start, end);
-
-  if (label) {
-    return insertAt(text, start, end, `[${label}](${url})`);
-  }
-
-  const inserted = `[text](${url})`;
-  const next = `${text.slice(0, start)}${inserted}${text.slice(end)}`;
-  const labelStart = start + 1;
-  return { text: next, selectionStart: labelStart, selectionEnd: labelStart + 'text'.length };
-}
-
-/** Ctrl/Cmd+B / I / D / Q shortcuts; `Q` is blockquote, never `link`. */
-const SHORTCUT_KIND: Record<string, TextFormatKind> = {
-  b: 'bold',
-  B: 'bold',
-  i: 'italic',
-  I: 'italic',
-  d: 'strike',
-  D: 'strike',
-
-  q: 'quote',
-  Q: 'quote',
-};
-
-export function shortcutFormatKind(event: { key: string }): TextFormatKind | null {
-  return SHORTCUT_KIND[event.key] ?? null;
 }

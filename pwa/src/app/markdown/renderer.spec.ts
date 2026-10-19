@@ -39,7 +39,7 @@ function renderPreview(markdown: string, options?: MarkdownRenderOptions): strin
 
 describe('renderMarkdownText — inline', () => {
   it('renders bold, italic, strikethrough and inline code', () => {
-    expect(renderText('**bold** *italic* ~~strike~~ `code`')).toBe(
+    expect(renderText('**bold** __italic__ ~~strike~~ `code`')).toBe(
       '<p><strong>bold</strong> <em>italic</em> <s>strike</s> <code>code</code></p>',
     );
   });
@@ -60,7 +60,7 @@ describe('renderMarkdownText — inline', () => {
   });
 
   it('renders nested emphasis', () => {
-    expect(renderText('**bold and *nested***')).toBe('<p><strong>bold and <em>nested</em></strong></p>');
+    expect(renderText('**bold and __nested__**')).toBe('<p><strong>bold and <em>nested</em></strong></p>');
   });
 
   it('does not parse markers inside inline code', () => {

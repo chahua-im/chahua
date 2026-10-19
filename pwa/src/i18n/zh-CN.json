@@ -366,14 +366,6 @@
       "tooManyAttachments": "每条消息最多添加 20 个附件。",
       "editMediaOnly": "编辑消息时只能添加图片或视频。",
       "processingFailed": "处理失败，请检查文件大小、权限或网络后重试。",
-      "format": {
-        "bold": "加粗 (Ctrl+B)",
-        "italic": "斜体 (Ctrl+I)",
-        "strike": "删除线 (Ctrl+D)",
-        "code": "代码块",
-        "quote": "引用 (Ctrl+Q)",
-        "link": "链接"
-      },
       "placeholder": "输入消息",
       "photos": "照片",
       "files": "文件",
