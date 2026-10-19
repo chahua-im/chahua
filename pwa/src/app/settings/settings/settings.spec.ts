@@ -187,9 +187,11 @@ describe('Settings', () => {
     expect(language.getAttribute('href')).toBe('/settings/language');
     expect(language.textContent).toContain('自动');
     const toggles = Array.from(page.querySelectorAll('ion-toggle'));
+    expect(toggles[2].checked).toBe(true);
+    toggles[2].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     toggles[0].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     toggles[1].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
-    toggles[2].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
+    toggles[3].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     expect(TestBed.inject(Preferences).showThreadsInMessages()).toBe(false);
     expect(TestBed.inject(Preferences).showAllAvatars()).toBe(true);
     expect(TestBed.inject(Preferences).showDmDetails()).toBe(false);
@@ -204,6 +206,7 @@ describe('Settings', () => {
     const restored = Array.from(page.querySelectorAll('ion-toggle'));
     expect(restored[0].checked).toBe(false);
     expect(restored[1].checked).toBe(true);
+    expect(restored[3].checked).toBe(false);
     expect(restored[2].checked).toBe(false);
     const done = Array.from(page.querySelectorAll('ion-button')).find(
       (button) => button.textContent?.trim() === '完成',

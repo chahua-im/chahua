@@ -1,4 +1,5 @@
-import { Component, computed, input } from '@angular/core';
+import { Preferences } from '../../settings/preferences';
+import { Component, computed, inject, input } from '@angular/core';
 import type { MentionInfo } from '../../../generated/models';
 import { extractMentionWidgets } from '../../markdown/mentions';
 import { MarkdownBody } from '../../markdown/markdown-body';
@@ -25,10 +26,12 @@ import { MessageText } from '../message-text/message-text';
   `,
 })
 export class MarkdownSummary {
+  private readonly preferences = inject(Preferences);
   readonly text = input.required<string>();
   readonly mentions = input<readonly MentionInfo[]>([]);
 
   protected readonly nodes = computed<MarkdownNode[] | undefined>(() => {
+    if (!this.preferences.markdownEnabled()) return undefined;
     const { body, widgets } = extractMentionWidgets(this.text());
     if (!messageHasMarkdown(body)) return undefined;
     const names = new Map(this.mentions().map((mention) => [mention.uid, mention.username]));

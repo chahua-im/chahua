@@ -35,6 +35,14 @@
         <span class="ion-text-wrap">{{ 'settings.general.showAllAvatars' | transloco }}</span>
       </ion-toggle>
     </ion-item>
+    <ion-item>
+      <ion-icon slot="start" [icon]="markdownIcon" color="primary"></ion-icon>
+      <ion-toggle
+        [checked]="preferences.markdownEnabled()"
+        (ionChange)="preferences.setMarkdownEnabled($event.detail.checked)">
+        <span class="ion-text-wrap">{{ 'settings.general.markdownEnabled' | transloco }}</span>
+      </ion-toggle>
+    </ion-item>
     <ion-item lines="none">
       <ion-icon slot="start" [icon]="dmDetailsIcon" color="primary"></ion-icon>
       <ion-toggle

@@ -107,7 +107,10 @@ describe('ConversationPage', () => {
         provideRouter([]),
         { provide: Connection, useValue: mockRealtime({ messages$: incoming, events$: events, resync$: resync }) },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
-        { provide: Preferences, useValue: { showAllAvatars: avatars, showDmDetails: dmDetails } },
+        {
+          provide: Preferences,
+          useValue: { markdownEnabled: () => true, showAllAvatars: avatars, showDmDetails: dmDetails },
+        },
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),

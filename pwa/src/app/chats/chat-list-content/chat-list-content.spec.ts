@@ -70,7 +70,11 @@ describe('ChatListContent', () => {
   const lastMessage = { ...testMessage, mentions: [] };
   let fixture: ComponentFixture<ChatListContent>;
   const session = { user: signal(testUser), logout: vi.fn() };
-  const preferences = { showThreadsInMessages: signal(false), showAllAvatars: signal(false) };
+  const preferences = {
+    markdownEnabled: () => true,
+    showThreadsInMessages: signal(false),
+    showAllAvatars: signal(false),
+  };
   const chats = {
     items: signal<ChatData[]>([]),
     loading: signal(false),

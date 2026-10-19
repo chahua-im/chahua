@@ -49,6 +49,7 @@
       "title": "一般",
       "language": "語言",
       "showThreads": "在訊息中顯示「話題」",
+      "markdownEnabled": "Markdown 渲染",
       "showAllAvatars": "在所有訊息旁顯示頭像",
       "showDmDetails": "在私聊中顯示雙方頭像和使用者名稱",
       "colorMode": "顏色模式",

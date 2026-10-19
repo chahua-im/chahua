@@ -49,6 +49,7 @@
       "title": "General",
       "language": "Language",
       "showThreads": "Show 'Threads' in Messages",
+      "markdownEnabled": "Render Markdown",
       "showAllAvatars": "Show Avatars Next to All Messages",
       "showDmDetails": "Show Both Avatars and Usernames in Direct Messages",
       "colorMode": "Color Mode",

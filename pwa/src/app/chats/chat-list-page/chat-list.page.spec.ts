@@ -143,7 +143,7 @@ describe('ChatListPage query lifecycle', () => {
         },
         { provide: ChatStore, useValue: {} },
         { provide: SessionStore, useValue: { user: signal(undefined) } },
-        { provide: Preferences, useValue: { showThreadsInMessages: () => true } },
+        { provide: Preferences, useValue: { markdownEnabled: () => true, showThreadsInMessages: () => true } },
       ],
     })
       .overrideComponent(ChatListContent, { set: { template: '' } })

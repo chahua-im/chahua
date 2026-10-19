@@ -1,3 +1,4 @@
+import { Preferences } from '../../settings/preferences';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
@@ -17,6 +18,12 @@ import { SessionStore } from '../../session/session-store';
 import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
 import { ChatDetails } from './chat-details';
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [{ provide: Preferences, useValue: { markdownEnabled: () => true } }],
+  });
+});
 
 describe('ChatDetails', () => {
   let http: HttpTestingController;
