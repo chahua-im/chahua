@@ -90,6 +90,8 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatListContent             |
 | 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                                |
 | 显示归档计数                  | `GET /chats/unread`；需要话题时读 `/threads/unread`                    | 查询由实际消费者激活                        |
+| 返回被覆盖的列表              | 期间收到消息的已加载聊天读 `GET /chats/{c}/unread`；窗口外的新聊天从首页补读至原覆盖边界 | ChatListStore → ChatStore                   |
+| 列表失效（resync、归档、成员关系、删除） | `GET /chats?limit=50`，读取到已加载条数或末尾                  | ChatListStore → ChatStore → ChatListContent |
 | 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限                |
 | 私聊或用户资料缺关系          | `GET /friends/{uid}`                                                   | ChatStore.relationship → 三处共用           |
 | 用户资料的验证方式            | `GET /friends/add-info/{uid}`                                          | ChatDetails 在点击添加好友后读取            |
@@ -118,7 +120,7 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 
 ## 分页、刷新与页面生命周期
 
-列表查询按普通/归档范围共享成员和进行中的请求；记录成员 ID、游标和覆盖边界，字段从 ChatStore 派生。刷新读取到已加载条目数或末尾，齐备后替换，期间保留现有内容。初次显示或切分类等待当前分类的列表查询，固定入口和归档角标不参与等待。
+列表查询按普通/归档范围共享成员和进行中的请求；记录成员 ID、游标、覆盖边界和待补未读，字段从 ChatStore 派生。刷新从首页逐页读取到已加载条数或末尾，每页到达即合并进列表；刷新完成后以响应中的成员替换旧窗口，期间保留现有内容。被其他页面覆盖不使列表失效：实时消息已更新预览，返回时只按受影响聊天补读未读状态，未加载窗口外的新聊天从首页按需补页至原覆盖边界或末尾；resync、归档、成员关系和删除才重读列表。初次显示或切分类等待当前分类的列表查询，固定入口和归档角标不参与等待。
 
 只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
 
@@ -138,7 +140,7 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 
 | 事件                                                      | 更新路径                                                                                              |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；当前页面决定接收和是否跟随底部 |
+| message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；隐藏列表记录待补未读或首页位置；当前页面决定接收和是否跟随底部 |
 | messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；编辑按服务器预览形状改写引用方内嵌的引用快照，撤回将其改为墓碑；正在读取的区间保留补丁 |
 | reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                            |
 | pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                 |
