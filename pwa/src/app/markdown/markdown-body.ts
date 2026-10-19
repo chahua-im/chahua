@@ -1,10 +1,11 @@
 import { Component, DestroyRef, effect, ElementRef, inject, input, output, Renderer2 } from '@angular/core';
+import { highlightCodeBlock } from './code-highlight';
 import type { MarkdownNode } from './nodes';
 import { SpoilerParticles } from './spoiler-particles';
 
 /**
- * Renders a {@link MarkdownNode} tree as DOM. Never uses HTML strings or
- * innerHTML, so raw HTML and unsafe payloads from the parser stay inert.
+ * Renders a {@link MarkdownNode} tree as DOM using text nodes for user content.
+ * Code blocks are then highlighted by highlight.js, which escapes their text.
  * Interactive decisions (mention clickability, internal link targets) are made
  * by the caller that builds the tree; this component only wires the events.
  */
@@ -80,6 +81,9 @@ export class MarkdownBody {
           }
         }
         for (const child of node.children) element.append(this.build(child));
+        if (node.tag === 'pre') {
+          for (const code of element.querySelectorAll('code')) highlightCodeBlock(code);
+        }
         if (node.attrs?.['class'] === 'spoiler') {
           const content: HTMLElement = this.renderer.createElement('span');
           content.className = 'spoiler-content';

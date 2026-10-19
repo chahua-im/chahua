@@ -5,9 +5,8 @@ import { containsPlaceholder, splitByPlaceholders } from './placeholder';
 
 /**
  * Framework-agnostic render tree produced from a markdown-it token stream.
- * The {@link MarkdownBody} component turns this tree into DOM — never HTML
- * strings, never innerHTML — so raw HTML and javascript-style payloads stay
- * inert. Interactive widgets (mentions) are re-inserted at their placeholder
+ * The {@link MarkdownBody} component creates DOM with text nodes for user
+ * content, then applies syntax highlighting to code blocks. Interactive widgets (mentions) are re-inserted at their placeholder
  * slots inside text tokens via {@link MarkdownRenderOptions.onPlaceholder}.
  */
 export type MarkdownNode =

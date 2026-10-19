@@ -43,6 +43,33 @@ describe('MarkdownBody presentation', () => {
     for (const element of host.querySelectorAll('*')) expect(element.hasAttribute(scope!)).toBe(true);
   });
 
+  it('highlights a language alias while preserving code text and escaping HTML', () => {
+    const code = 'const html = "<img src=x onerror=alert(1)>";\n';
+    const fixture = render('```js\n' + code + '```');
+    const element = (fixture.nativeElement as HTMLElement).querySelector('pre code')!;
+    expect(element.querySelector('.hljs-keyword')?.textContent).toBe('const');
+    expect(element.textContent).toBe(code);
+    expect(element.querySelector('img')).toBeNull();
+
+    fixture.componentRef.setInput('nodes', renderMarkdownText('```rust\nlet value = 42;\n```'));
+    fixture.detectChanges();
+    const updated = (fixture.nativeElement as HTMLElement).querySelector('pre code')!;
+    expect(updated.querySelector('.hljs-keyword')?.textContent).toBe('let');
+    expect(updated.textContent).toBe('let value = 42;\n');
+  });
+
+  it.each(['', 'unknown-language', 'text'])('keeps %s code blocks plain', (language) => {
+    const fixture = render('```' + language + '\nconst value = 42;\n```');
+    const code = (fixture.nativeElement as HTMLElement).querySelector('pre code')!;
+    expect(code.querySelector('span')).toBeNull();
+    expect(code.textContent).toBe('const value = 42;\n');
+  });
+
+  it('keeps inline code plain', () => {
+    const fixture = render('`const value = 42;`');
+    expect((fixture.nativeElement as HTMLElement).querySelector('.hljs')).toBeNull();
+  });
+
   it('reveals a hidden link before allowing navigation', () => {
     const fixture = render('||[secret](https://example.com/secret)||');
     const host = fixture.nativeElement as HTMLElement;
