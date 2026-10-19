@@ -57,26 +57,42 @@ describe('`*` is not a list marker', () => {
   });
 });
 
-describe('single-asterisk italic space-adaptation', () => {
-  it('forgives a single stray space inside a mention star pair', () => {
-    // `*@devuser2 *` was the failing manual-test input: the space on the inner
-    // side of the closing `*` kept the pair literal under CommonMark.
-    expect(markdownEngine.render('*@devuser2 *', {}).trim()).toContain('<em>@devuser2</em>');
-    expect(markdownEngine.render('* @devuser2*', {}).trim()).toContain('<em>@devuser2</em>');
+describe('formatting syntax', () => {
+  it.each(['*italic*', '***bold italic***', 'a * word * b', '*word *', '* word*'])(
+    'keeps unsupported star syntax literal: %s',
+    (text) => {
+      expect(markdownEngine.render(text).trim()).toBe(`<p>${text}</p>`);
+    },
+  );
+
+  it.each([
+    ['**bold**', '<strong>bold</strong>'],
+    ['__italic__', '<em>italic</em>'],
+    ['**__both__**', '<strong><em>both</em></strong>'],
+    ['__**both**__', '<em><strong>both</strong></em>'],
+    ['**bold __nested__ end**', '<strong>bold <em>nested</em> end</strong>'],
+    ['__italic **nested** end__', '<em>italic <strong>nested</strong> end</em>'],
+  ])('renders supported formatting: %s', (text, html) => {
+    expect(markdownEngine.render(text).trim()).toBe(`<p>${html}</p>`);
   });
 
-  it('forgives only one stray space, not symmetric spacing', () => {
-    expect(markdownEngine.render('*italic words here *', {}).trim()).toContain('<em>italic words here</em>');
-    expect(markdownEngine.render('* x *', {}).trim()).toBe('<p>* x *</p>');
+  it.each(['**', '__', '~~'])('moves inner whitespace outside %s pairs', (marker) => {
+    const tag = marker === '**' ? 'strong' : marker === '__' ? 'em' : 's';
+    expect(markdownEngine.render(`a ${marker} hello ${marker} b`).trim()).toBe(`<p>a  <${tag}>hello</${tag}>  b</p>`);
   });
 
-  it('keeps arithmetic-like symmetric `5 * 3 * 4` literal', () => {
-    expect(markdownEngine.render('5 * 3 * 4', {}).trim()).toBe('<p>5 * 3 * 4</p>');
-    expect(markdownEngine.render('a *2 * b', {}).trim()).toBe('<p>a *2 * b</p>');
-  });
+  it.each(['~~~\nplain\n~~~', '> ~~~\n> plain\n> ~~~', '- ~~~\n  plain\n  ~~~'])(
+    'does not treat tildes as a code fence: %s',
+    (source) => {
+      const html = markdownEngine.render(source);
+      expect(html).not.toContain('<pre>');
+      expect(html).not.toContain('<code>');
+      expect(html).toContain('plain');
+    },
+  );
 
-  it('never touches stars inside code spans', () => {
-    expect(markdownEngine.render('`*a *`', {}).trim()).toBe('<p><code>*a *</code></p>');
+  it('preserves literal markers inside backtick code', () => {
+    expect(markdownEngine.render('`** x ** __ y __ *z*`')).toContain('<code>** x ** __ y __ *z*</code>');
   });
 });
 
@@ -99,14 +115,11 @@ describe('normalization boundaries', () => {
     expect(markdownEngine.render('** unmatched\n** bold **')).toContain('<strong>bold</strong>');
   });
 
-  it.each(['- ~~~\n  ** x **\n  ~~~', '> ~~~\n> ** x **\n> ~~~', '- ```\n  ** x **\n  ```', '> ```\n> ** x **\n> ```'])(
-    'preserves nested code content: %s',
-    (source) => {
-      expect(markdownEngine.render(source)).toContain('<code>** x **\n</code>');
-    },
-  );
+  it.each(['- ```\n  ** x **\n  ```', '> ```\n> ** x **\n> ```'])('preserves nested code content: %s', (source) => {
+    expect(markdownEngine.render(source)).toContain('<code>** x **\n</code>');
+  });
 
   it('keeps image syntax and formatting literal inside nested fences', () => {
-    expect(markdownEngine.render('> ~~~\n> ![x](url) __ x __\n> ~~~')).toContain('<code>![x](url) __ x __\n</code>');
+    expect(markdownEngine.render('> ```\n> ![x](url) __ x __\n> ```')).toContain('<code>![x](url) __ x __\n</code>');
   });
 });

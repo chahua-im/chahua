@@ -366,14 +366,6 @@
       "tooManyAttachments": "You can add up to 20 attachments per message.",
       "editMediaOnly": "You can only add photos or videos while editing.",
       "processingFailed": "Processing failed. Check the file size, permissions, or network and try again.",
-      "format": {
-        "bold": "Bold (Ctrl+B)",
-        "italic": "Italic (Ctrl+I)",
-        "strike": "Strikethrough (Ctrl+D)",
-        "code": "Code block",
-        "quote": "Quote (Ctrl+Q)",
-        "link": "Link"
-      },
       "placeholder": "Type a message",
       "photos": "Photos",
       "files": "Files",

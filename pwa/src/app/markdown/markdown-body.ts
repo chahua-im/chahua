@@ -69,10 +69,11 @@ export class MarkdownBody {
         for (const [key, value] of Object.entries(node.attrs ?? {})) element.setAttribute(key, value);
         if (node.tag === 'a') {
           if (element.hasAttribute('internal')) {
+            const target = element.getAttribute('internal')!;
             element.removeAttribute('internal');
-            const target = element.getAttribute('href')!;
             element.addEventListener('click', (event) => {
               event.stopPropagation();
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
               event.preventDefault();
               this.follow.emit(target);
             });

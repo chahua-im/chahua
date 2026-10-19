@@ -10,9 +10,8 @@
  *     `** @[uid:1] **`  →  ` **@[uid:1]** `
  *
  * Two-character runs (`**`/`~~`/`__`) forgive spaces on either inner side;
- * single-`*` italic forgives one side only so arithmetic-like `5 * 3 * 4` is
- * never altered. Code spans, fences, escaped characters and multi-line
- * content are skipped.
+ * single stars stay literal. Code spans, fences, escaped characters and
+ * multi-line content are skipped.
  */
 
 import { findCodeRegions } from './code-regions';
@@ -35,9 +34,7 @@ interface MarkerRun {
   ch: string;
 }
 
-type ReflowMode = 'two' | 'one';
-
-function collectPairs(src: string, masked: boolean[], mode: ReflowMode): Array<[number, number]> {
+function collectPairs(src: string, masked: boolean[]): Array<[number, number]> {
   const n = src.length;
   const runs: MarkerRun[] = [];
   let i = 0;
@@ -50,8 +47,7 @@ function collectPairs(src: string, masked: boolean[], mode: ReflowMode): Array<[
     let j = i;
     while (j < n && src[j] === ch) j++;
     const len = j - i;
-    // `two`: exact `**`/`~~`/`__` runs. `one`: isolated single `*` only.
-    if (len === (mode === 'two' ? 2 : 1) && (mode === 'one' ? ch === '*' : true)) {
+    if (len === 2) {
       runs.push({ start: i, ch });
     }
     i = j;
@@ -78,14 +74,13 @@ function collectPairs(src: string, masked: boolean[], mode: ReflowMode): Array<[
 
 /**
  * Moves redundant spaces directly inside a paired marker to its outside.
- * `two` (`**`/`~~`/`__`) forgives spaces on either inner side; `one` (`*…*`)
- * forgives a stray space on one side only, so `5 * 3 * 4` keeps literal stars.
+ * Only exact `**`/`~~`/`__` pairs participate.
  */
-function reflowPairedSpaces(src: string, mode: ReflowMode): string {
+function reflowPairedSpaces(src: string): string {
   if (!src) return src;
   const masked = maskCodeRegions(src);
-  const pairs = collectPairs(src, masked, mode);
-  const markerLen = mode === 'two' ? 2 : 1;
+  const pairs = collectPairs(src, masked);
+  const markerLen = 2;
 
   let out = src;
   for (let p = pairs.length - 1; p >= 0; p--) {
@@ -104,18 +99,16 @@ function reflowPairedSpaces(src: string, mode: ReflowMode): string {
     const inner = mid.slice(lead, mid.length - trail);
     if (inner.length <= 0) continue; // whitespace-only pair
     if (lead === 0 && trail === 0) continue; // nothing to move
-    if (mode === 'one' && lead > 0 && trail > 0) continue; // `5 * 3 * 4` stays literal
 
-    // Digits adjacent to the markers or numeric-only content stay literal too.
+    // Preserve the existing numeric and identifier boundary rules.
     const prevChar = openStart > 0 ? out[openStart - 1] : '';
     const nextChar = closeStart + markerLen < out.length ? out[closeStart + markerLen] : '';
     if (/[0-9]/.test(prevChar) || /[0-9]/.test(nextChar)) continue;
-    if (mode === 'one' && /^[0-9][0-9.,%]*$/.test(inner)) continue;
-    if (mode === 'two' && out[openStart] === '_' && (/[A-Za-z0-9]/.test(prevChar) || /[A-Za-z0-9]/.test(nextChar))) {
+    if (out[openStart] === '_' && (/[A-Za-z0-9]/.test(prevChar) || /[A-Za-z0-9]/.test(nextChar))) {
       continue;
     }
 
-    const marker = mode === 'two' ? out[openStart] + out[openStart] : '*';
+    const marker = out[openStart] + out[openStart];
     const leadWs = mid.slice(0, lead);
     const trailWs = mid.slice(mid.length - trail);
 
@@ -124,10 +117,10 @@ function reflowPairedSpaces(src: string, mode: ReflowMode): string {
   return out;
 }
 
-/** Reflows `**`/`~~`/`__` first, then single-`*` italic on the result. */
+/** Reflows spaces inside double-character formatting markers. */
 export function normalizeMarkdownWhitespace(src: string): string {
   if (!src) return src;
-  return reflowPairedSpaces(reflowPairedSpaces(src, 'two'), 'one');
+  return reflowPairedSpaces(src);
 }
 
 /**

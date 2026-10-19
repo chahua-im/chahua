@@ -42,10 +42,10 @@ export function wireText(value: EditableText): string {
   return text + value.text.slice(last);
 }
 
-function indexOfClosestSubstring(haystack: string, needle: string, hint: number): number {
+function indexOfClosestSubstring(haystack: string, needle: string, hint: number, from: number): number {
   let best = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
-  let index = haystack.indexOf(needle);
+  let index = haystack.indexOf(needle, from);
   while (index !== -1) {
     const distance = Math.abs(index - hint);
     if (distance < bestDistance) {
@@ -63,7 +63,7 @@ function indexOfClosestSubstring(haystack: string, needle: string, hint: number)
  *
  * Edits entirely before or after a span shift it; edits touching the mention's
  * own span drop it — unless the mention text survives verbatim inside the
- * rewritten middle (e.g. wrapping `*@alice*` in emphasis), in which case the
+ * rewritten middle (e.g. wrapping `__@alice__` in emphasis), in which case the
  * span is re-located by searching for the text.
  */
 function relocateMentions(previous: EditableText, nextText: string): MentionSpan[] {
@@ -88,6 +88,7 @@ function relocateMentions(previous: EditableText, nextText: string): MentionSpan
   const changedNew = nextText.slice(changeStart, nextText.length - suffix);
 
   const relocated: MentionSpan[] = [];
+  let searchStart = 0;
   for (const entry of entries) {
     if (entry.end <= changeStart) {
       relocated.push(entry);
@@ -96,8 +97,11 @@ function relocateMentions(previous: EditableText, nextText: string): MentionSpan
     } else if (entry.start >= changeStart && entry.end <= changeEnd) {
       const raw = previousText.slice(entry.start, entry.end);
       const hint = entry.start - changeStart;
-      const found = indexOfClosestSubstring(changedNew, raw, hint);
-      if (found !== -1) relocated.push({ ...entry, start: changeStart + found, end: changeStart + found + raw.length });
+      const found = indexOfClosestSubstring(changedNew, raw, hint, searchStart);
+      if (found !== -1) {
+        relocated.push({ ...entry, start: changeStart + found, end: changeStart + found + raw.length });
+        searchStart = found + raw.length;
+      }
     }
   }
   return relocated;
