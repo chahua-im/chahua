@@ -55,6 +55,10 @@ interface QueryState {
   recentVersion: number;
   cancel: Subject<void>;
   requests: Map<ListFetch, Promise<void>>;
+  /** Chats whose unread changed while no list was visible; refreshed by id on activation. */
+  pendingUnread: Set<SnowflakeID>;
+  /** A message arrived for a chat outside the loaded ids; only the head page can place it. */
+  headStale: boolean;
 }
 export enum FriendRequestAction {
   Accept,
@@ -197,6 +201,8 @@ export class ChatListStore {
       recentVersion: 0,
       cancel: new Subject(),
       requests: new Map(),
+      pendingUnread: new Set(),
+      headStale: false,
     };
     const handle: ChatQuery = {
       items: computed(() =>
@@ -215,12 +221,10 @@ export class ChatListStore {
         const consumer = Symbol();
         state.consumers.add(consumer);
         if (state.dirty() && !state.requests.has(ListFetch.Load)) void this.fetchQuery(state, ListFetch.Load);
+        else this.reconcile(state);
         return () => {
           state.consumers.delete(consumer);
-          if (!state.consumers.size && state.requests.size) {
-            state.dirty.set(true);
-            this.cancelQuery(state);
-          }
+          if (!state.consumers.size && state.requests.size) this.cancelQuery(state);
         };
       },
       refresh: () => {
@@ -236,6 +240,8 @@ export class ChatListStore {
   }
 
   private cancelQuery(query: QueryState) {
+    // A cancelled head read still has to place a conversation missed outside the loaded ids.
+    if (query.requests.has(ListFetch.Recent)) query.headStale = true;
     query.generation++;
     query.cancel.next();
     query.cancel.complete();
@@ -248,8 +254,20 @@ export class ChatListStore {
   private invalidateQuery(query: QueryState) {
     query.dirty.set(true);
     this.cancelQuery(query);
+    query.pendingUnread.clear();
+    query.headStale = false;
     query.error.set(undefined);
     if (query.consumers.size && !this.destroyRef.destroyed) void this.fetchQuery(query, ListFetch.Load);
+  }
+
+  /** Reconciles a list hidden from view without reloading rows that live events kept current. */
+  private reconcile(query: QueryState) {
+    if (!query.consumers.size || this.destroyRef.destroyed) return;
+    for (const chatId of query.pendingUnread) void this.syncUnread(chatId);
+    query.pendingUnread.clear();
+    if (!query.headStale || query.dirty() || query.requests.size) return;
+    query.headStale = false;
+    void this.fetchQuery(query, ListFetch.Recent);
   }
 
   private fetchQuery(query: QueryState, mode: ListFetch): Promise<void> {
@@ -265,36 +283,18 @@ export class ChatListStore {
       try {
         while (true) {
           const recentVersion = query.recentVersion;
-          const version = this.chatInfo.snapshot();
-          const read = async (cursor?: SnowflakeID) => {
-            const page = await firstValueFrom(
-              this.api
-                .getChats({
-                  limit: 50,
-                  ...(query.archived ? { archived: true } : {}),
-                  ...(cursor ? { after: cursor } : {}),
-                })
-                .pipe(takeUntil(query.cancel), takeUntilDestroyed(this.destroyRef)),
-            );
-            return { items: page.chats, cursor: page.nextCursor };
-          };
-          const result =
-            mode === ListFetch.Load
-              ? await readPages(read, query.ids().length, () => generation === query.generation)
-              : await read(after);
-          const page = { chats: result.items, nextCursor: result.cursor };
-          if (this.destroyRef.destroyed || generation !== query.generation) return;
-          this.chatInfo.acceptChats(page.chats, version);
-          query.ids.update((ids) => [
-            ...new Set([...(mode === ListFetch.Load ? [] : ids), ...page.chats.map((chat) => chat.id)]),
-          ]);
-          if (mode !== ListFetch.Recent) {
-            query.cursor.set(page.nextCursor);
-            // Use the server page boundary, not rows subsequently moved by live messages.
-            const time = page.chats.at(-1)?.lastMessageAt;
-            query.loadedThrough.set(page.nextCursor && time ? Date.parse(time) : -Infinity);
+          if (mode === ListFetch.Load) {
+            if (!(await this.readFromHead(query, generation))) return;
+            query.dirty.set(false);
+          } else if (mode === ListFetch.Recent) {
+            if (!(await this.readRecent(query, generation))) return;
+          } else {
+            const { page, version } = await this.readPage(query, after);
+            if (this.destroyRef.destroyed || generation !== query.generation) return;
+            this.chatInfo.acceptChats(page.chats, version);
+            query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
+            this.applyBoundary(query, page.chats, page.nextCursor);
           }
-          if (mode === ListFetch.Load) query.dirty.set(false);
           if (mode !== ListFetch.Recent || recentVersion === query.recentVersion) return;
         }
       } catch {
@@ -329,10 +329,67 @@ export class ChatListStore {
     return promise;
   }
 
+  private readPage(query: QueryState, cursor?: SnowflakeID) {
+    // Snapshot before the request so live previews received meanwhile keep their version.
+    const version = this.chatInfo.snapshot();
+    return firstValueFrom(
+      this.api
+        .getChats({
+          limit: 50,
+          ...(query.archived ? { archived: true } : {}),
+          ...(cursor ? { after: cursor } : {}),
+        })
+        .pipe(takeUntil(query.cancel), takeUntilDestroyed(this.destroyRef)),
+    ).then((page) => ({ page, version }));
+  }
+
+  /** Applies each page before reading the next, up to the depth already loaded or the tail. */
+  private async readFromHead(query: QueryState, generation: number) {
+    const depth = query.ids().length;
+    const read: SnowflakeID[] = [];
+    let loaded = 0;
+    let cursor: SnowflakeID | undefined;
+    do {
+      const { page, version } = await this.readPage(query, cursor);
+      if (this.destroyRef.destroyed || generation !== query.generation) return false;
+      this.chatInfo.acceptChats(page.chats, version);
+      read.push(...page.chats.map((chat) => chat.id));
+      query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
+      loaded += page.chats.length;
+      cursor = page.nextCursor;
+      this.applyBoundary(query, page.chats, page.nextCursor);
+    } while (cursor && loaded < depth);
+    // Replace membership only after the refreshed window is complete.
+    query.ids.set([...new Set(read)]);
+    return true;
+  }
+
+  /** Bridge the new head to the previously loaded window without moving its pagination cursor. */
+  private async readRecent(query: QueryState, generation: number) {
+    const boundary = query.loadedThrough();
+    let cursor: SnowflakeID | undefined;
+    do {
+      const { page, version } = await this.readPage(query, cursor);
+      if (this.destroyRef.destroyed || generation !== query.generation) return false;
+      this.chatInfo.acceptChats(page.chats, version);
+      query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
+      cursor = page.nextCursor;
+      const time = page.chats.at(-1)?.lastMessageAt;
+      if (time && Date.parse(time) < boundary) break;
+    } while (cursor);
+    return true;
+  }
+
+  private applyBoundary(query: QueryState, chats: readonly ChatListItem[], next?: SnowflakeID) {
+    query.cursor.set(next);
+    // Use the server page boundary, not rows subsequently moved by live messages.
+    const time = chats.at(-1)?.lastMessageAt;
+    query.loadedThrough.set(next && time ? Date.parse(time) : -Infinity);
+  }
+
   private receiveMessage(message: MessageResponse) {
     if (message.replyRootId) return;
     const active = [...this.queries.values()].map(({ state }) => state).filter((query) => query.consumers.size);
-    for (const { state } of this.queries.values()) if (!state.consumers.size) state.dirty.set(true);
     if (active.length) this.syncUnread(message.chatId);
     for (const query of active) {
       if (!query.ids().includes(message.chatId)) {
@@ -341,14 +398,20 @@ export class ChatListStore {
           void this.fetchQuery(query, query.dirty() ? ListFetch.Load : ListFetch.Recent);
       }
     }
+    // A hidden list keeps its rows; live previews cover the message itself, so record only the gaps.
+    for (const { state } of this.queries.values()) {
+      if (state.consumers.size || state.dirty()) continue;
+      if (state.ids().includes(message.chatId)) state.pendingUnread.add(message.chatId);
+      else state.headStale = true;
+    }
   }
 
   private receiveChange(change: MessageChange) {
     if (change.type === ServerWsMessageType.reactionUpdated) return;
     if (change.type !== ServerWsMessageType.messagesBulkDeleted && change.payload.replyRootId) return;
-    if (change.type === ServerWsMessageType.messageUpdated) {
-      for (const { state } of this.queries.values()) if (!state.consumers.size) state.dirty.set(true);
-    } else if (!this.changeRefreshPending) {
+    // Edits are already applied to the shared preview; they never change list membership or order.
+    if (change.type === ServerWsMessageType.messageUpdated) return;
+    if (!this.changeRefreshPending) {
       this.changeRefreshPending = true;
       void Promise.resolve().then(() => {
         this.changeRefreshPending = false;

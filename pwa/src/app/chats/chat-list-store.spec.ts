@@ -152,6 +152,29 @@ describe('ChatListStore', () => {
     await loading;
     expect(query.items()).toEqual([]);
   });
+  it('applies the first refresh page before reading the rest of the loaded depth', async () => {
+    const many = Array.from({ length: 60 }, (_, index) => ({
+      ...wireChat,
+      id: String(9007199254000000 + index),
+      lastMessageAt: new Date(Date.UTC(2026, 0, 1, 0, 59 - index)).toISOString(),
+    }));
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: many }));
+    await settle();
+    expect(query.items()).toHaveLength(60);
+    query.refresh();
+    http.expectOne('/_api/chats?limit=50').flush({
+      chats: [{ ...many[0], lastMessage: structuredClone(wireMessage) }, ...structuredClone(many.slice(1, 50))],
+      nextCursor: '9007199254740993',
+    });
+    await settle();
+    expect(query.items()[0].lastMessage?.id).toBe(testMessage.id);
+    expect(query.loading()).toBe(true);
+    http.expectOne('/_api/chats?limit=50&after=9007199254740993').flush(structuredClone({ chats: many.slice(50) }));
+    await settle();
+    expect(query.loading()).toBe(false);
+    expect(query.items()).toHaveLength(60);
+  });
+
   it('updates the preview once and uses the authoritative live unread count without losing pagination', async () => {
     http
       .expectOne('/_api/chats?limit=50')
@@ -810,9 +833,9 @@ describe('ChatListStore', () => {
     expect(query.items()).toEqual([testChat]);
     expect(query.loadingMore()).toBe(false);
     query.activate();
-    http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     await settle();
-    expect(query.items()).toEqual([]);
+    http.expectNone('/_api/chats?limit=50');
+    expect(query.items()).toEqual([testChat]);
   });
 
   it('cancels a departing query page without applying it to the other query', async () => {
@@ -833,9 +856,9 @@ describe('ChatListStore', () => {
     expect(query.items().map((chat) => chat.id)).toEqual([encodeId('9007199254740995')]);
     expect(regular.items()).toEqual([testChat]);
     selectQuery(false);
-    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
-    expect(query.hasMore()).toBe(false);
+    http.expectNone('/_api/chats?limit=50');
+    expect(query.hasMore()).toBe(true);
   });
 
   it('merges a recent conversation before an older pagination response without losing either page', async () => {
@@ -909,22 +932,137 @@ describe('ChatListStore', () => {
     });
   });
 
-  it('keeps hidden queries dirty without background list work and reloads them on activation', async () => {
+  it('keeps hidden rows and reconciles their read state on activation without reloading', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     releaseQuery();
     incoming.next(testMessage);
-    resync.next();
     http.expectNone('/_api/chats?limit=50');
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     expect(query.items()).toHaveLength(1);
-    query.activate();
-    http
-      .expectOne('/_api/chats?limit=50')
-      .flush(structuredClone({ chats: [{ ...wireChat, lastMessage: wireMessage, unreadCount: 5 }] }));
+    releaseQuery = query.activate();
+    const unread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    http.expectNone('/_api/chats?limit=50');
+    unread.flush({ lastReadMessageId: wireMessage.id, unreadCount: 5 });
     await settle();
     expect(query.items()[0].lastMessage?.id).toBe(testMessage.id);
+    expect(query.items()[0].unreadCount).toBe(5);
+  });
+
+  it('reads only the head page when a hidden list missed a new conversation', async () => {
+    http
+      .expectOne('/_api/chats?limit=50')
+      .flush(structuredClone({ chats: [wireChat], nextCursor: '9007199254740993' }));
+    await settle();
+    releaseQuery();
+    const otherId = encodeId('9007199254740995');
+    incoming.next({ ...testMessage, chatId: otherId });
+    http.expectNone('/_api/chats?limit=50');
+    releaseQuery = query.activate();
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...wireChat, id: decodeId(otherId) }] }));
+    await settle();
+    expect(new Set(query.items().map((chat) => chat.id))).toEqual(new Set([testChat.id, otherId]));
+    expect(query.hasMore()).toBe(true);
+  });
+
+  it('removes departed chats when a refresh stops before the list tail', async () => {
+    const chats = Array.from({ length: 51 }, (_, index) => ({
+      ...wireChat,
+      id: String(9007199254000000 + index * 2),
+      lastMessageAt: new Date(Date.UTC(2026, 0, 1, 0, 59 - index)).toISOString(),
+    }));
+    http
+      .expectOne('/_api/chats?limit=50')
+      .flush(structuredClone({ chats: chats.slice(0, 50), nextCursor: chats[49].id }));
+    await settle();
+    data.refreshChats();
+    expect(query.items()).toHaveLength(50);
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: chats.slice(1), nextCursor: chats[50].id }));
+    await settle();
+    expect(query.items().map((chat) => decodeId(chat.id))).toEqual(chats.slice(1).map((chat) => chat.id));
+    expect(query.hasMore()).toBe(true);
+  });
+
+  it.each([false, true])('bridges multiple hidden head pages with existing pagination=%s', async (paginated) => {
+    http.expectOne('/_api/chats?limit=50').flush(
+      structuredClone({
+        chats: [{ ...wireChat, lastMessageAt: '2025-01-01T00:00:00Z' }],
+        ...(paginated ? { nextCursor: wireChat.id } : {}),
+      }),
+    );
+    await settle();
+    releaseQuery();
+    const chats = Array.from({ length: 51 }, (_, index) => ({
+      ...wireChat,
+      id: String(9007199254000000 + index * 2),
+      lastMessageAt: new Date(Date.UTC(2026, 0, 1, 0, 59 - index)).toISOString(),
+    }));
+    for (const chat of chats)
+      incoming.next({ ...testMessage, chatId: encodeId(chat.id), createdAt: chat.lastMessageAt });
+    releaseQuery = query.activate();
+    http
+      .expectOne('/_api/chats?limit=50')
+      .flush(structuredClone({ chats: chats.slice(0, 50), nextCursor: chats[49].id }));
+    await settle();
+    http.expectOne(`/_api/chats?limit=50&after=${chats[49].id}`).flush(structuredClone({ chats: chats.slice(50) }));
+    await settle();
+    expect(new Set(query.items().map((chat) => decodeId(chat.id)))).toEqual(
+      new Set([wireChat.id, ...chats.map((chat) => chat.id)]),
+    );
+    expect(query.hasMore()).toBe(paginated);
+    if (paginated) {
+      const loading = query.loadMore();
+      http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush({ chats: [] });
+      await loading;
+    }
+  });
+
+  it('stops head reconciliation once it overlaps the previous coverage', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(
+      structuredClone({
+        chats: [{ ...wireChat, lastMessageAt: '2026-01-02T00:00:00Z' }],
+        nextCursor: wireChat.id,
+      }),
+    );
+    await settle();
+    releaseQuery();
+    const otherId = '9007199254000000';
+    incoming.next({ ...testMessage, chatId: encodeId(otherId) });
+    releaseQuery = query.activate();
+    http.expectOne('/_api/chats?limit=50').flush(
+      structuredClone({
+        chats: [{ ...wireChat, id: otherId, lastMessageAt: '2026-01-03T00:00:00Z' }],
+        nextCursor: otherId,
+      }),
+    );
+    await settle();
+    const olderId = '9007199254000002';
+    http.expectOne(`/_api/chats?limit=50&after=${otherId}`).flush(
+      structuredClone({
+        chats: [{ ...wireChat, id: olderId, lastMessageAt: '2026-01-01T00:00:00Z' }],
+        nextCursor: olderId,
+      }),
+    );
+    await settle();
+    http.expectNone(`/_api/chats?limit=50&after=${olderId}`);
+    expect(query.loadedThrough()).toBe(Date.parse('2026-01-02T00:00:00Z'));
+    const loading = query.loadMore();
+    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush({ chats: [] });
+    await loading;
+  });
+
+  it('still reloads a hidden list after a resync', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    releaseQuery();
+    resync.next();
+    http.expectNone('/_api/chats?limit=50');
+    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    releaseQuery = query.activate();
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    expect(query.items()).toHaveLength(1);
   });
 
   it('does not use a stale cursor after a refresh fails', async () => {
