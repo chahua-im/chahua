@@ -26,7 +26,9 @@ describe('messageHasMarkdown', () => {
   });
 
   it('detects the supported block constructs', () => {
-    expect(messageHasMarkdown('> quote')).toBe(true);
+    expect(messageHasMarkdown('> quote')).toBe(false);
+    expect(messageHasMarkdown('>> nested')).toBe(false);
+    expect(messageHasMarkdown('> **bold**')).toBe(true);
     expect(messageHasMarkdown('- item')).toBe(true);
     expect(messageHasMarkdown('1. item')).toBe(true);
     expect(messageHasMarkdown('```\ncode\n```')).toBe(true);

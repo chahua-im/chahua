@@ -83,12 +83,6 @@ function previewBlocks(tokens: readonly Token[], options: MarkdownRenderOptions)
         i = closeIndex + 1;
         break;
       }
-      case 'blockquote_open': {
-        const closeIndex = findMatchingTokenEnd(tokens, i);
-        addUnit(previewBlocks(tokens.slice(i + 1, closeIndex), options));
-        i = closeIndex + 1;
-        break;
-      }
       case 'fence':
       case 'code_block': {
         const text = token.content.replace(/\s*\n+\s*/g, ' ').trim();

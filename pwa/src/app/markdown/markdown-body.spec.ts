@@ -36,7 +36,7 @@ describe('MarkdownBody presentation', () => {
     const fixture = render('> **quote**\n\n```\ncode\n```');
     const host = fixture.nativeElement as HTMLElement;
     const scope = host
-      .querySelector('blockquote')!
+      .querySelector('p')!
       .getAttributeNames()
       .find((name) => name.startsWith('_ngcontent-'));
     expect(scope).toBeDefined();

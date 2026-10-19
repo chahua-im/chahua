@@ -203,12 +203,13 @@ function spoilerPost(state: StateInline): void {
  * ------------------------------------------------------------------------- */
 
 /**
- * Rules disabled so their syntax renders as literal text. Headings, horizontal
+ * Rules disabled so their syntax renders as literal text. Blockquotes, headings, horizontal
  * rules, images, reference links, autolinks, HTML and entities are NOT part of
  * chahua's subset.
  */
 const DISABLED_RULES = [
   // block
+  'blockquote',
   'table',
   'code', // 4-space indented code block
   'hr',
@@ -244,7 +245,7 @@ const TAB = 0x09;
  * lone `*`) is NOT a list. Dash/plus and numbered lists remain supported.
  * Returning `false` lets the lower-priority
  * rules (paragraph) render the line literally, in every context the native
- * list rule is consulted (top level, inside blockquotes, nested items...).
+ * list rule is consulted (top level, nested items...).
  */
 function starAwareListRule(
   nativeList: InternalBlockRule['fn'],

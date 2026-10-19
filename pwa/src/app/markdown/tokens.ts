@@ -18,7 +18,6 @@ const MEANINGFUL_TOKEN_TYPES = new Set<string>([
   'heading_open',
   'bullet_list_open',
   'ordered_list_open',
-  'blockquote_open',
   'hr',
   'fence',
   'code_block',
@@ -44,7 +43,7 @@ export function tokensContainMarkup(tokens: readonly Token[]): boolean {
 }
 
 /**
- * True when the body needs block layout: a heading / list / quote / fence /
+ * True when the body needs block layout: a heading / list / fence /
  * code block / hr, or more than one paragraph. Purely inline formatting stays
  * inline.
  */
@@ -59,7 +58,6 @@ export function tokensContainBlocks(tokens: readonly Token[]): boolean {
       case 'heading_open':
       case 'bullet_list_open':
       case 'ordered_list_open':
-      case 'blockquote_open':
       case 'hr':
       case 'fence':
       case 'code_block':
