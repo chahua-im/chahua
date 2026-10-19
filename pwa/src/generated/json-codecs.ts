@@ -340,6 +340,9 @@ export const jsonOperations: JsonOperationCodec[] = [
     method: 'GET',
     path: '/chats/{chat_id}/mentions',
     response: 'UnreadMentionIdsResponse',
+    query: {
+      threadId: 1,
+    },
   },
   {
     method: 'GET',
@@ -397,7 +400,6 @@ export const jsonOperations: JsonOperationCodec[] = [
     method: 'POST',
     path: '/chats/{chat_id}/reactions/read',
     body: 'AcknowledgeReactionsBody',
-    response: 'UnreadReactionsAckResponse',
   },
   {
     method: 'POST',

@@ -9,6 +9,8 @@ import { decodeId } from '../../../app/api/snowflake-id';
 import type {
   GetChatAttachmentsParams,
   GetChatReadReceiptParams,
+  GetChatMentionsParams,
+  GetChatReactionsParams,
   GetChatsParams,
   GetMessagesParams,
   ListChatAttachmentsResponse,
@@ -24,6 +26,8 @@ import type {
   SearchMessagesResponse,
   SnowflakeID,
   UnreadCountResponse,
+  UnreadMentionIdsResponse,
+  UnreadReactionIdsResponse,
 } from '../../models';
 import { HttpHeaders, httpResource } from '@angular/common/http';
 import type { HttpContext, HttpResourceOptions, HttpResourceRef, HttpResourceRequest } from '@angular/common/http';
@@ -239,6 +243,35 @@ export function getChatAttachmentsResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getChatMentionsResource(
+  chatId: Signal<SnowflakeID>,
+  params: Signal<GetChatMentionsParams> | undefined,
+  options: OrvalHttpResourceOptions<UnreadMentionIdsResponse, unknown> & {
+    defaultValue: NoInfer<UnreadMentionIdsResponse>;
+  },
+): HttpResourceRef<UnreadMentionIdsResponse>;
+export function getChatMentionsResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatMentionsParams>,
+  options?: OrvalHttpResourceOptions<UnreadMentionIdsResponse, unknown>,
+): HttpResourceRef<UnreadMentionIdsResponse | undefined>;
+export function getChatMentionsResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatMentionsParams>,
+  options?: OrvalHttpResourceOptions<UnreadMentionIdsResponse, unknown>,
+): HttpResourceRef<UnreadMentionIdsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<UnreadMentionIdsResponse>(() => {
+    const request = {
+      url: `${baseUrl}/chats/${decodeId(chatId())}/mentions`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function getMessagesResource(
   chatId: Signal<SnowflakeID>,
   params: Signal<GetMessagesParams> | undefined,
@@ -383,6 +416,35 @@ export function getChatReadReceiptResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getChatReactionsResource(
+  chatId: Signal<SnowflakeID>,
+  params: Signal<GetChatReactionsParams> | undefined,
+  options: OrvalHttpResourceOptions<UnreadReactionIdsResponse, unknown> & {
+    defaultValue: NoInfer<UnreadReactionIdsResponse>;
+  },
+): HttpResourceRef<UnreadReactionIdsResponse>;
+export function getChatReactionsResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatReactionsParams>,
+  options?: OrvalHttpResourceOptions<UnreadReactionIdsResponse, unknown>,
+): HttpResourceRef<UnreadReactionIdsResponse | undefined>;
+export function getChatReactionsResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatReactionsParams>,
+  options?: OrvalHttpResourceOptions<UnreadReactionIdsResponse, unknown>,
+): HttpResourceRef<UnreadReactionIdsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<UnreadReactionIdsResponse>(() => {
+    const request = {
+      url: `${baseUrl}/chats/${decodeId(chatId())}/reactions`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function listChatSavedMessagesResource(
   chatId: Signal<SnowflakeID>,
   params: Signal<ListChatSavedMessagesParams> | undefined,
@@ -435,11 +497,13 @@ export function getChatUnreadCountResource(
 export type GetChatsResourceResult = NonNullable<ListChatsResponse>;
 export type GetUnreadCountResourceResult = NonNullable<UnreadCountResponse>;
 export type GetChatAttachmentsResourceResult = NonNullable<ListChatAttachmentsResponse>;
+export type GetChatMentionsResourceResult = NonNullable<UnreadMentionIdsResponse>;
 export type GetMessagesResourceResult = NonNullable<ListMessagesResponse>;
 export type SearchMessagesResourceResult = NonNullable<SearchMessagesResponse>;
 export type GetMessageResourceResult = NonNullable<MessageResponse>;
 export type GetReactionDetailsResourceResult = NonNullable<ReactionDetailResponse>;
 export type GetChatReadReceiptResourceResult = NonNullable<ReadReceiptResponse>;
+export type GetChatReactionsResourceResult = NonNullable<UnreadReactionIdsResponse>;
 export type ListChatSavedMessagesResourceResult = NonNullable<ListSavedMessagesResponse>;
 export type GetChatUnreadCountResourceResult = NonNullable<MarkChatReadStateResponse>;
 /**

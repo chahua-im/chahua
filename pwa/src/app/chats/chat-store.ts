@@ -281,8 +281,8 @@ export class ChatStore {
           state: {
             lastReadMessageId: chat.lastReadMessageId,
             unreadCount: chat.unreadCount,
-            unreadMentions: chat.unreadMentions,
-            unreadReactions: chat.unreadReactions,
+            unreadMentions: chat.unreadMentions ?? 0,
+            unreadReactions: chat.unreadReactions ?? 0,
           },
           version,
           dirty: false,
@@ -413,6 +413,11 @@ export class ChatStore {
   unreadReactions(chatId: SnowflakeID, threadId?: SnowflakeID) {
     const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
     return read?.state.unreadReactions ?? 0;
+  }
+
+  unreadMentions(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
+    return read?.state.unreadMentions ?? 0;
   }
 
   /** Apply a chat-level reaction acknowledge response (count for the scope). */
@@ -645,7 +650,7 @@ export class ChatStore {
       if ((summaries.get(rootId)?.version ?? 0) <= version) summaries.set(rootId, { value: summary, version });
       if ((reads.get(rootId)?.version ?? 0) <= version)
         reads.set(rootId, {
-          state: { lastReadMessageId, unreadCount, unreadMentions, unreadReactions },
+          state: { lastReadMessageId, unreadCount, unreadMentions: unreadMentions ?? 0, unreadReactions: unreadReactions ?? 0 },
           version,
           dirty: false,
         });

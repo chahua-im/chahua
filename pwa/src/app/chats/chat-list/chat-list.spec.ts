@@ -44,6 +44,8 @@ describe('ChatList', () => {
           useValue: {
             unread: { value: signal({ unreadChatCount: 2 }), activate: vi.fn(() => vi.fn()) },
             threadUnread: { value: signal({ unreadThreadCount: 3 }), activate: vi.fn(() => vi.fn()) },
+            chats: () => ({ items: signal([]) }),
+            threads: () => ({ items: signal([]) }),
           },
         },
         { provide: Preferences, useValue: { showThreadsInMessages: signal(true) } },
@@ -67,6 +69,38 @@ describe('ChatList', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     TestBed.inject(VoicePlayback).active.set(undefined);
+  });
+
+  it('uses complete mention categories even when none of their rows are loaded', () => {
+    const lists = TestBed.inject(ChatListStore);
+    const summary = signal({
+      unreadCount: 1,
+      archivedUnreadCount: 0,
+      unreadChatCount: 1,
+      archivedUnreadChatCount: 0,
+      mentionBadges: { groups: true, friends: false, threads: true },
+      archivedMentionBadges: { groups: false, friends: true, threads: false },
+    });
+    Object.assign(lists.unread, { value: summary });
+    // Recreate to track the replacement summary signal from the initial read.
+    fixture.destroy();
+    fixture = TestBed.createComponent(ChatList);
+    fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: false, requestHistory: false });
+    fixture.detectChanges();
+    expect(fixture.componentInstance['tabMentions']()).toEqual({
+      messages: true,
+      groups: true,
+      friends: false,
+      threads: true,
+    });
+    fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: true, requestHistory: false });
+    fixture.detectChanges();
+    expect(fixture.componentInstance['tabMentions']()).toEqual({
+      messages: true,
+      groups: false,
+      friends: true,
+      threads: false,
+    });
   });
 
   it('shows the playing voice bar in the header and releases it on dismissal', () => {

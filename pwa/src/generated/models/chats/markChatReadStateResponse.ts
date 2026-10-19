@@ -10,6 +10,6 @@ import type { SnowflakeID } from '../snowflakeID';
 export interface MarkChatReadStateResponse {
   lastReadMessageId?: SnowflakeID;
   unreadCount: number;
-  unreadMentions: number;
-  unreadReactions: number;
+  unreadMentions?: number;
+  unreadReactions?: number;
 }

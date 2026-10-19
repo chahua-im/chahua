@@ -27,5 +27,4 @@ export enum ServerWsMessageType {
   friendRequestReceived = 'friendRequestReceived',
   friendRequestResolved = 'friendRequestResolved',
   friendshipRemoved = 'friendshipRemoved',
-  notification = 'notification',
 }

@@ -95,6 +95,16 @@ export class ChatList {
     const threads = this.preferences.showThreadsInMessages() ? this.lists.threadUnread.value()?.unreadThreadCount : 0;
     return chats == null || threads == null ? undefined : chats + threads;
   });
+  protected readonly tabMentions = computed(() => {
+    const summary = this.lists.unread.value();
+    const badges = this.list().archived ? summary?.archivedMentionBadges : summary?.mentionBadges;
+    return {
+      messages: !!(badges?.groups || badges?.friends || (this.preferences.showThreadsInMessages() && badges?.threads)),
+      groups: badges?.groups ?? false,
+      friends: badges?.friends ?? false,
+      threads: badges?.threads ?? false,
+    };
+  });
 
   constructor() {
     effect((onCleanup) => {

@@ -88,6 +88,7 @@ describe('ChatStore', () => {
       subscribedAt: '2026-09-05T12:00:00Z',
       archived: false,
       unreadCount: 3,
+      unreadMentions: 0,
       unreadReactions: 2,
     };
     store.acceptThreads([thread], store.snapshot(), store.subscriptionSnapshot());
@@ -95,6 +96,36 @@ describe('ChatStore', () => {
 
     store.applyReactionRead(testChat.id, rootId, 0);
     expect(store.thread(rootId)?.unreadReactions).toBe(0);
+    http.expectNone(url);
+  });
+
+  it('carries chat and thread unread mentions from list snapshots', () => {
+    store.acceptChats([{ ...testChat, unreadMentions: 2 }], store.snapshot());
+    expect(store.unreadMentions(testChat.id)).toBe(2);
+    expect(store.chat(testChat.id).unreadMentions).toBe(2);
+
+    const rootId = encodeId('9007199254741998');
+    store.acceptThreads(
+      [
+        {
+          chatId: testChat.id,
+          chatName: testChat.name ?? '测试群',
+          threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
+          participants: [],
+          replyCount: 0,
+          lastReplyAt: '2026-09-05T12:00:00Z',
+          subscribedAt: '2026-09-05T12:00:00Z',
+          archived: false,
+          unreadCount: 0,
+          unreadMentions: 1,
+          unreadReactions: 0,
+        },
+      ],
+      store.snapshot(),
+      store.subscriptionSnapshot(),
+    );
+    expect(store.unreadMentions(testChat.id, rootId)).toBe(1);
+    expect(store.thread(rootId)?.unreadMentions).toBe(1);
     http.expectNone(url);
   });
 

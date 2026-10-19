@@ -53,6 +53,20 @@ describe('ChatListItem', () => {
     expect(fixture.nativeElement.querySelector('ion-item-options')).toBeNull();
   });
 
+  it('renders a mention badge without a numeric unread count', async () => {
+    fixture.componentRef.setInput('entry', {
+      title: '测试群',
+      subtitle: '最新消息',
+      link: ['/chats/chat', 'chat-1'],
+      unreadMentions: 1,
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const badge = fixture.nativeElement.querySelector('ion-badge.mention-badge');
+    expect(badge).not.toBeNull();
+    expect(badge.textContent.trim()).toBe('@');
+  });
+
   it('renders a reaction badge without a numeric unread count', async () => {
     fixture.componentRef.setInput('entry', {
       title: '测试群',

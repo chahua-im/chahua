@@ -48,6 +48,7 @@ import {
   archiveOutline,
   arrowUndoOutline,
   createOutline,
+  at,
   chevronBack,
   chevronDown,
   chevronUpOutline,
@@ -583,8 +584,17 @@ export class ConversationPage {
   protected readonly reactionJumpIds = signal<SnowflakeID[]>([]);
   protected readonly reactionRemaining = computed(() => this.reactionJumpIds().length);
   protected readonly canJumpReaction = computed(() => this.active() && this.reactionRemaining() > 0);
+  protected readonly mentionIcon = at;
+  protected readonly mentionJumpIds = signal<SnowflakeID[]>([]);
+  protected readonly mentionRemaining = computed(() => this.mentionJumpIds().length);
+  protected readonly canJumpMention = computed(() => this.active() && this.mentionRemaining() > 0);
+  /** Stack the mention FAB above the reaction FAB when both are visible. */
+  protected readonly mentionFabOffset = computed(
+    () => (this.showDownButton() ? 72 : 16) + (this.canJumpReaction() ? 56 : 0),
+  );
   private reactionSessionEntered = false;
   private reactionRequest?: { again: boolean };
+  private mentionRequest?: { again: boolean };
   private readonly playback = inject(VoicePlayback);
   protected readonly savedReplyId = linkedSignal({
     source: this.entryVersion,
@@ -719,17 +729,21 @@ export class ConversationPage {
       }
       if (
         event.type === ServerWsMessageType.notification &&
-        event.payload.notificationType === NotificationType.reaction &&
         event.payload.chatId === this.id() &&
         event.payload.threadRootId === (this.threadId() ?? null)
       ) {
-        void this.enterReactionSession();
+        if (event.payload.notificationType === NotificationType.reaction) {
+          void this.enterReactionSession();
+        } else {
+          void this.enterMentionSession();
+        }
       }
     });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
       if (this.isCurrent()) {
         const entry = this.entryKey();
         void this.enterReactionSession();
+        void this.enterMentionSession();
         void this.conversation.reconnect();
         void this.loadPins();
         this.invalidateReadReceipt();
@@ -791,6 +805,7 @@ export class ConversationPage {
 
   private activate(id: SnowflakeID, threadId?: SnowflakeID) {
     this.resetReactionSession();
+    this.resetMentionSession();
     this.scrolling.reset();
     this.entryVersion.update((version) => version + 1);
     this.active.set(true);
@@ -801,6 +816,7 @@ export class ConversationPage {
     this.conversation.reset(id, threadId);
     if (this.entered) {
       void this.enterReactionSession();
+      void this.enterMentionSession();
     }
     void this.loadPins();
     void this.loadThreadRoot();
@@ -827,6 +843,7 @@ export class ConversationPage {
     this.entered = true;
     void this.positionAndRead();
     void this.enterReactionSession();
+    void this.enterMentionSession();
   }
 
   ionViewWillLeave() {
@@ -871,6 +888,7 @@ export class ConversationPage {
     this.navigationVersion++;
     this.position.set(undefined);
     this.resetReactionSession();
+    this.resetMentionSession();
     if (retainRange) {
       this.conversation.cancelLoading();
       if (!retainComposer) this.cancelEdit();
@@ -994,6 +1012,7 @@ export class ConversationPage {
     if (this.document.hidden) this.saveDraft();
     else {
       void this.enterReactionSession();
+      void this.enterMentionSession();
     }
   }
 
@@ -1067,6 +1086,50 @@ export class ConversationPage {
       if (entry !== this.entryKey()) return;
       const missing = this.conversation.error() === ConversationError.Missing;
       if (reached === true || missing) this.reactionJumpIds.update((ids) => ids.filter((id) => id !== target));
+      if (reached === true || !missing) return;
+    }
+  }
+
+  private resetMentionSession() {
+    this.mentionRequest = undefined;
+    this.mentionJumpIds.set([]);
+  }
+
+  private async enterMentionSession() {
+    if (this.document.hidden || !this.isCurrent()) return;
+    if (this.mentionRequest) {
+      this.mentionRequest.again = true;
+      return;
+    }
+    const entry = this.entryKey();
+    const chatId = this.id();
+    const threadId = this.threadId();
+    const request = { again: false };
+    this.mentionRequest = request;
+    try {
+      do {
+        request.again = false;
+        const response = await firstValueFrom(
+          this.api.getChatMentions(chatId, { threadId }).pipe(takeUntilDestroyed(this.destroyRef)),
+        );
+        if (this.mentionRequest !== request || !this.isCurrent(entry) || this.document.hidden) return;
+        this.mentionJumpIds.update((ids) => [...new Set([...ids, ...response.messageIds])].sort((a, b) => b - a));
+      } while (request.again && this.mentionRequest === request && this.isCurrent(entry) && !this.document.hidden);
+    } catch {
+      // Keep session targets; entry/resync retries without acknowledging mentions.
+    } finally {
+      if (this.mentionRequest === request) this.mentionRequest = undefined;
+    }
+  }
+
+  protected async jumpToNextMention() {
+    while (this.mentionJumpIds().length) {
+      const target = this.mentionJumpIds().at(-1)!;
+      const entry = this.entryKey();
+      const reached = await this.goTo({ type: ConversationTargetKind.Message, messageId: target });
+      if (entry !== this.entryKey()) return;
+      const missing = this.conversation.error() === ConversationError.Missing;
+      if (reached === true || missing) this.mentionJumpIds.update((ids) => ids.filter((id) => id !== target));
       if (reached === true || !missing) return;
     }
   }

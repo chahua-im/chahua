@@ -259,6 +259,18 @@
       </ion-fab-button>
       <ion-badge>{{ reactionRemaining() }}</ion-badge>
     </ion-fab>
+    <ion-fab
+      class="history-navigation mention-navigation"
+      slot="fixed"
+      vertical="bottom"
+      horizontal="end"
+      [style.margin-bottom.px]="mentionFabOffset()"
+      [style.visibility]="canJumpMention() ? 'visible' : 'hidden'">
+      <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextMention()">
+        <ion-icon class="action-icon" [icon]="mentionIcon"></ion-icon>
+      </ion-fab-button>
+      <ion-badge>{{ mentionRemaining() }}</ion-badge>
+    </ion-fab>
   }
 </ion-content>
 <ion-footer #composerFooter>
