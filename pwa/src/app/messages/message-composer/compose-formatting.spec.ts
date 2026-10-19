@@ -1,9 +1,19 @@
+import { Preferences } from '../../settings/preferences';
 import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { testChat, testMessage } from '../../api/testing';
 import { markdownEngine } from '../../markdown/engine';
 import { MessageComposer } from './message-composer';
+
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe('Composer formatting shortcuts', () => {
   let fixture: ComponentFixture<MessageComposer>;
@@ -41,6 +51,21 @@ describe('Composer formatting shortcuts', () => {
     fixture.detectChanges();
     return event;
   }
+
+  it.each(['b', 'i'])('leaves %s shortcuts untouched when Markdown is disabled', async (value) => {
+    const preferences = TestBed.inject(Preferences);
+    preferences.setMarkdownEnabled(false);
+    try {
+      for (const init of [{ ctrlKey: true }, { metaKey: true }]) {
+        select('hello');
+        const event = await key(value, init);
+        expect(composer.text()).toBe('hello');
+        expect(event.defaultPrevented).toBe(false);
+      }
+    } finally {
+      preferences.setMarkdownEnabled(true);
+    }
+  });
 
   it.each([
     { key: 'b', ctrlKey: true, marker: '**', tag: 'strong' },

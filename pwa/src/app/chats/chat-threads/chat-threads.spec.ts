@@ -1,3 +1,4 @@
+import { Preferences } from '../../settings/preferences';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
@@ -12,6 +13,12 @@ import { ChatThreads } from './chat-threads';
 
 const path = `/_api/chats/${wireChat.id}/messages`;
 const topic = { ...wireMessage, threadInfo: { replyCount: 4 } };
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [{ provide: Preferences, useValue: { markdownEnabled: () => true } }],
+  });
+});
 
 describe('ChatThreads', () => {
   let http: HttpTestingController;

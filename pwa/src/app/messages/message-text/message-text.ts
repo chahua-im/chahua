@@ -1,3 +1,4 @@
+import { Preferences } from '../../settings/preferences';
 import { Component, computed, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
 import { SessionStore } from '../../session/session-store';
@@ -135,13 +136,16 @@ export function prepareMessageContent(
   imports: [MarkdownBody],
 })
 export class MessageText {
+  private readonly preferences = inject(Preferences);
   readonly text = input('');
   readonly mentions = input<readonly MentionInfo[]>([]);
   readonly interactive = input(true);
   protected readonly currentUserUid = computed(() => this.session.user()?.uid);
   protected readonly parts = computed(() => messageParts(this.text(), this.mentions()));
   protected readonly prepared = computed(() =>
-    prepareMessageContent(this.text(), this.mentions(), this.currentUserUid(), this.interactive()),
+    this.preferences.markdownEnabled()
+      ? prepareMessageContent(this.text(), this.mentions(), this.currentUserUid(), this.interactive())
+      : { isMarkdown: false, hasBlocks: false, nodes: null },
   );
   private readonly router = inject(Router);
   private readonly session = inject(SessionStore);

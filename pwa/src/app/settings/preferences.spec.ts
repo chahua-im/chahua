@@ -43,6 +43,17 @@ describe('Preferences', () => {
     expect(TestBed.inject(Preferences).showAllAvatars()).toBe(false);
     expect(TestBed.inject(Preferences).showDmDetails()).toBe(true);
   });
+  it('enables Markdown by default and restores the saved choice', () => {
+    const preferences = TestBed.inject(Preferences);
+    expect(preferences.markdownEnabled()).toBe(true);
+    preferences.setMarkdownEnabled(false);
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).markdownEnabled()).toBe(false);
+    TestBed.inject(Preferences).setMarkdownEnabled(true);
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).markdownEnabled()).toBe(true);
+  });
+
   it('remembers the last five distinct reactions across fresh service instances', () => {
     const preferences = TestBed.inject(Preferences);
     for (const emoji of ['👍', '❤️', '😂', '😮', '😢', '🍵', '❤️']) preferences.rememberReaction(emoji);

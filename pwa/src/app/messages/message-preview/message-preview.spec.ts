@@ -1,8 +1,15 @@
+import { Preferences } from '../../settings/preferences';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { testMessage } from '../../api/testing';
 import { MessagePreview } from './message-preview';
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [{ provide: Preferences, useValue: { markdownEnabled: () => true } }],
+  });
+});
 
 describe('MessagePreview', () => {
   let fixture: ComponentFixture<MessagePreview>;

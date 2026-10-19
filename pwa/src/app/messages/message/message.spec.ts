@@ -1,3 +1,4 @@
+import { Preferences } from '../../settings/preferences';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -10,6 +11,12 @@ import { testMessage } from '../../api/testing';
 import { MessageDelivery } from '../message-delivery';
 import { UploadStatus, type AttachmentUpload } from '../upload';
 import { Message, type MessageContent } from './message';
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [{ provide: Preferences, useValue: { markdownEnabled: () => true } }],
+  });
+});
 
 describe('Message', () => {
   beforeEach(() => vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false })));
