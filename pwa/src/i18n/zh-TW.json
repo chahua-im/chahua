@@ -372,7 +372,9 @@
         "copy": "複製",
         "edit": "編輯",
         "save": "收藏",
+        "unsave": "取消收藏",
         "favoriteSticker": "收藏表情",
+        "unfavoriteSticker": "取消收藏表情",
         "link": "連結",
         "recall": "收回",
         "reactions": "查看表態"
@@ -389,6 +391,7 @@
       "notice": {
         "copied": "已複製",
         "saved": "已收藏",
+        "unsaved": "已取消收藏",
         "pinned": "已置頂",
         "unpinned": "已取消置頂",
         "recalled": "已收回",

@@ -16,10 +16,10 @@ import {
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast } from '@ionic/angular';
-import { firstValueFrom } from 'rxjs';
 import {
   addOutline,
   arrowUndoOutline,
+  bookmark,
   bookmarkOutline,
   chatbubblesOutline,
   chevronDown,
@@ -28,12 +28,12 @@ import {
   linkOutline,
   peopleOutline,
   createOutline,
+  heart,
   heartOutline,
   pinOutline,
   trashOutline,
 } from 'ionicons/icons';
 import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
-import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import { copyText } from '../../api/clipboard';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
@@ -46,6 +46,8 @@ import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
 import { messageParts } from '../message-text/message-text';
 import { Message, type MessageContent, type MessageMenuSelection } from '../message/message';
 import { exceedsReactionLimit } from '../reaction-state';
+import { SavedMessageStore } from '../saved-message-store';
+import { StickerFavorites } from '../sticker-favorites';
 
 export enum MessageAction {
   Reply,
@@ -97,7 +99,8 @@ export class MessageMenu {
   private readonly chatInfo = inject(ChatStore);
   private readonly session = inject(SessionStore);
   private readonly messageActions = inject(MessageActions);
-  private readonly stickers = inject(StickersService);
+  private readonly savedMessages = inject(SavedMessageStore);
+  private readonly favoriteStickers = inject(StickerFavorites);
   private readonly outbox = inject(MessageOutbox);
   private readonly document = inject(DOCUMENT);
   private readonly modal = viewChild(IonModal);
@@ -135,6 +138,14 @@ export class MessageMenu {
     const message = this.serverMessage();
     return !this.queued() && !!message && !!this.pins().get(message.id);
   });
+  protected readonly saved = computed(() => {
+    const message = this.serverMessage();
+    return !this.queued() && !!message && this.savedMessages.isSaved(this.chatId(), message.id);
+  });
+  protected readonly favorited = computed(() => {
+    const sticker = this.serverMessage()?.sticker;
+    return !!sticker && this.favoriteStickers.isFavorite(sticker.id);
+  });
   private readonly preferences = inject(Preferences);
   private readonly router = inject(Router);
   protected readonly recent = this.preferences.recentReactions;
@@ -163,18 +174,18 @@ export class MessageMenu {
   });
   protected readonly Action = MessageAction;
   protected readonly icons = { addOutline, chevronDown, chevronUp };
-  protected readonly actionIcons: Record<MessageAction, string> = {
+  protected readonly actionIcons = computed<Record<MessageAction, string>>(() => ({
     [MessageAction.Reply]: arrowUndoOutline,
     [MessageAction.Thread]: chatbubblesOutline,
     [MessageAction.Pin]: pinOutline,
     [MessageAction.Copy]: copyOutline,
     [MessageAction.Edit]: createOutline,
-    [MessageAction.Save]: bookmarkOutline,
-    [MessageAction.FavoriteSticker]: heartOutline,
+    [MessageAction.Save]: this.saved() ? bookmark : bookmarkOutline,
+    [MessageAction.FavoriteSticker]: this.favorited() ? heart : heartOutline,
     [MessageAction.Link]: linkOutline,
     [MessageAction.Recall]: trashOutline,
     [MessageAction.Reactions]: peopleOutline,
-  };
+  }));
   protected readonly choosingEmoji = signal(false);
   protected readonly placed = signal(false);
   private readonly stack = viewChild<ElementRef<HTMLElement>>('stack');
@@ -260,7 +271,7 @@ export class MessageMenu {
       add(MessageAction.Pin, { disabled: this.pins().loading() || this.busy() });
     if (this.canCopy()) add(MessageAction.Copy);
     if (writable && this.canEdit()) add(MessageAction.Edit, { disabled: !this.queued() && !this.canReply() });
-    if (this.canSave()) add(MessageAction.Save);
+    if (this.canSave()) add(MessageAction.Save, { disabled: this.savedMessages.loading(this.chatId()) });
     else if (
       message &&
       !this.queued() &&
@@ -268,7 +279,7 @@ export class MessageMenu {
       message.messageType === MessageType.sticker &&
       message.sticker
     )
-      add(MessageAction.FavoriteSticker);
+      add(MessageAction.FavoriteSticker, { disabled: this.favoriteStickers.loading() });
     if (message && !this.queued() && !this.dm() && message.messageType !== MessageType.invite) add(MessageAction.Link);
     if (writable && this.canRecall()) add(MessageAction.Recall, { destructive: true });
     if (this.canReact() && message?.reactions?.length) add(MessageAction.Reactions);
@@ -283,6 +294,9 @@ export class MessageMenu {
       if (this.queued() || !this.serverMessage()) return;
       untracked(() => {
         const version = this.version;
+        // A missing saved-state read only costs the 收藏 label, so it stays out of the permission notice.
+        void this.savedMessages.ensure(this.chatId()).catch(() => undefined);
+        if (this.serverMessage()?.sticker) void this.favoriteStickers.ensure();
         void Promise.all([this.chatInfo.ensureDetails(this.chatId()), this.pins().ensure()]).catch(() => {
           if (version === this.version) this.notice.set(MessageNotice.MetadataFailed);
         });
@@ -507,6 +521,8 @@ export class MessageMenu {
       return;
     }
     const pinned = this.pinned();
+    const saved = this.saved();
+    const favorited = this.favorited();
     await this.close();
     if (version !== this.version) return;
     switch (action) {
@@ -534,15 +550,17 @@ export class MessageMenu {
         this.confirmation.set({ action, message, pinned });
         break;
       case MessageAction.Save:
-        await this.perform(() => this.messageActions.save(message), MessageNotice.Saved, message.id);
+        await this.perform(
+          () => (saved ? this.savedMessages.unsave(message) : this.savedMessages.save(message)),
+          saved ? MessageNotice.Unsaved : MessageNotice.Saved,
+        );
         break;
       case MessageAction.FavoriteSticker: {
         const sticker = message.sticker;
         if (sticker)
           await this.perform(
-            () => firstValueFrom(this.stickers.putFavorite(sticker.id)),
-            MessageNotice.Saved,
-            message.id,
+            () => this.favoriteStickers.set(sticker.id, !favorited),
+            favorited ? MessageNotice.Unsaved : MessageNotice.Saved,
           );
         break;
       }
@@ -574,14 +592,10 @@ export class MessageMenu {
     void this.close();
     // The server refuses reactions in a read-only DM, so the tap only dismisses the menu.
     if (this.readOnly()) return;
-    await this.perform(
-      async () => {
-        await this.messageActions.toggleReaction(message, emoji);
-        if (version === this.version) this.preferences.rememberReaction(emoji);
-      },
-      undefined,
-      message.id,
-    );
+    await this.perform(async () => {
+      await this.messageActions.toggleReaction(message, emoji);
+      if (version === this.version) this.preferences.rememberReaction(emoji);
+    });
   }
 
   private canRecallMessage(message: MessageResponse) {

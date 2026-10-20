@@ -68,9 +68,6 @@
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
       <div class="bubble-surface">
-        @if (busy()) {
-          <span class="acting"><ion-spinner></ion-spinner></span>
-        }
         @if (first() && !isSticker() && showDetails()) {
           <app-message-author
             class="sender"
@@ -143,6 +140,9 @@
           <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
         }
       </div>
+      @if (busy()) {
+        <span class="acting"><ion-spinner></ion-spinner></span>
+      }
     </div>
     @if (status() === Delivery.Failed && !preview()) {
       <button type="button" class="retry-button" (click)="retry.emit()">

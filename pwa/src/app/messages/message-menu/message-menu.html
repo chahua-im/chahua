@@ -60,7 +60,7 @@
                       [class.destructive]="slot.destructive"
                       [disabled]="slot.disabled"
                       (click)="choose(slot.action)">
-                      <ion-icon [icon]="actionIcons[slot.action]"></ion-icon>
+                      <ion-icon [icon]="actionIcons()[slot.action]"></ion-icon>
                       <span>
                         @switch (slot.action) {
                           @case (Action.Reply) {
@@ -79,10 +79,15 @@
                             {{ 'messages.menu.actions.edit' | transloco }}
                           }
                           @case (Action.Save) {
-                            {{ 'messages.menu.actions.save' | transloco }}
+                            {{ (saved() ? 'messages.menu.actions.unsave' : 'messages.menu.actions.save') | transloco }}
                           }
                           @case (Action.FavoriteSticker) {
-                            {{ 'messages.menu.actions.favoriteSticker' | transloco }}
+                            {{
+                              (favorited()
+                                ? 'messages.menu.actions.unfavoriteSticker'
+                                : 'messages.menu.actions.favoriteSticker'
+                              ) | transloco
+                            }}
                           }
                           @case (Action.Link) {
                             {{ 'messages.menu.actions.link' | transloco }}
@@ -139,15 +144,17 @@
       ? ('messages.menu.notice.copied' | transloco)
       : notice() === Notice.Saved
         ? ('messages.menu.notice.saved' | transloco)
-        : notice() === Notice.Pinned
-          ? ('messages.menu.notice.pinned' | transloco)
-          : notice() === Notice.Unpinned
-            ? ('messages.menu.notice.unpinned' | transloco)
-            : notice() === Notice.Recalled
-              ? ('messages.menu.notice.recalled' | transloco)
-              : notice() === Notice.ReactionLimit
-                ? ('messages.menu.notice.reactionLimit' | transloco)
-                : notice() === Notice.MetadataFailed
-                  ? ('messages.menu.notice.metadataFailed' | transloco)
-                  : ('messages.menu.notice.failed' | transloco)
+        : notice() === Notice.Unsaved
+          ? ('messages.menu.notice.unsaved' | transloco)
+          : notice() === Notice.Pinned
+            ? ('messages.menu.notice.pinned' | transloco)
+            : notice() === Notice.Unpinned
+              ? ('messages.menu.notice.unpinned' | transloco)
+              : notice() === Notice.Recalled
+                ? ('messages.menu.notice.recalled' | transloco)
+                : notice() === Notice.ReactionLimit
+                  ? ('messages.menu.notice.reactionLimit' | transloco)
+                  : notice() === Notice.MetadataFailed
+                    ? ('messages.menu.notice.metadataFailed' | transloco)
+                    : ('messages.menu.notice.failed' | transloco)
   "></ion-toast>

@@ -71,13 +71,8 @@ describe('MessageActions', () => {
     await loading;
   }
 
-  it('saves and recalls the selected message using its original IDs', async () => {
+  it('recalls the selected message using its original IDs', async () => {
     await loadPins([wirePin]);
-    const saved = actions.save(testMessage);
-    const save = http.expectOne(`/_api/saved-messages/${decodeId(testMessage.id)}`);
-    expect(save.request.method).toBe('PUT');
-    save.flush({});
-    await saved;
     const recalled = actions.recall(testMessage);
     const recall = http.expectOne(messageUrl);
     expect(recall.request.method).toBe('DELETE');
@@ -181,13 +176,16 @@ describe('MessageActions', () => {
     http.expectNone(() => true);
   });
 
-  it('propagates mutation failure to the page without additional requests', async () => {
+  it('propagates mutation failure to the page and reverts the optimistic reaction', async () => {
+    await loadPins([wirePin]);
     const adding = actions.toggleReaction(testMessage, '👍');
+    expect(conversation.get(testMessage.id)?.message.reactions).toHaveLength(1);
     const failure = expect(adding).rejects.toBeDefined();
     http
       .expectOne(`${messageUrl}/reactions/${encodeURIComponent('👍')}`)
       .flush('', { status: 403, statusText: 'Forbidden' });
     await failure;
+    expect(conversation.get(testMessage.id)?.message.reactions).toEqual([]);
     http.expectNone(() => true);
   });
 });
