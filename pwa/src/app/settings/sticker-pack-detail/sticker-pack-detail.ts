@@ -20,6 +20,7 @@ import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
+import { MediaLoaded } from '../../messages/media-loaded';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../../messages/media-processing/file-type';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
@@ -33,6 +34,7 @@ import { StickerPreferences } from '../sticker-preferences';
   imports: [
     ContentScrollbars,
     LoadError,
+    MediaLoaded,
     IonButton,
     IonButtons,
     IonContent,
@@ -78,6 +80,15 @@ import { StickerPreferences } from '../sticker-preferences';
       font-size: 32px;
       color: var(--ion-color-medium);
       border: 2px dashed var(--ion-color-light-shade);
+    }
+    // Covers one cell until its own image or first video frame paints.
+    .cell-skeleton {
+      position: absolute;
+      inset: 6px;
+      border-radius: 8px;
+    }
+    .cell:has(.loaded) .cell-skeleton {
+      display: none;
     }
     .cell .remove {
       position: absolute;

@@ -2239,6 +2239,27 @@ describe('ConversationPage', () => {
     ]);
   });
 
+  it('shows the subscribe action before the status arrives and acts on what it showed', async () => {
+    await enterThread();
+    subscriptions.set(new Map());
+    expect(component['subscription']()).toBeUndefined();
+    expect(component['threadAction']()).toMatchObject({ label: 'conversation.actions.subscribeThread' });
+    const inbox = TestBed.inject(ChatStore);
+    const loading = deferred<void>();
+    vi.mocked(inbox.loadSubscription).mockImplementationOnce(() => {
+      subscriptions.set(new Map([[encodeId('100'), { subscribed: true, archived: false }]]));
+      return loading.promise;
+    });
+    const updating = component['updateThread']();
+    expect(component['threadUpdating']()).toBe(true);
+    loading.resolve();
+    await updating;
+    // The thread turned out to be subscribed, so the tap that read 订阅 does not archive it.
+    expect(inbox.subscribeThread).not.toHaveBeenCalled();
+    expect(inbox.setThreadArchived).not.toHaveBeenCalled();
+    expect(component['threadUpdating']()).toBe(false);
+  });
+
   it('keeps live chat metadata independent of filtered chat and thread lists', async () => {
     const chatInfo = TestBed.inject(ChatStore);
     chatInfo.remember([{ ...testChat, name: '话题所属群' }]);
@@ -2353,15 +2374,15 @@ describe('ConversationPage', () => {
     const oldUpdating = component['updateThread']();
     component.ionViewDidLeave();
     await reenter();
-    expect(component['threadBusy']()).toBe(false);
+    expect(component['threadUpdating']()).toBe(false);
     const newUpdating = component['updateThread']();
     oldAction.reject(new Error('Previous action failed'));
     await oldUpdating;
-    expect(component['threadBusy']()).toBe(true);
+    expect(component['threadUpdating']()).toBe(true);
     expect(component['threadError']()).toBeUndefined();
     newAction.reject(new Error('Current action failed'));
     await newUpdating;
-    expect(component['threadBusy']()).toBe(false);
+    expect(component['threadUpdating']()).toBe(false);
     expect(component['threadError']()).toBe(ThreadError.Update);
   });
 

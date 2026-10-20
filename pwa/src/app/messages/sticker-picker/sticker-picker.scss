@@ -19,6 +19,7 @@
   overflow-y: auto;
 }
 .sticker-item {
+  position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 1;
@@ -73,11 +74,26 @@
   object-fit: contain;
   pointer-events: none;
 }
-.empty,
-.loading-status {
+.empty {
   grid-column: 1/-1;
   text-align: center;
   color: var(--ion-color-medium);
+}
+
+.sticker-skeleton {
+  aspect-ratio: 1;
+  border-radius: 8px;
+}
+
+// Covers one tile until its own image or first video frame paints.
+.sticker-tile-skeleton {
+  position: absolute;
+  inset: 6px;
+  border-radius: 8px;
+}
+
+.sticker-item:has(.loaded) .sticker-tile-skeleton {
+  display: none;
 }
 
 .subtitle {

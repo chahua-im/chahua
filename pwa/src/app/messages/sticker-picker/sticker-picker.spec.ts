@@ -189,6 +189,35 @@ describe('StickerPicker selection during requests', () => {
     expect(actions[1].disabled).toBe(true);
   });
 
+  it('shows sticker skeletons instead of a spinner while the library loads', async () => {
+    const response = new Subject<{ stickers: StickerSummary[] }>();
+    api.getMyFavorites.mockReturnValueOnce(response);
+    const fixture = TestBed.createComponent(StickerPicker);
+    fixture.componentRef.setInput('embedded', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.sticker-skeleton')).toHaveLength(12);
+    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
+    response.next({ stickers: [sticker] });
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelectorAll('.sticker-skeleton')).toHaveLength(0);
+    });
+    expect(fixture.nativeElement.querySelectorAll('.sticker-item')).toHaveLength(1);
+  });
+
+  it('covers each sticker tile until its media paints', async () => {
+    const { fixture } = await render();
+    const tile: HTMLElement = fixture.nativeElement.querySelector('.sticker-item');
+    const media = tile.querySelector('img')!;
+    expect(tile.querySelector('.sticker-tile-skeleton')).not.toBeNull();
+    expect(media.classList.contains('loaded')).toBe(false);
+    media.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(media.classList.contains('loaded')).toBe(true);
+  });
+
   it('emits an already displayed sticker while favorites reload, keeping navigation busy', async () => {
     const { fixture, button, selected } = await render();
     const response = new Subject<{ stickers: StickerSummary[] }>();
@@ -197,7 +226,8 @@ describe('StickerPicker selection during requests', () => {
     tab.click();
     fixture.detectChanges();
     expect(tab.disabled).toBe(true);
-    expect(fixture.nativeElement.querySelector('ion-spinner')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
@@ -219,7 +249,8 @@ describe('StickerPicker selection during requests', () => {
     fixture.nativeElement.querySelectorAll('.pack-tab')[1].click();
     fixture.detectChanges();
     expect(api.getPack).toHaveBeenCalledExactlyOnceWith(pack.id);
-    expect(fixture.nativeElement.querySelector('ion-spinner')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
     expect(modals.dismiss).toHaveBeenCalledExactlyOnceWith(sticker, 'send');
@@ -240,7 +271,8 @@ describe('StickerPicker selection during requests', () => {
     const favorite = fixture.componentInstance['favorite'](item);
     fixture.detectChanges();
     expect(request).toHaveBeenCalledExactlyOnceWith(item.id);
-    expect(fixture.nativeElement.querySelector('ion-spinner')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith({ ...item, isFavorited: !isFavorited });
@@ -289,7 +321,8 @@ describe('StickerPicker selection during requests', () => {
     const subscription = fixture.componentInstance['subscribe']();
     fixture.detectChanges();
     expect(api.putSubscription).toHaveBeenCalledExactlyOnceWith(pack.id);
-    expect(fixture.nativeElement.querySelector('ion-spinner')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
     expect(modals.dismiss).toHaveBeenCalledExactlyOnceWith(sticker, 'send');
@@ -373,7 +406,10 @@ describe('StickerPicker selection during requests', () => {
     preferences.upsertPackOrderItem.mockClear();
     preferences.syncPackOrder.mockClear();
     preferences.packOrder.mockReturnValue(
-      Array.from({ length: 20 }, (_, index) => ({ stickerPackId: encodeId(String(900 + index)), lastUsedOn: 1000 - index })),
+      Array.from({ length: 20 }, (_, index) => ({
+        stickerPackId: encodeId(String(900 + index)),
+        lastUsedOn: 1000 - index,
+      })),
     );
     fixture.componentInstance['packs'].update((packs) => [
       ...Array.from({ length: 20 }, (_, index) => ({ ...pack, id: encodeId(String(900 + index)) })),

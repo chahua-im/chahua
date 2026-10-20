@@ -72,6 +72,16 @@
   overflow: hidden;
 }
 
+// Each frame reserves its size up front, so the placeholder fills it without moving the row.
+.media-skeleton {
+  position: absolute;
+  inset: 0;
+}
+
+.media-frame:has(.loaded) .media-skeleton {
+  display: none;
+}
+
 // An opaque neutral background keeps transparent media independent of the bubble color.
 .media-frame,
 .attachments.album {

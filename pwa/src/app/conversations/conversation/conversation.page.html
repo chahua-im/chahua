@@ -316,19 +316,15 @@
     <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
   </ion-button>
   @if (threadAction(); as action) {
-    <ion-button [disabled]="threadBusy()" (click)="updateThread()">
-      <span class="action-content" [class.busy]="threadBusy()">
+    <ion-button [disabled]="threadUpdating()" (click)="updateThread()">
+      <span class="action-content" [class.busy]="threadUpdating()">
         <ion-icon class="action-label action-icon" [icon]="action.icon" />
-        @if (threadBusy()) {
+        @if (threadUpdating()) {
           <ion-spinner class="action-icon"></ion-spinner>
         }
       </span>
     </ion-button>
-  } @else if (threadBusy()) {
-    <ion-button disabled>
-      <ion-spinner class="action-icon" slot="icon-only"></ion-spinner>
-    </ion-button>
-  } @else if (!threadId()) {
+  } @else {
     <ion-button [disabled]="muteBusy()" (click)="toggleMute()">
       <ion-icon
         class="action-icon"
@@ -359,7 +355,7 @@
         <ion-label>{{ 'conversation.actions.search' | transloco }}</ion-label>
       </ion-item>
       @if (threadAction(); as action) {
-        <ion-item [button]="true" [disabled]="threadBusy()" (click)="updateThread()">
+        <ion-item [button]="true" [disabled]="threadUpdating()" (click)="updateThread()">
           <ion-icon slot="start" [icon]="action.icon" />
           <ion-label>{{ action.label | transloco }}</ion-label>
         </ion-item>
@@ -368,7 +364,9 @@
           <ion-icon
             slot="start"
             [icon]="muted() ? toolbarIcons.notificationsOffOutline : toolbarIcons.notificationsOutline" />
-          <ion-label>{{ (muted() ? 'conversation.actions.unmute' : 'conversation.actions.mute') | transloco }}</ion-label>
+          <ion-label>
+            {{ (muted() ? 'conversation.actions.unmute' : 'conversation.actions.mute') | transloco }}
+          </ion-label>
         </ion-item>
       }
       <ion-item [button]="true" (click)="details()">

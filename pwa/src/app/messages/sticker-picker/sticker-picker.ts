@@ -18,7 +18,6 @@ import {
   IonLabel,
   IonList,
   IonPopover,
-  IonSpinner,
   IonTitle,
   IonToolbar,
   ModalController,
@@ -42,6 +41,7 @@ import {
   sortFavoriteStickersByPreference,
   AUTO_SORT_LIMIT,
 } from '../../settings/sticker-preferences';
+import { MediaLoaded } from '../media-loaded';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../media-processing/file-type';
 
 type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] };
@@ -52,6 +52,7 @@ type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] }
   styleUrl: './sticker-picker.scss',
   imports: [
     ContentScrollbars,
+    MediaLoaded,
     IonIcon,
     IonPopover,
     TranslocoPipe,
@@ -69,7 +70,6 @@ type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] }
     IonList,
     IonItem,
     IonLabel,
-    IonSpinner,
   ],
   host: { '[class.ion-page]': '!embedded()', '[class.embedded]': 'embedded()' },
 })

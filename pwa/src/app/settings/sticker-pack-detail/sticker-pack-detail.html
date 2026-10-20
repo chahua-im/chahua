@@ -35,15 +35,19 @@
         <button type="button" class="cell add" [disabled]="busy()" (click)="stickerFile.click()">+</button>
       }
       @for (sticker of current.stickers; track sticker.id) {
-        <button
-          type="button"
-          class="cell"
-          [disabled]="!owned() || busy()"
-          (click)="removeSticker(sticker)">
+        <button type="button" class="cell" [disabled]="!owned() || busy()" (click)="removeSticker(sticker)">
+          <span class="cell-skeleton skeleton-block"></span>
           @if (sticker.media.contentType.startsWith('video/')) {
-            <video [src]="sticker.media.url" autoplay loop [muted]="true" playsinline preload="metadata"></video>
+            <video
+              appMediaLoaded
+              [src]="sticker.media.url"
+              autoplay
+              loop
+              [muted]="true"
+              playsinline
+              preload="metadata"></video>
           } @else {
-            <img [src]="sticker.media.url" loading="lazy" decoding="async" />
+            <img appMediaLoaded [src]="sticker.media.url" loading="lazy" decoding="async" />
           }
           @if (owned()) {
             <span class="remove">✕</span>
