@@ -24,14 +24,34 @@ afterAll(() => Reflect.deleteProperty(Element.prototype, 'scrollTo'));
 beforeEach(() => vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false })));
 afterEach(() => vi.unstubAllGlobals());
 
-@Component({ selector: 'app-chat-list', template: '' })
+@Component({ selector: 'app-chat-list', template: '{{ preview() }}' })
 class ListStub {
+  readonly preview = signal('old preview');
   readonly active = input(true);
   readonly selection = input();
   readonly openList = output<ListSelection>();
 }
 
 describe('ChatListPage', () => {
+  it('renders cached local changes synchronously before reactivating queries', async () => {
+    await TestBed.configureTestingModule({ imports: [ChatListPage] })
+      .overrideComponent(ChatListPage, { remove: { imports: [ChatList] }, add: { imports: [ListStub] } })
+      .compileComponents();
+    const fixture = TestBed.createComponent(ChatListPage);
+    await fixture.whenStable();
+    const list = fixture.debugElement.children.find((child) => child.componentInstance instanceof ListStub)!
+      .componentInstance as ListStub;
+    fixture.componentRef.changeDetectorRef.detach();
+    fixture.componentInstance.ionViewDidLeave();
+    list.preview.set('new local preview');
+    expect(fixture.nativeElement.textContent).toContain('old preview');
+    fixture.componentRef.changeDetectorRef.reattach();
+    fixture.componentInstance.ionViewWillEnter();
+    // No whenStable(), response, timer, or fixture.detectChanges() between enter and assertion.
+    expect(fixture.nativeElement.textContent).toContain('new local preview');
+    expect(list.active()).toBe(false);
+  });
+
   it('passes route selection to the list with false defaults for missing flags', async () => {
     await TestBed.configureTestingModule({
       imports: [ChatListPage],
@@ -155,7 +175,7 @@ describe('ChatListPage query lifecycle', () => {
     fixture.componentInstance.ionViewDidLeave();
     expect(release).toHaveBeenCalledTimes(5);
     fixture.componentRef.changeDetectorRef.reattach();
-    fixture.componentInstance.ionViewDidEnter();
+    fixture.componentInstance.ionViewWillEnter();
     await fixture.whenStable();
     expect(query.activate).toHaveBeenCalledTimes(10);
     fixture.destroy();

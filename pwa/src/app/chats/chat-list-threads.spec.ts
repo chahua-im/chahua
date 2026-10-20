@@ -341,6 +341,26 @@ describe('ChatListStore threads and friend requests', () => {
     expect(threads.loadingMore()).toBe(false);
   });
 
+  it('updates a hidden thread preview from a reply without a request or activation', async () => {
+    await startThreads();
+    await hideLists();
+    const store = scope.get(ChatStore);
+    const version = store.snapshot();
+    const subscriptionVersion = store.subscriptionSnapshot();
+    const reply = { ...testMessage, replyRootId: rootId, createdAt: '2026-09-06T12:00:00Z', message: '实时话题回复' };
+    messages.next(reply);
+    expect(threads.items()[0].lastReply?.message).toBe(reply.message);
+    expect(threads.items()[0].lastReplyAt).toBe(reply.createdAt);
+    // A list response started before the message cannot restore the old preview.
+    store.acceptThreads([thread], version, subscriptionVersion);
+    messages.next({ ...reply, id: encodeId('9007199254741002'), message: '旧回复' });
+    messages.next(reply);
+    await settle();
+    expect(threads.items()[0].lastReply?.message).toBe(reply.message);
+    expect(threads.items()[0].lastReplyAt).toBe(reply.createdAt);
+    http.expectNone(() => true);
+  });
+
   it('uses one invalidation path for accepted HTTP replies and WebSocket replies', async () => {
     await startThreads();
     const reply = { ...testMessage, replyRootId: rootId };

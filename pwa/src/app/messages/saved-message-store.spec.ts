@@ -75,4 +75,16 @@ describe('SavedMessageStore', () => {
     await failure;
     expect(store.isSaved(testChat.id, message.id)).toBe(true);
   });
+
+  it('preserves an existing save when saving it again fails', async () => {
+    await load();
+    const message = { ...testMessage, id: encodeId('9007199254741001') };
+    const saving = store.save(message);
+    const failure = expect(saving).rejects.toBeDefined();
+    http
+      .expectOne(`/_api/saved-messages/${decodeId(message.id)}`)
+      .flush('', { status: 500, statusText: 'Server Error' });
+    await failure;
+    expect(store.isSaved(testChat.id, message.id)).toBe(true);
+  });
 });

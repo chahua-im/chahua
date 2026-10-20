@@ -12,6 +12,7 @@ import {
   type ThreadUpdatePayload,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
+import { ChatStore } from '../chats/chat-store';
 import { type SnowflakeID } from '../api/snowflake-id';
 import { type MessageChange } from '../messages/message-change';
 import { mergeMessages } from '../messages/message-merge';
@@ -54,6 +55,7 @@ export class ConversationStore {
   readonly error = this.currentError.asReadonly();
   readonly atLatest = computed(() => !!this.page() && !this.page()?.newerCursor && !this.loading());
   private readonly realtime = inject(Connection);
+  private readonly chatInfo = inject(ChatStore);
   private context?: ConversationContext;
 
   constructor() {
@@ -190,10 +192,12 @@ export class ConversationStore {
         break;
       case ServerWsMessageType.messageDeleted:
         this.update({ ...event.payload, isDeleted: true });
+        if (this.accepts(event.payload)) this.restoreChatPreview(new Set([event.payload.id]));
         break;
       case ServerWsMessageType.messagesBulkDeleted:
         if (event.payload.chatId === this.context?.chatId) {
           for (const id of event.payload.messageIds) this.delete(id);
+          this.restoreChatPreview(new Set(event.payload.messageIds));
         }
         break;
       case ServerWsMessageType.reactionUpdated:
@@ -201,6 +205,22 @@ export class ConversationStore {
           this.updateReactions(event.payload.messageId, event.payload.reactions);
         break;
     }
+  }
+
+  private restoreChatPreview(deletedIds: ReadonlySet<SnowflakeID>) {
+    if (!this.context || !this.atLatest()) return;
+    const { chatId, threadId } = this.context;
+    const page = this.page()!;
+    const previous = page.messages
+      .filter((message) => !message.isDeleted && (threadId ? message.replyRootId === threadId : !message.replyRootId))
+      .at(-1);
+    // An empty partial range says nothing about messages beyond its older edge.
+    if (!previous && page.olderCursor) return;
+    const knownDeleted = new Set(page.messages.filter((message) => deletedIds.has(message.id)).map(({ id }) => id));
+    if (threadId) {
+      const restored = this.chatInfo.restoreThreadPreview(chatId, threadId, knownDeleted, previous);
+      if (restored && !previous) this.patch(threadId, (message) => ({ ...message, threadInfo: undefined }));
+    } else this.chatInfo.restoreChatPreview(chatId, knownDeleted, previous);
   }
 
   update(message: MessageResponse) {

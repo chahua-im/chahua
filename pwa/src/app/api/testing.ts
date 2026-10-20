@@ -42,9 +42,10 @@ export function mockRealtime({
   messages$ = new Subject<MessageResponse>(),
   events$ = new Subject<ServerWsMessage>(),
   resync$ = new Subject<void>(),
+  connected = signal(true),
 } = {}) {
   return {
-    connected: signal(true),
+    connected,
     events$: merge(
       events$,
       messages$.pipe(map((payload): ServerWsMessage => ({ type: ServerWsMessageType.message, payload }))),

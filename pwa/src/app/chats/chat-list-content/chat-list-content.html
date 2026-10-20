@@ -111,6 +111,7 @@
           @switch (row.kind) {
             @case (ListRowKind.Thread) {
               <app-chat-list-item
+                [attr.data-row-key]="row.key"
                 [entry]="row.entry"
                 [startActions]="
                   row.thread.unreadCount > 0
@@ -132,7 +133,7 @@
                   @if (row.draft; as draft) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
                     <app-markdown-summary [text]="draft.text" />
-                  } @else if (row.thread.lastReply; as last) {
+                  } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {
                     {{ 'chats.content.noReplies' | transloco }}
@@ -145,6 +146,7 @@
                 #presenceRow
                 [attr.data-presence-uid]="row.isDm ? row.chat.peer?.uid : null"
                 [online]="active() && row.isDm && presence.user(row.chat.peer?.uid)?.online === true"
+                [attr.data-row-key]="row.key"
                 [entry]="{
                   ...row.entry,
                   title: row.isDm
@@ -186,7 +188,7 @@
                   @if (row.draft; as draft) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
                     <app-markdown-summary [text]="draft.text" />
-                  } @else if (row.chat.lastMessage; as last) {
+                  } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {
                     {{ 'chats.content.noMessages' | transloco }}

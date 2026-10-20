@@ -28,6 +28,7 @@ import { Preferences } from '../../settings/preferences';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
 import { ChatListStore, FriendRequestAction, type ChatListError } from '../chat-list-store';
 import { ChatStore, type ChatInfo } from '../chat-store';
+import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { listSelection, ListTab } from '../list-tabs';
 import { ChatListContent } from './chat-list-content';
 
@@ -123,6 +124,7 @@ describe('ChatListContent', () => {
     setArchived: vi.fn().mockResolvedValue(undefined),
   };
   const navigation = { goTo: vi.fn() };
+  const outbox = { items: signal<OutgoingMessage[]>([]) };
   const chatInfo = signal<ChatInfo | undefined>(undefined);
   const metadata = {
     isMuted: (id: SnowflakeID) =>
@@ -202,6 +204,7 @@ describe('ChatListContent', () => {
     vi.spyOn(IonItemSliding.prototype, 'close').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
+    outbox.items.set([]);
     chats.items.set([{ ...testChat, lastMessage }]);
     chats.loading.set(false);
     chats.hasMore.set(false);
@@ -221,6 +224,7 @@ describe('ChatListContent', () => {
       imports: [ChatListContent],
       providers: [
         { provide: Connection, useValue: { ...mockRealtime({ events$: presenceEvents }), connected, watchPresence } },
+        { provide: MessageOutbox, useValue: outbox },
         provideRouter(routes),
         { provide: ChatListStore, useValue: { ...data, ...inbox, archivedUnread: counts } },
         { provide: ConversationNavigation, useValue: navigation },
@@ -927,5 +931,55 @@ describe('ChatListContent', () => {
       await fixture.whenStable();
       expect(fixture.nativeElement.querySelector('ion-label[color="danger"]').textContent).toContain('操作失败');
     });
+  });
+
+  it('previews pending thread replies in an inactive mixed list without changing the parent chat', async () => {
+    preferences.showThreadsInMessages.set(true);
+    chats.items.set([{ ...testChat, lastMessageAt: '2026-09-05T12:10:00Z', lastMessage }]);
+    threads.items.set([thread]);
+    await fixture.whenStable();
+    fixture.componentRef.setInput('active', false);
+    await fixture.whenStable();
+    const pending = { ...testMessage, createdAt: '2026-09-05T12:30:00Z', message: '待发话题回复' };
+    outbox.items.set([
+      {
+        chatId: testChat.id,
+        threadId: thread.threadRootMessage.id,
+        cancelled: () => false,
+        message: () => pending,
+      } as unknown as OutgoingMessage,
+    ]);
+    fixture.detectChanges();
+    expect(fixture.componentInstance['rows']().map((row) => row.key)).toEqual([
+      thread.threadRootMessage.id,
+      testChat.id,
+    ]);
+    expect(fixture.componentInstance['threadRows']()[0].preview?.message).toBe('待发话题回复');
+    expect(fixture.componentInstance['threadRows']()[0].entry.time).toBe(pending.createdAt);
+    expect(fixture.componentInstance['conversationRows']()[0].preview).toBe(lastMessage);
+    expect(fixture.nativeElement.textContent).toContain('待发话题回复');
+    expect(threads.refresh).not.toHaveBeenCalled();
+  });
+
+  it('lifts a row and previews a submitted message before the summary echoes it', () => {
+    const otherId = encodeId('9007199254741999');
+    chats.items.set([
+      { ...testChat, id: otherId, lastMessageAt: '2026-09-05T12:00:00Z', lastMessage },
+      { ...testChat, lastMessageAt: '2026-09-05T11:00:00Z', lastMessage },
+    ]);
+    const pending = {
+      ...testMessage,
+      createdAt: '2026-09-05T12:30:00Z',
+      message: '刚发出的消息',
+    };
+    outbox.items.set([
+      { chatId: testChat.id, cancelled: () => false, message: () => pending } as unknown as OutgoingMessage,
+    ]);
+    fixture.detectChanges();
+    const rows = fixture.componentInstance['rows']();
+    expect(rows.map((row) => row.key)).toEqual([testChat.id, otherId]);
+    const updated = fixture.componentInstance['conversationRows']().find((row) => row.key === testChat.id)!;
+    expect(updated.preview?.message).toBe('刚发出的消息');
+    expect(fixture.nativeElement.textContent).toContain('刚发出的消息');
   });
 });
