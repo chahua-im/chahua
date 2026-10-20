@@ -6,7 +6,7 @@ import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
 import type { FriendRelationshipResponse } from '../../generated/models';
-import { GroupRole } from '../../generated/models';
+import { FriendPresenceOverride, GroupRole } from '../../generated/models';
 import { activeQuery } from '../api/query';
 import { testChat, testUser, wireChat } from '../api/testing';
 import { SessionStore } from '../session/session-store';
@@ -127,6 +127,9 @@ describe('Chat feature requests', () => {
     await Promise.resolve();
     http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true, canDm: !blocking, blocking });
     await vi.waitFor(() => expect(fixture.componentInstance['relationship']()).toBeTruthy());
+    await vi.waitFor(() =>
+      http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
+    );
     const changing = fixture.componentInstance['blockUser']();
     await vi.waitFor(() => {
       const request = http.expectOne((req) => req.method === (blocking ? 'DELETE' : 'POST'));
@@ -150,6 +153,9 @@ describe('Chat feature requests', () => {
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('user', { uid: 2, username: '朋友', gender: 0 });
     fixture.detectChanges();
+    await vi.waitFor(() =>
+      http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
+    );
     http.expectNone('/_api/friends/add-info/2');
     http.expectNone('/_api/friends/2');
     expect(fixture.componentInstance['relationship']()).toBe(query.value());

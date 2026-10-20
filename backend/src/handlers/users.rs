@@ -135,6 +135,7 @@ async fn put_stickerpack_order(
                 sticker_pack_order: order_json.clone(),
                 verification_mode: FriendAddVerificationMode::Direct,
                 verification_question: None,
+                presence_visibility: crate::models::PresenceVisibility::Everyone,
             })
             .execute(conn)?;
     }

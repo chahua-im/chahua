@@ -13,9 +13,9 @@
 | 列表续页                         | Ionic infinite-scroll spinner                         | 查询 loadingMore                                      |
 | 对话首次加载                     | 消息气泡骨架屏，贴底对齐；私聊关闭作者信息偏好时不显示头像占位 | ConversationStore.loading                             |
 | 对话历史/后续消息分页            | 顶部/底部固定尺寸分页控件，空闲箭头、加载圆弧         | ConversationStore.pagingDirection                     |
-| 会话标题、资料的在线/最近上线及群人数 | 固定状态行内的紧凑脉动线框；取得快照后替换为状态，未知/无权查看/断网保留空行 | Presence 的当前请求 pending 范围及展示组件 active |
+| 会话标题、资料的在线/最近上线及群人数 | 固定状态行内仅对尚无数据的请求显示紧凑脉动线框；已有状态在刷新时保留并原位更新，未知/无权查看/断网保留空行 | Presence 的未知 ID pending 范围及展示组件 active |
 | 收藏/置顶页面加载                | 内容区居中的 page-loading                             | SavedMessageList.loading / PinnedMessagesPage.loading |
-| 好友验证设置加载                 | 列表内 spinner                                        | FriendVerificationSettings.loading                    |
+| 好友验证、全局在线隐私设置加载 | 列表内 spinner | FriendVerificationSettings.loading / PresenceSettings.loading |
 | 表情组件代码加载                 | @loading 延迟 100ms 展示 spinner                      | @defer 的加载状态                                     |
 
 后台更新检查无加载提示，不阻塞 Angular 或登录。业务页面的新版就绪 toast 不自动消失，提供“立即更新”和“暂不更新”；启动失败或 landing 时按[更新约定](requirements.md#通知静音与设置)自动刷新。
@@ -46,7 +46,8 @@
 | 话题订阅/归档                    | 话题操作入口      | toolbar 按钮内显示 spinner；收进菜单时选择后即关闭，失败由消息区提示                                                                                   |
 | 创建/加入群组、添加好友          | 被点击的按钮      | 按钮内显示 spinner，文案保留占位，表单暂时禁用                                                                                                         |
 | 创建/分享/撤销邀请               | 被点击的按钮      | 按钮内显示 spinner，文案保留占位，其他邀请操作暂时禁用                                                                                                 |
-| 保存好友验证设置                 | 保存按钮          | 保留文案占位，spinner 叠放；表单暂时禁用                                                                                                               |
+| 保存好友验证、全局在线隐私设置 | 保存按钮 | 保留文案占位，spinner 叠放；表单暂时禁用 |
+| 好友在线隐私读取/保存 | 选择器所在行右侧 | 选择器始终挂载、保持行高并暂时禁用，旁边显示 spinner；读取失败使用紧凑 LoadError 重试，保存失败恢复选择并显示 toast |
 | 首次允许通知                     | alert 的允许按钮  | 文案保留占位、spinner 叠放；授权期间阻止重复操作，失败 toast 后可重试                                                                                  |
 | 通知订阅                         | 通知设置行右侧    | PushNotifications.busy 仅用于用户主动授权或开关；spinner 替换 toggle，权限拒绝使用 toast；后台订阅同步无 spinner、失败静默，开关同步显示本机意图与权限 |
 | 检查更新                         | 检查更新行右侧    | AppUpdates.checking 时 spinner 替换右侧版本、结果或更新按钮，左侧图标保留；结果在设置页展示                                                            |

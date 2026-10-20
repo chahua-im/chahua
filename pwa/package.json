@@ -4,6 +4,7 @@
   "scripts": {
     "ng": "ng",
     "api:generate": "orval --config orval.config.ts",
+    "emoji:generate": "node scripts/generate-emoji-regex.mjs",
     "dev": "node --env-file-if-exists=.env.local scripts/dev.mjs --proxy-config proxy.conf.dev.mjs --port 4300",
     "start": "node --env-file-if-exists=.env.local scripts/dev.mjs",
     "dev:online": "API_PROXY_TARGET=https://chahui.app/_api node --env-file-if-exists=.env.local scripts/dev.mjs --proxy-config proxy.conf.dev.mjs",
@@ -47,6 +48,8 @@
     "jsdom": "^28.1.0",
     "orval": "8.28.1",
     "prettier": "^3.9.6",
+    "regenerate-unicode-properties": "10.2.2",
+    "regexpu-core": "6.4.0",
     "typescript": "~6.0.3",
     "vitest": "^4.1.11"
   }

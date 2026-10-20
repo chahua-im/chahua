@@ -1,4 +1,4 @@
-import { computed, DestroyRef, effect, inject, Service, signal } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Service, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ServerWsMessageType,
@@ -13,6 +13,8 @@ import { SessionStore } from '../session/session-store';
 export type PresenceScope = { userIds?: readonly number[]; chatIds?: readonly SnowflakeID[] };
 
 const MINUTE_MS = 60_000;
+const MAX_WATCHED_USERS = 100;
+const MAX_WATCHED_GROUPS = 4;
 
 /** Absolute, server-authorized presence snapshots for the scopes visible in the application. */
 @Service()
@@ -31,6 +33,7 @@ export class Presence {
   private readonly clock = signal(Date.now());
   private requestId = 0;
   private publishedRequestId = 0;
+  private publishedScope: { userIds: number[]; chatIds: SnowflakeID[] } = { userIds: [], chatIds: [] };
   private consumerId = 0;
   private sessionUid: number | undefined;
 
@@ -68,12 +71,12 @@ export class Presence {
     });
     effect(() => {
       const scope = this.scope();
-      if (!this.live() || this.sessionUid == null) {
+      if (!this.connection.connected() || !this.networkOnline() || this.sessionUid == null) {
         this.clear();
         if (this.connection.connected()) this.publish({ userIds: [], chatIds: [] });
         return;
       }
-      this.publish(scope);
+      this.publish(this.visible() ? scope : { userIds: [], chatIds: [] });
     });
     this.connection.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event.type === ServerWsMessageType.presenceSnapshot) this.receive(event.payload);
@@ -93,6 +96,31 @@ export class Presence {
       if (!this.consumers.delete(id)) return;
       this.revision.update((revision) => revision + 1);
     };
+  }
+
+  /**
+   * Removes authorization-sensitive user snapshots and publishes the watched scope again.
+   * Group snapshots deliberately survive because individual privacy never changes group counts.
+   */
+  invalidateUsers(uids?: readonly number[]) {
+    const affected = uids == null ? undefined : new Set(uids);
+    const users = new Map(this.usersState());
+    const pending = new Set(this.pendingUsers());
+    if (affected) {
+      for (const uid of affected) {
+        users.delete(uid);
+        pending.delete(uid);
+      }
+    } else {
+      users.clear();
+      pending.clear();
+    }
+    this.usersState.set(users);
+    this.pendingUsers.set(pending);
+
+    // Make an already in-flight snapshot stale even while no request can be published.
+    this.publishedRequestId = ++this.requestId;
+    if (this.live() && this.sessionUid != null) this.publish(this.scope());
   }
 
   user(uid: number | undefined) {
@@ -119,20 +147,23 @@ export class Presence {
       for (const uid of scope.userIds ?? []) userIds.add(uid);
       for (const chatId of scope.chatIds ?? []) chatIds.add(chatId);
     }
-    return { userIds: [...userIds].slice(0, 100), chatIds: [...chatIds].slice(0, 4) };
+    return { userIds: [...userIds].slice(0, MAX_WATCHED_USERS), chatIds: [...chatIds].slice(0, MAX_WATCHED_GROUPS) };
   }
 
   private publish(scope: { userIds: number[]; chatIds: SnowflakeID[] }) {
     const requestId = ++this.requestId;
-    this.clear();
+    this.publishedScope = scope;
     this.publishedRequestId = requestId;
-    this.pendingUsers.set(new Set(scope.userIds));
-    this.pendingGroups.set(new Set(scope.chatIds));
+    const users = untracked(this.usersState);
+    const groups = untracked(this.groupsState);
+    this.pendingUsers.set(new Set(scope.userIds.filter((uid) => !users.has(uid))));
+    this.pendingGroups.set(new Set(scope.chatIds.filter((chatId) => !groups.has(chatId))));
     this.connection.watchPresence(requestId, scope.userIds, scope.chatIds);
   }
 
   private clear() {
     this.publishedRequestId = 0;
+    this.publishedScope = { userIds: [], chatIds: [] };
     this.usersState.set(new Map());
     this.groupsState.set(new Map());
     this.pendingUsers.set(new Set());
@@ -141,8 +172,16 @@ export class Presence {
 
   private receive(snapshot: PresenceSnapshotPayload) {
     if (snapshot.requestId !== this.publishedRequestId) return;
-    this.usersState.set(new Map(snapshot.users.map((user) => [user.uid, user])));
-    this.groupsState.set(new Map(snapshot.groups.map((group) => [group.chatId, group])));
+    const users = new Map(this.usersState());
+    for (const uid of this.publishedScope.userIds) users.delete(uid);
+    for (const user of snapshot.users) users.set(user.uid, user);
+    while (users.size > MAX_WATCHED_USERS) users.delete(users.keys().next().value!);
+    const groups = new Map(this.groupsState());
+    for (const chatId of this.publishedScope.chatIds) groups.delete(chatId);
+    for (const group of snapshot.groups) groups.set(group.chatId, group);
+    while (groups.size > MAX_WATCHED_GROUPS) groups.delete(groups.keys().next().value!);
+    this.usersState.set(users);
+    this.groupsState.set(groups);
     this.pendingUsers.set(new Set());
     this.pendingGroups.set(new Set());
   }

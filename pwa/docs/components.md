@@ -140,7 +140,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 | 组件               | 输入与局部字段                                                                                                                                          | 共享数据/输出                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading | ChatStore 的头像、标题、详情、订阅与好友关系；普通私聊/群资料分别显示用户状态/群人数 |
+| ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人覆盖值，Presence 失效个人状态 |
 | ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                          | 从聊天消息页提取话题根，点击导航                                |
 | ChatMembers        | chatId；members、cursor、loading/error                                                                                                                  | MembersService；行点击打开资料，仅管理员显示右侧身份            |
 | ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                            | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料 |
@@ -162,9 +162,12 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | GeneralSettings            | 直接编辑 Preferences，无额外状态副本；语言项显示当前选择                       |
 | LanguageSettings           | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog         |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |
+| PresenceSettings           | 全局 visibility、loading/saving、读取/保存失败与成功反馈；FriendsService 读取/保存，成功后通过 Presence 失效个人状态 |
 | StickerSettings            | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、创建贴纸包、贴纸包重排列表 | StickersService、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
 | StickerPackDetail          | packId；包详情、owned 状态、重命名/删除/退订与添加、点按移除贴纸               | StickersService、StickerPreferences；删除与退订移除顺序条目并关闭弹窗 |
 | Landing                    | 检测平台与选中平台；公开安装指引                                               |
+
+置顶表态输入由 `settings/emoji-sequences.ts` 提取完整的 Unicode 17.0.0 RGI emoji 序列；匹配集合固定，不依赖浏览器自带的 Unicode 数据或正则 `u` / `v` 标志。该文件由 `npm run emoji:generate` 生成并提交，生成器及 Unicode 数据依赖使用精确版本；升级匹配集合时更新依赖并重新生成。交互约定见[表情与贴纸设置](requirements.md#通知静音与设置)。
 
 设置与详情统一由 ChatLink 路由托管 modal，关闭恢复浏览器历史；会话缓存保留底层状态。Localization 在首个页面渲染前读取保存的语言并加载 catalog；语言页切换时先加载目标 catalog，再更新活动语言。Landing 只提供安装指引，普通浏览器中 App 在该入口只同步恢复并保存 token；已安装 PWA 由路由 guard 重定向到聊天并正常初始化登录。
 

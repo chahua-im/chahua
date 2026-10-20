@@ -7,7 +7,7 @@
 mod metrics;
 pub use metrics::PresenceMetrics;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,7 +16,7 @@ use diesel::prelude::*;
 use moka::future::Cache;
 
 use crate::dto::ws::{GroupPresenceResponse, PresenceSnapshotPayload, UserPresenceResponse};
-use crate::models::GroupKind;
+use crate::models::{GroupKind, PresenceVisibility};
 use crate::schema::{group_membership, groups, user_extra};
 use crate::services::social;
 use crate::services::ws_registry::ConnectionRegistry;
@@ -213,45 +213,107 @@ fn load_visible_users(
             .collect()
     };
 
-    let allowed: HashSet<i32> = user_ids
+    // The existing publication authorization bounds the only policies we need to load.
+    // The follow-up reads each policy once for the whole snapshot; it never fans out by user.
+    let candidates: HashSet<i32> = user_ids
         .iter()
         .copied()
         .filter(|uid| {
             if *uid == viewer_uid {
                 return true;
             }
-            let Some(relationship) = relationships.get(uid) else {
-                return false;
-            };
-            !relationship.blocking
-                && !relationship.blocked_by
-                && (relationship.friends_since.is_some() || shared_members.contains(uid))
+            relationships.get(uid).is_some_and(|relationship| {
+                !relationship.blocking
+                    && !relationship.blocked_by
+                    && (relationship.friends_since.is_some() || shared_members.contains(uid))
+            })
         })
         .collect();
-    if allowed.is_empty() {
+    if candidates.is_empty() {
         return Ok(Vec::new());
     }
 
-    let last_seen_by_uid: std::collections::HashMap<i32, NaiveDateTime> = user_extra::table
-        .filter(user_extra::uid.eq_any(allowed.iter().copied()))
-        .select((user_extra::uid, user_extra::last_seen_at))
-        .load::<(i32, NaiveDateTime)>(conn)?
+    let mut policy_uids: Vec<i32> = candidates.iter().copied().collect();
+    if !policy_uids.contains(&viewer_uid) {
+        policy_uids.push(viewer_uid);
+    }
+    let presence_by_uid: HashMap<i32, (NaiveDateTime, PresenceVisibility)> = user_extra::table
+        .filter(user_extra::uid.eq_any(policy_uids))
+        .select((
+            user_extra::uid,
+            user_extra::last_seen_at,
+            user_extra::presence_visibility,
+        ))
+        .load::<(i32, NaiveDateTime, PresenceVisibility)>(conn)?
         .into_iter()
+        .map(|(uid, last_seen_at, visibility)| (uid, (last_seen_at, visibility)))
         .collect();
+    let viewer_visibility = presence_by_uid
+        .get(&viewer_uid)
+        .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
 
     Ok(user_ids
         .iter()
         .copied()
-        .filter(|uid| allowed.contains(uid))
-        .map(|uid| UserPresenceResponse {
-            uid,
-            online: registry.is_online(uid),
-            last_seen_at: last_seen_by_uid
-                .get(&uid)
-                .copied()
-                .map(|value| DateTime::<Utc>::from_naive_utc_and_offset(value, Utc)),
+        .filter(|uid| {
+            if *uid == viewer_uid {
+                return candidates.contains(uid);
+            }
+            let Some(relationship) = relationships.get(uid) else {
+                return false;
+            };
+            let peer_visibility = presence_by_uid
+                .get(uid)
+                .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
+            candidates.contains(uid)
+                && presence_is_visible(
+                    false,
+                    true,
+                    relationship.friends_since.is_some(),
+                    viewer_visibility,
+                    relationship.shares_presence,
+                    peer_visibility,
+                    relationship.peer_shares_presence,
+                )
+        })
+        .map(|uid| {
+            let last_seen_at = presence_by_uid.get(&uid).map(|(last_seen_at, _)| {
+                DateTime::<Utc>::from_naive_utc_and_offset(*last_seen_at, Utc)
+            });
+            UserPresenceResponse {
+                uid,
+                online: registry.is_online(uid),
+                last_seen_at,
+            }
         })
         .collect())
+}
+
+fn presence_is_visible(
+    is_self: bool,
+    is_authorized: bool,
+    is_friend: bool,
+    viewer_visibility: PresenceVisibility,
+    viewer_override: Option<bool>,
+    peer_visibility: PresenceVisibility,
+    peer_override: Option<bool>,
+) -> bool {
+    is_self
+        || (is_authorized
+            && shares_presence(viewer_visibility, is_friend, viewer_override)
+            && shares_presence(peer_visibility, is_friend, peer_override))
+}
+
+fn shares_presence(
+    visibility: PresenceVisibility,
+    is_friend: bool,
+    override_value: Option<bool>,
+) -> bool {
+    override_value.unwrap_or(match visibility {
+        PresenceVisibility::Everyone => true,
+        PresenceVisibility::Friends => is_friend,
+        PresenceVisibility::Nobody => false,
+    })
 }
 
 fn load_visible_group_ids(
@@ -323,5 +385,98 @@ mod tests {
         assert!(rendered
             .contains("presence_group_count_refresh_duration_seconds_count{result=\"failure\"} 0"));
         assert!(rendered.contains("presence_group_members_scanned_count 0"));
+    }
+
+    #[test]
+    fn global_presence_modes_and_missing_rows_default_to_everyone() {
+        assert!(presence_is_visible(
+            false,
+            true,
+            false,
+            PresenceVisibility::Everyone,
+            None,
+            PresenceVisibility::Everyone,
+            None,
+        ));
+        assert!(presence_is_visible(
+            false,
+            true,
+            true,
+            PresenceVisibility::Friends,
+            None,
+            PresenceVisibility::Friends,
+            None,
+        ));
+        assert!(!presence_is_visible(
+            false,
+            true,
+            false,
+            PresenceVisibility::Friends,
+            None,
+            PresenceVisibility::Friends,
+            None,
+        ));
+        assert!(!presence_is_visible(
+            false,
+            true,
+            true,
+            PresenceVisibility::Nobody,
+            None,
+            PresenceVisibility::Everyone,
+            None,
+        ));
+    }
+
+    #[test]
+    fn friend_overrides_take_precedence_and_require_reciprocity() {
+        assert!(presence_is_visible(
+            false,
+            true,
+            true,
+            PresenceVisibility::Nobody,
+            Some(true),
+            PresenceVisibility::Nobody,
+            Some(true),
+        ));
+        assert!(!presence_is_visible(
+            false,
+            true,
+            true,
+            PresenceVisibility::Everyone,
+            Some(false),
+            PresenceVisibility::Everyone,
+            Some(true),
+        ));
+        assert!(!presence_is_visible(
+            false,
+            true,
+            true,
+            PresenceVisibility::Everyone,
+            Some(true),
+            PresenceVisibility::Everyone,
+            Some(false),
+        ));
+    }
+
+    #[test]
+    fn blocks_hide_individual_presence_but_self_remains_visible() {
+        assert!(!presence_is_visible(
+            false,
+            false,
+            true,
+            PresenceVisibility::Everyone,
+            Some(true),
+            PresenceVisibility::Everyone,
+            Some(true),
+        ));
+        assert!(presence_is_visible(
+            true,
+            false,
+            false,
+            PresenceVisibility::Nobody,
+            None,
+            PresenceVisibility::Nobody,
+            None,
+        ));
     }
 }

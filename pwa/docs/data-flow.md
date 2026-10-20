@@ -152,15 +152,17 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | friendshipRemoved                                         | 刷新相关关系查询和聊天归档计数                                                                        |
 | chatArchiveStateChanged                                   | 更新归档/静音字段，刷新受影响列表与计数                                                               |
 | 首次 presenceUpdate、恢复前台                             | Connection 发出 resync；活跃查询刷新，当前页面补必要元数据                                            |
-| presenceSnapshot                                           | Presence 仅接收当前 `requestId` 的绝对授权快照；缺席用户/群清除，本机断网、断开、换会话或文档隐藏时不显示实时结论 |
+| presenceSnapshot                                           | Presence 仅接收当前 `requestId` 的绝对授权快照；清除当前请求中缺席的用户/群，刷新期间保留已知状态；本机断网、断开或文档隐藏时不显示实时结论 |
 
 Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过同一单例 Connection 发送 `{type:'watchPresence',requestId,userIds,chatIds}`，以该 socket 的可见范围替换服务端监看范围；Snowflake chatId 仅在 Connection 边界还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
 
 ChatListContent 在活跃列表中使用一个 IntersectionObserver，按实际进入视口的私聊行收集并去重对方 UID，注册到同一 Presence；滚出视口、切换分类、离开页面或销毁时释放对应范围。群组、话题和好友请求不注册列表在线范围；不为已加载但未显示的分页成员请求在线状态，也不为每行创建 observer、WebSocket 或轮询。列表、会话标题和资料的范围由 Presence 合并，HTTP 聊天列表不另存在线副本。
 
-当前请求的 pending 范围与已接受快照分开保存；只接受匹配请求号的快照，并结束该请求所有 ID 的等待，包括服务端省略的 ID。断网、切后台、断开和账号切换会清空或失效旧请求，迟到回包不能恢复旧的在线断言或加载状态。状态行反馈见[加载与操作反馈](loading-indicators.md)。
+当前请求范围、未知 ID 的 pending 与已接受状态分开保存；重新发布范围或 resync 不清空已知值，只有尚无已知值的用户/群 ID 进入加载状态。接受匹配请求号的快照时，先移除当前请求范围的旧值（包括服务端省略的 ID），再写入授权结果并结束等待；范围外的已知值可供切回时立即展示。按最近接受快照的顺序，最多保留 100 个用户及 4 个群的状态，不随滚动无限增长。文档隐藏时发布空范围并保留已知值，恢复可见后重新校验；实际断网、断开和账号切换才清空状态及失效旧请求，迟到回包不能恢复旧的在线断言或加载状态。状态行反馈见[加载与操作反馈](loading-indicators.md)。
 
 本 PWA 始终发送 `requestId` 并拒绝缺少该字段的快照，以保留切换范围时的迟到回包保护；其他客户端可按[后端协议](../../backend/README.md#client-websocket-controls)省略该可选关联字段。
+
+个人隐私策略在每次服务端快照发布时重新判断，字段与存储约定见[后端在线隐私协议](../../backend/README.md#individual-presence-privacy)。PresenceSettings 进入时读取全局设置；ChatDetails 仅在当前对象为非本人的好友时读取本人的覆盖值，读取版本与对象 UID 一起校验，切换对象后不接收旧响应。保存全局设置成功后，`Presence.invalidateUsers()` 清除全部个人状态；保存好友覆盖成功后仅清除该 UID，包括范围外的保留值。失效操作推进请求号并重新发布当前范围，群人数不清空，迟到旧快照不能恢复隐私已失效的状态。其他设备和查看者在下一次现有 15 秒快照刷新时应用策略，没有独立的隐私变更推送。
 
 没有推送的数据靠本地写响应、页面进入、手动刷新或 resync。好友验证配置进入时读取；贴纸库与表情和贴纸设置进入时读取；创建贴纸包直接使用完整响应，贴纸库上传后只重读该包，包详情页上传后把响应追加到当前列表。自动整理开关与收藏贴纸顺序保存在本机，不跨设备同步。静音和远端已读没有专门跨设备推送，不增设轮询。较早开始的读取不能覆盖较新推送或本地操作；已读交错时补取对应读状态，不猜增减值。
 

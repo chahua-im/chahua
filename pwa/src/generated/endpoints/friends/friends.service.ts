@@ -13,6 +13,7 @@ import type { Observable } from 'rxjs';
 import type {
   CreateFriendRequestBody,
   FriendAddInfoResponse,
+  FriendPresenceSettingsResponse,
   FriendRelationshipResponse,
   FriendRequestResponse,
   FriendSettingsResponse,
@@ -20,8 +21,11 @@ import type {
   ListFriendRequestHistoryResponse,
   ListFriendsResponse,
   PendingFriendRequestCountResponse,
+  PresenceSettingsResponse,
   SnowflakeID,
+  UpdateFriendPresenceSettingsBody,
   UpdateFriendSettingsBody,
+  UpdatePresenceSettingsBody,
 } from '../../models';
 import type { HttpHeaders, HttpResponse as AngularHttpResponse } from '@angular/common/http';
 import { CHAHUA_BASE_URL } from '../chahua.base-url';
@@ -492,6 +496,144 @@ export class FriendsService {
       });
     }
     return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  getFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/friends/${uid}/presence-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/friends/${uid}/presence-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/friends/${uid}/presence-settings`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  updateFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    updateFriendPresenceSettingsBody: UpdateFriendPresenceSettingsBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  updateFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    updateFriendPresenceSettingsBody: UpdateFriendPresenceSettingsBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  updateFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    updateFriendPresenceSettingsBody: UpdateFriendPresenceSettingsBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  updateFriendPresenceSettings<TData = FriendPresenceSettingsResponse>(
+    uid: number,
+    updateFriendPresenceSettingsBody: UpdateFriendPresenceSettingsBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.put<TData>(
+        `${this.baseUrl}/friends/${uid}/presence-settings`,
+        updateFriendPresenceSettingsBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.put<TData>(
+        `${this.baseUrl}/friends/${uid}/presence-settings`,
+        updateFriendPresenceSettingsBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.put<TData>(`${this.baseUrl}/friends/${uid}/presence-settings`, updateFriendPresenceSettingsBody, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  getMyPresenceSettings<TData = PresenceSettingsResponse>(options?: HttpClientBodyOptions): Observable<TData>;
+  getMyPresenceSettings<TData = PresenceSettingsResponse>(
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getMyPresenceSettings<TData = PresenceSettingsResponse>(
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getMyPresenceSettings<TData = PresenceSettingsResponse>(
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/me/presence-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/me/presence-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/me/presence-settings`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  updateMyPresenceSettings<TData = PresenceSettingsResponse>(
+    updatePresenceSettingsBody: UpdatePresenceSettingsBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  updateMyPresenceSettings<TData = PresenceSettingsResponse>(
+    updatePresenceSettingsBody: UpdatePresenceSettingsBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  updateMyPresenceSettings<TData = PresenceSettingsResponse>(
+    updatePresenceSettingsBody: UpdatePresenceSettingsBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  updateMyPresenceSettings<TData = PresenceSettingsResponse>(
+    updatePresenceSettingsBody: UpdatePresenceSettingsBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.put<TData>(`${this.baseUrl}/me/presence-settings`, updatePresenceSettingsBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.put<TData>(`${this.baseUrl}/me/presence-settings`, updatePresenceSettingsBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.put<TData>(`${this.baseUrl}/me/presence-settings`, updatePresenceSettingsBody, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

@@ -11,10 +11,11 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::friends::{
-    FriendAddInfoResponse, FriendRelationshipResponse, FriendRequestDirection,
-    FriendRequestHistoryEntry, FriendRequestResponse, FriendResponse, FriendSettingsResponse,
-    ListFriendRequestHistoryResponse, ListFriendsResponse, PendingFriendRequestCountResponse,
-    UpdateFriendSettingsBody,
+    FriendAddInfoResponse, FriendPresenceSettingsResponse, FriendRelationshipResponse,
+    FriendRequestDirection, FriendRequestHistoryEntry, FriendRequestResponse, FriendResponse,
+    FriendSettingsResponse, ListFriendRequestHistoryResponse, ListFriendsResponse,
+    PendingFriendRequestCountResponse, PresenceSettingsResponse, UpdateFriendPresenceSettingsBody,
+    UpdateFriendSettingsBody, UpdatePresenceSettingsBody,
 };
 use crate::dto::users::MemberSummary;
 use crate::dto::ws::{
@@ -528,10 +529,100 @@ async fn get_user_friend_add_info(
     Ok(Json(FriendAddInfoResponse { mode, question }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/me/presence-settings",
+    operation_id = "get_my_presence_settings",
+    tag = "friends",
+    responses((status = 200, description = "Current user's global presence policy", body = PresenceSettingsResponse)),
+    security(("bearer_jwt" = []))
+)]
+async fn get_my_presence_settings(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+) -> Result<Json<PresenceSettingsResponse>, AppError> {
+    let visibility = social::get_presence_settings(&mut conn, uid)?;
+    Ok(Json(PresenceSettingsResponse { visibility }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/me/presence-settings",
+    operation_id = "update_my_presence_settings",
+    tag = "friends",
+    request_body = UpdatePresenceSettingsBody,
+    responses((status = 200, description = "Updated global presence policy", body = PresenceSettingsResponse)),
+    security(("bearer_jwt" = []))
+)]
+async fn update_my_presence_settings(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+    Json(body): Json<UpdatePresenceSettingsBody>,
+) -> Result<Json<PresenceSettingsResponse>, AppError> {
+    let visibility = social::update_presence_settings(&mut conn, uid, body.visibility)?;
+    Ok(Json(PresenceSettingsResponse { visibility }))
+}
+
+fn validate_presence_friend_uid(uid: i32, peer_uid: i32) -> Result<(), AppError> {
+    if peer_uid <= 0 || peer_uid == uid {
+        return Err(AppError::BadRequest("Peer UID is invalid"));
+    }
+    Ok(())
+}
+
+#[utoipa::path(
+    get,
+    path = "/{uid}/presence-settings",
+    operation_id = "get_friend_presence_settings",
+    tag = "friends",
+    params(("uid" = i32, Path, description = "Current friend UID")),
+    responses(
+        (status = 200, description = "Current user's presence override for this friend", body = FriendPresenceSettingsResponse),
+        (status = 404, description = "Friendship not found")
+    ),
+    security(("bearer_jwt" = []))
+)]
+async fn get_friend_presence_settings(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+    Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
+) -> Result<Json<FriendPresenceSettingsResponse>, AppError> {
+    validate_presence_friend_uid(uid, peer_uid)?;
+    let override_value = social::get_friend_presence_settings(&mut conn, uid, peer_uid)?;
+    Ok(Json(FriendPresenceSettingsResponse { override_value }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/{uid}/presence-settings",
+    operation_id = "update_friend_presence_settings",
+    tag = "friends",
+    params(("uid" = i32, Path, description = "Current friend UID")),
+    request_body = UpdateFriendPresenceSettingsBody,
+    responses(
+        (status = 200, description = "Updated presence override", body = FriendPresenceSettingsResponse),
+        (status = 404, description = "Friendship not found")
+    ),
+    security(("bearer_jwt" = []))
+)]
+async fn update_friend_presence_settings(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+    Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
+    Json(body): Json<UpdateFriendPresenceSettingsBody>,
+) -> Result<Json<FriendPresenceSettingsResponse>, AppError> {
+    validate_presence_friend_uid(uid, peer_uid)?;
+    let override_value =
+        social::update_friend_presence_settings(&mut conn, uid, peer_uid, body.override_value)?;
+    Ok(Json(FriendPresenceSettingsResponse { override_value }))
+}
+
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(get_friends))
         .routes(routes!(get_friend_relationship))
+        .routes(routes!(get_friend_presence_settings))
+        .routes(routes!(update_friend_presence_settings))
         .routes(routes!(delete_friend))
         .routes(routes!(create_friend_request))
         .routes(routes!(count_pending_incoming_requests))
@@ -544,11 +635,17 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_user_friend_add_info))
 }
 
+pub fn presence_settings_router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(get_my_presence_settings))
+        .routes(routes!(update_my_presence_settings))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         validate_friend_request_message, validate_friend_verification_question,
-        ListFriendRequestsQuery, MAX_FRIEND_REQUEST_MESSAGE_CHARS,
+        validate_presence_friend_uid, ListFriendRequestsQuery, MAX_FRIEND_REQUEST_MESSAGE_CHARS,
         MAX_FRIEND_VERIFICATION_QUESTION_CHARS,
     };
     use crate::errors::AppError;
@@ -590,5 +687,17 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "archived": true })).unwrap();
 
         assert_eq!(query.archived, Some(true));
+    }
+
+    #[test]
+    fn presence_settings_reject_invalid_or_self_friend_uids() {
+        assert!(matches!(
+            validate_presence_friend_uid(7, 0),
+            Err(AppError::BadRequest("Peer UID is invalid"))
+        ));
+        assert!(matches!(
+            validate_presence_friend_uid(7, 7),
+            Err(AppError::BadRequest("Peer UID is invalid"))
+        ));
     }
 }

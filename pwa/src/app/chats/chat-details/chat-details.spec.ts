@@ -8,11 +8,18 @@ import { archive, archiveOutline, starOutline } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { GroupKind, GroupRole, ServerWsMessageType, type ServerWsMessage } from '../../../generated/models';
+import {
+  FriendPresenceOverride,
+  GroupKind,
+  GroupRole,
+  ServerWsMessageType,
+  type ServerWsMessage,
+} from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
+import { Presence } from '../../presence/presence';
 import { SessionStore } from '../../session/session-store';
 import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
@@ -23,6 +30,7 @@ describe('ChatDetails', () => {
   const events = new Subject<ServerWsMessage>();
   const realtime = mockRealtime({ events$: events });
   const alert = { present: vi.fn(), onDidDismiss: vi.fn() };
+  let presence: Presence;
   beforeEach(() => {
     vi.spyOn(IonToast.prototype, 'present').mockResolvedValue();
     TestBed.configureTestingModule({
@@ -37,6 +45,8 @@ describe('ChatDetails', () => {
       ],
     });
     http = TestBed.inject(HttpTestingController);
+    presence = TestBed.inject(Presence);
+    vi.spyOn(presence, 'invalidateUsers');
   });
   afterEach(() => http.verify());
 
@@ -173,9 +183,22 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).toBeNull();
     relationship.flush({ peerUid: 2, isFriend: true });
+    await vi.waitFor(() =>
+      http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
+    );
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('解除好友');
+    const selector: HTMLIonSelectElement = fixture.nativeElement.querySelector('ion-select');
+    expect(selector.value).toBe(FriendPresenceOverride.inherit);
+    selector.value = FriendPresenceOverride.hide;
+    selector.dispatchEvent(new CustomEvent('ionChange', { detail: { value: FriendPresenceOverride.hide } }));
+    const update = http.expectOne('/_api/friends/2/presence-settings');
+    expect(update.request.method).toBe('PUT');
+    expect(update.request.body).toEqual({ override: FriendPresenceOverride.hide });
+    update.flush({ override: FriendPresenceOverride.hide });
+    await fixture.whenStable();
+    expect(presence.invalidateUsers).toHaveBeenCalledWith([2]);
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim()),
     ).toEqual(['话题', '图片', '视频', '文件']);
@@ -196,8 +219,32 @@ describe('ChatDetails', () => {
     });
     expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).toBeNull();
     http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true });
+    await vi.waitFor(() =>
+      http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
+    );
     await fixture.whenStable();
     fixture.detectChanges();
+  });
+
+  it('does not let a prior friend presence response overwrite the newly selected friend', async () => {
+    const fixture = TestBed.createComponent(ChatDetails);
+    fixture.componentRef.setInput('user', { uid: 2, username: '甲', gender: 0 });
+    fixture.detectChanges();
+    await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true }));
+    const prior = await vi.waitFor(() => http.expectOne('/_api/friends/2/presence-settings'));
+
+    fixture.componentRef.setInput('user', { uid: 3, username: '乙', gender: 0 });
+    fixture.detectChanges();
+    await vi.waitFor(() => http.expectOne('/_api/friends/3').flush({ peerUid: 3, isFriend: true }));
+    const current = await vi.waitFor(() => http.expectOne('/_api/friends/3/presence-settings'));
+    current.flush({ override: FriendPresenceOverride.hide });
+    prior.flush({ override: FriendPresenceOverride.inherit });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement.querySelector('ion-select') as HTMLIonSelectElement).value).toBe(
+      FriendPresenceOverride.hide,
+    );
   });
 
   it('keeps the newest chat when a previous detail request completes later', async () => {
@@ -444,6 +491,9 @@ describe('ChatDetails', () => {
       .flush({ ...wireChat, kind: GroupKind.dm, peer: { uid: 2, username: '朋友', gender: 0 } });
     await Promise.resolve();
     await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true }));
+    await vi.waitFor(() =>
+      http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
+    );
     await Promise.resolve();
     fixture.detectChanges();
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
@@ -461,6 +511,10 @@ describe('ChatDetails', () => {
     http.expectOne({ method: 'DELETE', url: '/_api/friends/2' }).flush(null);
     await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: false }));
     await deleting;
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('ion-select')).toBeNull();
+    http.expectNone('/_api/friends/2/presence-settings');
     expect(navigate).toHaveBeenCalledWith(['/chats']);
     expect(fixture.componentInstance['error']()).toBe(false);
   });

@@ -193,6 +193,39 @@
             </ion-button>
           }
         </div>
+        @if (otherUser() && relationship()?.isFriend) {
+          <ion-item class="presence-settings">
+            <ion-select
+              [label]="'settings.presence.friendTitle' | transloco"
+              labelPlacement="stacked"
+              interface="popover"
+              [value]="presenceOverride()"
+              [disabled]="busy() || presenceOverrideLoading() || presenceOverrideError()"
+              (ionChange)="saveFriendPresenceOverride($event.detail.value)">
+              <ion-select-option [value]="PresenceOverride.inherit">
+                {{ 'settings.presence.friendInherit' | transloco }}
+              </ion-select-option>
+              <ion-select-option [value]="PresenceOverride.share">
+                {{ 'settings.presence.friendShare' | transloco }}
+              </ion-select-option>
+              <ion-select-option [value]="PresenceOverride.hide">
+                {{ 'settings.presence.friendHide' | transloco }}
+              </ion-select-option>
+            </ion-select>
+            @if (pending() === Action.Presence || presenceOverrideLoading()) {
+              <ion-spinner slot="end"></ion-spinner>
+            }
+          </ion-item>
+          <ion-item lines="none">
+            <ion-note class="ion-text-wrap">{{ 'settings.presence.reciprocalNote' | transloco }}</ion-note>
+          </ion-item>
+          @if (presenceOverrideError()) {
+            <app-load-error
+              compact
+              [message]="'settings.presence.friendLoadFailed' | transloco"
+              (retry)="loadFriendPresenceSettings()" />
+          }
+        }
       } @else if (loading()) {
         <div class="page-loading"><ion-spinner /></div>
       }

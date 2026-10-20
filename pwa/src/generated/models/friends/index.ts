@@ -9,6 +9,8 @@
 export * from './createFriendRequestBody';
 export * from './friendAddInfoResponse';
 export * from './friendAddVerificationMode';
+export * from './friendPresenceOverride';
+export * from './friendPresenceSettingsResponse';
 export * from './friendRelationshipResponse';
 export * from './friendRequestDirection';
 export * from './friendRequestHistoryEntry';
@@ -20,4 +22,8 @@ export * from './listFriendRequestHistoryParams';
 export * from './listFriendRequestHistoryResponse';
 export * from './listFriendsResponse';
 export * from './pendingFriendRequestCountResponse';
+export * from './presenceSettingsResponse';
+export * from './presenceVisibility';
+export * from './updateFriendPresenceSettingsBody';
 export * from './updateFriendSettingsBody';
+export * from './updatePresenceSettingsBody';

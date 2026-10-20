@@ -7,15 +7,22 @@ import { provideRouter, Router } from '@angular/router';
 import { IonNav, ModalController, provideIonicAngular } from '@ionic/angular';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { FriendAddVerificationMode as Mode, type FriendSettingsResponse } from '../../../generated/models';
+import {
+  FriendAddVerificationMode as Mode,
+  PresenceVisibility,
+  type FriendSettingsResponse,
+  type PresenceSettingsResponse,
+} from '../../../generated/models';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { testUser } from '../../api/testing';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
+import { Presence } from '../../presence/presence';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
 import { ColorMode } from '../color-mode';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
 import { Preferences } from '../preferences';
+import { PresenceSettings } from '../presence-settings/presence-settings';
 import { StickerSettings } from '../sticker-settings/sticker-settings';
 import { StickerPreferences } from '../sticker-preferences';
 import { Settings } from './settings';
@@ -47,6 +54,8 @@ describe('Settings', () => {
     check: ReturnType<typeof vi.fn>;
     reload: ReturnType<typeof vi.fn>;
   };
+  let presence: { invalidateUsers: () => void };
+  const presenceEndpoint = '/_api/me/presence-settings';
   const endpoint = '/_api/friends/me/settings';
 
   beforeEach(async () => {
@@ -72,6 +81,7 @@ describe('Settings', () => {
       check: vi.fn().mockResolvedValue(UpdateCheckResult.Current),
       reload: vi.fn(),
     };
+    presence = { invalidateUsers: vi.fn() };
     TestBed.configureTestingModule({
       imports: [SettingsHost],
       providers: [
@@ -91,6 +101,7 @@ describe('Settings', () => {
         { provide: ModalController, useValue: { dismiss } },
         { provide: PushNotifications, useValue: notifications },
         { provide: AppUpdates, useValue: updates },
+        { provide: Presence, useValue: presence },
         {
           provide: StickerPreferences,
           useValue: {
@@ -126,10 +137,22 @@ describe('Settings', () => {
     fixture.detectChanges();
   }
 
-  async function openPage(label: string) {
+  async function loadPresence(settings: PresenceSettingsResponse = { visibility: PresenceVisibility.everyone }) {
+    http.expectOne(presenceEndpoint).flush(settings);
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  async function openPage(label: '通用' | '好友验证' | '在线状态隐私') {
     const item = Array.from(page.querySelectorAll('ion-item')).find((entry) => entry.textContent?.trim() === label)!;
-    expect(item.getAttribute('href')).toBe(label === '通用' ? '/settings/general' : '/settings/friend-verification');
-    await nav.push(label === '通用' ? GeneralSettings : FriendVerificationSettings);
+    const destination =
+      label === '通用'
+        ? { component: GeneralSettings, route: '/settings/general' }
+        : label === '好友验证'
+          ? { component: FriendVerificationSettings, route: '/settings/friend-verification' }
+          : { component: PresenceSettings, route: '/settings/presence' };
+    expect(item.getAttribute('href')).toBe(destination.route);
+    await nav.push(destination.component);
     page = (await nav.getActive())!.element!;
     await fixture.whenStable();
   }
@@ -150,7 +173,7 @@ describe('Settings', () => {
     return getDebugNode(page)!.componentInstance as Settings;
   }
 
-  async function choose(mode: Mode) {
+  async function choose(mode: Mode | PresenceVisibility) {
     const group: HTMLIonRadioGroupElement = page.querySelector('ion-radio-group')!;
     group.value = mode;
     group.dispatchEvent(new CustomEvent('ionChange', { detail: { value: mode } }));
@@ -178,6 +201,7 @@ describe('Settings', () => {
     expect(page.textContent).not.toContain('在“消息”标签页中显示话题');
     expect(page.textContent).not.toContain('允许任何人添加我');
     http.expectNone(endpoint);
+    http.expectNone(presenceEndpoint);
   });
 
   it('links to general settings and persists preferences across page visits', async () => {
@@ -253,6 +277,25 @@ describe('Settings', () => {
     await back();
     expect(page.tagName).toBe('APP-SETTINGS');
     expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it('loads and saves presence privacy, invalidating all individual presence snapshots', async () => {
+    await openPage('在线状态隐私');
+    await loadPresence();
+    expect(Array.from(page.querySelectorAll('ion-radio')).map((radio) => radio.value)).toEqual([
+      PresenceVisibility.everyone,
+      PresenceVisibility.friends,
+      PresenceVisibility.nobody,
+    ]);
+    await choose(PresenceVisibility.nobody);
+    saveButton().click();
+    const request = http.expectOne(presenceEndpoint);
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ visibility: PresenceVisibility.nobody });
+    request.flush({ visibility: PresenceVisibility.nobody });
+    await fixture.whenStable();
+    expect(presence.invalidateUsers).toHaveBeenCalledOnce();
+    expect(page.textContent).toContain('已保存');
   });
 
   it('does not retain a question when another verification mode is saved', async () => {

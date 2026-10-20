@@ -21,6 +21,7 @@ use utoipa_axum::router::OpenApiRouter;
 
 pub fn api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .merge(friends::presence_settings_router())
         .nest("/auth", auth::router())
         .nest("/ws", ws::router())
         .nest("/chats", chats::router())

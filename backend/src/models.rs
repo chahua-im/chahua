@@ -815,6 +815,7 @@ pub struct UserExtra {
     pub verification_mode: FriendAddVerificationMode,
     pub verification_question: Option<String>,
     pub token_gen: i32,
+    pub presence_visibility: PresenceVisibility,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -826,6 +827,7 @@ pub struct NewUserExtra {
     pub sticker_pack_order: serde_json::Value,
     pub verification_mode: FriendAddVerificationMode,
     pub verification_question: Option<String>,
+    pub presence_visibility: PresenceVisibility,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
@@ -960,6 +962,35 @@ pub enum FriendAddVerificationMode {
     Question,
 }
 
+/// Global policy controlling who can see an individual's online and last-seen presence.
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::PresenceVisibility"]
+#[serde(rename_all = "lowercase")]
+pub enum PresenceVisibility {
+    Everyone,
+    Friends,
+    Nobody,
+}
+
+/// Per-friend refinement of the owner's global presence policy.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FriendPresenceOverride {
+    Inherit,
+    Share,
+    Hide,
+}
+
 /// Canonical friendship row: `uid1 < uid2`, so each pair is stored once.
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
 #[diesel(table_name = schema::friendships)]
@@ -968,6 +999,8 @@ pub struct Friendship {
     pub uid2: i32,
     pub initiated_by: i32,
     pub created_at: DateTime<Utc>,
+    pub uid1_shares_presence: Option<bool>,
+    pub uid2_shares_presence: Option<bool>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -977,6 +1010,8 @@ pub struct NewFriendship {
     pub uid2: i32,
     pub initiated_by: i32,
     pub created_at: DateTime<Utc>,
+    pub uid1_shares_presence: Option<bool>,
+    pub uid2_shares_presence: Option<bool>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize)]

@@ -7,12 +7,14 @@
  */
 import type {
   FriendAddInfoResponse,
+  FriendPresenceSettingsResponse,
   FriendRelationshipResponse,
   FriendSettingsResponse,
   ListFriendRequestHistoryParams,
   ListFriendRequestHistoryResponse,
   ListFriendsResponse,
   PendingFriendRequestCountResponse,
+  PresenceSettingsResponse,
 } from '../../models';
 
 import { HttpHeaders, httpResource } from '@angular/common/http';
@@ -291,12 +293,59 @@ export function getFriendRelationshipResource(
   );
 }
 
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getFriendPresenceSettingsResource(
+  uid: Signal<number>,
+  options: OrvalHttpResourceOptions<FriendPresenceSettingsResponse, unknown> & {
+    defaultValue: NoInfer<FriendPresenceSettingsResponse>;
+  },
+): HttpResourceRef<FriendPresenceSettingsResponse>;
+export function getFriendPresenceSettingsResource(
+  uid: Signal<number>,
+  options?: OrvalHttpResourceOptions<FriendPresenceSettingsResponse, unknown>,
+): HttpResourceRef<FriendPresenceSettingsResponse | undefined>;
+export function getFriendPresenceSettingsResource(
+  uid: Signal<number>,
+  options?: OrvalHttpResourceOptions<FriendPresenceSettingsResponse, unknown>,
+): HttpResourceRef<FriendPresenceSettingsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<FriendPresenceSettingsResponse>(
+    () => applyOrvalRequestExtension(`${baseUrl}/friends/${uid()}/presence-settings`, options),
+    options,
+  );
+}
+
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getMyPresenceSettingsResource(
+  options: OrvalHttpResourceOptions<PresenceSettingsResponse, unknown> & {
+    defaultValue: NoInfer<PresenceSettingsResponse>;
+  },
+): HttpResourceRef<PresenceSettingsResponse>;
+export function getMyPresenceSettingsResource(
+  options?: OrvalHttpResourceOptions<PresenceSettingsResponse, unknown>,
+): HttpResourceRef<PresenceSettingsResponse | undefined>;
+export function getMyPresenceSettingsResource(
+  options?: OrvalHttpResourceOptions<PresenceSettingsResponse, unknown>,
+): HttpResourceRef<PresenceSettingsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<PresenceSettingsResponse>(
+    () => applyOrvalRequestExtension(`${baseUrl}/me/presence-settings`, options),
+    options,
+  );
+}
+
 export type GetFriendsResourceResult = NonNullable<ListFriendsResponse>;
 export type GetUserFriendAddInfoResourceResult = NonNullable<FriendAddInfoResponse>;
 export type GetMyFriendSettingsResourceResult = NonNullable<FriendSettingsResponse>;
 export type ListFriendRequestHistoryResourceResult = NonNullable<ListFriendRequestHistoryResponse>;
 export type CountPendingIncomingRequestsResourceResult = NonNullable<PendingFriendRequestCountResponse>;
 export type GetFriendRelationshipResourceResult = NonNullable<FriendRelationshipResponse>;
+export type GetFriendPresenceSettingsResourceResult = NonNullable<FriendPresenceSettingsResponse>;
+export type GetMyPresenceSettingsResourceResult = NonNullable<PresenceSettingsResponse>;
 
 /**
  * Utility type for httpResource results with status tracking.

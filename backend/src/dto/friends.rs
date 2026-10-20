@@ -103,6 +103,36 @@ pub struct UpdateFriendSettingsBody {
     pub question: Option<String>,
 }
 
+/// A user's global policy for publishing online and last-seen presence.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceSettingsResponse {
+    pub visibility: crate::models::PresenceVisibility,
+}
+
+/// Body for PUT /me/presence-settings.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePresenceSettingsBody {
+    pub visibility: crate::models::PresenceVisibility,
+}
+
+/// The current user's override for publishing presence to one current friend.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendPresenceSettingsResponse {
+    #[serde(rename = "override")]
+    pub override_value: crate::models::FriendPresenceOverride,
+}
+
+/// Body for PUT /friends/{uid}/presence-settings.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFriendPresenceSettingsBody {
+    #[serde(rename = "override")]
+    pub override_value: crate::models::FriendPresenceOverride,
+}
+
 /// What a requester needs to know to render the add-friend UI for a target
 /// (GET /users/:uid/friend-add-info).
 #[derive(Debug, Clone, Serialize, ToSchema)]

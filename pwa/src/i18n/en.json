@@ -47,6 +47,7 @@
       "general": "General",
       "saved": "Saved",
       "friendVerification": "Friend Verification",
+      "presence": "Presence Privacy",
       "stickers": "Emojis & Stickers",
       "notifications": "Notifications",
       "notificationsUnsupported": "Not supported",
@@ -86,6 +87,20 @@
       "questionPlaceholder": "Enter the question the requester must answer",
       "questionInvalid": "Enter a question between 1 and 100 characters.",
       "saveFailed": "Save failed. Please try again."
+    },
+    "presence": {
+      "title": "Presence Privacy",
+      "loadFailed": "Failed to load presence privacy settings.",
+      "everyone": "Everyone",
+      "friends": "Friends",
+      "nobody": "Nobody",
+      "reciprocalNote": "Online status and last seen are visible only when both people allow sharing with each other. Group online counts are not affected.",
+      "saveFailed": "Save failed. Please try again.",
+      "friendTitle": "Presence sharing",
+      "friendInherit": "Use global setting",
+      "friendShare": "Share with this friend",
+      "friendHide": "Hide from this friend",
+      "friendLoadFailed": "Failed to load this friend's presence setting."
     },
     "stickers": {
       "title": "Emojis & Stickers",

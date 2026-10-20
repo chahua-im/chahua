@@ -23,9 +23,13 @@ import {
   IonButton,
   IonContent,
   IonIcon,
+  IonItem,
   IonLabel,
+  IonNote,
   IonSegment,
   IonSegmentButton,
+  IonSelect,
+  IonSelectOption,
   IonSpinner,
   ModalController,
   IonToast,
@@ -55,6 +59,7 @@ import { MembersService } from '../../../generated/endpoints/members/members.ser
 import {
   ChatAttachmentKindFilter,
   FriendAddVerificationMode,
+  FriendPresenceOverride,
   type MemberSummary,
   GroupKind,
   GroupRole,
@@ -70,6 +75,7 @@ import { uploadBlob } from '../../messages/upload';
 import { UploadProgress } from '../../messages/upload-progress/upload-progress';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
+import { Presence } from '../../presence/presence';
 import { LoadError } from '../../ui/load-error/load-error';
 import { ChatAttachments } from '../chat-attachments/chat-attachments';
 import { ChatAvatar, conversationAvatar } from '../chat-avatar/chat-avatar';
@@ -87,6 +93,7 @@ enum DetailAction {
   Avatar,
   Leave,
   AddFriend,
+  Presence,
   Block,
 }
 
@@ -114,10 +121,14 @@ export enum DetailView {
     ContentScrollbars,
     FormField,
     LoadError,
+    IonItem,
     IonButton,
+    IonNote,
     IonContent,
     IonLabel,
     IonIcon,
+    IonSelect,
+    IonSelectOption,
     IonSpinner,
     IonToast,
     IonSegment,
@@ -166,6 +177,7 @@ export class ChatDetails {
   private readonly friends = inject(FriendsService);
   private readonly destroy = inject(DestroyRef);
   private loadVersion = 0;
+  private presenceSettingsVersion = 0;
   private readonly peer = computed(() => {
     const chat = this.chatId() ? this.store.get(this.chatId()!) : undefined;
     return this.user() ?? (chat?.kind === GroupKind.dm ? chat.peer : undefined);
@@ -178,6 +190,10 @@ export class ChatDetails {
   protected readonly id = computed(() => this.chatId() ?? this.relationship()?.dmChatId);
   protected readonly person = computed(() => (!this.threadId() ? this.peer() : undefined));
   protected readonly otherUser = computed(() => this.person() && this.person()!.uid !== this.session.user()?.uid);
+  private readonly presenceSettingsUid = computed(() => {
+    const person = this.person();
+    return person && this.otherUser() && this.relationship()?.isFriend ? person.uid : undefined;
+  });
   private readonly blocks = inject(BlocksService);
   private readonly navigation = inject(ConversationNavigation);
   protected readonly modals = inject(ModalController);
@@ -185,6 +201,7 @@ export class ChatDetails {
   private readonly api = inject(GroupsService);
   private readonly members = inject(MembersService);
   private readonly session = inject(SessionStore);
+  private readonly presence = inject(Presence);
   private readonly store = inject(ChatStore);
   private readonly lists = inject(ChatListStore);
   private readonly alerts = inject(AlertController);
@@ -192,6 +209,19 @@ export class ChatDetails {
   private readonly injector = inject(Injector);
   protected readonly chat = computed(() => (this.id() ? this.store.get(this.id()!) : undefined));
   protected readonly loading = signal(false);
+  protected readonly PresenceOverride = FriendPresenceOverride;
+  protected readonly presenceOverride = linkedSignal({
+    source: this.presenceSettingsUid,
+    computation: (): FriendPresenceOverride | undefined => undefined,
+  });
+  protected readonly presenceOverrideLoading = linkedSignal({
+    source: this.presenceSettingsUid,
+    computation: () => false,
+  });
+  protected readonly presenceOverrideError = linkedSignal({
+    source: this.presenceSettingsUid,
+    computation: () => false,
+  });
   protected readonly Action = DetailAction;
   private readonly scope = computed(() => ({
     chatId: this.chatId(),
@@ -251,6 +281,14 @@ export class ChatDetails {
       if (query) onCleanup(query.activate());
     });
     effect(() => {
+      const uid = this.presenceSettingsUid();
+      if (uid == null) {
+        this.presenceSettingsVersion++;
+        return;
+      }
+      untracked(() => void this.loadFriendPresenceSettings());
+    });
+    effect(() => {
       const scope = this.scope();
       const root = scope.threadId;
       if (root && !this.subscription())
@@ -280,6 +318,51 @@ export class ChatDetails {
       if (version === this.loadVersion) this.loading.set(false);
     }
   }
+  protected async loadFriendPresenceSettings() {
+    const uid = this.presenceSettingsUid();
+    if (uid == null) return;
+    const version = ++this.presenceSettingsVersion;
+    this.presenceOverrideLoading.set(true);
+    this.presenceOverrideError.set(false);
+    try {
+      const settings = await firstValueFrom(this.friends.getFriendPresenceSettings(uid));
+      if (version === this.presenceSettingsVersion && uid === this.presenceSettingsUid() && !this.destroy.destroyed)
+        this.presenceOverride.set(settings.override);
+    } catch {
+      if (version === this.presenceSettingsVersion && uid === this.presenceSettingsUid() && !this.destroy.destroyed)
+        this.presenceOverrideError.set(true);
+    } finally {
+      if (version === this.presenceSettingsVersion && uid === this.presenceSettingsUid())
+        this.presenceOverrideLoading.set(false);
+    }
+  }
+
+  protected async saveFriendPresenceOverride(value: unknown) {
+    if (
+      this.busy() ||
+      this.presenceOverrideLoading() ||
+      !Object.values(FriendPresenceOverride).includes(value as FriendPresenceOverride)
+    )
+      return;
+    const uid = this.presenceSettingsUid();
+    if (uid == null) return;
+    const override = value as FriendPresenceOverride;
+    const previous = this.presenceOverride();
+    if (override === previous) return;
+    this.presenceOverride.set(override);
+    const scope = this.scope();
+    const saved = await this.perform(
+      DetailAction.Presence,
+      async () => {
+        const settings = await firstValueFrom(this.friends.updateFriendPresenceSettings(uid, { override }));
+        this.presence.invalidateUsers([uid]);
+        if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) this.presenceOverride.set(settings.override);
+      },
+      true,
+    );
+    if (!saved && this.isCurrent(scope) && uid === this.presenceSettingsUid()) this.presenceOverride.set(previous);
+  }
+
   protected edit(field: GroupField) {
     if (!this.canManage() || this.busy()) return;
     this.edits.update((edits) => ({ ...edits, [field]: { value: this.chat()?.[field] ?? '' } }));

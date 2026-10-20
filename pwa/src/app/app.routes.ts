@@ -16,6 +16,7 @@ import { Settings } from './settings/settings/settings';
 import { GeneralSettings } from './settings/general-settings/general-settings';
 import { LanguageSettings } from './settings/language-settings/language-settings';
 import { FriendVerificationSettings } from './settings/friend-verification-settings/friend-verification-settings';
+import { PresenceSettings } from './settings/presence-settings/presence-settings';
 import { StickerSettings } from './settings/sticker-settings/sticker-settings';
 import { StickerPackDetail } from './settings/sticker-pack-detail/sticker-pack-detail';
 import { Landing } from './pwa/landing/landing';
@@ -55,6 +56,7 @@ export const routes: Routes = [
     component: ChatLink,
     data: { modal: true, component: FriendVerificationSettings },
   },
+  { path: 'settings/presence', component: ChatLink, data: { modal: true, component: PresenceSettings } },
   { path: 'settings/stickers', component: ChatLink, data: { modal: true, component: StickerSettings } },
   { path: 'settings/stickers/:packId', component: ChatLink, data: { modal: true, component: StickerPackDetail } },
   {

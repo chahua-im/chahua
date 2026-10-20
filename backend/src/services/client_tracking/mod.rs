@@ -236,6 +236,7 @@ impl ClientTrackingService {
                         .map_or(serde_json::json!([]), |u| u.sticker_pack_order.clone()),
                     verification_mode: FriendAddVerificationMode::Direct,
                     verification_question: None,
+                    presence_visibility: crate::models::PresenceVisibility::Everyone,
                 };
 
                 diesel::insert_into(user_extra::table)

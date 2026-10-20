@@ -47,6 +47,7 @@
       "general": "一般",
       "saved": "收藏",
       "friendVerification": "好友驗證",
+      "presence": "在線狀態隱私",
       "stickers": "表情和貼紙",
       "notifications": "通知",
       "notificationsUnsupported": "不支援",
@@ -86,6 +87,20 @@
       "questionPlaceholder": "填寫申請者需要回答的問題",
       "questionInvalid": "請填寫 1–100 字的問題。",
       "saveFailed": "儲存失敗，請重試。"
+    },
+    "presence": {
+      "title": "在線狀態隱私",
+      "loadFailed": "在線狀態隱私設定載入失敗。",
+      "everyone": "所有人",
+      "friends": "僅好友",
+      "nobody": "沒有人",
+      "reciprocalNote": "在線狀態和最近上線只會在雙方都允許向對方分享時顯示；群組在線人數不受影響。",
+      "saveFailed": "儲存失敗，請重試。",
+      "friendTitle": "在線狀態分享",
+      "friendInherit": "使用全域設定",
+      "friendShare": "與這位好友分享",
+      "friendHide": "對這位好友隱藏",
+      "friendLoadFailed": "此好友的在線狀態設定載入失敗。"
     },
     "stickers": {
       "title": "表情和貼紙",

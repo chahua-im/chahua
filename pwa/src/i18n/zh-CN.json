@@ -47,6 +47,7 @@
       "general": "通用",
       "saved": "收藏",
       "friendVerification": "好友验证",
+      "presence": "在线状态隐私",
       "stickers": "表情和贴纸",
       "notifications": "消息通知",
       "notificationsUnsupported": "不支持",
@@ -86,6 +87,20 @@
       "questionPlaceholder": "填写申请者需要回答的问题",
       "questionInvalid": "请填写 1–100 字的问题。",
       "saveFailed": "保存失败，请重试。"
+    },
+    "presence": {
+      "title": "在线状态隐私",
+      "loadFailed": "在线状态隐私设置加载失败。",
+      "everyone": "所有人",
+      "friends": "仅好友",
+      "nobody": "没有人",
+      "reciprocalNote": "在线状态和最近上线仅在双方都允许向对方分享时可见；群组在线人数不受影响。",
+      "saveFailed": "保存失败，请重试。",
+      "friendTitle": "在线状态分享",
+      "friendInherit": "使用全局设置",
+      "friendShare": "与这位好友分享",
+      "friendHide": "对这位好友隐藏",
+      "friendLoadFailed": "此好友的在线状态设置加载失败。"
     },
     "stickers": {
       "title": "表情和贴纸",

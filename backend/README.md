@@ -78,6 +78,42 @@ coordination before the counts are globally authoritative. Sticky sessions alone
 The existing 300-second stale-connection timeout and 60-second pruning interval remain unchanged;
 silent network loss is not an immediate offline transition. No persistent presence writes are added.
 
+## Individual presence privacy
+
+Privacy applies to individual `online` and `lastSeenAt` together, including DM indicators
+and user details. Both users must permit sharing with each other. The existing self,
+friend/shared-group discoverability, and blocking checks still apply; `everyone` does
+not make arbitrary UIDs discoverable. Self-presence remains available.
+
+| Authenticated endpoint | GET response / PUT body and response |
+| --- | --- |
+| `/me/presence-settings` | `{ "visibility": "everyone" }`; allowed values: `everyone`, `friends`, `nobody`. |
+| `/friends/{uid}/presence-settings` | `{ "override": "inherit" }`; allowed values: `inherit`, `share`, `hide`. Requires a current friendship; missing friendships return 404. Only the caller's override is exposed. |
+
+The base policy is stored in `user_extra.presence_visibility`, a PostgreSQL enum with
+`NOT NULL DEFAULT 'everyone'`. Existing and newly created users default to everyone;
+reads without a user-extra row also use everyone. `friends` requires a current friendship;
+`nobody` denies sharing unless an explicit friend override permits it.
+
+Each canonical `friendships` row stores `uid1_shares_presence` and
+`uid2_shares_presence`: SQL NULL inherits that user's global policy, true shares,
+false hides. Writes update only the authenticated owner's column. Overrides take
+precedence over that owner's base policy, never over the other person's choice or
+a block. Unfriending deletes both overrides with the friendship; re-adding inherits.
+
+The existing batched friendship reads select both directional overrides. One bounded
+user-extra read loads the viewer and candidate peers' policies with last-seen data;
+there are no per-peer queries or materialized visibility pairs. Existing primary keys
+and friendship indexes serve these lookups; global changes update one row.
+
+Unauthorized individual entries are omitted, not emitted as offline, and clients
+must clear them. Policies are rechecked on every snapshot; no privacy authorization
+cache or separate policy-change push is used. Other clients apply changes on their
+next normal snapshot, while the saving PWA invalidates its affected individual cache
+and immediately re-requests its scope. Group aggregates, their cache, and registry
+online membership ignore individual privacy, so small-group counts may indirectly
+reveal activity.
+
 ## APNs setup
 
 This backend talks to Apple Push Notification service directly using **token-based auth**.

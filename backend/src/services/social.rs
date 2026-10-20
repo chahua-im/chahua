@@ -11,9 +11,10 @@ use diesel::prelude::*;
 
 use crate::errors::AppError;
 use crate::models::{
-    FriendAddVerificationMode, FriendRequest, FriendRequestStatus, GroupJoinReason, GroupKind,
-    GroupRole, GroupVisibility, MessageType, NewBlock, NewFriendRequest, NewFriendship, NewGroup,
-    NewGroupMembership, NewUserExtra,
+    FriendAddVerificationMode, FriendPresenceOverride, FriendRequest, FriendRequestStatus,
+    GroupJoinReason, GroupKind, GroupRole, GroupVisibility, MessageType, NewBlock,
+    NewFriendRequest, NewFriendship, NewGroup, NewGroupMembership, NewUserExtra,
+    PresenceVisibility,
 };
 use crate::schema::{blocks, friend_requests, friendships, group_membership, groups, user_extra};
 use crate::services::messages::{load_username_by_uid, PreparedMessageSend, SendMessageOutcome};
@@ -40,6 +41,10 @@ pub struct PeerRelationship {
     pub dm_chat_id: Option<i64>,
     pub blocking: bool,
     pub blocked_by: bool,
+    /// The caller's override for sharing presence with this peer.
+    pub shares_presence: Option<bool>,
+    /// This peer's override for sharing presence with the caller.
+    pub peer_shares_presence: Option<bool>,
     /// `(id, uid_is_sender, created_at)`.
     pub pending_request: Option<(i64, bool, chrono::DateTime<Utc>)>,
 }
@@ -62,16 +67,26 @@ pub fn peer_relationships(
         .collect::<HashMap<_, _>>();
 
     if !greater.is_empty() {
-        for (peer, created_at) in friendships::table
+        for (peer, created_at, shares_presence, peer_shares_presence) in friendships::table
             .filter(
                 friendships::uid1
                     .eq(uid)
                     .and(friendships::uid2.eq_any(&greater)),
             )
-            .select((friendships::uid2, friendships::created_at))
-            .load::<(i32, chrono::DateTime<Utc>)>(conn)?
+            .select((
+                friendships::uid2,
+                friendships::created_at,
+                friendships::uid1_shares_presence,
+                friendships::uid2_shares_presence,
+            ))
+            .load::<(i32, chrono::DateTime<Utc>, Option<bool>, Option<bool>)>(conn)?
         {
-            relationships.entry(peer).or_default().friends_since = Some(created_at);
+            let relationship = relationships.entry(peer).or_default();
+            let (shares_presence, peer_shares_presence) =
+                directional_presence_overrides(true, shares_presence, peer_shares_presence);
+            relationship.friends_since = Some(created_at);
+            relationship.shares_presence = shares_presence;
+            relationship.peer_shares_presence = peer_shares_presence;
         }
 
         for (peer, chat_id) in groups::table
@@ -91,16 +106,26 @@ pub fn peer_relationships(
     }
 
     if !lesser.is_empty() {
-        for (peer, created_at) in friendships::table
+        for (peer, created_at, peer_shares_presence, shares_presence) in friendships::table
             .filter(
                 friendships::uid2
                     .eq(uid)
                     .and(friendships::uid1.eq_any(&lesser)),
             )
-            .select((friendships::uid1, friendships::created_at))
-            .load::<(i32, chrono::DateTime<Utc>)>(conn)?
+            .select((
+                friendships::uid1,
+                friendships::created_at,
+                friendships::uid1_shares_presence,
+                friendships::uid2_shares_presence,
+            ))
+            .load::<(i32, chrono::DateTime<Utc>, Option<bool>, Option<bool>)>(conn)?
         {
-            relationships.entry(peer).or_default().friends_since = Some(created_at);
+            let relationship = relationships.entry(peer).or_default();
+            let (shares_presence, peer_shares_presence) =
+                directional_presence_overrides(false, peer_shares_presence, shares_presence);
+            relationship.friends_since = Some(created_at);
+            relationship.shares_presence = shares_presence;
+            relationship.peer_shares_presence = peer_shares_presence;
         }
 
         for (peer, chat_id) in groups::table
@@ -473,11 +498,127 @@ pub fn list_blocks_with_since(
 /// Remove the friendship between two users. Returns `true` if a row was deleted.
 pub fn remove_friendship(conn: &mut PgConnection, a: i32, b: i32) -> QueryResult<bool> {
     let (u1, u2) = canonical_pair(a, b);
+
     let affected = diesel::delete(
         friendships::table.filter(friendships::uid1.eq(u1).and(friendships::uid2.eq(u2))),
     )
     .execute(conn)?;
     Ok(affected > 0)
+}
+/// Read the caller-owned presence override for an existing friendship.
+pub fn get_friend_presence_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+    peer_uid: i32,
+) -> Result<FriendPresenceOverride, AppError> {
+    let (uid1, uid2) = canonical_pair(uid, peer_uid);
+    let shares_presence = if uid == uid1 {
+        friendships::table
+            .filter(friendships::uid1.eq(uid1).and(friendships::uid2.eq(uid2)))
+            .select(friendships::uid1_shares_presence)
+            .first::<Option<bool>>(conn)
+            .optional()?
+    } else {
+        friendships::table
+            .filter(friendships::uid1.eq(uid1).and(friendships::uid2.eq(uid2)))
+            .select(friendships::uid2_shares_presence)
+            .first::<Option<bool>>(conn)
+            .optional()?
+    }
+    .ok_or(AppError::NotFound("Friendship not found"))?;
+    Ok(friend_presence_override_from_db(shares_presence))
+}
+
+/// Update the caller-owned presence override for an existing friendship.
+pub fn update_friend_presence_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+    peer_uid: i32,
+    override_value: FriendPresenceOverride,
+) -> Result<FriendPresenceOverride, AppError> {
+    let (uid1, uid2) = canonical_pair(uid, peer_uid);
+    let filter = friendships::uid1.eq(uid1).and(friendships::uid2.eq(uid2));
+    let shares_presence = friend_presence_override_to_db(override_value);
+    let affected = if uid == uid1 {
+        diesel::update(friendships::table.filter(filter))
+            .set(friendships::uid1_shares_presence.eq(shares_presence))
+            .execute(conn)?
+    } else {
+        diesel::update(friendships::table.filter(filter))
+            .set(friendships::uid2_shares_presence.eq(shares_presence))
+            .execute(conn)?
+    };
+    if affected == 0 {
+        return Err(AppError::NotFound("Friendship not found"));
+    }
+    Ok(override_value)
+}
+
+/// Get a user's global presence policy. Users without activity rows retain the
+/// historical default of sharing with everyone.
+pub fn get_presence_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> Result<PresenceVisibility, AppError> {
+    Ok(user_extra::table
+        .filter(user_extra::uid.eq(uid))
+        .select(user_extra::presence_visibility)
+        .first(conn)
+        .optional()?
+        .unwrap_or(PresenceVisibility::Everyone))
+}
+
+/// Persist a user's global presence policy without clobbering other app-owned settings.
+pub fn update_presence_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+    visibility: PresenceVisibility,
+) -> Result<PresenceVisibility, AppError> {
+    let now = Utc::now().naive_utc();
+    diesel::insert_into(user_extra::table)
+        .values(NewUserExtra {
+            uid,
+            first_seen_at: now,
+            last_seen_at: now,
+            sticker_pack_order: serde_json::json!([]),
+            verification_mode: FriendAddVerificationMode::Direct,
+            verification_question: None,
+            presence_visibility: visibility,
+        })
+        .on_conflict(user_extra::uid)
+        .do_update()
+        .set(user_extra::presence_visibility.eq(visibility))
+        .returning(user_extra::presence_visibility)
+        .get_result(conn)
+        .map_err(AppError::from)
+}
+
+pub fn friend_presence_override_from_db(value: Option<bool>) -> FriendPresenceOverride {
+    match value {
+        None => FriendPresenceOverride::Inherit,
+        Some(true) => FriendPresenceOverride::Share,
+        Some(false) => FriendPresenceOverride::Hide,
+    }
+}
+
+pub fn friend_presence_override_to_db(value: FriendPresenceOverride) -> Option<bool> {
+    match value {
+        FriendPresenceOverride::Inherit => None,
+        FriendPresenceOverride::Share => Some(true),
+        FriendPresenceOverride::Hide => Some(false),
+    }
+}
+
+fn directional_presence_overrides(
+    viewer_is_uid1: bool,
+    uid1_shares_presence: Option<bool>,
+    uid2_shares_presence: Option<bool>,
+) -> (Option<bool>, Option<bool>) {
+    if viewer_is_uid1 {
+        (uid1_shares_presence, uid2_shares_presence)
+    } else {
+        (uid2_shares_presence, uid1_shares_presence)
+    }
 }
 
 /// Create a friendship row for `(a, b)` (idempotent).
@@ -495,6 +636,8 @@ fn insert_friendship(
             uid2: u2,
             initiated_by,
             created_at: now,
+            uid1_shares_presence: None,
+            uid2_shares_presence: None,
         })
         .on_conflict((friendships::uid1, friendships::uid2))
         .do_nothing()
@@ -576,6 +719,7 @@ pub fn upsert_friend_settings(
         sticker_pack_order: serde_json::json!([]),
         verification_mode: mode,
         verification_question: trimmed_question.clone(),
+        presence_visibility: PresenceVisibility::Everyone,
     };
     let result = diesel::insert_into(user_extra::table)
         .values(&row)
@@ -955,8 +1099,11 @@ pub fn unblock_user(conn: &mut PgConnection, blocker: i32, blocked: i32) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_pair, merge_request_history};
-    use crate::models::{FriendRequest, FriendRequestStatus};
+    use super::{
+        canonical_pair, directional_presence_overrides, friend_presence_override_from_db,
+        friend_presence_override_to_db, merge_request_history,
+    };
+    use crate::models::{FriendPresenceOverride, FriendRequest, FriendRequestStatus};
     use chrono::{DateTime, Utc};
 
     fn request_history_entry(
@@ -1003,5 +1150,29 @@ mod tests {
         assert_eq!(canonical_pair(5, 3), (3, 5));
         assert_eq!(canonical_pair(3, 5), (3, 5));
         assert_eq!(canonical_pair(-1, 9), (-1, 9));
+    }
+
+    #[test]
+    fn presence_overrides_follow_both_canonical_friendship_directions() {
+        assert_eq!(
+            directional_presence_overrides(true, Some(true), Some(false)),
+            (Some(true), Some(false))
+        );
+        assert_eq!(
+            directional_presence_overrides(false, Some(true), Some(false)),
+            (Some(false), Some(true))
+        );
+    }
+
+    #[test]
+    fn presence_override_enum_round_trips_through_nullable_storage() {
+        for (override_value, stored) in [
+            (FriendPresenceOverride::Inherit, None),
+            (FriendPresenceOverride::Share, Some(true)),
+            (FriendPresenceOverride::Hide, Some(false)),
+        ] {
+            assert_eq!(friend_presence_override_to_db(override_value), stored);
+            assert_eq!(friend_presence_override_from_db(stored), override_value);
+        }
     }
 }

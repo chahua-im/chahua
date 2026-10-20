@@ -50,6 +50,10 @@ pub mod sql_types {
     pub struct PolicySubjectType;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "presence_visibility"))]
+    pub struct PresenceVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "push_environment"))]
     pub struct PushEnvironment;
 
@@ -136,6 +140,8 @@ diesel::table! {
         uid2 -> Int4,
         initiated_by -> Int4,
         created_at -> Timestamptz,
+        uid1_shares_presence -> Nullable<Bool>,
+        uid2_shares_presence -> Nullable<Bool>,
     }
 }
 
@@ -441,6 +447,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::FriendAddVerificationMode;
+    use super::sql_types::PresenceVisibility;
 
     user_extra (uid) {
         uid -> Int4,
@@ -450,6 +457,7 @@ diesel::table! {
         verification_mode -> FriendAddVerificationMode,
         verification_question -> Nullable<Text>,
         token_gen -> Int4,
+        presence_visibility -> PresenceVisibility,
     }
 }
 
