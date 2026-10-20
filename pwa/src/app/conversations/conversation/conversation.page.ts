@@ -730,7 +730,7 @@ export class ConversationPage {
       if (
         event.type === ServerWsMessageType.notification &&
         event.payload.chatId === this.id() &&
-        event.payload.threadRootId === (this.threadId() ?? null)
+        (event.payload.threadRootId ?? null) === (this.threadId() ?? null)
       ) {
         if (event.payload.notificationType === NotificationType.reaction) {
           void this.enterReactionSession();

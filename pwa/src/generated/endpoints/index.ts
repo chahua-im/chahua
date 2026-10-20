@@ -28,7 +28,6 @@ export { applyOrvalRequestExtension, toResourceState } from './attachments/attac
 export * from './attachments/attachments.resource';
 export * from './blocks/blocks.resource';
 export * from './chats/chats.resource';
-export * from './default/default.resource';
 export * from './external-sessions/external-sessions.resource';
 export * from './friends/friends.resource';
 export * from './groups/groups.resource';
