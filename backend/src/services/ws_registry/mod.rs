@@ -124,13 +124,13 @@ impl ConnectionRegistry {
 
     /// Remove a single connection. Call when the socket closes.
     pub fn remove_connection(&self, uid: i32, conn_id: u64) {
-        let mut empty = false;
-        if let Some(mut vec) = self.inner.get_mut(&uid) {
-            vec.retain(|e| e.conn_id != conn_id);
-            empty = vec.is_empty();
-        }
-        if empty {
-            self.inner.remove(&uid);
+        if let dashmap::mapref::entry::Entry::Occupied(mut entry) = self.inner.entry(uid) {
+            entry
+                .get_mut()
+                .retain(|connection| connection.conn_id != conn_id);
+            if entry.get().is_empty() {
+                entry.remove();
+            }
         }
         self.update_metrics();
         self.broadcast_presence_to_user(uid);
@@ -165,6 +165,34 @@ impl ConnectionRegistry {
             vec.iter().any(|entry| {
                 now.saturating_sub(entry.last_ping_at.load(Ordering::Relaxed)) <= freshness_secs
                     && entry.app_state() == AppPresenceState::Active
+            })
+        })
+    }
+
+    /// Returns whether at least one fresh, open connection exists for a user.
+    ///
+    /// This deliberately ignores application foreground/background state: remote presence means
+    /// the authenticated WebSocket is live, while foreground state remains a push-delivery concern.
+    /// It allocates nothing and coalesces every tab/device into one boolean user status.
+    pub fn is_online(&self, uid: i32) -> bool {
+        self.is_online_at(uid, now_secs())
+    }
+
+    /// Counts online users in a unique membership UID list using one liveness timestamp.
+    pub fn count_online(&self, member_uids: &[i32]) -> u32 {
+        let now = now_secs();
+        member_uids
+            .iter()
+            .filter(|uid| self.is_online_at(**uid, now))
+            .count() as u32
+    }
+
+    fn is_online_at(&self, uid: i32, now: u64) -> bool {
+        self.inner.get(&uid).is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                !entry.tx.is_closed()
+                    && now.saturating_sub(entry.last_ping_at.load(Ordering::Relaxed))
+                        <= STALE_CONNECTION_TIMEOUT_SECS
             })
         })
     }
@@ -213,11 +241,12 @@ impl ConnectionRegistry {
         }
         let mut pruned_uids: Vec<i32> = Vec::new();
         for (uid, conn_ids) in uids_to_trim {
-            if let Some(mut vec) = self.inner.get_mut(&uid) {
-                vec.retain(|e| !conn_ids.contains(&e.conn_id));
-                if vec.is_empty() {
-                    drop(vec);
-                    self.inner.remove(&uid);
+            if let dashmap::mapref::entry::Entry::Occupied(mut entry) = self.inner.entry(uid) {
+                entry
+                    .get_mut()
+                    .retain(|connection| !conn_ids.contains(&connection.conn_id));
+                if entry.get().is_empty() {
+                    entry.remove();
                 }
             }
             pruned_uids.push(uid);
@@ -349,5 +378,76 @@ mod tests {
 
         registry.remove_connection(7, second.conn_id);
         assert!(registry.online_connections(7).is_empty());
+    }
+
+    #[test]
+    fn removing_one_device_preserves_another_fresh_device() {
+        let registry = registry();
+        let (closing, _closing_rx) = registry.register(7, "client-a".to_string());
+        let (surviving, _surviving_rx) = registry.register(7, "client-b".to_string());
+
+        registry.remove_connection(7, closing.conn_id);
+
+        assert!(registry.is_online(7));
+        assert_eq!(
+            registry.online_connections(7),
+            vec![OnlineConnection {
+                connection_id: surviving.conn_id,
+                client_id: "client-b".to_string(),
+                app_state: AppPresenceState::Active,
+            }]
+        );
+    }
+
+    #[test]
+    fn presence_is_online_for_a_fresh_background_connection() {
+        let registry = registry();
+        let (entry, _rx) = registry.register(7, "client-a".to_string());
+        entry.update_app_state(AppPresenceState::Inactive);
+
+        assert!(registry.is_online(7));
+    }
+
+    #[test]
+    fn presence_is_online_when_any_device_is_fresh() {
+        let registry = registry();
+        let (stale, _stale_rx) = registry.register(7, "client-a".to_string());
+        stale.last_ping_at.store(
+            now_secs().saturating_sub(STALE_CONNECTION_TIMEOUT_SECS + 1),
+            Ordering::Relaxed,
+        );
+        let (fresh, _fresh_rx) = registry.register(7, "client-b".to_string());
+        fresh.update_ping(AppPresenceState::Inactive);
+
+        assert!(registry.is_online(7));
+
+        fresh.last_ping_at.store(
+            now_secs().saturating_sub(STALE_CONNECTION_TIMEOUT_SECS + 1),
+            Ordering::Relaxed,
+        );
+        assert!(!registry.is_online(7));
+    }
+
+    #[test]
+    fn group_online_count_counts_users_not_devices_and_excludes_dead_connections() {
+        let registry = registry();
+        let (first, _first_rx) = registry.register(7, "first".into());
+        let (second, second_rx) = registry.register(7, "second".into());
+        second.update_app_state(AppPresenceState::Inactive);
+        let (stale, _stale_rx) = registry.register(8, "stale".into());
+        stale.last_ping_at.store(
+            now_secs().saturating_sub(STALE_CONNECTION_TIMEOUT_SECS + 60),
+            Ordering::Relaxed,
+        );
+        let (_closed, closed_rx) = registry.register(9, "closed".into());
+        drop(closed_rx);
+
+        assert_eq!(registry.count_online(&[7, 8, 9, 10]), 1);
+
+        registry.remove_connection(7, first.conn_id);
+        assert_eq!(registry.count_online(&[7, 8, 9, 10]), 1);
+
+        drop(second_rx);
+        assert_eq!(registry.count_online(&[7, 8, 9, 10]), 0);
     }
 }

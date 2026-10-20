@@ -122,6 +122,11 @@ async fn main() {
         )),
         authz_service: services::authz::AuthorizationService::start(),
         ws_registry: ws_registry.clone(),
+        presence_service: Arc::new(services::presence::PresenceSnapshotService::new(
+            pool.clone(),
+            ws_registry.clone(),
+            metrics.presence.clone(),
+        )),
         push_service: services::push::PushService::start(
             pool.clone(),
             ws_registry.clone(),

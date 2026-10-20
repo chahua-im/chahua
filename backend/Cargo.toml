@@ -36,6 +36,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 ferroid = { version = "1", features = ["snowflake", "lock", "async-tokio"] }
 dashmap = "6"
+moka = { version = "0.12", features = ["future"] }
 futures = "0.3"
 web-push = { version = "0.11.0", features = [
     "hyper-client",

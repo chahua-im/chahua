@@ -12,6 +12,7 @@ use crate::services::avatars::AvatarMetrics;
 use crate::services::background::BackgroundMetrics;
 use crate::services::client_tracking::ClientTrackingMetrics;
 use crate::services::message_search::MessageSearchMetrics;
+use crate::services::presence::PresenceMetrics;
 use crate::services::push::PushMetrics;
 use crate::services::ws_registry::WsMetrics;
 
@@ -24,6 +25,7 @@ pub struct Metrics {
     pub http: Arc<HttpMetrics>,
     pub chat: Arc<ChatMetrics>,
     pub ws: Arc<WsMetrics>,
+    pub presence: Arc<PresenceMetrics>,
     pub push: Arc<PushMetrics>,
     pub avatars: Arc<AvatarMetrics>,
     pub client_tracking: Arc<ClientTrackingMetrics>,
@@ -39,6 +41,7 @@ impl Metrics {
             http: Arc::new(HttpMetrics::new(&registry)),
             chat: Arc::new(ChatMetrics::new(&registry)),
             ws: Arc::new(WsMetrics::new(&registry)),
+            presence: Arc::new(PresenceMetrics::new(&registry)),
             push: Arc::new(PushMetrics::new(&registry)),
             avatars: Arc::new(AvatarMetrics::new(&registry)),
             client_tracking: Arc::new(ClientTrackingMetrics::new(&registry)),
@@ -106,6 +109,11 @@ mod tests {
         metrics.ws.record_connection_open();
         metrics.ws.record_connection_duration(12.0);
         metrics.avatars.record_lookup(2, 0.003, 0.001);
+        metrics.presence.record_snapshot(true, 0.003);
+        metrics.presence.record_scope_load(true, 0.002);
+        metrics.presence.record_group_lookup(0.001);
+        metrics.presence.record_group_refresh(true, 0.001);
+        metrics.presence.record_group_scan(5000, 0.0005);
         metrics.ws.record_message_pushed("message");
         metrics.ws.record_message_dropped("message");
         metrics.client_tracking.record_activity_write("success");
@@ -173,6 +181,12 @@ mod tests {
         assert!(body.contains("ws_inactive_connections"));
         assert!(body.contains("ws_connections_total"));
         assert!(body.contains("ws_connection_duration_seconds"));
+        assert!(body.contains("presence_snapshot_duration_seconds"));
+        assert!(body.contains("presence_scope_load_duration_seconds"));
+        assert!(body.contains("presence_group_count_lookup_duration_seconds"));
+        assert!(body.contains("presence_group_count_refresh_duration_seconds"));
+        assert!(body.contains("presence_group_online_scan_duration_seconds"));
+        assert!(body.contains("presence_group_members_scanned"));
         assert!(body.contains("discuz_avatar_lookup_duration_seconds"));
         assert!(body.contains("discuz_avatar_lookup_fs_duration_seconds"));
         assert!(body.contains("discuz_avatar_lookup_users_total"));

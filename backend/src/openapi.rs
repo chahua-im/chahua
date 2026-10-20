@@ -1,8 +1,9 @@
 use crate::dto::attachments::ChatAttachmentKindFilter;
 use crate::dto::ws::{
     ChatArchiveStateChangedPayload, FriendRequestReceivedPayload, FriendRequestResolvedPayload,
-    FriendshipRemovedPayload, PinUpdatePayload, PresenceUpdatePayload, ReactionUpdatePayload,
-    ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload,
+    FriendshipRemovedPayload, GroupPresenceResponse, PinUpdatePayload, PresenceSnapshotPayload,
+    PresenceUpdatePayload, ReactionUpdatePayload, ServerWsMessage, ThreadMembershipChangedPayload,
+    ThreadUpdatePayload, UserPresenceResponse,
 };
 use crate::handlers::groups::{GroupSearchMode, GroupSelectorScope};
 use crate::services::{message_search::MessageSearchSort, user::UserSearchMode};
@@ -27,6 +28,9 @@ use utoipa::OpenApi;
             ServerWsMessage,
             ReactionUpdatePayload,
             PresenceUpdatePayload,
+            PresenceSnapshotPayload,
+            UserPresenceResponse,
+            GroupPresenceResponse,
             ThreadUpdatePayload,
             ThreadMembershipChangedPayload,
             ChatArchiveStateChangedPayload,

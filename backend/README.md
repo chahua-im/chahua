@@ -1,5 +1,10 @@
 # Backend
 
+## Metrics
+
+Prometheus endpoint behavior and the complete metric catalog are in
+[docs/metrics.md](docs/metrics.md).
+
 ## OpenAPI contract
 
 Snowflake IDs in URL path parameters are documented as decimal strings, including
@@ -13,6 +18,65 @@ Validate the generated document with:
 ```bash
 cargo test --locked openapi::tests::
 ```
+
+## Client WebSocket controls
+
+Client commands are decoded by the serde-tagged `ClientWsMessage` enum in
+`src/dto/ws.rs`, alongside `ServerWsMessage`. The wire format remains flat:
+`{"type":"ping","state":"active"}`, not a `payload` envelope.
+
+| Type | Fields | Behavior |
+| --- | --- | --- |
+| `auth` | Required `ticket` string | Must be the first message, within five seconds; invalid credentials or a non-auth first message close the connection. |
+| `ping` | Optional `state`: `active` or `inactive` | Updates liveness and app state, replies with `pong`; missing/null state defaults to `active`. |
+| `appState` | Optional `state`: `active` or `inactive` | Updates app state and liveness; missing/null state defaults to `inactive`. |
+| `watchPresence` | Optional/null numeric `requestId`; optional/null `userIds` and `chatIds` arrays | Replaces the presence scope described below; missing/null arrays are empty. |
+
+After authentication, unknown message types are ignored without closing the socket.
+Malformed JSON, missing/non-string message types, wrong field types in known commands,
+and oversized presence scopes are ignored without replacing the current watch.
+Additional fields on known commands are ignored for forward compatibility.
+An additional `auth` command cannot switch the authenticated session.
+
+
+## Scoped WebSocket presence
+
+Authenticated WebSocket clients may replace that socket's watched presence scope with
+`{"type":"watchPresence","userIds":[2],"chatIds":[]}`. A scope is
+limited to 100 users and four chats. Non-empty replacements receive an immediate absolute
+`presenceSnapshot` and refresh on a 15-second interval; an empty scope stops publication.
+Omitted users and groups are not authorized or no longer exist in the
+caller's visible scope, so clients must clear them.
+
+`requestId` is an optional client correlation ID. When supplied, the same value
+(including `0`) is echoed in every initial and periodic snapshot for that scope.
+When omitted or `null`, snapshots omit `requestId`; the server does not generate an
+ID or substitute zero. Clients that change scopes and need to reject stale snapshots
+can opt in by supplying it on each replacement.
+
+Live `online` means at least one fresh, open authenticated WebSocket for the user, irrespective
+of foreground/background application state. It is distinct from `user_extra.last_seen_at`, which
+is existing HTTP activity data and is read without writing or changing its five-minute tracking
+throttle. User visibility is limited to self, friends, or current shared regular-group membership,
+and either blocking direction suppresses visibility. Group snapshots are limited to current
+members of regular groups; DMs and thread participation do not expose presence.
+
+Group aggregates are shared across viewers using Moka's async cache, with a 15-second TTL and
+a capacity target of 128 groups. Concurrent misses for the same group share one database load
+and registry scan; only the two resulting counts are retained, not the member UID list.
+Failed loads are not cached. Authorization is queried before each snapshot and is never
+reused from the aggregate cache; database connections are released before awaiting shared counts.
+Each scan uses one liveness timestamp for all members.
+
+A cached group aggregate can be up to 15 seconds old when sent. Combined with the client's
+15-second snapshot schedule, a count change can take approximately 30 seconds to become visible
+under normal service operation. Individual user online status is not cached this way.
+
+The live registry is intentionally process-local. These snapshots require a single backend
+instance; multi-instance deployments need a shared presence registry and cross-instance
+coordination before the counts are globally authoritative. Sticky sessions alone are insufficient.
+The existing 300-second stale-connection timeout and 60-second pruning interval remain unchanged;
+silent network loss is not an immediate offline transition. No persistent presence writes are added.
 
 ## APNs setup
 

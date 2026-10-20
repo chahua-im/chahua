@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::dto::{
     messages::{MessageResponse, ReactionSummary},
@@ -13,8 +13,34 @@ pub struct TicketResponse {
     pub ticket: String,
 }
 
+/// Client controls retain their flat wire shape; future message types are ignored.
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientWsMessage {
+    Auth {
+        ticket: String,
+    },
+    Ping {
+        state: Option<OnlineClientStatus>,
+    },
+    AppState {
+        state: Option<OnlineClientStatus>,
+    },
+    WatchPresence {
+        request_id: Option<u64>,
+        user_ids: Option<Vec<i32>>,
+        chat_ids: Option<Vec<String>>,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
 /// A WebSocket connection's app-presence state.
-#[derive(Debug, Clone, Copy, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OnlineClientStatus {
     Active,
@@ -51,6 +77,7 @@ pub enum ServerWsMessage {
     MessagesBulkDeleted(BulkDeletedPayload),
     ReactionUpdated(ReactionUpdatePayload),
     PresenceUpdate(PresenceUpdatePayload),
+    PresenceSnapshot(PresenceSnapshotPayload),
     ThreadUpdate(ThreadUpdatePayload),
     ThreadMembershipChanged(ThreadMembershipChangedPayload),
     ChatArchiveStateChanged(ChatArchiveStateChangedPayload),
@@ -78,6 +105,7 @@ impl ServerWsMessage {
             Self::MessagesBulkDeleted(_) => "messagesBulkDeleted",
             Self::ReactionUpdated(_) => "reactionUpdated",
             Self::PresenceUpdate(_) => "presenceUpdate",
+            Self::PresenceSnapshot(_) => "presenceSnapshot",
             Self::ThreadUpdate(_) => "threadUpdate",
             Self::ThreadMembershipChanged(_) => "threadMembershipChanged",
             Self::ChatArchiveStateChanged(_) => "chatArchiveStateChanged",
@@ -110,6 +138,38 @@ pub struct ReactionUpdatePayload {
 #[serde(rename_all = "camelCase")]
 pub struct PresenceUpdatePayload {
     pub active_connections: u32,
+}
+
+/// One watched user's current presence. `last_seen_at` is omitted when no HTTP activity has
+/// been recorded for that user.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPresenceResponse {
+    pub uid: i32,
+    pub online: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<DateTime<Utc>>,
+}
+
+/// Current aggregate presence for one regular group.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupPresenceResponse {
+    /// Snowflake chat ID encoded as a decimal string.
+    pub chat_id: String,
+    pub member_count: u32,
+    pub online_count: u32,
+}
+
+/// Absolute response to a `watchPresence` control message.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceSnapshotPayload {
+    /// Echoed only when the client supplied a correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<u64>,
+    pub users: Vec<UserPresenceResponse>,
+    pub groups: Vec<GroupPresenceResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -232,10 +292,139 @@ pub struct NotificationPayload {
 #[cfg(test)]
 mod tests {
     use super::{
-        NotificationPayload, NotificationType, PinUpdatePayload, PresenceUpdatePayload,
-        ServerWsMessage, ThreadMembershipChangedPayload,
+        ClientWsMessage, GroupPresenceResponse, NotificationPayload, NotificationType,
+        OnlineClientStatus, PinUpdatePayload, PresenceSnapshotPayload, PresenceUpdatePayload,
+        ServerWsMessage, ThreadMembershipChangedPayload, UserPresenceResponse,
     };
     use serde_json::json;
+
+    #[test]
+    fn decodes_flat_client_controls_with_variant_specific_fields() {
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(r#"{"type":"auth","ticket":"session"}"#).unwrap(),
+            ClientWsMessage::Auth { ticket } if ticket == "session"
+        ));
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(r#"{"type":"ping","state":"active"}"#).unwrap(),
+            ClientWsMessage::Ping {
+                state: Some(OnlineClientStatus::Active)
+            }
+        ));
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(r#"{"type":"appState","state":"inactive"}"#)
+                .unwrap(),
+            ClientWsMessage::AppState {
+                state: Some(OnlineClientStatus::Inactive)
+            }
+        ));
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(
+                r#"{"type":"watchPresence","requestId":12,"userIds":[2],"chatIds":["9223372036854775807"]}"#
+            ).unwrap(),
+            ClientWsMessage::WatchPresence { request_id: Some(12), user_ids: Some(users), chat_ids: Some(chats) }
+                if users == [2] && chats == ["9223372036854775807"]
+        ));
+    }
+
+    #[test]
+    fn tolerates_future_message_types_and_unrelated_fields() {
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(
+                r#"{"type":"futureCommand","state":"futureState","userIds":"futureShape","payload":{"nested":[1,2]}}"#
+            ).unwrap(),
+            ClientWsMessage::Unknown
+        ));
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(
+                r#"{"type":"ping","state":"inactive","requestId":"unrelated","userIds":"unrelated"}"#
+            ).unwrap(),
+            ClientWsMessage::Ping { state: Some(OnlineClientStatus::Inactive) }
+        ));
+    }
+
+    #[test]
+    fn preserves_optional_client_fields_and_null_empty_scopes() {
+        for message in [r#"{"type":"ping"}"#, r#"{"type":"ping","state":null}"#] {
+            assert!(matches!(
+                serde_json::from_str::<ClientWsMessage>(message).unwrap(),
+                ClientWsMessage::Ping { state: None }
+            ));
+        }
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(r#"{"type":"appState"}"#).unwrap(),
+            ClientWsMessage::AppState { state: None }
+        ));
+        for message in [
+            r#"{"type":"watchPresence","requestId":4}"#,
+            r#"{"type":"watchPresence","requestId":4,"userIds":null,"chatIds":null}"#,
+        ] {
+            assert!(matches!(
+                serde_json::from_str::<ClientWsMessage>(message).unwrap(),
+                ClientWsMessage::WatchPresence {
+                    request_id: Some(4),
+                    user_ids: None,
+                    chat_ids: None
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn accepts_watch_presence_without_correlation_and_preserves_zero() {
+        for message in [
+            r#"{"type":"watchPresence","userIds":[2]}"#,
+            r#"{"type":"watchPresence","requestId":null,"userIds":[2]}"#,
+        ] {
+            assert!(matches!(
+                serde_json::from_str::<ClientWsMessage>(message).unwrap(),
+                ClientWsMessage::WatchPresence { request_id: None, user_ids: Some(users), .. }
+                    if users == [2]
+            ));
+        }
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(
+                r#"{"type":"watchPresence","requestId":0,"userIds":[2]}"#
+            )
+            .unwrap(),
+            ClientWsMessage::WatchPresence {
+                request_id: Some(0),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn omits_absent_snapshot_correlation_without_substituting_zero() {
+        let mut payload = PresenceSnapshotPayload {
+            request_id: None,
+            users: vec![],
+            groups: vec![],
+        };
+        let value = serde_json::to_value(&payload).unwrap();
+        assert!(value.get("requestId").is_none());
+        payload.request_id = Some(0);
+        let value = serde_json::to_value(&payload).unwrap();
+        assert_eq!(value["requestId"], json!(0));
+    }
+
+    #[test]
+    fn rejects_malformed_known_controls_instead_of_treating_them_as_unknown() {
+        for message in [
+            r#"{"type":"auth"}"#,
+            r#"{"type":"auth","ticket":false}"#,
+            r#"{"type":"ping","state":"unknownState"}"#,
+            r#"{"type":"watchPresence","requestId":"wrong"}"#,
+            r#"{"type":"watchPresence","requestId":1,"chatIds":[42]}"#,
+            r#"{"type":42}"#,
+            r#"{"state":"active"}"#,
+            "{",
+        ] {
+            assert!(
+                serde_json::from_str::<ClientWsMessage>(message).is_err(),
+                "{message}"
+            );
+        }
+    }
 
     #[test]
     fn serializes_ws_event_types_and_payload_keys_as_camel_case() {
@@ -247,6 +436,34 @@ mod tests {
         assert_eq!(value["type"], json!("presenceUpdate"));
         assert_eq!(value["payload"]["activeConnections"], json!(3));
         assert!(value["payload"].get("active_connections").is_none());
+    }
+
+    #[test]
+    fn serializes_absolute_presence_snapshot_and_omits_unknown_last_seen() {
+        let value =
+            serde_json::to_value(ServerWsMessage::PresenceSnapshot(PresenceSnapshotPayload {
+                request_id: Some(12),
+                users: vec![UserPresenceResponse {
+                    uid: 7,
+                    online: true,
+                    last_seen_at: None,
+                }],
+                groups: vec![GroupPresenceResponse {
+                    chat_id: "9223372036854775807".to_string(),
+                    member_count: 5,
+                    online_count: 2,
+                }],
+            }))
+            .expect("serialize presence snapshot");
+
+        assert_eq!(value["type"], json!("presenceSnapshot"));
+        assert_eq!(value["payload"]["requestId"], json!(12));
+        assert_eq!(value["payload"]["users"][0]["uid"], json!(7));
+        assert_eq!(
+            value["payload"]["groups"][0]["chatId"],
+            json!("9223372036854775807")
+        );
+        assert!(value["payload"]["users"][0].get("lastSeenAt").is_none());
     }
 
     #[test]

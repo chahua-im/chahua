@@ -10,6 +10,7 @@ pub mod invites;
 pub mod media;
 pub mod message_search;
 pub mod messages;
+pub mod presence;
 pub mod push;
 pub mod saved_messages;
 pub mod service_tokens;

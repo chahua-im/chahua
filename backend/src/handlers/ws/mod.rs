@@ -5,15 +5,15 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
 use axum::Json;
-use serde::Deserialize;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::time::timeout;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::dto::ws::{
-    OnlineClientConnectionResponse, OnlineClientStatus, ServerWsMessage, TicketResponse,
+    ClientWsMessage, OnlineClientConnectionResponse, OnlineClientStatus, ServerWsMessage,
+    TicketResponse,
 };
 use crate::services::ws_registry;
 use crate::utils::auth::BearerSession;
@@ -80,39 +80,89 @@ async fn get_online_clients(
     ))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WsAuthMessage {
-    #[serde(rename = "type")]
-    type_: String,
-    ticket: String,
+#[derive(Clone)]
+struct PresenceWatch {
+    request_id: Option<u64>,
+    user_ids: Vec<i32>,
+    chat_ids: Vec<i64>,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WsMessage {
-    #[serde(rename = "type")]
-    type_: String,
-    state: Option<WsAppState>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum WsAppState {
-    Active,
-    Inactive,
-}
-
-impl From<WsAppState> for AppPresenceState {
-    fn from(value: WsAppState) -> Self {
+impl From<OnlineClientStatus> for AppPresenceState {
+    fn from(value: OnlineClientStatus) -> Self {
         match value {
-            WsAppState::Active => AppPresenceState::Active,
-            WsAppState::Inactive => AppPresenceState::Inactive,
+            OnlineClientStatus::Active => AppPresenceState::Active,
+            OnlineClientStatus::Inactive => AppPresenceState::Inactive,
         }
     }
 }
 
 const PONG_JSON: &str = r#"{"type":"pong"}"#;
+
+const MAX_WATCHED_USERS: usize = 100;
+const MAX_WATCHED_GROUPS: usize = 4;
+const PRESENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
+
+fn parse_presence_watch(
+    request_id: Option<u64>,
+    user_ids: Option<Vec<i32>>,
+    chat_ids: Option<Vec<String>>,
+) -> Option<Option<PresenceWatch>> {
+    let user_ids = user_ids.unwrap_or_default();
+    let chat_ids = chat_ids.unwrap_or_default();
+    if user_ids.len() > MAX_WATCHED_USERS || chat_ids.len() > MAX_WATCHED_GROUPS {
+        return None;
+    }
+
+    let mut parsed_chat_ids = Vec::with_capacity(chat_ids.len());
+    for chat_id in chat_ids {
+        let Ok(chat_id) = chat_id.parse::<i64>() else {
+            continue;
+        };
+        if chat_id > 0 {
+            parsed_chat_ids.push(chat_id);
+        }
+    }
+
+    if user_ids.is_empty() && parsed_chat_ids.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(PresenceWatch {
+            request_id,
+            user_ids,
+            chat_ids: parsed_chat_ids,
+        }))
+    }
+}
+
+async fn send_presence_snapshot(
+    socket: &mut WebSocket,
+    state: &AppState,
+    uid: i32,
+    watch: &PresenceWatch,
+) -> bool {
+    match state
+        .presence_service
+        .snapshot(
+            uid,
+            watch.request_id,
+            watch.user_ids.clone(),
+            watch.chat_ids.clone(),
+        )
+        .await
+    {
+        Ok(payload) => match serde_json::to_string(&ServerWsMessage::PresenceSnapshot(payload)) {
+            Ok(text) => socket.send(Message::Text(text.into())).await.is_ok(),
+            Err(error) => {
+                warn!(?error, "failed to serialize presence snapshot");
+                true
+            }
+        },
+        Err(error) => {
+            warn!(?error, uid, "failed to load presence snapshot");
+            true
+        }
+    }
+}
 
 /// Upgrades the connection to WebSocket and initiates auth handshake.
 #[utoipa::path(
@@ -134,20 +184,17 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
 
     let session = match auth_result {
         Ok(Some(Ok(Message::Text(text)))) => {
-            if let Ok(parsed) = serde_json::from_str::<WsAuthMessage>(&text) {
-                if parsed.type_ == "auth" {
-                    match crate::utils::auth::verify_session(&parsed.ticket, &state) {
-                        Ok(session) => session,
-                        Err(e) => {
-                            debug!("ws auth rejected (invalid ticket): {:?}", e);
-                            return;
-                        } // Invalid ticket
-                    }
-                } else {
-                    return; // First message not auth
+            let Ok(ClientWsMessage::Auth { ticket }) =
+                serde_json::from_str::<ClientWsMessage>(&text)
+            else {
+                return;
+            };
+            match crate::utils::auth::verify_session(&ticket, &state) {
+                Ok(session) => session,
+                Err(error) => {
+                    debug!(?error, "ws auth rejected (invalid ticket)");
+                    return;
                 }
-            } else {
-                return; // Invalid JSON or wrong structure
             }
         }
         _ => return, // Timeout, connection closed, or non-text message
@@ -173,6 +220,9 @@ async fn handle_socket(
     mut rx: tokio::sync::mpsc::Receiver<Arc<ServerWsMessage>>,
 ) {
     let started_at = Instant::now();
+    let mut watch = None;
+    let mut presence_refresh =
+        tokio::time::interval_at(tokio::time::Instant::now(), PRESENCE_REFRESH_INTERVAL);
     loop {
         tokio::select! {
             msg = rx.recv() => {
@@ -187,13 +237,23 @@ async fn handle_socket(
                     None => break,
                 }
             }
+            _ = presence_refresh.tick(), if watch.is_some() => {
+                let Some(watch) = watch.as_ref() else {
+                    continue;
+                };
+                if !send_presence_snapshot(&mut socket, &state, uid, watch).await {
+                    break;
+                }
+            }
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        if let Ok(parsed) = serde_json::from_str::<WsMessage>(&text) {
-                            if parsed.type_ == "ping" {
-                                let state = parsed
-                                    .state
+                        let Ok(message) = serde_json::from_str::<ClientWsMessage>(&text) else {
+                            continue;
+                        };
+                        match message {
+                            ClientWsMessage::Ping { state } => {
+                                let state = state
                                     .map(AppPresenceState::from)
                                     .unwrap_or(AppPresenceState::Active);
                                 entry.update_ping(state);
@@ -202,9 +262,9 @@ async fn handle_socket(
                                 if socket.send(Message::Text(PONG_JSON.into())).await.is_err() {
                                     break;
                                 }
-                            } else if parsed.type_ == "appState" {
-                                let state = parsed
-                                    .state
+                            }
+                            ClientWsMessage::AppState { state } => {
+                                let state = state
                                     .map(AppPresenceState::from)
                                     .unwrap_or(AppPresenceState::Inactive);
                                 entry.update_app_state(state);
@@ -216,6 +276,22 @@ async fn handle_socket(
                                     state
                                 );
                             }
+                            ClientWsMessage::WatchPresence { request_id, user_ids, chat_ids } => {
+                                let Some(next_watch) = parse_presence_watch(request_id, user_ids, chat_ids) else {
+                                    continue;
+                                };
+                                watch = next_watch;
+                                presence_refresh = tokio::time::interval_at(
+                                    tokio::time::Instant::now() + PRESENCE_REFRESH_INTERVAL,
+                                    PRESENCE_REFRESH_INTERVAL,
+                                );
+                                if let Some(watch) = watch.as_ref() {
+                                    if !send_presence_snapshot(&mut socket, &state, uid, watch).await {
+                                        break;
+                                    }
+                                }
+                            }
+                            ClientWsMessage::Auth { .. } | ClientWsMessage::Unknown => {}
                         }
                     }
                     Some(Err(_)) | None => break,
@@ -236,4 +312,22 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(ws_handler))
         .routes(utoipa_axum::routes!(get_ws_ticket))
         .routes(utoipa_axum::routes!(get_online_clients))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_presence_watch;
+
+    #[test]
+    fn watch_presence_replaces_with_empty_scope_without_a_publication() {
+        assert!(matches!(
+            parse_presence_watch(Some(4), Some(Vec::new()), Some(Vec::new())),
+            Some(None)
+        ));
+    }
+
+    #[test]
+    fn watch_presence_rejects_scopes_above_the_protocol_bounds() {
+        assert!(parse_presence_watch(Some(4), Some((0..101).collect()), None).is_none());
+    }
 }

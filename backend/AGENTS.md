@@ -40,6 +40,12 @@ Run backend work from `backend/`:
 - `cargo clippy` checks lint issues before review.
 - `diesel migration run` applies local PostgreSQL migrations.
 
+## Prometheus metrics
+
+The complete metric contract is in [docs/metrics.md](docs/metrics.md). When adding,
+removing, renaming, or changing the labels, units, buckets, or recording semantics
+of a metric family, you MUST update that catalog in the same change.
+
 ## Coding Style & Naming Conventions
 
 Rust uses edition 2021 and strict lints: `unsafe_code` is forbidden and `unused_must_use` is denied. Use `cargo fmt`, `snake_case` for modules/functions, and `PascalCase` for types.

@@ -21,6 +21,7 @@ use crate::services::background::BackgroundService;
 use crate::services::client_tracking::ClientTrackingService;
 use crate::services::media::MediaStore;
 use crate::services::message_search::MessageSearchService;
+use crate::services::presence::PresenceSnapshotService;
 use crate::services::push::PushService;
 use crate::services::token_generation::TokenGenerationService;
 use crate::services::unread::UnreadService;
@@ -40,6 +41,7 @@ pub struct AppInner {
     pub avatars: Arc<AvatarService>,
     pub authz_service: Arc<AuthorizationService>,
     pub ws_registry: Arc<ConnectionRegistry>,
+    pub presence_service: Arc<PresenceSnapshotService>,
     pub push_service: Arc<PushService>,
     pub unread_service: Arc<UnreadService>,
     pub client_tracking: Arc<ClientTrackingService>,
