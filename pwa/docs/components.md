@@ -72,13 +72,15 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 | NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                 | PushNotifications                                                                     |
 | ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                      | 将 selection 和 active 传给单列 ChatList                                              |
 | ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、Connection、PushNotifications；控制分类面板与菜单，设置入口保留授权手势 |
-| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数 | ChatListStore、ChatStore、DraftStore、Preferences、SessionStore、Presence |
+| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数 | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence |
 | ChatListItem       | entry、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据 |
 | ChatAvatar         | entry、size、online | 由输入派生头像、占位、话题角标和在线圆点，无请求 |
 | DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                | GroupsService、UsersService；选择用户或打开资料                                       |
 | ChatLink           | 路由参数；failed                                                                                                     | 解析链接和静态路由配置、按需查询消息/用户；负责详情弹窗与浏览器历史的生命周期         |
 
-ChatListContent 的行是共享资料、查询成员和草稿的派生结果。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。加载失败统一使用 LoadError（message、compact、retryable → retry）：页面级居中，列表和设置分区使用紧凑行。
+ChatListPage 在 ionViewWillEnter 中先同步检测缓存视图，再激活列表查询，使 pop 动画使用已更新的本地行；ionViewDidLeave 同步释放子查询消费者。
+
+ChatListContent 的普通会话行和话题行都是共享资料、查询成员、草稿和待发消息的派生结果；待发消息按聊天或话题根区分，在服务器摘要回显前提供预览和排序时间，话题回复不改变父会话行，已确认后由共享摘要替换。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。加载失败统一使用 LoadError（message、compact、retryable → retry）：页面级居中，列表和设置分区使用紧凑行。
 
 ## 消息页面
 

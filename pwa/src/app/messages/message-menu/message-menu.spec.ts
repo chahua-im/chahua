@@ -23,6 +23,7 @@ import { MessageAction, MessageMenu, pageSlots, type MenuSlot } from './message-
 describe('MessageMenu', () => {
   let fixture: ComponentFixture<MessageMenu>;
   let menu: MessageMenu;
+  let authorWidth = 100;
   const messages = signal([testMessage]);
   function setMessages(value: (typeof testMessage)[]) {
     messages.set(value);
@@ -49,11 +50,12 @@ describe('MessageMenu', () => {
     toggleReaction: vi.fn().mockResolvedValue(undefined),
   };
   const savedIds = signal<ReadonlySet<SnowflakeID>>(new Set());
+  const savedLoading = signal(false);
   const favoriteIds = signal<ReadonlySet<SnowflakeID>>(new Set());
   const savedMessages = {
     ensure: vi.fn().mockResolvedValue(undefined),
     isSaved: (_chatId: SnowflakeID, messageId: SnowflakeID) => savedIds().has(messageId),
-    loading: () => false,
+    loading: savedLoading,
     save: vi.fn().mockResolvedValue(undefined),
     unsave: vi.fn().mockResolvedValue(undefined),
   };
@@ -74,6 +76,20 @@ describe('MessageMenu', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    savedLoading.set(false);
+    authorWidth = 100;
+    const computedStyle = window.getComputedStyle;
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => {
+      const style = computedStyle(element);
+      return new Proxy(style, {
+        get(target, property) {
+          if (element.matches('.sender') && property === 'width') return `${authorWidth}px`;
+          if (element.matches('.bubble-surface') && (property === 'paddingLeft' || property === 'paddingRight'))
+            return '11px';
+          return Reflect.get(target, property);
+        },
+      });
+    });
     outbox.items.set([]);
     outbox.cancel.mockReset();
     savedIds.set(new Set());
@@ -480,33 +496,48 @@ describe('MessageMenu', () => {
 
   it('widens the preview when the sender row it adds does not fit the original bubble', () => {
     menu.reset();
+    authorWidth = 358;
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
       return this.classList.contains('avatar-slot') ? 44 : 300;
-    });
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('sender-name') ? 320 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('sender-name') ? 120 : 0;
     });
     menu.open(selection());
     fixture.detectChanges();
     const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
-    // 180px original bubble + 44px avatar column + 200px of clipped sender name.
+    // 358px complete author row + 22px bubble padding + 44px avatar column.
     expect(parseFloat(preview.style.width)).toBe(424);
   });
 
+  it('includes the complete author row for a short bubble', () => {
+    menu.reset();
+    authorWidth = 186;
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('avatar-slot') ? 44 : 300;
+    });
+    menu.open({ ...selection(), rect: new DOMRect(100, 200, 46, 70) });
+    fixture.detectChanges();
+    const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
+    expect(parseFloat(preview.style.width)).toBe(252);
+  });
+
+  it('rounds fractional author widths up so a subpixel deficit cannot produce an ellipsis', () => {
+    menu.reset();
+    authorWidth = 135.453125;
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('avatar-slot') ? 44 : 300;
+    });
+    menu.open({ ...selection(), rect: new DOMRect(100, 200, 46.25, 70) });
+    fixture.detectChanges();
+    const preview = fixture.nativeElement.querySelector('.preview') as HTMLElement;
+    expect(parseFloat(preview.style.width)).toBe(202);
+    expect(preview.querySelector<HTMLElement>('.sender')!.style.width).toBe('');
+  });
+
   it('keeps the right edge of an own bubble aligned when its anchored preview widens', () => {
+    authorWidth = 358;
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
       return this.classList.contains('avatar-slot') ? 44 : 276;
     });
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(2000);
-    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('sender-name') ? 320 : 0;
-    });
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('sender-name') ? 120 : 0;
-    });
     const rect = new DOMRect(400, 200, 180, 900);
     menu['selection'].set({ ...selection(), rect, own: true });
     fixture.detectChanges();
@@ -643,6 +674,38 @@ describe('MessageMenu', () => {
     expect(savedMessages.unsave).toHaveBeenCalledWith(testMessage);
     expect(savedMessages.save).not.toHaveBeenCalled();
     expect(menu['notice']()).toBe(MessageNotice.Unsaved);
+  });
+
+  it('accepts save while loading and preserves the clicked intent when the read finds it already saved', async () => {
+    let finishLoading!: () => void;
+    const loading = new Promise<void>((resolve) => (finishLoading = resolve));
+    savedLoading.set(true);
+    savedMessages.ensure.mockReturnValueOnce(loading);
+    fixture.detectChanges();
+    const button = [
+      ...(fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('.actions button'),
+    ].find((button) => button.textContent?.trim() === '收藏')!;
+    expect(button.disabled).toBe(false);
+    const saving = menu['choose'](MessageAction.Save);
+    await vi.waitFor(() => expect(menu.busy()).toBe(true));
+    expect(savedMessages.save).not.toHaveBeenCalled();
+    savedIds.set(new Set([testMessage.id]));
+    finishLoading();
+    await saving;
+    expect(savedMessages.save).toHaveBeenCalledWith(testMessage);
+    expect(savedMessages.unsave).not.toHaveBeenCalled();
+    expect(menu['notice']()).toBe(MessageNotice.Saved);
+  });
+
+  it('reports a failed saved-state read without writing and allows retry', async () => {
+    savedMessages.ensure.mockRejectedValueOnce(new Error('offline'));
+    await menu['choose'](MessageAction.Save);
+    expect(savedMessages.save).not.toHaveBeenCalled();
+    expect(menu['notice']()).toBe(MessageNotice.Failed);
+    expect(menu.busy()).toBe(false);
+    menu.open(selection());
+    await menu['choose'](MessageAction.Save);
+    expect(savedMessages.save).toHaveBeenCalledWith(testMessage);
   });
 
   it('reverses the favorite state of the selected sticker', async () => {

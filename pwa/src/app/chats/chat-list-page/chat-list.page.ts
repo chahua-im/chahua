@@ -8,6 +8,7 @@ import { filter, fromEvent, map } from 'rxjs';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { ChatList } from '../chat-list/chat-list';
 import { VoiceBar } from '../../messages/voice-player/voice-bar';
+import { traceChatList } from '../chat-list-trace';
 import { listSelection, ListTab, type ListSelection } from '../list-tabs';
 
 @Component({
@@ -65,11 +66,21 @@ export class ChatListPage {
       : this.nav.navigateForward(url);
   }
 
-  ionViewDidEnter() {
+  ionViewWillEnter() {
+    traceChatList('willEnter:before-render');
+    // Cached Ionic views are reattached without the initial pre-transition check.
+    // Flush local rows while queries are still inactive, before the pop animation.
+    this.changeDetector.detectChanges();
+    traceChatList('willEnter:after-render');
     this.listActive.set(true);
   }
 
+  ionViewDidEnter() {
+    traceChatList('didEnter');
+  }
+
   ionViewDidLeave() {
+    traceChatList('didLeave');
     this.listActive.set(false);
     // Ionic detaches cached pages; run the child query cleanups before leaving it hidden.
     this.changeDetector.detectChanges();

@@ -44,12 +44,13 @@ export class SavedMessageStore {
   }
 
   private async mutate(message: MessageResponse, saved: boolean) {
+    const previous = this.isSaved(message.chatId, message.id);
     this.write(message.chatId, message.id, saved);
     try {
       if (saved) await firstValueFrom(this.savedApi.putSavedMessage(message.id));
       else await firstValueFrom(this.savedApi.deleteSavedMessageByOriginal(message.id));
     } catch (error) {
-      this.write(message.chatId, message.id, !saved);
+      this.write(message.chatId, message.id, previous);
       throw error;
     }
   }

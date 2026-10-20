@@ -2,7 +2,8 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { MessageType, ServerWsMessageType } from '../../generated/models';
+import { MessageType, ServerWsMessageType, type ThreadListItem } from '../../generated/models';
+import { ChatStore } from '../chats/chat-store';
 import { Connection } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { encodeId } from '../api/snowflake-id';
@@ -31,6 +32,160 @@ describe('ConversationStore', () => {
     timeline.reset(testChat.id);
   });
   afterEach(() => http.verify());
+
+  it('restores a recalled latest summary from the loaded range before any list response', async () => {
+    const store = TestBed.inject(ChatStore);
+    const previous = { ...message('99'), createdAt: '2026-09-04T12:00:00Z', message: 'previous' };
+    const latest = message('100');
+    store.acceptChats(
+      [{ ...testChat, lastMessage: { ...latest, mentions: [] }, lastMessageAt: latest.createdAt }],
+      store.snapshot(),
+    );
+    const staleVersion = store.snapshot();
+    const opening = timeline.open();
+    http.expectOne(`${root}?max=50`).flush({
+      messages: [{ ...wire('99'), createdAt: previous.createdAt, message: 'previous' }, wire('100')],
+      olderCursor: '99',
+    });
+    await opening;
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...latest, isDeleted: true },
+    });
+    expect(store.chat(testChat.id).lastMessage?.id).toBe(previous.id);
+    expect(store.chat(testChat.id).lastMessageAt).toBe(previous.createdAt);
+    store.acceptChats(
+      [{ ...testChat, lastMessage: { ...latest, mentions: [] }, lastMessageAt: latest.createdAt }],
+      staleVersion,
+    );
+    expect(store.chat(testChat.id).lastMessage?.id).toBe(previous.id);
+    http.expectNone(() => true);
+  });
+
+  for (const edge of ['complete', 'older', 'newer', 'unknown'] as const) {
+    it(`does not guess the predecessor beyond a ${edge} range`, async () => {
+      const store = TestBed.inject(ChatStore);
+      const latest = message(edge === 'unknown' ? '101' : '100');
+      store.acceptChats(
+        [{ ...testChat, lastMessage: { ...latest, mentions: [] }, lastMessageAt: latest.createdAt }],
+        store.snapshot(),
+      );
+      const opening = timeline.open();
+      http.expectOne(`${root}?max=50`).flush({
+        messages: [wire('100')],
+        olderCursor: edge === 'older' ? '100' : undefined,
+        newerCursor: edge === 'newer' ? '100' : undefined,
+      });
+      await opening;
+      TestBed.inject(Connection).acceptChange({
+        type: ServerWsMessageType.messageDeleted,
+        payload: { ...latest, isDeleted: true },
+      });
+      if (edge === 'complete') {
+        expect(store.chat(testChat.id).lastMessage).toBeUndefined();
+        expect(store.chat(testChat.id).lastMessageAt).toBeUndefined();
+      } else {
+        expect(store.chat(testChat.id).lastMessage?.id).toBe(latest.id);
+        expect(store.chat(testChat.id).lastMessageAt).toBe(latest.createdAt);
+      }
+      http.expectNone(() => true);
+    });
+  }
+
+  it('skips every recalled tail message in a bulk event without overwriting a newer summary', async () => {
+    const store = TestBed.inject(ChatStore);
+    const latest = message('101');
+    store.acceptChats(
+      [{ ...testChat, lastMessage: { ...latest, mentions: [] }, lastMessageAt: latest.createdAt }],
+      store.snapshot(),
+    );
+    const opening = timeline.open();
+    http.expectOne(`${root}?max=50`).flush({ messages: [wire('99'), wire('100'), wire('101')] });
+    await opening;
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: {
+        chatId: testChat.id,
+        messageIds: [encodeId('100'), encodeId('101')],
+      },
+    });
+    expect(store.chat(testChat.id).lastMessage?.id).toBe(encodeId('99'));
+    TestBed.inject(Connection).accept(message('102'));
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...latest, isDeleted: true },
+    });
+    expect(store.chat(testChat.id).lastMessage?.id).toBe(encodeId('102'));
+  });
+
+  for (const edge of ['previous', 'empty', 'older', 'newer', 'unknown', 'bulk', 'root'] as const) {
+    it(`restores a recalled thread preview from a ${edge} range without a list response`, async () => {
+      const store = TestBed.inject(ChatStore);
+      const rootId = encodeId('90');
+      const previous = { ...message('99'), replyRootId: rootId, createdAt: '2026-09-04T12:00:00Z' };
+      const latest = { ...message(edge === 'unknown' ? '101' : '100'), replyRootId: rootId };
+      const thread: ThreadListItem = {
+        archived: false,
+        chatId: testChat.id,
+        chatName: 'Test',
+        threadRootMessage: { ...message('90'), mentions: [] },
+        lastReply: { ...latest, mentions: [] },
+        lastReplyAt: latest.createdAt,
+        participants: [],
+        replyCount: 2,
+        unreadCount: 0,
+        unreadMentions: 0,
+        unreadReactions: 0,
+        subscribedAt: previous.createdAt,
+      };
+      store.acceptThreads([thread], store.snapshot(), store.subscriptionSnapshot());
+      const staleVersion = store.snapshot();
+      timeline.reset(testChat.id, rootId);
+      const opening = timeline.open();
+      http.expectOne(`${root}?max=50&threadId=90`).flush({
+        messages: [
+          { ...wire('90'), threadInfo: { replyCount: 2 } },
+          ...(['previous', 'bulk', 'root'].includes(edge)
+            ? [{ ...wire('99'), replyRootId: '90', createdAt: previous.createdAt }]
+            : []),
+          { ...wire('100'), replyRootId: '90' },
+        ],
+        olderCursor: edge === 'older' ? '90' : undefined,
+        newerCursor: edge === 'newer' ? '100' : undefined,
+      });
+      await opening;
+      const connection = TestBed.inject(Connection);
+      if (edge === 'bulk')
+        connection.acceptChange({
+          type: ServerWsMessageType.messagesBulkDeleted,
+          payload: { chatId: testChat.id, messageIds: [previous.id, latest.id] },
+        });
+      else
+        connection.acceptChange({
+          type: ServerWsMessageType.messageDeleted,
+          payload: { ...(edge === 'root' ? message('90') : latest), isDeleted: true },
+        });
+      const assertSummary = () => {
+        if (edge === 'empty' || edge === 'bulk') {
+          expect(store.thread(rootId)).toBeUndefined();
+          expect(timeline.items().find((m) => m.id === rootId)?.threadInfo).toBeUndefined();
+        } else {
+          expect(store.thread(rootId)?.lastReply?.id).toBe(edge === 'previous' ? previous.id : latest.id);
+          expect(store.thread(rootId)?.lastReplyAt).toBe(edge === 'previous' ? previous.createdAt : latest.createdAt);
+        }
+      };
+      assertSummary();
+      store.acceptThreads([thread], staleVersion, store.subscriptionSnapshot());
+      assertSummary();
+      if (edge === 'empty' || edge === 'previous') {
+        const next = { ...message('102'), replyRootId: rootId };
+        connection.accept(next);
+        connection.acceptChange({ type: ServerWsMessageType.messageDeleted, payload: { ...latest, isDeleted: true } });
+        expect(store.thread(rootId)?.lastReply?.id).toBe(next.id);
+      }
+      http.expectNone(() => true);
+    });
+  }
 
   it('stores only the message range and current paging edges from HTTP responses', async () => {
     const opening = timeline.open();

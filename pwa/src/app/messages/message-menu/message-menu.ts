@@ -271,7 +271,7 @@ export class MessageMenu {
       add(MessageAction.Pin, { disabled: this.pins().loading() || this.busy() });
     if (this.canCopy()) add(MessageAction.Copy);
     if (writable && this.canEdit()) add(MessageAction.Edit, { disabled: !this.queued() && !this.canReply() });
-    if (this.canSave()) add(MessageAction.Save, { disabled: this.savedMessages.loading(this.chatId()) });
+    if (this.canSave()) add(MessageAction.Save);
     else if (
       message &&
       !this.queued() &&
@@ -316,7 +316,7 @@ export class MessageMenu {
       const preview = this.preview()!.nativeElement;
       const row = preview.querySelector<HTMLElement>('.chat-row')!;
       // The overlay always shows the sender row, which the chat may omit for grouped messages.
-      // Measure the name once at the original bubble width and widen the preview instead of eliding it.
+      // Measure the complete author row once and widen the preview instead of eliding it.
       let nameWidth = 0;
       const place = () => {
         if (!stack.offsetWidth) return;
@@ -332,9 +332,21 @@ export class MessageMenu {
         const avatarSpace = row.querySelector<HTMLElement>('.avatar-slot')!.offsetWidth;
         const baseWidth = rect.width + avatarSpace;
         if (!nameWidth) {
-          preview.style.width = `${baseWidth}px`;
-          const name = preview.querySelector<HTMLElement>('.sender-name');
-          nameWidth = name ? baseWidth + Math.max(0, name.scrollWidth - name.clientWidth) : baseWidth;
+          const author = preview.querySelector<HTMLElement>('.sender');
+          nameWidth = baseWidth;
+          if (author) {
+            author.style.width = 'max-content';
+            const surfaceStyle = getComputedStyle(author.parentElement!);
+            // Computed width keeps subpixels and ignores the preview's entrance transform.
+            // Integer scroll/client widths can undercount enough to trigger an ellipsis.
+            nameWidth = Math.ceil(
+              avatarSpace +
+                parseFloat(getComputedStyle(author).width) +
+                parseFloat(surfaceStyle.paddingLeft) +
+                parseFloat(surfaceStyle.paddingRight),
+            );
+            author.style.removeProperty('width');
+          }
         }
         const previewWidth = Math.min(Math.max(baseWidth, nameWidth), availableWidth);
         preview.style.width = `${previewWidth}px`;
@@ -551,7 +563,10 @@ export class MessageMenu {
         break;
       case MessageAction.Save:
         await this.perform(
-          () => (saved ? this.savedMessages.unsave(message) : this.savedMessages.save(message)),
+          async () => {
+            await this.savedMessages.ensure(message.chatId);
+            await (saved ? this.savedMessages.unsave(message) : this.savedMessages.save(message));
+          },
           saved ? MessageNotice.Unsaved : MessageNotice.Saved,
         );
         break;

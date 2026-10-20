@@ -1,9 +1,13 @@
 import {
   afterRenderEffect,
+  afterNextRender,
   Component,
+  DestroyRef,
+  ElementRef,
+  EnvironmentInjector,
+  NgZone,
   computed,
   effect,
-  ElementRef,
   inject,
   input,
   linkedSignal,
@@ -39,12 +43,14 @@ import {
   personAddOutline,
 } from 'ionicons/icons';
 import { FriendRequestDirection, FriendRequestStatus, GroupKind, MessageType } from '../../../generated/models';
-import { decodeId } from '../../api/snowflake-id';
+import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
 import { DraftStore } from '../../conversations/draft-store';
-import { MessagePreview } from '../../messages/message-preview/message-preview';
+import type { MessageContent } from '../../messages/message/message';
+import { MessageOutbox } from '../../messages/message-outbox';
 import { MarkdownSummary } from '../../messages/message-preview/markdown-summary';
 import { Presence } from '../../presence/presence';
+import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { SessionStore } from '../../session/session-store';
@@ -53,6 +59,7 @@ import { ChatListItem, type ChatListEntry } from '../chat-list-item/chat-list-it
 import { ChatListError, ChatListStore, FriendRequestAction } from '../chat-list-store';
 import { ChatMute } from '../chat-mute/chat-mute';
 import { ChatStore } from '../chat-store';
+import { chatListTraceEnabled, traceChatList } from '../chat-list-trace';
 import { ListTab, type ListSelection } from '../list-tabs';
 
 enum ListRowKind {
@@ -96,6 +103,7 @@ export class ChatListContent {
   private readonly presenceRows = viewChildren<ChatListItem, ElementRef<HTMLElement>>('presenceRow', {
     read: ElementRef,
   });
+  private readonly outbox = inject(MessageOutbox);
   readonly selection = input.required<ListSelection>();
   readonly openList = output<ListSelection>();
   protected readonly list = this.selection;
@@ -121,9 +129,23 @@ export class ChatListContent {
     }
   });
   protected readonly session = inject(SessionStore);
-  protected readonly conversationRows = computed(() =>
-    this.visibleConversations().map((chat) => {
+  /** Submitted messages keep their row current until the shared summary echoes them. */
+  private readonly pendingPreviews = computed(() => {
+    const previews = new Map<SnowflakeID, MessageContent>();
+    for (const item of this.outbox.items()) {
+      if (item.editId || item.cancelled()) continue;
+      const content = item.message();
+      const key = item.threadId ?? item.chatId;
+      const current = previews.get(key);
+      if (!current || current.createdAt < content.createdAt) previews.set(key, content);
+    }
+    return previews;
+  });
+  protected readonly conversationRows = computed(() => {
+    const rows = this.visibleConversations().map((chat) => {
       const last = chat.lastMessage;
+      const pending = this.pendingPreviews().get(chat.id);
+      const preview = pending && (!chat.lastMessageAt || pending.createdAt > chat.lastMessageAt) ? pending : last;
       const draft = this.drafts.get(chat.id);
       const muted = this.metadata.isMuted(chat.id);
       return {
@@ -131,20 +153,25 @@ export class ChatListContent {
         key: chat.id,
         chat,
         draft,
-        sortTime: Math.max(Date.parse(chat.lastMessageAt ?? '') || -Infinity, draft?.savedAt ?? -Infinity),
+        preview,
+        sortTime: Math.max(
+          Date.parse(chat.lastMessageAt ?? '') || -Infinity,
+          draft?.savedAt ?? -Infinity,
+          Date.parse(pending?.createdAt ?? '') || -Infinity,
+        ),
         muted,
         isDm: chat.kind === GroupKind.dm,
         entry: {
           avatar: chat.kind === GroupKind.dm ? chat.peer?.avatarUrl : chat.avatar,
           sender:
-            !draft && chat.kind === GroupKind.group && last && last.messageType !== MessageType.system
-              ? (last.sender.name ?? String(last.sender.uid))
+            !draft && chat.kind === GroupKind.group && preview && preview.messageType !== MessageType.system
+              ? (preview.sender.name ?? String(preview.sender.uid))
               : undefined,
           link: ['/chats/chat', decodeId(chat.id)],
           time:
-            draft && draft.savedAt > (Date.parse(chat.lastMessageAt ?? '') || 0)
+            draft && draft.savedAt > (Date.parse(preview?.createdAt ?? '') || 0)
               ? new Date(draft.savedAt).toISOString()
-              : chat.lastMessageAt,
+              : (preview?.createdAt ?? chat.lastMessageAt),
           unreadCount: chat.unreadCount,
           muted,
         } satisfies ChatListEntry,
@@ -154,8 +181,22 @@ export class ChatListContent {
         toggleMuted: () => this.muteMenu().toggle(chat.id),
         toggleArchived: () => this.metadata.setArchived(chat.id, !chat.archived),
       };
-    }),
-  );
+    });
+    if (chatListTraceEnabled())
+      traceChatList(
+        'conversationRows',
+        rows.map((row) => ({
+          key: row.key,
+          sortTime: row.sortTime,
+          summaryAt: row.chat.lastMessageAt,
+          pendingAt: this.pendingPreviews().get(row.chat.id)?.createdAt,
+          draftAt: row.draft?.savedAt,
+          previewAt: row.preview?.createdAt,
+          preview: row.preview?.message,
+        })),
+      );
+    return rows;
+  });
   protected readonly showRequests = computed(
     () =>
       this.list().requestHistory ||
@@ -169,6 +210,9 @@ export class ChatListContent {
         const root = thread.threadRootMessage;
         const draft = this.drafts.get(thread.chatId, root.id);
         const last = thread.lastReply;
+        const pending = this.pendingPreviews().get(root.id);
+        const preview = pending && pending.createdAt > thread.lastReplyAt ? pending : last;
+        const latestAt = preview?.createdAt ?? thread.lastReplyAt;
         const isDm = chat?.kind === GroupKind.dm;
         const peer = isDm ? thread.participants.find((user) => user.uid !== this.session.user()?.uid) : undefined;
         return {
@@ -176,7 +220,12 @@ export class ChatListContent {
           key: root.id,
           thread,
           draft,
-          sortTime: Math.max(Date.parse(thread.lastReplyAt), draft?.savedAt ?? -Infinity),
+          preview,
+          sortTime: Math.max(
+            Date.parse(thread.lastReplyAt),
+            Date.parse(pending?.createdAt ?? '') || -Infinity,
+            draft?.savedAt ?? -Infinity,
+          ),
           entry: {
             avatarName: isDm ? (chat.peer?.username ?? peer?.name ?? thread.chatName) : (chat?.name ?? thread.chatName),
             avatar: isDm ? (chat.peer?.avatarUrl ?? peer?.avatarUrl) : (chat?.avatar ?? thread.chatAvatar),
@@ -184,13 +233,10 @@ export class ChatListContent {
             badgeAvatar: chat?.kind === GroupKind.group ? root.sender.avatarUrl : undefined,
             badgeIcon: isDm ? chatbubbles : undefined,
             sender:
-              !draft && chat?.kind === GroupKind.group && last && last.messageType !== MessageType.system
-                ? (last.sender.name ?? String(last.sender.uid))
+              !draft && chat?.kind === GroupKind.group && preview && preview.messageType !== MessageType.system
+                ? (preview.sender.name ?? String(preview.sender.uid))
                 : undefined,
-            time:
-              draft && draft.savedAt > Date.parse(thread.lastReplyAt)
-                ? new Date(draft.savedAt).toISOString()
-                : thread.lastReplyAt,
+            time: draft && draft.savedAt > Date.parse(latestAt) ? new Date(draft.savedAt).toISOString() : latestAt,
             unreadCount: thread.unreadCount,
             muted: thread.archived,
             link: ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(root.id)],
@@ -211,7 +257,13 @@ export class ChatListContent {
       ...(this.showThreads() ? this.threadRows() : []),
     ];
     const visible = this.mixed() ? rows.filter((row) => row.sortTime >= this.loadedThrough()) : rows;
-    return visible.sort((a, b) => b.sortTime - a.sortTime);
+    const sorted = visible.sort((a, b) => b.sortTime - a.sortTime);
+    if (chatListTraceEnabled())
+      traceChatList('rows', {
+        tab: this.list().tab,
+        rows: sorted.map(({ kind, key, sortTime }) => ({ kind: ListRowKind[kind], key, sortTime })),
+      });
+    return sorted;
   });
   protected readonly requestRows = computed(() => {
     const requests = this.friendRequests().items();
@@ -316,6 +368,56 @@ export class ChatListContent {
         release?.();
       });
     });
+    if (chatListTraceEnabled()) {
+      const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+      const destroy = inject(DestroyRef);
+      // A root effect samples local data even while Ionic detaches the page.
+      // It does not run change detection on the cached view.
+      const probe = effect(
+        () => {
+          this.rows();
+        },
+        {
+          injector: inject(EnvironmentInjector),
+          manualCleanup: true,
+        },
+      );
+      inject(NgZone).runOutsideAngular(() => {
+        const snapshot = () => ({
+          tab: this.list().tab,
+          rows: Array.from(host.querySelectorAll<HTMLElement>('[data-row-key]')).map((row) => ({
+            key: row.dataset['rowKey'],
+            text: row.textContent?.trim(),
+            top: row.getBoundingClientRect().top,
+          })),
+        });
+        const observer = new MutationObserver(() => traceChatList('dom:mutation', snapshot()));
+        observer.observe(host, { childList: true, subtree: true, characterData: true });
+        destroy.onDestroy(() => {
+          probe.destroy();
+          observer.disconnect();
+        });
+        // Ionic may not have inserted this view into the page during construction.
+        afterNextRender(() => {
+          const page = host.closest('app-chats');
+          traceChatList('probe:mounted', { tab: this.list().tab, connected: host.isConnected, page: !!page });
+          const visibility = new MutationObserver(() => traceChatList('page:class', page?.className));
+          if (page) visibility.observe(page, { attributes: true, attributeFilter: ['class'] });
+          let frame = 0;
+          const entering = () => {
+            traceChatList('dom:willEnter', snapshot());
+            frame = requestAnimationFrame(() => traceChatList('dom:first-raf', snapshot()));
+          };
+          page?.addEventListener('ionViewWillEnter', entering);
+          destroy.onDestroy(() => {
+            visibility.disconnect();
+            page?.removeEventListener('ionViewWillEnter', entering);
+            cancelAnimationFrame(frame);
+          });
+        });
+      });
+    }
+
     effect((onCleanup) => {
       if (!this.active()) return;
       const query = this.chatQuery();

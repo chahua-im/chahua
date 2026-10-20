@@ -1,5 +1,6 @@
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
@@ -20,9 +21,11 @@ describe('ChatListStore', () => {
   let http: HttpTestingController;
   let incoming: Subject<MessageResponse>;
   let resync: Subject<void>;
+  let connected: WritableSignal<boolean>;
   beforeEach(() => {
     incoming = new Subject<MessageResponse>();
     resync = new Subject<void>();
+    connected = signal(true);
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(withInterceptors([jsonInterceptor])),
@@ -30,7 +33,7 @@ describe('ChatListStore', () => {
         provideChahuaBaseUrl('/_api'),
         {
           provide: Connection,
-          useValue: mockRealtime({ messages$: incoming, resync$: resync, events$: new Subject() }),
+          useValue: mockRealtime({ messages$: incoming, resync$: resync, events$: new Subject(), connected }),
         },
       ],
     });
@@ -54,6 +57,13 @@ describe('ChatListStore', () => {
 
   async function settle() {
     for (let step = 0; step < 12; step++) await Promise.resolve();
+    TestBed.tick();
+  }
+
+  function reconnect() {
+    connected.set(false);
+    TestBed.tick();
+    connected.set(true);
     TestBed.tick();
   }
 
@@ -95,14 +105,12 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     await settle();
     TestBed.tick();
-    resync.next();
-    TestBed.tick();
+    reconnect();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     TestBed.tick();
     expect(query.items()).toEqual([testChat]);
-    resync.next();
-    TestBed.tick();
+    reconnect();
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     await settle();
     TestBed.tick();
@@ -609,8 +617,7 @@ describe('ChatListStore', () => {
     expect(query.items()[0].archived).toBe(false);
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...chat, mutedUntil }] }));
     await settle();
-    resync.next();
-    TestBed.tick();
+    reconnect();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [chat] }));
     await settle();
     expect(query.items()[0].mutedUntil).toBeNull();
@@ -662,8 +669,7 @@ describe('ChatListStore', () => {
     initial.flush({ lastReadMessageId: '200', unreadCount: 1 });
     await first;
     expect(data['chatInfo']['readOperations'].size).toBe(0);
-    resync.next();
-    TestBed.tick();
+    reconnect();
     const joined = data['chatInfo'].getReadState(testChat.id);
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ lastReadMessageId: '200', unreadCount: 2 });
@@ -707,8 +713,7 @@ describe('ChatListStore', () => {
     await data['chatInfo'].markRead(testChat.id, testMessage.id);
     await vi.advanceTimersByTimeAsync(1000);
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/read`);
-    resync.next();
-    TestBed.tick();
+    reconnect();
     const joined = data['chatInfo'].getReadState(testChat.id);
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     http
@@ -716,8 +721,7 @@ describe('ChatListStore', () => {
       .flush({ lastReadMessageId: wireMessage.id, unreadCount: 1 });
     await joined;
     expect(data['chatInfo']['readOperations'].size).toBe(0);
-    resync.next();
-    TestBed.tick();
+    reconnect();
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
     await settle();
@@ -779,8 +783,7 @@ describe('ChatListStore', () => {
     http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
     await settle();
     expect(data['chatInfo']['readOperations'].size).toBe(0);
-    resync.next();
-    TestBed.tick();
+    reconnect();
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
     await settle();
@@ -932,22 +935,44 @@ describe('ChatListStore', () => {
     });
   });
 
-  it('keeps hidden rows and reconciles their read state on activation without reloading', async () => {
+  it('keeps hidden rows and reads their unread state as messages arrive', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     releaseQuery();
     incoming.next(testMessage);
     http.expectNone('/_api/chats?limit=50');
-    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    const unread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
     expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
     expect(query.items()).toHaveLength(1);
-    releaseQuery = query.activate();
-    const unread = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
-    http.expectNone('/_api/chats?limit=50');
+    expect(query.items()[0].lastMessage?.id).toBe(testMessage.id);
     unread.flush({ lastReadMessageId: wireMessage.id, unreadCount: 5 });
     await settle();
-    expect(query.items()[0].lastMessage?.id).toBe(testMessage.id);
     expect(query.items()[0].unreadCount).toBe(5);
+    releaseQuery = query.activate();
+    http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    http.expectNone('/_api/chats?limit=50');
+  });
+
+  it('reorders a covered list as soon as a live message arrives', async () => {
+    const olderId = encodeId('9007199254742001');
+    const newerId = encodeId('9007199254742003');
+    http.expectOne('/_api/chats?limit=50').flush(
+      structuredClone({
+        chats: [
+          { ...wireChat, id: decodeId(newerId), name: '较新', lastMessageAt: '2026-09-05T12:00:00Z' },
+          { ...wireChat, id: decodeId(olderId), name: '较旧', lastMessageAt: '2026-09-05T11:00:00Z' },
+        ],
+      }),
+    );
+    await settle();
+    releaseQuery();
+    incoming.next({ ...testMessage, chatId: olderId, createdAt: '2026-09-05T12:30:00Z' });
+    expect(query.items().map((chat) => chat.id)).toEqual([olderId, newerId]);
+    expect(query.items()[0].lastMessage?.message).toBe(testMessage.message);
+    http
+      .expectOne(`/_api/chats/${decodeId(olderId)}/unread`)
+      .flush({ lastReadMessageId: testMessage.id, unreadCount: 1 });
+    await settle();
   });
 
   it('reads only the head page when a hidden list missed a new conversation', async () => {
@@ -1052,7 +1077,7 @@ describe('ChatListStore', () => {
     await loading;
   });
 
-  it('still reloads a hidden list after a resync', async () => {
+  it('keeps the list through a foreground resync and reloads it after a reconnect', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     releaseQuery();
@@ -1060,6 +1085,12 @@ describe('ChatListStore', () => {
     http.expectNone('/_api/chats?limit=50');
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     releaseQuery = query.activate();
+    http.expectNone('/_api/chats?limit=50');
+    TestBed.tick();
+    connected.set(false);
+    TestBed.tick();
+    connected.set(true);
+    TestBed.tick();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
     await settle();
     expect(query.items()).toHaveLength(1);

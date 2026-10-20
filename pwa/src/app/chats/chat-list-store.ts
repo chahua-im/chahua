@@ -1,4 +1,14 @@
-import { computed, DestroyRef, inject, Service, signal, type Signal, type WritableSignal } from '@angular/core';
+import {
+  computed,
+  DestroyRef,
+  effect,
+  inject,
+  Service,
+  signal,
+  untracked,
+  type Signal,
+  type WritableSignal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
@@ -122,10 +132,21 @@ export class ChatListStore {
   constructor() {
     for (const archived of [false, true]) this.queries.set(archived, this.createQuery(archived));
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
-      this.refreshChats();
       void this.invalidateRequests();
       void this.invalidateThreads();
       this.refreshArchivedUnread();
+    });
+    // Live events keep a foregrounded list current; only a dropped socket can have missed rows.
+    let wasConnected = this.realtime.connected();
+    let dropped = false;
+    effect(() => {
+      const connected = this.realtime.connected();
+      if (!connected && wasConnected) dropped = true;
+      if (connected && dropped) {
+        dropped = false;
+        untracked(() => this.refreshChats());
+      }
+      wasConnected = connected;
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, threadId }) => {
       if (threadId) {
@@ -401,8 +422,22 @@ export class ChatListStore {
     // A hidden list keeps its rows; live previews cover the message itself, so record only the gaps.
     for (const { state } of this.queries.values()) {
       if (state.consumers.size || state.dirty()) continue;
-      if (state.ids().includes(message.chatId)) state.pendingUnread.add(message.chatId);
-      else state.headStale = true;
+      if (!state.ids().includes(message.chatId)) {
+        state.headStale = true;
+        continue;
+      }
+      state.pendingUnread.add(message.chatId);
+      // Read now so uncovering the list does not wait for the read state.
+      if (!document.hidden) void this.syncHiddenUnread(state, message.chatId);
+    }
+  }
+
+  private async syncHiddenUnread(query: QueryState, chatId: SnowflakeID) {
+    try {
+      await this.chatInfo.getReadState(chatId);
+      query.pendingUnread.delete(chatId);
+    } catch {
+      // Keep it pending: activation retries and only a visible list reports the failure.
     }
   }
 

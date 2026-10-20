@@ -153,8 +153,10 @@ export class ChatStore {
           void this.relationships.get(event.payload.byUid)?.refresh();
           break;
         case ServerWsMessageType.message:
-          if (event.payload.replyRootId) this.invalidateSubscriptions(event.payload.replyRootId);
-          else this.receiveMessage(event.payload);
+          if (event.payload.replyRootId) {
+            this.invalidateSubscriptions(event.payload.replyRootId);
+            this.receiveThreadMessage(event.payload, event.payload.replyRootId);
+          } else this.receiveMessage(event.payload);
           break;
         case ServerWsMessageType.threadMembershipChanged:
           this.invalidateSubscriptions(event.payload.threadRootId);
@@ -288,19 +290,25 @@ export class ChatStore {
     if (previous?.id === message.id) return;
     this.invalidateReads(new Set([message.chatId]));
     if (previous && previous.id > message.id) return;
-    const preview: MessagePreview = {
-      id: message.id,
-      clientGeneratedId: message.clientGeneratedId,
-      createdAt: message.createdAt,
-      sender: message.sender,
-      message: message.message,
-      messageType: message.messageType,
-      isDeleted: message.isDeleted,
-      attachments: message.attachments.map(({ kind }) => ({ kind })),
-      mentions: message.mentions ?? [],
-      sticker: message.sticker ? { emoji: message.sticker.emoji } : message.sticker,
-    };
+    const preview = messagePreview(message);
     this.updatePreview(message.chatId, preview);
+  }
+
+  private receiveThreadMessage(message: MessageResponse, rootId: SnowflakeID) {
+    const current = this.threadSummaries().get(rootId);
+    // Membership and unknown threads still come from the list query.
+    if (!current || (current.value.lastReply && current.value.lastReply.id >= message.id)) return;
+    this.threadSummaries.update((summaries) =>
+      new Map(summaries).set(rootId, {
+        value: {
+          ...current.value,
+          lastReply: messagePreview(message),
+          lastReplyAt: message.createdAt,
+          replyCount: Math.max(1, current.value.replyCount),
+        },
+        version: ++this.version,
+      }),
+    );
   }
 
   private updatePreview(chatId: SnowflakeID, preview: MessagePreview) {
@@ -312,6 +320,47 @@ export class ChatStore {
         stateVersion: current?.stateVersion ?? 0,
       }),
     );
+  }
+
+  /** A loaded, contiguous latest range can resolve a recall without another list read. */
+  restoreChatPreview(chatId: SnowflakeID, deletedIds: ReadonlySet<SnowflakeID>, previous?: MessageResponse) {
+    const current = this.summaries().get(chatId);
+    if (!current?.value.lastMessage || !deletedIds.has(current.value.lastMessage.id)) return;
+    this.summaries.update((summaries) =>
+      new Map(summaries).set(chatId, {
+        ...current,
+        value: {
+          ...current.value,
+          lastMessage: previous && messagePreview(previous),
+          lastMessageAt: previous?.createdAt,
+        },
+        previewVersion: ++this.version,
+      }),
+    );
+  }
+
+  restoreThreadPreview(
+    chatId: SnowflakeID,
+    rootId: SnowflakeID,
+    deletedIds: ReadonlySet<SnowflakeID>,
+    previous?: MessageResponse,
+  ) {
+    const current = this.threadSummaries().get(rootId);
+    if (current?.value.chatId !== chatId || !current.value.lastReply || !deletedIds.has(current.value.lastReply.id))
+      return;
+    this.threadSummaries.update((summaries) =>
+      new Map(summaries).set(rootId, {
+        value: {
+          ...current.value,
+          lastReply: previous && messagePreview(previous),
+          lastReplyAt: previous?.createdAt ?? current.value.subscribedAt,
+          // Only a complete range can prove there are no remaining replies.
+          replyCount: previous ? current.value.replyCount : 0,
+        },
+        version: ++this.version,
+      }),
+    );
+    return true;
   }
 
   private receiveChange(change: MessageChange) {
@@ -539,7 +588,7 @@ export class ChatStore {
 
   thread(rootId: SnowflakeID): ThreadListItem | undefined {
     const summary = this.threadSummaries().get(rootId)?.value;
-    if (!summary) return undefined;
+    if (!summary || summary.replyCount === 0) return undefined;
     const status = this.subscriptions().get(rootId)?.status;
     if (status && !status.subscribed) return undefined;
     return { ...summary, archived: status?.archived ?? false, ...this.threadReads().get(rootId)!.state };
@@ -728,4 +777,19 @@ export class ChatStore {
   private response<T>(source: Observable<T>) {
     return firstValueFrom(source.pipe(takeUntilDestroyed(this.destroyRef)));
   }
+}
+
+function messagePreview(message: MessageResponse): MessagePreview {
+  return {
+    id: message.id,
+    clientGeneratedId: message.clientGeneratedId,
+    createdAt: message.createdAt,
+    sender: message.sender,
+    message: message.message,
+    messageType: message.messageType,
+    isDeleted: message.isDeleted,
+    attachments: message.attachments.map(({ kind }) => ({ kind })),
+    mentions: message.mentions ?? [],
+    sticker: message.sticker ? { emoji: message.sticker.emoji } : message.sticker,
+  };
 }
