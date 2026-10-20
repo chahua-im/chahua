@@ -30,6 +30,8 @@ const thread: ThreadListItem = {
   participants: [],
   replyCount: 2,
   unreadCount: 2,
+  unreadMentions: 0,
+  unreadReactions: 0,
   lastReplyAt: testMessage.createdAt,
   subscribedAt: testMessage.createdAt,
 };

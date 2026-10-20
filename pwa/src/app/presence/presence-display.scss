@@ -1,0 +1,22 @@
+:host {
+  display: block;
+  min-width: 0;
+  min-height: var(--app-line-caption);
+  overflow: hidden;
+  color: var(--ion-color-medium);
+  font-size: var(--app-font-caption);
+  font-weight: 400;
+  line-height: var(--app-line-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online {
+  color: var(--app-online-color);
+}
+.presence-skeleton {
+  display: inline-block;
+  width: 6em;
+  height: 0.75em;
+  border-radius: 0.375em;
+  vertical-align: middle;
+}

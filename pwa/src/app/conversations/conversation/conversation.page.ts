@@ -85,6 +85,7 @@ import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
+import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { Preferences } from '../../settings/preferences';
 import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
@@ -132,6 +133,8 @@ type ScrollPosition =
     ContentScrollbars,
     LocalDatePipe,
     TranslocoPipe,
+    GroupPresenceDisplay,
+    UserPresenceDisplay,
     ChatDetails,
     ChatMute,
     ChatAvatar,
@@ -455,7 +458,7 @@ export class ConversationPage {
     const index = this.messages().findIndex((message) => message.message().id === messageId);
     return this.messageElements()[index]?.nativeElement;
   }
-  private readonly peerUid = computed(() => this.chatInfo.get(this.id())?.peer?.uid);
+  protected readonly peerUid = computed(() => this.chatInfo.get(this.id())?.peer?.uid);
   protected readonly relationship = computed(() => {
     const uid = this.peerUid();
     return uid ? this.chatInfo.relationship(uid).value() : undefined;

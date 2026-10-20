@@ -22,4 +22,6 @@ export interface ThreadListItem {
   subscribedAt: string;
   threadRootMessage: MessagePreview;
   unreadCount: number;
+  unreadMentions: number;
+  unreadReactions: number;
 }

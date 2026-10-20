@@ -5,7 +5,7 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
-import type { TicketResponse } from '../../models';
+import type { OnlineClientConnectionResponse, TicketResponse } from '../../models';
 
 import { HttpHeaders, httpResource } from '@angular/common/http';
 import type { HttpContext, HttpResourceOptions, HttpResourceRef, HttpResourceRequest } from '@angular/common/http';
@@ -100,6 +100,27 @@ export function wsHandlerResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getOnlineClientsResource(
+  options: OrvalHttpResourceOptions<OnlineClientConnectionResponse[], unknown> & {
+    defaultValue: NoInfer<OnlineClientConnectionResponse[]>;
+  },
+): HttpResourceRef<OnlineClientConnectionResponse[]>;
+export function getOnlineClientsResource(
+  options?: OrvalHttpResourceOptions<OnlineClientConnectionResponse[], unknown>,
+): HttpResourceRef<OnlineClientConnectionResponse[] | undefined>;
+export function getOnlineClientsResource(
+  options?: OrvalHttpResourceOptions<OnlineClientConnectionResponse[], unknown>,
+): HttpResourceRef<OnlineClientConnectionResponse[] | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<OnlineClientConnectionResponse[]>(
+    () => applyOrvalRequestExtension(`${baseUrl}/ws/clients`, options),
+    options,
+  );
+}
+
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function getWsTicketResource(
   options: OrvalHttpResourceOptions<TicketResponse, unknown> & { defaultValue: NoInfer<TicketResponse> },
 ): HttpResourceRef<TicketResponse>;
@@ -114,6 +135,7 @@ export function getWsTicketResource(
 }
 
 export type WsHandlerResourceResult = NonNullable<unknown>;
+export type GetOnlineClientsResourceResult = NonNullable<OnlineClientConnectionResponse[]>;
 export type GetWsTicketResourceResult = NonNullable<TicketResponse>;
 
 /**

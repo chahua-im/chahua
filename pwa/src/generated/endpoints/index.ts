@@ -2,6 +2,7 @@ export * from './attachments/attachments.service';
 export * from './auth/auth.service';
 export * from './blocks/blocks.service';
 export * from './chats/chats.service';
+export * from './default/default.service';
 export * from './external-invites/external-invites.service';
 export * from './external-sessions/external-sessions.service';
 export * from './external-social/external-social.service';
@@ -27,6 +28,7 @@ export { applyOrvalRequestExtension, toResourceState } from './attachments/attac
 export * from './attachments/attachments.resource';
 export * from './blocks/blocks.resource';
 export * from './chats/chats.resource';
+export * from './default/default.resource';
 export * from './external-sessions/external-sessions.resource';
 export * from './friends/friends.resource';
 export * from './groups/groups.resource';

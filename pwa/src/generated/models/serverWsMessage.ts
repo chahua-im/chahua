@@ -11,7 +11,9 @@ import type { FriendRequestReceivedPayload } from './friendRequestReceivedPayloa
 import type { FriendRequestResolvedPayload } from './friendRequestResolvedPayload';
 import type { FriendshipRemovedPayload } from './friendshipRemovedPayload';
 import type { MessageResponse } from './messageResponse';
+import type { NotificationPayload } from './notificationPayload';
 import type { PinUpdatePayload } from './pinUpdatePayload';
+import type { PresenceSnapshotPayload } from './presenceSnapshotPayload';
 import type { PresenceUpdatePayload } from './presenceUpdatePayload';
 import type { ReactionUpdatePayload } from './reactionUpdatePayload';
 import type { StickerPackOrderUpdatePayload } from './stickerPackOrderUpdatePayload';
@@ -42,6 +44,10 @@ export type ServerWsMessage =
   | {
       payload: PresenceUpdatePayload;
       type: 'presenceUpdate';
+    }
+  | {
+      payload: PresenceSnapshotPayload;
+      type: 'presenceSnapshot';
     }
   | {
       payload: ThreadUpdatePayload;
@@ -90,4 +96,8 @@ export type ServerWsMessage =
   | {
       payload: FriendshipRemovedPayload;
       type: 'friendshipRemoved';
+    }
+  | {
+      payload: NotificationPayload;
+      type: 'notification';
     };

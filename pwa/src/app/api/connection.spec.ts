@@ -68,6 +68,10 @@ describe('Connection', () => {
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'auth', ticket: 'test-jwt' }));
     socket.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
     expect(realtime.connected()).toBe(true);
+    realtime.watchPresence(7, [2], [testChat.id]);
+    expect(socket.send).toHaveBeenLastCalledWith(
+      JSON.stringify({ type: 'watchPresence', requestId: 7, userIds: [2], chatIds: [wireChat.id] }),
+    );
     realtime.accept(testMessage);
     socket.receive({ type: 'message', payload: wireMessage });
     socket.receive({

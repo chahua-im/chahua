@@ -28,6 +28,7 @@ flowchart TD
   PINS --> MENU
   PAGE --> COMPOSER[MessageComposer]
   PAGE --> DETAILS[ChatDetails：侧栏或 modal]
+  PAGE --> PRESENCE[UserPresenceDisplay / GroupPresenceDisplay]
   COMPOSER --> RECORDER[VoiceRecorder]
   COMPOSER --> STICKERS[StickerPicker]
   COMPOSER --> VOICE[VoicePlayer]
@@ -71,9 +72,9 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 | NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                 | PushNotifications                                                                     |
 | ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                      | 将 selection 和 active 传给单列 ChatList                                              |
 | ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、Connection、PushNotifications；控制分类面板与菜单，设置入口保留授权手势 |
-| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行                                         | ChatListStore、ChatStore、DraftStore、Preferences、SessionStore                       |
-| ChatListItem       | entry、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用                      | 接收行数据和回调，不自行读取聊天数据                                                  |
-| ChatAvatar         | entry、size                                                                                                          | 由输入派生头像、占位和话题角标，无请求                                                |
+| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数 | ChatListStore、ChatStore、DraftStore、Preferences、SessionStore、Presence |
+| ChatListItem       | entry、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据 |
+| ChatAvatar         | entry、size、online | 由输入派生头像、占位、话题角标和在线圆点，无请求 |
 | DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                | GroupsService、UsersService；选择用户或打开资料                                       |
 | ChatLink           | 路由参数；failed                                                                                                     | 解析链接和静态路由配置、按需查询消息/用户；负责详情弹窗与浏览器历史的生命周期         |
 
@@ -83,12 +84,16 @@ ChatListContent 的行是共享资料、查询成员和草稿的派生结果。�
 
 | 组件               | 输入与局部字段                                                                                               | 数据依赖与传递                                                                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer、ChatDetails 传值 |
+| ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer、ChatDetails 和 Presence 展示组件传值 |
 | PinnedMessagesPage | id、threadId；活跃版本、loading/failed、滚动状态与浮动日期                                                   | 从共享 ChatPins 派生消息，复用 Message 和 MessageMenu；无需 ConversationStore                                                                         |
 | SavedMessagesPage  | active                                                                                                       | 路由及 toolbar；离开时销毁 SavedMessageList，重新进入时重新创建                                                                                       |
 | SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                              | 全局收藏接口；快照映射给非交互 Message                                                                                                                |
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图不可见的消息（撤回的普通消息整行移除，话题根保留为墓碑行）。日期与连续作者分组从最终可见行派生。
+会话标题在普通私聊显示 `UserPresenceDisplay`，普通群聊显示 `GroupPresenceDisplay`；话题不显示群人数。展示组件注册可见范围到应用级 Presence，ChatDetails 的私聊资料和群资料复用相同展示组件，不自行保存在线或人数副本。
+UserPresenceDisplay 和 GroupPresenceDisplay 始终保留状态行，仅在对应有效范围等待快照时展示紧凑线框；pending 范围属于 Presence，而不是组件自行启动的定时器。列表行的在线布尔值直接派生自同一 Presence，不向 ChatStore 或聊天列表响应复制在线字段。
+
+
 
 输入文字、回复对象与编辑目标由页面持有；Composer 通过 model 和输出传递变化。引用来源栈、当前置顶选择等只保留需要重新查找的 ID；已有同一对象引用无需转成 ID。未读数字直接消费 ChatStore。滚动中的已读与分页判断共用一次滚动尺寸读取；已确认消息的元素集合随消息行和视图变化派生，不在每次滚动时重新过滤。置顶栏持有当前显示的置顶对象引用，仅在栏位出现或消失时等待触摸与惯性结束；共享的置顶数据仍即时更新。
 
@@ -135,7 +140,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 | 组件               | 输入与局部字段                                                                                                                                          | 共享数据/输出                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading | ChatStore 的头像、标题、详情、订阅与好友关系                    |
+| ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading | ChatStore 的头像、标题、详情、订阅与好友关系；普通私聊/群资料分别显示用户状态/群人数 |
 | ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                          | 从聊天消息页提取话题根，点击导航                                |
 | ChatMembers        | chatId；members、cursor、loading/error                                                                                                                  | MembersService；行点击打开资料，仅管理员显示右侧身份            |
 | ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                            | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料 |

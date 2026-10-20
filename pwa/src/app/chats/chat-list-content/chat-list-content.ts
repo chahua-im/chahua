@@ -1,7 +1,9 @@
 import {
+  afterRenderEffect,
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   input,
   linkedSignal,
@@ -9,6 +11,7 @@ import {
   signal,
   untracked,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
@@ -41,6 +44,7 @@ import { ConversationNavigation, ConversationTargetKind } from '../../conversati
 import { DraftStore } from '../../conversations/draft-store';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { MarkdownSummary } from '../../messages/message-preview/markdown-summary';
+import { Presence } from '../../presence/presence';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { SessionStore } from '../../session/session-store';
@@ -88,6 +92,10 @@ export class ChatListContent {
   protected readonly navigation = inject(ConversationNavigation);
   private readonly preferences = inject(Preferences);
   private readonly metadata = inject(ChatStore);
+  protected readonly presence = inject(Presence);
+  private readonly presenceRows = viewChildren<ChatListItem, ElementRef<HTMLElement>>('presenceRow', {
+    read: ElementRef,
+  });
   readonly selection = input.required<ListSelection>();
   readonly openList = output<ListSelection>();
   protected readonly list = this.selection;
@@ -274,6 +282,40 @@ export class ChatListContent {
   private readonly refresher = viewChild(IonRefresher);
 
   constructor() {
+    afterRenderEffect((onCleanup) => {
+      if (
+        !this.active() ||
+        !this.rows().some((row) => row.kind === ListRowKind.Chat && row.isDm && row.chat.peer != null)
+      )
+        return;
+      const targets = new Map<Element, number>();
+      for (const { nativeElement } of this.presenceRows()) {
+        const uid = nativeElement.getAttribute('data-presence-uid');
+        if (uid != null) targets.set(nativeElement, Number(uid));
+      }
+      const visible = new Map<Element, number>();
+      let watched = new Set<number>();
+      let release: (() => void) | undefined;
+      let observing = true;
+      const observer = new IntersectionObserver((entries) => {
+        if (!observing) return;
+        for (const entry of entries) {
+          if (entry.isIntersecting) visible.set(entry.target, targets.get(entry.target)!);
+          else visible.delete(entry.target);
+        }
+        const users = new Set(visible.values());
+        if (users.size === watched.size && [...users].every((uid) => watched.has(uid))) return;
+        watched = users;
+        release?.();
+        release = users.size ? this.presence.watch({ userIds: [...users] }) : undefined;
+      });
+      for (const target of targets.keys()) observer.observe(target);
+      onCleanup(() => {
+        observing = false;
+        observer.disconnect();
+        release?.();
+      });
+    });
     effect((onCleanup) => {
       if (!this.active()) return;
       const query = this.chatQuery();

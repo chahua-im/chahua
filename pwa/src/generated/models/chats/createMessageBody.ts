@@ -9,6 +9,7 @@ import type { MessageType } from '../messageType';
 import type { SnowflakeID } from '../snowflakeID';
 
 export interface CreateMessageBody {
+  /** Uploaded attachment IDs in display order; allocation-time order is replaced. */
   attachmentIds?: SnowflakeID[];
   clientGeneratedId: string;
   message?: string;

@@ -1,0 +1,9 @@
+@if (loading()) {
+  <span class="skeleton-block presence-skeleton"></span>
+} @else if (state(); as presence) {
+  @if (presence.online) {
+    <span class="online">{{ 'presence.online' | transloco }}</span>
+  } @else if (bucket(); as bucket) {
+    <span>{{ 'presence.lastSeen.' + bucket | transloco }}</span>
+  }
+}

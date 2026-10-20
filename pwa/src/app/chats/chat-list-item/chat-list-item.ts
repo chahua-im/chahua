@@ -67,6 +67,7 @@ export class ChatListItem {
   protected readonly mutedIcon = notificationsOffOutline;
   readonly entry = input.required<ChatListEntry>();
   readonly button = input(false);
+  readonly online = input(false);
   readonly startActions = input<readonly ChatListAction[]>([]);
   readonly endActions = input<readonly ChatListAction[]>([]);
   readonly actionsAlwaysVisible = input(false);

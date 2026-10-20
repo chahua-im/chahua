@@ -75,6 +75,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     avatarImageId: 1,
     id: 1,
   },
+  GroupPresenceResponse: {
+    chatId: 1,
+  },
   GroupSelectorItem: {
     id: 1,
   },
@@ -159,6 +162,11 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     id: 1,
     media: 'MessageStickerMediaResponse',
   },
+  NotificationPayload: {
+    chatId: 1,
+    messageId: 1,
+    threadRootId: 1,
+  },
   PinResponse: {
     chatId: 1,
     id: 1,
@@ -171,6 +179,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     pin: 'PinResponse',
     pinId: 1,
     threadRootId: 1,
+  },
+  PresenceSnapshotPayload: {
+    groups: ['GroupPresenceResponse'],
   },
   ReactionUpdatePayload: {
     chatId: 1,
@@ -271,6 +282,12 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     chatId: 1,
     threadRootId: 1,
   },
+  UnreadMentionIdsResponse: {
+    messageIds: [1],
+  },
+  UnreadReactionIdsResponse: {
+    messageIds: [1],
+  },
   UpdateChatBody: {
     avatarImageId: 1,
   },
@@ -309,6 +326,11 @@ export const jsonOperations: JsonOperationCodec[] = [
       before: 1,
       after: 1,
     },
+  },
+  {
+    method: 'GET',
+    path: '/chats/{chat_id}/mentions',
+    response: 'UnreadMentionIdsResponse',
   },
   {
     method: 'GET',
@@ -353,6 +375,11 @@ export const jsonOperations: JsonOperationCodec[] = [
     path: '/chats/{chat_id}/pins',
     body: 'CreatePinBody',
     response: 'PinResponse',
+  },
+  {
+    method: 'GET',
+    path: '/chats/{chat_id}/reactions',
+    response: 'UnreadReactionIdsResponse',
   },
   {
     method: 'POST',
@@ -606,6 +633,7 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   messagesBulkDeleted: 'BulkDeletedPayload',
   reactionUpdated: 'ReactionUpdatePayload',
   presenceUpdate: 0,
+  presenceSnapshot: 'PresenceSnapshotPayload',
   threadUpdate: 'ThreadUpdatePayload',
   threadMembershipChanged: 'ThreadMembershipChangedPayload',
   chatArchiveStateChanged: 'ChatArchiveStateChangedPayload',
@@ -617,4 +645,5 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   friendRequestReceived: 0,
   friendRequestResolved: 'FriendRequestResolvedPayload',
   friendshipRemoved: 0,
+  notification: 'NotificationPayload',
 };

@@ -898,6 +898,8 @@ describe('ConversationPage', () => {
           subscribedAt: testMessage.createdAt,
           archived: false,
           unreadCount: 5,
+          unreadMentions: 0,
+          unreadReactions: 0,
           lastReadMessageId: testMessage.id,
           lastReplyAt: testMessage.createdAt,
         },
@@ -1713,7 +1715,12 @@ describe('ConversationPage', () => {
     const data = TestBed.inject(ChatStore);
     const read = vi.mocked(data.cachedReadState);
     component.ionViewDidLeave();
-    read.mockReturnValue({ lastReadMessageId: encodeId('100'), unreadCount: 90 });
+    read.mockReturnValue({
+      lastReadMessageId: encodeId('100'),
+      unreadCount: 90,
+      unreadMentions: 0,
+      unreadReactions: 0,
+    });
     component.ionViewWillEnter();
     if (component.threadId())
       for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
@@ -1728,7 +1735,12 @@ describe('ConversationPage', () => {
     });
     await fixture.whenStable();
     expect(component['firstUnreadId']()).toBe(encodeId('101'));
-    read.mockReturnValue({ lastReadMessageId: encodeId('101'), unreadCount: 89 });
+    read.mockReturnValue({
+      lastReadMessageId: encodeId('101'),
+      unreadCount: 89,
+      unreadMentions: 0,
+      unreadReactions: 0,
+    });
     await fixture.whenStable();
     expect(component['entryReadId']()).toBe(encodeId('100'));
     expect(fixture.nativeElement.querySelector('.unread-separator')).not.toBeNull();
@@ -1748,6 +1760,8 @@ describe('ConversationPage', () => {
     vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue({
       lastReadMessageId: encodeId('100'),
       unreadCount: 1,
+      unreadMentions: 0,
+      unreadReactions: 0,
     });
     component.ionViewWillEnter();
     if (component.threadId())
@@ -1774,6 +1788,8 @@ describe('ConversationPage', () => {
     vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue({
       lastReadMessageId: encodeId('101'),
       unreadCount: 0,
+      unreadMentions: 0,
+      unreadReactions: 0,
     });
     await fixture.whenStable();
     expect(component['firstUnreadId']()).toBe(encodeId('101'));
@@ -1973,7 +1989,7 @@ describe('ConversationPage', () => {
     expect(data.getReadState).toHaveBeenCalledOnce();
     expect(data.getReadState).toHaveBeenCalledWith(testChat.id);
     expect(data.markRead).toHaveBeenLastCalledWith(testChat.id, testMessage.id);
-    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('重连后的群名称');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('重连后的群名称');
   });
 
   it('refreshes deep-linked topic subscription state on resync without reloading the topic list', async () => {
@@ -2042,7 +2058,7 @@ describe('ConversationPage', () => {
     expect(TestBed.inject(DraftStore).get(testChat.id, encodeId('100'))).toBeUndefined();
     expect(component['draft']()).toBe('');
     expect(component['firstUnreadId']()).toBe(encodeId('102'));
-    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('.conversation-name').textContent.trim()).toBe('测试消息');
     expect(component['showBackToChat']()).toBe(true);
     component['draft'].set('话题草稿');
     await enterThread('99', {});
@@ -2207,14 +2223,14 @@ describe('ConversationPage', () => {
     chatInfo.remember([{ ...testChat, name: '话题所属群' }]);
     vi.mocked(TestBed.inject(ChatStore).cachedReadState).mockReturnValue(undefined);
     await enterThread();
-    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('测试消息');
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: true }));
     await component['updateThread']();
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('测试消息');
     chatInfo.remember([{ ...testChat, name: '群名称更新' }]);
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('测试消息');
   });
 
   it('loads a missing canonical subscription after the owner invalidates it', async () => {

@@ -11,4 +11,5 @@ export interface UnreadCountResponse {
   archivedUnreadCount: number;
   unreadChatCount: number;
   unreadCount: number;
+  unreadMentions: number;
 }

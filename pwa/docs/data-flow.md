@@ -8,6 +8,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | ---------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
 | SessionStore           | token、当前用户及用户组                                                 | 应用；token 保存到 localStorage 和 Cookie                   |
 | Connection             | 唯一 WebSocket、认证/心跳/重连、最近 256 个新消息 ID                    | 应用                                                        |
+| Presence               | 可见用户/普通群范围、最后授权快照、待回包的用户/群范围、一个分钟时钟与当前请求号 | 应用内存；展示消费者释放或文档隐藏即停止范围和时钟，不持久化 |
 | ChatStore              | 聊天资料、摘要、归档/静音、已读、话题摘要与订阅、好友关系查询、ChatPins | 应用缓存，不保存全部历史消息                                |
 | ChatListStore          | 查询成员 ID、游标、覆盖范围、消费者、好友请求与共享未读响应             | 应用；无消费者时取消读取                                    |
 | ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、用于改写引用快照的撤回与编辑记录 | 每个 ConversationPage；由页面生命周期控制                   |
@@ -32,6 +33,7 @@ flowchart TD
   API --> CHAT[ChatStore：共享资料、关系、已读、置顶]
   API --> RANGE[ConversationStore：连续消息]
   WS[WebSocket] --> CONNECTION[Connection]
+  CONNECTION --> PRESENCE[Presence：可见范围快照]
   CONNECTION --> CHAT
   CONNECTION --> LISTS
   CONNECTION --> RANGE
@@ -150,8 +152,15 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | friendshipRemoved                                         | 刷新相关关系查询和聊天归档计数                                                                        |
 | chatArchiveStateChanged                                   | 更新归档/静音字段，刷新受影响列表与计数                                                               |
 | 首次 presenceUpdate、恢复前台                             | Connection 发出 resync；活跃查询刷新，当前页面补必要元数据                                            |
+| presenceSnapshot                                           | Presence 仅接收当前 `requestId` 的绝对授权快照；缺席用户/群清除，本机断网、断开、换会话或文档隐藏时不显示实时结论 |
 
-Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。
+Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过同一单例 Connection 发送 `{type:'watchPresence',requestId,userIds,chatIds}`，以该 socket 的可见范围替换服务端监看范围；Snowflake chatId 仅在 Connection 边界还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
+
+ChatListContent 在活跃列表中使用一个 IntersectionObserver，按实际进入视口的私聊行收集并去重对方 UID，注册到同一 Presence；滚出视口、切换分类、离开页面或销毁时释放对应范围。群组、话题和好友请求不注册列表在线范围；不为已加载但未显示的分页成员请求在线状态，也不为每行创建 observer、WebSocket 或轮询。列表、会话标题和资料的范围由 Presence 合并，HTTP 聊天列表不另存在线副本。
+
+当前请求的 pending 范围与已接受快照分开保存；只接受匹配请求号的快照，并结束该请求所有 ID 的等待，包括服务端省略的 ID。断网、切后台、断开和账号切换会清空或失效旧请求，迟到回包不能恢复旧的在线断言或加载状态。状态行反馈见[加载与操作反馈](loading-indicators.md)。
+
+本 PWA 始终发送 `requestId` 并拒绝缺少该字段的快照，以保留切换范围时的迟到回包保护；其他客户端可按[后端协议](../../backend/README.md#client-websocket-controls)省略该可选关联字段。
 
 没有推送的数据靠本地写响应、页面进入、手动刷新或 resync。好友验证配置进入时读取；贴纸库与表情和贴纸设置进入时读取；创建贴纸包直接使用完整响应，贴纸库上传后只重读该包，包详情页上传后把响应追加到当前列表。自动整理开关与收藏贴纸顺序保存在本机，不跨设备同步。静音和远端已读没有专门跨设备推送，不增设轮询。较早开始的读取不能覆盖较新推送或本地操作；已读交错时补取对应读状态，不猜增减值。
 

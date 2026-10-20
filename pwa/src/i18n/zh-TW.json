@@ -25,6 +25,22 @@
     "okay": "好",
     "user": "使用者"
   },
+  "presence": {
+    "online": "在線",
+    "groupCounts": "{{ online }} 人在線 · 共 {{ members }} 人",
+    "lastSeen": {
+      "recently": "最近上線",
+      "within30m": "30 分鐘內上線",
+      "within1h": "1 小時內上線",
+      "within2h": "2 小時內上線",
+      "within6h": "6 小時內上線",
+      "within12h": "12 小時內上線",
+      "within1day": "1 天內上線",
+      "within1week": "1 週內上線",
+      "within1month": "1 個月內上線",
+      "longago": "很久以前上線"
+    }
+  },
   "settings": {
     "title": "設定",
     "menu": {

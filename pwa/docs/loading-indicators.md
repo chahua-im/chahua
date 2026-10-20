@@ -13,6 +13,7 @@
 | 列表续页                         | Ionic infinite-scroll spinner                         | 查询 loadingMore                                      |
 | 对话首次加载                     | 消息气泡骨架屏，贴底对齐；私聊关闭作者信息偏好时不显示头像占位 | ConversationStore.loading                             |
 | 对话历史/后续消息分页            | 顶部/底部固定尺寸分页控件，空闲箭头、加载圆弧         | ConversationStore.pagingDirection                     |
+| 会话标题、资料的在线/最近上线及群人数 | 固定状态行内的紧凑脉动线框；取得快照后替换为状态，未知/无权查看/断网保留空行 | Presence 的当前请求 pending 范围及展示组件 active |
 | 收藏/置顶页面加载                | 内容区居中的 page-loading                             | SavedMessageList.loading / PinnedMessagesPage.loading |
 | 好友验证设置加载                 | 列表内 spinner                                        | FriendVerificationSettings.loading                    |
 | 表情组件代码加载                 | @loading 延迟 100ms 展示 spinner                      | @defer 的加载状态                                     |
@@ -29,7 +30,7 @@
 
 页面或区块加载失败时使用共享的 LoadError：图标、说明和“重试”按钮。页面级失败在内容区居中，列表、信息栏和设置分区使用紧凑行；不可重试的错误（消息已删除或无法查看）不显示按钮。操作失败仍使用原位文字或 Toast，不换成整块失败页。
 
-骨架屏只用于聊天列表和会话的首次内容加载：占位块与真实行/气泡同尺寸，浅色脉动，不用 shimmer 扫光。切换分类在骨架屏与已缓存内容之间二选一；刷新、续页和已有内容的加载不显示骨架屏，仍使用 Ionic 自带指示器。
+列表与消息的整行骨架屏只用于首次内容加载：占位块与真实行/气泡同尺寸，浅色脉动，不用 shimmer 扫光。切换分类在骨架屏与已缓存内容之间二选一；刷新、续页和已有内容的加载不显示整块骨架屏，仍使用 Ionic 自带指示器。在线状态的紧凑线框只占预留状态行，不替换名称或整个信息头部。
 
 ## 操作反馈
 

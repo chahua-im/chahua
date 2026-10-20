@@ -96,6 +96,13 @@
               }
             </p>
           }
+          @if (!threadId()) {
+            @if (person(); as user) {
+              <app-user-presence [uid]="user.uid" />
+            } @else if (chat()?.kind === Kind.group) {
+              <app-group-presence [chatId]="id()" />
+            }
+          }
         </div>
         <div class="quick-actions ion-padding-horizontal">
           @if (person(); as user) {

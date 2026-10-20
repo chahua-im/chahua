@@ -25,6 +25,22 @@
     "okay": "OK",
     "user": "User"
   },
+  "presence": {
+    "online": "Online",
+    "groupCounts": "{{ online }} online · {{ members }} members",
+    "lastSeen": {
+      "recently": "Last seen recently",
+      "within30m": "Last seen within 30 minutes",
+      "within1h": "Last seen within 1 hour",
+      "within2h": "Last seen within 2 hours",
+      "within6h": "Last seen within 6 hours",
+      "within12h": "Last seen within 12 hours",
+      "within1day": "Last seen within 1 day",
+      "within1week": "Last seen within 1 week",
+      "within1month": "Last seen within 1 month",
+      "longago": "Last seen a long time ago"
+    }
+  },
   "settings": {
     "title": "Settings",
     "menu": {

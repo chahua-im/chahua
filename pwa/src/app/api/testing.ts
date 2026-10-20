@@ -12,6 +12,8 @@ export const testChat: ChatListItem = {
   name: '测试群',
   archived: false,
   unreadCount: 2,
+  unreadMentions: 0,
+  unreadReactions: 0,
 };
 export const testMessage: MessageResponse = {
   id: encodeId('9007199254741003'),
@@ -59,5 +61,6 @@ export function mockRealtime({
     accept: (message: MessageResponse) => events$.next({ type: ServerWsMessageType.message, payload: message }),
     acceptPin: (event: PinChange) => events$.next(event),
     acceptChange: (event: MessageChange) => events$.next(event),
+    watchPresence: () => {},
   };
 }

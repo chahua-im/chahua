@@ -911,7 +911,7 @@ describe('ChatListStore', () => {
     selectQuery(true);
     http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
     await settle();
-    expect(data['chatInfo'].cachedReadState(testChat.id)).toEqual({
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('200'),
       unreadCount: 3,
     });
@@ -926,7 +926,7 @@ describe('ChatListStore', () => {
       .expectOne('/_api/chats?limit=50')
       .flush(structuredClone({ chats: [{ ...wireChat, lastReadMessageId: '199', unreadCount: 4 }] }));
     await settle();
-    expect(data['chatInfo'].cachedReadState(testChat.id)).toEqual({
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('199'),
       unreadCount: 4,
     });
@@ -1126,7 +1126,7 @@ describe('ChatListStore', () => {
     await settle();
     expect(query.items()[0].unreadCount).toBe(0);
     expect(archived.items()).toEqual([]);
-    expect(data['chatInfo'].cachedReadState(testChat.id)).toEqual({
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toMatchObject({
       lastReadMessageId: encodeId('205'),
       unreadCount: 0,
     });

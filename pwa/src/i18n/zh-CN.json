@@ -25,6 +25,22 @@
     "okay": "好",
     "user": "用户"
   },
+  "presence": {
+    "online": "在线",
+    "groupCounts": "{{ online }} 人在线 · 共 {{ members }} 人",
+    "lastSeen": {
+      "recently": "最近上线",
+      "within30m": "30 分钟内上线",
+      "within1h": "1 小时内上线",
+      "within2h": "2 小时内上线",
+      "within6h": "6 小时内上线",
+      "within12h": "12 小时内上线",
+      "within1day": "1 天内上线",
+      "within1week": "1 周内上线",
+      "within1month": "1 个月内上线",
+      "longago": "很久以前上线"
+    }
+  },
   "settings": {
     "title": "设置",
     "menu": {

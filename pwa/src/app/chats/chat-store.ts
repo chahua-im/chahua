@@ -29,7 +29,10 @@ export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> &
 type ChatSummary = Pick<ChatListItem, 'lastMessage' | 'lastMessageAt' | 'archived' | 'mutedUntil'>;
 type ChatState = Partial<Pick<ChatListItem, 'archived' | 'mutedUntil'>>;
 const PERMANENT_MUTE = '9999-12-31T23:59:59Z';
-type ThreadSummary = Omit<ThreadListItem, 'unreadCount' | 'lastReadMessageId' | 'archived'>;
+type ThreadSummary = Omit<
+  ThreadListItem,
+  'unreadCount' | 'unreadMentions' | 'unreadReactions' | 'lastReadMessageId' | 'archived'
+>;
 interface ChatReadOperation {
   version: number;
   refresh?: Promise<MarkChatReadStateResponse>;
@@ -266,7 +269,12 @@ export class ChatStore {
       });
       if ((reads.get(chat.id)?.version ?? 0) <= version)
         reads.set(chat.id, {
-          state: { lastReadMessageId: chat.lastReadMessageId, unreadCount: chat.unreadCount },
+          state: {
+            lastReadMessageId: chat.lastReadMessageId,
+            unreadCount: chat.unreadCount,
+            unreadMentions: chat.unreadMentions,
+            unreadReactions: chat.unreadReactions,
+          },
           version,
           dirty: false,
         });
@@ -541,11 +549,15 @@ export class ChatStore {
     const summaries = new Map(this.threadSummaries());
     const reads = new Map(this.threadReads());
     for (const thread of threads) {
-      const { archived, unreadCount, lastReadMessageId, ...summary } = thread;
+      const { archived, unreadCount, unreadMentions, unreadReactions, lastReadMessageId, ...summary } = thread;
       const rootId = summary.threadRootMessage.id;
       if ((summaries.get(rootId)?.version ?? 0) <= version) summaries.set(rootId, { value: summary, version });
       if ((reads.get(rootId)?.version ?? 0) <= version)
-        reads.set(rootId, { state: { lastReadMessageId, unreadCount }, version, dirty: false });
+        reads.set(rootId, {
+          state: { lastReadMessageId, unreadCount, unreadMentions, unreadReactions },
+          version,
+          dirty: false,
+        });
       if ((this.subscriptions().get(rootId)?.version ?? 0) <= subscriptionVersion)
         this.setSubscription(thread.chatId, rootId, { subscribed: true, archived }, subscriptionVersion);
     }

@@ -12,7 +12,7 @@ import { Injectable, inject } from '@angular/core';
 
 import type { Observable } from 'rxjs';
 
-import type { TicketResponse } from '../../models';
+import type { OnlineClientConnectionResponse, TicketResponse } from '../../models';
 
 import type { HttpHeaders, HttpResponse as AngularHttpResponse } from '@angular/common/http';
 
@@ -82,6 +82,38 @@ export class WebsocketService {
     }
 
     return this.http.get<TData>(`${this.baseUrl}/ws`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  /**
+   * @summary Lists the caller's current, fresh WebSocket connections.
+   */
+  getOnlineClients<TData = OnlineClientConnectionResponse[]>(options?: HttpClientBodyOptions): Observable<TData>;
+  getOnlineClients<TData = OnlineClientConnectionResponse[]>(
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getOnlineClients<TData = OnlineClientConnectionResponse[]>(
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getOnlineClients<TData = OnlineClientConnectionResponse[]>(
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/ws/clients`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/ws/clients`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+
+    return this.http.get<TData>(`${this.baseUrl}/ws/clients`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

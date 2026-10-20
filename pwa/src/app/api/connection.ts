@@ -7,13 +7,14 @@ import { ServerWsMessageType } from '../../generated/models';
 import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
 import { SessionStore } from '../session/session-store';
 import { encodeJsonIds } from './json-ids';
-import type { SnowflakeID } from './snowflake-id';
+import { decodeId, type SnowflakeID } from './snowflake-id';
 
 const enum WsControl {
   Auth = 'auth',
   Ping = 'ping',
   Pong = 'pong',
   AppState = 'appState',
+  WatchPresence = 'watchPresence',
 }
 
 const enum WsAppState {
@@ -43,6 +44,7 @@ export class Connection {
   readonly changes$ = this.events$.pipe(filter(isMessageChange));
   readonly resync$ = this.resync.asObservable();
   private readonly acceptedIds = new Set<SnowflakeID>();
+  private socket?: WebSocket;
 
   /** HTTP success and its WebSocket echo share one delivery path. */
   accept(message: MessageResponse) {
@@ -58,6 +60,19 @@ export class Connection {
 
   acceptChange(event: MessageChange) {
     this.events.next(event);
+  }
+
+  /** Replaces this socket's server-side presence watch scope when authenticated. */
+  watchPresence(requestId: number, userIds: readonly number[], chatIds: readonly SnowflakeID[]) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
+    this.socket.send(
+      JSON.stringify({
+        type: WsControl.WatchPresence,
+        requestId,
+        userIds,
+        chatIds: chatIds.map(decodeId),
+      }),
+    );
   }
 
   constructor() {
@@ -76,6 +91,7 @@ export class Connection {
       const state = () => (document.hidden || !document.hasFocus() ? WsAppState.Inactive : WsAppState.Active);
       const connect = () => {
         socket = new WebSocket(url);
+        this.socket = socket;
         socket.onopen = () => {
           lastPong = Date.now();
           socket.send(JSON.stringify({ type: WsControl.Auth, ticket: token }));
@@ -111,6 +127,7 @@ export class Connection {
           else if (message.type !== WsControl.Pong) this.events.next(message);
         };
         socket.onclose = () => {
+          if (this.socket === socket) this.socket = undefined;
           connected = false;
           this.connected.set(false);
           clearInterval(heartbeat);
@@ -142,6 +159,7 @@ export class Connection {
         document.removeEventListener(VISIBILITY_CHANGE, visibilityChanged);
         window.removeEventListener('focus', visibilityChanged);
         window.removeEventListener('blur', visibilityChanged);
+        if (this.socket === socket) this.socket = undefined;
         socket.onclose = null;
         socket.onmessage = null;
         socket.onopen = null;

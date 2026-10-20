@@ -35,6 +35,8 @@ iOS 根布局保留 Ionic 默认 body 样式，不根据 VisualViewport 的 resi
 
 字号、行高与控件密度分别选择，头像、按钮和边距不按正文比例整体缩放。显式指定的资料头像保持 88px，消息头像保持 34px。聊天头像的占位字号、角标尺寸和偏移随头像缩放，并取最近的整数 CSS px。文字头像统一通过 AvatarTextPipe 按完整 Unicode 字素截取，保留 emoji、肤色、组合符号及非 BMP 汉字；消息头像取前两个，其余头像和角标取第一个。媒体占位和右侧 360px 信息栏保持稳定。信息栏各标签的无限滚动控件空闲时仅留 1px 触底检测高度，加载时使用 Ionic 默认 spinner 区域，末页后不占空间。资料区上下留白为移动端 32px/24px、桌面 24px/20px；横排操作最小高度为 64px/56px，长标签可以换行。
 
+普通会话标题的头像右侧使用垂直容器，名称独立使用 600 字重，状态独立使用 400 字重和 caption 字号；资料状态同样使用正常字重。状态行最小高度为一个 `--app-line-caption`，文字单行省略；加载线框放在该行内部，不改变容器高度。在线文字与私聊列表头像右下角的在线圆点共用 `--app-online-color`（`#6FB456`），浅色和深色模式一致。圆点直径为 12px（含 2px 边框），边框跟随列表背景，选中行跟随 primary 背景；圆点不影响头像或列表行尺寸。
+
 资料区横排操作使用 Ionic clear 按钮与主题色浅底：普通操作背景为 primary 的 8%，hover/focused 为 12%，按下为 16%；破坏性操作使用 danger 的 10%/14%/18%。悬停时图标及文字变为对应 shade 色，颜色过渡为 160ms；侧栏与详情弹窗共用。
 
 消息的手机正文参考 TG iOS，桌面采用 14px 正文以兼顾密度和中文阅读。其组织方式参考 [Signal 桌面字体](https://github.com/signalapp/Signal-Desktop/blob/aee156c662c64dc6cbe5e363325565f5cbd7203a/stylesheets/_mixins.scss)和 [Discord 字号与密度的区分](https://support.discord.com/hc/en-us/articles/207260127-How-to-Change-Discord-Color-Themes-and-Customize-Appearance-Settings)。应用没有额外的字体或密度设置项。
@@ -85,7 +87,8 @@ NotificationPrompt 使用 Angular 默认的 Emulated 封装，模板内 spinner 
 | ChatList               | 顶栏 26px 头像和小屏可容纳的分类标签；页面实例在底部挂吸顶语音播放条，桌面侧栏实例不挂。                                                 |
 | ChatListItem           | 列表行密度、选中态、时间/未读布局、系统预览色与静音标记。                                                                                |
 | LoadError              | 页面级与紧凑失败布局、图标底色、间距和重试按钮。                                                                                         |
-| ChatAvatar             | 默认列表头像使用平台尺寸；显式 88px 等尺寸用于资料；话题角标、边框及占位。                                                               |
+| ChatAvatar             | 默认列表头像使用平台尺寸；显式 88px 等尺寸用于资料；话题角标、边框、占位及列表在线圆点。 |
+| UserPresenceDisplay / GroupPresenceDisplay | 正常字重的单行状态、固定行高占位、紧凑加载线框。 |
 | ChatDetails            | 内容容器、安全区、居中资料、横排操作及紧凑标签。                                                                                         |
 | ConversationPage       | 360px 信息栏、移动端标题无法完整显示时操作收进竖排三点菜单并在下方弹出带图标的纵向操作列表、手动锚点下关闭浏览器二次锚定、未读线、下箭头与置顶/回复栏；吸顶语音播放条；主 toolbar 保留底边，置顶栏有自己的底边。        |
 | SavedMessageList       | 收藏消息背景、来源与快照操作排列；用于全局收藏页面。                                                                                     |

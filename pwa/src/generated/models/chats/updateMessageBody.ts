@@ -8,6 +8,7 @@
 import type { SnowflakeID } from '../snowflakeID';
 
 export interface UpdateMessageBody {
+  /** Complete attachment selection in display order, including retained uploads. */
   attachmentIds?: SnowflakeID[];
   message: string;
 }

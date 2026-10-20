@@ -142,6 +142,9 @@
             }
             @case (ListRowKind.Chat) {
               <app-chat-list-item
+                #presenceRow
+                [attr.data-presence-uid]="row.isDm ? row.chat.peer?.uid : null"
+                [online]="active() && row.isDm && presence.user(row.chat.peer?.uid)?.online === true"
                 [entry]="{
                   ...row.entry,
                   title: row.isDm

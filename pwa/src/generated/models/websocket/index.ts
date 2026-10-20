@@ -6,4 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './onlineClientConnectionResponse';
+export * from './onlineClientStatus';
 export * from './ticketResponse';

@@ -22,7 +22,7 @@
           [ngTemplateOutletContext]="{ $implicit: 'start' }"></ng-container>
       </ion-buttons>
     }
-    <app-chat-avatar slot="start" [entry]="entry()" />
+    <app-chat-avatar slot="start" [entry]="entry()" [online]="online()" />
     <ion-label class="ion-text-nowrap">
       <h3>
         {{ entry().title }}

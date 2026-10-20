@@ -78,6 +78,7 @@ import { ChatListStore } from '../chat-list-store';
 import { ChatMembers } from '../chat-members/chat-members';
 import { ChatStore } from '../chat-store';
 import { ChatThreads } from '../chat-threads/chat-threads';
+import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { dismissChatOverlays } from '../dismiss-chat-overlays';
 enum DetailAction {
   Thread,
@@ -122,6 +123,8 @@ export enum DetailView {
     IonSegment,
     IonSegmentButton,
     ChatAvatar,
+    GroupPresenceDisplay,
+    UserPresenceDisplay,
     UploadProgress,
     MessagePreview,
     ChatMembers,

@@ -13,20 +13,29 @@
       </ion-buttons>
     }
     <ion-title (click)="details()">
-      <span class="conversation-title">
+      <div class="conversation-title">
         <app-chat-avatar [entry]="chatTitle().avatar" [size]="32" />
-        <span #titleText>
-          @if (threadId()) {
-            @if (threadRoot(); as root) {
-              <app-message-preview [message]="root" />
+        <div class="conversation-heading" #titleText>
+          <div class="conversation-name">
+            @if (threadId()) {
+              @if (threadRoot(); as root) {
+                <app-message-preview [message]="root" />
+              } @else {
+                {{ 'conversation.thread' | transloco }}
+              }
             } @else {
-              {{ 'conversation.thread' | transloco }}
+              {{ chatTitle().name ?? ((chatTitle().isDm ? 'chats.content.dm' : 'conversation.chat') | transloco) }}
             }
-          } @else {
-            {{ chatTitle().name ?? ((chatTitle().isDm ? 'chats.content.dm' : 'conversation.chat') | transloco) }}
+          </div>
+          @if (!threadId()) {
+            @if (chatTitle().isDm) {
+              <app-user-presence [uid]="peerUid()" [active]="active()" />
+            } @else {
+              <app-group-presence [chatId]="id()" [active]="active()" />
+            }
           }
-        </span>
-      </span>
+        </div>
+      </div>
     </ion-title>
     <ion-buttons #toolbarActions slot="end" class="ion-hide-md-up">
       @if (compactToolbar()) {

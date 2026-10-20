@@ -5,6 +5,7 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { UserGroupTagInfo } from '../userGroupTagInfo';
 import type { StickerPackOrderItem } from './stickerPackOrderItem';
 
 export interface MeResponse {
@@ -13,5 +14,6 @@ export interface MeResponse {
   permissions: string[];
   stickerPackOrder: StickerPackOrderItem[];
   uid: number;
+  userGroup?: UserGroupTagInfo;
   username: string;
 }

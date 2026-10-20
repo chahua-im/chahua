@@ -25,6 +25,7 @@ export interface ChatAvatarData {
 export class ChatAvatar {
   readonly entry = input.required<ChatAvatarData>();
   readonly size = input<number>();
+  readonly online = input(false);
 }
 
 export function conversationAvatar(

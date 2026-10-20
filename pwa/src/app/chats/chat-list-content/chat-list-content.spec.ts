@@ -4,15 +4,18 @@ import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { IonActionSheet, IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
+import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import {
   FriendRequestDirection,
   FriendRequestStatus,
   GroupKind,
   MessageType,
+  ServerWsMessageType,
   type ChatListItem as ChatData,
   type FriendRequestHistoryEntry,
   type ThreadListItem as ThreadData,
+  type ServerWsMessage,
 } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
@@ -64,11 +67,38 @@ const thread: ThreadData = {
     sender: { uid: 2, name: '小花', gender: 0 },
   },
   unreadCount: 3,
+  unreadMentions: 0,
+  unreadReactions: 0,
 };
+
+class ListVisibilityObserver {
+  static instances: ListVisibilityObserver[] = [];
+  readonly targets = new Set<Element>();
+
+  constructor(private readonly callback: IntersectionObserverCallback) {
+    ListVisibilityObserver.instances.push(this);
+  }
+
+  observe(target: Element) {
+    this.targets.add(target);
+  }
+
+  disconnect() {
+    this.targets.clear();
+  }
+
+  emit(entries: { target: Element; isIntersecting: boolean }[]) {
+    this.callback(entries as IntersectionObserverEntry[], this as unknown as IntersectionObserver);
+  }
+}
 
 describe('ChatListContent', () => {
   const lastMessage = { ...testMessage, mentions: [] };
   let fixture: ComponentFixture<ChatListContent>;
+  let presenceEvents: Subject<ServerWsMessage>;
+  const connected = signal(true);
+  const watchPresence =
+    vi.fn<(requestId: number, userIds: readonly number[], chatIds: readonly SnowflakeID[]) => void>();
   const session = { user: signal(testUser), logout: vi.fn() };
   const preferences = {
     showThreadsInMessages: signal(false),
@@ -150,6 +180,10 @@ describe('ChatListContent', () => {
     if (selection) fixture.componentRef.setInput('selection', selection);
   }
   beforeEach(async () => {
+    ListVisibilityObserver.instances = [];
+    vi.stubGlobal('IntersectionObserver', ListVisibilityObserver);
+    presenceEvents = new Subject<ServerWsMessage>();
+    connected.set(true);
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -186,7 +220,7 @@ describe('ChatListContent', () => {
     await TestBed.configureTestingModule({
       imports: [ChatListContent],
       providers: [
-        { provide: Connection, useValue: mockRealtime() },
+        { provide: Connection, useValue: { ...mockRealtime({ events$: presenceEvents }), connected, watchPresence } },
         provideRouter(routes),
         { provide: ChatListStore, useValue: { ...data, ...inbox, archivedUnread: counts } },
         { provide: ConversationNavigation, useValue: navigation },
@@ -220,6 +254,76 @@ describe('ChatListContent', () => {
       .find((row) => (row.componentInstance as ChatListItem).entry().link?.includes(decodeId(testChat.id)))!;
   }
 
+  it('shows live online dots only on DM rows and removes them when the peer goes offline', async () => {
+    const dm = {
+      ...testChat,
+      id: encodeId('9007199254740994'),
+      kind: GroupKind.dm,
+      peer: { uid: 2, username: '小花', gender: 0 },
+    };
+    chats.items.set([testChat, dm]);
+    requests.items.set([incoming]);
+    preferences.showThreadsInMessages.set(true);
+    threads.items.set([thread]);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const dmRow = fixture.nativeElement.querySelector('[data-presence-uid="2"]') as HTMLElement;
+    const observer = ListVisibilityObserver.instances.at(-1)!;
+    observer.emit([{ target: dmRow, isIntersecting: true }]);
+    await fixture.whenStable();
+    const requestId = watchPresence.mock.calls.at(-1)![0];
+    presenceEvents.next({
+      type: ServerWsMessageType.presenceSnapshot,
+      payload: { requestId, users: [{ uid: 2, online: true }], groups: [] },
+    });
+    await fixture.whenStable();
+    expect(dmRow.querySelector('.online-dot')).not.toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.online-dot')).toHaveLength(1);
+
+    presenceEvents.next({
+      type: ServerWsMessageType.presenceSnapshot,
+      payload: { requestId, users: [{ uid: 2, online: false }], groups: [] },
+    });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('.online-dot')).toBeNull();
+  });
+
+  it('watches only visible DMs and releases presence when rows scroll away or the list leaves', async () => {
+    chats.items.set([
+      { ...testChat, kind: GroupKind.dm, peer: { uid: 2, gender: 0 } },
+      { ...testChat, id: encodeId('9007199254740994'), kind: GroupKind.dm, peer: { uid: 3, gender: 0 } },
+    ]);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const row = fixture.nativeElement.querySelector('[data-presence-uid="2"]') as HTMLElement;
+    const observer = ListVisibilityObserver.instances.at(-1)!;
+    observer.emit([{ target: row, isIntersecting: true }]);
+    await fixture.whenStable();
+    expect(watchPresence.mock.calls.at(-1)![1]).toEqual([2]);
+
+    observer.emit([{ target: row, isIntersecting: false }]);
+    await fixture.whenStable();
+    expect(watchPresence.mock.calls.at(-1)![1]).toEqual([]);
+
+    observer.emit([{ target: row, isIntersecting: true }]);
+    await fixture.whenStable();
+    const requestId = watchPresence.mock.calls.at(-1)![0];
+    presenceEvents.next({
+      type: ServerWsMessageType.presenceSnapshot,
+      payload: { requestId, users: [{ uid: 2, online: true }], groups: [] },
+    });
+    await fixture.whenStable();
+    expect(row.querySelector('.online-dot')).not.toBeNull();
+
+    connected.set(false);
+    await fixture.whenStable();
+    expect(row.querySelector('.online-dot')).toBeNull();
+    connected.set(true);
+    await fixture.whenStable();
+    fixture.componentRef.setInput('active', false);
+    await fixture.whenStable();
+    expect(watchPresence.mock.calls.at(-1)![1]).toEqual([]);
+  });
   function options(side: 'start' | 'end') {
     return conversationRow()
       .queryAll(By.directive(IonItemOption))
