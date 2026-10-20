@@ -56,11 +56,20 @@ ion-content::part(scroll) {
 }
 
 .reply-context {
-  display: flex;
+  --context-color: light-dark(
+    var(--context-light, var(--ion-color-primary)),
+    var(--context-dark, var(--ion-color-primary))
+  );
+  display: grid;
+  grid-template-columns: var(--composer-control-size) minmax(0, 1fr) var(--composer-control-size);
   align-items: center;
   gap: 4px;
-  padding: 0 4px 0 var(--composer-padding-start);
-  background: var(--ion-background-color-step-100, #f0f0f0);
+}
+.context-icon {
+  justify-self: center;
+  color: var(--ion-color-medium);
+  font-size: 22px;
+  pointer-events: none;
 }
 .reply-description {
   display: flex;
@@ -69,10 +78,11 @@ ion-content::part(scroll) {
   gap: 1px;
   flex: 1;
   min-width: 0;
-  height: calc(2 * var(--app-line-micro) + 1px);
-  padding: 0 8px;
-  border-inline-start: 2px solid var(--ion-color-primary);
-  background: none;
+  height: calc(var(--composer-control-size) - 2px);
+  padding: 0 var(--composer-padding-start);
+  border-inline-start: 2px solid var(--context-color);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--context-color) 10%, transparent);
   color: var(--ion-text-color-step-600, #666);
   text-align: start;
   font: inherit;
@@ -87,14 +97,14 @@ ion-content::part(scroll) {
   text-overflow: ellipsis;
 }
 .reply-description strong {
-  color: var(--ion-color-primary);
+  color: var(--context-color);
   font-weight: 500;
 }
 .reply-close {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 32px;
+  width: var(--composer-control-size);
   height: calc(var(--composer-control-size) - 2px);
   background: none;
   color: var(--ion-color-medium);

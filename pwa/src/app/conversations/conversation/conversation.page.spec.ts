@@ -2691,12 +2691,22 @@ describe('ConversationPage', () => {
     http.expectNone(() => true);
   });
   it('passes reactive avatar preferences to message children', () => {
+    component['stickySender'].set(testMessage.sender);
+    component['stickyRow'].set(0);
     fixture.detectChanges();
     const message = fixture.debugElement.query(By.directive(Message)).componentInstance as Message;
     expect(message.showAllAvatars()).toBe(false);
+    expect(message.stickyAvatar()).toBe(true);
+    expect(fixture.nativeElement.querySelector('.sticky-avatar')).not.toBeNull();
     avatars.set(true);
     fixture.detectChanges();
     expect(message.showAllAvatars()).toBe(true);
+    expect(message.stickyAvatar()).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticky-avatar')).toBeNull();
+    avatars.set(false);
+    fixture.detectChanges();
+    expect(message.stickyAvatar()).toBe(true);
+    expect(fixture.nativeElement.querySelector('.sticky-avatar')).not.toBeNull();
   });
 
   it('resolves an ID-only menu selection against the latest message', async () => {

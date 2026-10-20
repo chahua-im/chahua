@@ -91,7 +91,7 @@
   (touchend)="scrolling.touchEnd()"
   (touchcancel)="scrolling.touchEnd()">
   <div slot="fixed" class="sticky-avatar-container" [class.sent]="stickySender()?.uid === session.user()?.uid">
-    @if (showMessageDetails() && stickySender(); as sender) {
+    @if (stickyAvatarsEnabled() && stickySender(); as sender) {
       <button
         class="sticky-avatar"
         [avatarColor]="sender.avatarUrl ? null : (sender.name ?? sender.uid.toString())"
@@ -155,7 +155,7 @@
           <p #unreadSeparator class="unread-separator">{{ 'conversation.unreadBelow' | transloco }}</p>
         }
         <app-message
-          [stickyAvatar]="stickyRow() === index"
+          [stickyAvatar]="stickyAvatarsEnabled() && stickyRow() === index"
           [showAllAvatars]="preferences.showAllAvatars()"
           [showDetails]="showMessageDetails()"
           [message]="row.message"
@@ -250,6 +250,8 @@
 </ion-content>
 <ion-footer #composerFooter>
   <app-message-composer
+    [style.--context-light]="composerContextColors()?.light"
+    [style.--context-dark]="composerContextColors()?.dark"
     [relationship]="relationship()"
     [chatId]="id()"
     [text]="editing() ? editText() : draft()"
@@ -261,6 +263,7 @@
     (escape)="escapeComposer()">
     @if (editing(); as edit) {
       <div class="reply-context">
+        <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
         <div class="reply-description">
           <strong>{{ 'conversation.editing' | transloco }}</strong>
           <span><app-message-preview [message]="edit" /></span>
@@ -271,6 +274,7 @@
       </div>
     } @else if (replyTo(); as message) {
       <div class="reply-context">
+        <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
         <button
           type="button"
           class="reply-description"
@@ -287,6 +291,7 @@
       </div>
     } @else if (savedReplyId()) {
       <div class="reply-context">
+        <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
         <div class="reply-description">
           <strong>{{ 'conversation.reply' | transloco }}</strong>
         </div>

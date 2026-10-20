@@ -1,3 +1,4 @@
+import { userColors } from '../../messages/user-colors';
 import { DOCUMENT, Location, NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
@@ -45,6 +46,8 @@ import {
 import {
   archive,
   archiveOutline,
+  arrowUndoOutline,
+  createOutline,
   chevronBack,
   chevronDown,
   chevronUpOutline,
@@ -339,6 +342,9 @@ export class ConversationPage {
   protected readonly showMessageDetails = computed(
     () => this.chatInfo.get(this.id())?.kind !== GroupKind.dm || this.preferences.showDmDetails(),
   );
+  protected readonly stickyAvatarsEnabled = computed(
+    () => this.showMessageDetails() && !this.preferences.showAllAvatars(),
+  );
   private readonly loadedThreadRoot = linkedSignal({
     source: this.entryKey,
     computation: (): MessageResponse | undefined => undefined,
@@ -519,6 +525,12 @@ export class ConversationPage {
     source: this.entryVersion,
     computation: (): MessageResponse | undefined => undefined,
   });
+  protected readonly composerContextColors = computed(() => {
+    const sender = this.editing()?.sender ?? this.replyTo()?.sender;
+    return sender ? userColors(sender.name ?? String(sender.uid)) : undefined;
+  });
+  protected readonly editContextIcon = createOutline;
+  protected readonly replyContextIcon = arrowUndoOutline;
   protected readonly closeIcon = closeCircleOutline;
   protected readonly downIcon = chevronDown;
   protected readonly upIcon = chevronUpOutline;
@@ -997,7 +1009,7 @@ export class ConversationPage {
     const bubble = bottomElement?.querySelector('.bubble, .sticker-content')?.getBoundingClientRect();
     const avatar = bottomElement?.querySelector('.avatar')?.getBoundingClientRect();
     const sticky =
-      this.showMessageDetails() &&
+      this.stickyAvatarsEnabled() &&
       bottomRow &&
       bubble &&
       bubble.top < viewport.bottom &&

@@ -1,7 +1,8 @@
 :host {
   --composer-padding-start: 12px;
   --composer-control-size: var(--app-composer-size);
-  display: block;
+  // Keep the bar's vertical margins inside the background during page transitions.
+  display: flow-root;
   position: relative;
   padding-bottom: var(--ion-safe-area-bottom, 0px);
   background: var(--ion-background-color, #fff);
@@ -104,13 +105,15 @@
 }
 
 .bar {
-  display: flex;
-  align-items: flex-end;
   margin: 8px 12px;
   padding: 2px;
-  gap: 4px;
   border: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
   border-radius: calc(var(--composer-control-size) / 2 + 3px);
+}
+.compose-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
 }
 .attach-button,
 .sticker-button {

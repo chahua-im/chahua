@@ -64,7 +64,6 @@
       #bubble
       [class]="isSticker() ? 'sticker-content' : 'bubble'"
       [class.media-only]="mediaOnly()"
-      [class.has-thread]="!!threadInfo()"
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
       <div class="bubble-surface">
