@@ -1,0 +1,66 @@
+name: ${COMPOSE_PROJECT_NAME:?Run node runspace/dev.mjs init first}
+
+services:
+  postgres:
+    restart: unless-stopped
+    image: postgres:18-alpine
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    environment:
+      POSTGRES_USER: wetty_chat
+      POSTGRES_PASSWORD: local-chat-password
+      POSTGRES_DB: wetty_chat
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wetty_chat -d wetty_chat"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  meilisearch:
+    restart: unless-stopped
+    image: getmeili/meilisearch:v1.37
+    ports:
+      - "127.0.0.1:${MEILI_PORT}:7700"
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilisearch_data:/meili_data
+  rustfs:
+    restart: unless-stopped
+    image: rustfs/rustfs:latest
+    ports:
+      - "127.0.0.1:${S3_PORT}:9000"
+      - "127.0.0.1:${S3_CONSOLE_PORT}:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
+      RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY}
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_REGION: ${AWS_REGION}
+    command: /data --console-enable --address ":9000"
+    volumes:
+      - rustfs_data:/data
+  storage-init:
+    image: public.ecr.aws/aws-cli/aws-cli:latest
+    profiles: ["init"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_REGION}
+      AWS_EC2_METADATA_DISABLED: "true"
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        endpoint=http://rustfs:9000
+        aws --endpoint-url "$$endpoint" s3api head-bucket --bucket "$$S3_BUCKET_NAME" 2>/dev/null ||
+          aws --endpoint-url "$$endpoint" s3api create-bucket --bucket "$$S3_BUCKET_NAME"
+        policy='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::'"$$S3_BUCKET_NAME"'/*"}]}'
+        aws --endpoint-url "$$endpoint" s3api put-bucket-policy --bucket "$$S3_BUCKET_NAME" --policy "$$policy"
+        aws --endpoint-url "$$endpoint" s3api put-bucket-cors --bucket "$$S3_BUCKET_NAME" --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"]}]}'
+
+volumes:
+  postgres_data:
+  meilisearch_data:
+  rustfs_data:

@@ -1,451 +1,180 @@
-# Local development setup (beginner guide)
+# Local development setup
 
-This guide gets a full local chat stack running on **macOS** or **Linux** with **no prior experience** assumed. By the end you will have:
+Run PostgreSQL, Meilisearch, and RustFS in Docker, with the Rust backend and Angular/Ionic PWA on the host. The checkout-local `runspace` provides initialization, representative fake data, and launch commands without changing `backend/.env` or `pwa/.env.local`.
 
-- PostgreSQL running in Docker
-- The Rust backend running **on your host** (easy to debug in an IDE / with `cargo`)
-- The React/Ionic frontend PWA talking to that backend
-- A seed user (`uid=1`) and admin-level permissions so you can create chats
+## Prerequisites
 
-Recommended layout for day-to-day work: **Postgres (and optionally object storage) in Docker; backend and frontend outside Docker.**
+- Docker Engine / Docker Desktop with Docker Compose v2 or newer, running and accessible without `sudo`.
+- A current stable Rust toolchain and native backend build dependencies.
+- Node.js matching [`pwa/.nvmrc`](../pwa/.nvmrc), and npm.
+- Python 3.10 or newer; the seeder uses only the standard library.
+- FFmpeg for audio/voice transcoding when exercising those attachment paths.
 
-Commands that differ by OS are labeled **macOS** or **Linux**. Shared steps (clone, `.env`, `cargo run`, seed SQL, the frontend dev server) are the same on both.
-
----
-
-## 0. What you need
-
-| Tool | Purpose | Rough version |
-|------|---------|---------------|
-| Git | Clone the repo | any recent |
-| Docker + Docker Compose | Run PostgreSQL | Docker 24+ |
-| Rust (`rustc` / `cargo`) | Build & run the API | **1.95** (matches CI) |
-| Node.js + npm | Frontend Angular app | **^20.19** or **≥22.12** |
-| `openssl` | Generate JWT signing key | usually preinstalled / via Homebrew |
-| `psql` (optional but helpful) | Insert the seed user | `libpq` / `postgresql-client` |
-| Xcode Command Line Tools (macOS) | Compilers / headers for native crates | — |
-
-### Native packages to compile the backend
-
-**macOS** (Homebrew — install Homebrew first if needed: https://brew.sh):
+On Debian / Ubuntu, install native backend dependencies with:
 
 ```bash
-xcode-select --install   # if you have never installed Command Line Tools
-brew install pkg-config openssl@3 libpq
-brew link --force libpq  # puts `psql` on your PATH; follow any brew hints if this warns
+sudo apt install build-essential pkg-config libssl-dev libpq-dev
 ```
 
-Apple Silicon Macs sometimes need OpenSSL visible to the Rust build. If `cargo build` later fails to find OpenSSL, add this to `~/.zshrc` (then open a new terminal):
+On macOS:
+
+```bash
+xcode-select --install
+brew install pkg-config openssl@3 libpq
+```
+
+If OpenSSL is not found on Apple Silicon, expose its pkg-config directory before building:
 
 ```bash
 export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 ```
 
-**Linux (Debian / Ubuntu):**
+Neither a host PostgreSQL installation, `psql`, Diesel CLI, nor an S3 CLI is required. Initialization uses the database container's `psql`, the backend's embedded migrations, and a one-shot AWS CLI container for bucket configuration.
+
+## Initialize
+
+From the repository root:
 
 ```bash
-sudo apt update
-sudo apt install -y build-essential pkg-config libssl-dev libpq-dev postgresql-client
+node runspace/dev.mjs init
 ```
 
----
+Initialization:
 
-## 1. Check what you already have
+1. Creates ignored `runspace/.env` if absent, with local endpoints, checkout-specific Compose project identity, and generated JWT, service-token, VAPID, and Meilisearch keys. Existing configuration and keys are retained.
+2. Starts PostgreSQL 18, Meilisearch, and RustFS with persistent, project-scoped named volumes and loopback-only host ports.
+3. Waits for the services and creates a public-download local S3 bucket, including upload CORS configuration. Uploads still require signed requests.
+4. Builds the debug backend on the host and starts it temporarily. The backend applies the normal embedded migrations.
+5. Seeds identities and administrator permissions through SQL, then creates chat content through the real APIs so message search, membership events, thread metadata, and unread state follow normal backend behavior.
+6. Stops the temporary backend, leaving dependency containers running.
 
-Run these one at a time. If a command prints a version, you already have that tool.
+The temporary backend's output is in ignored `runspace/backend-init.log`. If initialization fails, correct the reported problem and run the same command again. Stop any backend already using this runspace's API or metrics port first; initialization does not attach to an unknown existing process.
+
+The generated credentials and arbitrary-UID development authentication are for local use only. Do not deploy this configuration or expose these services publicly. No production backend, database, object store, or APNs key is needed.
+
+### Default addresses
+
+| Service | Address |
+| --- | --- |
+| PWA | http://localhost:14300 |
+| Backend API | http://127.0.0.1:13000 |
+| Backend metrics | http://127.0.0.1:13001/metrics |
+| PostgreSQL | 127.0.0.1:15432 |
+| Meilisearch | http://127.0.0.1:17700 |
+| RustFS S3 endpoint | http://127.0.0.1:19000 |
+| RustFS console | http://127.0.0.1:19001 |
+
+PostgreSQL uses database/user `wetty_chat` and password `local-chat-password`. RustFS uses access key and secret `rustfsadmin`; the bucket is `chahua-local`. The generated Meilisearch master key is in `runspace/.env`.
+
+These ports differ from the original checkout's standard ports. The Compose project name includes a hash of the checkout path, so its containers, network, and volumes do not reuse the original checkout's resources. Another copy using this same runspace workflow needs different host ports as well: edit its generated `.env`, keeping port settings, endpoint URLs, listen addresses, and CORS origins consistent.
+
+## Run backend and PWA
+
+In one terminal, from the repository root:
 
 ```bash
-git --version
-docker --version
-docker compose version
-rustc --version
-cargo --version
-node --version
-npm --version
-openssl version
-psql --version
+node runspace/dev.mjs backend
 ```
 
-**How to read the results**
+This builds the backend and runs the host binary with the runspace configuration. Ctrl+C stops it; Docker dependencies remain running.
 
-- `command not found` → install that tool in the next section.
-- Node must be `v20.19.x` or `v22.12+` (Angular CLI requirement). `v20.18` or `v21` will fail.
-- Rust should be recent; if `cargo run` later fails on language features, update with `rustup update`.
-- On macOS, if `git` or `clang` is missing, run `xcode-select --install` first.
-
----
-
-## 2. Install missing tools
-
-Skip any subsection whose tools already work.
-
-### 2.1 Docker
-
-**macOS — Docker Desktop**
-
-1. Download and install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/).
-2. Open **Docker Desktop** from Applications and wait until it says Docker is running.
-3. Verify in Terminal:
+In another terminal:
 
 ```bash
-docker run --rm hello-world
-docker compose version
+node runspace/dev.mjs pwa
 ```
 
-If `docker` is not found, quit and reopen Terminal after install (PATH is updated when Docker Desktop starts).
-
-**Linux (Debian / Ubuntu) — Docker Engine:**
+The PWA launcher installs dependencies with `npm ci` if Angular CLI is absent, and starts the existing dev launcher with this runspace's API target and PWA port. If the checkout already has `node_modules` but its dependencies have changed, synchronize them first:
 
 ```bash
-# If `docker` is missing:
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker "$USER"
+(cd pwa && npm ci)
 ```
 
-Log out and back in (or reboot) so the `docker` group applies, then verify:
+Open http://localhost:14300. HTTP and WebSocket traffic use the PWA's development proxy to the local backend. This launcher does not load `pwa/.env.local` or use a preset `CHAHUA_DEV_TOKEN`; a fresh browser session automatically obtains a development session for UID 1. Existing browser login state still takes precedence, as described in the [PWA README](../pwa/README.md).
+
+Do not substitute `npm start`: that command targets production. Plain `npm run dev` uses the standard backend/PWA ports rather than the isolated runspace ports; use the launcher above for this stack.
+
+### IDE / direct Cargo workflow
+
+Use `runspace` as the backend working directory so its `.env` is loaded instead of `backend/.env`:
 
 ```bash
-docker run --rm hello-world
-docker compose version
+cd runspace
+cargo run --manifest-path ../backend/Cargo.toml
 ```
 
-If `docker` works only with `sudo`, the group membership did not take effect yet.
+For an IDE, use the same working directory and the `backend/Cargo.toml` manifest / `wetty-chat-backend` executable. No backend container is involved.
 
-### 2.2 Rust
+## Seeded data
 
-Same on macOS and Linux:
+The initial fixture set contains:
 
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+- 100 fake users, UIDs 1–100, with deterministic names, profiles, and three user-group tags. All email addresses use `example.test`.
+- UID 1 (`Avery Chen 001`) with the global administrator policy. Other users remain ordinary members.
+- Four public groups: **Town Square** (100 members), **Project Aurora** (25), **Book Club** (30), and **Weekend Plans** (16).
+- Three friendship-backed DMs: users 1–2, 1–3, and 4–5.
+- 219 text messages, including four thread roots with four text replies each; normal membership and friendship events bring the initial message total to 389.
+- Reactions and mixed chat/thread read states. UID 1 starts with read group history and unread DMs; other users have unread group history.
+
+Search for `seed-search-lantern` to exercise message search.
+
+To switch the PWA's development identity, use its browser console:
+
+```javascript
+sessionStorage.setItem('uid', '7');
+location.reload();
 ```
 
-Choose the default install when prompted, then reload your shell:
+For manually authenticated API calls:
 
 ```bash
-source "$HOME/.cargo/env"
-rustc --version
-cargo --version
-```
-
-Optional but useful for schema work later (needs `libpq` / OpenSSL from §0):
-
-```bash
-cargo install diesel_cli --no-default-features --features postgres
-```
-
-You do **not** need Diesel CLI just to run the app — migrations are applied automatically on startup.
-
-### 2.3 Node.js
-
-Use an official LTS that satisfies `^20.19 || >=22.12`. [nvm](https://github.com/nvm-sh/nvm) works the same on macOS and Linux:
-
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-# restart the shell (or `source ~/.nvm/nvm.sh`), then:
-nvm install 22
-node --version   # should be v22.12+ or a recent v20.19+
-npm --version
-```
-
-**Alternatives**
-
-- **macOS:** `brew install node@22` (then follow brew’s PATH instructions for that formula).
-- **Linux:** [NodeSource](https://github.com/nodesource/distributions) if you prefer apt packages over nvm.
-
-### 2.4 Clone the repository
-
-```bash
-git clone <YOUR_REPO_URL> chahua-im
-cd chahua-im
-```
-
-Optional: enable the repo’s pre-commit format hooks:
-
-```bash
-git config core.hooksPath .githooks
-```
-
----
-
-## 3. Start PostgreSQL in Docker
-
-From the **repository root**:
-
-```bash
-docker compose up -d postgres
-```
-
-Check that it is healthy:
-
-```bash
-docker compose ps
-docker compose logs postgres --tail 20
-```
-
-Compose starts Postgres **18** on `127.0.0.1:5432` with:
-
-| Setting | Value |
-|---------|-------|
-| User | `wetty_chat` |
-| Password | `NIM1gs7unjbQumYD` |
-| Database | `wetty_chat` (created automatically from the username) |
-
-Quick connectivity check:
-
-```bash
-psql "postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat" -c 'SELECT 1;'
-```
-
-You should see `1`.
-
-> **Port already in use?** Something else is bound to 5432. Either stop that service, or change the host port mapping in `docker-compose.yml` (for example `"5433:5432"`) and use that port in `DATABASE_URL`.
-
----
-
-## 4. Configure the backend (`.env`)
-
-```bash
-cd backend
-cp .env.example .env
-```
-
-Edit `backend/.env`. At minimum set the values below.
-
-### 4.1 Database (Docker Compose credentials)
-
-```bash
-DATABASE_URL=postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat
-```
-
-### 4.2 JWT signing key
-
-The backend requires a JWT key at startup:
-
-```bash
-openssl rand -base64 32
-```
-
-Paste the output into:
-
-```bash
-JWT_SIGNING_KEY_BASE64=<paste here>
-```
-
-### 4.3 Local debug sessions
-
-`cargo run` builds the backend in debug mode, which enables `POST /auth/dev-session` for local development. It issues a JWT for a seeded user; it does not accept an identity header. If you intentionally run a release build locally, set `ENABLE_DEBUG_AUTH=true` to enable this endpoint.
-
-To obtain a token manually for the seeded user, send a valid `X-Client-Id` while creating the session:
-
-```bash
-curl -sS -X POST http://localhost:3000/auth/dev-session \
+curl -sS http://127.0.0.1:13000/auth/dev-session \
   -H 'Content-Type: application/json' \
   -H 'X-Client-Id: local-dev-client' \
   -d '{"uid":1}'
 ```
 
-The response is `{"token":"<jwt>"}`. Use that value as `Authorization: Bearer <jwt>` for API calls. The development client performs this bootstrap automatically for its configured local uid.
+Use the returned token as `Authorization: Bearer <token>`.
 
-### 4.4 Web Push (VAPID) keys
+### Repeated initialization
 
-Also required at startup:
+`init` is additive, not a reset. It retains generated keys and records fixture progress in ignored `runspace/seed-state.json`, tied to the PostgreSQL cluster identity. Repeating initialization does not duplicate seeded messages or reset completed fixtures' read states, edited descriptions, or user-created conversations. Do not delete the progress file to refresh data.
 
-```bash
-npx --yes web-push generate-vapid-keys
-```
-
-Copy the printed public/private keys into `.env`:
+With the backend already running, seed or resume fixture creation without starting another backend:
 
 ```bash
-VAPID_PUBLIC_KEY=<public key>
-VAPID_PRIVATE_KEY=<private key>
-VAPID_SUBJECT=mailto:dev@example.com
+node runspace/dev.mjs seed
 ```
 
-### 4.5 S3 / attachments (required env vars)
+## Day-to-day container management
 
-The process will not start without these names set. For **basic chat API work** you can leave placeholders and skip real object storage until you need uploads:
+From the repository root:
 
 ```bash
-S3_BUCKET_NAME=wetty-chat-local-dev
-AWS_REGION=us-west-2
+node runspace/dev.mjs up       # Start dependencies and ensure the bucket is configured
+node runspace/dev.mjs stop     # Stop dependencies, retaining all data
+
+docker compose -f runspace/docker-compose.yml ps
+docker compose -f runspace/docker-compose.yml logs postgres
 ```
 
-When you need attachments locally, start a MinIO-compatible store from the repo root and uncomment the matching lines in `.env.example`:
+Stop host backend/PWA processes separately with Ctrl+C.
+
+For a deliberately clean environment, first stop those host processes. The following command **permanently deletes this runspace project's database, search index, and uploaded files**:
 
 ```bash
-# from repo root
-docker compose up -d rustfs init-rustfs
+docker compose -f runspace/docker-compose.yml down -v
+node runspace/dev.mjs init
 ```
 
-Then in `backend/.env`:
+The new PostgreSQL cluster identity causes the seeder to create fresh fixtures. Keys in `runspace/.env` are retained. Do not run `down -v` when you want to preserve development data.
 
-```bash
-S3_ENDPOINT_URL=http://127.0.0.1:9000
-AWS_ACCESS_KEY_ID=rustfsadmin
-AWS_SECRET_ACCESS_KEY=rustfsadmin
-S3_BASE_URL=http://127.0.0.1:9000/wetty-chat-local-dev
-```
+## Troubleshooting
 
-### 4.6 Optional CORS
-
-If you ever call the API from a browser origin other than the dev proxy, set:
-
-```bash
-CORS_ALLOWED_ORIGINS=http://localhost:4300
-```
-
-With the default dev proxy you usually do not need this.
-
-Discuz avatar variables and Meilisearch can stay commented out for a first run.
-
----
-
-## 5. Run the backend on the host
-
-Still in `backend/`:
-
-```bash
-cargo run
-```
-
-The first build downloads crates and can take several minutes. On success you should see the API listening.
-
-| Service | URL |
-|---------|-----|
-| API | http://localhost:3000 |
-| Metrics | http://localhost:3001/metrics |
-
-**Migrations:** Diesel migrations under `backend/migrations/` are **embedded** and applied automatically on startup. You do not need to run `diesel migration run` for a normal local setup.
-
-Leave this terminal open. Open a second terminal for the next steps.
-
-## 6. Create the initial user and permissions
-
-An empty database has **no users** and **no one assigned** the admin policy. Create the seeded user before bootstrapping a local JWT or using the frontend; otherwise the user profile shows as `Unknown` and creating chats will fail authorization.
-
-Identity lives in Discuz-compatible tables (`discuz.common_member`). The frontend defaults to **uid `1`** when it requests its development session.
-
-### 6.1 Insert a development user
-
-```bash
-psql "postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat" <<'SQL'
-INSERT INTO discuz.common_member (uid, loginname, username, email, groupid, regdate)
-VALUES (
-  1,
-  'devuser',
-  'devuser',
-  'dev@example.com',
-  10,
-  extract(epoch from now())::bigint
-)
-ON CONFLICT (uid) DO NOTHING;
-SQL
-```
-
-`username` is unique and limited to 50 characters.
-
-### 6.2 Grant permission to create chats (and more)
-
-Migrations seed a reserved policy `permission_admin` (`id = 1`) with `permission.all`, but it is **not assigned to anyone**. Assign it to your user:
-
-```bash
-psql "postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat" <<'SQL'
-INSERT INTO policy_assignments (id, subject_type, subject_id, policy_id, created_at, updated_at)
-VALUES (1, 'user', 1, 1, NOW(), NOW())
-ON CONFLICT (id) DO NOTHING;
-SQL
-```
-
-Verify:
-
-```bash
-psql "postgres://wetty_chat:NIM1gs7unjbQumYD@127.0.0.1:5432/wetty_chat" -c \
-  "SELECT uid, username FROM discuz.common_member; SELECT * FROM policy_assignments;"
-```
-
----
-
-## 7. Run the frontend
-
-In a new terminal:
-
-```bash
-cd pwa
-cp .env.example .env.local   # optional; only needed for a fixed dev identity
-npm ci
-npm run dev
-```
-
-Open http://localhost:4300.
-
-How the pieces connect:
-
-- Dev API calls go to `/_api/...` on the dev server origin.
-- The dev server proxies `/_api` → `http://localhost:3000` (override with `API_PROXY_TARGET`; HTTP and WebSocket both apply).
-- In development, the client requests `POST /auth/dev-session` for its configured local uid and sends `X-Client-Id` with that bootstrap request.
-- The backend returns a JWT, which the client stores and sends as `Authorization: Bearer <token>` on API calls.
-
----
-
-## 8. Smoke-check
-
-1. Backend terminal shows requests without panicking.
-2. Frontend loads without a blank error screen.
-3. You can open or create a conversation (needs the policy assignment from §6).
-4. Optional API check: create a development session, copy its `token`, then use it as a bearer token:
-
-```bash
-curl -sS -X POST http://localhost:3000/auth/dev-session \
-  -H 'Content-Type: application/json' \
-  -H 'X-Client-Id: local-dev-client' \
-  -d '{"uid":1}'
-
-curl -sS -H 'Authorization: Bearer <token from the previous response>' \
-  http://localhost:3000/users/me
-```
-
----
-
-## 9. Day-to-day workflow
-
-| Want to… | Do this |
-|----------|---------|
-| Start DB | `docker compose up -d postgres` (repo root) |
-| Start API | `cd backend && cargo run` |
-| Start UI | `cd pwa && npm run dev` |
-| Stop DB | `docker compose stop postgres` |
-| Reset DB data | `docker compose down -v` then start postgres again, re-run backend (migrations), re-run §6 |
-| Format before commit | enable `.githooks`, or run `cargo fmt` / `npm run format` |
-
-Debug the backend like any local Rust binary: breakpoints in your IDE, `RUST_LOG=debug cargo run`, etc. Postgres stays in Docker so you do not need a native Postgres install.
-
----
-
-## 10. Troubleshooting
-
-| Symptom | Likely fix |
-|---------|------------|
-| `docker: command not found` (macOS) | Install/start **Docker Desktop**; reopen Terminal |
-| `POST /auth/dev-session` returns `404` | Run `cargo run` (debug builds enable it), or set `ENABLE_DEBUG_AUTH=true` only for a local release build |
-| `docker: permission denied` (Linux) | Re-login after `usermod -aG docker`, or use rootless Docker |
-| `connection refused` on 5432 | `docker compose up -d postgres`; check `docker compose ps` |
-| `password authentication failed` | `DATABASE_URL` must match compose user/password above |
-| Backend exits on missing env | Fill `JWT_SIGNING_KEY_BASE64`, VAPID keys, `S3_BUCKET_NAME`, `AWS_REGION` |
-| Username shows `Unknown` | Missing `discuz.common_member` row for uid `1` |
-| Cannot create chat | Missing `policy_assignments` row for uid `1` → policy `1` |
-| Frontend cannot reach API | Backend not on `:3000`, or wrong `API_PROXY_TARGET` |
-| `npm ci` engine error | Upgrade Node to ^20.19 or ≥22.12 |
-| Linker / OpenSSL / pq errors on `cargo build` (**macOS**) | `brew install pkg-config openssl@3 libpq`; set `PKG_CONFIG_PATH` as in §0; ensure Xcode CLT installed |
-| Linker / OpenSSL / pq errors on `cargo build` (**Linux**) | Install `libssl-dev`, `libpq-dev`, `pkg-config`, `build-essential` |
-| `psql: command not found` (**macOS**) | `brew install libpq && brew link --force libpq` |
-| Port 5432 already in use (**macOS**) | Local Postgres from Homebrew may be running; `brew services stop postgresql@…` or change the compose host port |
-
----
-
-## Related files
-
-- Root overview (shorter): [`README.md`](../README.md)
-- Backend env template: [`backend/.env.example`](../backend/.env.example)
-- Compose services: [`docker-compose.yml`](../docker-compose.yml)
-- Frontend proxy notes: [`pwa/.env.example`](../pwa/.env.example)
+- **Port occupied:** stop the conflicting process or consistently change the relevant ports and URLs in `runspace/.env`. The initializer refuses to start over an existing API or metrics listener.
+- **Backend build fails:** check Rust and native build prerequisites above. Initialization does not install a host toolchain.
+- **Initialization fails after starting the backend:** inspect `runspace/backend-init.log`; rerun `init` after fixing the cause.
+- **Development session returns 404:** use this runspace's launcher/configuration; it enables local debug authentication. Do not enable arbitrary-UID authentication on a production service.
+- **Unknown user / missing groups:** confirm the frontend targets port 13000 and that initialization completed; inspect browser login state before assuming UID 1 is active.
+- **PWA module-resolution errors:** run `(cd pwa && npm ci)` to align installed dependencies with the lockfile.
+- **Uploads fail:** check RustFS health, use this runspace's `S3_ENDPOINT_URL` and `S3_BASE_URL`, and rerun `node runspace/dev.mjs up` to ensure bucket policy and CORS are configured.

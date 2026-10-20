@@ -11,8 +11,9 @@
 .cursor
 .env
 
-# Where I keep my runspace for testing / docker compose
-/runspace
+# Local runspace configuration and generated seed progress
+/runspace/.env
+/runspace/seed-state.json
 /reference
 /ci-deploy/
 .geminiignore

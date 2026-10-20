@@ -10,7 +10,15 @@ chahua is a chat application targeting ~20k users / ~2k messages per day.
 
 ## Local development
 
-New to the project? Follow the step-by-step beginner guide: [docs/local-setup.md](docs/local-setup.md)
+Initialize a checkout-local database, search, object storage, and fake chat data, then run the backend and PWA on the host:
+
+```bash
+node runspace/dev.mjs init
+node runspace/dev.mjs backend  # One terminal
+node runspace/dev.mjs pwa      # Another terminal; http://localhost:14300
+```
+
+Prerequisites, isolated ports, seed identities, and container management: [docs/local-setup.md](docs/local-setup.md).
 
 ## Formatting and hooks
 
