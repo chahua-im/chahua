@@ -55,6 +55,11 @@ describe('renderMarkdownText — inline', () => {
     );
   });
 
+  it('pairs spoilers touching text and punctuation', () => {
+    expect(renderText('你好||**1234**||')).toBe('<p>你好<span class="spoiler"><strong>1234</strong></span></p>');
+    expect(renderText('||**1234**||你好')).toBe('<p><span class="spoiler"><strong>1234</strong></span>你好</p>');
+  });
+
   it('renders single underscore markers as literal text', () => {
     expect(renderText('_literal_ and __em__')).toBe('<p>_literal_ and <em>em</em></p>');
   });

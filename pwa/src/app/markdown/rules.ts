@@ -136,33 +136,46 @@ function underscoreItalicPost(state: StateInline): void {
  * literal text.
  * ------------------------------------------------------------------------- */
 
-function spoilerTokenize(state: StateInline, silent: boolean): boolean {
-  if (silent) return false;
-  if (state.src.charCodeAt(state.pos) !== PIPE) return false;
-  const scanned = state.scanDelims(state.pos, true);
-  let len = scanned.length;
-  const ch = String.fromCharCode(PIPE);
-  if (len < 2) return false;
-  let token;
-  if (len % 2) {
-    token = state.push('text', '', 0);
-    token.content = ch;
-    len--;
-  }
-  for (let i = 0; i < len; i += 2) {
-    token = state.push('text', '', 0);
-    token.content = ch + ch;
-    state.delimiters.push({
-      marker: PIPE,
-      length: 0,
-      token: state.tokens.length - 1,
-      end: -1,
-      open: scanned.can_open,
-      close: scanned.can_close,
-    });
-  }
-  state.pos += scanned.length;
-  return true;
+/**
+ * CommonMark flanking would keep `||` from opening right before punctuation
+ * (`你好||**粗体**||`) or closing right after it (`||**粗体**||你好`), because
+ * emphasis markers read as punctuation. A chat spoiler only cares about
+ * whitespace: it opens unless followed by whitespace and closes unless preceded
+ * by one.
+ */
+function spoilerTokenize(isWhiteSpace: (code: number) => boolean): (state: StateInline, silent: boolean) => boolean {
+  return function spoiler(state, silent) {
+    if (silent) return false;
+    if (state.src.charCodeAt(state.pos) !== PIPE) return false;
+    const scanned = state.scanDelims(state.pos, true);
+    let len = scanned.length;
+    const ch = String.fromCharCode(PIPE);
+    if (len < 2) return false;
+    const before = state.pos > 0 ? state.src.charCodeAt(state.pos - 1) : SPACE;
+    const after = state.pos + len < state.posMax ? state.src.charCodeAt(state.pos + len) : SPACE;
+    const open = !isWhiteSpace(after);
+    const close = !isWhiteSpace(before);
+    let token;
+    if (len % 2) {
+      token = state.push('text', '', 0);
+      token.content = ch;
+      len--;
+    }
+    for (let i = 0; i < len; i += 2) {
+      token = state.push('text', '', 0);
+      token.content = ch + ch;
+      state.delimiters.push({
+        marker: PIPE,
+        length: 0,
+        token: state.tokens.length - 1,
+        end: -1,
+        open,
+        close,
+      });
+    }
+    state.pos += scanned.length;
+    return true;
+  };
 }
 
 function spoilerPostProcess(state: StateInline, delimiters: StateInline['delimiters']): void {
@@ -297,7 +310,7 @@ export function applyMarkdownSubset(md: MarkdownIt): void {
   md.inline.ruler2.before('fragments_join', 'underscoreItalic', underscoreItalicPost);
 
   // `||spoiler||`.
-  md.inline.ruler.before('link', 'spoiler', spoilerTokenize);
+  md.inline.ruler.before('link', 'spoiler', spoilerTokenize(md.utils.isWhiteSpace));
   md.inline.ruler2.before('fragments_join', 'spoiler', spoilerPost);
 
   // Tilde runs remain literal rather than opening code fences.
