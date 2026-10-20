@@ -7,7 +7,6 @@ const REACTIONS_KEY = 'chahua.preferences.recentReactions';
 const PINNED_REACTIONS_KEY = 'chahua.preferences.pinnedReactions';
 
 const AVATARS_KEY = 'chahua.preferences.showAllAvatars';
-const MARKDOWN_KEY = 'chahua.preferences.markdownEnabled';
 const DM_DETAILS_KEY = 'chahua.preferences.showDmDetails';
 
 const COLOR_MODE_KEY = 'chahua.preferences.colorMode';
@@ -28,14 +27,6 @@ export class Preferences {
     const pinned = [...new Set(reactions)].slice(0, 5);
     window.localStorage.setItem(PINNED_REACTIONS_KEY, JSON.stringify(pinned));
     this.pinnedReactions.set(pinned);
-  }
-
-  private readonly markdown = signal(window.localStorage.getItem(MARKDOWN_KEY) !== 'false');
-  readonly markdownEnabled = this.markdown.asReadonly();
-
-  setMarkdownEnabled(value: boolean) {
-    window.localStorage.setItem(MARKDOWN_KEY, String(value));
-    this.markdown.set(value);
   }
 
   private readonly threads = signal(window.localStorage.getItem(THREADS_KEY) !== 'false');

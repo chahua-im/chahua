@@ -84,7 +84,6 @@ describe('MessageMenu', () => {
         {
           provide: Preferences,
           useValue: {
-            markdownEnabled: () => true,
             recentReactions: signal([]),
             pinnedReactions: signal(['👍']),
             rememberReaction: vi.fn(),

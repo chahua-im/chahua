@@ -120,7 +120,7 @@ describe('ConversationPage', () => {
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         {
           provide: Preferences,
-          useValue: { markdownEnabled: () => true, showAllAvatars: avatars, showDmDetails: dmDetails },
+          useValue: { showAllAvatars: avatars, showDmDetails: dmDetails },
         },
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),

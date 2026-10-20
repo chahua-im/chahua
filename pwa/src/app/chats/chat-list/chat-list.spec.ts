@@ -43,7 +43,7 @@ describe('ChatList', () => {
             threadUnread: { value: signal({ unreadThreadCount: 3 }), activate: vi.fn(() => vi.fn()) },
           },
         },
-        { provide: Preferences, useValue: { markdownEnabled: () => true, showThreadsInMessages: signal(true) } },
+        { provide: Preferences, useValue: { showThreadsInMessages: signal(true) } },
         provideRouter([{ path: 'chats/chat/:id', children: [] }]),
         { provide: Connection, useValue: mockRealtime() },
         { provide: PushNotifications, useValue: { requestSettingsPermission: vi.fn() } },

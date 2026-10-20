@@ -71,7 +71,6 @@ describe('ChatListContent', () => {
   let fixture: ComponentFixture<ChatListContent>;
   const session = { user: signal(testUser), logout: vi.fn() };
   const preferences = {
-    markdownEnabled: () => true,
     showThreadsInMessages: signal(false),
     showAllAvatars: signal(false),
   };

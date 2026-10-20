@@ -23,7 +23,6 @@ import {
   chatbubblesOutline,
   chevronBackOutline,
   contrastOutline,
-  logoMarkdown,
   languageOutline,
   moonOutline,
   personCircleOutline,
@@ -65,7 +64,6 @@ export class GeneralSettings {
   protected readonly preferences = inject(Preferences);
   protected readonly modals = inject(ModalController);
   protected readonly ColorMode = ColorMode;
-  protected readonly markdownIcon = logoMarkdown;
   protected readonly threadsIcon = chatbubblesOutline;
   protected readonly languageIcon = languageOutline;
   protected readonly avatarsIcon = personCircleOutline;
