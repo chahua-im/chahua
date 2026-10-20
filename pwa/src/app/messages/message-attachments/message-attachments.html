@@ -12,6 +12,7 @@
         [class.cover]="!!frame"
         [class.fill]="fill()"
         [style.--media-aspect-ratio]="fill() ? item.width / item.height : null"
+        [style.--media-natural-width]="fill() ? item.displayWidth + 'px' : null"
         [style.left.px]="frame?.x"
         [style.top.px]="frame?.y"
         [style.width.px]="frame?.width ?? (fill() ? null : item.displayWidth)"
@@ -52,7 +53,7 @@
           </button>
         }
         @if (last && overlayTime()) {
-          <ion-badge class="media-time" color="medium">
+          <ion-badge #timePill class="media-time" color="medium">
             <time [attr.datetime]="message().createdAt">{{ message().createdAt | localDate: 'time' }}</time>
             <app-message-status [delivery]="delivery()" />
           </ion-badge>

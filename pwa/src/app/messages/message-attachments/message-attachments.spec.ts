@@ -24,6 +24,7 @@ const image: AttachmentResponse = {
 
 describe('MessageAttachments', () => {
   let resize: (width: number) => void;
+  let resizePill: (width: number) => void;
   const disconnect = vi.fn();
   beforeEach(() => {
     TestBed.configureTestingModule({ providers: [provideRouter([])] });
@@ -34,8 +35,10 @@ describe('MessageAttachments', () => {
       class {
         constructor(private callback: (entries: { target: Element; contentRect: { width: number } }[]) => void) {}
         observe(target: Element) {
-          if (!target.classList.contains('chat-row'))
-            resize = (width) => this.callback([{ target, contentRect: { width } }]);
+          if (target.classList.contains('chat-row')) return;
+          const notify = (width: number) => this.callback([{ target, contentRect: { width } }]);
+          if (target.tagName === 'ION-BADGE') resizePill = notify;
+          else resize = notify;
         }
         disconnect = disconnect;
       },
@@ -208,6 +211,24 @@ describe('MessageAttachments', () => {
     fixture.detectChanges();
     expect(frame.querySelector('.backdrop')).toBeNull();
     expect(element.querySelector('.media-error')).toBeTruthy();
+  });
+
+  it('widens a captionless image bubble to twice its time pill', async () => {
+    const fixture = await render({
+      messageType: MessageType.text,
+      message: '',
+      attachments: [{ ...image, width: 40, height: 800 }],
+    });
+    fixture.componentRef.setInput('overlayTime', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const element: HTMLElement = fixture.nativeElement;
+    const pill = element.querySelector<HTMLElement>('ion-badge.media-time')!;
+    pill.getBoundingClientRect = () => ({ width: 60, height: 20 }) as DOMRect;
+    resizePill(60);
+    fixture.detectChanges();
+    expect(element.style.width).toBe('21px');
+    expect(element.style.minWidth).toBe('120px');
   });
 
   it('keeps a narrow sticker unstretched', async () => {

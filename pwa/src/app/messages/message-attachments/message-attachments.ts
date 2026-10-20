@@ -1,5 +1,16 @@
 import { Router } from '@angular/router';
-import { afterRenderEffect, Component, computed, ElementRef, inject, input, linkedSignal, signal } from '@angular/core';
+import {
+  afterRenderEffect,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  input,
+  linkedSignal,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import { IonBadge, IonIcon } from '@ionic/angular';
@@ -39,6 +50,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
     '[class.visual]': 'visual()',
     '[class.fill]': 'fill()',
     '[style.width.px]': 'album() ? layout().intrinsicWidth : fillWidth()',
+    '[style.min-width.px]': 'minWidth()',
   },
 })
 export class MessageAttachments {
@@ -118,6 +130,10 @@ export class MessageAttachments {
    *  A real width (not flex-basis) is required: flex-basis is ignored when sizing the flex container,
    *  and the absolutely-positioned media contributes zero, collapsing media-only bubbles. */
   protected readonly fillWidth = computed(() => (this.fill() ? this.items()[0].displayWidth : null));
+  /** A media-only image narrower than twice its time pill would bury the time; widen the bubble instead. */
+  private readonly timePill = viewChild('timePill', { read: ElementRef<HTMLElement> });
+  private readonly timePillWidth = signal(0);
+  protected readonly minWidth = computed(() => (this.overlayTime() && this.fill() ? 2 * this.timePillWidth() : null));
   protected readonly visibleItems = computed(() => (this.album() ? this.items().slice(0, 9) : this.items()));
   private readonly viewport = signal(
     {
@@ -190,6 +206,13 @@ export class MessageAttachments {
         observer.disconnect();
         window.removeEventListener('resize', updateViewport);
       });
+    });
+    effect((onCleanup) => {
+      const pill = this.timePill()?.nativeElement;
+      if (!pill) return;
+      const observer = new ResizeObserver(() => this.timePillWidth.set(pill.getBoundingClientRect().width));
+      observer.observe(pill);
+      onCleanup(() => observer.disconnect());
     });
   }
 
