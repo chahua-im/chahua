@@ -12,7 +12,16 @@ import { UploadStatus, type AttachmentUpload } from '../upload';
 import { Message, type MessageContent } from './message';
 
 describe('Message', () => {
-  beforeEach(() => vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false })));
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
