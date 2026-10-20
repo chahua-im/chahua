@@ -25,6 +25,7 @@ import { UploadProgress } from '../upload-progress/upload-progress';
 import { type VoiceDock } from '../voice-player/voice-playback';
 import { VoicePlayer } from '../voice-player/voice-player';
 
+import { MediaLoaded } from '../media-loaded';
 import { albumLayout } from './album-layout';
 import { attachmentKind, MediaKind } from './media-kind';
 
@@ -43,7 +44,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   selector: 'app-message-attachments',
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
-  imports: [VoicePlayer, IonBadge, IonIcon, UploadProgress, MessageStatus, LocalDatePipe, TranslocoPipe],
+  imports: [MediaLoaded, VoicePlayer, IonBadge, IonIcon, UploadProgress, MessageStatus, LocalDatePipe, TranslocoPipe],
   host: {
     '[class.overlay-time]': 'overlayTime()',
     '[class.album]': 'album()',

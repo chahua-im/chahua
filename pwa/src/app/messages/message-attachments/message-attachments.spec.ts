@@ -246,6 +246,51 @@ describe('MessageAttachments', () => {
     expect(element.querySelector('.media-frame.fill')).toBeNull();
   });
 
+  it('covers every album frame until its own media paints', async () => {
+    const fixture = await render({
+      attachments: [image, { ...image, id: encodeId('9007199254741102'), url: '/second.jpg' }],
+    });
+    const frames: NodeListOf<HTMLElement> = fixture.nativeElement.querySelectorAll('.media-frame');
+    const media: NodeListOf<HTMLElement> = fixture.nativeElement.querySelectorAll('.media-frame img');
+    expect(frames).toHaveLength(2);
+    expect(frames[0].querySelector('.media-skeleton')).not.toBeNull();
+    expect(frames[1].querySelector('.media-skeleton')).not.toBeNull();
+    media[0].dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(media[0].classList.contains('loaded')).toBe(true);
+    expect(media[1].classList.contains('loaded')).toBe(false);
+  });
+
+  it('settles a video placeholder once its metadata is available', async () => {
+    const fixture = await render({
+      attachments: [{ ...image, kind: 'video/mp4', url: '/clip.mp4', fileName: 'clip.mp4' }],
+    });
+    const video: HTMLVideoElement = fixture.nativeElement.querySelector('.media-frame video');
+    expect(video.classList.contains('loaded')).toBe(false);
+    video.dispatchEvent(new Event('loadedmetadata'));
+    fixture.detectChanges();
+    expect(video.classList.contains('loaded')).toBe(true);
+  });
+
+  it('covers a sticker until its media paints', async () => {
+    const fixture = await render({
+      messageType: MessageType.sticker,
+      sticker: {
+        id: encodeId('9007199254741201'),
+        emoji: '🍵',
+        name: '茶',
+        media: { ...image, contentType: 'image/png' },
+      },
+    });
+    const frame: HTMLElement = fixture.nativeElement.querySelector('.media-frame');
+    const media = frame.querySelector('img')!;
+    expect(frame.querySelector('.media-skeleton')).not.toBeNull();
+    expect(media.classList.contains('loaded')).toBe(false);
+    media.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(media.classList.contains('loaded')).toBe(true);
+  });
+
   it('keeps multi-kind attachments unstretched', async () => {
     const fixture = await render({
       attachments: [

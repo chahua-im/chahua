@@ -109,6 +109,12 @@ export enum ThreadError {
   Update,
 }
 
+enum ThreadActionKind {
+  Subscribe,
+  Archive,
+  Unarchive,
+}
+
 type ScrollPosition =
   | { type: PositionKind.Bottom }
   // Unread anchors on the divider captured on entry unless a messageId names the live unread start.
@@ -391,19 +397,17 @@ export class ConversationPage {
     const threadId = this.threadId();
     return threadId ? this.chatInfo.subscription(this.id(), threadId) : undefined;
   });
-  protected readonly threadBusy = linkedSignal({ source: this.entryKey, computation: () => false });
+  protected readonly threadLoading = linkedSignal({ source: this.entryKey, computation: () => false });
+  protected readonly threadUpdating = linkedSignal({ source: this.entryKey, computation: () => false });
+  /** The button renders before the subscription status arrives, assuming an unsubscribed thread. */
   protected readonly threadAction = computed(() => {
+    if (!this.threadId()) return undefined;
     const status = this.subscription();
-    if (!status) return undefined;
-    const archived = status.subscribed && status.archived;
-    return {
-      icon: !status.subscribed ? starOutline : archived ? archive : archiveOutline,
-      label: !status.subscribed
-        ? 'conversation.actions.subscribeThread'
-        : archived
-          ? 'conversation.actions.unarchiveThread'
-          : 'conversation.actions.archiveThread',
-    };
+    if (!status?.subscribed)
+      return { kind: ThreadActionKind.Subscribe, icon: starOutline, label: 'conversation.actions.subscribeThread' };
+    return status.archived
+      ? { kind: ThreadActionKind.Unarchive, icon: archive, label: 'conversation.actions.unarchiveThread' }
+      : { kind: ThreadActionKind.Archive, icon: archiveOutline, label: 'conversation.actions.archiveThread' };
   });
   protected readonly threadError = linkedSignal({
     source: this.entryKey,
@@ -1166,35 +1170,53 @@ export class ConversationPage {
 
   protected async loadSubscription() {
     const threadId = this.threadId();
-    if (!threadId || this.threadBusy()) return;
+    if (!threadId || this.threadLoading()) return;
     const entry = this.entryKey();
     const version = ++this.subscriptionVersion;
-    this.threadBusy.set(true);
+    this.threadLoading.set(true);
     this.threadError.set(undefined);
     try {
       await this.chatInfo.loadSubscription(this.id(), threadId);
     } catch {
       if (this.isCurrent(entry) && version === this.subscriptionVersion) this.threadError.set(ThreadError.Load);
     } finally {
-      if (this.isCurrent(entry) && version === this.subscriptionVersion) this.threadBusy.set(false);
+      if (this.isCurrent(entry) && version === this.subscriptionVersion) this.threadLoading.set(false);
     }
   }
 
   protected async updateThread() {
     const threadId = this.threadId();
-    const status = this.subscription();
-    if (!threadId || !status || this.threadBusy()) return;
+    const action = this.threadAction();
+    if (!threadId || !action || this.threadUpdating()) return;
     const entry = this.entryKey();
-    this.subscriptionVersion++;
-    this.threadBusy.set(true);
+    this.threadUpdating.set(true);
     this.threadError.set(undefined);
     try {
-      if (status.subscribed) await this.chatInfo.setThreadArchived(this.id(), threadId, !status.archived);
-      else await this.chatInfo.subscribeThread(this.id(), threadId);
+      let status = this.subscription();
+      if (!status) {
+        // The tap landed before the status arrived; wait for the shared read instead of acting blind.
+        try {
+          await this.chatInfo.loadSubscription(this.id(), threadId);
+        } catch {
+          if (this.isCurrent(entry)) this.threadError.set(ThreadError.Load);
+          return;
+        }
+        if (!this.isCurrent(entry)) return;
+        status = this.subscription();
+        if (!status) return;
+      }
+      const archived = status.subscribed && status.archived;
+      if (action.kind === ThreadActionKind.Subscribe && !status.subscribed) {
+        await this.chatInfo.subscribeThread(this.id(), threadId);
+      } else if (action.kind === ThreadActionKind.Archive && status.subscribed && !archived) {
+        await this.chatInfo.setThreadArchived(this.id(), threadId, true);
+      } else if (action.kind === ThreadActionKind.Unarchive && archived) {
+        await this.chatInfo.setThreadArchived(this.id(), threadId, false);
+      }
     } catch {
       if (this.isCurrent(entry)) this.threadError.set(ThreadError.Update);
     } finally {
-      if (this.isCurrent(entry)) this.threadBusy.set(false);
+      if (this.isCurrent(entry)) this.threadUpdating.set(false);
     }
   }
 

@@ -87,9 +87,10 @@ describe('StickerPackDetail', () => {
   }
 
   function confirm(role: string) {
-    alerts.create.mockImplementationOnce(
-      async () => ({ present: async () => {}, onDidDismiss: async () => ({ role }) }),
-    );
+    alerts.create.mockImplementationOnce(async () => ({
+      present: async () => {},
+      onDidDismiss: async () => ({ role }),
+    }));
   }
 
   it('loads the pack and offers rename, delete and add for owned packs', async () => {
@@ -97,13 +98,27 @@ describe('StickerPackDetail', () => {
     expect(component['owned']()).toBe(true);
   });
 
+  it('covers each sticker cell until its media paints', async () => {
+    const fixture = TestBed.createComponent(StickerPackDetail);
+    fixture.componentRef.setInput('packId', pack.id);
+    fixture.detectChanges();
+    await vi.waitFor(() => expect(fixture.nativeElement.querySelector('.cell img')).not.toBeNull());
+    fixture.detectChanges();
+    const cells = Array.from(fixture.nativeElement.querySelectorAll('.cell') as NodeListOf<HTMLElement>);
+    const cell = cells.find((item) => item.querySelector('img'))!;
+    const media = cell.querySelector('img')!;
+    expect(cell.querySelector('.cell-skeleton')).not.toBeNull();
+    expect(media.classList.contains('loaded')).toBe(false);
+    media.dispatchEvent(new Event('load'));
+    fixture.detectChanges();
+    expect(media.classList.contains('loaded')).toBe(true);
+  });
+
   it('renames through the pack endpoint and updates the title signal', async () => {
-    alerts.create.mockImplementationOnce(
-      async () => ({
-        present: async () => {},
-        onDidDismiss: async () => ({ role: 'confirm', data: { values: { name: ' 新名 ' } } }),
-      }),
-    );
+    alerts.create.mockImplementationOnce(async () => ({
+      present: async () => {},
+      onDidDismiss: async () => ({ role: 'confirm', data: { values: { name: ' 新名 ' } } }),
+    }));
     const component = await loaded();
     await component['rename']();
     expect(api['patchPack']).toHaveBeenCalledWith(pack.id, { name: '新名' });
@@ -140,12 +155,10 @@ describe('StickerPackDetail', () => {
 
   it('uploads a sticker with its emoji and appends it to the pack', async () => {
     const component = await loaded();
-    alerts.create.mockImplementationOnce(
-      async () => ({
-        present: async () => {},
-        onDidDismiss: async () => ({ role: 'confirm', data: { values: { emoji: '🍵', name: '茶' } } }),
-      }),
-    );
+    alerts.create.mockImplementationOnce(async () => ({
+      present: async () => {},
+      onDidDismiss: async () => ({ role: 'confirm', data: { values: { emoji: '🍵', name: '茶' } } }),
+    }));
     const file = new File(['png-bytes'], 'tea.png', { type: 'image/png' });
     await component['upload']({ target: { files: [file], value: '' } } as unknown as Event);
     expect(post).toHaveBeenCalledOnce();

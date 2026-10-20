@@ -18,6 +18,7 @@
         [style.width.px]="frame?.width ?? (fill() ? null : item.displayWidth)"
         [style.height.px]="frame?.height"
         [style.aspect-ratio]="frame ? null : item.width + ' / ' + item.height">
+        <span class="media-skeleton skeleton-block"></span>
         @if (fill() && item.kind === MediaKind.Image && !failed().has(item.id ?? item.url)) {
           <div class="backdrop" [style.background-image]="'url(' + item.url + ')'"></div>
         }
@@ -27,10 +28,11 @@
           </a>
         } @else if (item.kind === MediaKind.Image) {
           <a [href]="item.url" target="_blank" rel="noopener" (click)="view(item.id ?? item.url, $event)">
-            <img [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id ?? item.url)" />
+            <img appMediaLoaded [src]="item.url" loading="lazy" decoding="async" (error)="fail(item.id ?? item.url)" />
           </a>
         } @else {
           <video
+            appMediaLoaded
             [src]="item.url"
             [autoplay]="item.sticker"
             [loop]="item.sticker"
