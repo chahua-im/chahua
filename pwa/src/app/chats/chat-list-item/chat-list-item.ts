@@ -23,6 +23,7 @@ import { ChatDatePipe } from '../chat-date.pipe';
 export interface ChatListEntry extends ChatAvatarData {
   subtitle?: string;
   link?: string[];
+  state?: Record<string, unknown>;
   sender?: string;
   time?: string;
   unreadCount?: number;

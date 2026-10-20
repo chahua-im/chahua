@@ -338,6 +338,7 @@ describe('ChatListContent', () => {
       ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(thread.threadRootMessage.id)],
       ['/chats/chat', decodeId(testChat.id)],
     ]);
+    expect((fixture.componentInstance['rows']()[0].entry as { state?: unknown }).state).toEqual({ fromChatList: true });
     expect(fixture.nativeElement.textContent).toContain('话题开头');
     const release = threads.activate.mock.results[0].value;
     preferences.showThreadsInMessages.set(false);
