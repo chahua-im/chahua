@@ -1,4 +1,4 @@
-import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
+import { DOCUMENT, Location, NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
   afterRenderEffect,
@@ -22,7 +22,6 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import {
-  IonBackButton,
   IonBadge,
   IonButton,
   IonButtons,
@@ -36,6 +35,8 @@ import {
   IonLabel,
   IonList,
   IonPopover,
+  IonRouterOutlet,
+  NavController,
   IonSpinner,
   IonTitle,
   IonToolbar,
@@ -142,7 +143,6 @@ type ScrollPosition =
     VoiceBar,
     LoadError,
     NgTemplateOutlet,
-    IonBackButton,
     IonBadge,
     IonButton,
     IonButtons,
@@ -354,13 +354,33 @@ export class ConversationPage {
       /* The conversation can remain usable when the root is unavailable. */
     }
   }
-  protected readonly backHref = computed(() => (this.threadId() ? `/chats/chat/${decodeId(this.id())}` : '/chats'));
+  private readonly location = inject(Location);
+  private readonly nav = inject(NavController);
+  private readonly outlet = inject(IonRouterOutlet, { optional: true });
+  /** A thread opened from the chat list has no parent conversation behind it. */
+  private readonly fromChatList = linkedSignal({
+    source: this.entryKey,
+    computation: () => !!(this.location.getState() as { fromChatList?: boolean } | null)?.fromChatList,
+  });
+  protected readonly showBackToChat = computed(() => !!this.threadId() && !this.fromChatList());
+
+  /** Mobile follows real history, matching the browser's back gesture. */
+  protected back() {
+    if (this.outlet?.canGoBack()) {
+      void this.nav.back();
+    } else {
+      void this.nav.navigateBack(this.threadId() ? ['/chats/chat', decodeId(this.id())] : ['/chats'], {
+        replaceUrl: true,
+      });
+    }
+  }
 
   /** Desktop has no browser-style back button; mirror the Escape shortcut's return-to-chat. */
   protected backToChat() {
     const threadId = this.threadId();
     if (!threadId) return;
     void this.router.navigate(['/chats/chat', decodeId(this.id())], {
+      replaceUrl: true,
       fragment: `msg=${decodeId(threadId)}`,
     });
   }

@@ -1,9 +1,11 @@
 <ion-header>
   <ion-toolbar #toolbar>
     <ion-buttons slot="start" class="ion-hide-md-up">
-      <ion-back-button [defaultHref]="backHref()"></ion-back-button>
+      <ion-button (click)="back()">
+        <ion-icon slot="icon-only" [icon]="toolbarIcons.chevronBack" />
+      </ion-button>
     </ion-buttons>
-    @if (threadId()) {
+    @if (showBackToChat()) {
       <ion-buttons slot="start" class="ion-hide-md-down">
         <ion-button (click)="backToChat()">
           <ion-icon slot="icon-only" [icon]="toolbarIcons.chevronBack" />

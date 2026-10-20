@@ -1,10 +1,20 @@
+import { Location } from '@angular/common';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NavigationEnd, provideRouter, Router, RouterLink } from '@angular/router';
-import { IonActionSheet, IonContent, IonModal, IonPopover, IonTextarea, iosTransitionAnimation } from '@ionic/angular';
+import {
+  IonActionSheet,
+  IonContent,
+  IonModal,
+  IonPopover,
+  IonRouterOutlet,
+  IonTextarea,
+  NavController,
+  iosTransitionAnimation,
+} from '@ionic/angular';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -105,6 +115,7 @@ describe('ConversationPage', () => {
       imports: [ConversationPage, VoicePlayer],
       providers: [
         provideRouter([]),
+        { provide: IonRouterOutlet, useValue: { canGoBack: vi.fn().mockReturnValue(true) } },
         { provide: Connection, useValue: mockRealtime({ messages$: incoming, events$: events, resync$: resync }) },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         {
@@ -185,6 +196,53 @@ describe('ConversationPage', () => {
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'search']);
   });
 
+  it('goes back through real history from the mobile header', () => {
+    const back = vi.spyOn(TestBed.inject(Location), 'back').mockImplementation(() => {});
+    const button = fixture.nativeElement.querySelector(
+      ':scope > ion-header ion-buttons[slot="start"] ion-button',
+    ) as HTMLElement;
+    button.click();
+    expect(back).toHaveBeenCalledOnce();
+  });
+
+  it('hides the desktop return-to-chat button for a thread opened from the chat list', async () => {
+    vi.spyOn(TestBed.inject(Location), 'getState').mockReturnValue({ fromChatList: true });
+    await enterThread();
+    expect(component['showBackToChat']()).toBe(false);
+  });
+
+  it('returns a directly opened conversation to the list without leaving the app', () => {
+    vi.mocked(TestBed.inject(IonRouterOutlet).canGoBack).mockReturnValue(false);
+    const back = vi.spyOn(TestBed.inject(Location), 'back').mockImplementation(() => {});
+    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateBack').mockResolvedValue(true);
+    const button = fixture.nativeElement.querySelector(
+      ':scope > ion-header ion-buttons[slot="start"] ion-button',
+    ) as HTMLElement;
+    button.click();
+    expect(back).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(['/chats'], { replaceUrl: true });
+  });
+
+  it('returns a directly opened thread to its parent conversation', async () => {
+    await enterThread();
+    vi.mocked(TestBed.inject(IonRouterOutlet).canGoBack).mockReturnValue(false);
+    const back = vi.spyOn(TestBed.inject(Location), 'back').mockImplementation(() => {});
+    const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateBack').mockResolvedValue(true);
+    component['back']();
+    expect(back).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], { replaceUrl: true });
+  });
+
+  it('returns a thread to its root message on desktop', async () => {
+    await enterThread();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    component['backToChat']();
+    expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id], {
+      replaceUrl: true,
+      fragment: 'msg=100',
+    });
+  });
+
   it('opens the collapsed toolbar actions from the narrow-screen button', () => {
     const present = vi.spyOn(IonPopover.prototype, 'present').mockResolvedValue();
     component['compactToolbar'].set(true);
@@ -249,10 +307,8 @@ describe('ConversationPage', () => {
       page.classList.add('ion-page');
       const content = page.querySelector<HTMLElement>(':scope > ion-content')!;
       const title = page.querySelector<HTMLElement>(':scope > ion-header ion-title')!;
-      const back = page.querySelector<HTMLElement>(':scope > ion-header ion-back-button')!;
       expect(content).not.toBeNull();
       expect(title).not.toBeNull();
-      expect(back).not.toBeNull();
       const other = document.createElement('div');
       const animation = iosTransitionAnimation(document.createElement('div'), {
         baseEl: document.createElement('div'),
@@ -264,11 +320,9 @@ describe('ConversationPage', () => {
       for (const part of parts) parts.push(...part.childAnimations);
       const contentAnimation = parts.find((part) => part.elements.includes(content))!;
       const titleAnimation = parts.find((part) => part.elements.includes(title))!;
-      const backAnimation = parts.find((part) => part.elements.includes(back))!;
       expect(titleAnimation).not.toBe(contentAnimation);
       expect(contentAnimation.getKeyframes().some((frame) => frame['transform'])).toBe(true);
       expect(titleAnimation.getKeyframes().some((frame) => frame['transform'] && frame['opacity'] != null)).toBe(true);
-      expect(backAnimation.getKeyframes().some((frame) => frame['opacity'] != null)).toBe(true);
       animation.destroy();
     },
   );
@@ -1989,7 +2043,7 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('');
     expect(component['firstUnreadId']()).toBe(encodeId('102'));
     expect(fixture.nativeElement.querySelector('.conversation-title > span').textContent.trim()).toBe('测试消息');
-    expect(component['backHref']()).toBe(`/chats/chat/${wireChat.id}`);
+    expect(component['showBackToChat']()).toBe(true);
     component['draft'].set('话题草稿');
     await enterThread('99', {});
     expect(component['draft']()).toBe('');
