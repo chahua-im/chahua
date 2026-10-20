@@ -116,7 +116,7 @@
 // The frame keeps the image ratio until its height is capped. Size the image element to
 // the contained image itself so its opaque backing never covers the blurred side gutters.
 .media-frame.fill img {
-  width: min(100%, calc(var(--media-max-height) * var(--media-aspect-ratio)));
+  width: min(100%, calc(var(--media-max-height) * var(--media-aspect-ratio)), var(--media-natural-width, 100%));
   left: 50%;
   transform: translateX(-50%);
   background: var(--ion-color-medium);
