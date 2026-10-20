@@ -69,20 +69,24 @@
   -webkit-touch-callout: none;
 }
 
-// Marks the message a menu action is running against without moving the row.
+// A menu action in flight sits outside the bubble, in the gutter the reply button uses:
+// trailing for incoming messages, leading for outgoing ones.
 .acting {
   position: absolute;
   z-index: 1;
-  inset-block-start: 6px;
-  inset-inline-end: 6px;
+  inset-block-start: 2px;
+  inset-inline-end: -22px;
   display: grid;
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--ion-background-color) 82%, transparent);
   color: var(--ion-color-medium);
   pointer-events: none;
+}
+
+.sent .acting {
+  inset-inline-start: -22px;
+  inset-inline-end: auto;
 }
 
 .acting ion-spinner {
@@ -390,6 +394,10 @@
 
 .chat-row:hover .reply-button {
   opacity: 1;
+}
+
+.chat-row:has(.acting) .reply-button {
+  opacity: 0;
 }
 
 .chat-row.dragging {

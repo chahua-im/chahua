@@ -372,7 +372,9 @@
         "copy": "Copy",
         "edit": "Edit",
         "save": "Save",
+        "unsave": "Unsave",
         "favoriteSticker": "Favorite sticker",
+        "unfavoriteSticker": "Unfavorite sticker",
         "link": "Link",
         "recall": "Recall",
         "reactions": "View reactions"
@@ -389,6 +391,7 @@
       "notice": {
         "copied": "Copied",
         "saved": "Saved",
+        "unsaved": "Unsaved",
         "pinned": "Pinned",
         "unpinned": "Unpinned",
         "recalled": "Recalled",

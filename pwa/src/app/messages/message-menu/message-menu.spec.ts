@@ -1,5 +1,3 @@
-import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
-import { of } from 'rxjs';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -8,7 +6,7 @@ import { IonModal } from '@ionic/angular';
 import { timeOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
 import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
-import { encodeId } from '../../api/snowflake-id';
+import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../../api/testing';
 import { ChatStore } from '../../chats/chat-store';
 import { SessionStore } from '../../session/session-store';
@@ -18,6 +16,8 @@ import { MessageDelivery } from '../message-delivery';
 import { MessageNotice } from '../message-notice';
 import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
 import { Message, type MessageContent } from '../message/message';
+import { SavedMessageStore } from '../saved-message-store';
+import { StickerFavorites } from '../sticker-favorites';
 import { MessageAction, MessageMenu, pageSlots, type MenuSlot } from './message-menu';
 
 describe('MessageMenu', () => {
@@ -45,9 +45,23 @@ describe('MessageMenu', () => {
     cancel: vi.fn<(item: OutgoingMessage) => void>(),
   };
   const actions = {
-    save: vi.fn().mockResolvedValue(undefined),
     recall: vi.fn().mockResolvedValue(undefined),
     toggleReaction: vi.fn().mockResolvedValue(undefined),
+  };
+  const savedIds = signal<ReadonlySet<SnowflakeID>>(new Set());
+  const favoriteIds = signal<ReadonlySet<SnowflakeID>>(new Set());
+  const savedMessages = {
+    ensure: vi.fn().mockResolvedValue(undefined),
+    isSaved: (_chatId: SnowflakeID, messageId: SnowflakeID) => savedIds().has(messageId),
+    loading: () => false,
+    save: vi.fn().mockResolvedValue(undefined),
+    unsave: vi.fn().mockResolvedValue(undefined),
+  };
+  const favoriteStickers = {
+    ensure: vi.fn().mockResolvedValue(undefined),
+    isFavorite: (stickerId: SnowflakeID) => favoriteIds().has(stickerId),
+    loading: () => false,
+    set: vi.fn().mockResolvedValue(undefined),
   };
   const selection = () => ({
     messageId: testMessage.id,
@@ -62,6 +76,8 @@ describe('MessageMenu', () => {
     vi.clearAllMocks();
     outbox.items.set([]);
     outbox.cancel.mockReset();
+    savedIds.set(new Set());
+    favoriteIds.set(new Set());
     setMessages([testMessage]);
     admin.set(false);
     pinned.set(false);
@@ -80,7 +96,8 @@ describe('MessageMenu', () => {
     await TestBed.configureTestingModule({
       imports: [MessageMenu],
       providers: [
-        { provide: StickersService, useValue: { putFavorite: vi.fn(() => of(undefined)) } },
+        { provide: SavedMessageStore, useValue: savedMessages },
+        { provide: StickerFavorites, useValue: favoriteStickers },
         {
           provide: Preferences,
           useValue: {
@@ -273,7 +290,7 @@ describe('MessageMenu', () => {
     expect(ensureDetails).toHaveBeenCalledExactlyOnceWith(testChat.id);
     expect(conversation.ensure).toHaveBeenCalledOnce();
     await menu['choose'](MessageAction.Save);
-    expect(actions.save).toHaveBeenCalledExactlyOnceWith(confirmed);
+    expect(savedMessages.save).toHaveBeenCalledExactlyOnceWith(confirmed);
   });
 
   it('hides a cancelled queue item even while it remains in the outbox', () => {
@@ -313,7 +330,7 @@ describe('MessageMenu', () => {
     await menu.reactTo(testMessage, '👍');
     expect(reply).not.toHaveBeenCalled();
     expect(thread).not.toHaveBeenCalled();
-    expect(actions.save).not.toHaveBeenCalled();
+    expect(savedMessages.save).not.toHaveBeenCalled();
     expect(actions.toggleReaction).not.toHaveBeenCalled();
     expect(menu['confirmation']()).toBeUndefined();
     expect(ensureDetails).not.toHaveBeenCalled();
@@ -554,7 +571,7 @@ describe('MessageMenu', () => {
 
   it('keeps feedback local and ignores completion after the owning page leaves', async () => {
     let finish!: () => void;
-    actions.save.mockReturnValueOnce(
+    savedMessages.save.mockReturnValueOnce(
       new Promise<void>((resolve) => {
         finish = resolve;
       }),
@@ -565,7 +582,7 @@ describe('MessageMenu', () => {
     expect(menu.busy()).toBe(true);
     expect(menu['selection']()).toBeUndefined();
     await menu['choose'](MessageAction.Save);
-    expect(actions.save).toHaveBeenCalledOnce();
+    expect(savedMessages.save).toHaveBeenCalledOnce();
     menu.reset();
     finish();
     await saving;
@@ -612,8 +629,40 @@ describe('MessageMenu', () => {
     expect(labels()).toEqual(['回复', '收藏表情', '链接', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     await menu['choose'](MessageAction.FavoriteSticker);
-    expect(TestBed.inject(StickersService).putFavorite).toHaveBeenCalledWith(sticker.id);
-    expect(actions.save).not.toHaveBeenCalled();
+    expect(favoriteStickers.set).toHaveBeenCalledWith(sticker.id, true);
+    expect(savedMessages.save).not.toHaveBeenCalled();
+  });
+
+  it('reverses the saved state of the selected message', async () => {
+    savedIds.set(new Set([testMessage.id]));
+    menu.reset();
+    menu.open(selection());
+    fixture.detectChanges();
+    expect(labels()).toContain('取消收藏');
+    await menu['choose'](MessageAction.Save);
+    expect(savedMessages.unsave).toHaveBeenCalledWith(testMessage);
+    expect(savedMessages.save).not.toHaveBeenCalled();
+    expect(menu['notice']()).toBe(MessageNotice.Unsaved);
+  });
+
+  it('reverses the favorite state of the selected sticker', async () => {
+    const sticker = {
+      id: encodeId('123'),
+      emoji: '🙂',
+      name: '表情',
+      createdAt: testMessage.createdAt,
+      isFavorited: true,
+      media: { id: encodeId('124'), url: '/sticker.png', contentType: 'image/png', width: 100, height: 100, size: 20 },
+    };
+    favoriteIds.set(new Set([sticker.id]));
+    setMessages([{ ...testMessage, messageType: MessageType.sticker, sticker }]);
+    menu.reset();
+    menu.open(selection());
+    fixture.detectChanges();
+    expect(labels()).toContain('取消收藏表情');
+    await menu['choose'](MessageAction.FavoriteSticker);
+    expect(favoriteStickers.set).toHaveBeenCalledWith(sticker.id, false);
+    expect(menu['notice']()).toBe(MessageNotice.Unsaved);
   });
 });
 

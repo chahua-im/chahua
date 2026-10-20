@@ -39,6 +39,8 @@ import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
 import { MessageOutbox } from '../../messages/message-outbox';
 import { Message, type MessageContent } from '../../messages/message/message';
+import { SavedMessageStore } from '../../messages/saved-message-store';
+import { StickerFavorites } from '../../messages/sticker-favorites';
 import { VoicePlayback, type VoiceDock } from '../../messages/voice-player/voice-playback';
 import { VoicePlayer } from '../../messages/voice-player/voice-player';
 import { UploadStatus, type AttachmentUpload } from '../../messages/upload';
@@ -125,6 +127,25 @@ describe('ConversationPage', () => {
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
+        {
+          provide: SavedMessageStore,
+          useValue: {
+            ensure: () => Promise.resolve(),
+            isSaved: () => false,
+            loading: () => false,
+            save: vi.fn(),
+            unsave: vi.fn(),
+          },
+        },
+        {
+          provide: StickerFavorites,
+          useValue: {
+            ensure: () => Promise.resolve(),
+            isFavorite: () => false,
+            loading: () => false,
+            set: vi.fn(),
+          },
+        },
       ],
     }).compileComponents();
     vi.spyOn(TestBed.inject(PinsService), 'listPins').mockImplementation((() =>
