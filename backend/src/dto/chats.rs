@@ -15,9 +15,11 @@ pub struct ChatListItem {
     pub avatar: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub unread_count: i64,
+    #[schema(required = false)]
     pub unread_mentions: i64,
     /// Unread-reaction message count (reactions on my messages newer than my
     /// reaction cursor). Never folded into `unread_count`.
+    #[schema(required = false)]
     pub unread_reactions: i64,
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
@@ -46,18 +48,34 @@ pub struct MarkChatReadStateResponse {
     #[schema(value_type = Option<String>)]
     pub last_read_message_id: Option<i64>,
     pub unread_count: i64,
+    #[schema(required = false)]
     pub unread_mentions: i64,
+    #[schema(required = false)]
     pub unread_reactions: i64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnreadCountResponse {
+    /// Complete mention/reply presence for each active list category.
+    #[schema(required = false)]
+    pub mention_badges: MentionBadges,
+    #[schema(required = false)]
+    pub archived_mention_badges: MentionBadges,
     pub unread_count: i64,
     pub archived_unread_count: i64,
     pub unread_chat_count: i64,
     pub archived_unread_chat_count: i64,
+    #[schema(required = false)]
     pub unread_mentions: i64,
+}
+
+#[derive(Default, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MentionBadges {
+    pub groups: bool,
+    pub friends: bool,
+    pub threads: bool,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

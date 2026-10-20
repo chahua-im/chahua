@@ -682,6 +682,7 @@ struct UnreadMentionsQuery {
 #[utoipa::path(
     get,
     path = "/mentions",
+    tag = "chats",
     params(
         ("chat_id" = String, Path, description = "Chat ID"),
         ("threadId" = Option<String>, Query, description = "Thread root message id; omit for main-scope mentions"),
@@ -861,17 +862,12 @@ async fn get_unread_count(
     let conn = &mut *conn;
 
     let counts = state.unread_service.count_user_unread_summary(conn, uid)?;
-    let mention_counts = state
-        .unread_service
-        .count_user_chat_unread_mentions(conn, uid)?;
-    // Reaction badges are list-only by design and never join this global
-    // aggregation (see `count_user_chat_unread_reactions`).
-    let unread_mentions = mention_counts.values().copied().fold(0i64, |acc, n| {
-        acc.saturating_add(n)
-            .min(crate::constants::MAX_UNREAD_COUNT)
-    });
+    let (unread_mentions, mention_badges, archived_mention_badges) =
+        state.unread_service.count_user_mention_summary(conn, uid)?;
 
     Ok(Json(UnreadCountResponse {
+        mention_badges,
+        archived_mention_badges,
         unread_count: counts.unread_count,
         archived_unread_count: counts.archived_unread_count,
         unread_chat_count: counts.unread_chat_count,

@@ -121,6 +121,47 @@ struct UnreadReactionIdRow {
     message_id: i64,
 }
 
+#[derive(diesel::QueryableByName)]
+struct MentionScopeCount {
+    #[diesel(sql_type = crate::schema::sql_types::GroupKind)]
+    kind: crate::models::GroupKind,
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    archived: bool,
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    is_thread: bool,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    count: i64,
+}
+
+fn mention_summary(
+    rows: Vec<MentionScopeCount>,
+) -> (
+    i64,
+    crate::dto::chats::MentionBadges,
+    crate::dto::chats::MentionBadges,
+) {
+    let mut active = crate::dto::chats::MentionBadges::default();
+    let mut archived = crate::dto::chats::MentionBadges::default();
+    let mut total: i64 = 0;
+    for row in rows {
+        total = total.saturating_add(row.count).min(MAX_UNREAD_COUNT);
+        let badges = if row.archived {
+            &mut archived
+        } else {
+            &mut active
+        };
+        if row.is_thread {
+            badges.threads |= row.count > 0;
+        } else {
+            match row.kind {
+                crate::models::GroupKind::Group => badges.groups |= row.count > 0,
+                crate::models::GroupKind::Dm => badges.friends |= row.count > 0,
+            }
+        }
+    }
+    (total, active, archived)
+}
+
 impl UnreadService {
     pub fn new() -> Self {
         Self::default()
@@ -192,6 +233,42 @@ impl UnreadService {
             .into_iter()
             .map(|r| (r.chat_id, r.mention_count.min(MAX_UNREAD_COUNT)))
             .collect())
+    }
+
+    /// Full category presence, independent of list pagination. The mention index
+    /// leads with mentioned_uid; membership, thread state and root joins use their
+    /// keys. SQL handles the different main/thread read cursors in one scan.
+    pub fn count_user_mention_summary(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+    ) -> Result<
+        (
+            i64,
+            crate::dto::chats::MentionBadges,
+            crate::dto::chats::MentionBadges,
+        ),
+        DieselError,
+    > {
+        let rows = sql_query(
+            "SELECT g.kind,
+                    CASE WHEN mm.thread_root_id IS NULL THEN gm.archived ELSE ts.archived END AS archived,
+                    (mm.thread_root_id IS NOT NULL) AS is_thread,
+                    COUNT(*)::BIGINT AS count
+             FROM message_mentions mm
+             JOIN group_membership gm ON gm.chat_id = mm.chat_id AND gm.uid = mm.mentioned_uid
+             JOIN groups g ON g.id = mm.chat_id
+             LEFT JOIN thread_user_states ts ON ts.chat_id = mm.chat_id
+                  AND ts.thread_root_id = mm.thread_root_id AND ts.uid = mm.mentioned_uid
+             LEFT JOIN messages root ON root.id = mm.thread_root_id
+             WHERE mm.mentioned_uid = $1
+               AND ((mm.thread_root_id IS NULL AND mm.message_id > COALESCE(gm.last_read_message_id, 0))
+                 OR (ts.subscribed = TRUE AND root.reply_root_id IS NULL
+                     AND root.has_thread = TRUE AND root.is_published = TRUE
+                     AND mm.message_id > COALESCE(ts.last_read_message_id, 0)))
+             GROUP BY 1, 2, 3",
+        ).bind::<diesel::sql_types::Integer, _>(uid).load::<MentionScopeCount>(conn)?;
+        Ok(mention_summary(rows))
     }
 
     /// Unread @mention count for a single chat, given the user's read pointer.
@@ -1441,6 +1518,47 @@ mod tests {
         assert!(
             matches!(result, Err(diesel::result::Error::RollbackTransaction)),
             "transaction should roll back"
+        );
+    }
+
+    #[test]
+    fn mention_categories_include_unloaded_scopes_and_separate_archives() {
+        let (total, active, archived) = super::mention_summary(vec![
+            super::MentionScopeCount {
+                kind: crate::models::GroupKind::Group,
+                archived: false,
+                is_thread: false,
+                count: 1,
+            },
+            super::MentionScopeCount {
+                kind: crate::models::GroupKind::Dm,
+                archived: true,
+                is_thread: false,
+                count: 2,
+            },
+            super::MentionScopeCount {
+                kind: crate::models::GroupKind::Group,
+                archived: false,
+                is_thread: true,
+                count: 3,
+            },
+        ]);
+        assert_eq!(total, 6);
+        assert_eq!(
+            active,
+            crate::dto::chats::MentionBadges {
+                groups: true,
+                friends: false,
+                threads: true
+            }
+        );
+        assert_eq!(
+            archived,
+            crate::dto::chats::MentionBadges {
+                groups: false,
+                friends: true,
+                threads: false
+            }
         );
     }
 
