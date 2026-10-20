@@ -21,6 +21,17 @@ const snapshot: SavedMessageResponse = {
 };
 
 describe('savedMessageContent rendered by Message', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
   async function render(message: SavedMessageResponse) {
     await TestBed.configureTestingModule({ imports: [Message] }).compileComponents();
     const fixture = TestBed.createComponent(Message);

@@ -33,6 +33,9 @@ class ContentStub {
 describe('ChatList', () => {
   let fixture: ComponentFixture<ChatList>;
   beforeEach(async () => {
+    vi.stubGlobal('matchMedia', (query: string) =>
+      Object.assign(new EventTarget(), { matches: query === '(prefers-reduced-motion: reduce)' }),
+    );
     await TestBed.configureTestingModule({
       imports: [ChatList],
       providers: [

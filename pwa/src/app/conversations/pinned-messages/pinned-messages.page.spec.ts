@@ -192,6 +192,8 @@ describe('PinnedMessagesPage', () => {
     select(pin.message);
     const saving = page['menu']()!['choose'](MessageAction.Save);
     await settle();
+    http.expectOne(`/_api/chats/${wireChat.id}/saved-messages?limit=50`).flush({ savedMessages: [] });
+    await settle();
     http.expectOne(`/_api/saved-messages/${wireMessage.id}`).flush(savedSnapshot());
     await saving;
     expect(page['menu']()!['notice']()).toBe(MessageNotice.Saved);
