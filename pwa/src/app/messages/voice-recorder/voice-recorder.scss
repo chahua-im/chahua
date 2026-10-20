@@ -16,8 +16,6 @@
   min-width: 0;
   min-height: var(--composer-control-size, 36px);
   padding: 0 8px 0 12px;
-  border: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
-  border-radius: 20px;
 }
 .timer {
   font-size: var(--app-font-body);
@@ -55,7 +53,7 @@ app-voice-player {
   }
 }
 .action-slot {
-  width: 44px;
+  width: var(--composer-control-size, 36px);
   display: flex;
   justify-content: center;
   flex-shrink: 0;

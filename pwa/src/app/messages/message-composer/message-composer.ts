@@ -15,9 +15,19 @@ import {
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { IonAlert, IonButton, IonIcon, IonItem, IonLabel, IonList, IonTextarea, isPlatform } from '@ionic/angular';
 import {
-  addCircleOutline,
+  IonAlert,
+  IonButton,
+  IonIcon,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonPopover,
+  IonTextarea,
+  isPlatform,
+} from '@ionic/angular';
+import {
+  attachOutline,
   closeOutline,
   documentOutline,
   happyOutline,
@@ -59,7 +69,6 @@ export interface Composition {
 }
 enum Panel {
   None,
-  Attachments,
   Stickers,
 }
 @Component({
@@ -77,6 +86,7 @@ enum Panel {
     IonTextarea,
     UploadProgress,
     IonList,
+    IonPopover,
     IonItem,
     IonLabel,
     StickerPicker,
@@ -108,7 +118,7 @@ export class MessageComposer {
   readonly editLast = output<void>();
   readonly escape = output<void>();
   protected readonly icons = {
-    addCircleOutline,
+    attachOutline,
     happyOutline,
     send,
     closeOutline,

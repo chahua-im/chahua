@@ -347,7 +347,7 @@
   </ion-button>
 </ng-template>
 
-<ion-popover #actionsMenu side="bottom" alignment="end" [dismissOnSelect]="true">
+<ion-popover #actionsMenu side="bottom" alignment="end" [arrow]="false" [dismissOnSelect]="true">
   <ng-template>
     <ion-list class="actions-menu" lines="none">
       <ion-item [button]="true" (click)="search()">

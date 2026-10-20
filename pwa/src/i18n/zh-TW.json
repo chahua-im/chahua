@@ -409,7 +409,7 @@
       "editMediaOnly": "編輯訊息時只能新增圖片或影片。",
       "processingFailed": "處理失敗，請檢查檔案大小、權限或網路後重試。",
       "placeholder": "輸入訊息",
-      "photos": "照片",
+      "media": "媒體",
       "files": "檔案",
       "blockedTitle": "無法傳送訊息",
       "blockedSelf": "你已將對方封鎖，解除封鎖後可以繼續聊天。",
