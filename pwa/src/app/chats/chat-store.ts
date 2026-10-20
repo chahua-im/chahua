@@ -650,7 +650,12 @@ export class ChatStore {
       if ((summaries.get(rootId)?.version ?? 0) <= version) summaries.set(rootId, { value: summary, version });
       if ((reads.get(rootId)?.version ?? 0) <= version)
         reads.set(rootId, {
-          state: { lastReadMessageId, unreadCount, unreadMentions: unreadMentions ?? 0, unreadReactions: unreadReactions ?? 0 },
+          state: {
+            lastReadMessageId,
+            unreadCount,
+            unreadMentions: unreadMentions ?? 0,
+            unreadReactions: unreadReactions ?? 0,
+          },
           version,
           dirty: false,
         });
