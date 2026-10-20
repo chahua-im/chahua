@@ -4,7 +4,7 @@ Ionic iOS 模式负责 toolbar、列表、按钮、modal、popover、segment 和
 
 ## 导航动画
 
-单列的会话进入和返回使用 Ionic 默认 iOS 页面动画。会话页面直接包含 `ion-header`、`ion-content` 和 `ion-footer`，标题、返回按钮及其文字、正文分别由 Ionic 默认转场处理；分栏切换会话不播放页面动画。Safari 已提供可视返回转场时，Ionic 只完成页面显示状态清理。
+单列的会话进入和返回使用 Ionic 默认 iOS 页面动画。会话页面直接包含 `ion-header`、`ion-content` 和 `ion-footer`，标题、仅显示箭头的返回按钮、正文分别由 Ionic 默认转场处理；分栏切换会话不播放页面动画。Safari 已提供可视返回转场时，Ionic 只完成页面显示状态清理。
 
 聊天列表保留 Ionic `ion-segment` 的选中指示器。内容区使用浏览器 Web Animations，只让当前分类与目标分类按方向横移一页宽，时长 200ms；中间分类不参与。快速切换取消上一段动画，减少动态效果时直接切换。内容区不提供左右手势，toolbar 保持固定。四个分类常驻，各自保留滚动位置，只有当前分类激活读取和续页。归档与好友请求历史使用独立列表内容和 Ionic 返回按钮；单列保留分类路由和浏览器历史，分栏切分类不改变右侧会话。
 
@@ -87,7 +87,7 @@ NotificationPrompt 使用 Angular 默认的 Emulated 封装，模板内 spinner 
 | LoadError              | 页面级与紧凑失败布局、图标底色、间距和重试按钮。                                                                                         |
 | ChatAvatar             | 默认列表头像使用平台尺寸；显式 88px 等尺寸用于资料；话题角标、边框及占位。                                                               |
 | ChatDetails            | 内容容器、安全区、居中资料、横排操作及紧凑标签。                                                                                         |
-| ConversationPage       | 360px 信息栏、手动锚点下关闭浏览器二次锚定、未读线、下箭头与置顶/回复栏；吸顶语音播放条；主 toolbar 保留底边，置顶栏有自己的底边。        |
+| ConversationPage       | 360px 信息栏、移动端标题无法完整显示时操作收进竖排三点菜单并在下方弹出带图标的纵向操作列表、手动锚点下关闭浏览器二次锚定、未读线、下箭头与置顶/回复栏；吸顶语音播放条；主 toolbar 保留底边，置顶栏有自己的底边。        |
 | SavedMessageList       | 收藏消息背景、来源与快照操作排列；用于全局收藏页面。                                                                                     |
 | Message                | 气泡、尾巴、作者分组、媒体贴边、时间、引用、桌面 hover 与手机回复手势反馈。                                                              |
 | MessageAuthor          | 用户名、用户组和性别在同一行的颜色及密度。                                                                                               |

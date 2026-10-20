@@ -7,7 +7,6 @@
     "name": "Chahua"
   },
   "common": {
-    "back": "Back",
     "done": "Done",
     "save": "Save",
     "saved": "Saved",
@@ -281,6 +280,15 @@
     }
   },
   "conversation": {
+    "actions": {
+      "search": "Search",
+      "mute": "Mute",
+      "unmute": "Unmute",
+      "info": "Chat info",
+      "subscribeThread": "Subscribe to topic",
+      "archiveThread": "Archive topic",
+      "unarchiveThread": "Unarchive topic"
+    },
     "thread": "Thread",
     "chat": "Conversation",
     "pinned": "Pinned message",

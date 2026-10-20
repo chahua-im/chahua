@@ -1,7 +1,7 @@
 <ion-header>
-  <ion-toolbar>
+  <ion-toolbar #toolbar>
     <ion-buttons slot="start" class="ion-hide-md-up">
-      <ion-back-button [text]="'common.back' | transloco" [defaultHref]="backHref()"></ion-back-button>
+      <ion-back-button [defaultHref]="backHref()"></ion-back-button>
     </ion-buttons>
     @if (threadId()) {
       <ion-buttons slot="start" class="ion-hide-md-down">
@@ -13,7 +13,7 @@
     <ion-title (click)="details()">
       <span class="conversation-title">
         <app-chat-avatar [entry]="chatTitle().avatar" [size]="32" />
-        <span>
+        <span #titleText>
           @if (threadId()) {
             @if (threadRoot(); as root) {
               <app-message-preview [message]="root" />
@@ -26,54 +26,17 @@
         </span>
       </span>
     </ion-title>
-    <ion-buttons slot="end">
-      <ion-button (click)="search()">
-        <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
-      </ion-button>
-      @if (threadId()) {
-        @if (subscription(); as status) {
-          <ion-button [disabled]="threadBusy()" (click)="updateThread()">
-            <span class="action-content" [class.busy]="threadBusy()">
-              <ion-icon
-                class="action-label action-icon"
-                [icon]="
-                  !status.subscribed
-                    ? threadIcons.starOutline
-                    : status.archived
-                      ? threadIcons.archive
-                      : threadIcons.archiveOutline
-                " />
-              @if (threadBusy()) {
-                <ion-spinner class="action-icon"></ion-spinner>
-              }
-            </span>
-          </ion-button>
-        } @else if (threadBusy()) {
-          <ion-button disabled>
-            <ion-spinner class="action-icon" slot="icon-only"></ion-spinner>
-          </ion-button>
-        }
-      } @else {
-        <ion-button [disabled]="muteBusy()" (click)="toggleMute()">
-          <ion-icon
-            class="action-icon"
-            slot="icon-only"
-            [icon]="muted() ? toolbarIcons.notificationsOffOutline : toolbarIcons.notificationsOutline" />
+    <ion-buttons #toolbarActions slot="end" class="ion-hide-md-up">
+      @if (compactToolbar()) {
+        <ion-button (click)="actionsMenu.present($event)">
+          <ion-icon slot="icon-only" [icon]="toolbarIcons.ellipsisVertical" />
         </ion-button>
+      } @else {
+        <ng-container [ngTemplateOutlet]="actions" />
       }
-      <ion-button class="info-button" (click)="details()">
-        @if (largeScreen()) {
-          <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <path d="M15 4v16" />
-            @if (sidebarOpen()) {
-              <path d="M17 7h2v10h-2z" fill="currentColor" stroke="none" />
-            }
-          </svg>
-        } @else {
-          <ion-icon slot="icon-only" [icon]="infoIcon" />
-        }
-      </ion-button>
+    </ion-buttons>
+    <ion-buttons slot="end" class="ion-hide-md-down">
+      <ng-container [ngTemplateOutlet]="actions" />
     </ion-buttons>
   </ion-toolbar>
   @if (selectedPin(); as pin) {
@@ -336,6 +299,74 @@
     }
   </aside>
 }
+
+<ng-template #actions>
+  <ion-button (click)="search()">
+    <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
+  </ion-button>
+  @if (threadAction(); as action) {
+    <ion-button [disabled]="threadBusy()" (click)="updateThread()">
+      <span class="action-content" [class.busy]="threadBusy()">
+        <ion-icon class="action-label action-icon" [icon]="action.icon" />
+        @if (threadBusy()) {
+          <ion-spinner class="action-icon"></ion-spinner>
+        }
+      </span>
+    </ion-button>
+  } @else if (threadBusy()) {
+    <ion-button disabled>
+      <ion-spinner class="action-icon" slot="icon-only"></ion-spinner>
+    </ion-button>
+  } @else if (!threadId()) {
+    <ion-button [disabled]="muteBusy()" (click)="toggleMute()">
+      <ion-icon
+        class="action-icon"
+        slot="icon-only"
+        [icon]="muted() ? toolbarIcons.notificationsOffOutline : toolbarIcons.notificationsOutline" />
+    </ion-button>
+  }
+  <ion-button (click)="details()">
+    @if (largeScreen()) {
+      <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="M15 4v16" />
+        @if (sidebarOpen()) {
+          <path d="M17 7h2v10h-2z" fill="currentColor" stroke="none" />
+        }
+      </svg>
+    } @else {
+      <ion-icon slot="icon-only" [icon]="infoIcon" />
+    }
+  </ion-button>
+</ng-template>
+
+<ion-popover #actionsMenu side="bottom" alignment="end" [dismissOnSelect]="true">
+  <ng-template>
+    <ion-list class="actions-menu" lines="none">
+      <ion-item [button]="true" (click)="search()">
+        <ion-icon slot="start" [icon]="toolbarIcons.searchOutline" />
+        <ion-label>{{ 'conversation.actions.search' | transloco }}</ion-label>
+      </ion-item>
+      @if (threadAction(); as action) {
+        <ion-item [button]="true" [disabled]="threadBusy()" (click)="updateThread()">
+          <ion-icon slot="start" [icon]="action.icon" />
+          <ion-label>{{ action.label | transloco }}</ion-label>
+        </ion-item>
+      } @else if (!threadId()) {
+        <ion-item [button]="true" [disabled]="muteBusy()" (click)="toggleMute()">
+          <ion-icon
+            slot="start"
+            [icon]="muted() ? toolbarIcons.notificationsOffOutline : toolbarIcons.notificationsOutline" />
+          <ion-label>{{ (muted() ? 'conversation.actions.unmute' : 'conversation.actions.mute') | transloco }}</ion-label>
+        </ion-item>
+      }
+      <ion-item [button]="true" (click)="details()">
+        <ion-icon slot="start" [icon]="infoIcon" />
+        <ion-label>{{ 'conversation.actions.info' | transloco }}</ion-label>
+      </ion-item>
+    </ion-list>
+  </ng-template>
+</ion-popover>
 
 <app-message-menu
   [messages]="conversation.items()"

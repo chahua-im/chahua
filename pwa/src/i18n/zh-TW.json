@@ -7,7 +7,6 @@
     "name": "茶話"
   },
   "common": {
-    "back": "返回",
     "done": "完成",
     "save": "儲存",
     "saved": "已儲存",
@@ -281,6 +280,15 @@
     }
   },
   "conversation": {
+    "actions": {
+      "search": "搜尋",
+      "mute": "靜音",
+      "unmute": "取消靜音",
+      "info": "聊天資訊",
+      "subscribeThread": "訂閱話題",
+      "archiveThread": "封存話題",
+      "unarchiveThread": "取消封存話題"
+    },
     "thread": "話題",
     "chat": "會話",
     "pinned": "置頂訊息",

@@ -205,7 +205,7 @@ describe('ChatList', () => {
       expect(contents.length).toBe(1);
       expect(contents[0].componentInstance.selection()).toEqual(selection);
       const back: HTMLIonBackButtonElement = fixture.nativeElement.querySelector('ion-back-button');
-      expect(back.text).toBe('返回');
+      expect(back.text).toBeUndefined();
       back.click();
       await fixture.whenStable();
       expect(opened).toHaveBeenLastCalledWith(normal);

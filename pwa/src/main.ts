@@ -58,6 +58,7 @@ bootstrapApplication(App, {
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
     provideIonicAngular({
       mode: 'ios',
+      backButtonText: '',
       spinner: 'circular',
       loadingSpinner: 'circular',
       refreshingSpinner: 'circular',
