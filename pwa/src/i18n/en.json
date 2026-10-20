@@ -409,7 +409,7 @@
       "editMediaOnly": "You can only add photos or videos while editing.",
       "processingFailed": "Processing failed. Check the file size, permissions, or network and try again.",
       "placeholder": "Type a message",
-      "photos": "Photos",
+      "media": "Media",
       "files": "Files",
       "blockedTitle": "Can't send messages",
       "blockedSelf": "You blocked this user. Unblock them to continue chatting.",

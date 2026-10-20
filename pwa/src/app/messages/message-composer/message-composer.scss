@@ -106,8 +106,11 @@
 .bar {
   display: flex;
   align-items: flex-end;
-  padding: 8px 12px;
+  margin: 8px 12px;
+  padding: 2px;
   gap: 4px;
+  border: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
+  border-radius: calc(var(--composer-control-size) / 2 + 3px);
 }
 .attach-button,
 .sticker-button {
@@ -123,6 +126,9 @@
   font-size: 28px;
   color: var(--ion-color-primary);
 }
+.attach-button ion-icon {
+  transform: rotate(45deg);
+}
 .sticker-button {
   width: 32px;
   font-size: 22px;
@@ -137,8 +143,6 @@
   flex: 1;
   min-width: 0;
   min-height: var(--composer-control-size);
-  border: 1px solid var(--ion-background-color-step-200, var(--ion-color-light-shade));
-  border-radius: 20px;
   overflow: hidden;
 }
 .input-wrapper[hidden] {
@@ -154,7 +158,7 @@ ion-textarea {
   --padding-end: 4px;
 }
 .action-slot {
-  width: 44px;
+  width: var(--composer-control-size);
   flex-shrink: 0;
   display: flex;
   justify-content: center;
@@ -175,36 +179,9 @@ ion-textarea {
 button:disabled {
   opacity: 0.45;
 }
-.attachment-panel {
-  height: 260px;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 12px;
-  border-top: 1px solid var(--ion-background-color-step-150, var(--ion-color-light-shade));
+.actions-menu {
+  padding-block: 4px;
 }
-.attachment-panel button {
-  width: 88px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  color: var(--ion-color-primary);
-  font-size: var(--app-font-compact);
-  line-height: var(--app-line-compact);
-  font-weight: 600;
-}
-.attachment-panel span {
-  width: 88px;
-  height: 88px;
-  display: grid;
-  place-items: center;
-  border-radius: 24px;
-  background: rgba(var(--ion-color-primary-rgb), 0.08);
-  font-size: 28px;
-}
-
 .input-row {
   display: flex;
   align-items: flex-end;

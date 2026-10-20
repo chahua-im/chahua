@@ -81,8 +81,12 @@
   (change)="files($event, Purpose.media)" />
 <input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
 <div class="bar">
-  <button type="button" class="attach-button" [disabled]="voiceActive()" (click)="togglePanel(Panel.Attachments)">
-    <ion-icon [icon]="icons.addCircleOutline" />
+  <button
+    type="button"
+    class="attach-button"
+    [disabled]="voiceActive()"
+    (click)="panel.set(Panel.None); blur(); attachmentMenu.present($event)">
+    <ion-icon [icon]="icons.attachOutline" />
   </button>
   <div class="input-wrapper" [hidden]="voiceActive()">
     <ng-content />
@@ -127,23 +131,30 @@
     </div>
   }
 </div>
-@switch (panel()) {
-  @case (Panel.Attachments) {
-    <div class="attachment-panel">
-      <button type="button" (click)="photos.click()">
-        <span><ion-icon [icon]="icons.imageOutline" /></span>
-        {{ 'messages.composer.photos' | transloco }}
-      </button>
-      <button type="button" [disabled]="!!editing()" (click)="filesInput.click()">
-        <span><ion-icon [icon]="icons.documentOutline" /></span>
-        {{ 'messages.composer.files' | transloco }}
-      </button>
-    </div>
-  }
-  @case (Panel.Stickers) {
-    <app-sticker-picker [embedded]="true" (selected)="sticker($event)" />
-  }
+@if (panel() === Panel.Stickers) {
+  <app-sticker-picker [embedded]="true" (selected)="sticker($event)" />
 }
+
+<ion-popover
+  #attachmentMenu
+  side="top"
+  alignment="start"
+  [arrow]="false"
+  [dismissOnSelect]="true"
+  style="--width: 160px">
+  <ng-template>
+    <ion-list class="actions-menu" lines="none">
+      <ion-item [button]="true" [detail]="false" (click)="photos.click()">
+        <ion-icon slot="start" [icon]="icons.imageOutline" />
+        <ion-label>{{ 'messages.composer.media' | transloco }}</ion-label>
+      </ion-item>
+      <ion-item [button]="true" [detail]="false" [disabled]="!!editing()" (click)="filesInput.click()">
+        <ion-icon slot="start" [icon]="icons.documentOutline" />
+        <ion-label>{{ 'messages.composer.files' | transloco }}</ion-label>
+      </ion-item>
+    </ion-list>
+  </ng-template>
+</ion-popover>
 
 <ion-alert
   [isOpen]="blocked()"

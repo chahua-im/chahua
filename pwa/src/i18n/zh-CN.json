@@ -409,7 +409,7 @@
       "editMediaOnly": "编辑消息时只能添加图片或视频。",
       "processingFailed": "处理失败，请检查文件大小、权限或网络后重试。",
       "placeholder": "输入消息",
-      "photos": "照片",
+      "media": "媒体",
       "files": "文件",
       "blockedTitle": "无法发送消息",
       "blockedSelf": "你已将对方拉黑，解除拉黑后可以继续聊天。",
