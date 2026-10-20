@@ -691,7 +691,7 @@ struct UnreadMentionsQuery {
     responses(
         (status = 200, description = "Unread mention message ids, newest-first", body = UnreadMentionIdsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_chat_mentions(
     CurrentUid(uid): CurrentUid,
@@ -753,7 +753,7 @@ async fn get_chat_mentions(
     responses(
         (status = 200, description = "Message ids with unread reactions, newest-first", body = UnreadReactionIdsResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn get_chat_reactions(
     CurrentUid(uid): CurrentUid,
@@ -768,20 +768,15 @@ async fn get_chat_reactions(
 
     let limit = validate_limit(q.max, crate::constants::MAX_UNREAD_COUNT);
 
-    let read_through = Utc::now();
-    let ids = state.unread_service.list_chat_unread_reactions(
+    let snapshot = state.unread_service.snapshot_chat_unread_reactions(
         conn,
         uid,
         chat_id,
         q.thread_id,
         limit,
-        read_through,
     )?;
 
-    Ok(Json(UnreadReactionIdsResponse {
-        read_through,
-        message_ids: ids.into_iter().map(|id| id.to_string()).collect(),
-    }))
+    Ok(Json(snapshot))
 }
 
 /// POST /chats/{chat_id}/reactions/read — Mark the conversation scope's reactions read.
@@ -802,7 +797,7 @@ async fn get_chat_reactions(
     responses(
         (status = 200, description = "Fresh unread-reaction state", body = UnreadReactionsAckResponse),
     ),
-    security(("uid_header" = []), ("bearer_jwt" = [])),
+    security(("bearer_jwt" = [])),
 )]
 async fn acknowledge_chat_reactions(
     CurrentUid(uid): CurrentUid,
@@ -815,20 +810,6 @@ async fn acknowledge_chat_reactions(
 
     if let Some(thread_id) = body.thread_id {
         super::threads::authorize_thread_in_chat(conn, chat_id, thread_id, uid)?;
-        // The reaction cursor is per thread root; a reply id must not create
-        // a bogus thread-user-state row.
-        let is_root: bool = diesel::select(diesel::dsl::exists(
-            messages_schema::table.filter(
-                messages_schema::id
-                    .eq(thread_id)
-                    .and(messages_schema::chat_id.eq(chat_id))
-                    .and(messages_schema::reply_root_id.is_null()),
-            ),
-        ))
-        .get_result(conn)?;
-        if !is_root {
-            return Err(AppError::NotFound("Thread root message not found"));
-        }
     } else {
         check_membership(conn, chat_id, uid)?;
     }

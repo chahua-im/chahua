@@ -73,6 +73,32 @@ mod tests {
     }
 
     #[test]
+    fn api_document_security_requirements_use_registered_schemes() {
+        let document = api_document();
+        let schemes = document["components"]["securitySchemes"]
+            .as_object()
+            .unwrap();
+        for (path, item) in document["paths"].as_object().unwrap() {
+            for operation in item.as_object().unwrap().values() {
+                if let Some(requirements) = operation["security"].as_array() {
+                    for requirement in requirements {
+                        for name in requirement.as_object().unwrap().keys() {
+                            assert!(
+                                schemes.contains_key(name),
+                                "{path}: unknown security scheme {name}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            document["paths"]["/chats/{chat_id}/reactions/read"]["post"]["security"],
+            serde_json::json!([{"bearer_jwt": []}]),
+        );
+    }
+
+    #[test]
     fn api_document_has_no_unresolved_references() {
         fn check_references(value: &Value, document: &Value) {
             match value {

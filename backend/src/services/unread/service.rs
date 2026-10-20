@@ -417,13 +417,39 @@ impl UnreadService {
         Ok(row.reaction_count.min(MAX_UNREAD_COUNT))
     }
 
+    /// Capture the boundary and IDs while holding the same lock as reaction writes.
+    pub fn snapshot_chat_unread_reactions(
+        &self,
+        conn: &mut PgConnection,
+        uid: i32,
+        chat_id: i64,
+        thread_root_id: Option<i64>,
+        limit: i64,
+    ) -> Result<crate::dto::chats::UnreadReactionIdsResponse, DieselError> {
+        conn.transaction(|conn| {
+            let read_through = crate::services::reactions::lock_scope(conn, chat_id, uid)?;
+            let ids = self.list_chat_unread_reactions(
+                conn,
+                uid,
+                chat_id,
+                thread_root_id,
+                limit,
+                read_through,
+            )?;
+            Ok(crate::dto::chats::UnreadReactionIdsResponse {
+                read_through,
+                message_ids: ids.into_iter().map(|id| id.to_string()).collect(),
+            })
+        })
+    }
+
     /// Unread-reaction message ids for a single chat, newest-first, one entry
     /// per message regardless of how many new reactions it carries.
     ///
     /// Same derivation and scope rules as `count_chat_unread_reactions`. The
     /// limit is interpolated instead of bound so both scope variants share one
     /// placeholder layout (`limit` is a validated `i64` from `validate_limit`).
-    pub fn list_chat_unread_reactions(
+    fn list_chat_unread_reactions(
         &self,
         conn: &mut PgConnection,
         uid: i32,
@@ -470,8 +496,9 @@ impl UnreadService {
         thread_root_id: Option<i64>,
         read_through: Option<DateTime<Utc>>,
     ) -> Result<i64, DieselError> {
-        let read_through = read_through.unwrap_or_else(Utc::now).min(Utc::now());
         conn.transaction(|conn| {
+            let now = crate::services::reactions::lock_scope(conn, chat_id, uid)?;
+            let read_through = read_through.unwrap_or(now).min(now);
             match thread_root_id {
                 Some(thread_id) => {
                     let inserted = crate::services::threads::ensure_thread_user_state(
