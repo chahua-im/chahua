@@ -18,6 +18,9 @@ ion-header > ion-toolbar:first-of-type {
   width: 26px;
   height: 26px;
 }
+.actions-menu {
+  padding-block: 4px;
+}
 
 // The page restores an explicit message anchor after an idle prepend.
 ion-content::part(scroll) {

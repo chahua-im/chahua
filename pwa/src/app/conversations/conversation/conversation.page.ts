@@ -1,4 +1,4 @@
-import { DOCUMENT } from '@angular/common';
+import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
   afterRenderEffect,
@@ -12,6 +12,7 @@ import {
   input,
   linkedSignal,
   signal,
+  type Signal,
   untracked,
   viewChild,
   viewChildren,
@@ -31,6 +32,10 @@ import {
   IonFooter,
   IonHeader,
   IonIcon,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonPopover,
   IonSpinner,
   IonTitle,
   IonToolbar,
@@ -43,6 +48,7 @@ import {
   chevronDown,
   chevronUpOutline,
   closeCircleOutline,
+  ellipsisVertical,
   informationCircleOutline,
   listOutline,
   starOutline,
@@ -135,6 +141,7 @@ type ScrollPosition =
     MessagePreview,
     VoiceBar,
     LoadError,
+    NgTemplateOutlet,
     IonBackButton,
     IonBadge,
     IonButton,
@@ -145,6 +152,10 @@ type ScrollPosition =
     IonFooter,
     IonHeader,
     IonIcon,
+    IonItem,
+    IonLabel,
+    IonList,
+    IonPopover,
     IonSpinner,
     IonTitle,
     IonToolbar,
@@ -169,9 +180,39 @@ export class ConversationPage {
         'info',
       ]);
   }
-  protected readonly toolbarIcons = { searchOutline, notificationsOutline, notificationsOffOutline, chevronBack };
+  protected readonly toolbarIcons = {
+    searchOutline,
+    notificationsOutline,
+    notificationsOffOutline,
+    chevronBack,
+    ellipsisVertical,
+  };
   protected search() {
     return this.router.navigate(['/chats/chat', decodeId(this.id()), 'search']);
+  }
+  protected readonly compactToolbar = signal(false);
+  private readonly toolbar = viewChild('toolbar', { read: ElementRef }) as Signal<ElementRef<HTMLElement> | undefined>;
+  private readonly toolbarActions = viewChild('toolbarActions', { read: ElementRef }) as Signal<
+    ElementRef<HTMLElement> | undefined
+  >;
+  private readonly titleText = viewChild<ElementRef<HTMLElement>>('titleText');
+  private expandedActionsWidth = 0;
+
+  private measureToolbar() {
+    const text = this.titleText()?.nativeElement;
+    const actions = this.toolbarActions()?.nativeElement;
+    const title = text?.parentElement;
+    const available = title?.clientWidth ?? 0;
+    const actionsWidth = actions?.offsetWidth ?? 0;
+    if (!text || !title || !available || !actionsWidth) return;
+    const preview = text.querySelector('app-message-preview');
+    const naturalText = Math.max(text.offsetWidth, text.scrollWidth, preview?.scrollWidth ?? 0);
+    const avatar = title.firstElementChild as HTMLElement;
+    const gap = parseFloat(getComputedStyle(title).columnGap) || 0;
+    const natural = avatar.offsetWidth + gap + naturalText;
+    const expanded = this.compactToolbar() ? available - this.expandedActionsWidth + actionsWidth : available;
+    if (!this.compactToolbar()) this.expandedActionsWidth = actionsWidth;
+    this.compactToolbar.set(this.compactToolbar() ? natural + 1 > expanded : natural > expanded);
   }
   protected readonly muteBusy = linkedSignal({ source: () => this.entryKey(), computation: () => false });
   protected readonly muted = computed(() => this.chatInfo.isMuted(this.id()));
@@ -328,6 +369,19 @@ export class ConversationPage {
     return threadId ? this.chatInfo.subscription(this.id(), threadId) : undefined;
   });
   protected readonly threadBusy = linkedSignal({ source: this.entryKey, computation: () => false });
+  protected readonly threadAction = computed(() => {
+    const status = this.subscription();
+    if (!status) return undefined;
+    const archived = status.subscribed && status.archived;
+    return {
+      icon: !status.subscribed ? starOutline : archived ? archive : archiveOutline,
+      label: !status.subscribed
+        ? 'conversation.actions.subscribeThread'
+        : archived
+          ? 'conversation.actions.unarchiveThread'
+          : 'conversation.actions.archiveThread',
+    };
+  });
   protected readonly threadError = linkedSignal({
     source: this.entryKey,
     computation: (): ThreadError | undefined => undefined,
@@ -442,7 +496,6 @@ export class ConversationPage {
   protected readonly downIcon = chevronDown;
   protected readonly upIcon = chevronUpOutline;
   protected readonly listIcon = listOutline;
-  protected readonly threadIcons = { starOutline, archiveOutline, archive, informationCircleOutline };
   protected readonly pins = computed(() => this.chatInfo.pins(this.id(), this.threadId()));
   protected readonly visiblePins = linkedSignal({
     source: () => ({
@@ -576,6 +629,13 @@ export class ConversationPage {
     });
     afterNextRender(() => void this.observeResize());
     afterNextRender(() => this.observeComposer());
+    afterNextRender(() => this.observeToolbar());
+    afterRenderEffect(() => {
+      this.chatTitle();
+      this.threadId();
+      this.threadRoot();
+      untracked(() => this.measureToolbar());
+    });
     afterRenderEffect(() => {
       this.messageElements();
       this.position();
@@ -792,6 +852,16 @@ export class ConversationPage {
 
   protected retry() {
     this.retryAction();
+  }
+
+  private observeToolbar() {
+    const toolbar = this.toolbar()?.nativeElement;
+    const text = this.titleText()?.nativeElement;
+    if (!toolbar || !text) return;
+    const resize = new ResizeObserver(() => this.measureToolbar());
+    resize.observe(toolbar);
+    resize.observe(text);
+    this.destroyRef.onDestroy(() => resize.disconnect());
   }
 
   /** Publish the composer height so page overlays can sit above it. */

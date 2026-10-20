@@ -4,7 +4,9 @@
     <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
   </ion-button>
   @if (view() !== View.Info) {
-    <ion-button fill="clear" (click)="modals.dismiss()">{{ 'common.back' | transloco }}</ion-button>
+    <ion-button fill="clear" (click)="modals.dismiss()">
+      <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
+    </ion-button>
   }
   @switch (view()) {
     @case (View.Invites) {

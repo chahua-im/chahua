@@ -4,7 +4,7 @@ import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NavigationEnd, provideRouter, Router, RouterLink } from '@angular/router';
-import { IonActionSheet, IonContent, IonModal, IonTextarea, iosTransitionAnimation } from '@ionic/angular';
+import { IonActionSheet, IonContent, IonModal, IonPopover, IonTextarea, iosTransitionAnimation } from '@ionic/angular';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -183,6 +183,35 @@ describe('ConversationPage', () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     button.click();
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'search']);
+  });
+
+  it('opens the collapsed toolbar actions from the narrow-screen button', () => {
+    const present = vi.spyOn(IonPopover.prototype, 'present').mockResolvedValue();
+    component['compactToolbar'].set(true);
+    fixture.detectChanges();
+    const button = [...fixture.nativeElement.querySelectorAll('ion-header ion-button')].find(
+      (element) => element.querySelector('ion-icon')?.icon === component['toolbarIcons'].ellipsisVertical,
+    );
+    expect(button).toBeDefined();
+    button!.click();
+    expect(present).toHaveBeenCalledOnce();
+  });
+
+  it('collapses the toolbar actions only when the full title does not fit', () => {
+    const title: HTMLElement = fixture.nativeElement.querySelector('.conversation-title');
+    const actions: HTMLElement = fixture.nativeElement.querySelector('ion-header ion-buttons[slot="end"]');
+    const text = title.lastElementChild as HTMLElement;
+    Object.defineProperty(title, 'clientWidth', { value: 300, configurable: true });
+    Object.defineProperty(actions, 'offsetWidth', { value: 132, configurable: true });
+    Object.defineProperties(text, {
+      offsetWidth: { value: 260, configurable: true },
+      scrollWidth: { value: 260, configurable: true },
+    });
+    component['measureToolbar']();
+    expect(component['compactToolbar']()).toBe(false);
+    Object.defineProperty(text, 'scrollWidth', { value: 320, configurable: true });
+    component['measureToolbar']();
+    expect(component['compactToolbar']()).toBe(true);
   });
 
   it('shares mute updates with the list and reflects websocket changes without another detail request', async () => {
