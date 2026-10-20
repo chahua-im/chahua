@@ -1,4 +1,3 @@
-import { Preferences } from '../../settings/preferences';
 import { TestBed } from '@angular/core/testing';
 import { MessageType, type SavedMessageResponse } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
@@ -20,12 +19,6 @@ const snapshot: SavedMessageResponse = {
   attachments: [],
   mentions: [],
 };
-
-beforeEach(() => {
-  TestBed.configureTestingModule({
-    providers: [{ provide: Preferences, useValue: { markdownEnabled: () => true } }],
-  });
-});
 
 describe('savedMessageContent rendered by Message', () => {
   async function render(message: SavedMessageResponse) {

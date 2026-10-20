@@ -1,4 +1,3 @@
-import { Preferences } from '../../settings/preferences';
 import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -50,12 +49,6 @@ class FakeUpload {
     this.onloadend?.();
   }
 }
-
-beforeEach(() => {
-  TestBed.configureTestingModule({
-    providers: [{ provide: Preferences, useValue: { markdownEnabled: () => true } }],
-  });
-});
 
 describe('Message composer upload ownership', () => {
   let fixture: ComponentFixture<MessageComposer>;

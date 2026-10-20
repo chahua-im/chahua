@@ -1,4 +1,3 @@
-import { Preferences } from '../../settings/preferences';
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
@@ -182,26 +181,6 @@ describe('same-origin navigation', () => {
     f.detectChanges();
     return { f, navigate, el: f.nativeElement as HTMLElement };
   }
-
-  it('keeps mentions and automatic links when rendering is disabled', () => {
-    const { f, el } = render();
-    f.componentRef.setInput('text', '**hello** @[uid:7] https://example.com');
-    f.componentRef.setInput('mentions', [mention(7, 'Alice')]);
-    const preferences = TestBed.inject(Preferences);
-    preferences.setMarkdownEnabled(false);
-    try {
-      f.detectChanges();
-      expect(el.querySelector('strong')).toBeNull();
-      expect(el.textContent?.replace(/\s+/g, ' ')).toContain('**hello** @Alice https://example.com');
-      expect(el.querySelector('button.mention')?.textContent?.trim()).toBe('@Alice');
-      expect(el.querySelector('a[href="https://example.com"]')).not.toBeNull();
-    } finally {
-      preferences.setMarkdownEnabled(true);
-    }
-    f.detectChanges();
-    expect(el.querySelector('strong')?.textContent).toBe('hello');
-    f.destroy();
-  });
 
   it('routes an ordinary click using only the app path', () => {
     const { f, el, navigate } = render();

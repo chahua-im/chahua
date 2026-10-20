@@ -1,4 +1,3 @@
-import { Preferences } from '../../settings/preferences';
 import { NgTemplateOutlet } from '@angular/common';
 import {
   Component,
@@ -121,7 +120,6 @@ export class MessageComposer {
   protected readonly windows = navigator.userAgent.includes('Windows');
   protected readonly macOS = !isPlatform('ios') && navigator.userAgent.includes('Macintosh');
   protected readonly Status = UploadStatus;
-  private readonly preferences = inject(Preferences);
   private readonly api = inject(AttachmentsService);
   private readonly members = inject(MembersService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -416,7 +414,7 @@ export class MessageComposer {
         );
       return;
     }
-    if (this.preferences.markdownEnabled() && !event.altKey && (event.ctrlKey || event.metaKey)) {
+    if (!event.altKey && (event.ctrlKey || event.metaKey)) {
       const kind = shortcutFormatKind(event);
       if (kind) {
         event.preventDefault();

@@ -48,7 +48,6 @@
       "title": "通用",
       "language": "语言",
       "showThreads": "在“消息”标签页中显示话题",
-      "markdownEnabled": "Markdown 渲染",
       "showAllAvatars": "在所有消息旁显示头像",
       "showDmDetails": "在私聊中显示双方头像和用户名",
       "colorMode": "颜色模式",

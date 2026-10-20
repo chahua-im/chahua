@@ -1,4 +1,3 @@
-import { Preferences } from '../../settings/preferences';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import type { MentionInfo } from '../../../generated/models';
@@ -25,22 +24,6 @@ describe('MarkdownSummary', () => {
     fixture.detectChanges();
     return fixture.nativeElement as HTMLElement;
   }
-
-  it('updates existing summaries when Markdown is toggled', () => {
-    const element = render('**hi** @[uid:2] https://example.com', [{ uid: 2, username: 'Alice', gender: 0 }]);
-    const preferences = TestBed.inject(Preferences);
-    preferences.setMarkdownEnabled(false);
-    try {
-      fixture.detectChanges();
-      expect(element.querySelector('strong')).toBeNull();
-      expect(element.textContent).toBe('**hi** @Alice https://example.com');
-      expect(element.querySelector('a')).toBeNull();
-    } finally {
-      preferences.setMarkdownEnabled(true);
-    }
-    fixture.detectChanges();
-    expect(element.querySelector('strong')?.textContent).toBe('hi');
-  });
 
   it('renders inline Markdown (bold/italic/strikethrough/code) without raw syntax', () => {
     const element = render('**粗**、__斜__、~~删~~、`code`');

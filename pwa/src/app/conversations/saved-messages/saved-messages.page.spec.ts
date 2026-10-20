@@ -52,7 +52,7 @@ describe('SavedMessagesPage', () => {
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
         { provide: SessionStore, useValue: { user: signal(testUser) } },
-        { provide: Preferences, useValue: { markdownEnabled: () => true, showAllAvatars: () => false } },
+        { provide: Preferences, useValue: { showAllAvatars: () => false } },
         { provide: Connection, useValue: mockRealtime({ events$: new Subject(), resync$: new Subject() }) },
       ],
     }).compileComponents();

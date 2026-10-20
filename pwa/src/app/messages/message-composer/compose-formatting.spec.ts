@@ -1,4 +1,3 @@
-import { Preferences } from '../../settings/preferences';
 import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -51,21 +50,6 @@ describe('Composer formatting shortcuts', () => {
     fixture.detectChanges();
     return event;
   }
-
-  it.each(['b', 'i'])('leaves %s shortcuts untouched when Markdown is disabled', async (value) => {
-    const preferences = TestBed.inject(Preferences);
-    preferences.setMarkdownEnabled(false);
-    try {
-      for (const init of [{ ctrlKey: true }, { metaKey: true }]) {
-        select('hello');
-        const event = await key(value, init);
-        expect(composer.text()).toBe('hello');
-        expect(event.defaultPrevented).toBe(false);
-      }
-    } finally {
-      preferences.setMarkdownEnabled(true);
-    }
-  });
 
   it.each([
     { key: 'b', ctrlKey: true, marker: '**', tag: 'strong' },
