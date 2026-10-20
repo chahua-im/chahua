@@ -149,8 +149,7 @@
   --bubble-top-left: 8px;
 }
 
-.last .bubble:where(:not(.media-only), .has-thread),
-.last:where(.preview) .bubble {
+.last .bubble:where(:not(.media-only)) {
   --bubble-bottom-left: 0px;
 
   &::after {
@@ -327,8 +326,7 @@
     --bubble-top-right: 8px;
   }
 
-  &.last .bubble:where(:not(.media-only), .has-thread),
-  &.last:where(.preview) .bubble {
+  &.last .bubble:where(:not(.media-only)) {
     --bubble-bottom-right: 0px;
   }
 

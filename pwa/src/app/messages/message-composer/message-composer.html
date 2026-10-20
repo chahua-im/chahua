@@ -81,55 +81,57 @@
   (change)="files($event, Purpose.media)" />
 <input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
 <div class="bar">
-  <button
-    type="button"
-    class="attach-button"
-    [disabled]="voiceActive()"
-    (click)="panel.set(Panel.None); blur(); attachmentMenu.present($event)">
-    <ion-icon [icon]="icons.attachOutline" />
-  </button>
-  <div class="input-wrapper" [hidden]="voiceActive()">
-    <ng-content />
-    <div class="input-row">
-      <ion-textarea
-        [placeholder]="'messages.composer.placeholder' | transloco"
-        [autoGrow]="true"
-        [rows]="1"
-        [value]="display().text"
-        (ionInput)="changed($event.detail.value || '')"
-        (ionFocus)="panel.set(Panel.None)"
-        (paste)="paste($event)"
-        (keydown)="key($event)" />
-      @if (!editing()) {
+  <div class="compose-context" [hidden]="voiceActive()"><ng-content /></div>
+  <div class="compose-row">
+    <button
+      type="button"
+      class="attach-button"
+      [disabled]="voiceActive()"
+      (click)="panel.set(Panel.None); blur(); attachmentMenu.present($event)">
+      <ion-icon [icon]="icons.attachOutline" />
+    </button>
+    <div class="input-wrapper" [hidden]="voiceActive()">
+      <div class="input-row">
+        <ion-textarea
+          [placeholder]="'messages.composer.placeholder' | transloco"
+          [autoGrow]="true"
+          [rows]="1"
+          [value]="display().text"
+          (ionInput)="changed($event.detail.value || '')"
+          (ionFocus)="panel.set(Panel.None)"
+          (paste)="paste($event)"
+          (keydown)="key($event)" />
+        @if (!editing()) {
+          <button
+            type="button"
+            class="sticker-button"
+            [attr.title]="windows ? 'Emoji: Win + .' : macOS ? 'Emoji: fn + E' : null"
+            [class.selected]="panel() === Panel.Stickers"
+            (click)="togglePanel(Panel.Stickers)">
+            <ion-icon [icon]="icons.happyOutline" />
+          </button>
+        }
+      </div>
+    </div>
+    @if (useVoice()) {
+      <app-voice-recorder
+        [(active)]="voiceActive"
+        (activeChange)="$event && panel.set(Panel.None)"
+        (submitted)="sendVoice($event)"
+        (discarded)="discardVoice()" />
+    } @else {
+      <div class="action-slot">
         <button
           type="button"
-          class="sticker-button"
-          [attr.title]="windows ? 'Emoji: Win + .' : macOS ? 'Emoji: fn + E' : null"
-          [class.selected]="panel() === Panel.Stickers"
-          (click)="togglePanel(Panel.Stickers)">
-          <ion-icon [icon]="icons.happyOutline" />
+          class="send-button"
+          [disabled]="!canSend()"
+          (mousedown)="$event.preventDefault()"
+          (click)="submit()">
+          <ion-icon [icon]="icons.send" />
         </button>
-      }
-    </div>
+      </div>
+    }
   </div>
-  @if (useVoice()) {
-    <app-voice-recorder
-      [(active)]="voiceActive"
-      (activeChange)="$event && panel.set(Panel.None)"
-      (submitted)="sendVoice($event)"
-      (discarded)="discardVoice()" />
-  } @else {
-    <div class="action-slot">
-      <button
-        type="button"
-        class="send-button"
-        [disabled]="!canSend()"
-        (mousedown)="$event.preventDefault()"
-        (click)="submit()">
-        <ion-icon [icon]="icons.send" />
-      </button>
-    </div>
-  }
 </div>
 @if (panel() === Panel.Stickers) {
   <app-sticker-picker [embedded]="true" (selected)="sticker($event)" />
