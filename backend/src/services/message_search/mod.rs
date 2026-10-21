@@ -269,7 +269,7 @@ impl MessageSearchService {
     pub fn start_setup_best_effort(self: &Arc<Self>) {
         let service = self.clone();
         tokio::spawn(async move {
-            if let Err(err) = service.ensure_index_and_settings().await {
+            if let Err(err) = service.ensure_ready().await {
                 tracing::warn!(
                     index_uid = service.index_uid.as_str(),
                     ?err,
@@ -280,7 +280,6 @@ impl MessageSearchService {
                     index_uid = service.index_uid.as_str(),
                     "message search index setup completed"
                 );
-                service.mark_setup_ready();
             }
         });
     }

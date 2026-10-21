@@ -1,5 +1,32 @@
 # Backend
 
+## Startup and maintenance
+
+The API waits for database pool initialization, embedded migrations, and required
+configuration/resource construction (including AWS SDK configuration). Migrations
+are a schema-readiness prerequisite and may perform substantial database work.
+Push credentials and other required configuration are still validated before serving.
+
+Nonessential maintenance does not gate the API or metrics listeners:
+
+- Activity gauges load in a blocking-pool task; they start at zero until the load completes.
+- Stale-client cleanup runs in the background immediately and every six hours, with
+  missed timer ticks skipped. Each blocking-pool task selects at most 500 clients
+  inactive for more than 45 days, ordered by last activity, using
+  `FOR UPDATE SKIP LOCKED`. A transaction deletes their push subscriptions and client
+  records and updates the daily purge count. Cache eviction and Prometheus updates
+  follow successful commit. Connections and row locks are released between batches;
+  rows locked by concurrent activity or another instance are skipped.
+- Audio-backlog discovery and legacy-state updates run in a blocking-pool task.
+  Discovery retains its existing bounded queries.
+- When message search is enabled, its health check and index setup run in the
+  background. A slow or unavailable Meilisearch does not prevent API startup.
+  Search remains not ready until setup succeeds; setup failures are logged.
+  The `message-search-reindex` command still waits for search readiness.
+
+The database-backed purge regression test uses temporary tables inside a
+rollback-only connection and is enabled with a local migrated database:
+
 ## Database migrations
 
 The server applies pending embedded Diesel migrations at startup in version order.

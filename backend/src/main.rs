@@ -103,7 +103,6 @@ async fn main() {
     }
 
     let message_search = build_message_search_service(metrics.message_search.clone())
-        .await
         .expect("Failed to initialize message search service");
 
     let ws_registry = Arc::new(services::ws_registry::ConnectionRegistry::new(
@@ -317,7 +316,7 @@ fn read_command() -> Option<BackendCommand> {
     }
 }
 
-async fn build_message_search_service(
+fn build_message_search_service(
     metrics: Arc<services::message_search::MessageSearchMetrics>,
 ) -> Result<
     Option<Arc<services::message_search::MessageSearchService>>,
@@ -332,7 +331,6 @@ async fn build_message_search_service(
     let service = Arc::new(services::message_search::MessageSearchService::new(
         config, metrics,
     )?);
-    service.ensure_healthy().await?;
     service.start_setup_best_effort();
     info!(
         index_uid,
