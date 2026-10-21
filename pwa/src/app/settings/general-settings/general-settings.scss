@@ -1,0 +1,32 @@
+.font-preview {
+  display: grid;
+  gap: 12px;
+  min-height: 260px;
+  align-content: center;
+}
+
+.preview-message {
+  justify-self: start;
+  max-width: 85%;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 16px 16px 16px 8px;
+  background: var(--ion-background-color-step-100);
+  color: var(--ion-text-color);
+  font-size: var(--preview-font-size, var(--app-font-body));
+  line-height: var(--preview-line-height, var(--app-line-body));
+  overflow-wrap: anywhere;
+
+  &.own {
+    justify-self: end;
+    border-radius: 16px 16px 8px 16px;
+    background: var(--ion-color-primary);
+    color: var(--ion-color-primary-contrast);
+  }
+}
+
+.font-value {
+  padding-inline-end: 16px;
+  font-size: var(--app-font-caption);
+  font-weight: normal;
+}

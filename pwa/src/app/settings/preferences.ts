@@ -1,3 +1,4 @@
+import { readChatFontSize, ChatFontSize } from './chat-font-size';
 import { Service, signal } from '@angular/core';
 import { ColorMode, isColorMode } from './color-mode';
 import { type AppLocale, isAppLocale } from './locale';
@@ -14,6 +15,14 @@ const LOCALE_KEY = 'chahua.preferences.locale';
 
 @Service()
 export class Preferences {
+  private readonly fontSize = signal(readChatFontSize());
+  readonly chatFontSize = this.fontSize.asReadonly();
+
+  setChatFontSize(value: ChatFontSize) {
+    window.localStorage.setItem('chahua.preferences.chatFontSize', String(value));
+    this.fontSize.set(value);
+  }
+
   readonly recentReactions = signal<readonly string[]>(readReactions());
   readonly pinnedReactions = signal<readonly string[]>(readPinnedReactions());
   private readonly locale = signal<AppLocale | null>(readLocale());

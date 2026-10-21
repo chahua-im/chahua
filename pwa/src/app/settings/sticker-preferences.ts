@@ -72,9 +72,15 @@ export class StickerPreferences {
   async syncPackOrder(items: UpdateStickerPackOrderItem[]) {
     try {
       await firstValueFrom(this.users.putStickerpackOrder({ order: items }));
+      return true;
     } catch {
-      const user = await firstValueFrom(this.users.getMe());
-      this.session.replaceStickerPackOrder(user.stickerPackOrder);
+      try {
+        const user = await firstValueFrom(this.users.getMe());
+        this.session.replaceStickerPackOrder(user.stickerPackOrder);
+      } catch {
+        // Keep the local order when offline; the caller can offer to retry the write.
+      }
+      return false;
     }
   }
 }

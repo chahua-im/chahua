@@ -310,17 +310,6 @@ export class PushNotifications {
     void this.refresh();
   }
 
-  // Run in the avatar's click handler, before routing can lose user activation.
-  requestSettingsPermission(): void {
-    if (
-      this.supported &&
-      window.localStorage.getItem(ENABLED_KEY) === 'true' &&
-      Notification.permission === 'default'
-    ) {
-      void this.setEnabled(true);
-    }
-  }
-
   // Call directly from a button or toggle event to retain the browser's user gesture.
   async setEnabled(enabled: boolean): Promise<boolean> {
     if (this.busy()) return false;

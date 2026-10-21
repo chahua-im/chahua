@@ -23,7 +23,10 @@
     "confirm": "确认",
     "add": "添加",
     "okay": "好",
-    "user": "用户"
+    "user": "用户",
+    "enabled": "开启",
+    "disabled": "关闭",
+    "saving": "保存中…"
   },
   "presence": {
     "online": "在线",
@@ -48,7 +51,7 @@
     "title": "设置",
     "menu": {
       "general": "通用",
-      "saved": "收藏",
+      "saved": "我的收藏",
       "friendVerification": "好友验证",
       "presence": "在线状态隐私",
       "readReceipts": "已读回执",
@@ -63,10 +66,16 @@
       "updateNow": "立即更新",
       "notificationDenied": "通知权限已被拒绝",
       "devUid": "开发 UID",
-      "devUidSwitch": "切换"
+      "devUidSwitch": "切换",
+      "privacy": "隐私",
+      "requestNotifications": "申请通知权限",
+      "install": "安装应用",
+      "notificationBlockedHelp": "通知权限已被拒绝。请在浏览器的网站设置中允许通知，然后返回此页面。",
+      "notificationWorkerUnavailable": "通知服务暂不可用，请重试。",
+      "notificationDisableFailed": "关闭后台推送失败，请重试。"
     },
     "general": {
-      "title": "通用",
+      "title": "聊天设置",
       "language": "语言",
       "showThreads": "在“消息”标签页中显示话题",
       "showAllAvatars": "在所有消息旁显示头像",
@@ -74,30 +83,38 @@
       "colorMode": "颜色模式",
       "colorModeSystem": "跟随系统",
       "colorModeLight": "浅色",
-      "colorModeDark": "深色"
+      "colorModeDark": "深色",
+      "fontSize": "字号",
+      "fontSmall": "小",
+      "fontLarge": "大",
+      "fontPreviewIncoming": "这是聊天消息的预览，拖动滑块试试不同的字号。",
+      "fontPreviewOutgoing": "选择一个阅读起来舒服的大小。",
+      "fontDefault": "系统默认"
     },
     "language": {
       "title": "语言",
-      "auto": "自动"
+      "auto": "自动",
+      "saveFailed": "语言切换失败，请重试。"
     },
     "friendVerification": {
-      "title": "好友验证",
+      "title": "加我好友时的验证方式",
       "loadFailed": "好友验证设置加载失败。",
-      "allowAnyone": "允许任何人添加我",
+      "allowAnyone": "允许任何人",
       "needMessage": "需要验证消息",
-      "needQuestion": "需要回答问题",
-      "forbid": "拒绝任何人添加我",
+      "needQuestion": "需要回答问题并由我确认",
+      "forbid": "禁止加我为好友",
       "questionLabel": "设置问题",
       "questionPlaceholder": "填写申请者需要回答的问题",
       "questionInvalid": "请填写 1–100 字的问题。",
-      "saveFailed": "保存失败，请重试。"
+      "saveFailed": "保存失败，请重试。",
+      "apply": "应用"
     },
     "presence": {
-      "title": "在线状态隐私",
-      "loadFailed": "在线状态隐私设置加载失败。",
+      "title": "谁能查看我的活动状态",
+      "loadFailed": "在线状态加载失败，点击重试",
       "everyone": "所有人",
-      "friends": "仅好友",
-      "nobody": "没有人",
+      "friends": "我的好友",
+      "nobody": "不允许任何人",
       "reciprocalNote": "仅在双方都允许分享时显示在线状态和精确上线时间，否则显示模糊的最近上线时间；群组在线人数不受影响。",
       "saveFailed": "保存失败，请重试。",
       "friendTitle": "在线状态分享",
@@ -109,8 +126,6 @@
     "readReceipt": {
       "title": "已读回执",
       "loadFailed": "已读回执设置加载失败。",
-      "friends": "仅好友",
-      "nobody": "没有人",
       "reciprocalNote": "仅在双方都允许分享时显示已读回执；群组对话永不显示已读回执。",
       "saveFailed": "保存失败，请重试。",
       "friendTitle": "已读回执分享",
@@ -126,7 +141,8 @@
       "autoSortFavorites": "按最近使用自动排序收藏贴纸",
       "loadFailed": "贴纸包加载失败。",
       "sortDivider": "此行以下的贴纸包不会自动排序",
-      "owned": "我的"
+      "owned": "我的",
+      "orderFailed": "贴纸排序保存失败，请重试。"
     },
     "stickerPack": {
       "title": "贴纸包",
@@ -144,6 +160,15 @@
       "removeStickerTitle": "移除贴纸",
       "removeStickerMessage": "要从贴纸包中移除此表情吗？",
       "removeStickerFailed": "移除失败，请重试"
+    },
+    "privacy": {
+      "blockedUsers": "已拉黑用户",
+      "none": "无",
+      "friendVerification": "加我好友时的验证方式",
+      "allowAnyone": "允许任何人",
+      "presence": "谁能查看我的活动状态",
+      "loadFailed": "加载失败，点击重试",
+      "blocksLoadFailed": "拉黑用户列表加载失败。"
     }
   },
   "chats": {

@@ -118,6 +118,8 @@
 }
 
 .bubble {
+  font-size: var(--app-chat-font-size, var(--app-font-body));
+  line-height: var(--app-chat-line-height, var(--app-line-body));
   position: relative;
   isolation: isolate;
   min-width: 0;

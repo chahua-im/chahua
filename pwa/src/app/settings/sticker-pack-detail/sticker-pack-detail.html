@@ -23,6 +23,9 @@
       }
     </ion-buttons>
   </ion-toolbar>
+  @if (pack() && busy()) {
+    <ion-progress-bar type="indeterminate" />
+  }
 </ion-header>
 <ion-content appScrollbars color="light">
   @if (pack(); as current) {

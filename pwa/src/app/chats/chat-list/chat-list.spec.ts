@@ -10,7 +10,6 @@ import { mockRealtime, testChat, testUser } from '../../api/testing';
 import WaveSurfer from 'wavesurfer.js';
 import { VoicePlayback, type VoiceDock } from '../../messages/voice-player/voice-playback';
 import { VoicePlayer } from '../../messages/voice-player/voice-player';
-import { PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { ListTab, type ListSelection } from '../list-tabs';
@@ -100,7 +99,6 @@ describe('ChatList', () => {
         { provide: Preferences, useValue: { showThreadsInMessages: signal(true) } },
         provideRouter([{ path: 'chats/chat/:id', children: [] }]),
         { provide: Connection, useValue: mockRealtime() },
-        { provide: PushNotifications, useValue: { requestSettingsPermission: vi.fn() } },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
       ],
     })
@@ -310,15 +308,15 @@ describe('ChatList', () => {
     expect(selected().tab).toBe(ListTab.Threads);
   });
 
-  it('requests settings permission in the avatar click before navigation', () => {
-    const notifications = TestBed.inject(PushNotifications);
-    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockImplementation(async () => {
-      expect(notifications.requestSettingsPermission).toHaveBeenCalledOnce();
-      return true;
-    });
-    fixture.debugElement.query(By.css('ion-buttons[slot="start"] ion-button')).triggerEventHandler('click');
-    expect(navigate).toHaveBeenCalledOnce();
-    expect(navigate).toHaveBeenCalledWith('/settings');
+  it('opens the avatar menu without navigating or requesting notification permission', async () => {
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
+    const menu = fixture.nativeElement.querySelectorAll('ion-popover')[1];
+    const present = vi.spyOn(menu, 'present').mockResolvedValue(undefined);
+    fixture.debugElement
+      .query(By.css('ion-buttons[slot="start"] ion-button'))
+      .triggerEventHandler('click', new MouseEvent('click'));
+    expect(present).toHaveBeenCalledOnce();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('activates only the selected content and delegates selection without changing the conversation route', async () => {

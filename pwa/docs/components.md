@@ -71,7 +71,7 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 | App                | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态、全局更新 toast 和可交互标记 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                              |
 | NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                 | PushNotifications                                                                     |
 | ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                      | 将 selection 和 active 传给单列 ChatList                                              |
-| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、ChatListStore、Preferences、PushNotifications；控制分类面板与菜单，active 时同步 selection，设置入口保留授权手势 |
+| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、ChatListStore、Preferences、AppInstall；控制分类面板与菜单，active 时同步 selection，头像菜单提供收藏、设置与安装入口 |
 | ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数 | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence |
 | ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量 |
 | ChatAvatar         | entry、size、online | 由输入派生头像、占位、话题角标和在线圆点，无请求 |
@@ -80,7 +80,7 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 
 ChatListPage 在 ionViewWillEnter 中先同步检测缓存视图，再激活列表查询，使 pop 动画使用已更新的本地行；ionViewDidLeave 同步释放子查询消费者。
 
-ChatListContent 的普通会话行和话题行都是共享资料、查询成员、草稿和待发消息的派生结果；待发消息按聊天或话题根区分，在服务器摘要回显前提供预览和排序时间，话题回复不改变父会话行，已确认后由共享摘要替换。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。加载失败统一使用 LoadError（message、compact、retryable → retry）：页面级居中，列表和设置分区使用紧凑行。
+ChatListContent 的普通会话行和话题行都是共享资料、查询成员、草稿和待发消息的派生结果；待发消息按聊天或话题根区分，在服务器摘要回显前提供预览和排序时间，话题回复不改变父会话行，已确认后由共享摘要替换。分类内容各自保留滚动位置，仅当前分类激活查询和续页。tab、归档范围属于父组件；操作进度属于被点击的行。固定入口与独立角标不参与初次内容等待。隐私首页摘要失败在对应行显示重试文案，其余加载失败使用 LoadError（message、compact、retryable → retry）：页面级居中，列表和设置分区使用紧凑行。
 
 ## 消息页面
 
@@ -179,13 +179,18 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 
 | 组件                       | 状态与职责                                                                     |
 | -------------------------- | ------------------------------------------------------------------------------ |
-| Settings                   | 当前用户、通知和更新状态；持有权限拒绝 toast、局部更新结果，打开设置子页和收藏 |
-| GeneralSettings            | 直接编辑 Preferences，无额外状态副本；语言项显示当前选择                       |
+| Settings                   | 当前用户和更新状态；持有局部更新结果，打开通知、隐私、聊天、贴纸与语言子页 |
+| NotificationSettings       | 通知开关、权限申请按钮、订阅等待和失败重试；进入时 refresh，权限拒绝使用 toast |
+| GeneralSettings            | 聊天设置直接编辑 Preferences 的颜色模式、消息字号及三个显示开关，无额外状态副本                       |
 | LanguageSettings           | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog         |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |
+| PrivacySettings            | 四项隐私入口；独立读取拉黑列表、好友验证、在线状态和已读回执设置资源，显示实际摘要与加载状态，窄屏摘要位于标题下方 |
+| ReadReceiptSettings        | 全局回执开关、读取/自动保存状态；FriendsService 读取/保存，成功后通过 ChatStore 失效回执隐私 |
+| BlockedUsers               | 拉黑用户列表、空状态和加载失败重试；点击用户路由打开资料页 |
 | PresenceSettings           | 全局 visibility、loading/saving、读取/保存失败与成功反馈；FriendsService 读取/保存，成功后通过 Presence 失效个人状态 |
 | StickerSettings            | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、创建贴纸包、贴纸包重排列表 | StickersService、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
 | StickerPackDetail          | packId；包详情、owned 状态、重命名/删除/退订与添加、点按移除贴纸               | StickersService、StickerPreferences；删除与退订移除顺序条目并关闭弹窗 |
+| AppInstall                 | 启动时捕获浏览器安装事件，available 控制菜单入口；点击消费事件并调用安装提示，安装完成时清除事件 |
 | Landing                    | 检测平台与选中平台；公开安装指引                                               |
 
 置顶表态输入由 `settings/emoji-sequences.ts` 提取完整的 Unicode 17.0.0 RGI emoji 序列；匹配集合固定，不依赖浏览器自带的 Unicode 数据或正则 `u` / `v` 标志。该文件由 `npm run emoji:generate` 生成并提交，生成器及 Unicode 数据依赖使用精确版本；升级匹配集合时更新依赖并重新生成。交互约定见[表情与贴纸设置](requirements.md#通知静音与设置)。

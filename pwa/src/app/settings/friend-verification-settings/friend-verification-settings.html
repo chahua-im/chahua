@@ -24,7 +24,7 @@
         (retry)="loadVerification()" />
     } @else {
       <div>
-        <ion-radio-group [formField]="verificationForm.mode" (ionChange)="saved.set(false)">
+        <ion-radio-group [value]="verification().mode" (ionChange)="chooseMode($event.detail.value)">
           <ion-item>
             <ion-icon slot="start" [icon]="allowIcon" color="primary"></ion-icon>
             <ion-radio [value]="Mode.direct" [disabled]="saving()" justify="space-between">
@@ -60,7 +60,7 @@
             [autoGrow]="true"
             [maxlength]="100"
             [formField]="verificationForm.question"
-            (ionInput)="saved.set(false)"></ion-textarea>
+            (ionInput)="saved.set(false); saveError.set(false)"></ion-textarea>
         </ion-item>
         @if (verificationForm.question().invalid()) {
           <ion-item lines="none">
@@ -68,26 +68,30 @@
           </ion-item>
         }
       }
-      <ion-item lines="none">
-        @if (saveError()) {
+      <ion-item lines="none" class="save-status">
+        @if (saving()) {
+          <ion-spinner slot="end"></ion-spinner>
+        } @else if (saveError()) {
           <ion-label class="ion-text-wrap" color="danger">
             {{ 'settings.friendVerification.saveFailed' | transloco }}
           </ion-label>
+          @if (verification().mode !== Mode.question) {
+            <ion-button slot="end" fill="clear" (click)="saveVerification()">
+              {{ 'common.retry' | transloco }}
+            </ion-button>
+          }
         } @else if (saved()) {
-          <ion-label color="medium">{{ 'common.saved' | transloco }}</ion-label>
+          <ion-label class="saved-feedback" color="medium">{{ 'common.saved' | transloco }}</ion-label>
         }
-        <ion-button
-          slot="end"
-          fill="clear"
-          [disabled]="verificationForm().disabled() || verificationForm().invalid()"
-          (click)="saveVerification()">
-          <span class="action-content" [class.busy]="saving()">
-            <span class="action-label">{{ 'common.save' | transloco }}</span>
-            @if (saving()) {
-              <ion-spinner></ion-spinner>
-            }
-          </span>
-        </ion-button>
+        @if (verification().mode === Mode.question) {
+          <ion-button
+            slot="end"
+            fill="clear"
+            [disabled]="verificationForm().disabled() || verificationForm().invalid()"
+            (click)="saveVerification()">
+            {{ 'settings.friendVerification.apply' | transloco }}
+          </ion-button>
+        }
       </ion-item>
     }
   </ion-list>

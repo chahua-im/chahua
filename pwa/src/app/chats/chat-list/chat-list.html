@@ -22,7 +22,7 @@
         </ion-title>
       } @else {
         <ion-buttons slot="start">
-          <ion-button (click)="openSettings()">
+          <ion-button (click)="profileMenu.present($event)">
             <ion-avatar [avatarColor]="session.user()?.avatarUrl ? null : (session.user()?.username ?? '')">
               @if (session.user()?.avatarUrl; as src) {
                 <img [src]="src" width="26" height="26" decoding="async" />
@@ -119,6 +119,27 @@
       <ion-item [button]="true" (click)="searching.set(true)">
         <ion-label>{{ 'chats.list.add.search' | transloco }}</ion-label>
       </ion-item>
+    </ion-list>
+  </ng-template>
+</ion-popover>
+
+<ion-popover #profileMenu side="bottom" alignment="start" [arrow]="false" [dismissOnSelect]="true">
+  <ng-template>
+    <ion-list>
+      <ion-item [button]="true" [detail]="false" routerLink="/chats/saved">
+        <ion-icon slot="start" [icon]="savedIcon" color="primary"></ion-icon>
+        <ion-label>{{ 'settings.menu.saved' | transloco }}</ion-label>
+      </ion-item>
+      <ion-item [button]="true" [detail]="false" routerLink="/settings">
+        <ion-icon slot="start" [icon]="settingsIcon" color="primary"></ion-icon>
+        <ion-label>{{ 'settings.title' | transloco }}</ion-label>
+      </ion-item>
+      @if (installer.available()) {
+        <ion-item [button]="true" [detail]="false" (click)="installer.install()" lines="none">
+          <ion-icon slot="start" [icon]="installIcon" color="primary"></ion-icon>
+          <ion-label>{{ 'settings.menu.install' | transloco }}</ion-label>
+        </ion-item>
+      }
     </ion-list>
   </ng-template>
 </ion-popover>

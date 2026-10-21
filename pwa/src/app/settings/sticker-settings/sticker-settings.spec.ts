@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { vi, type MockInstance } from 'vitest';
-import { of, throwError } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackSummary } from '../../../generated/models';
 import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
@@ -36,7 +36,7 @@ describe('StickerSettings', () => {
     autoSortFavoritesEnabled: vi.fn(() => false),
     packOrder: vi.fn(() => [] as { stickerPackId: SnowflakeID; lastUsedOn: number }[]),
     upsertPackOrderItem: vi.fn(),
-    syncPackOrder: vi.fn(async () => {}),
+    syncPackOrder: vi.fn(async () => true),
   };
   const alerts = {
     create: vi.fn(async () => ({
@@ -103,6 +103,37 @@ describe('StickerSettings', () => {
     expect(component['packs']()[0].name).toBe('新包');
   });
 
+  it('prevents duplicate creation while the request is pending', async () => {
+    const response = new Subject<
+      ReturnType<typeof api.postPack> extends import('rxjs').Observable<infer T> ? T : never
+    >();
+    api.postPack.mockReturnValueOnce(response);
+    const component = await loaded();
+    const pending = component['createPack']();
+    await vi.waitFor(() => expect(api.postPack).toHaveBeenCalledOnce());
+    expect(component['creating']()).toBe(true);
+    await component['createPack']();
+    expect(alerts.create).toHaveBeenCalledOnce();
+    response.next({ ...ownedPack, id: encodeId('301'), name: '新包', stickers: [] });
+    response.complete();
+    await pending;
+    expect(component['creating']()).toBe(false);
+  });
+
+  it('exposes a failed reorder and retries the same intended order', async () => {
+    preferences.syncPackOrder.mockResolvedValueOnce(false);
+    const component = await loaded();
+    await component['reorder']({
+      detail: { to: 0, complete: () => [other, ownedPack, subscribed] },
+    } as unknown as CustomEvent);
+    expect(component['orderFailed']()).toBe(true);
+    const original = preferences.syncPackOrder.mock.calls[0];
+    await component['saveOrder']();
+    expect(preferences.syncPackOrder.mock.calls[1]).toEqual(original);
+    expect(component['orderFailed']()).toBe(false);
+    expect(component['savingOrder']()).toBe(false);
+  });
+
   it('shows a failure alert when creating a pack fails', async () => {
     api.postPack.mockReturnValueOnce(throwError(() => new Error('offline')));
     const component = await loaded();
@@ -119,7 +150,7 @@ describe('StickerSettings', () => {
     const component = await loaded();
     const order = (items: StickerPackSummary[], to: number) =>
       component['reorder']({ detail: { to, complete: () => items } } as unknown as CustomEvent);
-    order([ownedPack, other, subscribed], 1);
+    await order([ownedPack, other, subscribed], 1);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: 75 });
     expect(preferences.syncPackOrder).toHaveBeenLastCalledWith([{ stickerPackId: other.id, lastUsedOn: 75 }]);
 
@@ -127,13 +158,13 @@ describe('StickerSettings', () => {
       { stickerPackId: ownedPack.id, lastUsedOn: 100 },
       { stickerPackId: subscribed.id, lastUsedOn: 100 },
     ]);
-    order([ownedPack, other, subscribed], 1);
+    await order([ownedPack, other, subscribed], 1);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: -9900 });
 
-    order([ownedPack, subscribed, other], 2);
+    await order([ownedPack, subscribed, other], 2);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: -9900 });
 
-    order([other, ownedPack, subscribed], 0);
+    await order([other, ownedPack, subscribed], 0);
     expect(preferences.upsertPackOrderItem).toHaveBeenLastCalledWith({ stickerPackId: other.id, lastUsedOn: 10100 });
   });
 

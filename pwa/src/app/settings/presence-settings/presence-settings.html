@@ -43,20 +43,17 @@
       <ion-item lines="none">
         <ion-note class="ion-text-wrap">{{ 'settings.presence.reciprocalNote' | transloco }}</ion-note>
       </ion-item>
-      <ion-item lines="none">
-        @if (saveError()) {
+      <ion-item lines="none" class="save-status">
+        @if (saving()) {
+          <ion-spinner slot="end"></ion-spinner>
+        } @else if (saveError()) {
           <ion-label class="ion-text-wrap" color="danger">{{ 'settings.presence.saveFailed' | transloco }}</ion-label>
+          <ion-button slot="end" fill="clear" (click)="savePresenceSettings()">
+            {{ 'common.retry' | transloco }}
+          </ion-button>
         } @else if (saved()) {
-          <ion-label color="medium">{{ 'common.saved' | transloco }}</ion-label>
+          <ion-label class="saved-feedback" color="medium">{{ 'common.saved' | transloco }}</ion-label>
         }
-        <ion-button slot="end" fill="clear" [disabled]="saving()" (click)="savePresenceSettings()">
-          <span class="action-content" [class.busy]="saving()">
-            <span class="action-label">{{ 'common.save' | transloco }}</span>
-            @if (saving()) {
-              <ion-spinner></ion-spinner>
-            }
-          </span>
-        </ion-button>
       </ion-item>
     }
   </ion-list>

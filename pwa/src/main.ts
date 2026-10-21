@@ -1,5 +1,6 @@
 import { inject, isDevMode, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideServiceWorker } from '@angular/service-worker';
+import { AppInstall } from './app/pwa/app-install';
 import { AppUpdates } from './app/pwa/app-updates';
 import { LegacyMigration } from './app/pwa/legacy-migration';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
@@ -46,6 +47,7 @@ bootstrapApplication(App, {
       loader: TranslocoHttpLoader,
     }),
     provideAppInitializer(async () => {
+      inject(AppInstall);
       inject(Appearance);
       inject(AppUpdates);
       const legacyMigration = inject(LegacyMigration);

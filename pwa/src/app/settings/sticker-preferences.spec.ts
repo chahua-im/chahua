@@ -3,11 +3,7 @@ import { vi, type MockInstance } from 'vitest';
 import { Subject, of, throwError } from 'rxjs';
 import { AuthService } from '../../generated/endpoints/auth/auth.service';
 import { UsersService } from '../../generated/endpoints/users/users.service';
-import {
-  ServerWsMessageType,
-  type MeResponse,
-  type ServerWsMessage,
-} from '../../generated/models';
+import { ServerWsMessageType, type MeResponse, type ServerWsMessage } from '../../generated/models';
 import { encodeId } from '../api/snowflake-id';
 import { mockRealtime, testUser } from '../api/testing';
 import { Connection } from '../api/connection';
@@ -91,6 +87,16 @@ describe('StickerPreferences', () => {
     preferences.upsertPackOrderItem({ stickerPackId: encodeId('201'), lastUsedOn: 30 });
     await preferences.syncPackOrder([{ stickerPackId: encodeId('201'), lastUsedOn: 30 }]);
     expect(session.user()?.stickerPackOrder).toEqual(serverOrder);
+  });
+
+  it('reports failure even when restoring the server order also fails', async () => {
+    putStickerpackOrder.mockReturnValueOnce(throwError(() => new Error('offline')));
+    getMe.mockReturnValueOnce(throwError(() => new Error('offline')));
+    const preferences = TestBed.inject(StickerPreferences);
+    const item = { stickerPackId: encodeId('201'), lastUsedOn: 30 };
+    preferences.upsertPackOrderItem(item);
+    expect(await preferences.syncPackOrder([item])).toBe(false);
+    expect(session.user()?.stickerPackOrder).toEqual([item]);
   });
 
   it('replaces the session order when the server pushes an update', () => {

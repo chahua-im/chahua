@@ -23,7 +23,10 @@
     "confirm": "確認",
     "add": "新增",
     "okay": "好",
-    "user": "使用者"
+    "user": "使用者",
+    "enabled": "開啟",
+    "disabled": "關閉",
+    "saving": "儲存中…"
   },
   "presence": {
     "online": "在線",
@@ -48,12 +51,12 @@
     "title": "設定",
     "menu": {
       "general": "一般",
-      "saved": "收藏",
+      "saved": "我的收藏",
       "friendVerification": "好友驗證",
       "presence": "在線狀態隱私",
       "readReceipts": "已讀回條",
       "stickers": "表情和貼紙",
-      "notifications": "通知",
+      "notifications": "訊息通知",
       "notificationsUnsupported": "不支援",
       "pushRegisterFailed": "背景推播註冊失敗",
       "tryAgain": "請重試",
@@ -63,10 +66,16 @@
       "updateNow": "立即更新",
       "notificationDenied": "未授予通知權限",
       "devUid": "開發 UID",
-      "devUidSwitch": "切換"
+      "devUidSwitch": "切換",
+      "privacy": "隱私",
+      "requestNotifications": "申請通知權限",
+      "install": "安裝應用程式",
+      "notificationBlockedHelp": "通知權限已被拒絕。請在瀏覽器的網站設定中允許通知，然後返回此頁面。",
+      "notificationWorkerUnavailable": "通知服務暫不可用，請重試。",
+      "notificationDisableFailed": "關閉背景推播失敗，請重試。"
     },
     "general": {
-      "title": "一般",
+      "title": "聊天設定",
       "language": "語言",
       "showThreads": "在訊息中顯示「話題」",
       "showAllAvatars": "在所有訊息旁顯示頭像",
@@ -74,30 +83,38 @@
       "colorMode": "顏色模式",
       "colorModeSystem": "跟隨系統",
       "colorModeLight": "淺色",
-      "colorModeDark": "深色"
+      "colorModeDark": "深色",
+      "fontSize": "字級",
+      "fontSmall": "小",
+      "fontLarge": "大",
+      "fontPreviewIncoming": "這是聊天訊息的預覽，拖動滑桿試試不同的字級。",
+      "fontPreviewOutgoing": "選擇一個閱讀起來舒服的大小。",
+      "fontDefault": "系統預設"
     },
     "language": {
       "title": "語言",
-      "auto": "自動"
+      "auto": "自動",
+      "saveFailed": "語言切換失敗，請重試。"
     },
     "friendVerification": {
-      "title": "好友驗證",
+      "title": "加我好友時的驗證方式",
       "loadFailed": "好友驗證設定載入失敗。",
-      "allowAnyone": "允許任何人加入我",
+      "allowAnyone": "允許任何人",
       "needMessage": "需要驗證訊息",
-      "needQuestion": "需要回答問題",
-      "forbid": "拒絕任何人加入我",
+      "needQuestion": "需要回答問題並由我確認",
+      "forbid": "禁止加我為好友",
       "questionLabel": "設定問題",
       "questionPlaceholder": "填寫申請者需要回答的問題",
       "questionInvalid": "請填寫 1–100 字的問題。",
-      "saveFailed": "儲存失敗，請重試。"
+      "saveFailed": "儲存失敗，請重試。",
+      "apply": "套用"
     },
     "presence": {
-      "title": "在線狀態隱私",
-      "loadFailed": "在線狀態隱私設定載入失敗。",
+      "title": "誰能查看我的活動狀態",
+      "loadFailed": "在線狀態載入失敗，點擊重試",
       "everyone": "所有人",
-      "friends": "僅好友",
-      "nobody": "沒有人",
+      "friends": "我的好友",
+      "nobody": "不允許任何人",
       "reciprocalNote": "僅在雙方都允許分享時顯示在線狀態和精確上線時間，否則顯示模糊的最近上線時間；群組在線人數不受影響。",
       "saveFailed": "儲存失敗，請重試。",
       "friendTitle": "在線狀態分享",
@@ -109,8 +126,6 @@
     "readReceipt": {
       "title": "已讀回條",
       "loadFailed": "已讀回條設定載入失敗。",
-      "friends": "僅好友",
-      "nobody": "沒有人",
       "reciprocalNote": "只會在雙方都允許分享時顯示已讀回條；群組對話永不顯示已讀回條。",
       "saveFailed": "儲存失敗，請重試。",
       "friendTitle": "已讀回條分享",
@@ -126,7 +141,8 @@
       "autoSortFavorites": "按最近使用自動排序收藏貼紙",
       "loadFailed": "貼紙包載入失敗。",
       "sortDivider": "此行以下的貼紙包不會自動排序",
-      "owned": "我的"
+      "owned": "我的",
+      "orderFailed": "貼紙排序儲存失敗，請重試。"
     },
     "stickerPack": {
       "title": "貼紙包",
@@ -144,6 +160,15 @@
       "removeStickerTitle": "移除貼紙",
       "removeStickerMessage": "要從貼紙包中移除此表情嗎？",
       "removeStickerFailed": "移除失敗，請重試"
+    },
+    "privacy": {
+      "blockedUsers": "已封鎖的使用者",
+      "none": "無",
+      "friendVerification": "加我為好友時的驗證方式",
+      "allowAnyone": "允許任何人",
+      "presence": "誰能查看我的活動狀態",
+      "loadFailed": "載入失敗，點擊重試",
+      "blocksLoadFailed": "封鎖使用者清單載入失敗。"
     }
   },
   "chats": {

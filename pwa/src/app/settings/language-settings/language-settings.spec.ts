@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { ModalController, provideIonicAngular } from '@ionic/angular';
 import type { RadioGroupCustomEvent } from '@ionic/core';
 import { vi } from 'vitest';
+import { Localization } from '../../i18n/localization';
 import { Preferences } from '../preferences';
 import { LanguageSettings } from './language-settings';
 
@@ -48,6 +49,25 @@ describe('LanguageSettings', () => {
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('Language');
     expect(document.documentElement.lang).toBe('en');
     expect(dismiss).toHaveBeenCalled();
+  });
+
+  it('keeps the page open after failure and retries the requested language', async () => {
+    const fixture = TestBed.createComponent(LanguageSettings);
+    fixture.detectChanges();
+    const service = TestBed.inject(Localization);
+    const apply = vi.spyOn(service, 'setLocale').mockRejectedValueOnce(new Error('offline'));
+    const group = fixture.nativeElement.querySelector('ion-radio-group');
+    group.value = 'en';
+    group.dispatchEvent(new CustomEvent('ionChange', { detail: { value: 'en' } }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(group.value).toBe('auto');
+    expect(fixture.nativeElement.textContent).toContain('语言切换失败');
+    apply.mockRestore();
+    await fixture.componentInstance['save']();
+    expect(TestBed.inject(Preferences).selectedLocale()).toBe('en');
+    expect(dismiss).toHaveBeenCalledOnce();
   });
 
   it('returns to automatic detection', async () => {

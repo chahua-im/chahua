@@ -3,7 +3,7 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ChangeDetectorRef, Component, getDebugNode, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter, Router } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { IonNav, ModalController, provideIonicAngular } from '@ionic/angular';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -22,9 +22,11 @@ import { SessionStore } from '../../session/session-store';
 import { ColorMode } from '../color-mode';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
 import { Preferences } from '../preferences';
+import { PrivacySettings } from '../privacy-settings/privacy-settings';
 import { PresenceSettings } from '../presence-settings/presence-settings';
 import { StickerSettings } from '../sticker-settings/sticker-settings';
 import { StickerPreferences } from '../sticker-preferences';
+import { NotificationSettings } from '../notification-settings/notification-settings';
 import { Settings } from './settings';
 
 @Component({ imports: [IonNav], template: '<ion-nav [root]="root"></ion-nav>' })
@@ -40,6 +42,7 @@ describe('Settings', () => {
   let dismiss: ReturnType<typeof vi.fn>;
   let notifications: {
     supported: boolean;
+    permission: ReturnType<typeof signal<NotificationPermission>>;
     enabled: ReturnType<typeof signal<boolean>>;
     busy: ReturnType<typeof signal<boolean>>;
     error: ReturnType<typeof signal<PushNotificationError | undefined>>;
@@ -67,6 +70,7 @@ describe('Settings', () => {
     dismiss = vi.fn().mockResolvedValue(true);
     notifications = {
       supported: true,
+      permission: signal<NotificationPermission>('granted'),
       enabled: signal(false),
       busy: signal(false),
       error: signal<PushNotificationError | undefined>(undefined),
@@ -143,16 +147,35 @@ describe('Settings', () => {
     fixture.detectChanges();
   }
 
-  async function openPage(label: '通用' | '好友验证' | '在线状态隐私') {
-    const item = Array.from(page.querySelectorAll('ion-item')).find((entry) => entry.textContent?.trim() === label)!;
+  async function openPage(label: '聊天设置' | '好友验证' | '在线状态隐私') {
+    if (label !== '聊天设置') {
+      const privacy = page.querySelector('ion-item[href="/settings/privacy"]');
+      expect(privacy).not.toBeNull();
+      expect(page.querySelector('ion-item[href="/settings/read-receipts"]')).toBeNull();
+      await nav.push(PrivacySettings);
+      page = (await nav.getActive())!.element!;
+      TestBed.tick();
+      http.expectOne('/_api/blocks').flush({ blocks: [] });
+      http.expectOne('/_api/me/read-receipt-settings').flush({ visibility: 'friends' });
+      http.expectOne(endpoint).flush({ mode: Mode.direct });
+      http.expectOne(presenceEndpoint).flush({ visibility: PresenceVisibility.everyone });
+      await fixture.whenStable();
+    }
     const destination =
-      label === '通用'
+      label === '聊天设置'
         ? { component: GeneralSettings, route: '/settings/general' }
         : label === '好友验证'
           ? { component: FriendVerificationSettings, route: '/settings/friend-verification' }
           : { component: PresenceSettings, route: '/settings/presence' };
-    expect(item.getAttribute('href')).toBe(destination.route);
+    expect(page.querySelector(`ion-item[href="${destination.route}"]`)).not.toBeNull();
     await nav.push(destination.component);
+    page = (await nav.getActive())!.element!;
+    await fixture.whenStable();
+  }
+
+  async function openNotifications() {
+    expect(page.querySelector('ion-item[href="/settings/notifications"]')).not.toBeNull();
+    await nav.push(NotificationSettings);
     page = (await nav.getActive())!.element!;
     await fixture.whenStable();
   }
@@ -185,31 +208,38 @@ describe('Settings', () => {
     const textarea: HTMLIonTextareaElement = page.querySelector('ion-textarea')!;
     textarea.value = question;
     textarea.dispatchEvent(new CustomEvent('ionInput', { detail: { value: question } }));
+    textarea.dispatchEvent(new CustomEvent('ionChange', { detail: { value: question } }));
     await fixture.whenStable();
     fixture.detectChanges();
-  }
-
-  function saveButton() {
-    return Array.from(page.querySelectorAll('ion-button')).find((button) => button.textContent?.includes('保存'))!;
   }
 
   it('keeps general and verification controls on secondary pages instead of the settings home', () => {
     expect(page.textContent).toContain(testUser.username);
     expect(page.querySelector('ion-avatar img')!.getAttribute('src')).toBe('/avatar.jpg');
-    expect(page.querySelectorAll('ion-toggle')).toHaveLength(1);
+    expect(page.querySelectorAll('ion-toggle')).toHaveLength(0);
     expect(page.querySelector('ion-radio-group')).toBeNull();
     expect(page.textContent).not.toContain('在“消息”标签页中显示话题');
-    expect(page.textContent).not.toContain('允许任何人添加我');
+    expect(page.textContent).not.toContain('允许任何人');
     http.expectNone(endpoint);
     http.expectNone(presenceEndpoint);
   });
 
   it('links to general settings and persists preferences across page visits', async () => {
-    await openPage('通用');
-    expect(page.querySelector('ion-title')!.textContent).toBe('通用');
-    const language = Array.from(page.querySelectorAll('ion-item')).find((item) => item.textContent?.includes('语言'))!;
-    expect(language.getAttribute('href')).toBe('/settings/language');
-    expect(language.textContent).toContain('自动');
+    await openPage('聊天设置');
+    expect(page.querySelector('ion-title')!.textContent).toBe('聊天设置');
+    expect(page.textContent).not.toContain('语言');
+    const range = page.querySelector('ion-range')!;
+    range.dispatchEvent(new CustomEvent('ionInput', { detail: { value: 4 } }));
+    expect(TestBed.inject(Preferences).chatFontSize()).toBe(4);
+    expect(localStorage.getItem('chahua.preferences.chatFontSize')).toBe('4');
+    await fixture.whenStable();
+    const preview = page.querySelector<HTMLElement>('.font-preview')!;
+    expect(preview.style.getPropertyValue('--preview-font-size')).toBe('20px');
+    expect(preview.querySelectorAll('.preview-message')).toHaveLength(2);
+    range.dispatchEvent(new CustomEvent('ionInput', { detail: { value: 2 } }));
+    await fixture.whenStable();
+    expect(preview.style.getPropertyValue('--preview-font-size')).toBe('');
+    expect(preview.style.getPropertyValue('--preview-line-height')).toBe('');
     const toggles = Array.from(page.querySelectorAll('ion-toggle'));
     expect(toggles[2].checked).toBe(true);
     toggles[0].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
@@ -225,7 +255,7 @@ describe('Settings', () => {
     expect(page.tagName).toBe('APP-SETTINGS');
     expect(await nav.canGoBack()).toBe(false);
     expect(dismiss).not.toHaveBeenCalled();
-    await openPage('通用');
+    await openPage('聊天设置');
     const restored = Array.from(page.querySelectorAll('ion-toggle'));
     expect(restored[0].checked).toBe(false);
     expect(restored[1].checked).toBe(true);
@@ -238,7 +268,7 @@ describe('Settings', () => {
   });
 
   it('switches and persists the color mode from general settings', async () => {
-    await openPage('通用');
+    await openPage('聊天设置');
     expect(Array.from(page.querySelectorAll('ion-radio')).map((radio) => radio.value)).toEqual([
       ColorMode.System,
       ColorMode.Light,
@@ -253,7 +283,7 @@ describe('Settings', () => {
     expect(localStorage.getItem('chahua.preferences.colorMode')).toBe('dark');
   });
 
-  it('loads all four modes, requires a nonblank question and saves its trimmed text', async () => {
+  it('requires Apply for question mode and saves its trimmed text only after confirmation', async () => {
     await openPage('好友验证');
     await load({ mode: Mode.need_message });
     expect(Array.from(page.querySelectorAll('ion-radio')).map((radio) => radio.value)).toEqual([
@@ -262,20 +292,32 @@ describe('Settings', () => {
       Mode.question,
       Mode.forbid,
     ]);
+    expect(
+      Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '应用'),
+    ).toBe(false);
     await choose(Mode.question);
     await enterQuestion('   ');
-    expect(saveButton().disabled).toBe(true);
+    const apply = Array.from(page.querySelectorAll('ion-button')).find(
+      (button) => button.textContent?.trim() === '应用',
+    )!;
+    expect(apply.disabled).toBe(true);
+    http.expectNone(endpoint);
+    expect(page.textContent).toContain('请填写 1–100 字的问题');
     await enterQuestion('  我们在哪里认识的？  ');
-    expect(saveButton().disabled).toBe(false);
-    saveButton().click();
+    http.expectNone(endpoint);
+    expect(apply.disabled).toBe(false);
+    apply.click();
     const request = http.expectOne(endpoint);
     expect(request.request.method).toBe('PUT');
     expect(request.request.body).toEqual({ mode: Mode.question, question: '我们在哪里认识的？' });
     request.flush({ mode: Mode.question, question: '我们在哪里认识的？' });
     await fixture.whenStable();
-    expect(page.textContent).toContain('已保存');
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(page.textContent).toContain('已保存');
+    });
     await back();
-    expect(page.tagName).toBe('APP-SETTINGS');
+    expect(page.tagName).toBe('APP-PRIVACY-SETTINGS');
     expect(dismiss).not.toHaveBeenCalled();
   });
 
@@ -287,15 +329,21 @@ describe('Settings', () => {
       PresenceVisibility.friends,
       PresenceVisibility.nobody,
     ]);
+    expect(
+      Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '保存'),
+    ).toBe(false);
     await choose(PresenceVisibility.nobody);
-    saveButton().click();
+    await choose(PresenceVisibility.friends);
     const request = http.expectOne(presenceEndpoint);
     expect(request.request.method).toBe('PUT');
     expect(request.request.body).toEqual({ visibility: PresenceVisibility.nobody });
     request.flush({ visibility: PresenceVisibility.nobody });
     await fixture.whenStable();
     expect(presence.invalidateUsers).toHaveBeenCalledOnce();
-    expect(page.textContent).toContain('已保存');
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(page.textContent).toContain('已保存');
+    });
   });
 
   it('does not retain a question when another verification mode is saved', async () => {
@@ -303,7 +351,9 @@ describe('Settings', () => {
     await load({ mode: Mode.question, question: '旧问题' });
     await choose(Mode.forbid);
     expect(page.querySelector('ion-textarea')).toBeNull();
-    saveButton().click();
+    expect(
+      Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '应用'),
+    ).toBe(false);
     const request = http.expectOne(endpoint);
     expect(request.request.body).toEqual({ mode: Mode.forbid });
     request.flush({ mode: Mode.forbid });
@@ -330,18 +380,23 @@ describe('Settings', () => {
     await openPage('好友验证');
     await load();
     await choose(Mode.need_message);
-    const saving = friendPage()['saveVerification']();
     await friendPage()['saveVerification']();
     http.expectOne(endpoint).flush('', { status: 503, statusText: 'Unavailable' });
-    await saving;
     await fixture.whenStable();
-    expect(page.textContent).toContain('保存失败，请重试');
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(page.textContent).toContain('保存失败，请重试');
+    });
     expect(friendPage()['verification']().mode).toBe(Mode.need_message);
-    const retry = friendPage()['saveVerification']();
+    Array.from(page.querySelectorAll('ion-button'))
+      .find((button) => button.textContent?.includes('重试'))!
+      .click();
     http.expectOne(endpoint).flush({ mode: Mode.need_message });
-    await retry;
     await fixture.whenStable();
-    expect(page.textContent).toContain('已保存');
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(page.textContent).toContain('已保存');
+    });
   });
 
   it('links to the sticker settings page and loads its pack list', async () => {
@@ -357,16 +412,39 @@ describe('Settings', () => {
     expect(page.querySelector('ion-title')!.textContent).toBe('表情和贴纸');
   });
 
-  it('replaces the settings page with saved messages', async () => {
-    vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
-    await homePage()['openSaved']();
-    expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/chats/saved', { replaceUrl: true });
+  it('keeps the requested menu order and requests permission only from its button', async () => {
+    expect(
+      Array.from(page.querySelectorAll('ion-list')[0].querySelectorAll('ion-label')).map((item) =>
+        item.textContent?.trim(),
+      ),
+    ).toEqual(['消息通知', '隐私', '聊天设置', '表情和贴纸', '语言']);
+    expect(page.querySelector('ion-toggle')).toBeNull();
+    expect(notifications.refresh).not.toHaveBeenCalled();
+    notifications.permission.set('default');
+    await openNotifications();
+    expect(page.querySelector('ion-toggle')!.disabled).toBe(true);
+    const button = Array.from(page.querySelectorAll('ion-button')).find((item) =>
+      item.textContent?.includes('申请通知权限'),
+    )!;
+    button.click();
+    expect(notifications.setEnabled).toHaveBeenCalledWith(true);
+    notifications.permission.set('granted');
+    notifications.enabled.set(true);
+    await fixture.whenStable();
+    expect(page.textContent).not.toContain('申请通知权限');
+    expect(page.querySelector('ion-toggle')!.disabled).toBe(false);
+    expect(page.querySelector('ion-toggle')!.checked).toBe(true);
+    await back();
+    expect(page.tagName).toBe('APP-SETTINGS');
   });
 
   it('refreshes notification status without requesting permission and rolls back a denied toggle', async () => {
+    await openNotifications();
     expect(notifications.refresh).toHaveBeenCalledOnce();
     expect(notifications.setEnabled).not.toHaveBeenCalled();
-    const toast = vi.spyOn(homePage()['permissionToast'](), 'present').mockResolvedValue();
+    const toast = vi
+      .spyOn((getDebugNode(page)!.componentInstance as NotificationSettings)['permissionToast'](), 'present')
+      .mockResolvedValue();
     notifications.setEnabled.mockImplementation(async () => {
       notifications.error.set(PushNotificationError.PermissionDenied);
       return false;
@@ -381,6 +459,25 @@ describe('Settings', () => {
     expect(page.querySelector('ion-list')!.textContent).not.toContain('通知权限已被拒绝');
   });
 
+  it('shows blocked permission guidance, refreshes on focus and retries worker failures', async () => {
+    notifications.permission.set('denied');
+    await openNotifications();
+    expect(page.textContent).toContain('浏览器的网站设置');
+    expect(page.textContent).not.toContain('申请通知权限');
+    notifications.refresh.mockClear();
+    window.dispatchEvent(new Event('focus'));
+    expect(notifications.refresh).toHaveBeenCalledOnce();
+    notifications.permission.set('granted');
+    notifications.enabled.set(true);
+    notifications.error.set(PushNotificationError.ServiceWorkerUnavailable);
+    await fixture.whenStable();
+    expect(page.textContent).toContain('通知服务暂不可用');
+    Array.from(page.querySelectorAll('ion-button'))
+      .find((button) => button.textContent?.includes('重试'))!
+      .click();
+    expect(notifications.setEnabled).toHaveBeenCalledWith(true);
+  });
+
   it('replaces unsupported notifications with a note and disables the update row', async () => {
     notifications.supported = false;
     updates.supported = false;
@@ -389,8 +486,11 @@ describe('Settings', () => {
     await fixture.whenStable();
     expect(page.querySelector('ion-toggle')).toBeNull();
     const items = Array.from(page.querySelectorAll('ion-item'));
-    expect(items.find((item) => item.textContent?.includes('消息通知'))?.textContent).toContain('不支持');
     expect(items.find((item) => item.textContent?.includes('检查更新'))?.disabled).toBe(true);
+    await openNotifications();
+    expect(page.textContent).toContain('不支持');
+    expect(page.querySelector('ion-toggle')!.disabled).toBe(true);
+    expect(page.textContent).not.toContain('申请通知权限');
   });
 
   it('shows the version and check result, then reloads only when the update button is chosen', async () => {

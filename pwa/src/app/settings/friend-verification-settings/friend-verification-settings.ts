@@ -98,6 +98,14 @@ export class FriendVerificationSettings {
     }
   }
 
+  protected chooseMode(mode: FriendAddVerificationMode) {
+    if (this.saving() || mode === this.verification().mode) return;
+    this.verification.update((value) => ({ ...value, mode }));
+    this.saved.set(false);
+    this.saveError.set(false);
+    if (mode !== FriendAddVerificationMode.question) void this.saveVerification();
+  }
+
   protected async saveVerification() {
     if (this.verificationForm().disabled() || this.verificationForm().invalid()) return;
     this.saving.set(true);
