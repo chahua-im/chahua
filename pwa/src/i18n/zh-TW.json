@@ -30,15 +30,17 @@
     "groupCounts": "{{ online }} 人在線 · 共 {{ members }} 人",
     "lastSeen": {
       "recently": "最近上線",
-      "within30m": "30 分鐘內上線",
-      "within1h": "1 小時內上線",
-      "within2h": "2 小時內上線",
-      "within6h": "6 小時內上線",
-      "within12h": "12 小時內上線",
-      "within1day": "1 天內上線",
-      "within1week": "1 週內上線",
-      "within1month": "1 個月內上線",
-      "longago": "很久以前上線"
+      "withinWeek": "1 週內上線",
+      "withinMonth": "1 個月內上線",
+      "longAgo": "很久沒上線",
+      "today": "最近上線於今天 {{ time }}",
+      "yesterday": "最近上線於昨天 {{ time }}",
+      "date": "最近上線於 {{ date }} {{ time }}",
+      "justNow": "剛剛上線",
+      "minute": "最近上線於 {{ count }} 分鐘前",
+      "minutes": "最近上線於 {{ count }} 分鐘前",
+      "hour": "最近上線於 {{ count }} 小時前",
+      "hours": "最近上線於 {{ count }} 小時前"
     }
   },
   "settings": {
@@ -95,7 +97,7 @@
       "everyone": "所有人",
       "friends": "僅好友",
       "nobody": "沒有人",
-      "reciprocalNote": "在線狀態和最近上線只會在雙方都允許向對方分享時顯示；群組在線人數不受影響。",
+      "reciprocalNote": "僅在雙方都允許分享時顯示在線狀態和精確上線時間，否則顯示模糊的最近上線時間；群組在線人數不受影響。",
       "saveFailed": "儲存失敗，請重試。",
       "friendTitle": "在線狀態分享",
       "friendInherit": "使用全域設定",

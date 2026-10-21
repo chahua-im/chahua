@@ -142,8 +142,18 @@ pub struct PresenceUpdatePayload {
     pub active_connections: u32,
 }
 
-/// One watched user's current presence. `last_seen_at` is omitted when no HTTP activity has
-/// been recorded for that user.
+/// Privacy-filtered last-seen approximation. Boundaries are 3, 7 and 30 days.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum LastSeenBucket {
+    Recently,
+    WithinWeek,
+    WithinMonth,
+    LongAgo,
+}
+
+/// One watched user's presence. Hidden presence has only a bucket and `online: false`;
+/// this suppresses the online indicator without asserting the user is offline.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UserPresenceResponse {
@@ -151,6 +161,8 @@ pub struct UserPresenceResponse {
     pub online: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_bucket: Option<LastSeenBucket>,
 }
 
 /// Current aggregate presence for one regular group.
@@ -491,6 +503,7 @@ mod tests {
                     uid: 7,
                     online: true,
                     last_seen_at: None,
+                    last_seen_bucket: None,
                 }],
                 groups: vec![GroupPresenceResponse {
                     chat_id: "9223372036854775807".to_string(),

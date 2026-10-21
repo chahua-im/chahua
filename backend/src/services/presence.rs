@@ -15,7 +15,9 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use diesel::prelude::*;
 use moka::future::Cache;
 
-use crate::dto::ws::{GroupPresenceResponse, PresenceSnapshotPayload, UserPresenceResponse};
+use crate::dto::ws::{
+    GroupPresenceResponse, LastSeenBucket, PresenceSnapshotPayload, UserPresenceResponse,
+};
 use crate::models::{GroupKind, PresenceVisibility};
 use crate::schema::{group_membership, groups, user_extra};
 use crate::services::social;
@@ -252,41 +254,60 @@ fn load_visible_users(
         .get(&viewer_uid)
         .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
 
+    let now = Utc::now();
     Ok(user_ids
         .iter()
         .copied()
-        .filter(|uid| {
-            if *uid == viewer_uid {
-                return candidates.contains(uid);
-            }
-            let Some(relationship) = relationships.get(uid) else {
-                return false;
-            };
-            let peer_visibility = presence_by_uid
-                .get(uid)
-                .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
-            candidates.contains(uid)
-                && presence_is_visible(
-                    false,
-                    true,
-                    relationship.friends_since.is_some(),
-                    viewer_visibility,
-                    relationship.shares_presence,
-                    peer_visibility,
-                    relationship.peer_shares_presence,
-                )
-        })
+        .filter(|uid| candidates.contains(uid))
         .map(|uid| {
+            let peer_visibility = presence_by_uid
+                .get(&uid)
+                .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
+            let exact = uid == viewer_uid
+                || relationships.get(&uid).is_some_and(|relationship| {
+                    presence_is_visible(
+                        false,
+                        true,
+                        relationship.friends_since.is_some(),
+                        viewer_visibility,
+                        relationship.shares_presence,
+                        peer_visibility,
+                        relationship.peer_shares_presence,
+                    )
+                });
             let last_seen_at = presence_by_uid.get(&uid).map(|(last_seen_at, _)| {
                 DateTime::<Utc>::from_naive_utc_and_offset(*last_seen_at, Utc)
             });
-            UserPresenceResponse {
-                uid,
-                online: registry.is_online(uid),
-                last_seen_at,
-            }
+            user_presence(uid, exact, registry.is_online(uid), last_seen_at, now)
         })
         .collect())
+}
+
+fn user_presence(
+    uid: i32,
+    exact: bool,
+    online: bool,
+    last_seen_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> UserPresenceResponse {
+    let last_seen_bucket = if exact {
+        None
+    } else if online {
+        Some(LastSeenBucket::Recently)
+    } else {
+        last_seen_at.map(|last_seen| match (now - last_seen).num_days() {
+            days if days < 3 => LastSeenBucket::Recently,
+            days if days < 7 => LastSeenBucket::WithinWeek,
+            days if days < 30 => LastSeenBucket::WithinMonth,
+            _ => LastSeenBucket::LongAgo,
+        })
+    };
+    UserPresenceResponse {
+        uid,
+        online: exact && online,
+        last_seen_at: if exact { last_seen_at } else { None },
+        last_seen_bucket,
+    }
 }
 
 fn presence_is_visible(
@@ -355,6 +376,39 @@ mod tests {
     use crate::services::ws_registry::WsMetrics;
     use diesel::r2d2::ConnectionManager;
     use prometheus::Registry;
+
+    #[test]
+    fn hidden_presence_never_serializes_exact_activity() {
+        let now = Utc::now();
+        for (days, bucket) in [
+            (0, LastSeenBucket::Recently),
+            (2, LastSeenBucket::Recently),
+            (3, LastSeenBucket::WithinWeek),
+            (7, LastSeenBucket::WithinMonth),
+            (30, LastSeenBucket::LongAgo),
+        ] {
+            let response = user_presence(
+                2,
+                false,
+                false,
+                Some(now - chrono::Duration::days(days)),
+                now,
+            );
+            assert_eq!(response.last_seen_bucket, Some(bucket));
+            let json = serde_json::to_value(response).unwrap();
+            assert_eq!(json["online"], false);
+            assert!(json.get("lastSeenAt").is_none());
+        }
+        let online = user_presence(2, false, true, Some(now - chrono::Duration::days(40)), now);
+        assert_eq!(online.last_seen_bucket, Some(LastSeenBucket::Recently));
+        assert!(!online.online);
+        assert!(online.last_seen_at.is_none());
+        let unknown = user_presence(2, false, false, None, now);
+        assert!(unknown.last_seen_bucket.is_none());
+        let exact = user_presence(2, true, false, Some(now), now);
+        assert_eq!(exact.last_seen_at, Some(now));
+        assert!(exact.last_seen_bucket.is_none());
+    }
 
     #[tokio::test]
     async fn failed_scope_load_records_failure_without_counting_group_work() {
