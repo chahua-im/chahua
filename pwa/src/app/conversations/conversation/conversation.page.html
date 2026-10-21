@@ -232,44 +232,29 @@
   </div>
   @if (conversation.page(); as page) {
     <!-- Keep the fixed slot mounted: changing its nodes interrupts Safari's momentum scrolling. -->
-    <ion-fab
-      class="history-navigation"
-      slot="fixed"
-      vertical="bottom"
-      horizontal="end"
-      [style.visibility]="showDownButton() ? 'visible' : 'hidden'">
-      <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="navigateDown()">
-        @if (navigatingDown() || pendingNavigation()?.type === ConversationTargetKind.Latest) {
-          <ion-spinner class="action-icon"></ion-spinner>
-        } @else {
-          <ion-icon class="action-icon" [icon]="downIcon"></ion-icon>
-        }
-      </ion-fab-button>
-      <ion-badge [style.opacity]="unreadCount() ? 1 : 0">{{ unreadCount() }}</ion-badge>
-    </ion-fab>
-    <ion-fab
-      class="history-navigation reaction-navigation"
-      slot="fixed"
-      vertical="bottom"
-      horizontal="end"
-      [style.margin-bottom.px]="showDownButton() ? 72 : 16"
-      [style.visibility]="canJumpReaction() ? 'visible' : 'hidden'">
-      <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextReaction()">
-        <ion-icon class="action-icon" [icon]="reactionIcon"></ion-icon>
-      </ion-fab-button>
-      <ion-badge>{{ reactionRemaining() >= 1000 ? '999+' : reactionRemaining() }}</ion-badge>
-    </ion-fab>
-    <ion-fab
-      class="history-navigation mention-navigation"
-      slot="fixed"
-      vertical="bottom"
-      horizontal="end"
-      [style.margin-bottom.px]="mentionFabOffset()"
-      [style.visibility]="canJumpMention() ? 'visible' : 'hidden'">
-      <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextMention()">
-        <ion-icon class="action-icon" [icon]="mentionIcon"></ion-icon>
-      </ion-fab-button>
-      <ion-badge>{{ mentionRemaining() >= 1000 ? '999+' : mentionRemaining() }}</ion-badge>
+    <ion-fab class="history-navigation" slot="fixed" vertical="bottom" horizontal="end">
+      <div class="reaction-navigation" [hidden]="!canJumpReaction()">
+        <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextReaction()">
+          <ion-icon class="action-icon" [icon]="reactionIcon"></ion-icon>
+        </ion-fab-button>
+        <ion-badge>{{ reactionRemaining() >= 1000 ? '999+' : reactionRemaining() }}</ion-badge>
+      </div>
+      <div class="mention-navigation" [hidden]="!canJumpMention()">
+        <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="jumpToNextMention()">
+          <ion-icon class="action-icon" [icon]="mentionIcon"></ion-icon>
+        </ion-fab-button>
+        <ion-badge>{{ mentionRemaining() >= 1000 ? '999+' : mentionRemaining() }}</ion-badge>
+      </div>
+      <div class="down-navigation" [hidden]="!showDownButton()">
+        <ion-fab-button size="small" [disabled]="!!pendingNavigation()" (click)="navigateDown()">
+          @if (navigatingDown() || pendingNavigation()?.type === ConversationTargetKind.Latest) {
+            <ion-spinner class="action-icon"></ion-spinner>
+          } @else {
+            <ion-icon class="action-icon" [icon]="downIcon"></ion-icon>
+          }
+        </ion-fab-button>
+        <ion-badge [style.opacity]="unreadCount() ? 1 : 0">{{ unreadCount() }}</ion-badge>
+      </div>
     </ion-fab>
   }
 </ion-content>

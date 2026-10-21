@@ -816,7 +816,7 @@ describe('ConversationPage', () => {
       await component['onScroll']();
       await fixture.whenStable();
       expect(content.querySelector('ion-fab')).toBe(fab);
-      expect(getComputedStyle(fab).visibility).toBe(top === 470 ? 'hidden' : 'visible');
+      expect(fab.querySelector<HTMLElement>('.down-navigation')!.hidden).toBe(top === 470);
       expect(scroll.scrollTop).toBe(top);
     }
   });
@@ -880,23 +880,23 @@ describe('ConversationPage', () => {
     });
     await fixture.whenStable();
     fixture.detectChanges();
-    const button: HTMLElement = fixture.nativeElement.querySelector('.history-navigation');
-    expect(button.style.visibility).toBe('hidden');
+    const button: HTMLElement = fixture.nativeElement.querySelector('.down-navigation');
+    expect(button.hidden).toBe(true);
     positioning.mockRestore();
     await component['positionAndRead']();
     await fixture.whenStable();
-    expect(button.style.visibility).toBe(hasNewer ? 'visible' : 'hidden');
+    expect(button.hidden).toBe(!hasNewer);
     Object.defineProperties(scroll, { scrollHeight: { value: 3000 }, clientHeight: { value: 500 } });
     scroll.scrollTop = 1000;
     await component['trackScroll']();
     await fixture.whenStable();
-    expect(button.style.visibility).toBe('visible');
-    expect(fixture.nativeElement.querySelector('.history-navigation')).toBe(button);
+    expect(button.hidden).toBe(false);
+    expect(fixture.nativeElement.querySelector('.down-navigation')).toBe(button);
   });
 
   it('reads the badge from shared state, keeps its node mounted and hides it with the button', async () => {
     const data = TestBed.inject(ChatStore);
-    const badge: HTMLElement = fixture.nativeElement.querySelector('.history-navigation ion-badge');
+    const badge: HTMLElement = fixture.nativeElement.querySelector('.down-navigation ion-badge');
     data.acceptChats([{ ...testChat, unreadCount: 37 }], data.snapshot());
     Object.defineProperties(scroll, { scrollHeight: { value: 3000 }, clientHeight: { value: 500 } });
     scroll.scrollTop = 1000;
@@ -910,7 +910,7 @@ describe('ConversationPage', () => {
     component['composer']()!.voiceActive.set(false);
     data.acceptChats([{ ...testChat, unreadCount: 0 }], data.snapshot());
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('.history-navigation ion-badge')).toBe(badge);
+    expect(fixture.nativeElement.querySelector('.down-navigation ion-badge')).toBe(badge);
     expect(badge.style.opacity).toBe('0');
   });
 
