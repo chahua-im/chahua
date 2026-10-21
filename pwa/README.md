@@ -26,7 +26,9 @@ npm run test:pwa
 
 安装指引位于 `/landing`；已安装应用从该入口直接进入聊天。
 
-`npm start` 和 `npm run dev:online` 的开发服务地址为 `http://localhost:4200`，`npm run dev` 使用 `http://localhost:4300`；两者源不同，可各自保留登录状态。默认 `npm run build` 生成同源构建，部署目录为 `dist/app/browser`。`npm run dev` 使用 `proxy.conf.dev.mjs` 代理到 `API_PROXY_TARGET`（默认 `http://localhost:3000`），并去掉 `/_api` 前缀，HTTP 与 WebSocket 均生效；该变量可在命令前或 `.env.local` 中设置。`npm run dev:online` 将目标设为 `https://chahui.app/_api`，`npm start` 仍使用 `proxy.conf.json` 代理到生产。HTTP 与 WebSocket 的基地址见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。
+开发模式自动注册仅处理通知的 Service Worker，支持通知权限、Web Push 和通知点击跳转，不缓存页面、JS、CSS 或 API，不影响热更新；“检查更新”在开发模式保持禁用。局域网测试需要浏览器信任的 HTTPS 证书，可沿用 `npm run dev:online -- --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem`；证书必须包含访问 IP，测试设备需信任签发证书的根 CA。生产构建继续使用 Angular 的资源缓存与更新机制。
+
+`npm start` 使用 `http://localhost:4200`，`npm run dev:online` 使用 `https://localhost:4200`，`npm run dev` 使用 `https://localhost:4300`；两者源不同，可各自保留登录状态。默认 `npm run build` 生成同源构建，部署目录为 `dist/app/browser`。`npm run dev` 使用 `proxy.conf.dev.mjs` 代理到 `API_PROXY_TARGET`（默认 `http://localhost:3000`），并去掉 `/_api` 前缀，HTTP 与 WebSocket 均生效；该变量可在命令前或 `.env.local` 中设置。`npm run dev:online` 将目标设为 `https://chahui.app/_api`，`npm start` 仍使用 `proxy.conf.json` 代理到生产。HTTP 与 WebSocket 的基地址见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。
 
 `npm run build:prod` 生成跨域生产构建，部署目录为 `dist/prod/browser`。编译后的 JS、CSS 和延迟加载模块从 `https://chahui.app/` 加载；HTML、manifest、图标、表情数据和 Service Worker 保留在页面源。构建脚本同步改写 `ngsw.json` 中的编译资源 URL 与哈希表键，保留内容校验；不要用单独的 `ng build --configuration production,prod` 替代完整脚本。
 

@@ -29,9 +29,9 @@ if (isDevMode() && typeof crypto.randomUUID !== 'function')
 bootstrapApplication(App, {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideServiceWorker('serviceWorker.js', {
-      enabled: !isDevMode(),
-      registrationStrategy: 'registerWhenStable:3000',
+    provideServiceWorker(isDevMode() ? 'serviceWorker.js?development=1' : 'serviceWorker.js', {
+      enabled: true,
+      registrationStrategy: isDevMode() ? 'registerImmediately' : 'registerWhenStable:3000',
       updateViaCache: 'none',
     }),
     provideTransloco({

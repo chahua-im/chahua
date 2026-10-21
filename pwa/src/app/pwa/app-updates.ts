@@ -1,4 +1,4 @@
-import { computed, inject, Service, signal } from '@angular/core';
+import { computed, inject, isDevMode, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SwUpdate } from '@angular/service-worker';
 import { firstValueFrom, from, timeout } from 'rxjs';
@@ -20,7 +20,7 @@ export class AppUpdates {
   private readonly dismissedVersion = signal<string | undefined>(undefined);
   private readonly interactive = signal(false);
   private pendingCheck?: Promise<UpdateCheckResult>;
-  readonly supported = this.updates.isEnabled;
+  readonly supported = !isDevMode() && this.updates.isEnabled;
   readonly version = appVersion;
   readonly checking = this.checkingState.asReadonly();
   readonly available = computed(() => this.availableState() || !!this.latestVersion());
@@ -42,7 +42,7 @@ export class AppUpdates {
   readonly dismiss = () => this.dismissedVersion.set(this.latestVersion());
 
   check(): Promise<UpdateCheckResult> {
-    if (!this.updates.isEnabled) return Promise.resolve(UpdateCheckResult.Unavailable);
+    if (!this.supported) return Promise.resolve(UpdateCheckResult.Unavailable);
     if (this.pendingCheck) return this.pendingCheck;
     this.checkingState.set(true);
     this.pendingCheck = this.checkForUpdate().finally(() => {
