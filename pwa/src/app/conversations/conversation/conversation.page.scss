@@ -35,7 +35,17 @@ ion-content::part(scroll) {
 }
 
 .history-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px;
+
+  > div {
+    position: relative;
+  }
+
   ion-fab-button {
+    margin: 0;
     --background: var(--ion-background-color-step-100, #f0f0f0);
     --background-hover: var(--ion-background-color-step-150, var(--ion-color-light-shade));
     --background-activated: var(--ion-background-color-step-150, var(--ion-color-light-shade));
@@ -46,7 +56,7 @@ ion-content::part(scroll) {
 
   ion-badge {
     position: absolute;
-    top: 0;
+    top: -8px;
     left: 50%;
     transform: translateX(-50%);
     min-width: 20px;

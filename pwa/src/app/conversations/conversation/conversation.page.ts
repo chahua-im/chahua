@@ -588,10 +588,6 @@ export class ConversationPage {
   protected readonly mentionJumpIds = signal<SnowflakeID[]>([]);
   protected readonly mentionRemaining = computed(() => this.mentionJumpIds().length);
   protected readonly canJumpMention = computed(() => this.active() && this.mentionRemaining() > 0);
-  /** Stack the mention FAB above the reaction FAB when both are visible. */
-  protected readonly mentionFabOffset = computed(
-    () => (this.showDownButton() ? 72 : 16) + (this.canJumpReaction() ? 56 : 0),
-  );
   private reactionSessionEntered = false;
   private reactionRequest?: { again: boolean };
   private mentionRequest?: { again: boolean };

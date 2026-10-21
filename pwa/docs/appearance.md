@@ -91,7 +91,7 @@ NotificationPrompt 使用 Angular 默认的 Emulated 封装，模板内 spinner 
 | ChatAvatar             | 默认列表头像使用平台尺寸；显式 88px 等尺寸用于资料；话题角标、边框、占位及列表在线圆点。 |
 | UserPresenceDisplay / GroupPresenceDisplay | 正常字重的单行状态、固定行高占位、紧凑加载线框。 |
 | ChatDetails            | 内容容器、安全区、居中资料、横排操作及紧凑标签。                                                                                         |
-| ConversationPage       | 360px 信息栏、移动端标题无法完整显示时操作收进竖排三点菜单并在下方弹出带图标的纵向操作列表、手动锚点下关闭浏览器二次锚定、未读线、下箭头、mention/reaction 跳转 FAB（同时可见时向上堆叠） 与置顶/回复栏；吸顶语音播放条；主 toolbar 保留底边，置顶栏有自己的底边。        |
+| ConversationPage       | 360px 信息栏、移动端标题无法完整显示时操作收进竖排三点菜单并在下方弹出带图标的纵向操作列表、手动锚点下关闭浏览器二次锚定、未读线、下箭头、表态、提及、回到底部按钮（从上到下排列，按钮间距 16px；隐藏项不占位，其余按钮向底部补齐） 与置顶/回复栏；吸顶语音播放条；主 toolbar 保留底边，置顶栏有自己的底边。        |
 | SavedMessageList       | 收藏消息背景、来源与快照操作排列；用于全局收藏页面。                                                                                     |
 | Message                | 气泡、尾巴、作者分组、媒体贴边、时间、引用、桌面 hover 与手机回复手势反馈。                                                              |
 | MessageAuthor          | 用户名、用户组和性别在同一行的颜色及密度。                                                                                               |
