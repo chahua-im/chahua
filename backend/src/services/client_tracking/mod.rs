@@ -28,6 +28,7 @@ use crate::utils::auth::{extract_auth_context, X_APP_VERSION, X_ON_BEHALF_OF};
 const ACTIVITY_WRITE_THROTTLE: Duration = Duration::from_secs(5 * 60);
 const PURGE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const PURGE_RESTART_DELAY: Duration = Duration::from_secs(1);
+const PURGE_BATCH_SIZE: i64 = 500;
 const STALE_CLIENT_RETENTION_DAYS: u64 = 45;
 const WS_UPGRADE_PATHS: [&str; 2] = ["/ws", "/ws/"];
 
@@ -74,6 +75,13 @@ impl DailyMetricDelta {
     }
 }
 
+struct PurgeBatch {
+    stale_client_ids: Vec<String>,
+    deleted_subscriptions: usize,
+    deleted_clients: usize,
+    today_metrics: Option<ActivityTodaySnapshot>,
+}
+
 pub struct ClientTrackingService {
     db: Pool<ConnectionManager<PgConnection>>,
     metrics: Arc<ClientTrackingMetrics>,
@@ -91,12 +99,22 @@ impl ClientTrackingService {
             recent_writes: DashMap::new(),
         });
 
-        if let Err(error) = service.refresh_today_metrics_gauges() {
-            warn!(
-                "client tracking: failed to initialize today's activity gauges: {}",
-                error
-            );
-        }
+        let gauge_service = service.clone();
+        tokio::spawn(async move {
+            match tokio::task::spawn_blocking(move || gauge_service.refresh_today_metrics_gauges())
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => warn!(
+                    "client tracking: failed to initialize today's activity gauges: {}",
+                    error
+                ),
+                Err(error) => warn!(
+                    "client tracking: activity gauge initialization worker failed: {}",
+                    error
+                ),
+            }
+        });
 
         let worker_service = service.clone();
         tokio::spawn(async move {
@@ -145,8 +163,12 @@ impl ClientTrackingService {
             )
         })?;
 
-        let recorded_app_version = conn
-            .transaction::<Option<String>, diesel::result::Error, _>(|conn| {
+        let (recorded_app_version, today_metrics, recorded_rebind) = conn
+            .transaction::<
+                (Option<String>, Option<ActivityTodaySnapshot>, bool),
+                diesel::result::Error,
+                _,
+            >(|conn| {
                 let existing_client = clients::table
                     .find(client_id)
                     .select(ClientRecord::as_select())
@@ -246,7 +268,7 @@ impl ClientTrackingService {
                     .set(user_extra::last_seen_at.eq(now))
                     .execute(conn)?;
 
-                self.upsert_daily_metrics(
+                let today_metrics = Self::upsert_daily_metrics(
                     conn,
                     DailyMetricDelta {
                         day: today,
@@ -261,7 +283,7 @@ impl ClientTrackingService {
                     now,
                 )?;
 
-                Ok(last_app_version)
+                Ok((last_app_version, today_metrics, rebind_delta > 0))
             })
             .map_err(|e| {
                 error!("client tracking: failed to record activity: {:?}", e);
@@ -274,6 +296,14 @@ impl ClientTrackingService {
             })?;
 
         self.metrics.record_activity_write("success");
+
+        if let Some(today_metrics) = today_metrics {
+            self.metrics.set_activity_today(today_metrics);
+            self.metrics.record_daily_rollup_update("success");
+        }
+        if recorded_rebind {
+            self.metrics.record_rebind();
+        }
         self.recent_writes.insert(
             client_id.to_string(),
             CachedActivity {
@@ -321,72 +351,53 @@ impl ClientTrackingService {
 
     async fn run_purge_worker(self: Arc<Self>) {
         let mut interval = tokio::time::interval(PURGE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         loop {
             interval.tick().await;
-            if let Err(error) = self.purge_stale_subscriptions() {
+            if let Err(error) = self.purge_stale_subscriptions().await {
                 warn!("client tracking purge failed: {}", error);
             }
         }
     }
 
-    fn purge_stale_subscriptions(&self) -> Result<(), String> {
+    async fn purge_stale_subscriptions(&self) -> Result<(), String> {
         let now = Utc::now().naive_utc();
         let today = now.date();
         let stale_cutoff = now
             .checked_sub_days(Days::new(STALE_CLIENT_RETENTION_DAYS))
             .ok_or_else(|| "failed to compute stale client cutoff".to_string())?;
-
-        let conn = &mut self
-            .db
-            .get()
-            .map_err(|e| format!("failed to get DB connection: {:?}", e))?;
-
-        let stale_client_ids: Vec<String> = clients::table
-            .filter(clients::last_active.lt(stale_cutoff))
-            .select(clients::client_id)
-            .load(conn)
-            .map_err(|e| format!("failed to load stale client ids: {:?}", e))?;
-
         let mut deleted_subscriptions = 0;
         let mut deleted_clients = 0;
 
-        if !stale_client_ids.is_empty() {
-            deleted_subscriptions += diesel::delete(
-                push_subscriptions::table
-                    .filter(push_subscriptions::client_id.eq_any(&stale_client_ids)),
-            )
-            .execute(conn)
-            .map_err(|e| format!("failed to delete stale subscriptions: {:?}", e))?;
+        loop {
+            let db = self.db.clone();
+            let batch = tokio::task::spawn_blocking(move || {
+                Self::purge_stale_subscriptions_batch(db, now, today, stale_cutoff)
+            })
+            .await
+            .map_err(|error| format!("stale client purge worker failed: {}", error))??;
+            let stale_client_count = batch.stale_client_ids.len();
 
-            deleted_clients =
-                diesel::delete(clients::table.filter(clients::client_id.eq_any(&stale_client_ids)))
-                    .execute(conn)
-                    .map_err(|e| format!("failed to delete stale clients: {:?}", e))?;
-
-            for client_id in &stale_client_ids {
+            for client_id in &batch.stale_client_ids {
                 self.recent_writes.remove(client_id);
             }
-        }
+            if let Some(today_metrics) = batch.today_metrics {
+                self.metrics.set_activity_today(today_metrics);
+                self.metrics.record_daily_rollup_update("success");
+            }
+            if batch.deleted_clients > 0 {
+                self.metrics
+                    .record_purge("stale_clients", batch.deleted_clients as u64);
+            }
 
-        self.upsert_daily_metrics(
-            conn,
-            DailyMetricDelta {
-                day: today,
-                active_users: 0,
-                new_users: 0,
-                active_clients: 0,
-                new_clients: 0,
-                client_rebinds: 0,
-                stale_clients_purged: deleted_clients as i64,
-                legacy_subscriptions_purged: 0,
-            },
-            now,
-        )
-        .map_err(|e| format!("failed to update daily purge metrics: {:?}", e))?;
+            deleted_subscriptions += batch.deleted_subscriptions;
+            deleted_clients += batch.deleted_clients;
+            if stale_client_count < PURGE_BATCH_SIZE as usize {
+                break;
+            }
 
-        if deleted_clients > 0 {
-            self.metrics
-                .record_purge("stale_clients", deleted_clients as u64);
+            tokio::task::yield_now().await;
         }
 
         if deleted_subscriptions > 0 || deleted_clients > 0 {
@@ -397,6 +408,68 @@ impl ClientTrackingService {
         }
 
         Ok(())
+    }
+
+    fn purge_stale_subscriptions_batch(
+        db: Pool<ConnectionManager<PgConnection>>,
+        now: NaiveDateTime,
+        today: NaiveDate,
+        stale_cutoff: NaiveDateTime,
+    ) -> Result<PurgeBatch, String> {
+        let conn = &mut db
+            .get()
+            .map_err(|error| format!("failed to get DB connection: {:?}", error))?;
+
+        conn.transaction::<PurgeBatch, diesel::result::Error, _>(|conn| {
+            let stale_client_ids: Vec<String> = clients::table
+                .filter(clients::last_active.lt(stale_cutoff))
+                .order(clients::last_active.asc())
+                .for_update()
+                .skip_locked()
+                .limit(PURGE_BATCH_SIZE)
+                .select(clients::client_id)
+                .load(conn)?;
+
+            if stale_client_ids.is_empty() {
+                return Ok(PurgeBatch {
+                    stale_client_ids,
+                    deleted_subscriptions: 0,
+                    deleted_clients: 0,
+                    today_metrics: None,
+                });
+            }
+
+            let deleted_subscriptions = diesel::delete(
+                push_subscriptions::table
+                    .filter(push_subscriptions::client_id.eq_any(&stale_client_ids)),
+            )
+            .execute(conn)?;
+            let deleted_clients =
+                diesel::delete(clients::table.filter(clients::client_id.eq_any(&stale_client_ids)))
+                    .execute(conn)?;
+            let today_metrics = Self::upsert_daily_metrics(
+                conn,
+                DailyMetricDelta {
+                    day: today,
+                    active_users: 0,
+                    new_users: 0,
+                    active_clients: 0,
+                    new_clients: 0,
+                    client_rebinds: 0,
+                    stale_clients_purged: deleted_clients as i64,
+                    legacy_subscriptions_purged: 0,
+                },
+                now,
+            )?;
+
+            Ok(PurgeBatch {
+                stale_client_ids,
+                deleted_subscriptions,
+                deleted_clients,
+                today_metrics,
+            })
+        })
+        .map_err(|error| format!("failed to purge stale client batch: {:?}", error))
     }
 
     fn refresh_today_metrics_gauges(&self) -> Result<(), String> {
@@ -432,13 +505,12 @@ impl ClientTrackingService {
     }
 
     fn upsert_daily_metrics(
-        &self,
         conn: &mut PgConnection,
         delta: DailyMetricDelta,
         now: NaiveDateTime,
-    ) -> Result<(), diesel::result::Error> {
+    ) -> Result<Option<ActivityTodaySnapshot>, diesel::result::Error> {
         if delta.is_zero() {
-            return Ok(());
+            return Ok(None);
         }
 
         let new_row = NewActivityDailyMetric {
@@ -482,7 +554,7 @@ impl ClientTrackingService {
             .select(ActivityDailyMetric::as_select())
             .first::<ActivityDailyMetric>(conn)?;
 
-        self.metrics.set_activity_today(
+        Ok(Some(
             DailyMetricDelta {
                 day: today_metrics.day,
                 active_users: today_metrics.active_users,
@@ -494,12 +566,7 @@ impl ClientTrackingService {
                 legacy_subscriptions_purged: today_metrics.legacy_subscriptions_purged,
             }
             .as_activity_today_snapshot(),
-        );
-        self.metrics.record_daily_rollup_update("success");
-        if delta.client_rebinds > 0 {
-            self.metrics.record_rebind();
-        }
-        Ok(())
+        ))
     }
 }
 
@@ -704,5 +771,93 @@ mod tests {
                 .cloned(),
             Some(Some("2.0.0".to_owned()))
         );
+    }
+
+    /// Requires a migrated test database (`WETTY_TEST_DATABASE_URL`); skipped
+    /// otherwise. All writes roll back with the test connection.
+    #[test]
+    fn stale_client_purge_deletes_at_most_one_batch() {
+        let url = match std::env::var("WETTY_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+                return;
+            }
+        };
+        let pool = Pool::builder()
+            .max_size(1)
+            .connection_customizer(Box::new(diesel::r2d2::TestCustomizer))
+            .build(ConnectionManager::<PgConnection>::new(url))
+            .expect("create test database pool");
+        let now = Utc::now().naive_utc();
+        let stale_cutoff = now
+            .checked_sub_days(Days::new(STALE_CLIENT_RETENTION_DAYS))
+            .expect("compute stale client cutoff");
+        let stale_at = stale_cutoff
+            .checked_sub_signed(chrono::Duration::seconds(1))
+            .expect("compute stale client timestamp");
+        let prefix = format!("purge-batch-test-{}", uuid::Uuid::new_v4());
+        let stale_clients: Vec<NewClientRecord> = (0..=PURGE_BATCH_SIZE)
+            .map(|index| NewClientRecord {
+                client_id: format!("{}-{}", prefix, index),
+                created_at: stale_at,
+                last_active: stale_at,
+                last_active_uid: 1,
+                last_app_version: None,
+            })
+            .collect();
+        let active_client_id = format!("{}-active", prefix);
+        let active_client = NewClientRecord {
+            client_id: active_client_id.clone(),
+            created_at: now,
+            last_active: now,
+            last_active_uid: 1,
+            last_app_version: None,
+        };
+
+        {
+            let conn = &mut pool.get().expect("get test database connection");
+            use diesel::connection::SimpleConnection;
+
+            conn.batch_execute(
+                "CREATE TEMP TABLE clients (LIKE public.clients INCLUDING ALL);
+                 CREATE TEMP TABLE push_subscriptions (LIKE public.push_subscriptions INCLUDING ALL);
+                 CREATE TEMP TABLE activity_daily_metrics (LIKE public.activity_daily_metrics INCLUDING ALL);",
+            )
+            .expect("isolate purge fixtures from existing database rows");
+            diesel::insert_into(clients::table)
+                .values(&stale_clients)
+                .execute(conn)
+                .expect("insert stale clients");
+            diesel::insert_into(clients::table)
+                .values(&active_client)
+                .execute(conn)
+                .expect("insert active client");
+        }
+
+        let batch = ClientTrackingService::purge_stale_subscriptions_batch(
+            pool.clone(),
+            now,
+            now.date(),
+            stale_cutoff,
+        )
+        .expect("purge one stale client batch");
+        assert_eq!(batch.stale_client_ids.len(), PURGE_BATCH_SIZE as usize);
+        assert_eq!(batch.deleted_clients, PURGE_BATCH_SIZE as usize);
+
+        let conn = &mut pool.get().expect("get test database connection");
+        let stale_remaining = clients::table
+            .filter(clients::client_id.like(format!("{}-%", prefix)))
+            .filter(clients::last_active.lt(stale_cutoff))
+            .count()
+            .get_result::<i64>(conn)
+            .expect("count remaining stale clients");
+        assert_eq!(stale_remaining, 1);
+        let active_remaining = clients::table
+            .find(&active_client_id)
+            .count()
+            .get_result::<i64>(conn)
+            .expect("count active client");
+        assert_eq!(active_remaining, 1);
     }
 }

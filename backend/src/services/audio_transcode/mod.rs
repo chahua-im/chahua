@@ -184,7 +184,11 @@ async fn run_worker(
     info!("Audio transcode worker started");
 
     loop {
-        refill_pending_jobs(service, state);
+        let refill_service = service.clone();
+        let refill_state = state.clone();
+        tokio::task::spawn_blocking(move || refill_pending_jobs(&refill_service, &refill_state))
+            .await
+            .expect("audio backlog refill task failed");
 
         let Some(job) = rx.recv().await else {
             return;
