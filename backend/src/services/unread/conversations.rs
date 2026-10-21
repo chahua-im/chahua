@@ -56,6 +56,8 @@ struct Scope {
     is_dm: bool,
     #[diesel(sql_type = Bool)]
     archived: bool,
+    #[diesel(sql_type = Bool)]
+    muted: bool,
     #[diesel(sql_type = Nullable<BigInt>)]
     last_read_message_id: Option<i64>,
 }
@@ -122,14 +124,16 @@ impl UnreadService {
         let selections = views.iter().map(Selection::new).collect::<Vec<_>>();
         // This UNION reads the user's indexed memberships/subscriptions and joins roots by PK.
         // It never scans message history to discover the collection or trusts caller-supplied IDs.
+        // Match list-row mute semantics: main chats use expiry, threads use their own archive state.
         let scopes = sql_query(
             "SELECT gm.chat_id, NULL::BIGINT AS thread_id, g.kind = 'dm' AS is_dm,
-                    gm.archived, gm.last_read_message_id
+                    gm.archived, COALESCE(gm.muted_until > statement_timestamp(), FALSE) AS muted,
+                    gm.last_read_message_id
              FROM group_membership gm JOIN groups g ON g.id = gm.chat_id
              WHERE gm.uid = $1
              UNION ALL
              SELECT ts.chat_id, ts.thread_root_id AS thread_id, g.kind = 'dm' AS is_dm,
-                    ts.archived, ts.last_read_message_id
+                    ts.archived, ts.archived AS muted, ts.last_read_message_id
              FROM thread_user_states ts
              JOIN group_membership gm ON gm.chat_id = ts.chat_id AND gm.uid = ts.uid
              JOIN groups g ON g.id = ts.chat_id
@@ -276,15 +280,23 @@ fn aggregate(
                 summary.unread_message_count =
                     (summary.unread_message_count + count).min(MAX_UNREAD_COUNT);
                 summary.unread_conversation_count += i64::from(count > 0);
-                summary.unread_attention_count = (summary.unread_attention_count
-                    + attention
-                        .get(&(
-                            scope.thread_id.is_some(),
-                            scope.thread_id.unwrap_or(scope.chat_id),
-                        ))
-                        .copied()
-                        .unwrap_or(0))
-                .min(MAX_UNREAD_COUNT);
+                let attention_count = attention
+                    .get(&(
+                        scope.thread_id.is_some(),
+                        scope.thread_id.unwrap_or(scope.chat_id),
+                    ))
+                    .copied()
+                    .unwrap_or(0);
+                summary.unread_attention_count =
+                    (summary.unread_attention_count + attention_count).min(MAX_UNREAD_COUNT);
+                if !scope.muted {
+                    summary.unread_unmuted_message_count =
+                        (summary.unread_unmuted_message_count + count).min(MAX_UNREAD_COUNT);
+                    summary.unread_unmuted_conversation_count += i64::from(count > 0);
+                    summary.unread_unmuted_attention_count =
+                        (summary.unread_unmuted_attention_count + attention_count)
+                            .min(MAX_UNREAD_COUNT);
+                }
             }
             summary
         })
@@ -374,6 +386,7 @@ mod tests {
                 thread_id: None,
                 is_dm: false,
                 archived: false,
+                muted: false,
                 last_read_message_id: None,
             },
             Scope {
@@ -381,6 +394,7 @@ mod tests {
                 thread_id: Some(10),
                 is_dm: false,
                 archived: false,
+                muted: false,
                 last_read_message_id: None,
             },
             Scope {
@@ -388,6 +402,7 @@ mod tests {
                 thread_id: None,
                 is_dm: false,
                 archived: true,
+                muted: false,
                 last_read_message_id: None,
             },
         ];
@@ -420,6 +435,51 @@ mod tests {
             ),
             (900, 1)
         );
+    }
+
+    #[test]
+    fn muted_scopes_preserve_totals_and_cap_unmuted_counts_independently() {
+        let views = [view(
+            "groups",
+            vec![ConversationCategory::Group],
+            vec![],
+            vec![],
+        )];
+        let selections = views.iter().map(Selection::new).collect::<Vec<_>>();
+        let mut scopes = (1..=4)
+            .map(|chat_id| Scope {
+                chat_id,
+                thread_id: None,
+                is_dm: false,
+                archived: false,
+                muted: true,
+                last_read_message_id: None,
+            })
+            .collect::<Vec<_>>();
+        let main = HashMap::from([(1, 1000), (2, 700), (3, 700)]);
+        let attention = HashMap::from([((false, 1), 1000), ((false, 2), 700), ((false, 3), 700)]);
+        for (unmuted_scopes, expected) in [(0, 0), (1, 700), (2, 1000)] {
+            for (index, scope) in scopes.iter_mut().enumerate().skip(1) {
+                scope.muted = index > unmuted_scopes;
+            }
+            // An unmuted conversation without unread messages contributes no count.
+            scopes[3].muted = false;
+            let results = aggregate(&selections, &scopes, &main, &HashMap::new(), &attention);
+            let summary = &results[0];
+            assert_eq!(summary.unread_message_count, 1000);
+            assert_eq!(summary.unread_conversation_count, 3);
+            assert_eq!(summary.unread_attention_count, 1000);
+            assert_eq!(summary.unread_unmuted_attention_count, expected);
+            assert_eq!(summary.unread_unmuted_message_count, expected);
+            assert_eq!(
+                summary.unread_unmuted_conversation_count,
+                unmuted_scopes as i64
+            );
+            let json = serde_json::to_value(summary).unwrap();
+            assert_eq!(json["unreadUnmutedAttentionCount"], expected);
+            assert_eq!(json["unreadUnmutedMessageCount"], expected);
+            assert_eq!(json["unreadUnmutedConversationCount"], unmuted_scopes);
+        }
     }
 
     /// Uses isolated temporary tables in a dedicated test database, never application data.
@@ -513,6 +573,62 @@ mod tests {
             totals,
             vec![(5, 4, 2), (1, 1, 0), (3, 2, 1), (0, 0, 0), (1, 1, 0)]
         );
+        assert_eq!(
+            result
+                .iter()
+                .map(|s| (
+                    s.unread_unmuted_message_count,
+                    s.unread_unmuted_conversation_count
+                ))
+                .collect::<Vec<_>>(),
+            vec![(4, 3), (1, 1), (3, 2), (0, 0), (1, 1)]
+        );
+        // A muted parent suppresses its own attention, but not its active thread.
+        assert_eq!(
+            result
+                .iter()
+                .map(|s| s.unread_unmuted_attention_count)
+                .collect::<Vec<_>>(),
+            vec![1, 0, 1, 0, 0]
+        );
+        // Expired and absent mute times both restore attention without changing read state.
+        for mute_time in ["'2000-01-01'", "NULL"] {
+            conn.batch_execute(&format!(
+                "UPDATE group_membership SET muted_until={mute_time} WHERE chat_id=1"
+            ))
+            .unwrap();
+            let refreshed = service
+                .conversation_summaries(&mut conn, 1, &views)
+                .unwrap();
+            assert_eq!(refreshed[0].unread_unmuted_attention_count, 2);
+            assert_eq!(refreshed[0].unread_attention_count, 2);
+            assert_eq!(refreshed[0].unread_message_count, 5);
+            assert_eq!(refreshed[0].unread_unmuted_message_count, 5);
+            assert_eq!(refreshed[0].unread_unmuted_conversation_count, 4);
+        }
+        // Archived threads keep raw attention, but never add unmuted attention.
+        conn.batch_execute("UPDATE group_membership SET muted_until='9999-01-01' WHERE chat_id=1; UPDATE thread_user_states SET archived=TRUE WHERE thread_root_id=10").unwrap();
+        let refreshed = service
+            .conversation_summaries(&mut conn, 1, &views)
+            .unwrap();
+        assert_eq!(refreshed[0].unread_attention_count, 1);
+        assert_eq!(refreshed[0].unread_unmuted_attention_count, 0);
+        assert_eq!(refreshed[4].unread_attention_count, 1);
+        assert_eq!(refreshed[4].unread_unmuted_attention_count, 0);
+        assert_eq!(refreshed[0].unread_unmuted_message_count, 2);
+        assert_eq!(refreshed[0].unread_unmuted_conversation_count, 2);
+        assert_eq!(refreshed[4].unread_unmuted_message_count, 1);
+        assert_eq!(refreshed[4].unread_unmuted_conversation_count, 1);
+        // Parent archive and mute state do not silence an active subscribed thread.
+        conn.batch_execute("UPDATE group_membership SET archived=TRUE WHERE chat_id=1; UPDATE thread_user_states SET archived=FALSE WHERE thread_root_id=10").unwrap();
+        let refreshed = service
+            .conversation_summaries(&mut conn, 1, &views)
+            .unwrap();
+        assert_eq!(refreshed[0].unread_unmuted_attention_count, 1);
+        assert_eq!(refreshed[4].unread_attention_count, 1);
+        assert_eq!(refreshed[4].unread_unmuted_attention_count, 0);
+        conn.batch_execute("UPDATE group_membership SET archived=FALSE WHERE chat_id=1")
+            .unwrap();
         conn.batch_execute("UPDATE group_membership SET last_read_message_id=13 WHERE chat_id=1; UPDATE thread_user_states SET last_read_message_id=1002 WHERE thread_root_id=10;").unwrap();
         let result = service
             .conversation_summaries(&mut conn, 1, &views)
@@ -524,6 +640,9 @@ mod tests {
             ),
             (2, 0)
         );
+        assert_eq!(result[0].unread_unmuted_attention_count, 0);
+        assert_eq!(result[0].unread_unmuted_message_count, 2);
+        assert_eq!(result[0].unread_unmuted_conversation_count, 2);
         conn.batch_execute("DELETE FROM group_membership WHERE chat_id=2")
             .unwrap();
         let result = service
@@ -537,5 +656,7 @@ mod tests {
             ),
             (0, 0, 0)
         );
+        assert_eq!(result[0].unread_unmuted_message_count, 0);
+        assert_eq!(result[0].unread_unmuted_conversation_count, 0);
     }
 }

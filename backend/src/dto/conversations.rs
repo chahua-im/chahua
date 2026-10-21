@@ -55,10 +55,16 @@ pub struct ConversationUnreadSummary {
     pub key: String,
     /// Unread messages, including muted conversations; capped at 1000.
     pub unread_message_count: i64,
+    /// Unread messages in unmuted conversations, including DMs and threads; capped at 1000.
+    pub unread_unmuted_message_count: i64,
     /// Number of distinct conversations with unread messages.
     pub unread_conversation_count: i64,
-    /// Unread group mentions/replies, counted once per message; DMs contribute zero. Capped at 1000.
+    /// Number of distinct unmuted conversations with unread messages; not capped.
+    pub unread_unmuted_conversation_count: i64,
+    /// Unread group mentions/replies, including muted conversations, once per message; DMs contribute zero. Capped at 1000.
     pub unread_attention_count: i64,
+    /// Unread group mentions/replies in unmuted conversations, for tab/title badges. Capped at 1000.
+    pub unread_unmuted_attention_count: i64,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]

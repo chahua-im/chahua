@@ -42,9 +42,23 @@ and at most 128 bytes; a batch allows at most 32 views and 2048 explicit referen
 Each response entry in `summaries` contains the key and:
 
 - `unreadMessageCount`: unread messages, including muted conversations, capped at 1000.
+- `unreadUnmutedMessageCount`: unread messages in unmuted conversations, capped independently at 1000.
 - `unreadConversationCount`: distinct selected conversations with unread messages.
-- `unreadAttentionCount`: unread group mentions/replies, once per message, capped at 1000.
-  DMs and DM threads contribute zero. Reactions are separate.
+- `unreadUnmutedConversationCount`: distinct unmuted selected conversations with unread messages, not capped.
+- `unreadAttentionCount`: unread group mentions/replies, including muted conversations,
+  once per message, capped at 1000.
+- `unreadUnmutedAttentionCount`: unread group mentions/replies in unmuted conversations,
+  capped independently at 1000, for tab badges and the background title's `@` indicator.
+  DMs and DM threads contribute zero to both attention counts. Reactions are separate.
+
+Main chats are muted while `mutedUntil` is in the future; expired or absent mute times
+are unmuted. Threads use their own archive state as their mute state, independently
+of the parent chat's mute or archive state. All three unmuted counts use this rule.
+Message and conversation counts include DMs and DM threads. The unmuted counts reuse
+the same per-conversation counts without additional queries. Chat rows can retain gray mention badges
+using their existing `unreadMentions` and mute metadata without contributing to tab
+attention badges. Both attention counts use the same conversation read cursors and
+the same mention queries; muting does not mark anything as read.
 
 Views may overlap; each view counts a conversation once. A global collection must be
 queried as its own union, never calculated by adding overlapping view totals. Read
