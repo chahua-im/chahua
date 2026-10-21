@@ -25,6 +25,7 @@ const rootId = encodeId('100');
 const thread: ThreadListItem = {
   archived: false,
   chatId: testChat.id,
+  chatKind: testChat.kind,
   chatName: '测试群',
   threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
   participants: [],

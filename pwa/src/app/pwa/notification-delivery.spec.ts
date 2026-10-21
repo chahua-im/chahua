@@ -7,7 +7,9 @@ import { BehaviorSubject, of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { PushService } from '../../generated/endpoints/push/push.service';
 import {
+  GroupKind,
   MessageType,
+  type ConversationUnreadSummary,
   ServerWsMessageType,
   type ServerWsMessage,
   type ThreadSubscriptionStatusResponse,
@@ -15,6 +17,7 @@ import {
 import { Connection } from '../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../api/testing';
+import { ListTab } from '../chats/list-tabs';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
@@ -42,6 +45,8 @@ describe('online notifications', () => {
     readThrough?: string;
   }[] = [];
   const total = signal<{ unreadCount: number; archivedUnreadCount: number } | undefined>(undefined);
+  const selectedSummary = signal<ConversationUnreadSummary | undefined>(undefined);
+  const viewUnread = { activate: vi.fn(() => vi.fn()) };
   const release = vi.fn();
   const unread = { value: total, activate: vi.fn(() => release) };
   const badges = { setAppBadge: vi.fn(), clearAppBadge: vi.fn() };
@@ -63,6 +68,15 @@ describe('online notifications', () => {
     reads = new Subject();
     clicks = new Subject();
     total.set({ unreadCount: 7, archivedUnreadCount: 900 });
+    selectedSummary.set({
+      key: 'friends',
+      unreadMessageCount: 7,
+      unreadUnmutedMessageCount: 7,
+      unreadConversationCount: 2,
+      unreadUnmutedConversationCount: 2,
+      unreadAttentionCount: 0,
+      unreadUnmutedAttentionCount: 0,
+    });
     unread.activate.mockClear();
     release.mockClear();
     badges.setAppBadge.mockReset().mockResolvedValue(undefined);
@@ -104,7 +118,15 @@ describe('online notifications', () => {
             subscription: () => subscription,
           },
         },
-        { provide: ChatListStore, useValue: { unread } },
+        {
+          provide: ChatListStore,
+          useValue: {
+            unread,
+            viewUnread,
+            summary: selectedSummary,
+            selection: signal({ tab: ListTab.Friends, archived: false, requestHistory: false }),
+          },
+        },
         {
           provide: PushService,
           useValue: { postSubscribe: () => of(undefined), postUnsubscribe: () => of(undefined) },
@@ -165,7 +187,15 @@ describe('online notifications', () => {
         provideRouter([]),
         { provide: Connection, useValue: { events$: events, resync$: new Subject() } },
         { provide: ChatStore, useValue: { changes$: reads } },
-        { provide: ChatListStore, useValue: { unread } },
+        {
+          provide: ChatListStore,
+          useValue: {
+            unread,
+            viewUnread,
+            summary: selectedSummary,
+            selection: signal({ tab: ListTab.Friends, archived: false, requestHistory: false }),
+          },
+        },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         { provide: ModalController, useValue: modals },
         { provide: SwPush, useValue: { isEnabled: false, notificationClicks: clicks } },
@@ -282,6 +312,31 @@ describe('online notifications', () => {
     });
   });
 
+  it.each([
+    { subscribed: true, archived: true },
+    { subscribed: false, archived: false },
+  ])('delivers replies to the user in inactive group topics: %o', async (threadState) => {
+    subscription = threadState;
+    state = { mutedUntil: '9999-12-31T23:59:59Z' };
+    const topic = {
+      ...incoming,
+      replyRootId: encodeId('9007199254740999'),
+      replyToMessage: { ...testMessage, mentions: [] },
+    };
+    events.next({ type: ServerWsMessageType.message, payload: topic });
+    await settle();
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      type: 'CHAHUA_NOTIFY',
+      suppress: false,
+      payload: { data: { threadRootId: decodeId(topic.replyRootId) } },
+    });
+    state = { archived: true };
+    events.next({ type: ServerWsMessageType.message, payload: { ...topic, id: encodeId('9007199254741010') } });
+    await settle();
+    expect(commands).toHaveLength(1);
+  });
+
   it('recall closes its system notification', async () => {
     events.next({ type: ServerWsMessageType.message, payload: incoming });
     await settle();
@@ -301,13 +356,121 @@ describe('online notifications', () => {
     await settle();
     expect(goTo).toHaveBeenCalledOnce();
   });
-  it('shows the shared unread total only while the browser tab is hidden', () => {
+  it('uses ordinary DM eligibility for online mention and reply messages', async () => {
+    vi.spyOn(TestBed.inject(ChatStore), 'get').mockReturnValue({ ...testChat, kind: GroupKind.dm });
+    state = { mutedUntil: '9999-12-31T23:59:59Z' };
+    const directed = {
+      ...incoming,
+      mentions: [{ uid: testUser.uid, username: '我', gender: 0 }],
+      replyToMessage: { ...testMessage, mentions: [] },
+    };
+    events.next({ type: ServerWsMessageType.message, payload: directed });
+    await settle();
+    expect(commands).toEqual([]);
+    state = {};
+    events.next({ type: ServerWsMessageType.message, payload: directed });
+    await settle();
+    expect(commands).toHaveLength(1);
+    expect(commands[0].payload?.body).toBe(incoming.message);
+  });
+
+  it('shows only the selected collection while global app badges stay unchanged', () => {
+    const title = document.title;
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    selectedSummary.set({
+      key: 'friends',
+      unreadMessageCount: 4,
+      unreadUnmutedMessageCount: 4,
+      unreadConversationCount: 2,
+      unreadUnmutedConversationCount: 2,
+      unreadAttentionCount: 0,
+      unreadUnmutedAttentionCount: 0,
+    });
+    TestBed.tick();
+    expect(document.title).toBe(`(4) ${title}`.trim());
+    selectedSummary.set({
+      key: 'threads',
+      unreadMessageCount: 28,
+      unreadUnmutedMessageCount: 28,
+      unreadConversationCount: 5,
+      unreadUnmutedConversationCount: 5,
+      unreadAttentionCount: 2,
+      unreadUnmutedAttentionCount: 2,
+    });
+    TestBed.tick();
+    expect(document.title).toBe(`(@) (28) ${title}`.trim());
+    expect(badges.setAppBadge).toHaveBeenLastCalledWith(7);
+    selectedSummary.set({
+      key: 'groups',
+      unreadMessageCount: 0,
+      unreadUnmutedMessageCount: 0,
+      unreadConversationCount: 0,
+      unreadUnmutedConversationCount: 0,
+      unreadAttentionCount: 0,
+      unreadUnmutedAttentionCount: 0,
+    });
+    TestBed.tick();
+    expect(document.title).toBe(title);
+  });
+
+  it('keeps muted attention out of the title without removing ordinary unread counts', () => {
+    const title = document.title;
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    selectedSummary.set({
+      key: 'groups',
+      unreadMessageCount: 12,
+      unreadUnmutedMessageCount: 4,
+      unreadConversationCount: 2,
+      unreadUnmutedConversationCount: 1,
+      unreadAttentionCount: 5,
+      unreadUnmutedAttentionCount: 0,
+    });
+    TestBed.tick();
+    expect(document.title).toBe(`(12) ${title}`.trim());
+    selectedSummary.update((summary) => ({ ...summary!, unreadUnmutedAttentionCount: 1 }));
+    TestBed.tick();
+    expect(document.title).toBe(`(@) (12) ${title}`.trim());
+    expect(badges.setAppBadge).toHaveBeenLastCalledWith(7);
+  });
+
+  it('caps collection title counts and clears them after logout', () => {
+    const title = document.title;
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    selectedSummary.set({
+      key: 'threads',
+      unreadMessageCount: 1000,
+      unreadUnmutedMessageCount: 1000,
+      unreadConversationCount: 50,
+      unreadUnmutedConversationCount: 50,
+      unreadAttentionCount: 2,
+      unreadUnmutedAttentionCount: 2,
+    });
+    TestBed.tick();
+    expect(document.title).toBe(`(@) (999+) ${title}`.trim());
+    vi.spyOn(TestBed.inject(SessionStore), 'user').mockReturnValue(undefined);
+    selectedSummary.set(undefined);
+    TestBed.tick();
+    expect(document.title).toBe(title);
+  });
+
+  it('shows the selected unread total only while the browser tab is hidden', () => {
     const title = document.title;
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
     TestBed.tick();
     expect(document.title).toBe(`(7) ${title}`.trim());
-    total.set({ unreadCount: 4, archivedUnreadCount: 900 });
+    selectedSummary.set({
+      key: 'friends',
+      unreadMessageCount: 4,
+      unreadUnmutedMessageCount: 4,
+      unreadConversationCount: 2,
+      unreadUnmutedConversationCount: 2,
+      unreadAttentionCount: 0,
+      unreadUnmutedAttentionCount: 0,
+    });
     TestBed.tick();
     expect(document.title).toBe(`(4) ${title}`.trim());
     hidden.mockReturnValue(false);

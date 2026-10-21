@@ -50,9 +50,9 @@
         }
         <div class="badges">
           @if (entry().unreadMentions) {
-            <ion-badge
-              class="mention-badge"
-              [color]="active.isActive ? 'light' : entry().muted ? 'medium' : 'primary'">@</ion-badge>
+            <ion-badge class="mention-badge" [color]="entry().muted ? 'medium' : active.isActive ? 'light' : 'primary'">
+              @
+            </ion-badge>
           }
           @if (entry().unreadReactions) {
             <ion-badge

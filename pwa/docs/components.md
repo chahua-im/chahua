@@ -71,7 +71,7 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 | App                | landingPage、启动 loading/error、splitPaneVisible、sidebarSelection、浏览器返回动画状态、全局更新 toast 和可交互标记 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                              |
 | NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                 | PushNotifications                                                                     |
 | ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                      | 将 selection 和 active 传给单列 ChatList                                              |
-| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、Connection、PushNotifications；控制分类面板与菜单，设置入口保留授权手势 |
+| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、ChatListStore、Preferences、PushNotifications；控制分类面板与菜单，active 时同步 selection，设置入口保留授权手势 |
 | ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数 | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence |
 | ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量 |
 | ChatAvatar         | entry、size、online | 由输入派生头像、占位、话题角标和在线圆点，无请求 |
@@ -99,7 +99,7 @@ UserPresenceDisplay 和 GroupPresenceDisplay 始终保留状态行，仅在对�
 
 输入文字、回复对象与编辑目标由页面持有；Composer 通过 model 和输出传递变化。引用来源栈、当前置顶选择等只保留需要重新查找的 ID；已有同一对象引用无需转成 ID。未读数字直接消费 ChatStore。滚动中的已读与分页判断共用一次滚动尺寸读取；已确认消息的元素集合随消息行和视图变化派生，不在每次滚动时重新过滤。置顶栏持有当前显示的置顶对象引用，仅在栏位出现或消失时等待触摸与惯性结束；共享的置顶数据仍即时更新。
 
-ConversationPage 在进入前台、恢复可见和重连时读取 mention 与 reaction 的跳转 ID，不依赖列表计数缓存。新目标与尚未跳转的目标去重合并；跳转成功或目标已删除时移除该目标。reaction 按查询响应的 readThrough 确认，前台离开时再确认；mention 依赖消息已读游标、不单独确认。FAB 按消息时间从旧到新逐个定位，同时可见时纵向堆叠。普通消息已读与 reaction 已读互不影响。
+ConversationPage 在进入前台、恢复可见和重连时读取群聊及群聊话题的 mention 跳转 ID，以及所有会话的 reaction 跳转 ID，不依赖列表计数缓存。私聊及其话题不显示 mention 跳转入口。新目标与尚未跳转的目标去重合并；跳转成功或目标已删除时移除该目标。reaction 按查询响应的 readThrough 确认，前台离开时再确认；mention 依赖消息已读游标、不单独确认。FAB 按消息时间从旧到新逐个定位，同时可见时纵向堆叠。普通消息已读与 reaction 已读互不影响。
 
 scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯性，用于分页合并和置顶栏显隐；visibleDate 来自已有视口测量。Ionic 缓存页面通常在离开时释放区间和组件资源；群聊被其话题覆盖时保留消息节点和位置，返回时补取消息，离开这组群聊/话题后释放。DraftStore 与 MessageOutbox 的生命周期独立于页面。
 
@@ -128,7 +128,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 | 组件            | 输入、输出与局部字段                                                                                           | 所有权                                                                                                  |
 | --------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| MessageComposer | chatId、text model、editing、editingUploads、relationship；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面             |
+| MessageComposer | chatId、text model、editing、editingUploads、relationship、mentionsEnabled；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面             |
 | VoiceRecorder   | active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                | 设备资源和未发送录音属于组件，离开时释放                                                                |
 | UploadProgress  | value（0–1）                                                                                                   | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                                   |
 | VoicePlayer     | src、dock；playing、loading、failed、elapsed、duration、波形状态                                               | 挂载时创建 Audio 和 WaveSurfer 并读取波形；同一时间播放一条；带 dock 的消息语音把播放状态交给吸顶播放条，销毁时由 VoicePlayback 接管音频继续播放 |
@@ -178,3 +178,5 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 消息、提及、成员和目录结果通过 Router 打开资料，不直接依赖 ChatDetails；弹窗组件的静态导入集中在路由入口，展示组件之间没有循环依赖。
 
 会话标题栏提供搜索与静音入口：搜索弹窗复用 ChatSearch，静音复用 ChatMute，读取 ChatStore 的共享静音状态。
+
+ChatList 的四个 tab 数字消费集合 `unreadUnmutedConversationCount`，有未静音 mention 时由 `@` 替代数字，两者均为零时隐藏。tab `@` 和 PushNotifications 的后台标题仅消费集合 `unreadUnmutedAttentionCount`；原始 attention 不驱动这两处提醒。ChatListContent 使用话题响应的 `chatKind` 决定 mention、作者与头像徽标；父聊天详情仅补充名称和头像，不影响类型判断。ChatListItem 保留静音群聊和归档话题的行内 mention badge，使用 medium 色，选中时仍保持灰色。

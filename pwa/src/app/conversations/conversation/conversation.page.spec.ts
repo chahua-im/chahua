@@ -194,6 +194,18 @@ describe('ConversationPage', () => {
     http.verify();
   });
 
+  it.each([undefined, wireMessage.id])('ignores DM mention/reply navigation for thread %s', async (threadId) => {
+    TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
+    fixture.componentRef.setInput('threadId', threadId);
+    const query = vi.mocked(TestBed.inject(ChatsService).getChatMentions);
+    query.mockClear();
+    component['mentionJumpIds'].set([testMessage.id]);
+    expect(component['canJumpMention']()).toBe(false);
+    await component['enterMentionSession']();
+    expect(query).not.toHaveBeenCalled();
+    expect(component['mentionJumpIds']()).toEqual([]);
+  });
+
   it('hides skeleton avatars and collapses message details for dm chats when the preference is off', async () => {
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     dmDetails.set(false);
@@ -922,6 +934,7 @@ describe('ConversationPage', () => {
         {
           chatId: testChat.id,
           threadRootMessage: { ...testMessage, mentions: [] },
+          chatKind: testChat.kind,
           chatName: '测试群',
           participants: [],
           replyCount: 5,

@@ -112,6 +112,7 @@ export class MessageComposer {
     return allowed;
   }
   readonly chatId = input.required<SnowflakeID>();
+  readonly mentionsEnabled = input(true);
   readonly editing = input<MessageContent>();
   readonly editingUploads = input<readonly AttachmentUpload[]>([]);
   readonly submitted = output<Composition>();
@@ -310,7 +311,7 @@ export class MessageComposer {
     const end = input?.selectionStart ?? text.length;
     const match = text.slice(0, end).match(/(?:^|\s)@([^\s@\[\]]*)$/);
     const version = ++this.mentionVersion;
-    if (!match) {
+    if (!this.mentionsEnabled() || !match) {
       this.suggestions.set([]);
       return;
     }

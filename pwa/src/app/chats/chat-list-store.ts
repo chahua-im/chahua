@@ -13,11 +13,17 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
+import { ConversationsService } from '../../generated/endpoints/conversations/conversations.service';
+import { SessionStore } from '../session/session-store';
+import { builtinConversationViews } from './conversation-views';
+import { ListTab, type ListSelection } from './list-tabs';
 import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import {
   FriendRequestStatus,
   ServerWsMessageType,
   type ChatListItem,
+  type ConversationUnreadSummary,
+  type ConversationView,
   type FriendRequestHistoryEntry,
   type MessageResponse,
   type UnreadCountResponse,
@@ -106,6 +112,35 @@ export class ChatListStore {
   private readonly historicalRequests = this.requestCache(true);
   private readonly activeThreads = this.threadCache(false);
   private readonly archivedThreads = this.threadCache(true);
+  private readonly conversationApi = inject(ConversationsService);
+  private readonly session = inject(SessionStore);
+  readonly selection = signal<ListSelection>({ tab: ListTab.Messages, archived: false, requestHistory: false });
+  private readonly viewQuery = activeQuery<
+    { uid: number | undefined; summaries: ConversationUnreadSummary[] } | undefined
+  >(
+    this.destroyRef,
+    async (cancel) => {
+      const uid = this.session.user()?.uid;
+      if (uid == null) return { uid, summaries: [] };
+      const response = await this.response(
+        this.conversationApi.unreadSummary({ views: builtinConversationViews() }),
+        cancel,
+      );
+      return { uid, summaries: response.summaries };
+    },
+    undefined,
+  );
+  readonly viewUnread = {
+    ...this.viewQuery,
+    value: computed(() => {
+      const snapshot = this.viewQuery.value();
+      return snapshot?.uid === this.session.user()?.uid ? snapshot?.summaries : undefined;
+    }),
+  };
+  summary(view: ConversationView): ConversationUnreadSummary | undefined {
+    return this.viewUnread.value()?.find((summary) => summary.key === view.key);
+  }
+
   readonly unread = activeQuery<UnreadCountResponse | undefined>(
     this.destroyRef,
     (cancel) => this.response(this.api.getUnreadCount({ timeout: 10000 }), cancel),
@@ -130,6 +165,10 @@ export class ChatListStore {
   };
 
   constructor() {
+    effect(() => {
+      this.session.user()?.uid;
+      untracked(() => void this.viewUnread.refresh());
+    });
     for (const archived of [false, true]) this.queries.set(archived, this.createQuery(archived));
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
       void this.invalidateRequests();
@@ -149,6 +188,7 @@ export class ChatListStore {
       wasConnected = connected;
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, threadId }) => {
+      void this.viewUnread.refresh();
       if (threadId) {
         void this.threadUnread.refresh();
         if (kind === ChatChangeKind.Membership) void this.invalidateThreads();
@@ -164,6 +204,7 @@ export class ChatListStore {
       }
       switch (event.type) {
         case ServerWsMessageType.message:
+          void this.viewUnread.refresh();
           this.receiveMessage(event.payload);
           if (event.payload.replyRootId) {
             void this.invalidateThreads();
@@ -181,6 +222,7 @@ export class ChatListStore {
           break;
         case ServerWsMessageType.threadUpdate:
         case ServerWsMessageType.threadMembershipChanged:
+          void this.viewUnread.refresh();
           void this.invalidateThreads();
           void this.archivedUnread.threads.refresh();
           break;
@@ -213,6 +255,7 @@ export class ChatListStore {
           this.refreshChatUnread();
           break;
         case ServerWsMessageType.messageDeleted:
+          void this.viewUnread.refresh();
           if (event.payload.replyRootId) void this.archivedUnread.threads.refresh();
           else this.refreshChatUnread();
           break;
@@ -485,6 +528,7 @@ export class ChatListStore {
 
   refreshChats() {
     if (this.destroyRef.destroyed) return;
+    void this.viewUnread.refresh();
     this.chatInfo.invalidateReads();
     for (const { state } of this.queries.values()) this.invalidateQuery(state);
   }
@@ -665,6 +709,7 @@ export class ChatListStore {
   }
 
   private refreshChatUnread() {
+    void this.viewUnread.refresh();
     void this.unread.refresh();
   }
 

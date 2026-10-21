@@ -42,7 +42,13 @@ import {
   notificationsOutline,
   personAddOutline,
 } from 'ionicons/icons';
-import { FriendRequestDirection, FriendRequestStatus, GroupKind, MessageType } from '../../../generated/models';
+import {
+  ConversationCategory,
+  FriendRequestDirection,
+  FriendRequestStatus,
+  GroupKind,
+  MessageType,
+} from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
 import { DraftStore } from '../../conversations/draft-store';
@@ -60,6 +66,7 @@ import { ChatListError, ChatListStore, FriendRequestAction } from '../chat-list-
 import { ChatMute } from '../chat-mute/chat-mute';
 import { ChatStore } from '../chat-store';
 import { chatListTraceEnabled, traceChatList } from '../chat-list-trace';
+import { containsConversation, conversationView, mainCategories, threadCategories } from '../conversation-views';
 import { ListTab, type ListSelection } from '../list-tabs';
 
 enum ListRowKind {
@@ -110,24 +117,29 @@ export class ChatListContent {
   protected readonly chatQuery = computed(() => this.lists.chats(this.list().archived));
   protected readonly friendRequests = computed(() => this.lists.friendRequests(this.list().requestHistory));
   protected readonly threads = computed(() => this.lists.threads(this.list().archived));
-  protected readonly showChats = computed(() => !this.list().requestHistory && this.list().tab !== ListTab.Threads);
+  private readonly view = computed(() => conversationView(this.list(), this.preferences.showThreadsInMessages()));
+  protected readonly showChats = computed(
+    () =>
+      !this.list().requestHistory &&
+      mainCategories.some((category) => this.view().selector.categories?.includes(category)),
+  );
   protected readonly showThreads = computed(
     () =>
       !this.list().requestHistory &&
-      (this.list().tab === ListTab.Threads ||
-        (this.list().tab === ListTab.Messages && this.preferences.showThreadsInMessages())),
+      threadCategories.some((category) => this.view().selector.categories?.includes(category)),
   );
-  private readonly visibleConversations = computed(() => {
-    const chats = this.chatQuery().items();
-    switch (this.list().tab) {
-      case ListTab.Groups:
-        return chats.filter((chat) => chat.kind === GroupKind.group);
-      case ListTab.Friends:
-        return chats.filter((chat) => chat.kind === GroupKind.dm);
-      default:
-        return chats;
-    }
-  });
+  private readonly visibleConversations = computed(() =>
+    this.chatQuery()
+      .items()
+      .filter((chat) =>
+        containsConversation(
+          this.view().selector,
+          { chatId: chat.id },
+          chat.kind === GroupKind.dm ? ConversationCategory.dm : ConversationCategory.group,
+          chat.archived,
+        ),
+      ),
+  );
   protected readonly session = inject(SessionStore);
   /** Submitted messages keep their row current until the shared summary echoes them. */
   private readonly pendingPreviews = computed(() => {
@@ -173,7 +185,7 @@ export class ChatListContent {
               ? new Date(draft.savedAt).toISOString()
               : (preview?.createdAt ?? chat.lastMessageAt),
           unreadCount: chat.unreadCount,
-          unreadMentions: chat.unreadMentions,
+          unreadMentions: chat.kind === GroupKind.group ? chat.unreadMentions : 0,
           unreadReactions: chat.unreadReactions,
           muted,
         } satisfies ChatListEntry,
@@ -215,7 +227,7 @@ export class ChatListContent {
         const pending = this.pendingPreviews().get(root.id);
         const preview = pending && pending.createdAt > thread.lastReplyAt ? pending : last;
         const latestAt = preview?.createdAt ?? thread.lastReplyAt;
-        const isDm = chat?.kind === GroupKind.dm;
+        const isDm = thread.chatKind === GroupKind.dm;
         const peer = isDm ? thread.participants.find((user) => user.uid !== this.session.user()?.uid) : undefined;
         return {
           kind: ListRowKind.Thread as const,
@@ -229,18 +241,20 @@ export class ChatListContent {
             draft?.savedAt ?? -Infinity,
           ),
           entry: {
-            avatarName: isDm ? (chat.peer?.username ?? peer?.name ?? thread.chatName) : (chat?.name ?? thread.chatName),
-            avatar: isDm ? (chat.peer?.avatarUrl ?? peer?.avatarUrl) : (chat?.avatar ?? thread.chatAvatar),
-            badgeName: chat?.kind === GroupKind.group ? (root.sender.name ?? String(root.sender.uid)) : undefined,
-            badgeAvatar: chat?.kind === GroupKind.group ? root.sender.avatarUrl : undefined,
+            avatarName: isDm
+              ? (chat?.peer?.username ?? peer?.name ?? thread.chatName)
+              : (chat?.name ?? thread.chatName),
+            avatar: isDm ? (chat?.peer?.avatarUrl ?? peer?.avatarUrl) : (chat?.avatar ?? thread.chatAvatar),
+            badgeName: !isDm ? (root.sender.name ?? String(root.sender.uid)) : undefined,
+            badgeAvatar: !isDm ? root.sender.avatarUrl : undefined,
             badgeIcon: isDm ? chatbubbles : undefined,
             sender:
-              !draft && chat?.kind === GroupKind.group && preview && preview.messageType !== MessageType.system
+              !draft && !isDm && preview && preview.messageType !== MessageType.system
                 ? (preview.sender.name ?? String(preview.sender.uid))
                 : undefined,
             time: draft && draft.savedAt > Date.parse(latestAt) ? new Date(draft.savedAt).toISOString() : latestAt,
             unreadCount: thread.unreadCount,
-            unreadMentions: thread.unreadMentions,
+            unreadMentions: !isDm ? thread.unreadMentions : 0,
             unreadReactions: thread.unreadReactions,
             muted: thread.archived,
             link: ['/chats/chat', decodeId(thread.chatId), 'thread', decodeId(root.id)],
@@ -306,20 +320,13 @@ export class ChatListContent {
   protected readonly hasMore = computed(
     () => (this.showChats() && this.chatQuery().hasMore()) || (this.showThreads() && !!this.threads().hasMore()),
   );
-  protected readonly countQueries = computed(
-    () => {
-      const { tab, archived, requestHistory } = this.list();
-      if (archived || requestHistory) return [];
-      return tab === ListTab.Messages
-        ? [this.lists.archivedUnread.chats, ...(this.showThreads() ? [this.lists.archivedUnread.threads] : [])]
-        : tab === ListTab.Threads
-          ? [this.lists.archivedUnread.threads]
-          : [this.lists.archivedUnread.chats];
-    },
-    { equal: (a, b) => a.length === b.length && a.every((query, index) => query === b[index]) },
-  );
-  protected readonly archivedUnreadCount = computed(() =>
-    this.countQueries().reduce((total, query) => total + (query.value() ?? 0), 0),
+  protected readonly countQueries = computed(() => (this.list().requestHistory ? [] : [this.lists.viewUnread]), {
+    equal: (a, b) => a.length === b.length && a[0] === b[0],
+  });
+  protected readonly archivedUnreadCount = computed(
+    () =>
+      this.lists.summary(conversationView({ ...this.list(), archived: true }, this.preferences.showThreadsInMessages()))
+        ?.unreadMessageCount ?? 0,
   );
   protected readonly archiveIcon = archiveOutline;
   protected readonly requestsIcon = personAddOutline;

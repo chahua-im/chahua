@@ -154,6 +154,9 @@ describe('ChatListPage query lifecycle', () => {
           provide: ChatListStore,
           useValue: {
             unread: { value: signal(undefined), activate: () => () => {} },
+            selection: signal({ tab: ListTab.Messages, archived: false, requestHistory: false }),
+            summary: () => undefined,
+            viewUnread: query,
             threadUnread: { value: signal(undefined), activate: () => () => {} },
             chats: () => query,
             friendRequests: () => query,

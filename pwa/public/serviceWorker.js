@@ -89,7 +89,7 @@
       return;
     if (!suppress) {
       await self.registration.showNotification(payload.title, {
-        body: payload.body,
+        body: payload.ordinaryMessageBody ?? payload.body,
         icon: new URL('icon/pwa-192x192.png', self.registration.scope).href,
         badge: new URL('icon/pwa-64x64.png', self.registration.scope).href,
         tag: validId(messageId) ? `msg_${messageId}` : undefined,

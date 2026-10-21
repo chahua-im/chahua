@@ -80,6 +80,7 @@ describe('ChatStore', () => {
     const rootId = encodeId('9007199254741999');
     const thread = {
       chatId: testChat.id,
+      chatKind: testChat.kind,
       chatName: testChat.name ?? '测试群',
       threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
       participants: [],
@@ -109,6 +110,7 @@ describe('ChatStore', () => {
       [
         {
           chatId: testChat.id,
+          chatKind: testChat.kind,
           chatName: testChat.name ?? '测试群',
           threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
           participants: [],

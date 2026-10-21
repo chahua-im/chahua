@@ -91,7 +91,7 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 话题 tab，或消息 tab 开启话题 | `GET /threads?limit=20`，archived 与 before 时间游标                   | ChatListStore → ChatStore → ChatListContent |
 | 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatListContent             |
 | 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                                |
-| 显示归档计数                  | `GET /chats/unread`；需要话题时读 `/threads/unread`                    | 查询由实际消费者激活                        |
+| 显示归档计数                  | `POST /conversations/unread-summary`，选择对应 tab 的 archived 集合                    | 查询由实际消费者激活                        |
 | 被覆盖的列表收到消息                       | 已加载聊天立即读 `GET /chats/{c}/unread`；页面在后台时留到返回后补读，窗口外的新聊天返回时从首页补读至原覆盖边界 | ChatListStore → ChatStore                                   |
 | 列表失效（断线重连、归档、成员关系、删除） | `GET /chats?limit=50`，读取到已加载条数或末尾                                                                    | ChatListStore → ChatStore → ChatListContent                 |
 | 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限                |
@@ -214,11 +214,11 @@ NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持�
 
 关闭立即保存本机意图并清除已显示的通知，再调用 `/push/unsubscribe` 和浏览器取消订阅；后端请求失败仍尝试浏览器取消。订阅操作按顺序执行并读取最新选择，后台登记进行中关闭会在该请求结束后清理。未增加持久重试队列；浏览器取消成功但后端未删除的过期 endpoint，由后端投递失败时清理。用户主动开关才设置 busy 并展示错误；后台操作不占用开关。
 
-规则读取 ChatStore：自己、系统和已撤回消息不提醒；普通提及绕过静音，回复自己可绕过归档。话题按订阅/归档判断，提及是例外，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史。
+规则读取 ChatStore：自己、系统和已撤回消息不提醒。私聊及其话题的提及和回复按普通消息处理，不绕过静音、归档或话题订阅规则，不显示额外的 `@` badge、跳转按钮或后台标题提醒；普通未读数和表态提醒保留。群聊提及绕过静音，回复自己可绕过归档；群聊话题按订阅/归档判断，提及自己或回复自己均可绕过话题归档和取消订阅，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史。后台 Web Push 在服务端按私聊普通消息规则筛选收件人，不投递仅由提及/回复例外触发的通知；私聊载荷携带 `ordinaryMessageBody`，Worker 使用普通消息文案。APNs 保留原有策略。
 
 Worker 串行处理页面与 Push，在独立的 `chahua-notifications` IndexedDB 中按账号保存已处理消息 ID、聊天/话题已读边界。通知成功展示、前台阅读时抑制或撤回后登记具体 ID；仅确认已读才推进范围边界，乱序消息不会因更大的 ID 已提醒而被忽略。记录保存 30 天，覆盖后端 web-push 默认 28 天有效期，按过期索引清理；Worker 重启和通知被划掉均不丢失有效记录。通知中心补回仍显示的通知，账号变化清理旧通知，退出后停止处理 Push。页面通过 CHAHUA_SESSION 同步账号，控制器切换后重新同步。通知点击使用 `#msg=ID`；新通知由 Angular onActionClick 唤起，缺少该字段的旧通知由兼容监听器唤起并发送导航事件，已有页面不整页刷新。
 
-ChatListStore.unread 的完整响应同时服务归档数、系统角标和后台标题，不额外相加话题/静音/归档计数。支持角标或标签隐藏时激活同一查询；前台恢复普通标题。
+ChatListStore.unread 保留账号级系统角标查询。ChatListStore.viewUnread 通过 `/conversations/unread-summary` 一次读取内置 tab 的普通、归档及“消息是否包含话题”两种集合，供 tab badge、归档入口和后台标题共享。普通列表与归档列表的下拉刷新均刷新该汇总。ChatList 只在 active 时发布当前 selection，进入会话或设置后保留最近选择；隐藏的 Ionic 缓存页不能覆盖当前选择。标题读取选中集合的 `unreadMessageCount` 与 `unreadUnmutedAttentionCount`，前台恢复普通标题。系统角标和通知不受 selection 影响。
 
 ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c}/mute`；永久省略 durationSeconds。一个到期定时器更新标志与计数，取消静音按协议同时取消归档。话题使用自身订阅/归档操作。
 
@@ -228,4 +228,4 @@ ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c
 
 媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。每次路由导航关闭已经存在的 modal、popover、alert 和 action-sheet，Toast 保留自己的生命周期。
 
-聊天分类的 `@` 使用 `/chats/unread` 的 `mentionBadges` 与 `archivedMentionBadges`，分别包含完整的 groups、friends、threads 布尔值。消息分类按“在消息中显示话题”偏好合并；不依赖已加载分页。`unreadMentions` 汇总主聊天与已订阅话题的提及/回复，包含归档。
+会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字使用 `unreadUnmutedConversationCount`，标题数字仍使用包含静音的 `unreadMessageCount`。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab 和后台标题使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天 mutedUntil 或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；消息、编辑、撤回、已读、订阅、归档、静音变更、已知静音到期、好友变化和重连使缓存失效，多个消费者共用请求。刷新保留同一账号的已知结果，版本丢弃迟到回包；账号切换立即隐藏旧账号快照并重新查询。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。

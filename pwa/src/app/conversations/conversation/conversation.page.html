@@ -264,6 +264,7 @@
     [style.--context-dark]="composerContextColors()?.dark"
     [relationship]="relationship()"
     [chatId]="id()"
+    [mentionsEnabled]="mentionsEnabled()"
     [text]="editing() ? editText() : draft()"
     (textChange)="updateDraft($event)"
     [editing]="editing()"

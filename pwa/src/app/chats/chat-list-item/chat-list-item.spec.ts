@@ -67,6 +67,18 @@ describe('ChatListItem', () => {
     expect(badge.textContent.trim()).toBe('@');
   });
 
+  it('keeps muted mention badges gray and restores their normal color after unmuting', async () => {
+    fixture.componentRef.setInput('entry', { ...entry, unreadMentions: 3, muted: true });
+    await fixture.whenStable();
+    const badge = fixture.nativeElement.querySelector('ion-badge.mention-badge');
+    expect(badge.textContent.trim()).toBe('@');
+    expect(badge.color).toBe('medium');
+    fixture.componentRef.setInput('entry', { ...entry, unreadMentions: 3, muted: false });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('ion-badge.mention-badge')).toBe(badge);
+    expect(badge.color).toBe('primary');
+  });
+
   it('renders a reaction badge without a numeric unread count', async () => {
     fixture.componentRef.setInput('entry', {
       title: '测试群',

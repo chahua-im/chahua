@@ -38,8 +38,9 @@ import { PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { SessionStore } from '../../session/session-store';
-import { ChatListStore } from '../chat-list-store';
 import { Preferences } from '../../settings/preferences';
+import { conversationView } from '../conversation-views';
+import { ChatListStore } from '../chat-list-store';
 import { AvatarColor, AvatarTextPipe } from '../avatar-text.pipe';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
 import { DirectorySearch } from '../directory-search/directory-search';
@@ -90,27 +91,27 @@ export class ChatList {
   private previousTab?: ListTab;
   protected readonly lists = inject(ChatListStore);
   private readonly preferences = inject(Preferences);
-  protected readonly messageUnread = computed(() => {
-    const chats = this.lists.unread.value()?.unreadChatCount;
-    const threads = this.preferences.showThreadsInMessages() ? this.lists.threadUnread.value()?.unreadThreadCount : 0;
-    return chats == null || threads == null ? undefined : chats + threads;
-  });
-  protected readonly tabMentions = computed(() => {
-    const summary = this.lists.unread.value();
-    const badges = this.list().archived ? summary?.archivedMentionBadges : summary?.mentionBadges;
-    return {
-      messages: !!(badges?.groups || badges?.friends || (this.preferences.showThreadsInMessages() && badges?.threads)),
-      groups: badges?.groups ?? false,
-      friends: badges?.friends ?? false,
-      threads: badges?.threads ?? false,
-    };
-  });
+  private summary(tab: ListTab) {
+    return this.lists.summary(conversationView({ ...this.list(), tab }, this.preferences.showThreadsInMessages()));
+  }
+  protected readonly messageUnread = computed(() => this.summary(ListTab.Messages)?.unreadUnmutedConversationCount);
+  protected readonly groupUnread = computed(() => this.summary(ListTab.Groups)?.unreadUnmutedConversationCount);
+  protected readonly friendUnread = computed(() => this.summary(ListTab.Friends)?.unreadUnmutedConversationCount);
+  protected readonly threadUnread = computed(() => this.summary(ListTab.Threads)?.unreadUnmutedConversationCount);
+  protected readonly tabMentions = computed(() => ({
+    messages: !!this.summary(ListTab.Messages)?.unreadUnmutedAttentionCount,
+    groups: !!this.summary(ListTab.Groups)?.unreadUnmutedAttentionCount,
+    friends: !!this.summary(ListTab.Friends)?.unreadUnmutedAttentionCount,
+    threads: !!this.summary(ListTab.Threads)?.unreadUnmutedAttentionCount,
+  }));
 
   constructor() {
     effect((onCleanup) => {
       if (!this.active()) return;
-      onCleanup(this.lists.unread.activate());
-      onCleanup(this.lists.threadUnread.activate());
+      onCleanup(this.lists.viewUnread.activate());
+    });
+    effect(() => {
+      if (this.active()) this.lists.selection.set(this.list());
     });
     afterRenderEffect((onCleanup) => {
       const tab = this.list().tab;
