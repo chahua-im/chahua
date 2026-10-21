@@ -21,7 +21,7 @@ use crate::dto::ws::{
 use crate::models::{GroupKind, PresenceVisibility};
 use crate::schema::{group_membership, groups, user_extra};
 use crate::services::social;
-use crate::services::ws_registry::ConnectionRegistry;
+use crate::services::ws_registry::{AppPresenceState, ConnectionRegistry};
 use crate::state::DbPool;
 
 const GROUP_COUNTS_CACHE_TTL: Duration = Duration::from_secs(15);
@@ -278,7 +278,13 @@ fn load_visible_users(
             let last_seen_at = presence_by_uid.get(&uid).map(|(last_seen_at, _)| {
                 DateTime::<Utc>::from_naive_utc_and_offset(*last_seen_at, Utc)
             });
-            user_presence(uid, exact, registry.is_online(uid), last_seen_at, now)
+            user_presence(
+                uid,
+                exact,
+                registry.personal_presence(uid),
+                last_seen_at,
+                now,
+            )
         })
         .collect())
 }
@@ -286,13 +292,13 @@ fn load_visible_users(
 fn user_presence(
     uid: i32,
     exact: bool,
-    online: bool,
+    state: Option<AppPresenceState>,
     last_seen_at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> UserPresenceResponse {
     let last_seen_bucket = if exact {
         None
-    } else if online {
+    } else if state.is_some() {
         Some(LastSeenBucket::Recently)
     } else {
         last_seen_at.map(|last_seen| match (now - last_seen).num_days() {
@@ -304,7 +310,8 @@ fn user_presence(
     };
     UserPresenceResponse {
         uid,
-        online: exact && online,
+        online: exact && state == Some(AppPresenceState::Active),
+        away: (exact && state == Some(AppPresenceState::Inactive)).then_some(true),
         last_seen_at: if exact { last_seen_at } else { None },
         last_seen_bucket,
     }
@@ -378,6 +385,21 @@ mod tests {
     use prometheus::Registry;
 
     #[test]
+    fn away_is_visible_only_with_exact_presence_permission() {
+        let now = Utc::now();
+        let away = Some(AppPresenceState::Inactive);
+        let exact = user_presence(2, true, away, Some(now), now);
+        assert!(!exact.online);
+        assert_eq!(exact.away, Some(true));
+        let private = user_presence(2, false, away, Some(now), now);
+        let json = serde_json::to_value(private).unwrap();
+        assert_eq!(json["lastSeenBucket"], "recently");
+        assert_eq!(json["online"], false);
+        assert!(json.get("away").is_none());
+        assert!(json.get("lastSeenAt").is_none());
+    }
+
+    #[test]
     fn hidden_presence_never_serializes_exact_activity() {
         let now = Utc::now();
         for (days, bucket) in [
@@ -390,7 +412,7 @@ mod tests {
             let response = user_presence(
                 2,
                 false,
-                false,
+                None,
                 Some(now - chrono::Duration::days(days)),
                 now,
             );
@@ -399,13 +421,19 @@ mod tests {
             assert_eq!(json["online"], false);
             assert!(json.get("lastSeenAt").is_none());
         }
-        let online = user_presence(2, false, true, Some(now - chrono::Duration::days(40)), now);
+        let online = user_presence(
+            2,
+            false,
+            Some(AppPresenceState::Active),
+            Some(now - chrono::Duration::days(40)),
+            now,
+        );
         assert_eq!(online.last_seen_bucket, Some(LastSeenBucket::Recently));
         assert!(!online.online);
         assert!(online.last_seen_at.is_none());
-        let unknown = user_presence(2, false, false, None, now);
+        let unknown = user_presence(2, false, None, None, now);
         assert!(unknown.last_seen_bucket.is_none());
-        let exact = user_presence(2, true, false, Some(now), now);
+        let exact = user_presence(2, true, None, Some(now), now);
         assert_eq!(exact.last_seen_at, Some(now));
         assert!(exact.last_seen_bucket.is_none());
     }

@@ -3,6 +3,8 @@
 } @else if (state(); as presence) {
   @if (presence.online) {
     <span class="online">{{ 'presence.online' | transloco }}</span>
+  } @else if (presence.away) {
+    <span>{{ 'presence.away' | transloco }}</span>
   } @else if (presence.lastSeenBucket; as bucket) {
     <span>{{ 'presence.lastSeen.' + bucket | transloco }}</span>
   } @else if (lastSeen(); as seen) {

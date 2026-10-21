@@ -41,7 +41,8 @@
       "minutes": "Last seen {{ count }} minutes ago",
       "hour": "Last seen {{ count }} hour ago",
       "hours": "Last seen {{ count }} hours ago"
-    }
+    },
+    "away": "Away"
   },
   "settings": {
     "title": "Settings",

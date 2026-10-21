@@ -220,11 +220,17 @@ async fn handle_socket(
     mut rx: tokio::sync::mpsc::Receiver<Arc<ServerWsMessage>>,
 ) {
     let started_at = Instant::now();
+    let mut activity_tasks = tokio::task::JoinSet::new();
     let mut watch = None;
     let mut presence_refresh =
         tokio::time::interval_at(tokio::time::Instant::now(), PRESENCE_REFRESH_INTERVAL);
     loop {
         tokio::select! {
+            Some(result) = activity_tasks.join_next(), if !activity_tasks.is_empty() => {
+                if let Err(error) = result {
+                    warn!(?error, uid, "ws activity task failed");
+                }
+            }
             msg = rx.recv() => {
                 match msg {
                     Some(ws_msg) => {
@@ -252,15 +258,24 @@ async fn handle_socket(
                             continue;
                         };
                         match message {
-                            ClientWsMessage::Ping { state } => {
-                                let state = state
+                            ClientWsMessage::Ping { state: ping_state } => {
+                                let app_state = ping_state
                                     .map(AppPresenceState::from)
                                     .unwrap_or(AppPresenceState::Active);
-                                entry.update_ping(state);
+                                entry.update_ping(app_state);
                                 registry.refresh_metrics();
                                 trace!("ws ping received uid={} conn_id={}", uid, conn_id);
                                 if socket.send(Message::Text(PONG_JSON.into())).await.is_err() {
                                     break;
+                                }
+                                if activity_tasks.is_empty() {
+                                    let tracking = state.client_tracking.clone();
+                                    let client_id = entry.client_id.clone();
+                                    activity_tasks.spawn_blocking(move || {
+                                        if let Err(error) = tracking.record_activity(uid, &client_id, None) {
+                                            warn!(?error, uid, "failed to record ws activity");
+                                        }
+                                    });
                                 }
                             }
                             ClientWsMessage::AppState { state } => {

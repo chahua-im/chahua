@@ -41,7 +41,8 @@
       "minutes": "最近上線於 {{ count }} 分鐘前",
       "hour": "最近上線於 {{ count }} 小時前",
       "hours": "最近上線於 {{ count }} 小時前"
-    }
+    },
+    "away": "離開"
   },
   "settings": {
     "title": "設定",

@@ -52,6 +52,10 @@ describe('UserPresenceDisplay', () => {
     state.set({ uid: 2, online: true });
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.online')).not.toBeNull();
+    state.set({ uid: 2, online: false, away: true });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('离开');
+    expect(fixture.nativeElement.querySelector('.online')).toBeNull();
     for (const [bucket, text] of [
       [LastSeenBucket.recently, '最近上线'],
       [LastSeenBucket.withinWeek, '1 周内上线'],
