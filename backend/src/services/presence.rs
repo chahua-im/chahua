@@ -225,9 +225,7 @@ fn load_visible_users(
                 return true;
             }
             relationships.get(uid).is_some_and(|relationship| {
-                !relationship.blocking
-                    && !relationship.blocked_by
-                    && (relationship.friends_since.is_some() || shared_members.contains(uid))
+                relationship.friends_since.is_some() || shared_members.contains(uid)
             })
         })
         .collect();
@@ -235,7 +233,15 @@ fn load_visible_users(
         return Ok(Vec::new());
     }
 
-    let mut policy_uids: Vec<i32> = candidates.iter().copied().collect();
+    let mut policy_uids: Vec<i32> = candidates
+        .iter()
+        .copied()
+        .filter(|uid| {
+            !relationships
+                .get(uid)
+                .is_some_and(|peer| peer.blocking || peer.blocked_by)
+        })
+        .collect();
     if !policy_uids.contains(&viewer_uid) {
         policy_uids.push(viewer_uid);
     }
@@ -260,6 +266,12 @@ fn load_visible_users(
         .copied()
         .filter(|uid| candidates.contains(uid))
         .map(|uid| {
+            if let Some(blocked) = relationships
+                .get(&uid)
+                .and_then(|peer| blocked_presence(uid, peer))
+            {
+                return blocked;
+            }
             let peer_visibility = presence_by_uid
                 .get(&uid)
                 .map_or(PresenceVisibility::Everyone, |(_, visibility)| *visibility);
@@ -287,6 +299,16 @@ fn load_visible_users(
             )
         })
         .collect())
+}
+
+fn blocked_presence(uid: i32, peer: &social::PeerRelationship) -> Option<UserPresenceResponse> {
+    (peer.blocking || peer.blocked_by).then_some(UserPresenceResponse {
+        uid,
+        online: false,
+        away: None,
+        last_seen_at: None,
+        last_seen_bucket: Some(LastSeenBucket::LongAgo),
+    })
 }
 
 fn user_presence(
@@ -383,6 +405,25 @@ mod tests {
     use crate::services::ws_registry::WsMetrics;
     use diesel::r2d2::ConnectionManager;
     use prometheus::Registry;
+
+    #[test]
+    fn blocked_friends_receive_long_ago_in_both_directions_despite_share_overrides() {
+        for (blocking, blocked_by) in [(true, false), (false, true), (true, true)] {
+            let peer = social::PeerRelationship {
+                blocking,
+                blocked_by,
+                friends_since: Some(Utc::now()),
+                shares_presence: Some(true),
+                peer_shares_presence: Some(true),
+                ..Default::default()
+            };
+            assert_eq!(
+                serde_json::to_value(blocked_presence(2, &peer).unwrap()).unwrap(),
+                serde_json::json!({"uid": 2, "online": false, "lastSeenBucket": "longAgo"}),
+            );
+        }
+        assert!(blocked_presence(2, &social::PeerRelationship::default()).is_none());
+    }
 
     #[test]
     fn away_is_visible_only_with_exact_presence_permission() {
