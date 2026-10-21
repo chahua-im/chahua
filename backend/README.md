@@ -1,5 +1,11 @@
 # Backend
 
+## Database migrations
+
+The server applies pending embedded Diesel migrations at startup in version order.
+New migrations must sort after the latest migration on `main`; preserve dependency
+order when re-dating an unmerged branch's migrations.
+
 ## Metrics
 
 Prometheus endpoint behavior and the complete metric catalog are in

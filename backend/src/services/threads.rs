@@ -249,17 +249,9 @@ pub fn mark_thread_as_read(
     )
     .set(thread_user_states::last_read_message_id.eq(Some(message_id)))
     .execute(conn)?;
-    // Advancing the read position also acknowledges unread reactions: they are
-    // derived from a reaction-timestamp cursor (see UnreadService), which only
-    // moves forward.
-    diesel::update(
-        thread_user_states::table
-            .filter(thread_user_states::chat_id.eq(chat_id))
-            .filter(thread_user_states::thread_root_id.eq(thread_root_id))
-            .filter(thread_user_states::uid.eq(uid)),
-    )
-    .set(thread_user_states::last_reactions_read_at.eq(Utc::now()))
-    .execute(conn)?;
+    // Unread reactions are NOT acknowledged here: the thread reaction cursor
+    // is independent of the message read position and only advances through
+    // the explicit reaction-acknowledge endpoint.
     Ok(updated > 0)
 }
 

@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::Utc;
 use diesel::prelude::*;
 use diesel::PgConnection;
 use unicode_segmentation::UnicodeSegmentation;
@@ -17,7 +16,7 @@ use crate::{
     errors::AppError,
     extractors::DbConn,
     handlers::members::check_membership,
-    models::{Message, MessageReaction},
+    models::Message,
     schema::{group_membership, message_reactions, messages},
     utils::auth::CurrentUid,
     AppState,
@@ -239,22 +238,7 @@ async fn put_reaction(
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
 
-    // Insert reaction (ON CONFLICT DO NOTHING for idempotency)
-    let inserted = diesel::insert_into(message_reactions::table)
-        .values(&MessageReaction {
-            message_id,
-            user_uid: uid,
-            emoji,
-            created_at: Utc::now(),
-            message_author_uid: message.sender_uid,
-        })
-        .on_conflict_do_nothing()
-        .execute(conn)?;
-
-    // Set denormalized flag
-    diesel::update(messages::table.filter(messages::id.eq(message_id)))
-        .set(messages::has_reactions.eq(true))
-        .execute(conn)?;
+    let inserted = crate::services::reactions::insert_reaction(conn, &message, uid, emoji)?;
 
     let member_uids = broadcast_reaction_update(conn, &state, chat_id, message_id);
 
@@ -306,7 +290,7 @@ async fn delete_reaction(
     social::require_chat_writable(conn, chat_id, uid)?;
 
     // Verify message exists and is not deleted (no reaction removal on deleted messages)
-    let _message: Message = messages::table
+    let message: Message = messages::table
         .filter(messages::id.eq(message_id))
         .filter(messages::chat_id.eq(chat_id))
         .filter(messages::deleted_at.is_null())
@@ -336,7 +320,22 @@ async fn delete_reaction(
                 .execute(conn)?;
         }
 
-        let _ = broadcast_reaction_update(conn, &state, chat_id, message_id);
+        let member_uids = broadcast_reaction_update(conn, &state, chat_id, message_id);
+        // Removing a reaction changes the author's unread count too. Notify only
+        // that user rather than making every chat member refetch unread state.
+        if message.sender_uid != uid && member_uids.contains(&message.sender_uid) {
+            state.ws_registry.broadcast_to_uids(
+                &[message.sender_uid],
+                std::sync::Arc::new(ServerWsMessage::Notification(NotificationPayload {
+                    notification_type: NotificationType::Reaction,
+                    chat_id,
+                    message_id,
+                    thread_root_id: message.reply_root_id,
+                    actor_uid: uid,
+                    actor_name: None,
+                })),
+            );
+        }
     }
 
     Ok(StatusCode::NO_CONTENT)

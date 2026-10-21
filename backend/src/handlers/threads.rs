@@ -127,14 +127,14 @@ fn resolve_chat_id_for_thread(
 }
 
 /// Authorize `uid` for `thread_root_id` **within an explicitly supplied
-/// `chat_id`**, rejecting a mismatch with 404.
+/// `chat_id`**, rejecting a mismatch or a reply ID with 404.
 ///
 /// Membership is verified before the thread lookup on purpose: a non-member
 /// then receives 403 for every thread root alike, so the mismatch 404 cannot
 /// be used to probe which chat a thread belongs to. Reversing the order would
 /// let an outsider distinguish "root lives in this chat" (403) from "root
 /// lives elsewhere" (404).
-fn authorize_thread_in_chat(
+pub(crate) fn authorize_thread_in_chat(
     conn: &mut PgConnection,
     chat_id: i64,
     thread_root_id: i64,
@@ -148,7 +148,8 @@ fn authorize_thread_in_chat(
         messages::table.filter(
             messages::id
                 .eq(thread_root_id)
-                .and(messages::chat_id.eq(chat_id)),
+                .and(messages::chat_id.eq(chat_id))
+                .and(messages::reply_root_id.is_null()),
         ),
     ))
     .get_result(conn)?;
@@ -181,12 +182,14 @@ fn apply_thread_read(
             chat_id,
             thread_root_id,
         )?;
+        let unread_reactions =
+            unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
         return Ok(AppliedThreadRead {
             response: MarkThreadReadResponse {
                 last_read_message_id: None,
                 unread_count: 0,
                 unread_mentions: 0,
-                unread_reactions: 0,
+                unread_reactions,
             },
             receipt_advanced: false,
         });
@@ -683,4 +686,40 @@ pub fn thread_router() -> OpenApiRouter<crate::AppState> {
             OpenApiRouter::new().routes(utoipa_axum::routes!(get_thread_read_state_in_chat)),
         )
         .nest("/pins", super::pins::thread_router())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use diesel::connection::SimpleConnection;
+
+    #[test]
+    fn thread_authorization_rejects_replies_and_checks_membership_first() {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            conn.batch_execute(
+                "INSERT INTO groups (id, name) VALUES (9876720000, 'thread-auth-test'), (9876720003, 'other-chat');
+                 INSERT INTO group_membership (chat_id, uid) VALUES (9876720000, 4307), (9876720003, 4307);
+                 INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at)
+                     VALUES (9876720001, 'text', 'thread-auth-root', 4307, 9876720000, NOW());
+                 INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at, reply_root_id)
+                     VALUES (9876720002, 'text', 'thread-auth-reply', 4307, 9876720000, NOW(), 9876720001);"
+            )?;
+            assert!(authorize_thread_in_chat(conn, 9876720000, 9876720001, 4307).is_ok());
+            assert!(matches!(authorize_thread_in_chat(conn, 9876720000, 9876720002, 4307), Err(AppError::NotFound(_))));
+            assert!(matches!(authorize_thread_in_chat(conn, 9876720003, 9876720001, 4307), Err(AppError::NotFound(_))));
+            for id in [9876720001, 9876720002, 9876720099] {
+                assert!(matches!(authorize_thread_in_chat(conn, 9876720000, id, 4308), Err(AppError::Forbidden(_))));
+            }
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+        assert!(matches!(
+            result,
+            Err(diesel::result::Error::RollbackTransaction)
+        ));
+    }
 }
