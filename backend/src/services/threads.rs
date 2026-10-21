@@ -11,7 +11,7 @@ use crate::dto::{
     users::User,
     ws::{ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload},
 };
-use crate::models::{Attachment, Message, MessageType};
+use crate::models::{Attachment, GroupKind, Message, MessageType};
 use crate::schema::{attachments, messages, stickers, thread_meta, thread_user_states};
 use crate::services::avatars::AvatarService;
 use crate::services::media::MediaStore;
@@ -511,6 +511,8 @@ pub fn broadcast_thread_membership_changed_to_user(
 pub struct ThreadListRow {
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     pub chat_id: i64,
+    #[diesel(sql_type = crate::schema::sql_types::GroupKind)]
+    pub chat_kind: GroupKind,
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     pub thread_root_id: i64,
     #[diesel(sql_type = diesel::sql_types::Text)]
@@ -540,6 +542,7 @@ pub fn get_user_threads(
     let query = sql_query(
         "SELECT
             ts.chat_id,
+            g.kind AS chat_kind,
             ts.thread_root_id,
             g.name AS chat_name,
             avatar_media.storage_key AS chat_avatar_key,
@@ -1056,6 +1059,7 @@ pub fn enrich_thread_list(
             );
             Some(ThreadListItem {
                 chat_id: row.chat_id,
+                chat_kind: row.chat_kind,
                 chat_name: row.chat_name,
                 chat_avatar: row
                     .chat_avatar_key

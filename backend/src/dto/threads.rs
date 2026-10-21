@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::dto::{messages::MessagePreview, users::User};
+use crate::models::GroupKind;
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -9,6 +10,7 @@ pub struct ThreadListItem {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub chat_id: i64,
+    pub chat_kind: GroupKind,
     pub chat_name: String,
     pub chat_avatar: Option<String>,
     pub thread_root_message: MessagePreview,
