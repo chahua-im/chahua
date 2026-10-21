@@ -1,7 +1,7 @@
 //! Scoped WebSocket presence snapshots.
 //!
 //! Presence is intentionally process-local: the connection registry is the source of live
-//! status, while PostgreSQL supplies authorization and the existing HTTP-tracked last-seen
+//! status, while PostgreSQL supplies authorization and the HTTP/heartbeat-tracked last-seen
 //! value. This service never writes to the database.
 
 mod changes;

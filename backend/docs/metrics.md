@@ -68,6 +68,10 @@ not part of this endpoint unless source code registers them later.
 
 ## Presence snapshots
 
+Snapshots include initial watches, periodic refreshes, and refreshes triggered by committed
+privacy/relationship changes. A completed result discarded because of a concurrent policy
+change still records its service duration; the replacement query records another observation.
+
 All presence duration metrics use `H3`; all have no identifiers as labels. For
 the process-local presence boundary, see the [Scoped WebSocket presence section
 of the backend README](../README.md#scoped-websocket-presence).

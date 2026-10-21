@@ -171,8 +171,8 @@ impl ConnectionRegistry {
 
     /// Returns whether at least one fresh, open connection exists for a user.
     ///
-    /// This deliberately ignores application foreground/background state: remote presence means
-    /// the authenticated WebSocket is live, while foreground state remains a push-delivery concern.
+    /// This deliberately ignores application foreground/background state for connection liveness
+    /// and group counts. Personal snapshots use `personal_presence` to distinguish away users.
     /// It allocates nothing and coalesces every tab/device into one boolean user status.
     pub fn is_online(&self, uid: i32) -> bool {
         self.is_online_at(uid, now_secs())
