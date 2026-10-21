@@ -40,6 +40,25 @@ pub enum PushSkipReason {
     NoThreadSubscription,
 }
 
+pub fn should_send_web_push(
+    recipient: &PushRecipientContext,
+    is_dm: bool,
+    now: DateTime<Utc>,
+) -> PushDecision {
+    if is_dm {
+        should_send_push(
+            &PushRecipientContext {
+                is_mentioned: false,
+                is_reply_target: false,
+                ..recipient.clone()
+            },
+            now,
+        )
+    } else {
+        should_send_push(recipient, now)
+    }
+}
+
 pub fn should_send_push(recipient: &PushRecipientContext, now: DateTime<Utc>) -> PushDecision {
     if recipient.is_sender {
         return PushDecision::Skip(PushSkipReason::Sender);
@@ -109,6 +128,39 @@ mod tests {
                 has_active_presence: false,
             },
         )
+    }
+
+    #[test]
+    fn dm_web_push_uses_ordinary_rules_without_changing_native_or_group_push() {
+        for thread_state in [
+            ThreadPushState::NotThreadMessage,
+            ThreadPushState::ActiveSubscription,
+            ThreadPushState::ArchivedSubscription,
+            ThreadPushState::NoSubscription,
+        ] {
+            for archived in [false, true] {
+                for muted in [false, true] {
+                    let (now, mut ordinary) = base(thread_state);
+                    ordinary.chat_archived = archived;
+                    ordinary.group_muted_until = muted.then_some(now + Duration::minutes(5));
+                    for (mention, reply) in [(true, false), (false, true), (true, true)] {
+                        let directed = PushRecipientContext {
+                            is_mentioned: mention,
+                            is_reply_target: reply,
+                            ..ordinary.clone()
+                        };
+                        assert_eq!(
+                            should_send_web_push(&directed, true, now),
+                            should_send_push(&ordinary, now),
+                        );
+                        assert_eq!(
+                            should_send_web_push(&directed, false, now),
+                            should_send_push(&directed, now),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

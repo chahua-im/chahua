@@ -1609,7 +1609,7 @@ mod tests {
             crate::dto::chats::MentionBadges {
                 groups: true,
                 friends: false,
-                threads: true
+                threads: true,
             }
         );
         assert_eq!(
@@ -1617,7 +1617,7 @@ mod tests {
             crate::dto::chats::MentionBadges {
                 groups: false,
                 friends: true,
-                threads: false
+                threads: false,
             }
         );
     }
