@@ -33,6 +33,20 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     lastMessage: 'MessagePreview',
     lastReadMessageId: 1,
   },
+  ConversationRef: {
+    chatId: 1,
+    threadId: 1,
+  },
+  ConversationSelector: {
+    exclude: ['ConversationRef'],
+    include: ['ConversationRef'],
+  },
+  ConversationUnreadRequest: {
+    views: ['ConversationView'],
+  },
+  ConversationView: {
+    selector: 'ConversationSelector',
+  },
   CreateChatResponse: {
     id: 1,
   },
@@ -461,6 +475,11 @@ export const jsonOperations: JsonOperationCodec[] = [
     path: '/chats/{chat_id}/unread',
     body: 'MarkAsUnreadBody',
     response: 'MarkChatReadStateResponse',
+  },
+  {
+    method: 'POST',
+    path: '/conversations/unread-summary',
+    body: 'ConversationUnreadRequest',
   },
   {
     method: 'POST',

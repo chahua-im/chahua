@@ -48,6 +48,8 @@
               {{ 'chats.list.tabs.groups' | transloco }}
               @if (tabMentions().groups) {
                 <ion-badge>@</ion-badge>
+              } @else if (groupUnread(); as count) {
+                <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>
           </ion-segment-button>
@@ -56,6 +58,8 @@
               {{ 'chats.list.tabs.friends' | transloco }}
               @if (tabMentions().friends) {
                 <ion-badge>@</ion-badge>
+              } @else if (friendUnread(); as count) {
+                <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>
           </ion-segment-button>
@@ -64,7 +68,7 @@
               {{ 'chats.list.tabs.threads' | transloco }}
               @if (tabMentions().threads) {
                 <ion-badge>@</ion-badge>
-              } @else if (lists.threadUnread.value()?.unreadThreadCount; as count) {
+              } @else if (threadUnread(); as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>

@@ -309,3 +309,26 @@ test('the first Angular account keeps upgrade-era notifications and adopts their
   await instance.push(payload);
   assert.equal(instance.shown.length, 0);
 });
+
+test('DM mentions and replies use ordinary body and deduplicate across worker restart', async () => {
+  for (const type of ['mention', 'reply']) {
+    for (const threadRootId of [undefined, payload.data.threadRootId]) {
+      const w = worker();
+      const dm = {
+        ...payload,
+        type,
+        body: 'Alice replied to your message: hello',
+        data: { ...payload.data, threadRootId },
+        ordinaryMessageBody: 'Alice: hello',
+      };
+      await w.push(dm);
+      assert.equal(w.shown.length, 1);
+      assert.equal(w.shown[0][1].body, 'Alice: hello');
+      const restarted = worker([], { dbFactory: w.dbFactory });
+      await restarted.push(dm);
+      assert.equal(restarted.shown.length, 0);
+      await restarted.command({ type: 'CHAHUA_NOTIFY', payload });
+      assert.equal(restarted.shown.length, 0);
+    }
+  }
+});

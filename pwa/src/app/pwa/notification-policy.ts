@@ -1,18 +1,25 @@
-import { MessageType, type MessageResponse, type ThreadSubscriptionStatusResponse } from '../../generated/models';
+import {
+  GroupKind,
+  MessageType,
+  type MessageResponse,
+  type ThreadSubscriptionStatusResponse,
+} from '../../generated/models';
 
 /** Matches the server's push policy using the membership information already available locally. */
 export function shouldNotify(
   message: MessageResponse,
   uid: number,
-  chat: { archived?: boolean; mutedUntil?: string } | undefined,
+  chat: { kind?: GroupKind; archived?: boolean; mutedUntil?: string } | undefined,
   thread: ThreadSubscriptionStatusResponse | undefined,
   now = Date.now(),
 ): boolean {
   if (message.sender.uid === uid || message.isDeleted || message.messageType === MessageType.system) return false;
-  if (!message.replyRootId && message.replyToMessage?.sender.uid === uid) return true;
+  const directed = chat?.kind === GroupKind.group;
+  const replied = directed && message.replyToMessage?.sender.uid === uid;
+  if (replied && !message.replyRootId) return true;
   if (chat?.archived) return false;
-  const mentioned = message.mentions?.some((mention) => mention.uid === uid) ?? false;
-  if (message.replyRootId) return mentioned || !!(thread?.subscribed && !thread.archived);
+  const mentioned = directed && (message.mentions?.some((mention) => mention.uid === uid) ?? false);
+  if (message.replyRootId) return mentioned || replied || !!(thread?.subscribed && !thread.archived);
   return mentioned || !(Date.parse(chat?.mutedUntil ?? '') > now);
 }
 

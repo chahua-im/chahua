@@ -32,7 +32,38 @@ class ContentStub {
 
 describe('ChatList', () => {
   let fixture: ComponentFixture<ChatList>;
+  const summaries = signal<
+    Record<
+      string,
+      {
+        unreadConversationCount: number;
+        unreadUnmutedConversationCount: number;
+        unreadAttentionCount: number;
+        unreadUnmutedAttentionCount: number;
+      }
+    >
+  >({});
   beforeEach(async () => {
+    summaries.set({
+      messages: {
+        unreadConversationCount: 12,
+        unreadUnmutedConversationCount: 2,
+        unreadAttentionCount: 0,
+        unreadUnmutedAttentionCount: 0,
+      },
+      'messages-with-threads': {
+        unreadConversationCount: 15,
+        unreadUnmutedConversationCount: 5,
+        unreadAttentionCount: 0,
+        unreadUnmutedAttentionCount: 0,
+      },
+      threads: {
+        unreadConversationCount: 13,
+        unreadUnmutedConversationCount: 3,
+        unreadAttentionCount: 0,
+        unreadUnmutedAttentionCount: 0,
+      },
+    });
     vi.stubGlobal('matchMedia', (query: string) =>
       Object.assign(new EventTarget(), { matches: query === '(prefers-reduced-motion: reduce)' }),
     );
@@ -42,6 +73,9 @@ describe('ChatList', () => {
         {
           provide: ChatListStore,
           useValue: {
+            selection: signal({ tab: ListTab.Messages, archived: false, requestHistory: false }),
+            summary: (view: { key: string }) => summaries()[view.key],
+            viewUnread: { activate: vi.fn(() => vi.fn()) },
             unread: { value: signal({ unreadChatCount: 2 }), activate: vi.fn(() => vi.fn()) },
             threadUnread: { value: signal({ unreadThreadCount: 3 }), activate: vi.fn(() => vi.fn()) },
             chats: () => ({ items: signal([]) }),
@@ -72,19 +106,26 @@ describe('ChatList', () => {
   });
 
   it('uses complete mention categories even when none of their rows are loaded', () => {
-    const lists = TestBed.inject(ChatListStore);
-    const summary = signal({
-      unreadCount: 1,
-      archivedUnreadCount: 0,
-      unreadChatCount: 1,
-      archivedUnreadChatCount: 0,
-      mentionBadges: { groups: true, friends: false, threads: true },
-      archivedMentionBadges: { groups: false, friends: true, threads: false },
+    summaries.set({
+      'messages-with-threads': {
+        unreadConversationCount: 11,
+        unreadUnmutedConversationCount: 1,
+        unreadAttentionCount: 1,
+        unreadUnmutedAttentionCount: 1,
+      },
+      groups: {
+        unreadConversationCount: 11,
+        unreadUnmutedConversationCount: 1,
+        unreadAttentionCount: 1,
+        unreadUnmutedAttentionCount: 1,
+      },
+      threads: {
+        unreadConversationCount: 11,
+        unreadUnmutedConversationCount: 1,
+        unreadAttentionCount: 1,
+        unreadUnmutedAttentionCount: 1,
+      },
     });
-    Object.assign(lists.unread, { value: summary });
-    // Recreate to track the replacement summary signal from the initial read.
-    fixture.destroy();
-    fixture = TestBed.createComponent(ChatList);
     fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: false, requestHistory: false });
     fixture.detectChanges();
     expect(fixture.componentInstance['tabMentions']()).toEqual({
@@ -96,11 +137,71 @@ describe('ChatList', () => {
     fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: true, requestHistory: false });
     fixture.detectChanges();
     expect(fixture.componentInstance['tabMentions']()).toEqual({
-      messages: true,
+      messages: false,
       groups: false,
-      friends: true,
+      friends: false,
       threads: false,
     });
+  });
+
+  it('excludes muted conversations from every tab and prioritizes unmuted attention', async () => {
+    summaries.set({
+      'messages-with-threads': {
+        unreadConversationCount: 14,
+        unreadUnmutedConversationCount: 4,
+        unreadAttentionCount: 9,
+        unreadUnmutedAttentionCount: 0,
+      },
+      groups: {
+        unreadConversationCount: 13,
+        unreadUnmutedConversationCount: 3,
+        unreadAttentionCount: 7,
+        unreadUnmutedAttentionCount: 0,
+      },
+      friends: {
+        unreadConversationCount: 12,
+        unreadUnmutedConversationCount: 2,
+        unreadAttentionCount: 0,
+        unreadUnmutedAttentionCount: 0,
+      },
+      threads: {
+        unreadConversationCount: 11,
+        unreadUnmutedConversationCount: 1,
+        unreadAttentionCount: 2,
+        unreadUnmutedAttentionCount: 0,
+      },
+    });
+    await fixture.whenStable();
+    expect(
+      [...fixture.nativeElement.querySelectorAll('ion-segment ion-badge')].map((node) =>
+        (node as HTMLElement).textContent?.trim(),
+      ),
+    ).toEqual(['4', '3', '2', '1']);
+    expect(fixture.componentInstance['tabMentions']()).toEqual({
+      messages: false,
+      groups: false,
+      friends: false,
+      threads: false,
+    });
+    expect(fixture.componentInstance['messageUnread']()).toBe(4);
+    summaries.update((value) => ({ ...value, groups: { ...value['groups'], unreadUnmutedAttentionCount: 1 } }));
+    await fixture.whenStable();
+    expect(fixture.componentInstance['tabMentions']().groups).toBe(true);
+    expect(
+      [...fixture.nativeElement.querySelectorAll('ion-segment ion-badge')].map((node) =>
+        (node as HTMLElement).textContent?.trim(),
+      ),
+    ).toEqual(['4', '@', '2', '1']);
+    summaries.update((value) =>
+      Object.fromEntries(
+        Object.entries(value).map(([key, summary]) => [
+          key,
+          { ...summary, unreadUnmutedConversationCount: 0, unreadUnmutedAttentionCount: 0 },
+        ]),
+      ),
+    );
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelectorAll('ion-segment ion-badge')).toHaveLength(0);
   });
 
   it('shows the playing voice bar in the header and releases it on dismissal', () => {
@@ -186,6 +287,20 @@ describe('ChatList', () => {
     (preferences.showThreadsInMessages as ReturnType<typeof signal<boolean>>).set(false);
     await fixture.whenStable();
     expect(badges()).toEqual(['2', '3']);
+  });
+
+  it('publishes only the active list selection, retaining it while a conversation is open', async () => {
+    const selected = TestBed.inject(ChatListStore).selection;
+    fixture.componentRef.setInput('selection', { tab: ListTab.Friends, archived: false, requestHistory: false });
+    await fixture.whenStable();
+    expect(selected().tab).toBe(ListTab.Friends);
+    fixture.componentRef.setInput('active', false);
+    fixture.componentRef.setInput('selection', { tab: ListTab.Threads, archived: false, requestHistory: false });
+    await fixture.whenStable();
+    expect(selected().tab).toBe(ListTab.Friends);
+    fixture.componentRef.setInput('active', true);
+    await fixture.whenStable();
+    expect(selected().tab).toBe(ListTab.Threads);
   });
 
   it('requests settings permission in the avatar click before navigation', () => {

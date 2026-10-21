@@ -345,6 +345,7 @@ export class ConversationPage {
   protected readonly showMessageDetails = computed(
     () => this.chatInfo.get(this.id())?.kind !== GroupKind.dm || this.preferences.showDmDetails(),
   );
+  protected readonly mentionsEnabled = computed(() => this.chatInfo.get(this.id())?.kind === GroupKind.group);
   protected readonly stickyAvatarsEnabled = computed(
     () => this.showMessageDetails() && !this.preferences.showAllAvatars(),
   );
@@ -587,7 +588,9 @@ export class ConversationPage {
   protected readonly mentionIcon = at;
   protected readonly mentionJumpIds = signal<SnowflakeID[]>([]);
   protected readonly mentionRemaining = computed(() => this.mentionJumpIds().length);
-  protected readonly canJumpMention = computed(() => this.active() && this.mentionRemaining() > 0);
+  protected readonly canJumpMention = computed(
+    () => this.active() && this.mentionsEnabled() && this.mentionRemaining() > 0,
+  );
   private reactionSessionEntered = false;
   private reactionRequest?: { again: boolean };
   private mentionRequest?: { again: boolean };
@@ -1092,6 +1095,10 @@ export class ConversationPage {
   }
 
   private async enterMentionSession() {
+    if (this.chatInfo.get(this.id())?.kind === GroupKind.dm) {
+      this.resetMentionSession();
+      return;
+    }
     if (this.document.hidden || !this.isCurrent()) return;
     if (this.mentionRequest) {
       this.mentionRequest.again = true;

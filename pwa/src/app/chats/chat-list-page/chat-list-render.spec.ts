@@ -1,3 +1,4 @@
+import { ListTab } from '../list-tabs';
 import { ChangeDetectorRef, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -52,6 +53,9 @@ it('flushes the real cached list hierarchy before returning, without activating 
             threads: () => empty,
             friendRequests: () => empty,
             unread: count,
+            selection: signal({ tab: ListTab.Messages, archived: false, requestHistory: false }),
+            summary: () => undefined,
+            viewUnread: { activate: () => () => {}, refresh: vi.fn() },
             threadUnread: count,
             archivedUnread: { chats: count, threads: count },
           },

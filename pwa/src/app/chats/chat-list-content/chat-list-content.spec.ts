@@ -45,6 +45,7 @@ const incoming: FriendRequestHistoryEntry = {
 const thread: ThreadData = {
   archived: false,
   chatId: testChat.id,
+  chatKind: testChat.kind,
   chatName: '测试群',
   chatAvatar: 'https://example.com/thread-group.jpg',
   lastReplyAt: testMessage.createdAt,
@@ -226,7 +227,20 @@ describe('ChatListContent', () => {
         { provide: Connection, useValue: { ...mockRealtime({ events$: presenceEvents }), connected, watchPresence } },
         { provide: MessageOutbox, useValue: outbox },
         provideRouter(routes),
-        { provide: ChatListStore, useValue: { ...data, ...inbox, archivedUnread: counts } },
+        {
+          provide: ChatListStore,
+          useValue: {
+            ...data,
+            ...inbox,
+            archivedUnread: counts,
+            viewUnread: counts.chats,
+            summary: (view: { key: string }) => ({
+              unreadMessageCount: view.key.startsWith('threads')
+                ? counts.threads.value()
+                : counts.chats.value() + (view.key.startsWith('messages-with-threads') ? counts.threads.value() : 0),
+            }),
+          },
+        },
         { provide: ConversationNavigation, useValue: navigation },
         {
           provide: ChatStore,
@@ -464,11 +478,10 @@ describe('ChatListContent', () => {
     preferences.showThreadsInMessages.set(true);
     await fixture.whenStable();
     expect(fixture.componentInstance['archivedUnreadCount']()).toBe(10);
-    expect(counts.threads.activate).toHaveBeenCalledOnce();
-    const release = counts.threads.activate.mock.results[0].value;
+    expect(counts.chats.activate).toHaveBeenCalledOnce();
     preferences.showThreadsInMessages.set(false);
     await fixture.whenStable();
-    expect(release).toHaveBeenCalledOnce();
+    expect(counts.chats.activate).toHaveBeenCalledOnce();
     expect(fixture.componentInstance['archivedUnreadCount']()).toBe(7);
   });
 
@@ -603,7 +616,7 @@ describe('ChatListContent', () => {
     expect(chats.refresh).toHaveBeenCalledOnce();
     expect(threads.refresh).toHaveBeenCalledOnce();
     expect(counts.chats.refresh).toHaveBeenCalledOnce();
-    expect(counts.threads.refresh).toHaveBeenCalledOnce();
+    expect(counts.threads.refresh).not.toHaveBeenCalled();
     const complete = vi.fn().mockResolvedValue(undefined);
     fixture.debugElement
       .query(By.css('ion-infinite-scroll'))
@@ -616,7 +629,20 @@ describe('ChatListContent', () => {
     expect(fixture.componentInstance['loading']()).toBe(true);
   });
 
+  it.each([ListTab.Messages, ListTab.Groups, ListTab.Friends, ListTab.Threads])(
+    'refreshes the shared unread summary when pulling to refresh archived %s',
+    async (tab) => {
+      fixture.componentRef.setInput('selection', { tab, archived: true, requestHistory: false });
+      await fixture.whenStable();
+      counts.chats.refresh.mockClear();
+      fixture.debugElement.query(By.css('ion-refresher')).triggerEventHandler('ionRefresh');
+      expect(counts.chats.refresh).toHaveBeenCalledOnce();
+      expect(counts.chats.activate).toHaveBeenCalledOnce();
+    },
+  );
+
   it('keeps archived conversations readable with only unarchive on the right, and omits read for empty chats', async () => {
+    fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: true, requestHistory: false });
     chats.items.set([{ ...testChat, archived: true, lastMessage }]);
     fixture.detectChanges();
     expect(options('start')).toHaveLength(1);
@@ -624,10 +650,27 @@ describe('ChatListContent', () => {
     options('end')[0].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
     expect(data.setArchived).toHaveBeenCalledWith(testChat.id, false);
-    chats.items.set([{ ...testChat, lastMessage: undefined }]);
+    chats.items.set([{ ...testChat, archived: true, lastMessage: undefined }]);
     fixture.detectChanges();
     expect(options('start')).toHaveLength(0);
     expect(conversationRow().nativeElement.querySelector('ion-label p').textContent).toContain('暂无消息');
+  });
+
+  it('hides DM mention badges in chats and threads while retaining normal unread counts', () => {
+    for (const kind of [GroupKind.dm, GroupKind.group]) {
+      chats.items.set([{ ...testChat, kind, unreadCount: 4, unreadMentions: 2 }]);
+      chatInfo.set({ ...testChat, kind });
+      threads.items.set([{ ...thread, chatKind: kind, unreadMentions: 2 }]);
+      fixture.detectChanges();
+      expect(fixture.componentInstance['conversationRows']()[0].entry).toMatchObject({
+        unreadCount: 4,
+        unreadMentions: kind === GroupKind.dm ? 0 : 2,
+      });
+      expect(fixture.componentInstance['threadRows']()[0].entry).toMatchObject({
+        unreadCount: 3,
+        unreadMentions: kind === GroupKind.dm ? 0 : 2,
+      });
+    }
   });
 
   it('uses the shared message preview rules and keeps sender names specific to group conversations', () => {
@@ -813,6 +856,28 @@ describe('ChatListContent', () => {
       return (threadRow().componentInstance as ChatListItem).entry();
     }
 
+    it.each([GroupKind.group, GroupKind.dm])(
+      'renders %s topic mentions when parent metadata is unavailable, preserving the badge when it arrives',
+      async (kind) => {
+        chatInfo.set(undefined);
+        metadata.ensure.mockRejectedValueOnce(new Error('offline'));
+        threads.items.set([{ ...thread, chatKind: kind, unreadMentions: 2, archived: true }]);
+        await fixture.whenStable();
+        expect(threadEntry()).toMatchObject({ unreadMentions: kind === GroupKind.group ? 2 : 0, muted: true });
+        const badge = threadRow().nativeElement.querySelector('ion-badge');
+        if (kind === GroupKind.group) {
+          expect(badge.textContent.trim()).toBe('@');
+          expect(badge.color).toBe('medium');
+        } else {
+          expect(threadRow().nativeElement.textContent).not.toContain('@');
+        }
+        chatInfo.set({ ...testChat, kind });
+        await fixture.whenStable();
+        expect(threadRow().nativeElement.querySelector('ion-badge')).toBe(badge);
+        expect(threadEntry().unreadMentions).toBe(kind === GroupKind.group ? 2 : 0);
+      },
+    );
+
     it('loads chat metadata once per chat when several visible topics share it', async () => {
       metadata.ensure.mockClear();
       threads.items.set([
@@ -856,6 +921,7 @@ describe('ChatListContent', () => {
     });
 
     it('uses the verified DM peer avatar and topic icon without a sender prefix', () => {
+      threads.items.set([{ ...thread, chatKind: GroupKind.dm }]);
       chatInfo.set({
         ...testChat,
         kind: GroupKind.dm,
@@ -877,7 +943,7 @@ describe('ChatListContent', () => {
       expect(threadEntry().avatar).toBe('https://example.com/participant.jpg');
     });
 
-    it('does not infer a DM before metadata arrives and formats non-text or deleted previews', () => {
+    it('uses the supplied group kind before metadata arrives and formats non-text or deleted previews', () => {
       chatInfo.set(undefined);
       threads.items.set([
         {
@@ -889,12 +955,14 @@ describe('ChatListContent', () => {
       fixture.detectChanges();
       expect(threadEntry()).toMatchObject({
         avatar: thread.chatAvatar,
-        sender: undefined,
+        sender: '小花',
       });
       expect(threadEntry().badgeIcon).toBeUndefined();
-      expect(threadEntry().badgeAvatar).toBeUndefined();
+      expect(threadEntry().badgeAvatar).toBe(thread.threadRootMessage.sender.avatarUrl);
       expect(threadRow().nativeElement.querySelector('ion-label h3').textContent.trim()).toBe('消息已删除');
-      expect(threadRow().nativeElement.querySelector('ion-label p').textContent.trim()).toBe('[语音]');
+      expect(threadRow().nativeElement.querySelector('ion-label p').textContent.replace(/\s+/g, ' ').trim()).toBe(
+        '小花: [语音]',
+      );
     });
 
     it('offers mark-read only for unread topics and sends the latest reply or root ID', async () => {

@@ -58,6 +58,7 @@ export * from './attachments';
 export * from './auth';
 export * from './blocks';
 export * from './chats';
+export * from './conversations';
 export * from './external-invites';
 export * from './external-sessions';
 export * from './external-social';

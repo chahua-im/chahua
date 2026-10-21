@@ -15,6 +15,8 @@ import {
 import { TranslocoService } from '@jsverse/transloco';
 import { Connection } from '../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
+import { Preferences } from '../settings/preferences';
+import { conversationView } from '../chats/conversation-views';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
@@ -55,6 +57,7 @@ export class PushNotifications {
   private readonly connection = inject(Connection);
   private readonly chats = inject(ChatStore);
   private readonly lists = inject(ChatListStore);
+  private readonly preferences = inject(Preferences);
   private readonly injector = inject(Injector);
   private readonly session = inject(SessionStore);
   private readonly router = inject(Router);
@@ -88,7 +91,8 @@ export class PushNotifications {
     });
     effect(
       (onCleanup) => {
-        if ('setAppBadge' in navigator || hidden()) onCleanup(this.lists.unread.activate());
+        if ('setAppBadge' in navigator) onCleanup(this.lists.unread.activate());
+        if (hidden()) onCleanup(this.lists.viewUnread.activate());
       },
       { injector: this.injector },
     );
@@ -98,11 +102,15 @@ export class PushNotifications {
           document.title = baseTitle;
           return;
         }
-        const counts = this.lists.unread.value();
-        const count = counts?.unreadCount ?? 0;
-        // Unread mentions take priority over the message count.
-        document.title =
-          (counts?.unreadMentions ?? 0) > 0 ? `(@) ${baseTitle}` : count > 0 ? `(${count}) ${baseTitle}` : baseTitle;
+        const counts = this.lists.summary(
+          conversationView(this.lists.selection(), this.preferences.showThreadsInMessages()),
+        );
+        const count = counts?.unreadMessageCount ?? 0;
+        const mentioned = (counts?.unreadUnmutedAttentionCount ?? 0) > 0;
+        const prefix = [mentioned ? '(@)' : '', count > 0 ? `(${count >= 1000 ? '999+' : count})` : '']
+          .filter(Boolean)
+          .join(' ');
+        document.title = prefix ? `${prefix} ${baseTitle}` : baseTitle;
       },
       { injector: this.injector },
     );
@@ -198,7 +206,7 @@ export class PushNotifications {
     const chat = this.chats.get(message.chatId);
     const state = this.chats.chatState(message.chatId) ?? chat;
     const thread = message.replyRootId ? this.chats.subscription(message.chatId, message.replyRootId) : undefined;
-    if (!shouldNotify(message, uid, state, thread)) return;
+    if (!shouldNotify(message, uid, { ...state, kind: chat?.kind }, thread)) return;
     const title =
       (chat?.kind === GroupKind.dm ? chat.peer?.username : chat?.name) ??
       message.sender.name ??

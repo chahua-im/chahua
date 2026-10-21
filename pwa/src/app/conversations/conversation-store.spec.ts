@@ -127,6 +127,7 @@ describe('ConversationStore', () => {
       const thread: ThreadListItem = {
         archived: false,
         chatId: testChat.id,
+        chatKind: testChat.kind,
         chatName: 'Test',
         threadRootMessage: { ...message('90'), mentions: [] },
         lastReply: { ...latest, mentions: [] },

@@ -2,6 +2,7 @@ export * from './attachments/attachments.service';
 export * from './auth/auth.service';
 export * from './blocks/blocks.service';
 export * from './chats/chats.service';
+export * from './conversations/conversations.service';
 export * from './default/default.service';
 export * from './external-invites/external-invites.service';
 export * from './external-sessions/external-sessions.service';
