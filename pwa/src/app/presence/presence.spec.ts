@@ -4,7 +4,7 @@ import { Subject } from 'rxjs';
 import { Connection } from '../api/connection';
 import { encodeId } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
-import { lastSeenBucket } from './presence-display';
+import { lastSeenDisplay, LastSeenKind } from './presence-display';
 import { Presence } from './presence';
 
 function createPresenceHarness() {
@@ -29,25 +29,70 @@ describe('presence', () => {
   });
 
   it.each([
-    [0, 'recently'],
-    [5 * 60_000 - 1, 'recently'],
-    [5 * 60_000, 'within30m'],
-    [30 * 60_000, 'within1h'],
-    [60 * 60_000, 'within2h'],
-    [2 * 60 * 60_000, 'within6h'],
-    [6 * 60 * 60_000, 'within12h'],
-    [12 * 60 * 60_000, 'within1day'],
-    [24 * 60 * 60_000, 'within1week'],
-    [7 * 24 * 60 * 60_000, 'within1month'],
-    [30 * 24 * 60 * 60_000, 'longago'],
-  ] as const)('assigns the exact bucket at %i milliseconds', (age, expected) => {
-    const now = Date.parse('2026-10-19T12:00:00Z');
-    expect(lastSeenBucket(new Date(now - age).toISOString(), now)).toBe(expected);
+    [0, LastSeenKind.JustNow, undefined],
+    [59_999, LastSeenKind.JustNow, undefined],
+    [60_000, LastSeenKind.Minute, 1],
+    [120_000, LastSeenKind.Minutes, 2],
+    [3_599_999, LastSeenKind.Minutes, 59],
+    [3_600_000, LastSeenKind.Hour, 1],
+    [7_200_000, LastSeenKind.Hours, 2],
+    [43_199_999, LastSeenKind.Hours, 11],
+    [43_200_000, LastSeenKind.Today, undefined],
+  ] as const)('formats recent activity at %i ms', (age, kind, count) => {
+    const now = new Date(2026, 9, 21, 18).getTime();
+    const result = lastSeenDisplay(new Date(now - age).toISOString(), now);
+    expect(result?.kind).toBe(kind);
+    expect(result?.count).toBe(count);
   });
 
-  it('omits an unknown or invalid last-seen timestamp', () => {
-    expect(lastSeenBucket(undefined, Date.now())).toBeUndefined();
-    expect(lastSeenBucket('not-a-date', Date.now())).toBeUndefined();
+  it('uses local calendar days and omits the year only for dates in the current year', () => {
+    const now = new Date(2026, 0, 2, 18).getTime();
+    expect(lastSeenDisplay(new Date(2026, 0, 1, 23).toISOString(), now)?.kind).toBe(LastSeenKind.Yesterday);
+    expect(lastSeenDisplay(new Date(2025, 11, 31).toISOString(), now)).toEqual({
+      kind: LastSeenKind.Date,
+      dateFormat: 'date',
+    });
+    expect(lastSeenDisplay(new Date(2026, 0, 1).toISOString(), new Date(2026, 9, 21).getTime())).toEqual({
+      kind: LastSeenKind.Date,
+      dateFormat: 'monthDay',
+    });
+    expect(lastSeenDisplay(new Date(now + 60_000).toISOString(), now)?.kind).toBe(LastSeenKind.JustNow);
+    expect(lastSeenDisplay(undefined, now)).toBeUndefined();
+    expect(lastSeenDisplay('not-a-date', now)).toBeUndefined();
+  });
+
+  it('replaces exact cached activity with a private bucket and rejects an older response', () => {
+    const { presence, events, watchPresence, resync } = createPresenceHarness();
+    presence.watch({ userIds: [2] });
+    TestBed.tick();
+    const oldRequest = watchPresence.mock.lastCall![0];
+    events.next({
+      type: 'presenceSnapshot',
+      payload: {
+        requestId: oldRequest,
+        users: [{ uid: 2, online: true, lastSeenAt: '2026-10-21T10:00:00Z' }],
+        groups: [],
+      },
+    });
+    resync.next();
+    const requestId = watchPresence.mock.lastCall![0];
+    events.next({
+      type: 'presenceSnapshot',
+      payload: {
+        requestId,
+        users: [{ uid: 2, online: false, lastSeenBucket: 'recently' }],
+        groups: [],
+      },
+    });
+    events.next({
+      type: 'presenceSnapshot',
+      payload: {
+        requestId: oldRequest,
+        users: [{ uid: 2, online: true, lastSeenAt: '2026-10-21T10:00:00Z' }],
+        groups: [],
+      },
+    });
+    expect(presence.user(2)).toEqual({ uid: 2, online: false, lastSeenBucket: 'recently' });
   });
 
   it('shows scoped loading only until the current snapshot resolves, including omitted entries', () => {

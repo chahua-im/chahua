@@ -30,15 +30,17 @@
     "groupCounts": "{{ online }} online · {{ members }} members",
     "lastSeen": {
       "recently": "Last seen recently",
-      "within30m": "Last seen within 30 minutes",
-      "within1h": "Last seen within 1 hour",
-      "within2h": "Last seen within 2 hours",
-      "within6h": "Last seen within 6 hours",
-      "within12h": "Last seen within 12 hours",
-      "within1day": "Last seen within 1 day",
-      "within1week": "Last seen within 1 week",
-      "within1month": "Last seen within 1 month",
-      "longago": "Last seen a long time ago"
+      "withinWeek": "Last seen within a week",
+      "withinMonth": "Last seen within a month",
+      "longAgo": "Last seen a long time ago",
+      "today": "Last seen today at {{ time }}",
+      "yesterday": "Last seen yesterday at {{ time }}",
+      "date": "Last seen {{ date }} at {{ time }}",
+      "justNow": "Last seen just now",
+      "minute": "Last seen {{ count }} minute ago",
+      "minutes": "Last seen {{ count }} minutes ago",
+      "hour": "Last seen {{ count }} hour ago",
+      "hours": "Last seen {{ count }} hours ago"
     }
   },
   "settings": {
@@ -95,7 +97,7 @@
       "everyone": "Everyone",
       "friends": "Friends",
       "nobody": "Nobody",
-      "reciprocalNote": "Online status and last seen are visible only when both people allow sharing with each other. Group online counts are not affected.",
+      "reciprocalNote": "Exact last seen and online status are visible only when both people share them. Otherwise, approximate last seen is shown. Group online counts are unaffected.",
       "saveFailed": "Save failed. Please try again.",
       "friendTitle": "Presence sharing",
       "friendInherit": "Use global setting",

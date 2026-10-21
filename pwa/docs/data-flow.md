@@ -174,7 +174,7 @@ ChatListContent 在活跃列表中使用一个 IntersectionObserver，按实际�
 
 本 PWA 始终发送 `requestId` 并拒绝缺少该字段的快照，以保留切换范围时的迟到回包保护；其他客户端可按[后端协议](../../backend/README.md#client-websocket-controls)省略该可选关联字段。
 
-个人隐私策略在每次服务端快照发布时重新判断，字段与存储约定见[后端在线隐私协议](../../backend/README.md#individual-presence-privacy)。PresenceSettings 进入时读取全局设置；ChatDetails 仅在当前对象为非本人的好友时读取本人的覆盖值，读取版本与对象 UID 一起校验，切换对象后不接收旧响应。保存全局设置成功后，`Presence.invalidateUsers()` 清除全部个人状态；保存好友覆盖成功后仅清除该 UID，包括范围外的保留值。失效操作推进请求号并重新发布当前范围，群人数不清空，迟到旧快照不能恢复隐私已失效的状态。其他设备和查看者在下一次现有 15 秒快照刷新时应用策略，没有独立的隐私变更推送。
+个人隐私策略在每次服务端快照发布时重新判断；隐藏时接收 `lastSeenBucket` 并整体替换旧快照，清除旧的精确时间及在线断言，前端不自行推算隐私区间。字段与存储约定见[后端在线隐私协议](../../backend/README.md#individual-presence-privacy)。PresenceSettings 进入时读取全局设置；ChatDetails 仅在当前对象为非本人的好友时读取本人的覆盖值，读取版本与对象 UID 一起校验，切换对象后不接收旧响应。保存全局设置成功后，`Presence.invalidateUsers()` 清除全部个人状态；保存好友覆盖成功后仅清除该 UID，包括范围外的保留值。失效操作推进请求号并重新发布当前范围，群人数不清空，迟到旧快照不能恢复隐私已失效的状态。其他设备和查看者在下一次现有 15 秒快照刷新时应用策略，没有独立的隐私变更推送。
 
 ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使用不同的 scope。`readReceiptChanged` 不携带游标，仅使该 scope 的请求失效。范围、账号或页面生命周期变化会使旧请求失效；普通失效请求期间保留已知回执，隐私、拉黑或好友关系失效则先清除，迟到响应不能恢复它。消息、置顶、搜索及其他预览不拥有回执状态。
 

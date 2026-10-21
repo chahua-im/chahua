@@ -30,15 +30,17 @@
     "groupCounts": "{{ online }} 人在线 · 共 {{ members }} 人",
     "lastSeen": {
       "recently": "最近上线",
-      "within30m": "30 分钟内上线",
-      "within1h": "1 小时内上线",
-      "within2h": "2 小时内上线",
-      "within6h": "6 小时内上线",
-      "within12h": "12 小时内上线",
-      "within1day": "1 天内上线",
-      "within1week": "1 周内上线",
-      "within1month": "1 个月内上线",
-      "longago": "很久以前上线"
+      "withinWeek": "1 周内上线",
+      "withinMonth": "1 个月内上线",
+      "longAgo": "很久没上线",
+      "today": "最近上线于今天 {{ time }}",
+      "yesterday": "最近上线于昨天 {{ time }}",
+      "date": "最近上线于 {{ date }} {{ time }}",
+      "justNow": "刚刚上线",
+      "minute": "最近上线于 {{ count }} 分钟前",
+      "minutes": "最近上线于 {{ count }} 分钟前",
+      "hour": "最近上线于 {{ count }} 小时前",
+      "hours": "最近上线于 {{ count }} 小时前"
     }
   },
   "settings": {
@@ -95,7 +97,7 @@
       "everyone": "所有人",
       "friends": "仅好友",
       "nobody": "没有人",
-      "reciprocalNote": "在线状态和最近上线仅在双方都允许向对方分享时可见；群组在线人数不受影响。",
+      "reciprocalNote": "仅在双方都允许分享时显示在线状态和精确上线时间，否则显示模糊的最近上线时间；群组在线人数不受影响。",
       "saveFailed": "保存失败，请重试。",
       "friendTitle": "在线状态分享",
       "friendInherit": "使用全局设置",

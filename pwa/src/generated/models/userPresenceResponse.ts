@@ -5,13 +5,15 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { LastSeenBucket } from './lastSeenBucket';
 
 /**
- * One watched user's current presence. `last_seen_at` is omitted when no HTTP activity has
- * been recorded for that user.
+ * One watched user's presence. Hidden presence has only a bucket and `online: false`;
+ * this suppresses the online indicator without asserting the user is offline.
  */
 export interface UserPresenceResponse {
   lastSeenAt?: string;
+  lastSeenBucket?: LastSeenBucket;
   online: boolean;
   uid: number;
 }

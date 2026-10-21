@@ -3,7 +3,23 @@
 } @else if (state(); as presence) {
   @if (presence.online) {
     <span class="online">{{ 'presence.online' | transloco }}</span>
-  } @else if (bucket(); as bucket) {
+  } @else if (presence.lastSeenBucket; as bucket) {
     <span>{{ 'presence.lastSeen.' + bucket | transloco }}</span>
+  } @else if (lastSeen(); as seen) {
+    <span>
+      {{
+        'presence.lastSeen.' + seen.kind
+          | transloco
+            : {
+                time: (presence.lastSeenAt | localDate: 'time'),
+                date: (presence.lastSeenAt | localDate: seen.dateFormat),
+                count: seen.count,
+              }
+      }}
+    </span>
+  } @else if (showFallback()) {
+    <span>{{ 'presence.lastSeen.longAgo' | transloco }}</span>
   }
+} @else if (showFallback()) {
+  <span>{{ 'presence.lastSeen.longAgo' | transloco }}</span>
 }

@@ -169,7 +169,7 @@ silent network loss is not an immediate offline transition. No persistent presen
 ## Individual presence privacy
 
 Privacy applies to individual `online` and `lastSeenAt` together, including DM indicators
-and user details. Both users must permit sharing with each other. The existing self,
+and user details. Both users must permit sharing with each other to expose exact presence. The existing self,
 friend/shared-group discoverability, and blocking checks still apply; `everyone` does
 not make arbitrary UIDs discoverable. Self-presence remains available.
 
@@ -194,8 +194,14 @@ user-extra read loads the viewer and candidate peers' policies with last-seen da
 there are no per-peer queries or materialized visibility pairs. Existing primary keys
 and friendship indexes serve these lookups; global changes update one row.
 
-Unauthorized individual entries are omitted, not emitted as offline, and clients
-must clear them. Policies are rechecked on every snapshot; no privacy authorization
+Users outside the discoverable scope or blocked in either direction are omitted, and clients
+must clear them. Within that scope, privacy-hidden users receive `online: false` (indicator
+suppression, not an offline assertion) and optional `lastSeenBucket`: `recently` (<3 days),
+`withinWeek` (3–7 days), `withinMonth` (7–30 days), or `longAgo` (>=30 days).
+Hidden online users receive `recently`; unknown activity without an online connection has
+no bucket. Hidden responses never include `lastSeenAt`. Exact responses retain `online`
+and optional `lastSeenAt` and omit the bucket. Clients replace the whole user snapshot,
+including clearing previously received exact timestamps when a bucket arrives. Policies are rechecked on every snapshot; no privacy authorization
 cache or separate policy-change push is used. Other clients apply changes on their
 next normal snapshot, while the saving PWA invalidates its affected individual cache
 and immediately re-requests its scope. Group aggregates, their cache, and registry

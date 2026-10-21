@@ -2,41 +2,46 @@ import { Component, computed, effect, inject, input } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { Presence } from './presence';
+import { LocalDatePipe, type LocalDateFormat } from '../i18n/local-date.pipe';
 
-export type LastSeenBucket =
-  | 'recently'
-  | 'within30m'
-  | 'within1h'
-  | 'within2h'
-  | 'within6h'
-  | 'within12h'
-  | 'within1day'
-  | 'within1week'
-  | 'within1month'
-  | 'longago';
+export enum LastSeenKind {
+  JustNow = 'justNow',
+  Minute = 'minute',
+  Minutes = 'minutes',
+  Hour = 'hour',
+  Hours = 'hours',
+  Today = 'today',
+  Yesterday = 'yesterday',
+  Date = 'date',
+}
 
-export function lastSeenBucket(lastSeenAt: string | undefined, now: number): LastSeenBucket | undefined {
+export function lastSeenDisplay(
+  lastSeenAt: string | undefined,
+  now: number,
+): { kind: LastSeenKind; count?: number; dateFormat?: LocalDateFormat } | undefined {
   if (!lastSeenAt) return undefined;
-  const timestamp = Date.parse(lastSeenAt);
-  if (Number.isNaN(timestamp)) return undefined;
-  const age = Math.max(0, now - timestamp);
-  if (age < 5 * 60_000) return 'recently';
-  if (age < 30 * 60_000) return 'within30m';
-  if (age < 60 * 60_000) return 'within1h';
-  if (age < 2 * 60 * 60_000) return 'within2h';
-  if (age < 6 * 60 * 60_000) return 'within6h';
-  if (age < 12 * 60 * 60_000) return 'within12h';
-  if (age < 24 * 60 * 60_000) return 'within1day';
-  if (age < 7 * 24 * 60 * 60_000) return 'within1week';
-  if (age < 30 * 24 * 60 * 60_000) return 'within1month';
-  return 'longago';
+  const date = new Date(lastSeenAt);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const minutes = Math.floor(Math.max(0, now - date.getTime()) / 60_000);
+  if (minutes < 1) return { kind: LastSeenKind.JustNow };
+  if (minutes < 60) return { kind: minutes === 1 ? LastSeenKind.Minute : LastSeenKind.Minutes, count: minutes };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 12) return { kind: hours === 1 ? LastSeenKind.Hour : LastSeenKind.Hours, count: hours };
+  const today = new Date(now);
+  if (date.toDateString() === today.toDateString()) return { kind: LastSeenKind.Today };
+  const dateFormat = date.getFullYear() === today.getFullYear() ? 'monthDay' : 'date';
+  today.setDate(today.getDate() - 1);
+  return {
+    kind: date.toDateString() === today.toDateString() ? LastSeenKind.Yesterday : LastSeenKind.Date,
+    dateFormat,
+  };
 }
 
 @Component({
   selector: 'app-user-presence',
   templateUrl: './presence-display.html',
   styleUrl: './presence-display.scss',
-  imports: [TranslocoPipe],
+  imports: [TranslocoPipe, LocalDatePipe],
 })
 export class UserPresenceDisplay {
   readonly uid = input<number>();
@@ -44,7 +49,8 @@ export class UserPresenceDisplay {
   private readonly presence = inject(Presence);
   protected readonly state = computed(() => (this.active() ? this.presence.user(this.uid()) : undefined));
   protected readonly loading = computed(() => this.active() && this.presence.userLoading(this.uid()));
-  protected readonly bucket = computed(() => lastSeenBucket(this.state()?.lastSeenAt, this.presence.now()));
+  protected readonly showFallback = computed(() => this.active() && this.uid() != null && this.presence.live());
+  protected readonly lastSeen = computed(() => lastSeenDisplay(this.state()?.lastSeenAt, this.presence.now()));
 
   constructor() {
     effect((onCleanup) => {

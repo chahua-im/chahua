@@ -29,6 +29,7 @@ export * from './friendRequestResolvedPayload';
 export * from './friendshipRemovedPayload';
 export * from './groupInfoResponse';
 export * from './groupPresenceResponse';
+export * from './lastSeenBucket';
 export * from './reactionReactor';
 export * from './reactionSummary';
 export * from './messageStickerMediaResponse';

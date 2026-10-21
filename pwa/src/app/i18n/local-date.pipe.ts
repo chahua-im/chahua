@@ -1,9 +1,10 @@
 import { inject, Pipe, type PipeTransform } from '@angular/core';
 import { Localization } from './localization';
 
-export type LocalDateFormat = 'date' | 'time' | 'short' | 'monthDayTime';
+export type LocalDateFormat = 'date' | 'monthDay' | 'time' | 'short' | 'monthDayTime';
 
 const options: Record<LocalDateFormat, Intl.DateTimeFormatOptions> = {
+  monthDay: { month: 'short', day: 'numeric' },
   date: { year: 'numeric', month: 'short', day: 'numeric' },
   time: { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' },
   short: { dateStyle: 'short' },
