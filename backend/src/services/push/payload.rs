@@ -85,6 +85,9 @@ pub(super) struct PushPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) mentioned_uid: Option<i32>,
     pub(super) data: PushPayloadData,
+    /// PWA displays DM mentions/replies using ordinary message text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) ordinary_message_body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -129,6 +132,7 @@ pub(super) fn build_push_payload(
         message_preview: job.message_preview.clone(),
         unread_count,
         mentioned_uid: is_mention.then_some(recipient_uid),
+        ordinary_message_body: None,
         data: PushPayloadData {
             chat_id: job.chat_id.to_string(),
             message_id: job.message_id.to_string(),

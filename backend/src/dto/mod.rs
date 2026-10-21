@@ -2,6 +2,7 @@ pub mod attachments;
 pub mod auth;
 pub mod blocks;
 pub mod chats;
+pub mod conversations;
 pub mod external;
 pub mod friends;
 pub mod groups;

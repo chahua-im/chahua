@@ -1,4 +1,6 @@
 mod chat_index;
+mod conversations;
+pub use conversations::validate_conversation_views;
 mod fenwick;
 mod service;
 

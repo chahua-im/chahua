@@ -25,6 +25,47 @@ Validate the generated document with:
 cargo test --locked openapi::tests::
 ```
 
+## Conversation collection summaries
+
+`POST /conversations/unread-summary` accepts `{ "views": [{ "key": "...", "selector": { ... } }] }`.
+A selector contains `categories` (`group`, `dm`, `groupThread`, `dmThread`),
+`include` and `exclude` arrays of `{ chatId, threadId? }`, and `archived` (default false).
+IDs are decimal strings on the wire. Categories and explicit inclusions form a union;
+exclusions take precedence. A main chat never implicitly selects its threads.
+
+Only the caller's current memberships and subscribed, published threads qualify,
+including explicitly selected IDs. A thread's archive state is independent of its
+parent's archive state. Unknown, inaccessible, unsubscribed and mismatched references
+contribute nothing. An empty selector selects nothing. Keys must be unique, nonempty,
+and at most 128 bytes; a batch allows at most 32 views and 2048 explicit references.
+
+Each response entry in `summaries` contains the key and:
+
+- `unreadMessageCount`: unread messages, including muted conversations, capped at 1000.
+- `unreadConversationCount`: distinct selected conversations with unread messages.
+- `unreadAttentionCount`: unread group mentions/replies, once per message, capped at 1000.
+  DMs and DM threads contribute zero. Reactions are separate.
+
+Views may overlap; each view counts a conversation once. A global collection must be
+queried as its own union, never calculated by adding overlapping view totals. Read
+cursors belong to conversations, not views. Existing unread endpoints retain their
+legacy meanings for other clients and the global system badge.
+
+The service resolves authorized scopes once, counts each selected scope once, then
+aggregates all views. Main counts reuse `UnreadService`'s shared chat index; thread
+counts use `idx_messages_thread_reply_stats`, attention counts use
+`message_mentions_unread_idx`. LATERAL range seeks and per-scope caps bound message
+queries independently of list pagination. No new tables or indexes are required.
+
+## PWA notification metadata
+
+DM Web Push recipients are filtered using ordinary message rules without
+mention/reply exceptions, including DM threads. Ineligible Web Push subscriptions
+are excluded before delivery, avoiding silent pushes. DM payloads include
+`ordinaryMessageBody` for the PWA worker to display ordinary notification text.
+Existing payload fields and APNs behavior are unchanged. The selected collection
+only affects the PWA title and list badges, never push eligibility.
+
 ## Client WebSocket controls
 
 Client commands are decoded by the serde-tagged `ClientWsMessage` enum in

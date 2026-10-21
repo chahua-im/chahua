@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::models::PushSubscription;
+use crate::models::{GroupKind, PushProvider, PushSubscription};
 use crate::schema::push_subscriptions;
 use crate::services::ws_registry::ConnectionRegistry;
 
@@ -18,7 +18,8 @@ use super::payload::{
     payload_type_for, PushPayloadType,
 };
 use super::policy::{
-    should_send_push, PushDecision, PushRecipientContext, PushSkipReason, ThreadPushState,
+    should_send_push, should_send_web_push, PushDecision, PushRecipientContext, PushSkipReason,
+    ThreadPushState,
 };
 use super::{panic_payload_message, PushJob, PushService};
 
@@ -256,6 +257,13 @@ async fn process_push_job(
     let now = chrono::Utc::now();
 
     let candidates = load_recipient_candidates(&mut conn, job)?;
+    let is_dm = crate::schema::groups::table
+        .find(job.chat_id)
+        .select(crate::schema::groups::kind)
+        .first::<GroupKind>(&mut conn)
+        .map_err(|e| format!("Failed to load push chat kind: {:?}", e))?
+        == GroupKind::Dm;
+    let mut ordinary_recipients = std::collections::HashSet::new();
 
     let mentioned_uids: std::collections::HashSet<i32> =
         job.mentioned_uids.iter().copied().collect();
@@ -274,6 +282,15 @@ async fn process_push_job(
                 thread_state: candidate.thread_state,
                 has_active_presence,
             };
+
+            if is_dm
+                && matches!(
+                    should_send_web_push(&context, is_dm, now),
+                    PushDecision::Send
+                )
+            {
+                ordinary_recipients.insert(candidate.uid);
+            }
 
             match should_send_push(&context, now) {
                 PushDecision::Send | PushDecision::SendOneOffMention => Some(candidate.uid),
@@ -295,11 +312,19 @@ async fn process_push_job(
     }
 
     // 3. Load push subscriptions for the target users.
-    let subs: Vec<PushSubscription> = push_subscriptions::table
+    let mut subs: Vec<PushSubscription> = push_subscriptions::table
         .filter(push_subscriptions::dsl::user_id.eq_any(&target_uids))
         .select(PushSubscription::as_select())
         .load(&mut conn)
         .map_err(|e| format!("Failed to load push subscriptions: {:?}", e))?;
+
+    // Do not send silent Push events: browsers require a visible notification.
+    // APNs retains its existing mention/reply policy.
+    subs.retain(|sub| {
+        !is_dm
+            || sub.provider != PushProvider::WebPush
+            || ordinary_recipients.contains(&sub.user_id)
+    });
 
     if subs.is_empty() {
         debug!(
@@ -346,9 +371,14 @@ async fn process_push_job(
                     format_push_body(&job.sender_username, job.body_preview.as_deref())
                 }
             };
-            let web_payload =
-                serde_json::to_vec(&build_push_payload(job, unread, &body_text, sub.user_id))
-                    .unwrap_or_default();
+            let mut web_payload = build_push_payload(job, unread, &body_text, sub.user_id);
+            if is_dm {
+                web_payload.ordinary_message_body = Some(format_push_body(
+                    &job.sender_username,
+                    job.body_preview.as_deref(),
+                ));
+            }
+            let web_payload = serde_json::to_vec(&web_payload).unwrap_or_default();
             let apns_notification = build_apns_notification(job, unread, sub.user_id);
 
             async move {
