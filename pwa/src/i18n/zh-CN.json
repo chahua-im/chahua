@@ -41,7 +41,8 @@
       "minutes": "最近上线于 {{ count }} 分钟前",
       "hour": "最近上线于 {{ count }} 小时前",
       "hours": "最近上线于 {{ count }} 小时前"
-    }
+    },
+    "away": "离开"
   },
   "settings": {
     "title": "设置",

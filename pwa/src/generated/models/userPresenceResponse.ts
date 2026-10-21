@@ -12,6 +12,8 @@ import type { LastSeenBucket } from './lastSeenBucket';
  * this suppresses the online indicator without asserting the user is offline.
  */
 export interface UserPresenceResponse {
+  /** Present only when all fresh connections are inactive and exact presence is visible. */
+  away?: boolean;
   lastSeenAt?: string;
   lastSeenBucket?: LastSeenBucket;
   online: boolean;

@@ -178,6 +178,25 @@ impl ConnectionRegistry {
         self.is_online_at(uid, now_secs())
     }
 
+    /// Aggregates personal presence across fresh connections; active wins over inactive.
+    /// Group counts continue to include both states through `is_online`.
+    pub fn personal_presence(&self, uid: i32) -> Option<AppPresenceState> {
+        let now = now_secs();
+        let entries = self.inner.get(&uid)?;
+        let mut state = None;
+        for entry in entries.iter().filter(|entry| {
+            !entry.tx.is_closed()
+                && now.saturating_sub(entry.last_ping_at.load(Ordering::Relaxed))
+                    <= STALE_CONNECTION_TIMEOUT_SECS
+        }) {
+            match entry.app_state() {
+                AppPresenceState::Active => return Some(AppPresenceState::Active),
+                AppPresenceState::Inactive => state = Some(AppPresenceState::Inactive),
+            }
+        }
+        state
+    }
+
     /// Counts online users in a unique membership UID list using one liveness timestamp.
     pub fn count_online(&self, member_uids: &[i32]) -> u32 {
         let now = now_secs();
@@ -299,6 +318,41 @@ mod tests {
 
     fn registry() -> ConnectionRegistry {
         ConnectionRegistry::new(Arc::new(WsMetrics::new(&prometheus::Registry::new())))
+    }
+
+    #[test]
+    fn personal_presence_aggregates_active_and_away_without_changing_group_counts() {
+        let registry = registry();
+        let (away, _away_rx) = registry.register(7, "away".into());
+        away.update_app_state(AppPresenceState::Inactive);
+        assert_eq!(
+            registry.personal_presence(7),
+            Some(AppPresenceState::Inactive)
+        );
+        assert_eq!(registry.count_online(&[7]), 1);
+        let (active, active_rx) = registry.register(7, "active".into());
+        assert_eq!(
+            registry.personal_presence(7),
+            Some(AppPresenceState::Active)
+        );
+        assert_eq!(registry.count_online(&[7]), 1);
+        active.last_ping_at.store(
+            now_secs().saturating_sub(STALE_CONNECTION_TIMEOUT_SECS + 1),
+            Ordering::Relaxed,
+        );
+        assert_eq!(
+            registry.personal_presence(7),
+            Some(AppPresenceState::Inactive)
+        );
+        active.update_ping(AppPresenceState::Active);
+        drop(active_rx);
+        assert_eq!(
+            registry.personal_presence(7),
+            Some(AppPresenceState::Inactive)
+        );
+        registry.remove_connection(7, away.conn_id);
+        assert_eq!(registry.personal_presence(7), None);
+        assert_eq!(registry.count_online(&[7]), 0);
     }
 
     #[test]

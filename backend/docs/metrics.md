@@ -102,6 +102,10 @@ of the backend README](../README.md#scoped-websocket-presence).
 
 ## Client tracking and daily activity
 
+Authenticated HTTP requests and WebSocket heartbeats (both active and inactive) share
+the per-client five-minute activity write throttle. Heartbeats update user/client activity
+and daily rollups without changing the recorded HTTP application version.
+
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
 | `client_activity_writes_total` | Counter; `result` | Client activity database writes attempted. | Result is a small outcome classification. |

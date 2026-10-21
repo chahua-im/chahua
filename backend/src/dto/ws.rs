@@ -159,6 +159,9 @@ pub enum LastSeenBucket {
 pub struct UserPresenceResponse {
     pub uid: i32,
     pub online: bool,
+    /// Present only when all fresh connections are inactive and exact presence is visible.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub away: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -502,6 +505,7 @@ mod tests {
                 users: vec![UserPresenceResponse {
                     uid: 7,
                     online: true,
+                    away: None,
                     last_seen_at: None,
                     last_seen_bucket: None,
                 }],
