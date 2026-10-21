@@ -5,7 +5,10 @@ import vm from 'node:vm';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 
 const source = await readFile(new URL('../public/serviceWorker.js', import.meta.url), 'utf8');
-function worker(existing = [], { dbFactory = new IDBFactory(), now = Date.now(), failShow = false } = {}) {
+function worker(
+  existing = [],
+  { dbFactory = new IDBFactory(), now = Date.now(), failShow = false, development = false } = {},
+) {
   const listeners = new Map();
   const shown = [];
   const badges = [];
@@ -14,6 +17,8 @@ function worker(existing = [], { dbFactory = new IDBFactory(), now = Date.now(),
   const notifications = [...existing];
   const opened = [];
   const clients = [];
+  let skipped = false;
+  let claimed = false;
   const context = {
     URL,
     indexedDB: dbFactory,
@@ -26,7 +31,17 @@ function worker(existing = [], { dbFactory = new IDBFactory(), now = Date.now(),
     console: { error: (...args) => errors.push(args) },
     importScripts: (url) => imports.push(url),
     self: {
-      clients: { matchAll: async () => clients, openWindow: async (url) => opened.push(url) },
+      location: { href: `https://chat.example/serviceWorker.js${development ? '?development=1' : ''}` },
+      skipWaiting: async () => {
+        skipped = true;
+      },
+      clients: {
+        matchAll: async () => clients,
+        openWindow: async (url) => opened.push(url),
+        claim: async () => {
+          claimed = true;
+        },
+      },
       addEventListener: (name, handler) => listeners.set(name, handler),
       registration: {
         scope: 'https://chat.example/',
@@ -49,6 +64,22 @@ function worker(existing = [], { dbFactory = new IDBFactory(), now = Date.now(),
   vm.runInNewContext(source, context);
   return {
     dbFactory,
+    listeners,
+    get skipped() {
+      return skipped;
+    },
+    get claimed() {
+      return claimed;
+    },
+    lifecycle: async (name) => {
+      let pending;
+      listeners.get(name)({
+        waitUntil: (value) => {
+          pending = value;
+        },
+      });
+      await pending;
+    },
     opened,
     clients,
     click: async (data) => {
@@ -331,4 +362,43 @@ test('DM mentions and replies use ordinary body and deduplicate across worker re
       assert.equal(restarted.shown.length, 0);
     }
   }
+});
+
+test('development activates immediately without importing caching or intercepting fetch', async () => {
+  const instance = worker([], { development: true });
+  assert.deepEqual(instance.imports, []);
+  assert.equal(instance.listeners.has('fetch'), false);
+  await instance.lifecycle('install');
+  await instance.lifecycle('activate');
+  assert.equal(instance.skipped, true);
+  assert.equal(instance.claimed, true);
+});
+
+test('development notifications retain deduplication and click navigation for warm and cold pages', async () => {
+  const instance = worker([], { development: true });
+  await instance.command({ type: 'CHAHUA_SESSION', uid: 42 });
+  await instance.command({ type: 'CHAHUA_NOTIFY', uid: 42, payload });
+  await instance.push(payload);
+  assert.equal(instance.shown.length, 1);
+  const notification = instance.shown[0][1];
+  const messages = [];
+  let focused = false;
+  instance.clients.push({
+    visibilityState: 'visible',
+    focus: async () => {
+      focused = true;
+    },
+    postMessage: (message) => messages.push(message),
+  });
+  assert.equal(await instance.click(notification.data), true);
+  assert.equal(focused, true);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'NOTIFICATION_CLICK');
+  assert.equal(messages[0].data.notification.data.messageId, payload.data.messageId);
+  instance.clients.length = 0;
+  await instance.click(notification.data);
+  assert.equal(
+    instance.opened[0],
+    'https://chat.example/chats/chat/90071992547409931/thread/90071992547409932#msg=90071992547409933',
+  );
 });

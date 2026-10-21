@@ -1,13 +1,20 @@
+import { isDevMode } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { SwUpdate, type VersionEvent } from '@angular/service-worker';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { AppUpdates, UpdateCheckResult } from './app-updates';
 
+vi.mock('@angular/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@angular/core')>()),
+  isDevMode: vi.fn(() => false),
+}));
+
 describe('AppUpdates', () => {
   let events: Subject<VersionEvent>;
   let worker: { isEnabled: boolean; versionUpdates: Subject<VersionEvent>; checkForUpdate: ReturnType<typeof vi.fn> };
   beforeEach(() => {
+    vi.mocked(isDevMode).mockReturnValue(false);
     events = new Subject();
     worker = { isEnabled: true, versionUpdates: events, checkForUpdate: vi.fn().mockResolvedValue(false) };
     TestBed.configureTestingModule({ providers: [{ provide: SwUpdate, useValue: worker }] });
@@ -16,6 +23,14 @@ describe('AppUpdates', () => {
     delete window.chahuaUpdates;
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('does not send update requests to the development notification worker', async () => {
+    vi.mocked(isDevMode).mockReturnValue(true);
+    const service = TestBed.inject(AppUpdates);
+    expect(service.supported).toBe(false);
+    expect(await service.check()).toBe(UpdateCheckResult.Unavailable);
+    expect(worker.checkForUpdate).not.toHaveBeenCalled();
   });
 
   it('reports unavailable without a registered worker', async () => {

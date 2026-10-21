@@ -1,3 +1,5 @@
+const development = new URL(self.location.href).searchParams.get('development') === '1';
+
 (() => {
   // web-push 0.11 defaults to a 28-day TTL; keep records beyond that delivery window.
   const retention = 30 * 24 * 60 * 60 * 1000;
@@ -162,11 +164,11 @@
       }),
     );
   });
-  // Keep until notifications from the old worker have expired or been dismissed; they lack onActionClick.
-  // Register before Angular so its handler does not consume those clicks first.
+  // Development handles every notification click; production leaves current notifications to Angular.
+  // Keep the legacy handler before Angular until old notifications without onActionClick expire.
   self.addEventListener('notificationclick', (event) => {
     const data = event.notification.data;
-    if (data?.onActionClick || !validId(data?.chatId)) return;
+    if ((!development && data?.onActionClick) || !validId(data?.chatId)) return;
     event.stopImmediatePropagation();
     event.notification.close();
     event.waitUntil(
@@ -177,7 +179,8 @@
           await client.focus();
           client.postMessage({ type: 'NOTIFICATION_CLICK', data: { action: event.action, notification: { data } } });
           // A tab still running the old application understands this message.
-          client.postMessage({ type: 'OPEN_NOTIFICATION_TARGET', ...data, target: `/${target(data)}` });
+          if (!development)
+            client.postMessage({ type: 'OPEN_NOTIFICATION_TARGET', ...data, target: `/${target(data)}` });
         } else {
           await self.clients.openWindow(new URL(target(data), self.registration.scope).href);
         }
@@ -185,4 +188,10 @@
     );
   });
 })();
-importScripts('./ngsw-worker.js');
+if (development) {
+  // No fetch handler or Angular worker: development resources always use the network.
+  self.addEventListener('install', (event) => event.waitUntil(self.skipWaiting()));
+  self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+} else {
+  importScripts('./ngsw-worker.js');
+}

@@ -29,6 +29,7 @@ function page({
   saved = new Map(),
   complete = true,
   claim = true,
+  development = false,
 } = {}) {
   const window = target();
   const document = Object.assign(target(), { hidden: false });
@@ -49,6 +50,7 @@ function page({
     },
   });
   const active = {
+    scriptURL: `https://chat.example/serviceWorker.js${development ? '?development=1' : ''}`,
     postMessage(message) {
       messages.push(message);
       if (complete) serviceWorker.emit('message', { data: { type: 'OPERATION_COMPLETED', nonce: message.nonce } });
@@ -63,6 +65,7 @@ function page({
     location: { reload: () => reloads++ },
     sessionStorage: { getItem: (key) => saved.get(key), setItem: (key, value) => saved.set(key, value) },
     AbortSignal,
+    URL,
     fetch: async (...args) => {
       requests.push(args);
       if (offline) throw new Error('offline');
@@ -154,7 +157,7 @@ test('registers the production worker without bootstrapping Angular', async () =
   assert.equal(instance.messages.length, 1);
 });
 
-test('does not install a worker for a development server without a production manifest', async () => {
+test('does not bootstrap the production worker on a development server without its manifest', async () => {
   const instance = page({ installed: false, manifest: {} });
   await flush();
   assert.equal(instance.registrations.length, 0);
@@ -218,4 +221,18 @@ test('only finishes a check when the worker answers its matching operation', asy
   instance.window.emit('online');
   await flush();
   assert.equal(instance.messages.length, 2);
+});
+
+test('does not check Angular application versions with a notification-only development worker', async () => {
+  const instance = page({ development: true });
+  await flush();
+  assert.equal(instance.messages.length, 0);
+  assert.equal(instance.updates, 0);
+  assert.equal(instance.requests.length, 0);
+  assert.equal(instance.timers.size, 0);
+  instance.intervals[0].handler();
+  instance.serviceWorker.emit('controllerchange');
+  await flush();
+  assert.equal(instance.messages.length, 0);
+  assert.equal(instance.timers.size, 0);
 });

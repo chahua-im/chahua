@@ -226,6 +226,8 @@ ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使�
 
 App 在会话初始化并确认登录后启动 PushNotifications。在线 WebSocket 优先，前后台页面均直接让 Worker 展示系统通知，未运行时由 Web Push 兜底。各平台与分栏布局共用同一流程；前台正在阅读对应会话且未被设置或 modal 覆盖时，只登记去重，不展示通知。
 
+开发模式通过 `serviceWorker.js?development=1` 立即注册通知 Worker，安装后立即激活并接管页面；与生产共用通知展示、账号隔离和去重逻辑，但不导入 `ngsw-worker.js`、不监听 fetch。开发 Worker 自行处理当前通知点击，通过 `NOTIFICATION_CLICK` 交给 SwPush 和现有会话导航；没有打开页面时直接打开消息链接。AppUpdates 和启动更新脚本跳过开发 Worker 的应用版本检查。
+
 NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持通知、选择不存在且浏览器已经授权时，直接保存开启并在后台登记订阅，不再询问。明确保存过的关闭选择保持关闭；其余选择不存在的场景显示 Ionic alert。拒绝立即保存关闭并结束弹窗；允许在点击事件内调用 PushNotifications，授权和推送登记成功后结束，失败保留重试。弹窗等待状态由组件持有。
 
 设置行不等待异步请求。PushNotifications 同步检查浏览器 API 与 Worker 配置，读取 `chahua.notifications.enabled` 和 `Notification.permission`；本机关闭直接显示关，开启且已授权显示开。ChatList 在头像点击事件内调用 requestSettingsPermission，在导航之前为本机已开启但权限为 default 的场景申请权限。拒绝、关闭权限弹窗或无手势直接进入设置且缺授权时，保存关闭选择；Settings 的 refresh 不打断已开始的授权。

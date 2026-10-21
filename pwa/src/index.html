@@ -95,11 +95,17 @@
                 );
               }
             }
+            // The development worker only handles notifications, not Angular application versions.
+            const isDevelopmentWorker = (worker) =>
+              worker && new URL(worker.scriptURL).searchParams.get('development') === '1';
+            if (isDevelopmentWorker(registration.active) || isDevelopmentWorker(navigator.serviceWorker.controller))
+              return;
             // Worker script updates and application-version updates are separate operations.
             void registration.update().catch(() => {});
             if (!navigator.serviceWorker.controller) {
               await waitForWorkerEvent('controllerchange', () => !!navigator.serviceWorker.controller);
             }
+            if (isDevelopmentWorker(navigator.serviceWorker.controller)) return;
             if (!associated) {
               // A newly claimed page needs a fetch before Angular's worker tracks its version.
               await withTimeout(fetch('manifest.webmanifest'));
