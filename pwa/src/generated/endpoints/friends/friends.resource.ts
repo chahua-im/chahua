@@ -8,6 +8,7 @@
 import type {
   FriendAddInfoResponse,
   FriendPresenceSettingsResponse,
+  FriendReadReceiptSettingsResponse,
   FriendRelationshipResponse,
   FriendSettingsResponse,
   ListFriendRequestHistoryParams,
@@ -15,6 +16,7 @@ import type {
   ListFriendsResponse,
   PendingFriendRequestCountResponse,
   PresenceSettingsResponse,
+  ReadReceiptSettingsResponse,
 } from '../../models';
 
 import { HttpHeaders, httpResource } from '@angular/common/http';
@@ -320,6 +322,30 @@ export function getFriendPresenceSettingsResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getFriendReadReceiptSettingsResource(
+  uid: Signal<number>,
+  options: OrvalHttpResourceOptions<FriendReadReceiptSettingsResponse, unknown> & {
+    defaultValue: NoInfer<FriendReadReceiptSettingsResponse>;
+  },
+): HttpResourceRef<FriendReadReceiptSettingsResponse>;
+export function getFriendReadReceiptSettingsResource(
+  uid: Signal<number>,
+  options?: OrvalHttpResourceOptions<FriendReadReceiptSettingsResponse, unknown>,
+): HttpResourceRef<FriendReadReceiptSettingsResponse | undefined>;
+export function getFriendReadReceiptSettingsResource(
+  uid: Signal<number>,
+  options?: OrvalHttpResourceOptions<FriendReadReceiptSettingsResponse, unknown>,
+): HttpResourceRef<FriendReadReceiptSettingsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<FriendReadReceiptSettingsResponse>(
+    () => applyOrvalRequestExtension(`${baseUrl}/friends/${uid()}/read-receipt-settings`, options),
+    options,
+  );
+}
+
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function getMyPresenceSettingsResource(
   options: OrvalHttpResourceOptions<PresenceSettingsResponse, unknown> & {
     defaultValue: NoInfer<PresenceSettingsResponse>;
@@ -338,6 +364,27 @@ export function getMyPresenceSettingsResource(
   );
 }
 
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getMyReadReceiptSettingsResource(
+  options: OrvalHttpResourceOptions<ReadReceiptSettingsResponse, unknown> & {
+    defaultValue: NoInfer<ReadReceiptSettingsResponse>;
+  },
+): HttpResourceRef<ReadReceiptSettingsResponse>;
+export function getMyReadReceiptSettingsResource(
+  options?: OrvalHttpResourceOptions<ReadReceiptSettingsResponse, unknown>,
+): HttpResourceRef<ReadReceiptSettingsResponse | undefined>;
+export function getMyReadReceiptSettingsResource(
+  options?: OrvalHttpResourceOptions<ReadReceiptSettingsResponse, unknown>,
+): HttpResourceRef<ReadReceiptSettingsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<ReadReceiptSettingsResponse>(
+    () => applyOrvalRequestExtension(`${baseUrl}/me/read-receipt-settings`, options),
+    options,
+  );
+}
+
 export type GetFriendsResourceResult = NonNullable<ListFriendsResponse>;
 export type GetUserFriendAddInfoResourceResult = NonNullable<FriendAddInfoResponse>;
 export type GetMyFriendSettingsResourceResult = NonNullable<FriendSettingsResponse>;
@@ -345,7 +392,9 @@ export type ListFriendRequestHistoryResourceResult = NonNullable<ListFriendReque
 export type CountPendingIncomingRequestsResourceResult = NonNullable<PendingFriendRequestCountResponse>;
 export type GetFriendRelationshipResourceResult = NonNullable<FriendRelationshipResponse>;
 export type GetFriendPresenceSettingsResourceResult = NonNullable<FriendPresenceSettingsResponse>;
+export type GetFriendReadReceiptSettingsResourceResult = NonNullable<FriendReadReceiptSettingsResponse>;
 export type GetMyPresenceSettingsResourceResult = NonNullable<PresenceSettingsResponse>;
+export type GetMyReadReceiptSettingsResourceResult = NonNullable<ReadReceiptSettingsResponse>;
 
 /**
  * Utility type for httpResource results with status tracking.

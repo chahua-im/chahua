@@ -20,6 +20,7 @@ use crate::{
             UnreadMentionIdsResponse, UnreadReactionIdsResponse,
         },
         messages::MessageResponse,
+        read_receipts::ReadReceiptResponse,
         ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
     },
     errors::AppError,
@@ -402,6 +403,7 @@ async fn mark_as_read(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+    crate::services::read_receipts::validate_chat_read_target(conn, chat_id, body.message_id)?;
 
     let read_state = crate::services::chat::mark_chat_as_read_state(
         conn,
@@ -424,11 +426,79 @@ async fn mark_as_read(
         .unread_service
         .count_chat_unread_reactions(conn, uid, chat_id, None)?;
 
+    if read_state.receipt_advanced {
+        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
+            conn,
+            &state.ws_registry,
+            chat_id,
+            false,
+        )?;
+    }
+
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: read_state.last_read_message_id,
         unread_count: read_state.unread_count,
         unread_mentions,
         unread_reactions,
+    }))
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct ReadReceiptQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[param(value_type = Option<String>)]
+    thread_id: Option<i64>,
+}
+
+/// GET /chats/:chat_id/read-receipt — Read the peer's visible receipt in a DM.
+#[utoipa::path(
+    get,
+    path = "/read-receipt",
+    operation_id = "get_chat_read_receipt",
+    tag = "chats",
+    params(
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ReadReceiptQuery,
+    ),
+    responses(
+        (status = 200, description = "Peer read receipt when visible", body = ReadReceiptResponse),
+        (status = 404, description = "Not a direct-message receipt scope")
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn get_chat_read_receipt(
+    CurrentUid(uid): CurrentUid,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    Query(query): Query<ReadReceiptQuery>,
+    mut conn: DbConn,
+) -> Result<Json<ReadReceiptResponse>, AppError> {
+    let conn = &mut *conn;
+    check_membership(conn, chat_id, uid)?;
+
+    if let Some(thread_root_id) = query.thread_id {
+        let is_thread_root: bool = diesel::select(diesel::dsl::exists(
+            messages_schema::table.filter(
+                messages_schema::id
+                    .eq(thread_root_id)
+                    .and(messages_schema::chat_id.eq(chat_id))
+                    .and(messages_schema::reply_root_id.is_null()),
+            ),
+        ))
+        .get_result(conn)?;
+        if !is_thread_root {
+            return Err(AppError::NotFound("Thread root message not found"));
+        }
+    }
+
+    let last_read_message_id =
+        crate::services::read_receipts::get_read_receipt(conn, uid, chat_id, query.thread_id)?;
+    Ok(Json(ReadReceiptResponse {
+        last_read_message_id,
     }))
 }
 
@@ -860,6 +930,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 )
                 .nest("/attachments", self::chat_attachments::router())
                 .routes(utoipa_axum::routes!(mark_as_read))
+                .routes(utoipa_axum::routes!(get_chat_read_receipt))
                 .routes(utoipa_axum::routes!(mark_as_unread))
                 .routes(utoipa_axum::routes!(get_chat_unread_count))
                 .routes(utoipa_axum::routes!(get_chat_mentions))

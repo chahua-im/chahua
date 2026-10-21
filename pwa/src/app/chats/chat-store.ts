@@ -101,6 +101,13 @@ export class ChatStore {
   }>();
   readonly changes$ = this.changes.asObservable();
 
+  private readonly receiptPrivacyChanges = new Subject<number | undefined>();
+  readonly receiptPrivacyChanges$ = this.receiptPrivacyChanges.asObservable();
+
+  invalidateReadReceiptPrivacy(peerUid?: number) {
+    this.receiptPrivacyChanges.next(peerUid);
+  }
+
   private readonly muteTime = signal(Date.now());
 
   mutedUntil(chatId: SnowflakeID) {

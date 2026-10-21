@@ -48,6 +48,7 @@
       "saved": "Saved",
       "friendVerification": "Friend Verification",
       "presence": "Presence Privacy",
+      "readReceipts": "Read Receipts",
       "stickers": "Emojis & Stickers",
       "notifications": "Notifications",
       "notificationsUnsupported": "Not supported",
@@ -101,6 +102,19 @@
       "friendShare": "Share with this friend",
       "friendHide": "Hide from this friend",
       "friendLoadFailed": "Failed to load this friend's presence setting."
+    },
+    "readReceipt": {
+      "title": "Read Receipts",
+      "loadFailed": "Failed to load read receipt settings.",
+      "friends": "Friends",
+      "nobody": "No one",
+      "reciprocalNote": "Read receipts are visible only when both people allow sharing. Group conversations never show read receipts.",
+      "saveFailed": "Save failed. Please try again.",
+      "friendTitle": "Read receipt sharing",
+      "friendInherit": "Use global setting",
+      "friendShare": "Share with this friend",
+      "friendHide": "Hide from this friend",
+      "friendLoadFailed": "Failed to load this friend's read receipt setting."
     },
     "stickers": {
       "title": "Emojis & Stickers",

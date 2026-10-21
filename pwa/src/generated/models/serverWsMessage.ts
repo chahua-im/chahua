@@ -16,6 +16,7 @@ import type { PinUpdatePayload } from './pinUpdatePayload';
 import type { PresenceSnapshotPayload } from './presenceSnapshotPayload';
 import type { PresenceUpdatePayload } from './presenceUpdatePayload';
 import type { ReactionUpdatePayload } from './reactionUpdatePayload';
+import type { ReadReceiptChangedPayload } from './readReceiptChangedPayload';
 import type { StickerPackOrderUpdatePayload } from './stickerPackOrderUpdatePayload';
 import type { ThreadMembershipChangedPayload } from './threadMembershipChangedPayload';
 import type { ThreadUpdatePayload } from './threadUpdatePayload';
@@ -60,6 +61,10 @@ export type ServerWsMessage =
   | {
       payload: ChatArchiveStateChangedPayload;
       type: 'chatArchiveStateChanged';
+    }
+  | {
+      payload: ReadReceiptChangedPayload;
+      type: 'readReceiptChanged';
     }
   | {
       /** Chat-level pin event. Kept stable for already-deployed clients. */

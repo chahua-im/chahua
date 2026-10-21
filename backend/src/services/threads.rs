@@ -168,6 +168,7 @@ struct ThreadUnreadCountRow {
 pub struct ThreadReadState {
     pub last_read_message_id: Option<i64>,
     pub unread_count: i64,
+    pub receipt_advanced: bool,
 }
 pub fn get_thread_unread_count(
     conn: &mut PgConnection,
@@ -205,13 +206,23 @@ pub fn mark_thread_read(
     uid: i32,
     message_id: i64,
 ) -> Result<ThreadReadState, diesel::result::Error> {
-    let _ = mark_thread_as_read(conn, chat_id, thread_root_id, uid, message_id)?;
+    let receipt_advanced = conn.transaction(|conn| {
+        mark_thread_as_read(conn, chat_id, thread_root_id, uid, message_id)?;
+        crate::services::read_receipts::advance_thread_read_receipt(
+            conn,
+            chat_id,
+            thread_root_id,
+            uid,
+            message_id,
+        )
+    })?;
     let last_read_message_id = get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
     let unread_count = get_thread_unread_count(conn, thread_root_id, uid, last_read_message_id)?;
 
     Ok(ThreadReadState {
         last_read_message_id,
         unread_count,
+        receipt_advanced,
     })
 }
 

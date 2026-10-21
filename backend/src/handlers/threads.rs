@@ -160,6 +160,11 @@ fn authorize_thread_in_chat(
     Ok(())
 }
 
+struct AppliedThreadRead {
+    response: MarkThreadReadResponse,
+    receipt_advanced: bool,
+}
+
 /// Shared body of the chat-scoped and legacy "mark thread read" routes.
 /// Callers MUST have authorized `uid` for `chat_id` first.
 fn apply_thread_read(
@@ -169,23 +174,32 @@ fn apply_thread_read(
     thread_root_id: i64,
     uid: i32,
     message_id: i64,
-) -> Result<MarkThreadReadResponse, AppError> {
-    // If the client reports reading the root message itself (no replies),
-    // there is nothing to track — skip the write.
+) -> Result<AppliedThreadRead, AppError> {
     if message_id == thread_root_id {
-        return Ok(MarkThreadReadResponse {
-            last_read_message_id: None,
-            unread_count: 0,
-            unread_mentions: 0,
-            unread_reactions: 0,
+        crate::services::read_receipts::validate_thread_root_read_target(
+            conn,
+            chat_id,
+            thread_root_id,
+        )?;
+        return Ok(AppliedThreadRead {
+            response: MarkThreadReadResponse {
+                last_read_message_id: None,
+                unread_count: 0,
+                unread_mentions: 0,
+                unread_reactions: 0,
+            },
+            receipt_advanced: false,
         });
     }
 
+    crate::services::read_receipts::validate_thread_read_target(
+        conn,
+        chat_id,
+        thread_root_id,
+        message_id,
+    )?;
     let _ = thread_svc::ensure_thread_user_state(conn, chat_id, thread_root_id, uid, false)?;
     let read_state = thread_svc::mark_thread_read(conn, chat_id, thread_root_id, uid, message_id)?;
-    // Thread-scope unread mentions left past the new read cursor, mirroring the
-    // per-chat mark-as-read response so clients can keep the badge accurate
-    // without a separate fetch.
     let unread_mentions = unread_service.count_chat_unread_mentions(
         conn,
         uid,
@@ -193,16 +207,17 @@ fn apply_thread_read(
         read_state.last_read_message_id,
         Some(thread_root_id),
     )?;
-    // The reaction cursor was advanced by mark_thread_as_read, so this is
-    // normally 0; computed for consistency with the mention count.
     let unread_reactions =
         unread_service.count_chat_unread_reactions(conn, uid, chat_id, Some(thread_root_id))?;
 
-    Ok(MarkThreadReadResponse {
-        last_read_message_id: read_state.last_read_message_id,
-        unread_count: read_state.unread_count,
-        unread_mentions,
-        unread_reactions,
+    Ok(AppliedThreadRead {
+        response: MarkThreadReadResponse {
+            last_read_message_id: read_state.last_read_message_id,
+            unread_count: read_state.unread_count,
+            unread_mentions,
+            unread_reactions,
+        },
+        receipt_advanced: read_state.receipt_advanced,
     })
 }
 
@@ -235,14 +250,23 @@ async fn mark_thread_read(
     let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
     check_membership(conn, chat_id, uid)?;
 
-    Ok(Json(apply_thread_read(
+    let applied = apply_thread_read(
         conn,
         &state.unread_service,
         chat_id,
         thread_root_id,
         uid,
         body.message_id,
-    )?))
+    )?;
+    if applied.receipt_advanced {
+        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
+            conn,
+            &state.ws_registry,
+            chat_id,
+            false,
+        )?;
+    }
+    Ok(Json(applied.response))
 }
 
 /// GET /threads/:thread_root_id/read-state — Get the user's read position for a thread.
@@ -343,14 +367,23 @@ async fn mark_thread_read_in_chat(
 
     authorize_thread_in_chat(conn, chat_id, thread_root_id, uid)?;
 
-    Ok(Json(apply_thread_read(
+    let applied = apply_thread_read(
         conn,
         &state.unread_service,
         chat_id,
         thread_root_id,
         uid,
         body.message_id,
-    )?))
+    )?;
+    if applied.receipt_advanced {
+        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
+            conn,
+            &state.ws_registry,
+            chat_id,
+            false,
+        )?;
+    }
+    Ok(Json(applied.response))
 }
 
 /// GET /chats/:chat_id/threads/:thread_root_id/read-state — Read position in a thread.

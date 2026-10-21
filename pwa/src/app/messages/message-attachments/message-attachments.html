@@ -57,7 +57,7 @@
         @if (last && overlayTime()) {
           <ion-badge #timePill class="media-time" color="medium">
             <time [attr.datetime]="message().createdAt">{{ message().createdAt | localDate: 'time' }}</time>
-            <app-message-status [delivery]="delivery()" />
+            <app-message-status [delivery]="delivery()" [read]="read()" />
           </ion-badge>
         }
       </div>
@@ -70,7 +70,7 @@
         @if (last && overlayTime()) {
           <span class="media-time">
             <time [attr.datetime]="message().createdAt">{{ message().createdAt | localDate: 'time' }}</time>
-            <app-message-status [delivery]="delivery()" />
+            <app-message-status [delivery]="delivery()" [read]="read()" />
           </span>
         }
       </div>

@@ -98,6 +98,7 @@
               [overlayTime]="mediaOverlay()"
               [outgoing]="own()"
               [delivery]="status()"
+              [read]="read()"
               [uploads]="uploads()"></app-message-attachments>
           </div>
         }
@@ -131,7 +132,7 @@
                 <span>{{ 'messages.message.edited' | transloco }}</span>
               }
               {{ message().createdAt | localDate: 'time' }}
-              <app-message-status [delivery]="status()" />
+              <app-message-status [delivery]="status()" [read]="read()" />
             </time>
           </div>
         }

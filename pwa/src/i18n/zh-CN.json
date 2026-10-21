@@ -48,6 +48,7 @@
       "saved": "收藏",
       "friendVerification": "好友验证",
       "presence": "在线状态隐私",
+      "readReceipts": "已读回执",
       "stickers": "表情和贴纸",
       "notifications": "消息通知",
       "notificationsUnsupported": "不支持",
@@ -101,6 +102,19 @@
       "friendShare": "与这位好友分享",
       "friendHide": "对这位好友隐藏",
       "friendLoadFailed": "此好友的在线状态设置加载失败。"
+    },
+    "readReceipt": {
+      "title": "已读回执",
+      "loadFailed": "已读回执设置加载失败。",
+      "friends": "仅好友",
+      "nobody": "没有人",
+      "reciprocalNote": "仅在双方都允许分享时显示已读回执；群组对话永不显示已读回执。",
+      "saveFailed": "保存失败，请重试。",
+      "friendTitle": "已读回执分享",
+      "friendInherit": "使用全局设置",
+      "friendShare": "与这位好友分享",
+      "friendHide": "对这位好友隐藏",
+      "friendLoadFailed": "此好友的已读回执设置加载失败。"
     },
     "stickers": {
       "title": "表情和贴纸",

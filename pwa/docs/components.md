@@ -86,7 +86,7 @@ ChatListContent 的普通会话行和话题行都是共享资料、查询成员�
 
 | 组件               | 输入与局部字段                                                                                               | 数据依赖与传递                                                                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer、ChatDetails 和 Presence 展示组件传值 |
+| ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关、当前 DM 范围的授权回执 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer、ChatDetails 和 Presence 展示组件传值 |
 | PinnedMessagesPage | id、threadId；活跃版本、loading/failed、滚动状态与浮动日期                                                   | 从共享 ChatPins 派生消息，复用 Message 和 MessageMenu；无需 ConversationStore                                                                         |
 | SavedMessagesPage  | active                                                                                                       | 路由及 toolbar；离开时销毁 SavedMessageList，重新进入时重新创建                                                                                       |
 | SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                              | 全局收藏接口；快照映射给非交互 Message                                                                                                                |
@@ -109,8 +109,8 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | MessageAuthor      | sender、own；派生用户名、用户组和性别                                                                                                        |
 | MessageText        | text、mentions、interactive；派生文本片段，点击提及才打开资料                                                                                |
 | MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文、系统短语枚举；交互模式下系统用户名链接资料                                  |
-| MessageAttachments | message、overlayTime、outgoing、uploads；派生媒体框、相册布局、时间及上传反馈；局部保留相册初始尺寸、容器宽度、窗口及消息区域尺寸与资源加载失败                            |
-| MessageStatus      | delivery；把 MessageDelivery 枚举显示为图标                                                                                                  |
+| MessageAttachments | message、overlayTime、outgoing、delivery、read、uploads；派生媒体框、相册布局、时间、发送/已读及上传反馈；局部保留相册初始尺寸、容器宽度、窗口及消息区域尺寸与资源加载失败 |
+| MessageStatus      | delivery、read；把 MessageDelivery 枚举显示为图标，并仅按 ConversationPage 传入的当前 DM 范围授权回执将确认单勾替换为双勾 |
 | MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                                        |
 | MessageThread      | info、preview → open                                                                                                                         |
 | InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                               |
@@ -142,7 +142,7 @@ MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执�
 
 | 组件               | 输入与局部字段                                                                                                                                          | 共享数据/输出                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人覆盖值，Presence 失效个人状态 |
+| ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/readReceiptOverride 及其 loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人在线状态和已读回执覆盖值，Presence 失效个人状态 |
 | ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                          | 从聊天消息页提取话题根，点击导航                                |
 | ChatMembers        | chatId；members、cursor、loading/error                                                                                                                  | MembersService；行点击打开资料，仅管理员显示右侧身份            |
 | ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                            | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料 |

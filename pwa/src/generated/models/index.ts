@@ -48,6 +48,7 @@ export * from './userPresenceResponse';
 export * from './presenceSnapshotPayload';
 export * from './presenceUpdatePayload';
 export * from './reactionUpdatePayload';
+export * from './readReceiptChangedPayload';
 export * from './threadUpdatePayload';
 export * from './threadMembershipChangedPayload';
 export * from './stickerPackOrderUpdatePayload';

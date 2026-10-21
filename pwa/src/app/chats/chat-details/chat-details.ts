@@ -60,6 +60,7 @@ import {
   ChatAttachmentKindFilter,
   FriendAddVerificationMode,
   FriendPresenceOverride,
+  FriendReadReceiptOverride,
   type MemberSummary,
   GroupKind,
   GroupRole,
@@ -94,6 +95,7 @@ enum DetailAction {
   Leave,
   AddFriend,
   Presence,
+  ReadReceipt,
   Block,
 }
 
@@ -178,6 +180,7 @@ export class ChatDetails {
   private readonly destroy = inject(DestroyRef);
   private loadVersion = 0;
   private presenceSettingsVersion = 0;
+  private receiptSettingsVersion = 0;
   private readonly peer = computed(() => {
     const chat = this.chatId() ? this.store.get(this.chatId()!) : undefined;
     return this.user() ?? (chat?.kind === GroupKind.dm ? chat.peer : undefined);
@@ -219,6 +222,19 @@ export class ChatDetails {
     computation: () => false,
   });
   protected readonly presenceOverrideError = linkedSignal({
+    source: this.presenceSettingsUid,
+    computation: () => false,
+  });
+  protected readonly ReceiptOverride = FriendReadReceiptOverride;
+  protected readonly receiptOverride = linkedSignal({
+    source: this.presenceSettingsUid,
+    computation: (): FriendReadReceiptOverride | undefined => undefined,
+  });
+  protected readonly receiptOverrideLoading = linkedSignal({
+    source: this.presenceSettingsUid,
+    computation: () => false,
+  });
+  protected readonly receiptOverrideError = linkedSignal({
     source: this.presenceSettingsUid,
     computation: () => false,
   });
@@ -289,6 +305,14 @@ export class ChatDetails {
       untracked(() => void this.loadFriendPresenceSettings());
     });
     effect(() => {
+      const uid = this.presenceSettingsUid();
+      if (uid == null) {
+        this.receiptSettingsVersion++;
+        return;
+      }
+      untracked(() => void this.loadFriendReadReceiptSettings());
+    });
+    effect(() => {
       const scope = this.scope();
       const root = scope.threadId;
       if (root && !this.subscription())
@@ -335,6 +359,51 @@ export class ChatDetails {
       if (version === this.presenceSettingsVersion && uid === this.presenceSettingsUid())
         this.presenceOverrideLoading.set(false);
     }
+  }
+
+  protected async loadFriendReadReceiptSettings() {
+    const uid = this.presenceSettingsUid();
+    if (uid == null) return;
+    const version = ++this.receiptSettingsVersion;
+    this.receiptOverrideLoading.set(true);
+    this.receiptOverrideError.set(false);
+    try {
+      const settings = await firstValueFrom(this.friends.getFriendReadReceiptSettings(uid));
+      if (version === this.receiptSettingsVersion && uid === this.presenceSettingsUid() && !this.destroy.destroyed)
+        this.receiptOverride.set(settings.override);
+    } catch {
+      if (version === this.receiptSettingsVersion && uid === this.presenceSettingsUid() && !this.destroy.destroyed)
+        this.receiptOverrideError.set(true);
+    } finally {
+      if (version === this.receiptSettingsVersion && uid === this.presenceSettingsUid())
+        this.receiptOverrideLoading.set(false);
+    }
+  }
+
+  protected async saveFriendReadReceiptOverride(value: unknown) {
+    if (
+      this.busy() ||
+      this.receiptOverrideLoading() ||
+      !Object.values(FriendReadReceiptOverride).includes(value as FriendReadReceiptOverride)
+    )
+      return;
+    const uid = this.presenceSettingsUid();
+    if (uid == null) return;
+    const override = value as FriendReadReceiptOverride;
+    const previous = this.receiptOverride();
+    if (override === previous) return;
+    this.receiptOverride.set(override);
+    const scope = this.scope();
+    const saved = await this.perform(
+      DetailAction.ReadReceipt,
+      async () => {
+        const settings = await firstValueFrom(this.friends.updateFriendReadReceiptSettings(uid, { override }));
+        this.store.invalidateReadReceiptPrivacy(uid);
+        if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) this.receiptOverride.set(settings.override);
+      },
+      true,
+    );
+    if (!saved && this.isCurrent(scope) && uid === this.presenceSettingsUid()) this.receiptOverride.set(previous);
   }
 
   protected async saveFriendPresenceOverride(value: unknown) {
@@ -491,6 +560,7 @@ export class ChatDetails {
             ? this.friends.deleteFriend(person!.uid)
             : this.members.deleteRemoveMember(chatId, this.session.user()!.uid),
         );
+        if (isDm) this.store.invalidateReadReceiptPrivacy(person!.uid);
         this.lists.refreshChats();
         if (person) await this.store.relationship(person.uid).refresh();
       })
@@ -582,6 +652,7 @@ export class ChatDetails {
     if ((await alert.onDidDismiss()).role !== 'confirm' || !this.isCurrent(scope)) return;
     await this.perform(DetailAction.Block, async () => {
       await firstValueFrom(blocking ? this.blocks.unblockUser(user.uid) : this.blocks.blockUser({ uid: user.uid }));
+      this.store.invalidateReadReceiptPrivacy(user.uid);
       this.lists.refreshChats();
       await this.store.relationship(user.uid).refresh();
     });

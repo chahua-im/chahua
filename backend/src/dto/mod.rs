@@ -10,6 +10,7 @@ pub mod members;
 pub mod messages;
 pub mod pins;
 pub mod push;
+pub mod read_receipts;
 pub mod saved_messages;
 pub mod service_tokens;
 pub mod stickers;

@@ -225,6 +225,37 @@
               [message]="'settings.presence.friendLoadFailed' | transloco"
               (retry)="loadFriendPresenceSettings()" />
           }
+          <ion-item class="presence-settings">
+            <ion-select
+              [label]="'settings.readReceipt.friendTitle' | transloco"
+              labelPlacement="stacked"
+              interface="popover"
+              [value]="receiptOverride()"
+              [disabled]="busy() || receiptOverrideLoading() || receiptOverrideError()"
+              (ionChange)="saveFriendReadReceiptOverride($event.detail.value)">
+              <ion-select-option [value]="ReceiptOverride.inherit">
+                {{ 'settings.readReceipt.friendInherit' | transloco }}
+              </ion-select-option>
+              <ion-select-option [value]="ReceiptOverride.share">
+                {{ 'settings.readReceipt.friendShare' | transloco }}
+              </ion-select-option>
+              <ion-select-option [value]="ReceiptOverride.hide">
+                {{ 'settings.readReceipt.friendHide' | transloco }}
+              </ion-select-option>
+            </ion-select>
+            @if (pending() === Action.ReadReceipt || receiptOverrideLoading()) {
+              <ion-spinner slot="end"></ion-spinner>
+            }
+          </ion-item>
+          <ion-item lines="none">
+            <ion-note class="ion-text-wrap">{{ 'settings.readReceipt.reciprocalNote' | transloco }}</ion-note>
+          </ion-item>
+          @if (receiptOverrideError()) {
+            <app-load-error
+              compact
+              [message]="'settings.readReceipt.friendLoadFailed' | transloco"
+              (retry)="loadFriendReadReceiptSettings()" />
+          }
         }
       } @else if (loading()) {
         <div class="page-loading"><ion-spinner /></div>

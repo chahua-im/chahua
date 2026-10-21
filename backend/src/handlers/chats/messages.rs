@@ -596,15 +596,23 @@ async fn post_message(
         )
         .await?;
 
-        if let SendMessageOutcome::Created(send_result) = &send_result {
+        let receipt_advanced = if let SendMessageOutcome::Created(send_result) = &send_result {
             crate::services::chat::mark_chat_as_read(conn, chat_id, uid, send_result.response.id)?;
-        }
+            crate::services::read_receipts::advance_chat_read_receipt(
+                conn,
+                chat_id,
+                uid,
+                send_result.response.id,
+            )?
+        } else {
+            false
+        };
 
-        Ok(send_result)
+        Ok((send_result, receipt_advanced))
     }
     .await;
 
-    let send_result = match tx_result {
+    let (send_result, receipt_advanced) = match tx_result {
         Ok(send_result) => {
             diesel::sql_query("COMMIT").execute(conn)?;
             send_result
@@ -629,6 +637,15 @@ async fn post_message(
         }
         SendMessageOutcome::Duplicate(response) => *response,
     };
+
+    if receipt_advanced {
+        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
+            conn,
+            &state.ws_registry,
+            chat_id,
+            false,
+        )?;
+    }
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -691,15 +708,22 @@ pub(super) async fn post_thread_message(
         let send_result = match send_result {
             SendMessageOutcome::Created(send_result) => *send_result,
             SendMessageOutcome::Duplicate(response) => {
-                return Ok(SendMessageOutcome::Duplicate(response));
+                return Ok((SendMessageOutcome::Duplicate(response), false));
             }
         };
         let response = send_result.response.clone();
         let publish_now = publish_immediately;
 
-        // Auto-subscribe the replying user and track read position
+        // Auto-subscribe the replying user and track read position.
         crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)?;
         crate::services::threads::mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
+        let receipt_advanced = crate::services::read_receipts::advance_thread_read_receipt(
+            conn,
+            chat_id,
+            thread_id,
+            uid,
+            response.id,
+        )?;
 
         // Ensure the root author has an initial participant row without
         // overriding any existing subscription or archive preference.
@@ -741,11 +765,14 @@ pub(super) async fn post_thread_message(
                 .execute(conn)?;
         }
 
-        Ok(SendMessageOutcome::Created(Box::new(send_result)))
+        Ok((
+            SendMessageOutcome::Created(Box::new(send_result)),
+            receipt_advanced,
+        ))
     }
     .await;
 
-    let send_result = match tx_result {
+    let (send_result, receipt_advanced) = match tx_result {
         Ok(data) => {
             diesel::sql_query("COMMIT").execute(conn)?;
             data
@@ -774,6 +801,15 @@ pub(super) async fn post_thread_message(
     }
     if matches!(response.message_type, MessageType::Audio) {
         crate::services::audio_transcode::enqueue_message(response.id);
+    }
+
+    if receipt_advanced {
+        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
+            conn,
+            &state.ws_registry,
+            chat_id,
+            false,
+        )?;
     }
 
     // Post-commit: WS broadcasts (root message update + thread update)

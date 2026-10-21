@@ -1038,6 +1038,7 @@ fn remove_from_sticker_pack_order(
 
     if let Ok(Some(extra)) = user_extra::table
         .filter(user_extra::uid.eq(uid))
+        .select(UserExtra::as_select())
         .first::<UserExtra>(conn)
         .optional()
     {
@@ -1074,6 +1075,7 @@ fn add_to_sticker_pack_order(
 
     if let Ok(Some(extra)) = user_extra::table
         .filter(user_extra::uid.eq(uid))
+        .select(UserExtra::as_select())
         .first::<UserExtra>(conn)
         .optional()
     {

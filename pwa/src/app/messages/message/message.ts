@@ -109,6 +109,8 @@ export class Message<T extends MessageContent = MessageResponse> {
         (this.message().messageType !== MessageType.system && (this.canInteract() || !!this.outgoingId()))),
   );
   readonly delivery = input<MessageDelivery>();
+  /** The active DM scope's authorized peer receipt covers this confirmed outgoing message. */
+  readonly read = input(false);
   readonly busy = input(false);
   readonly uploads = input<readonly AttachmentUpload[]>([]);
   readonly retry = output<void>();

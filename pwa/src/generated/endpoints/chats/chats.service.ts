@@ -13,6 +13,7 @@ import type { Observable } from 'rxjs';
 import type {
   CreateMessageBody,
   GetChatAttachmentsParams,
+  GetChatReadReceiptParams,
   GetChatsParams,
   GetMessagesParams,
   ListChatAttachmentsResponse,
@@ -25,6 +26,7 @@ import type {
   MarkChatReadStateResponse,
   MessageResponse,
   ReactionDetailResponse,
+  ReadReceiptResponse,
   SearchMessagesParams,
   SearchMessagesResponse,
   SnowflakeID,
@@ -755,6 +757,50 @@ export class ChatsService {
     return this.http.post<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/read`, markAsReadBody, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
+    });
+  }
+  /**
+   * @summary GET /chats/:chat_id/read-receipt — Read the peer's visible receipt in a DM.
+   */
+  getChatReadReceipt<TData = ReadReceiptResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatReadReceiptParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getChatReadReceipt<TData = ReadReceiptResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatReadReceiptParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getChatReadReceipt<TData = ReadReceiptResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatReadReceiptParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getChatReadReceipt<TData = ReadReceiptResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatReadReceiptParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/read-receipt`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/read-receipt`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/read-receipt`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
     });
   }
   listChatSavedMessages<TData = ListSavedMessagesResponse>(

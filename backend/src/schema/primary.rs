@@ -62,6 +62,10 @@ pub mod sql_types {
     pub struct PushProvider;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "read_receipt_visibility"))]
+    pub struct ReadReceiptVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "transcode_status"))]
     pub struct TranscodeStatus;
 }
@@ -142,6 +146,8 @@ diesel::table! {
         created_at -> Timestamptz,
         uid1_shares_presence -> Nullable<Bool>,
         uid2_shares_presence -> Nullable<Bool>,
+        uid1_shares_read_receipts -> Nullable<Bool>,
+        uid2_shares_read_receipts -> Nullable<Bool>,
     }
 }
 
@@ -161,6 +167,7 @@ diesel::table! {
         join_reason_extra -> Nullable<Jsonb>,
         archived -> Bool,
         last_reactions_read_at -> Timestamptz,
+        last_read_receipt_message_id -> Nullable<Int8>,
     }
 }
 
@@ -441,6 +448,7 @@ diesel::table! {
         archived -> Bool,
         subscribed -> Bool,
         last_reactions_read_at -> Timestamptz,
+        last_read_receipt_message_id -> Nullable<Int8>,
     }
 }
 
@@ -448,6 +456,7 @@ diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::FriendAddVerificationMode;
     use super::sql_types::PresenceVisibility;
+    use super::sql_types::ReadReceiptVisibility;
 
     user_extra (uid) {
         uid -> Int4,
@@ -458,6 +467,7 @@ diesel::table! {
         verification_question -> Nullable<Text>,
         token_gen -> Int4,
         presence_visibility -> PresenceVisibility,
+        read_receipt_visibility -> ReadReceiptVisibility,
     }
 }
 

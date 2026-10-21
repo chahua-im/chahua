@@ -17,6 +17,7 @@ export enum ServerWsMessageType {
   threadUpdate = 'threadUpdate',
   threadMembershipChanged = 'threadMembershipChanged',
   chatArchiveStateChanged = 'chatArchiveStateChanged',
+  readReceiptChanged = 'readReceiptChanged',
   pinAdded = 'pinAdded',
   threadPinAdded = 'threadPinAdded',
   pinRemoved = 'pinRemoved',

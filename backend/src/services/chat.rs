@@ -16,6 +16,7 @@ pub fn indefinite_mute_until() -> DateTime<Utc> {
 pub struct ChatReadState {
     pub last_read_message_id: Option<i64>,
     pub unread_count: i64,
+    pub receipt_advanced: bool,
 }
 
 pub fn get_chat_last_read_message_id(
@@ -72,7 +73,10 @@ pub fn mark_chat_as_read_state(
     uid: i32,
     message_id: i64,
 ) -> Result<ChatReadState, diesel::result::Error> {
-    mark_chat_as_read(conn, chat_id, uid, message_id)?;
+    let receipt_advanced = conn.transaction(|conn| {
+        mark_chat_as_read(conn, chat_id, uid, message_id)?;
+        crate::services::read_receipts::advance_chat_read_receipt(conn, chat_id, uid, message_id)
+    })?;
 
     let last_read_message_id = get_chat_last_read_message_id(conn, chat_id, uid)?;
     let unread_count = unread_service.count_chat_unread(conn, chat_id, last_read_message_id)?;
@@ -80,6 +84,7 @@ pub fn mark_chat_as_read_state(
     Ok(ChatReadState {
         last_read_message_id,
         unread_count,
+        receipt_advanced,
     })
 }
 

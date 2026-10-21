@@ -8,6 +8,7 @@ import { decodeId } from '../../../app/api/snowflake-id';
  */
 import type {
   GetChatAttachmentsParams,
+  GetChatReadReceiptParams,
   GetChatsParams,
   GetMessagesParams,
   ListChatAttachmentsResponse,
@@ -18,6 +19,7 @@ import type {
   MarkChatReadStateResponse,
   MessageResponse,
   ReactionDetailResponse,
+  ReadReceiptResponse,
   SearchMessagesParams,
   SearchMessagesResponse,
   SnowflakeID,
@@ -352,6 +354,35 @@ export function getReactionDetailsResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getChatReadReceiptResource(
+  chatId: Signal<SnowflakeID>,
+  params: Signal<GetChatReadReceiptParams> | undefined,
+  options: OrvalHttpResourceOptions<ReadReceiptResponse, unknown> & {
+    defaultValue: NoInfer<ReadReceiptResponse>;
+  },
+): HttpResourceRef<ReadReceiptResponse>;
+export function getChatReadReceiptResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatReadReceiptParams>,
+  options?: OrvalHttpResourceOptions<ReadReceiptResponse, unknown>,
+): HttpResourceRef<ReadReceiptResponse | undefined>;
+export function getChatReadReceiptResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatReadReceiptParams>,
+  options?: OrvalHttpResourceOptions<ReadReceiptResponse, unknown>,
+): HttpResourceRef<ReadReceiptResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<ReadReceiptResponse>(() => {
+    const request = {
+      url: `${baseUrl}/chats/${decodeId(chatId())}/read-receipt`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function listChatSavedMessagesResource(
   chatId: Signal<SnowflakeID>,
   params: Signal<ListChatSavedMessagesParams> | undefined,
@@ -408,6 +439,7 @@ export type GetMessagesResourceResult = NonNullable<ListMessagesResponse>;
 export type SearchMessagesResourceResult = NonNullable<SearchMessagesResponse>;
 export type GetMessageResourceResult = NonNullable<MessageResponse>;
 export type GetReactionDetailsResourceResult = NonNullable<ReactionDetailResponse>;
+export type GetChatReadReceiptResourceResult = NonNullable<ReadReceiptResponse>;
 export type ListChatSavedMessagesResourceResult = NonNullable<ListSavedMessagesResponse>;
 export type GetChatUnreadCountResourceResult = NonNullable<MarkChatReadStateResponse>;
 /**

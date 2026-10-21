@@ -186,6 +186,7 @@ describe('ChatDetails', () => {
     await vi.waitFor(() =>
       http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
     );
+    http.expectOne('/_api/friends/2/read-receipt-settings').flush({ override: 'inherit' });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('解除好友');
@@ -222,6 +223,7 @@ describe('ChatDetails', () => {
     await vi.waitFor(() =>
       http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
     );
+    http.expectOne('/_api/friends/2/read-receipt-settings').flush({ override: 'inherit' });
     await fixture.whenStable();
     fixture.detectChanges();
   });
@@ -232,11 +234,14 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true }));
     const prior = await vi.waitFor(() => http.expectOne('/_api/friends/2/presence-settings'));
+    const priorReceipt = http.expectOne('/_api/friends/2/read-receipt-settings');
 
     fixture.componentRef.setInput('user', { uid: 3, username: '乙', gender: 0 });
     fixture.detectChanges();
     await vi.waitFor(() => http.expectOne('/_api/friends/3').flush({ peerUid: 3, isFriend: true }));
     const current = await vi.waitFor(() => http.expectOne('/_api/friends/3/presence-settings'));
+    http.expectOne('/_api/friends/3/read-receipt-settings').flush({ override: 'share' });
+    priorReceipt.flush({ override: 'hide' });
     current.flush({ override: FriendPresenceOverride.hide });
     prior.flush({ override: FriendPresenceOverride.inherit });
     await fixture.whenStable();
@@ -245,6 +250,7 @@ describe('ChatDetails', () => {
     expect((fixture.nativeElement.querySelector('ion-select') as HTMLIonSelectElement).value).toBe(
       FriendPresenceOverride.hide,
     );
+    expect((fixture.nativeElement.querySelectorAll('ion-select')[1] as HTMLIonSelectElement).value).toBe('share');
   });
 
   it('keeps the newest chat when a previous detail request completes later', async () => {
@@ -494,6 +500,7 @@ describe('ChatDetails', () => {
     await vi.waitFor(() =>
       http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
     );
+    http.expectOne('/_api/friends/2/read-receipt-settings').flush({ override: 'inherit' });
     await Promise.resolve();
     fixture.detectChanges();
     http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });

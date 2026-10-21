@@ -187,6 +187,12 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     chatId: 1,
     messageId: 1,
   },
+  ReadReceiptChangedPayload: {
+    chatId: 1,
+  },
+  ReadReceiptResponse: {
+    lastReadMessageId: 1,
+  },
   RedeemInviteResponse: {
     chat: 'GroupInfoResponse',
   },
@@ -386,6 +392,14 @@ export const jsonOperations: JsonOperationCodec[] = [
     path: '/chats/{chat_id}/read',
     body: 'MarkAsReadBody',
     response: 'MarkChatReadStateResponse',
+  },
+  {
+    method: 'GET',
+    path: '/chats/{chat_id}/read-receipt',
+    response: 'ReadReceiptResponse',
+    query: {
+      threadId: 1,
+    },
   },
   {
     method: 'GET',
@@ -637,6 +651,7 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   threadUpdate: 'ThreadUpdatePayload',
   threadMembershipChanged: 'ThreadMembershipChangedPayload',
   chatArchiveStateChanged: 'ChatArchiveStateChangedPayload',
+  readReceiptChanged: 'ReadReceiptChangedPayload',
   pinAdded: 'PinUpdatePayload',
   threadPinAdded: 'PinUpdatePayload',
   pinRemoved: 'PinUpdatePayload',

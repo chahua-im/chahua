@@ -11,10 +11,10 @@ use diesel::prelude::*;
 
 use crate::errors::AppError;
 use crate::models::{
-    FriendAddVerificationMode, FriendPresenceOverride, FriendRequest, FriendRequestStatus,
-    GroupJoinReason, GroupKind, GroupRole, GroupVisibility, MessageType, NewBlock,
-    NewFriendRequest, NewFriendship, NewGroup, NewGroupMembership, NewUserExtra,
-    PresenceVisibility,
+    FriendAddVerificationMode, FriendPresenceOverride, FriendReadReceiptOverride, FriendRequest,
+    FriendRequestStatus, GroupJoinReason, GroupKind, GroupRole, GroupVisibility, MessageType,
+    NewBlock, NewFriendRequest, NewFriendship, NewGroup, NewGroupMembership, NewUserExtra,
+    PresenceVisibility, ReadReceiptVisibility,
 };
 use crate::schema::{blocks, friend_requests, friendships, group_membership, groups, user_extra};
 use crate::services::messages::{load_username_by_uid, PreparedMessageSend, SendMessageOutcome};
@@ -593,6 +593,95 @@ pub fn update_presence_settings(
         .map_err(AppError::from)
 }
 
+/// Get a user's global read-receipt policy. Users without activity rows retain
+/// the default of sharing with friends.
+pub fn get_read_receipt_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> Result<ReadReceiptVisibility, AppError> {
+    Ok(user_extra::table
+        .filter(user_extra::uid.eq(uid))
+        .select(user_extra::read_receipt_visibility)
+        .first(conn)
+        .optional()?
+        .unwrap_or(ReadReceiptVisibility::Friends))
+}
+
+/// Persist a user's global read-receipt policy without touching unrelated
+/// app-owned settings.
+pub fn update_read_receipt_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+    visibility: ReadReceiptVisibility,
+) -> Result<ReadReceiptVisibility, AppError> {
+    let now = Utc::now().naive_utc();
+    diesel::insert_into(user_extra::table)
+        .values(NewUserExtra {
+            uid,
+            first_seen_at: now,
+            last_seen_at: now,
+            sticker_pack_order: serde_json::json!([]),
+            verification_mode: FriendAddVerificationMode::Direct,
+            verification_question: None,
+            presence_visibility: PresenceVisibility::Everyone,
+        })
+        .on_conflict(user_extra::uid)
+        .do_update()
+        .set(user_extra::read_receipt_visibility.eq(visibility))
+        .returning(user_extra::read_receipt_visibility)
+        .get_result(conn)
+        .map_err(AppError::from)
+}
+
+/// Read the caller-owned read-receipt override for an existing friendship.
+pub fn get_friend_read_receipt_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+    peer_uid: i32,
+) -> Result<FriendReadReceiptOverride, AppError> {
+    let (uid1, uid2) = canonical_pair(uid, peer_uid);
+    let shares_read_receipts = if uid == uid1 {
+        friendships::table
+            .filter(friendships::uid1.eq(uid1).and(friendships::uid2.eq(uid2)))
+            .select(friendships::uid1_shares_read_receipts)
+            .first::<Option<bool>>(conn)
+            .optional()?
+    } else {
+        friendships::table
+            .filter(friendships::uid1.eq(uid1).and(friendships::uid2.eq(uid2)))
+            .select(friendships::uid2_shares_read_receipts)
+            .first::<Option<bool>>(conn)
+            .optional()?
+    }
+    .ok_or(AppError::NotFound("Friendship not found"))?;
+    Ok(friend_read_receipt_override_from_db(shares_read_receipts))
+}
+
+/// Update the caller-owned read-receipt override for an existing friendship.
+pub fn update_friend_read_receipt_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+    peer_uid: i32,
+    override_value: FriendReadReceiptOverride,
+) -> Result<FriendReadReceiptOverride, AppError> {
+    let (uid1, uid2) = canonical_pair(uid, peer_uid);
+    let filter = friendships::uid1.eq(uid1).and(friendships::uid2.eq(uid2));
+    let shares_read_receipts = friend_read_receipt_override_to_db(override_value);
+    let affected = if uid == uid1 {
+        diesel::update(friendships::table.filter(filter))
+            .set(friendships::uid1_shares_read_receipts.eq(shares_read_receipts))
+            .execute(conn)?
+    } else {
+        diesel::update(friendships::table.filter(filter))
+            .set(friendships::uid2_shares_read_receipts.eq(shares_read_receipts))
+            .execute(conn)?
+    };
+    if affected == 0 {
+        return Err(AppError::NotFound("Friendship not found"));
+    }
+    Ok(override_value)
+}
+
 pub fn friend_presence_override_from_db(value: Option<bool>) -> FriendPresenceOverride {
     match value {
         None => FriendPresenceOverride::Inherit,
@@ -606,6 +695,22 @@ pub fn friend_presence_override_to_db(value: FriendPresenceOverride) -> Option<b
         FriendPresenceOverride::Inherit => None,
         FriendPresenceOverride::Share => Some(true),
         FriendPresenceOverride::Hide => Some(false),
+    }
+}
+
+pub fn friend_read_receipt_override_from_db(value: Option<bool>) -> FriendReadReceiptOverride {
+    match value {
+        None => FriendReadReceiptOverride::Inherit,
+        Some(true) => FriendReadReceiptOverride::Share,
+        Some(false) => FriendReadReceiptOverride::Hide,
+    }
+}
+
+pub fn friend_read_receipt_override_to_db(value: FriendReadReceiptOverride) -> Option<bool> {
+    match value {
+        FriendReadReceiptOverride::Inherit => None,
+        FriendReadReceiptOverride::Share => Some(true),
+        FriendReadReceiptOverride::Hide => Some(false),
     }
 }
 

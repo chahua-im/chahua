@@ -60,7 +60,7 @@ import {
   notificationsOutline,
   notificationsOffOutline,
 } from 'ionicons/icons';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, forkJoin, of } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
 import {
@@ -419,6 +419,70 @@ export class ConversationPage {
     source: this.entryKey,
     computation: (): ThreadError | undefined => undefined,
   });
+  private readonly receiptScope = computed(() => {
+    const chat = this.chatInfo.get(this.id());
+    const uid = this.session.user()?.uid;
+    if (chat?.kind !== GroupKind.dm || uid == null) return undefined;
+    return { chatId: this.id(), threadId: this.threadId(), uid };
+  });
+  private readonly receiptScopeKey = computed(() => {
+    const scope = this.receiptScope();
+    return scope && `${scope.chatId}:${scope.threadId ?? ''}:${scope.uid}`;
+  });
+  private readonly readReceiptId = linkedSignal({
+    source: this.receiptScopeKey,
+    computation: (): SnowflakeID | undefined => undefined,
+  });
+  private readonly rootReadReceiptId = linkedSignal({
+    source: this.receiptScopeKey,
+    computation: (): SnowflakeID | undefined => undefined,
+  });
+  private receiptRequestVersion = 0;
+  protected readonly isReadByPeer = (message: MessageContent) => {
+    const threadId = this.threadId();
+    const receipt =
+      threadId && message.id === threadId && message.replyRootId == null
+        ? this.rootReadReceiptId()
+        : (message.replyRootId ?? undefined) === threadId
+          ? this.readReceiptId()
+          : undefined;
+    return !!receipt && !!message.id && message.id <= receipt;
+  };
+  private async refreshReadReceipt(clear = false) {
+    const scope = this.receiptScope();
+    const version = ++this.receiptRequestVersion;
+    if (clear) {
+      this.readReceiptId.set(undefined);
+      this.rootReadReceiptId.set(undefined);
+    }
+    if (!scope || !this.active()) return;
+    try {
+      const receipts = await firstValueFrom(
+        forkJoin({
+          scope: this.api.getChatReadReceipt(scope.chatId, scope.threadId ? { threadId: scope.threadId } : undefined),
+          root: scope.threadId ? this.api.getChatReadReceipt(scope.chatId) : of(undefined),
+        }).pipe(takeUntilDestroyed(this.destroyRef)),
+      );
+      const current = this.receiptScope();
+      if (
+        version === this.receiptRequestVersion &&
+        current &&
+        current.chatId === scope.chatId &&
+        current.threadId === scope.threadId &&
+        current.uid === scope.uid &&
+        this.active() &&
+        !this.destroyRef.destroyed
+      ) {
+        this.readReceiptId.set(receipts.scope.lastReadMessageId);
+        this.rootReadReceiptId.set(receipts.root?.lastReadMessageId);
+      }
+    } catch {
+      // A failed refresh preserves a known authorized receipt; a privacy invalidation already cleared it.
+    }
+  }
+  private invalidateReadReceipt(privacyChanged = false) {
+    void this.refreshReadReceipt(privacyChanged);
+  }
   protected readonly outgoing = computed(() => this.outbox.items().filter((item) => item.chatId === this.id()));
   protected readonly rows = computed(() => {
     const messages = this.conversation.items();
@@ -588,10 +652,20 @@ export class ConversationPage {
   );
 
   constructor() {
+    this.chatInfo.receiptPrivacyChanges$.pipe(takeUntilDestroyed()).subscribe((peerUid) => {
+      if (peerUid == null || peerUid === this.peerUid()) this.invalidateReadReceipt(true);
+    });
     effect((onCleanup) => {
       const uid = this.peerUid();
       if (this.active() && uid && uid !== this.session.user()?.uid)
         onCleanup(this.chatInfo.relationship(uid).activate());
+    });
+    effect(() => {
+      if (!this.receiptScopeKey() || !this.active()) {
+        this.receiptRequestVersion++;
+        return;
+      }
+      untracked(() => this.invalidateReadReceipt());
     });
     const resize = () => {
       this.largeScreen.set(this.wide.matches);
@@ -623,6 +697,8 @@ export class ConversationPage {
       else if (!this.threadId()) void this.chatInfo.getReadState(this.id()).catch(() => {});
     });
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
+      if (event.type === ServerWsMessageType.readReceiptChanged && event.payload.chatId === this.id())
+        this.invalidateReadReceipt(event.payload.privacyChanged === true);
       if (!this.isCurrent()) return;
       if (event.type === ServerWsMessageType.messageUpdated && event.payload.id === this.threadId())
         this.loadedThreadRoot.set(event.payload);
@@ -639,6 +715,7 @@ export class ConversationPage {
         const entry = this.entryKey();
         void this.conversation.reconnect();
         void this.loadPins();
+        this.invalidateReadReceipt();
         void this.refreshConversationMetadata()
           .catch(() => {})
           .then(() => {

@@ -14,6 +14,7 @@ import type {
   CreateFriendRequestBody,
   FriendAddInfoResponse,
   FriendPresenceSettingsResponse,
+  FriendReadReceiptSettingsResponse,
   FriendRelationshipResponse,
   FriendRequestResponse,
   FriendSettingsResponse,
@@ -22,10 +23,13 @@ import type {
   ListFriendsResponse,
   PendingFriendRequestCountResponse,
   PresenceSettingsResponse,
+  ReadReceiptSettingsResponse,
   SnowflakeID,
   UpdateFriendPresenceSettingsBody,
+  UpdateFriendReadReceiptSettingsBody,
   UpdateFriendSettingsBody,
   UpdatePresenceSettingsBody,
+  UpdateReadReceiptSettingsBody,
 } from '../../models';
 import type { HttpHeaders, HttpResponse as AngularHttpResponse } from '@angular/common/http';
 import { CHAHUA_BASE_URL } from '../chahua.base-url';
@@ -578,6 +582,88 @@ export class FriendsService {
       observe: 'body',
     });
   }
+  getFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/friends/${uid}/read-receipt-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/friends/${uid}/read-receipt-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/friends/${uid}/read-receipt-settings`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  updateFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    updateFriendReadReceiptSettingsBody: UpdateFriendReadReceiptSettingsBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  updateFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    updateFriendReadReceiptSettingsBody: UpdateFriendReadReceiptSettingsBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  updateFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    updateFriendReadReceiptSettingsBody: UpdateFriendReadReceiptSettingsBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  updateFriendReadReceiptSettings<TData = FriendReadReceiptSettingsResponse>(
+    uid: number,
+    updateFriendReadReceiptSettingsBody: UpdateFriendReadReceiptSettingsBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.put<TData>(
+        `${this.baseUrl}/friends/${uid}/read-receipt-settings`,
+        updateFriendReadReceiptSettingsBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.put<TData>(
+        `${this.baseUrl}/friends/${uid}/read-receipt-settings`,
+        updateFriendReadReceiptSettingsBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.put<TData>(
+      `${this.baseUrl}/friends/${uid}/read-receipt-settings`,
+      updateFriendReadReceiptSettingsBody,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
   getMyPresenceSettings<TData = PresenceSettingsResponse>(options?: HttpClientBodyOptions): Observable<TData>;
   getMyPresenceSettings<TData = PresenceSettingsResponse>(
     options?: HttpClientEventOptions,
@@ -634,6 +720,66 @@ export class FriendsService {
       });
     }
     return this.http.put<TData>(`${this.baseUrl}/me/presence-settings`, updatePresenceSettingsBody, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  getMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(options?: HttpClientBodyOptions): Observable<TData>;
+  getMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/me/read-receipt-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/me/read-receipt-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/me/read-receipt-settings`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  updateMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(
+    updateReadReceiptSettingsBody: UpdateReadReceiptSettingsBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  updateMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(
+    updateReadReceiptSettingsBody: UpdateReadReceiptSettingsBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  updateMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(
+    updateReadReceiptSettingsBody: UpdateReadReceiptSettingsBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  updateMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(
+    updateReadReceiptSettingsBody: UpdateReadReceiptSettingsBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.put<TData>(`${this.baseUrl}/me/read-receipt-settings`, updateReadReceiptSettingsBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.put<TData>(`${this.baseUrl}/me/read-receipt-settings`, updateReadReceiptSettingsBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.put<TData>(`${this.baseUrl}/me/read-receipt-settings`, updateReadReceiptSettingsBody, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

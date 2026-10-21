@@ -2,7 +2,13 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ModalController } from '@ionic/angular';
-import { alertCircleOutline, checkmarkOutline, cloudUploadOutline, timeOutline } from 'ionicons/icons';
+import {
+  alertCircleOutline,
+  checkmarkDoneOutline,
+  checkmarkOutline,
+  cloudUploadOutline,
+  timeOutline,
+} from 'ionicons/icons';
 import { vi } from 'vitest';
 import { AttachmentUploadPurpose, MessageType, type MessagePreview } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
@@ -345,6 +351,11 @@ describe('Message', () => {
     fixture.detectChanges();
     expect(fixture.debugElement.query(By.css('.media-time app-message-status ion-icon')).componentInstance.icon).toBe(
       checkmarkOutline,
+    );
+    fixture.componentRef.setInput('read', true);
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.css('.media-time app-message-status ion-icon')).componentInstance.icon).toBe(
+      checkmarkDoneOutline,
     );
     fixture.componentRef.setInput('preview', true);
     fixture.detectChanges();

@@ -25,6 +25,7 @@ import {
   bookmarkOutline,
   happyOutline,
   constructOutline,
+  checkmarkDoneOutline,
   eyeOutline,
   notificationsOutline,
   refreshOutline,
@@ -77,6 +78,7 @@ export class Settings {
   protected readonly generalIcon = settingsOutline;
   protected readonly verificationIcon = shieldCheckmarkOutline;
   protected readonly presenceIcon = eyeOutline;
+  protected readonly readReceiptIcon = checkmarkDoneOutline;
   protected readonly stickerIcon = happyOutline;
   protected readonly notificationIcon = notificationsOutline;
   protected readonly updateIcon = refreshOutline;

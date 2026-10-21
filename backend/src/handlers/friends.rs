@@ -11,11 +11,13 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::friends::{
-    FriendAddInfoResponse, FriendPresenceSettingsResponse, FriendRelationshipResponse,
-    FriendRequestDirection, FriendRequestHistoryEntry, FriendRequestResponse, FriendResponse,
-    FriendSettingsResponse, ListFriendRequestHistoryResponse, ListFriendsResponse,
-    PendingFriendRequestCountResponse, PresenceSettingsResponse, UpdateFriendPresenceSettingsBody,
-    UpdateFriendSettingsBody, UpdatePresenceSettingsBody,
+    FriendAddInfoResponse, FriendPresenceSettingsResponse, FriendReadReceiptSettingsResponse,
+    FriendRelationshipResponse, FriendRequestDirection, FriendRequestHistoryEntry,
+    FriendRequestResponse, FriendResponse, FriendSettingsResponse,
+    ListFriendRequestHistoryResponse, ListFriendsResponse, PendingFriendRequestCountResponse,
+    PresenceSettingsResponse, ReadReceiptSettingsResponse, UpdateFriendPresenceSettingsBody,
+    UpdateFriendReadReceiptSettingsBody, UpdateFriendSettingsBody, UpdatePresenceSettingsBody,
+    UpdateReadReceiptSettingsBody,
 };
 use crate::dto::users::MemberSummary;
 use crate::dto::ws::{
@@ -244,6 +246,12 @@ async fn delete_friend(
     if !removed {
         return Err(AppError::NotFound("Friendship not found"));
     }
+    crate::services::read_receipts::broadcast_pair_privacy_changed(
+        conn,
+        &state.ws_registry,
+        uid,
+        other,
+    )?;
     fire_ws(
         &state,
         &[uid, other],
@@ -563,6 +571,49 @@ async fn update_my_presence_settings(
     Ok(Json(PresenceSettingsResponse { visibility }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/me/read-receipt-settings",
+    operation_id = "get_my_read_receipt_settings",
+    tag = "friends",
+    responses((status = 200, description = "Current user's global read-receipt policy", body = ReadReceiptSettingsResponse)),
+    security(("bearer_jwt" = []))
+)]
+async fn get_my_read_receipt_settings(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+) -> Result<Json<ReadReceiptSettingsResponse>, AppError> {
+    let visibility = social::get_read_receipt_settings(&mut conn, uid)?;
+    Ok(Json(ReadReceiptSettingsResponse { visibility }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/me/read-receipt-settings",
+    operation_id = "update_my_read_receipt_settings",
+    tag = "friends",
+    request_body = UpdateReadReceiptSettingsBody,
+    responses((status = 200, description = "Updated global read-receipt policy", body = ReadReceiptSettingsResponse)),
+    security(("bearer_jwt" = []))
+)]
+async fn update_my_read_receipt_settings(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Json(body): Json<UpdateReadReceiptSettingsBody>,
+) -> Result<Json<ReadReceiptSettingsResponse>, AppError> {
+    let previous = social::get_read_receipt_settings(&mut conn, uid)?;
+    let visibility = social::update_read_receipt_settings(&mut conn, uid, body.visibility)?;
+    if previous != visibility {
+        crate::services::read_receipts::broadcast_global_privacy_changed(
+            &mut conn,
+            &state.ws_registry,
+            uid,
+        )?;
+    }
+    Ok(Json(ReadReceiptSettingsResponse { visibility }))
+}
+
 fn validate_presence_friend_uid(uid: i32, peer_uid: i32) -> Result<(), AppError> {
     if peer_uid <= 0 || peer_uid == uid {
         return Err(AppError::BadRequest("Peer UID is invalid"));
@@ -617,12 +668,71 @@ async fn update_friend_presence_settings(
     Ok(Json(FriendPresenceSettingsResponse { override_value }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/{uid}/read-receipt-settings",
+    operation_id = "get_friend_read_receipt_settings",
+    tag = "friends",
+    params(("uid" = i32, Path, description = "Current friend UID")),
+    responses(
+        (status = 200, description = "Current user's read-receipt override for this friend", body = FriendReadReceiptSettingsResponse),
+        (status = 404, description = "Friendship not found")
+    ),
+    security(("bearer_jwt" = []))
+)]
+async fn get_friend_read_receipt_settings(
+    CurrentUid(uid): CurrentUid,
+    mut conn: DbConn,
+    Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
+) -> Result<Json<FriendReadReceiptSettingsResponse>, AppError> {
+    validate_presence_friend_uid(uid, peer_uid)?;
+    let override_value = social::get_friend_read_receipt_settings(&mut conn, uid, peer_uid)?;
+    Ok(Json(FriendReadReceiptSettingsResponse { override_value }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/{uid}/read-receipt-settings",
+    operation_id = "update_friend_read_receipt_settings",
+    tag = "friends",
+    params(("uid" = i32, Path, description = "Current friend UID")),
+    request_body = UpdateFriendReadReceiptSettingsBody,
+    responses(
+        (status = 200, description = "Updated read-receipt override", body = FriendReadReceiptSettingsResponse),
+        (status = 404, description = "Friendship not found")
+    ),
+    security(("bearer_jwt" = []))
+)]
+async fn update_friend_read_receipt_settings(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
+    Json(body): Json<UpdateFriendReadReceiptSettingsBody>,
+) -> Result<Json<FriendReadReceiptSettingsResponse>, AppError> {
+    validate_presence_friend_uid(uid, peer_uid)?;
+    let previous = social::get_friend_read_receipt_settings(&mut conn, uid, peer_uid)?;
+    let override_value =
+        social::update_friend_read_receipt_settings(&mut conn, uid, peer_uid, body.override_value)?;
+    if previous != override_value {
+        crate::services::read_receipts::broadcast_pair_privacy_changed(
+            &mut conn,
+            &state.ws_registry,
+            uid,
+            peer_uid,
+        )?;
+    }
+    Ok(Json(FriendReadReceiptSettingsResponse { override_value }))
+}
+
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(get_friends))
         .routes(routes!(get_friend_relationship))
         .routes(routes!(get_friend_presence_settings))
         .routes(routes!(update_friend_presence_settings))
+        .routes(routes!(get_friend_read_receipt_settings))
+        .routes(routes!(update_friend_read_receipt_settings))
         .routes(routes!(delete_friend))
         .routes(routes!(create_friend_request))
         .routes(routes!(count_pending_incoming_requests))
@@ -639,6 +749,8 @@ pub fn presence_settings_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(get_my_presence_settings))
         .routes(routes!(update_my_presence_settings))
+        .routes(routes!(get_my_read_receipt_settings))
+        .routes(routes!(update_my_read_receipt_settings))
 }
 
 #[cfg(test)]

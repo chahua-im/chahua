@@ -39,6 +39,7 @@ describe('Chat feature requests', () => {
     mutedUntil: () => undefined,
     chatState: vi.fn(),
     invalidate: vi.fn(),
+    invalidateReadReceiptPrivacy: vi.fn(),
     ensureDetails: vi.fn().mockResolvedValue(undefined),
   };
   beforeEach(() => {
@@ -130,6 +131,7 @@ describe('Chat feature requests', () => {
     await vi.waitFor(() =>
       http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
     );
+    http.expectOne('/_api/friends/2/read-receipt-settings').flush({ override: 'inherit' });
     const changing = fixture.componentInstance['blockUser']();
     await vi.waitFor(() => {
       const request = http.expectOne((req) => req.method === (blocking ? 'DELETE' : 'POST'));
@@ -156,6 +158,7 @@ describe('Chat feature requests', () => {
     await vi.waitFor(() =>
       http.expectOne('/_api/friends/2/presence-settings').flush({ override: FriendPresenceOverride.inherit }),
     );
+    http.expectOne('/_api/friends/2/read-receipt-settings').flush({ override: 'inherit' });
     http.expectNone('/_api/friends/add-info/2');
     http.expectNone('/_api/friends/2');
     expect(fixture.componentInstance['relationship']()).toBe(query.value());

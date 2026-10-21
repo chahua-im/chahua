@@ -81,6 +81,7 @@ pub enum ServerWsMessage {
     ThreadUpdate(ThreadUpdatePayload),
     ThreadMembershipChanged(ThreadMembershipChangedPayload),
     ChatArchiveStateChanged(ChatArchiveStateChangedPayload),
+    ReadReceiptChanged(ReadReceiptChangedPayload),
     /// Chat-level pin event. Kept stable for already-deployed clients.
     PinAdded(PinUpdatePayload),
     /// Thread-scoped pin event. Old clients ignore this unknown event type.
@@ -109,6 +110,7 @@ impl ServerWsMessage {
             Self::ThreadUpdate(_) => "threadUpdate",
             Self::ThreadMembershipChanged(_) => "threadMembershipChanged",
             Self::ChatArchiveStateChanged(_) => "chatArchiveStateChanged",
+            Self::ReadReceiptChanged(_) => "readReceiptChanged",
             Self::PinAdded(_) => "pinAdded",
             Self::ThreadPinAdded(_) => "threadPinAdded",
             Self::PinRemoved(_) => "pinRemoved",
@@ -207,6 +209,19 @@ pub struct ChatArchiveStateChangedPayload {
     pub muted_until: Option<DateTime<Utc>>,
 }
 
+/// Invalidation-only signal for a direct-message receipt. The cursor itself
+/// stays private to the HTTP endpoint; privacy changes let clients clear a
+/// previously rendered receipt before their authorized refetch completes.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadReceiptChangedPayload {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub chat_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub privacy_changed: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PinUpdatePayload {
@@ -294,7 +309,8 @@ mod tests {
     use super::{
         ClientWsMessage, GroupPresenceResponse, NotificationPayload, NotificationType,
         OnlineClientStatus, PinUpdatePayload, PresenceSnapshotPayload, PresenceUpdatePayload,
-        ServerWsMessage, ThreadMembershipChangedPayload, UserPresenceResponse,
+        ReadReceiptChangedPayload, ServerWsMessage, ThreadMembershipChangedPayload,
+        UserPresenceResponse,
     };
     use serde_json::json;
 
@@ -405,6 +421,34 @@ mod tests {
         payload.request_id = Some(0);
         let value = serde_json::to_value(&payload).unwrap();
         assert_eq!(value["requestId"], json!(0));
+    }
+
+    #[test]
+    fn read_receipt_invalidation_never_serializes_a_cursor() {
+        let ordinary = serde_json::to_value(ServerWsMessage::ReadReceiptChanged(
+            ReadReceiptChangedPayload {
+                chat_id: 9_223_372_036_854_775_807,
+                privacy_changed: None,
+            },
+        ))
+        .unwrap();
+        assert_eq!(ordinary["type"], "readReceiptChanged");
+        assert_eq!(
+            ordinary["payload"],
+            json!({"chatId": "9223372036854775807"})
+        );
+
+        let privacy_changed = serde_json::to_value(ServerWsMessage::ReadReceiptChanged(
+            ReadReceiptChangedPayload {
+                chat_id: 7,
+                privacy_changed: Some(true),
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            privacy_changed["payload"],
+            json!({"chatId": "7", "privacyChanged": true})
+        );
     }
 
     #[test]

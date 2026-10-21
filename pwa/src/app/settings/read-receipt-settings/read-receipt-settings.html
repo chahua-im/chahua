@@ -1,0 +1,60 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-button (click)="modals.dismiss()">
+        <ion-icon slot="icon-only" [icon]="backIcon"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+    <ion-title>{{ 'settings.readReceipt.title' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars color="light">
+  <ion-list [inset]="true">
+    @if (loading()) {
+      <ion-item lines="none"><ion-spinner slot="start"></ion-spinner></ion-item>
+    } @else if (loadError()) {
+      <app-load-error
+        compact
+        [message]="'settings.readReceipt.loadFailed' | transloco"
+        (retry)="loadReadReceiptSettings()" />
+    } @else {
+      <ion-radio-group [value]="visibility()" (ionChange)="chooseVisibility($event.detail.value)">
+        <ion-item>
+          <ion-icon slot="start" [icon]="friendsIcon" color="primary"></ion-icon>
+          <ion-radio [value]="Visibility.friends" [disabled]="saving()" justify="space-between">
+            <span class="ion-text-wrap">{{ 'settings.readReceipt.friends' | transloco }}</span>
+          </ion-radio>
+        </ion-item>
+        <ion-item lines="none">
+          <ion-icon slot="start" [icon]="nobodyIcon" color="primary"></ion-icon>
+          <ion-radio [value]="Visibility.nobody" [disabled]="saving()" justify="space-between">
+            <span class="ion-text-wrap">{{ 'settings.readReceipt.nobody' | transloco }}</span>
+          </ion-radio>
+        </ion-item>
+      </ion-radio-group>
+      <ion-item lines="none">
+        <ion-note class="ion-text-wrap">{{ 'settings.readReceipt.reciprocalNote' | transloco }}</ion-note>
+      </ion-item>
+      <ion-item lines="none">
+        @if (saveError()) {
+          <ion-label class="ion-text-wrap" color="danger">
+            {{ 'settings.readReceipt.saveFailed' | transloco }}
+          </ion-label>
+        } @else if (saved()) {
+          <ion-label color="medium">{{ 'common.saved' | transloco }}</ion-label>
+        }
+        <ion-button slot="end" fill="clear" [disabled]="saving()" (click)="saveReadReceiptSettings()">
+          <span class="action-content" [class.busy]="saving()">
+            <span class="action-label">{{ 'common.save' | transloco }}</span>
+            @if (saving()) {
+              <ion-spinner></ion-spinner>
+            }
+          </span>
+        </ion-button>
+      </ion-item>
+    }
+  </ion-list>
+</ion-content>

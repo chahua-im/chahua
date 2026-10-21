@@ -133,6 +133,36 @@ pub struct UpdateFriendPresenceSettingsBody {
     pub override_value: crate::models::FriendPresenceOverride,
 }
 
+/// A user's global policy for publishing read receipts.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadReceiptSettingsResponse {
+    pub visibility: crate::models::ReadReceiptVisibility,
+}
+
+/// Body for PUT /me/read-receipt-settings.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReadReceiptSettingsBody {
+    pub visibility: crate::models::ReadReceiptVisibility,
+}
+
+/// The current user's override for publishing read receipts to one current friend.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FriendReadReceiptSettingsResponse {
+    #[serde(rename = "override")]
+    pub override_value: crate::models::FriendReadReceiptOverride,
+}
+
+/// Body for PUT /friends/{uid}/read-receipt-settings.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateFriendReadReceiptSettingsBody {
+    #[serde(rename = "override")]
+    pub override_value: crate::models::FriendReadReceiptOverride,
+}
+
 /// What a requester needs to know to render the add-friend UI for a target
 /// (GET /users/:uid/friend-add-info).
 #[derive(Debug, Clone, Serialize, ToSchema)]

@@ -194,6 +194,7 @@ describe('ConversationPage', () => {
     component = fixture.componentInstance;
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
     const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
     expect(fixture.nativeElement.querySelector('.message-skeleton')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.message-skeleton-avatar')).toBeNull();
@@ -3241,4 +3242,65 @@ describe('ConversationPage', () => {
       expect(component['replyTo']()).toBeUndefined();
     },
   );
+  it('keeps an authorized DM receipt through ordinary invalidation and clears it immediately for privacy changes', async () => {
+    TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
+    fixture.detectChanges();
+    const initial = http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`);
+    initial.flush({ lastReadMessageId: wireMessage.id });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['readReceiptId']()).toBe(testMessage.id);
+    expect(fixture.debugElement.query(By.directive(Message)).componentInstance.read()).toBe(true);
+
+    events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id } });
+    expect(component['readReceiptId']()).toBe(testMessage.id);
+    const ordinary = http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`);
+    events.next({
+      type: ServerWsMessageType.readReceiptChanged,
+      payload: { chatId: testChat.id, privacyChanged: true },
+    });
+    expect(component['readReceiptId']()).toBeUndefined();
+    const privacy = http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`);
+    ordinary.flush({ lastReadMessageId: wireMessage.id });
+    privacy.flush({});
+    await fixture.whenStable();
+    expect(component['readReceiptId']()).toBeUndefined();
+  });
+
+  it('retains DM read checks while covered and applies local privacy saves without a WebSocket echo', async () => {
+    TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
+    fixture.detectChanges();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    await fixture.whenStable();
+    component['active'].set(false);
+    fixture.detectChanges();
+    expect(component['isReadByPeer'](testMessage)).toBe(true);
+    TestBed.inject(ChatStore).invalidateReadReceiptPrivacy();
+    expect(component['isReadByPeer'](testMessage)).toBe(false);
+    http.expectNone(`/_api/chats/${wireChat.id}/read-receipt`);
+    component['active'].set(true);
+    fixture.detectChanges();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    await fixture.whenStable();
+    expect(component['isReadByPeer'](testMessage)).toBe(false);
+  });
+
+  it('uses separate DM and thread receipts for the root and replies, without reading another thread', async () => {
+    TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
+    fixture.detectChanges();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    await fixture.whenStable();
+    const entering = enterThread();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({ lastReadMessageId: '102' });
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: '99' });
+    await entering;
+    expect(component['isReadByPeer']({ ...testMessage, id: encodeId('101'), replyRootId: encodeId('100') })).toBe(true);
+    expect(component['isReadByPeer']({ ...testMessage, id: encodeId('100') })).toBe(false);
+    expect(component['isReadByPeer']({ ...testMessage, id: encodeId('101'), replyRootId: encodeId('99') })).toBe(false);
+    events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id } });
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({ lastReadMessageId: '102' });
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: '100' });
+    await fixture.whenStable();
+    expect(component['isReadByPeer']({ ...testMessage, id: encodeId('100') })).toBe(true);
+  });
 });

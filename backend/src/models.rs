@@ -982,6 +982,34 @@ pub enum PresenceVisibility {
     Nobody,
 }
 
+/// Global policy controlling who can see an individual's read receipts.
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::ReadReceiptVisibility"]
+#[serde(rename_all = "lowercase")]
+pub enum ReadReceiptVisibility {
+    Friends,
+    Nobody,
+}
+
+/// Per-friend refinement of the owner's global read-receipt policy.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FriendReadReceiptOverride {
+    Inherit,
+    Share,
+    Hide,
+}
+
 /// Per-friend refinement of the owner's global presence policy.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]

@@ -114,6 +114,39 @@ and immediately re-requests its scope. Group aggregates, their cache, and regist
 online membership ignore individual privacy, so small-group counts may indirectly
 reveal activity.
 
+## Direct-message read receipts
+
+Read receipts are limited to DMs and have no timestamp. A single check remains
+the delivered/sent state; a double check means the peer's visible receipt has
+advanced. Group chats never expose a receipt.
+
+| Authenticated endpoint | GET response / PUT body and response |
+| --- | --- |
+| `/me/read-receipt-settings` | `{ "visibility": "friends" }`; allowed values: `friends`, `nobody`. |
+| `/friends/{uid}/read-receipt-settings` | `{ "override": "inherit" }`; allowed values: `inherit`, `share`, `hide`. Requires a current friendship; missing friendships return 404. |
+| `/chats/{chat_id}/read-receipt?threadId={root_id}` | `{ "lastReadMessageId": "…" }`; omit `threadId` for top-level DM messages. The field is absent when no receipt is visible or known. |
+
+Both DM participants must be current friends, unblocked in either direction,
+and permit sharing through their global policy plus their own per-friend
+override. Overrides are directional, take precedence over the owner's global
+policy, and disappear with the friendship. New users and users without a
+`user_extra` row default to `friends`.
+
+`group_membership.last_read_receipt_message_id` and
+`thread_user_states.last_read_receipt_message_id` are independent monotonic
+high-water marks. Rewinding unread state or deleting a message never rewinds
+them. Thread requests read only the matching thread-state marker; they never
+fall back to the parent DM marker. Explicit read targets must be published
+messages in the authorized top-level or thread scope. Sending also advances
+the receipt alongside the sender's existing read pointer, including while an
+accepted voice message awaits publication.
+
+The `readReceiptChanged` WebSocket event is an invalidation only:
+`{ "type": "readReceiptChanged", "payload": { "chatId": "…" } }`.
+Receipt advances omit `privacyChanged`; a policy, friendship, or block change
+sets `privacyChanged: true` so clients clear a cached check before refetching.
+Neither form contains a receipt cursor or timestamp.
+
 ## APNs setup
 
 This backend talks to Apple Push Notification service directly using **token-based auth**.

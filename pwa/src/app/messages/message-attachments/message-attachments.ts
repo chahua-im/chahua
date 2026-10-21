@@ -71,6 +71,7 @@ export class MessageAttachments {
   readonly overlayTime = input(false);
   readonly outgoing = input(false);
   readonly delivery = input<MessageDelivery>();
+  readonly read = input(false);
   readonly uploads = input<readonly AttachmentUpload[]>([]);
   /** Confirmed messages hand their identity to the voice player so the docked bar can label and locate them. */
   protected readonly dock = computed<VoiceDock | undefined>(() => {

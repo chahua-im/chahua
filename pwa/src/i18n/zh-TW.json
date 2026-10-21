@@ -48,6 +48,7 @@
       "saved": "收藏",
       "friendVerification": "好友驗證",
       "presence": "在線狀態隱私",
+      "readReceipts": "已讀回條",
       "stickers": "表情和貼紙",
       "notifications": "通知",
       "notificationsUnsupported": "不支援",
@@ -101,6 +102,19 @@
       "friendShare": "與這位好友分享",
       "friendHide": "對這位好友隱藏",
       "friendLoadFailed": "此好友的在線狀態設定載入失敗。"
+    },
+    "readReceipt": {
+      "title": "已讀回條",
+      "loadFailed": "已讀回條設定載入失敗。",
+      "friends": "僅好友",
+      "nobody": "沒有人",
+      "reciprocalNote": "只會在雙方都允許分享時顯示已讀回條；群組對話永不顯示已讀回條。",
+      "saveFailed": "儲存失敗，請重試。",
+      "friendTitle": "已讀回條分享",
+      "friendInherit": "使用全域設定",
+      "friendShare": "與這位好友分享",
+      "friendHide": "對這位好友隱藏",
+      "friendLoadFailed": "此好友的已讀回條設定載入失敗。"
     },
     "stickers": {
       "title": "表情和貼紙",

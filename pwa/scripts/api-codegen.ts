@@ -82,6 +82,7 @@ const queryIds: Record<string, string[]> = {
   '/group': ['after'],
   '/chats/{chat_id}/attachments': ['before', 'after'],
   '/chats/{chat_id}/messages': ['before', 'after', 'around', 'threadId'],
+  '/chats/{chat_id}/read-receipt': ['threadId'],
   '/chats/{chat_id}/saved-messages': ['before'],
   '/saved-messages': ['before'],
   '/invites': ['groupId'],

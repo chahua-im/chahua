@@ -166,6 +166,7 @@
           [uploads]="row.outgoing?.uploads ?? []"
           (retry)="row.outgoing && outbox.retry(row.outgoing)"
           [own]="row.message.sender.uid === session.user()?.uid"
+          [read]="row.message.sender.uid === session.user()?.uid && isReadByPeer(row.message)"
           [first]="row.first"
           [last]="row.last"
           [canReply]="!editing()"

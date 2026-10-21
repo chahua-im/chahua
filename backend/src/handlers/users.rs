@@ -66,6 +66,7 @@ async fn put_stickerpack_order(
 
     let extra = user_extra::table
         .filter(user_extra::uid.eq(uid))
+        .select(UserExtra::as_select())
         .first::<UserExtra>(conn)
         .optional()?;
 
