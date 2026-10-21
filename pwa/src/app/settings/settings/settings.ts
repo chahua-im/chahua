@@ -1,6 +1,8 @@
+import { Preferences } from '../preferences';
+import { localeLabels } from '../locale';
 import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
-import { RouterLink, Router } from '@angular/router';
-import { afterRenderEffect, Component, computed, inject, isDevMode, signal, viewChild } from '@angular/core';
+import { RouterLink } from '@angular/router';
+import { Component, computed, inject, isDevMode, signal } from '@angular/core';
 import {
   IonButton,
   IonButtons,
@@ -14,26 +16,20 @@ import {
   IonInput,
   IonSpinner,
   IonTitle,
-  IonToast,
-  IonToggle,
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
-import { TranslocoPipe } from '@jsverse/transloco';
-import type { ToggleCustomEvent } from '@ionic/core';
+import { translateSignal, TranslocoPipe } from '@jsverse/transloco';
 import {
-  bookmarkOutline,
+  languageOutline,
   happyOutline,
   constructOutline,
-  checkmarkDoneOutline,
   eyeOutline,
   notificationsOutline,
   refreshOutline,
   settingsOutline,
-  shieldCheckmarkOutline,
 } from 'ionicons/icons';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
-import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { devBackendEnabled, SessionStore } from '../../session/session-store';
 
@@ -56,8 +52,6 @@ import { devBackendEnabled, SessionStore } from '../../session/session-store';
     IonNote,
     IonInput,
     IonTitle,
-    IonToast,
-    IonToggle,
     IonSpinner,
     IonToolbar,
     TranslocoPipe,
@@ -66,19 +60,21 @@ import { devBackendEnabled, SessionStore } from '../../session/session-store';
 })
 export class Settings {
   private readonly modals = inject(ModalController);
-  private readonly permissionToast = viewChild.required(IonToast);
-  private readonly router = inject(Router);
+
   protected readonly session = inject(SessionStore);
-  protected readonly notifications = inject(PushNotifications);
   protected readonly updates = inject(AppUpdates);
-  protected readonly PushError = PushNotificationError;
   protected readonly UpdateResult = UpdateCheckResult;
   protected readonly updateResult = signal<UpdateCheckResult | undefined>(undefined);
-  protected readonly bookmarkIcon = bookmarkOutline;
+  protected readonly languageIcon = languageOutline;
+  private readonly preferences = inject(Preferences);
+  private readonly autoLabel = translateSignal('settings.language.auto');
+  protected readonly localeLabel = computed(() => {
+    const locale = this.preferences.selectedLocale();
+    return locale ? localeLabels[locale] : this.autoLabel();
+  });
   protected readonly generalIcon = settingsOutline;
-  protected readonly verificationIcon = shieldCheckmarkOutline;
+
   protected readonly presenceIcon = eyeOutline;
-  protected readonly readReceiptIcon = checkmarkDoneOutline;
   protected readonly stickerIcon = happyOutline;
   protected readonly notificationIcon = notificationsOutline;
   protected readonly updateIcon = refreshOutline;
@@ -92,10 +88,6 @@ export class Settings {
 
   constructor() {
     if (this.devMode) this.devUidInput.set(String(this.session.devUid()));
-    void this.notifications.refresh();
-    afterRenderEffect(() => {
-      if (this.notifications.error() === PushNotificationError.PermissionDenied) void this.permissionToast().present();
-    });
   }
 
   protected editDevUid(event: Event) {
@@ -110,15 +102,6 @@ export class Settings {
 
   protected close() {
     return this.modals.dismiss();
-  }
-
-  protected openSaved() {
-    return this.router.navigateByUrl('/chats/saved', { replaceUrl: true });
-  }
-
-  protected async setNotifications(event: ToggleCustomEvent) {
-    await this.notifications.setEnabled(event.detail.checked);
-    event.target.checked = this.notifications.enabled();
   }
 
   protected async checkUpdates() {

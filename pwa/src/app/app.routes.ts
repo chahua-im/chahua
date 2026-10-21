@@ -13,10 +13,13 @@ import { SavedMessagesPage } from './conversations/saved-messages/saved-messages
 import { ChatDetails, DetailView } from './chats/chat-details/chat-details';
 import { ChatSearch } from './chats/chat-search/chat-search';
 import { StartChatKind } from './chats/start-chat/start-chat';
+import { NotificationSettings } from './settings/notification-settings/notification-settings';
 import { Settings } from './settings/settings/settings';
 import { GeneralSettings } from './settings/general-settings/general-settings';
 import { LanguageSettings } from './settings/language-settings/language-settings';
 import { FriendVerificationSettings } from './settings/friend-verification-settings/friend-verification-settings';
+import { PrivacySettings } from './settings/privacy-settings/privacy-settings';
+import { BlockedUsers } from './settings/blocked-users/blocked-users';
 import { PresenceSettings } from './settings/presence-settings/presence-settings';
 import { ReadReceiptSettings } from './settings/read-receipt-settings/read-receipt-settings';
 import { StickerSettings } from './settings/sticker-settings/sticker-settings';
@@ -67,6 +70,7 @@ export const routes: Routes = [
   { path: 'chats/join/:code', component: ChatLink, data: { modal: true } },
   { path: 'chats/chat/:id/stickers/:packId', component: ChatLink, data: { modal: true } },
   { path: 'settings', component: ChatLink, data: { modal: true, component: Settings } },
+  { path: 'settings/notifications', component: ChatLink, data: { modal: true, component: NotificationSettings } },
   { path: 'settings/general', component: ChatLink, data: { modal: true, component: GeneralSettings } },
   { path: 'settings/language', component: ChatLink, data: { modal: true, component: LanguageSettings } },
   {
@@ -74,6 +78,8 @@ export const routes: Routes = [
     component: ChatLink,
     data: { modal: true, component: FriendVerificationSettings },
   },
+  { path: 'settings/privacy', component: ChatLink, data: { modal: true, component: PrivacySettings } },
+  { path: 'settings/blocked-users', component: ChatLink, data: { modal: true, component: BlockedUsers } },
   { path: 'settings/presence', component: ChatLink, data: { modal: true, component: PresenceSettings } },
   { path: 'settings/read-receipts', component: ChatLink, data: { modal: true, component: ReadReceiptSettings } },
   { path: 'settings/stickers', component: ChatLink, data: { modal: true, component: StickerSettings } },

@@ -85,9 +85,11 @@ export class PresenceSettings {
 
   protected chooseVisibility(value: unknown) {
     if (!Object.values(PresenceVisibility).includes(value as PresenceVisibility) || this.saving()) return;
+    if (value === this.visibility()) return;
     this.visibility.set(value as PresenceVisibility);
     this.saved.set(false);
     this.saveError.set(false);
+    void this.savePresenceSettings();
   }
 
   protected async savePresenceSettings() {

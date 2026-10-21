@@ -11,26 +11,31 @@ export class Localization {
   private readonly injector = inject(Injector);
   private readonly document = inject(DOCUMENT);
   private readonly active = signal<AppLocale>(this.initialLocale());
+  private request = 0;
   readonly locale = this.active.asReadonly();
 
   /** Runs before the first render so the saved language never flashes. */
   async initialize() {
-    await this.activate(this.injector.get(Preferences).selectedLocale() ?? detectLocale());
-  }
-
-  async setLocale(locale: AppLocale | null) {
-    this.injector.get(Preferences).setLocale(locale);
-    await this.activate(locale ?? detectLocale());
-  }
-
-  private async activate(locale: AppLocale) {
     try {
-      await firstValueFrom(this.transloco.load(locale));
-      this.setActive(locale);
+      await this.setLocale(this.injector.get(Preferences).selectedLocale());
     } catch {
-      // A failed catalog fetch should not block startup; keep the default language.
       this.setActive(defaultLocale);
     }
+  }
+
+  async setLocale(locale: AppLocale | null): Promise<boolean> {
+    const request = ++this.request;
+    const resolved = locale ?? detectLocale();
+    try {
+      await firstValueFrom(this.transloco.load(resolved));
+    } catch (error) {
+      if (request !== this.request) return false;
+      throw error;
+    }
+    if (request !== this.request) return false;
+    this.setActive(resolved);
+    this.injector.get(Preferences).setLocale(locale);
+    return true;
   }
 
   private setActive(locale: AppLocale) {

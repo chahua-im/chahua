@@ -1,6 +1,5 @@
-import { Component, computed, inject } from '@angular/core';
-import { RouterLink } from '@angular/router';
-import { translateSignal, TranslocoPipe } from '@jsverse/transloco';
+import { Component, inject } from '@angular/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -12,6 +11,7 @@ import {
   IonList,
   IonListHeader,
   IonNote,
+  IonRange,
   IonRadio,
   IonRadioGroup,
   IonTitle,
@@ -23,24 +23,22 @@ import {
   chatbubblesOutline,
   chevronBackOutline,
   contrastOutline,
-  languageOutline,
   moonOutline,
   personCircleOutline,
   personOutline,
   sunnyOutline,
 } from 'ionicons/icons';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { ChatFontSize, chatFontSizes } from '../chat-font-size';
 import { ColorMode } from '../color-mode';
-import { localeLabels } from '../locale';
 import { Preferences } from '../preferences';
 
 @Component({
   selector: 'app-general-settings',
   templateUrl: './general-settings.html',
-  styleUrl: '../settings/settings.scss',
+  styleUrl: './general-settings.scss',
   imports: [
     ContentScrollbars,
-    RouterLink,
     TranslocoPipe,
     IonButton,
     IonButtons,
@@ -52,6 +50,7 @@ import { Preferences } from '../preferences';
     IonList,
     IonListHeader,
     IonNote,
+    IonRange,
     IonRadio,
     IonRadioGroup,
     IonTitle,
@@ -65,18 +64,18 @@ export class GeneralSettings {
   protected readonly modals = inject(ModalController);
   protected readonly ColorMode = ColorMode;
   protected readonly threadsIcon = chatbubblesOutline;
-  protected readonly languageIcon = languageOutline;
+  protected readonly FontSize = ChatFontSize;
+  protected readonly fontSizes = chatFontSizes;
   protected readonly avatarsIcon = personCircleOutline;
   protected readonly dmDetailsIcon = personOutline;
   protected readonly systemIcon = contrastOutline;
   protected readonly lightIcon = sunnyOutline;
   protected readonly darkIcon = moonOutline;
   protected readonly backIcon = chevronBackOutline;
-  private readonly autoLabel = translateSignal('settings.language.auto');
-  protected readonly localeLabel = computed(() => {
-    const locale = this.preferences.selectedLocale();
-    return locale ? localeLabels[locale] : this.autoLabel();
-  });
+
+  protected setFontSize(value: number | { lower: number; upper: number }) {
+    if (typeof value === 'number') this.preferences.setChatFontSize(value);
+  }
 
   protected setColorMode(value: ColorMode) {
     this.preferences.setColorMode(value);

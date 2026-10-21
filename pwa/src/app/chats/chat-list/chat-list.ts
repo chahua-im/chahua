@@ -10,7 +10,7 @@ import {
   signal,
   viewChildren,
 } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonAvatar,
@@ -33,8 +33,8 @@ import {
   IonToolbar,
   type SegmentCustomEvent,
 } from '@ionic/angular';
-import { addCircleOutline } from 'ionicons/icons';
-import { PushNotifications } from '../../pwa/push-notifications';
+import { addCircleOutline, bookmarkOutline, settingsOutline, downloadOutline } from 'ionicons/icons';
+import { AppInstall } from '../../pwa/app-install';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { SessionStore } from '../../session/session-store';
@@ -133,19 +133,16 @@ export class ChatList {
   protected readonly ListTab = ListTab;
   protected readonly outlet = inject(IonRouterOutlet, { optional: true });
   protected readonly addIcon = addCircleOutline;
-  private readonly router = inject(Router);
-  private readonly notifications = inject(PushNotifications);
+  protected readonly installer = inject(AppInstall);
+  protected readonly savedIcon = bookmarkOutline;
+  protected readonly settingsIcon = settingsOutline;
+  protected readonly installIcon = downloadOutline;
 
   protected back() {
     // The sidebar has no router outlet; returning there only changes its local selection.
     if (!this.outlet) {
       this.openList.emit({ tab: this.list().tab, archived: false, requestHistory: false });
     }
-  }
-
-  protected openSettings() {
-    this.notifications.requestSettingsPermission();
-    return this.router.navigateByUrl('/settings');
   }
 
   protected selectTab(event: SegmentCustomEvent) {

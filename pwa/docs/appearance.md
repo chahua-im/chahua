@@ -39,7 +39,7 @@ iOS 根布局保留 Ionic 默认 body 样式，不根据 VisualViewport 的 resi
 
 资料区横排操作使用 Ionic clear 按钮与主题色浅底：普通操作背景为 primary 的 8%，hover/focused 为 12%，按下为 16%；破坏性操作使用 danger 的 10%/14%/18%。悬停时图标及文字变为对应 shade 色，颜色过渡为 160ms；侧栏与详情弹窗共用。
 
-消息的手机正文参考 TG iOS，桌面采用 14px 正文以兼顾密度和中文阅读。其组织方式参考 [Signal 桌面字体](https://github.com/signalapp/Signal-Desktop/blob/aee156c662c64dc6cbe5e363325565f5cbd7203a/stylesheets/_mixins.scss)和 [Discord 字号与密度的区分](https://support.discord.com/hc/en-us/articles/207260127-How-to-Change-Discord-Color-Themes-and-Customize-Appearance-Settings)。应用没有额外的字体或密度设置项。
+消息的手机正文参考 TG iOS，桌面采用 14px 正文以兼顾密度和中文阅读。其组织方式参考 [Signal 桌面字体](https://github.com/signalapp/Signal-Desktop/blob/aee156c662c64dc6cbe5e363325565f5cbd7203a/stylesheets/_mixins.scss)和 [Discord 字号与密度的区分](https://support.discord.com/hc/en-us/articles/207260127-How-to-Change-Discord-Color-Themes-and-Customize-Appearance-Settings)。聊天设置提供五档消息字号，默认保持上述平台字号；字号使用独立分区标题，标题旁显示当前字号或系统默认；滑块下方的双向消息气泡即时预览所选字号与行高，预览区域最小高度 260px；仅消息气泡文字及其行高随选择变化，头像、控件和列表密度保持不变。
 
 布局不统一取整：百分比宽度、文字测量和滚动锚点保留浏览器精度。Ionic 细分隔线及发送图标的视觉偏移允许小数 CSS px。
 

@@ -1,0 +1,31 @@
+.privacy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+
+  ion-note {
+    text-align: end;
+    flex-shrink: 0;
+    max-width: 55%;
+  }
+
+  ion-spinner {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .privacy-row {
+    flex-direction: column;
+    align-items: start;
+    gap: 4px;
+
+    ion-note {
+      max-width: 100%;
+      text-align: start;
+    }
+  }
+}

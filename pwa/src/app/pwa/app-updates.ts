@@ -1,4 +1,4 @@
-import { computed, inject, isDevMode, Service, signal } from '@angular/core';
+import { computed, inject, InjectionToken, isDevMode, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SwUpdate } from '@angular/service-worker';
 import { firstValueFrom, from, timeout } from 'rxjs';
@@ -11,6 +11,11 @@ export enum UpdateCheckResult {
   Failed = 'failed',
 }
 
+export const APP_UPDATES_ENABLED = new InjectionToken<boolean>('APP_UPDATES_ENABLED', {
+  providedIn: 'root',
+  factory: () => !isDevMode(),
+});
+
 @Service()
 export class AppUpdates {
   private readonly updates = inject(SwUpdate);
@@ -20,7 +25,7 @@ export class AppUpdates {
   private readonly dismissedVersion = signal<string | undefined>(undefined);
   private readonly interactive = signal(false);
   private pendingCheck?: Promise<UpdateCheckResult>;
-  readonly supported = !isDevMode() && this.updates.isEnabled;
+  readonly supported = inject(APP_UPDATES_ENABLED) && this.updates.isEnabled;
   readonly version = appVersion;
   readonly checking = this.checkingState.asReadonly();
   readonly available = computed(() => this.availableState() || !!this.latestVersion());

@@ -14,7 +14,7 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 | ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、用于改写引用快照的撤回与编辑记录 | 每个 ConversationPage；由页面生命周期控制                   |
 | MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                             | 应用内存；跨页面，整页刷新不恢复                            |
 | DraftStore             | 文字、回复目标 ID、保存时间                                             | 按账号和聊天/话题保存到 localStorage                        |
-| Preferences            | 话题/头像/私聊作者信息显示偏好、最近表情、置顶表态表情                                        | localStorage                                                |
+| Preferences            | 话题/头像/私聊作者信息显示偏好、消息字号、最近表情、置顶表态表情                                        | localStorage                                                |
 | StickerPreferences     | 自动整理开关、收藏贴纸使用顺序；读写 SessionStore 中的贴纸包顺序        | 应用；开关与收藏顺序保存到 localStorage，包顺序以服务器为准 |
 | MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                                            |
 | ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                      | 应用；当前页面消费                                          |
@@ -230,9 +230,9 @@ App 在会话初始化并确认登录后启动 PushNotifications。在线 WebSoc
 
 NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持通知、选择不存在且浏览器已经授权时，直接保存开启并在后台登记订阅，不再询问。明确保存过的关闭选择保持关闭；其余选择不存在的场景显示 Ionic alert。拒绝立即保存关闭并结束弹窗；允许在点击事件内调用 PushNotifications，授权和推送登记成功后结束，失败保留重试。弹窗等待状态由组件持有。
 
-设置行不等待异步请求。PushNotifications 同步检查浏览器 API 与 Worker 配置，读取 `chahua.notifications.enabled` 和 `Notification.permission`；本机关闭直接显示关，开启且已授权显示开。ChatList 在头像点击事件内调用 requestSettingsPermission，在导航之前为本机已开启但权限为 default 的场景申请权限。拒绝、关闭权限弹窗或无手势直接进入设置且缺授权时，保存关闭选择；Settings 的 refresh 不打断已开始的授权。
+设置行不等待异步请求。PushNotifications 同步检查浏览器 API 与 Worker 配置，读取 `chahua.notifications.enabled` 和 `Notification.permission`；本机关闭直接显示关，开启且已授权显示开。NotificationSettings 未授权时提供申请按钮，直接在点击事件内调用 setEnabled(true) 保留浏览器用户手势，已授权时以开关控制本机是否接收通知。拒绝、关闭权限弹窗或无手势直接进入设置且缺授权时，保存关闭选择；NotificationSettings 的 refresh 不打断已开始的授权。
 
-启动、进入设置，以及 Connection 在重连或恢复前台时发出的 resync，通过 refresh 在后台同步订阅；没有本机选择或环境不支持时不继续。开启且已授权时，读取浏览器当前订阅，缺少则取得 VAPID key 并创建订阅，按账号、clientId、endpoint 和密钥复用 24 小时内成功的登记；内容变化或过期才调用 `/push/subscribe`，不额外查询后端登记状态。相同同步共享进行中的请求，失败保留重试能力。后台检查无等待标识、失败静默；权限仍为 granted 时保留本机开启选择和已创建的 endpoint，下一次 refresh 重试，在线系统提醒不受登记失败影响。
+启动、进入通知子页，以及 Connection 在重连或恢复前台时发出的 resync，通过 refresh 在后台同步订阅；没有本机选择或环境不支持时不继续。开启且已授权时，读取浏览器当前订阅，缺少则取得 VAPID key 并创建订阅，按账号、clientId、endpoint 和密钥复用 24 小时内成功的登记；内容变化或过期才调用 `/push/subscribe`，不额外查询后端登记状态。相同同步共享进行中的请求，失败保留重试能力。后台检查无等待标识、失败静默；权限仍为 granted 时保留本机开启选择和已创建的 endpoint，下一次 refresh 重试，在线系统提醒不受登记失败影响。
 
 关闭立即保存本机意图并清除已显示的通知，再调用 `/push/unsubscribe` 和浏览器取消订阅；后端请求失败仍尝试浏览器取消。订阅操作按顺序执行并读取最新选择，后台登记进行中关闭会在该请求结束后清理。未增加持久重试队列；浏览器取消成功但后端未删除的过期 endpoint，由后端投递失败时清理。用户主动开关才设置 busy 并展示错误；后台操作不占用开关。
 
@@ -263,3 +263,5 @@ Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内
 当前可见列表的已加载行与当前会话通过 ChatStore 共享 `watchConversationStates`，合并最多 512 个唯一范围。完整快照到达后，消息和通知只使状态过期，未读计数及游标由 WS 更新，不再逐条 GET。首次定位尚无完整快照、超限范围及旧服务端保留 HTTP 校准；隐藏页面释放范围，重现或重连取得新快照。requestId 隔离范围、账号和本地写操作前的旧快照；权限撤销清零并移除列表项。协议见[未读 WS 协议](../../backend/docs/conversation-unread-ws.md#逐会话状态)。
 
 `MessagePreview` 按 messageType 判别 placeholder，再用固定枚举将 message 原因代码映射到翻译键；正文复用该预览，收藏和记录 DTO 保留原类型与代码。应用生成的通知使用相同映射，后台 Web Push 保留服务端的回退文案。既有占位消息再次转发不列入待确认替换集合。
+
+隐私首页独立读取 `GET /blocks`、`GET /friends/me/settings`、`/me/presence-settings` 与 `/me/read-receipt-settings`，不以本地默认值填充未完成或失败的摘要。子页通过 ChatLink 路由打开，返回时重新创建首页并读取最新设置；拉黑列表读取 `GET /blocks`，用户项链接到现有资料页，复用其中的解除拉黑与关系刷新流程。

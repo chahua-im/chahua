@@ -23,7 +23,10 @@
     "confirm": "Confirm",
     "add": "Add",
     "okay": "OK",
-    "user": "User"
+    "user": "User",
+    "enabled": "On",
+    "disabled": "Off",
+    "saving": "Saving…"
   },
   "presence": {
     "online": "Online",
@@ -48,12 +51,12 @@
     "title": "Settings",
     "menu": {
       "general": "General",
-      "saved": "Saved",
+      "saved": "Saved messages",
       "friendVerification": "Friend Verification",
       "presence": "Presence Privacy",
       "readReceipts": "Read Receipts",
       "stickers": "Emojis & Stickers",
-      "notifications": "Notifications",
+      "notifications": "Message notifications",
       "notificationsUnsupported": "Not supported",
       "pushRegisterFailed": "Push registration failed",
       "tryAgain": "Please try again",
@@ -63,10 +66,16 @@
       "updateNow": "Update now",
       "notificationDenied": "Notification permission was not granted",
       "devUid": "Dev UID",
-      "devUidSwitch": "Switch"
+      "devUidSwitch": "Switch",
+      "privacy": "Privacy",
+      "requestNotifications": "Allow notifications",
+      "install": "Install app",
+      "notificationBlockedHelp": "Notifications are blocked. Allow notifications in your browser’s site settings, then return here.",
+      "notificationWorkerUnavailable": "Notification service is unavailable. Please retry.",
+      "notificationDisableFailed": "Could not disable background push. Please retry."
     },
     "general": {
-      "title": "General",
+      "title": "Chat settings",
       "language": "Language",
       "showThreads": "Show 'Threads' in Messages",
       "showAllAvatars": "Show Avatars Next to All Messages",
@@ -74,11 +83,18 @@
       "colorMode": "Color Mode",
       "colorModeSystem": "Follow System",
       "colorModeLight": "Light",
-      "colorModeDark": "Dark"
+      "colorModeDark": "Dark",
+      "fontSize": "Font size",
+      "fontSmall": "Small",
+      "fontLarge": "Large",
+      "fontPreviewIncoming": "This is a message preview. Move the slider to try different text sizes.",
+      "fontPreviewOutgoing": "Choose a size that feels comfortable to read.",
+      "fontDefault": "System default"
     },
     "language": {
       "title": "Language",
-      "auto": "Auto"
+      "auto": "Auto",
+      "saveFailed": "Could not change language. Please retry."
     },
     "friendVerification": {
       "title": "Friend Verification",
@@ -90,7 +106,8 @@
       "questionLabel": "Question",
       "questionPlaceholder": "Enter the question the requester must answer",
       "questionInvalid": "Enter a question between 1 and 100 characters.",
-      "saveFailed": "Save failed. Please try again."
+      "saveFailed": "Save failed. Please try again.",
+      "apply": "Apply"
     },
     "presence": {
       "title": "Presence Privacy",
@@ -109,8 +126,6 @@
     "readReceipt": {
       "title": "Read Receipts",
       "loadFailed": "Failed to load read receipt settings.",
-      "friends": "Friends",
-      "nobody": "No one",
       "reciprocalNote": "Read receipts are visible only when both people allow sharing. Group conversations never show read receipts.",
       "saveFailed": "Save failed. Please try again.",
       "friendTitle": "Read receipt sharing",
@@ -126,7 +141,8 @@
       "autoSortFavorites": "Auto-sort favorite stickers by recent use",
       "loadFailed": "Failed to load sticker packs.",
       "sortDivider": "Packs below this line are not auto-sorted",
-      "owned": "Mine"
+      "owned": "Mine",
+      "orderFailed": "Could not save sticker order. Please retry."
     },
     "stickerPack": {
       "title": "Sticker Pack",
@@ -144,6 +160,15 @@
       "removeStickerTitle": "Remove Sticker",
       "removeStickerMessage": "Remove this sticker from the pack?",
       "removeStickerFailed": "Remove failed. Please try again."
+    },
+    "privacy": {
+      "blockedUsers": "Blocked users",
+      "none": "None",
+      "friendVerification": "Who can add me as a friend",
+      "allowAnyone": "Allow anyone",
+      "presence": "Who can see my last seen and online status",
+      "loadFailed": "Failed to load. Click to retry",
+      "blocksLoadFailed": "Could not load blocked users."
     }
   },
   "chats": {

@@ -13,11 +13,23 @@
 </ion-header>
 <ion-content appScrollbars color="light">
   <ion-list [inset]="true">
-    <ion-item [button]="true" [detail]="true" routerLink="/settings/language">
-      <ion-icon slot="start" [icon]="languageIcon" color="primary"></ion-icon>
-      <ion-label>{{ 'settings.general.language' | transloco }}</ion-label>
-      <ion-note slot="end" color="medium">{{ localeLabel() }}</ion-note>
-    </ion-item>
+    <ion-list-header>{{ 'settings.general.colorMode' | transloco }}</ion-list-header>
+    <ion-radio-group [value]="preferences.colorMode()" (ionChange)="setColorMode($event.detail.value)">
+      <ion-item>
+        <ion-icon slot="start" [icon]="systemIcon" color="primary"></ion-icon>
+        <ion-radio [value]="ColorMode.System">{{ 'settings.general.colorModeSystem' | transloco }}</ion-radio>
+      </ion-item>
+      <ion-item>
+        <ion-icon slot="start" [icon]="lightIcon" color="primary"></ion-icon>
+        <ion-radio [value]="ColorMode.Light">{{ 'settings.general.colorModeLight' | transloco }}</ion-radio>
+      </ion-item>
+      <ion-item lines="none">
+        <ion-icon slot="start" [icon]="darkIcon" color="primary"></ion-icon>
+        <ion-radio [value]="ColorMode.Dark">{{ 'settings.general.colorModeDark' | transloco }}</ion-radio>
+      </ion-item>
+    </ion-radio-group>
+  </ion-list>
+  <ion-list [inset]="true">
     <ion-item>
       <ion-icon slot="start" [icon]="threadsIcon" color="primary"></ion-icon>
       <ion-toggle
@@ -44,20 +56,31 @@
     </ion-item>
   </ion-list>
   <ion-list [inset]="true">
-    <ion-list-header>{{ 'settings.general.colorMode' | transloco }}</ion-list-header>
-    <ion-radio-group [value]="preferences.colorMode()" (ionChange)="setColorMode($event.detail.value)">
-      <ion-item>
-        <ion-icon slot="start" [icon]="systemIcon" color="primary"></ion-icon>
-        <ion-radio [value]="ColorMode.System">{{ 'settings.general.colorModeSystem' | transloco }}</ion-radio>
-      </ion-item>
-      <ion-item>
-        <ion-icon slot="start" [icon]="lightIcon" color="primary"></ion-icon>
-        <ion-radio [value]="ColorMode.Light">{{ 'settings.general.colorModeLight' | transloco }}</ion-radio>
-      </ion-item>
-      <ion-item lines="none">
-        <ion-icon slot="start" [icon]="darkIcon" color="primary"></ion-icon>
-        <ion-radio [value]="ColorMode.Dark">{{ 'settings.general.colorModeDark' | transloco }}</ion-radio>
-      </ion-item>
-    </ion-radio-group>
+    <ion-list-header>
+      <ion-label>{{ 'settings.general.fontSize' | transloco }}</ion-label>
+      <ion-note class="font-value">
+        {{ fontSizes[preferences.chatFontSize()] || ('settings.general.fontDefault' | transloco) }}
+      </ion-note>
+    </ion-list-header>
+    <ion-item lines="none">
+      <ion-range
+        [min]="FontSize.Small"
+        [max]="FontSize.Large"
+        [step]="1"
+        [snaps]="true"
+        [ticks]="true"
+        [value]="preferences.chatFontSize()"
+        (ionInput)="setFontSize($event.detail.value)">
+        <ion-label slot="start">{{ 'settings.general.fontSmall' | transloco }}</ion-label>
+        <ion-label slot="end">{{ 'settings.general.fontLarge' | transloco }}</ion-label>
+      </ion-range>
+    </ion-item>
+    <div
+      class="font-preview ion-padding"
+      [style.--preview-font-size]="fontSizes[preferences.chatFontSize()]"
+      [style.--preview-line-height]="fontSizes[preferences.chatFontSize()] ? '1.4' : null">
+      <p class="preview-message">{{ 'settings.general.fontPreviewIncoming' | transloco }}</p>
+      <p class="preview-message own">{{ 'settings.general.fontPreviewOutgoing' | transloco }}</p>
+    </div>
   </ion-list>
 </ion-content>

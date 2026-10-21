@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
+import { ChatFontSize } from './chat-font-size';
 import { ColorMode } from './color-mode';
 import { Preferences } from './preferences';
 
@@ -14,6 +15,17 @@ describe('Preferences', () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it('persists message font size and restores the platform default for invalid storage', () => {
+    const preferences = TestBed.inject(Preferences);
+    expect(preferences.chatFontSize()).toBe(ChatFontSize.Medium);
+    preferences.setChatFontSize(ChatFontSize.Large);
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).chatFontSize()).toBe(ChatFontSize.Large);
+    localStorage.setItem('chahua.preferences.chatFontSize', '99');
+    TestBed.resetTestingModule();
+    expect(TestBed.inject(Preferences).chatFontSize()).toBe(ChatFontSize.Medium);
+  });
 
   it('starts with threads visible, grouped avatars and dm details', () => {
     const preferences = TestBed.inject(Preferences);

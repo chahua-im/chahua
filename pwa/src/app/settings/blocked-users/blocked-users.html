@@ -1,0 +1,34 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-button (click)="modals.dismiss()"><ion-icon slot="icon-only" [icon]="backIcon"></ion-icon></ion-button>
+    </ion-buttons>
+    <ion-title>{{ 'settings.privacy.blockedUsers' | transloco }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars color="light">
+  <ion-list [inset]="true">
+    @if (blocks.hasValue()) {
+      @for (block of blocks.value().blocks; track block.user.uid) {
+        <ion-item [button]="true" [detail]="true" [routerLink]="['/profile', block.user.uid]">
+          <app-chat-avatar
+            slot="start"
+            [size]="40"
+            [entry]="{ title: block.user.username ?? '' + block.user.uid, avatar: block.user.avatarUrl }" />
+          <ion-label>{{ block.user.username ?? block.user.uid }}</ion-label>
+        </ion-item>
+      } @empty {
+        <ion-item lines="none">
+          <ion-note>{{ 'settings.privacy.none' | transloco }}</ion-note>
+        </ion-item>
+      }
+    } @else if (blocks.error()) {
+      <app-load-error compact [message]="'settings.privacy.blocksLoadFailed' | transloco" (retry)="blocks.reload()" />
+    } @else {
+      <ion-item lines="none"><ion-spinner slot="start" /></ion-item>
+    }
+  </ion-list>
+</ion-content>

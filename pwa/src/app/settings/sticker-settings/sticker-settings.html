@@ -50,9 +50,12 @@
         {{ 'settings.stickers.autoSortFavorites' | transloco }}
       </ion-toggle>
     </ion-item>
-    <ion-item [button]="true" [detail]="false" (click)="createPack()">
+    <ion-item [button]="true" [detail]="false" [disabled]="creating()" (click)="createPack()">
       <ion-icon slot="start" [icon]="icons.addOutline" color="primary"></ion-icon>
       <ion-label color="primary">{{ 'stickers.createPack' | transloco }}</ion-label>
+      @if (creating()) {
+        <ion-spinner slot="end" />
+      }
     </ion-item>
   </ion-list>
   <ion-list [inset]="true">
@@ -61,15 +64,25 @@
     } @else if (loadError()) {
       <app-load-error compact [message]="'settings.stickers.loadFailed' | transloco" (retry)="load()" />
     } @else {
-      <ion-reorder-group [disabled]="false" (ionItemReorder)="reorder($event)">
+      <ion-reorder-group [disabled]="savingOrder()" (ionItemReorder)="reorder($event)">
         @for (pack of orderedPacks(); track pack.id) {
-          @if (preferences.autoSortPacksEnabled() && orderedPacks().length > autoSortLimit && $index === autoSortLimit) {
-            <div class="sort-divider"><span>{{ 'settings.stickers.sortDivider' | transloco }}</span></div>
+          @if (
+            preferences.autoSortPacksEnabled() && orderedPacks().length > autoSortLimit && $index === autoSortLimit
+          ) {
+            <div class="sort-divider">
+              <span>{{ 'settings.stickers.sortDivider' | transloco }}</span>
+            </div>
           }
           <ion-item [button]="true" [detail]="false" (click)="openPack(pack)">
             <div slot="start" class="pack-preview">
               @if (pack.previewSticker?.media.contentType.startsWith('video/')) {
-                <video [src]="pack.previewSticker!.media.url" autoplay loop [muted]="true" playsinline preload="metadata"></video>
+                <video
+                  [src]="pack.previewSticker!.media.url"
+                  autoplay
+                  loop
+                  [muted]="true"
+                  playsinline
+                  preload="metadata"></video>
               } @else if (pack.previewSticker) {
                 <img [src]="pack.previewSticker.media.url" loading="lazy" decoding="async" />
               } @else {
@@ -89,6 +102,17 @@
           </ion-item>
         }
       </ion-reorder-group>
+      @if (savingOrder()) {
+        <ion-item lines="none">
+          <ion-note>{{ 'common.saving' | transloco }}</ion-note>
+          <ion-spinner slot="end" />
+        </ion-item>
+      } @else if (orderFailed()) {
+        <ion-item lines="none">
+          <ion-note class="ion-text-wrap" color="danger">{{ 'settings.stickers.orderFailed' | transloco }}</ion-note>
+          <ion-button slot="end" fill="clear" (click)="saveOrder()">{{ 'common.retry' | transloco }}</ion-button>
+        </ion-item>
+      }
     }
   </ion-list>
 </ion-content>

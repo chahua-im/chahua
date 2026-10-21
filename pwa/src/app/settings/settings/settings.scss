@@ -7,3 +7,22 @@
   height: 88px;
   margin-inline: auto;
 }
+
+.save-status {
+  --min-height: 32px;
+  font-size: var(--app-font-caption);
+}
+
+.saved-feedback {
+  animation: saved-feedback 2.5s forwards;
+}
+
+@keyframes saved-feedback {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

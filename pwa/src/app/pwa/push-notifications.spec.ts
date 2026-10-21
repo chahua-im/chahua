@@ -176,7 +176,7 @@ describe('PushNotifications', () => {
     expect(service.busy()).toBe(false);
   });
 
-  it('starts permission in the settings click and does not cancel it when the routed page refreshes', async () => {
+  it('starts permission in the authorization click and does not cancel it when the routed page refreshes', async () => {
     localStorage.setItem(preferenceKey, 'true');
     notification.permission = 'default';
     let grant!: () => void;
@@ -187,7 +187,7 @@ describe('PushNotifications', () => {
         }),
     );
     const service = TestBed.inject(PushNotifications);
-    service.requestSettingsPermission();
+    void service.setEnabled(true);
     expect(notification.requestPermission).toHaveBeenCalledOnce();
     await service.refresh();
     expect(localStorage.getItem(preferenceKey)).toBe('true');
@@ -232,11 +232,10 @@ describe('PushNotifications', () => {
     expect(service.error()).toBeUndefined();
   });
 
-  it('keeps a disabled choice off on settings clicks and cleans up its subscription', async () => {
+  it('keeps a disabled choice off on settings visits and cleans up its subscription', async () => {
     localStorage.setItem(preferenceKey, 'false');
     current.next(subscription);
     const service = TestBed.inject(PushNotifications);
-    service.requestSettingsPermission();
     await service.refresh();
     expect(service.enabled()).toBe(false);
     expect(notification.requestPermission).not.toHaveBeenCalled();
@@ -266,7 +265,6 @@ describe('PushNotifications', () => {
     const service = TestBed.inject(PushNotifications);
     expect(service.supported).toBe(false);
     expect(service.shouldPrompt()).toBe(false);
-    service.requestSettingsPermission();
     await service.refresh();
     expect(service.error()).toBeUndefined();
     expect(await service.setEnabled(true)).toBe(false);

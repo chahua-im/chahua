@@ -14,6 +14,7 @@ import {
   IonItem,
   IonLabel,
   IonList,
+  IonNote,
   IonPopover,
   IonReorder,
   IonReorderGroup,
@@ -26,7 +27,7 @@ import {
 import { addOutline, chevronBackOutline, cubeOutline, happyOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
-import type { StickerPackSummary } from '../../../generated/models';
+import type { StickerPackSummary, UpdateStickerPackOrderItem } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { EmojiPicker } from '../../messages/emoji-picker/emoji-picker';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -53,6 +54,7 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
     IonItem,
     IonLabel,
     IonList,
+    IonNote,
     IonPopover,
     IonReorder,
     IonReorderGroup,
@@ -90,7 +92,7 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
     }
     h2 ion-badge {
       flex-shrink: 0;
-      font-size: 0.55rem;
+      font-size: var(--app-font-caption);
       font-weight: normal;
     }
     .sort-divider {
@@ -108,7 +110,7 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
       background: var(--ion-color-step-300);
     }
     .sort-divider span {
-      font-size: 10px;
+      font-size: var(--app-font-caption);
       padding: 2px 8px;
       margin: 4px 0;
       color: var(--ion-color-medium);
@@ -137,6 +139,10 @@ export class StickerSettings {
   protected readonly orderedPacks = computed(() =>
     sortStickerPacksByPreference(this.packs(), this.preferences.packOrder()),
   );
+  protected readonly creating = signal(false);
+  protected readonly savingOrder = signal(false);
+  protected readonly orderFailed = signal(false);
+  private pendingOrder?: UpdateStickerPackOrderItem;
   private lastReorder = 0;
 
   constructor() {
@@ -175,6 +181,16 @@ export class StickerSettings {
   }
 
   protected async createPack() {
+    if (this.creating()) return;
+    this.creating.set(true);
+    try {
+      await this.createPackFromPrompt();
+    } finally {
+      this.creating.set(false);
+    }
+  }
+
+  private async createPackFromPrompt() {
     const alert = await this.alerts.create({
       header: this.transloco.translate('stickers.createPack'),
       inputs: [{ name: 'name', placeholder: this.transloco.translate('common.name') }],
@@ -207,7 +223,11 @@ export class StickerSettings {
     return this.router.navigate(['/settings/stickers', decodeId(pack.id)]);
   }
 
-  protected reorder(event: CustomEvent<ItemReorderEventDetail>) {
+  protected async reorder(event: CustomEvent<ItemReorderEventDetail>) {
+    if (this.savingOrder()) {
+      event.detail.complete(false);
+      return;
+    }
     this.lastReorder = Date.now();
     const items = event.detail.complete(this.orderedPacks());
     this.packs.set(items);
@@ -232,6 +252,23 @@ export class StickerSettings {
     }
     const item = { stickerPackId: items[to].id, lastUsedOn };
     this.preferences.upsertPackOrderItem(item);
-    void this.preferences.syncPackOrder([item]);
+    this.pendingOrder = item;
+    await this.saveOrder();
+  }
+
+  protected async saveOrder() {
+    if (!this.pendingOrder || this.savingOrder()) return;
+    this.savingOrder.set(true);
+    this.orderFailed.set(false);
+    try {
+      const success = await this.preferences.syncPackOrder([this.pendingOrder]);
+      this.orderFailed.set(!success);
+      if (success) {
+        this.preferences.upsertPackOrderItem(this.pendingOrder);
+        this.pendingOrder = undefined;
+      }
+    } finally {
+      this.savingOrder.set(false);
+    }
   }
 }

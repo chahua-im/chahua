@@ -15,13 +15,21 @@
   <ion-list [inset]="true">
     <ion-radio-group [value]="current()" (ionChange)="select($event)">
       <ion-item>
-        <ion-radio value="auto">{{ 'settings.language.auto' | transloco }}</ion-radio>
+        <ion-radio value="auto" [disabled]="saving()">{{ 'settings.language.auto' | transloco }}</ion-radio>
       </ion-item>
       @for (entry of locales; track entry.locale) {
-        <ion-item>
-          <ion-radio [value]="entry.locale">{{ entry.label }}</ion-radio>
+        <ion-item [lines]="$last ? 'none' : 'inset'">
+          <ion-radio [value]="entry.locale" [disabled]="saving()">{{ entry.label }}</ion-radio>
         </ion-item>
       }
     </ion-radio-group>
+    @if (saving()) {
+      <ion-item lines="none"><ion-spinner slot="end" /></ion-item>
+    } @else if (failed()) {
+      <ion-item lines="none">
+        <ion-note class="ion-text-wrap" color="danger">{{ 'settings.language.saveFailed' | transloco }}</ion-note>
+        <ion-button slot="end" fill="clear" (click)="save()">{{ 'common.retry' | transloco }}</ion-button>
+      </ion-item>
+    }
   </ion-list>
 </ion-content>

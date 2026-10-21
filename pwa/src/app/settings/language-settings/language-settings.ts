@@ -1,4 +1,4 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal, viewChild } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
@@ -8,6 +8,8 @@ import {
   IonIcon,
   IonItem,
   IonList,
+  IonNote,
+  IonSpinner,
   IonRadio,
   IonRadioGroup,
   IonTitle,
@@ -34,6 +36,8 @@ import { Preferences } from '../preferences';
     IonIcon,
     IonItem,
     IonList,
+    IonNote,
+    IonSpinner,
     IonRadio,
     IonRadioGroup,
     IonTitle,
@@ -48,11 +52,33 @@ export class LanguageSettings {
   protected readonly modals = inject(ModalController);
   protected readonly backIcon = chevronBackOutline;
   protected readonly locales = supportedLocales.map((locale) => ({ locale, label: localeLabels[locale] }));
+  private readonly destroy = inject(DestroyRef);
+  protected readonly saving = signal(false);
+  protected readonly failed = signal(false);
+  private readonly radios = viewChild(IonRadioGroup);
+  private requested: AppLocale | null = null;
   protected readonly current = computed(() => this.preferences.selectedLocale() ?? 'auto');
 
   protected async select(event: RadioGroupCustomEvent) {
+    if (this.saving()) return;
     const value = event.detail.value as string;
-    await this.localization.setLocale(value === 'auto' ? null : (value as AppLocale));
-    void this.modals.dismiss();
+    this.requested = value === 'auto' ? null : (value as AppLocale);
+    await this.save();
+  }
+
+  protected async save() {
+    if (this.saving()) return;
+    this.saving.set(true);
+    this.failed.set(false);
+    try {
+      const applied = await this.localization.setLocale(this.requested);
+      if (applied && !this.destroy.destroyed) void this.modals.dismiss();
+    } catch {
+      this.failed.set(true);
+    } finally {
+      this.saving.set(false);
+      const radios = this.radios();
+      if (radios) radios.value = this.current();
+    }
   }
 }
