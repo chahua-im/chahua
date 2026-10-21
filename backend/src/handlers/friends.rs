@@ -246,6 +246,7 @@ async fn delete_friend(
     if !removed {
         return Err(AppError::NotFound("Friendship not found"));
     }
+    state.presence_service.pair_policy_changed(uid, other);
     crate::services::read_receipts::broadcast_pair_privacy_changed(
         conn,
         &state.ws_registry,
@@ -564,10 +565,12 @@ async fn get_my_presence_settings(
 )]
 async fn update_my_presence_settings(
     CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
     mut conn: DbConn,
     Json(body): Json<UpdatePresenceSettingsBody>,
 ) -> Result<Json<PresenceSettingsResponse>, AppError> {
     let visibility = social::update_presence_settings(&mut conn, uid, body.visibility)?;
+    state.presence_service.user_policy_changed(uid);
     Ok(Json(PresenceSettingsResponse { visibility }))
 }
 
@@ -658,6 +661,7 @@ async fn get_friend_presence_settings(
 )]
 async fn update_friend_presence_settings(
     CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
     mut conn: DbConn,
     Path(FriendPath { uid: peer_uid }): Path<FriendPath>,
     Json(body): Json<UpdateFriendPresenceSettingsBody>,
@@ -665,6 +669,7 @@ async fn update_friend_presence_settings(
     validate_presence_friend_uid(uid, peer_uid)?;
     let override_value =
         social::update_friend_presence_settings(&mut conn, uid, peer_uid, body.override_value)?;
+    state.presence_service.pair_policy_changed(uid, peer_uid);
     Ok(Json(FriendPresenceSettingsResponse { override_value }))
 }
 

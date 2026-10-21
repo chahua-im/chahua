@@ -4,6 +4,9 @@
 //! status, while PostgreSQL supplies authorization and the existing HTTP-tracked last-seen
 //! value. This service never writes to the database.
 
+mod changes;
+pub use changes::{take_pending_changes, PresenceChange, PresenceChanges};
+
 mod metrics;
 pub use metrics::PresenceMetrics;
 
@@ -57,6 +60,7 @@ pub struct PresenceSnapshotService {
     db: DbPool,
     registry: Arc<ConnectionRegistry>,
     metrics: Arc<PresenceMetrics>,
+    changes: tokio::sync::broadcast::Sender<PresenceChange>,
     // Authorization is never cached; only the viewer-independent aggregate is shared.
     group_counts: Cache<i64, GroupCounts>,
 }
@@ -71,11 +75,24 @@ impl PresenceSnapshotService {
             db,
             registry,
             metrics,
+            changes: tokio::sync::broadcast::channel(64).0,
             group_counts: Cache::builder()
                 .max_capacity(MAX_CACHED_GROUPS)
                 .time_to_live(GROUP_COUNTS_CACHE_TTL)
                 .build(),
         }
+    }
+
+    pub fn subscribe_changes(&self) -> PresenceChanges {
+        self.changes.subscribe()
+    }
+
+    pub fn user_policy_changed(&self, uid: i32) {
+        let _ = self.changes.send(PresenceChange::UserPolicy(uid));
+    }
+
+    pub fn pair_policy_changed(&self, a: i32, b: i32) {
+        let _ = self.changes.send(PresenceChange::PairPolicy(a, b));
     }
 
     /// Builds one absolute snapshot. Every call rechecks the viewer's current authorization.
