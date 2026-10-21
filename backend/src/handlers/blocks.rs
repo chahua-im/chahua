@@ -75,6 +75,7 @@ async fn block_user(
     let conn = &mut *conn;
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialWrite)?;
     social::block_user(conn, uid, body.uid)?;
+    state.presence_service.pair_policy_changed(uid, body.uid);
     crate::services::read_receipts::broadcast_pair_privacy_changed(
         conn,
         &state.ws_registry,
@@ -107,6 +108,7 @@ async fn unblock_user(
     if !removed {
         return Err(AppError::NotFound("Block not found"));
     }
+    state.presence_service.pair_policy_changed(uid, other);
     crate::services::read_receipts::broadcast_pair_privacy_changed(
         conn,
         &state.ws_registry,

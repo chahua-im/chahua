@@ -15,6 +15,7 @@ use crate::dto::ws::{
     ClientWsMessage, OnlineClientConnectionResponse, OnlineClientStatus, ServerWsMessage,
     TicketResponse,
 };
+use crate::services::presence::{take_pending_changes, PresenceChanges};
 use crate::services::ws_registry;
 use crate::utils::auth::BearerSession;
 use crate::AppState;
@@ -139,28 +140,38 @@ async fn send_presence_snapshot(
     state: &AppState,
     uid: i32,
     watch: &PresenceWatch,
+    changes: &mut PresenceChanges,
 ) -> bool {
-    match state
-        .presence_service
-        .snapshot(
-            uid,
-            watch.request_id,
-            watch.user_ids.clone(),
-            watch.chat_ids.clone(),
-        )
-        .await
-    {
-        Ok(payload) => match serde_json::to_string(&ServerWsMessage::PresenceSnapshot(payload)) {
-            Ok(text) => socket.send(Message::Text(text.into())).await.is_ok(),
+    loop {
+        // The query below includes all changes already committed before it starts.
+        take_pending_changes(changes, uid, &watch.user_ids);
+        let result = state
+            .presence_service
+            .snapshot(
+                uid,
+                watch.request_id,
+                watch.user_ids.clone(),
+                watch.chat_ids.clone(),
+            )
+            .await;
+        // A policy changed during the query: discard the obsolete authorization result.
+        if take_pending_changes(changes, uid, &watch.user_ids) {
+            continue;
+        }
+        return match result {
+            Ok(payload) => match serde_json::to_string(&ServerWsMessage::PresenceSnapshot(payload))
+            {
+                Ok(text) => socket.send(Message::Text(text.into())).await.is_ok(),
+                Err(error) => {
+                    warn!(?error, "failed to serialize presence snapshot");
+                    true
+                }
+            },
             Err(error) => {
-                warn!(?error, "failed to serialize presence snapshot");
+                warn!(?error, uid, "failed to load presence snapshot");
                 true
             }
-        },
-        Err(error) => {
-            warn!(?error, uid, "failed to load presence snapshot");
-            true
-        }
+        };
     }
 }
 
@@ -220,8 +231,9 @@ async fn handle_socket(
     mut rx: tokio::sync::mpsc::Receiver<Arc<ServerWsMessage>>,
 ) {
     let started_at = Instant::now();
+    let mut presence_changes = state.presence_service.subscribe_changes();
     let mut activity_tasks = tokio::task::JoinSet::new();
-    let mut watch = None;
+    let mut watch: Option<PresenceWatch> = None;
     let mut presence_refresh =
         tokio::time::interval_at(tokio::time::Instant::now(), PRESENCE_REFRESH_INTERVAL);
     loop {
@@ -243,11 +255,21 @@ async fn handle_socket(
                     None => break,
                 }
             }
+            change = presence_changes.recv() => {
+                let Some(watch) = watch.as_ref() else {
+                    continue;
+                };
+                let relevant = !watch.user_ids.is_empty()
+                    && change.map_or(true, |change| change.affects(uid, &watch.user_ids));
+                if relevant && !send_presence_snapshot(&mut socket, &state, uid, watch, &mut presence_changes).await {
+                    break;
+                }
+            }
             _ = presence_refresh.tick(), if watch.is_some() => {
                 let Some(watch) = watch.as_ref() else {
                     continue;
                 };
-                if !send_presence_snapshot(&mut socket, &state, uid, watch).await {
+                if !send_presence_snapshot(&mut socket, &state, uid, watch, &mut presence_changes).await {
                     break;
                 }
             }
@@ -301,7 +323,7 @@ async fn handle_socket(
                                     PRESENCE_REFRESH_INTERVAL,
                                 );
                                 if let Some(watch) = watch.as_ref() {
-                                    if !send_presence_snapshot(&mut socket, &state, uid, watch).await {
+                                    if !send_presence_snapshot(&mut socket, &state, uid, watch, &mut presence_changes).await {
                                         break;
                                     }
                                 }
