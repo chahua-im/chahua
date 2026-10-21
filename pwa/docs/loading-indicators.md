@@ -13,7 +13,7 @@
 | 列表续页                         | Ionic infinite-scroll spinner                         | 查询 loadingMore                                      |
 | 对话首次加载                     | 消息气泡骨架屏，贴底对齐；私聊关闭作者信息偏好时不显示头像占位 | ConversationStore.loading                             |
 | 对话历史/后续消息分页            | 顶部/底部固定尺寸分页控件，空闲箭头、加载圆弧         | ConversationStore.pagingDirection                     |
-| 会话标题、资料的在线/最近上线及群人数 | 固定状态行内仅对尚无数据的请求显示紧凑脉动线框；已有状态在刷新时保留并原位更新，未知/无权查看/断网保留空行 | Presence 的未知 ID pending 范围及展示组件 active |
+| 会话标题、资料的在线/最近上线及群人数 | 固定状态行内仅对尚无数据的请求显示紧凑脉动线框；已有状态在刷新时保留并原位更新，个人状态在有效成功快照中缺席时按兼容规则显示“很久没上线”，群状态未知或断网保留空行 | Presence 的未知 ID pending 范围及展示组件 active |
 | 收藏/置顶页面加载                | 内容区居中的 page-loading                             | SavedMessageList.loading / PinnedMessagesPage.loading |
 | 好友验证、全局在线隐私设置加载 | 列表内 spinner | FriendVerificationSettings.loading / PresenceSettings.loading |
 | 表情组件代码加载                 | @loading 延迟 100ms 展示 spinner                      | @defer 的加载状态                                     |

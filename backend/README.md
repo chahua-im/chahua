@@ -142,12 +142,24 @@ When omitted or `null`, snapshots omit `requestId`; the server does not generate
 ID or substitute zero. Clients that change scopes and need to reject stale snapshots
 can opt in by supplying it on each replacement.
 
-Live `online` means at least one fresh, open authenticated WebSocket for the user, irrespective
-of foreground/background application state. It is distinct from `user_extra.last_seen_at`, which
-is existing HTTP activity data and is read without writing or changing its five-minute tracking
-throttle. User visibility is limited to self, friends, or current shared regular-group membership,
-and either blocking direction suppresses visibility. Group snapshots are limited to current
-members of regular groups; DMs and thread participation do not expose presence.
+Individual `online` means at least one fresh, open authenticated WebSocket reports active
+application state. If all fresh connections are inactive, exact presence returns
+`online: false, away: true`; active connections take precedence across devices. Offline
+and active responses omit `away`. Group counts still include both active and inactive
+connections, counting each user once.
+
+`user_extra.last_seen_at` records HTTP and WebSocket heartbeat activity, sharing the existing
+five-minute per-client write throttle. Heartbeats acknowledge Pong before scheduling a blocking
+activity write; each socket has at most one outstanding activity task. Inactive heartbeats also
+refresh activity, and writes without an app version preserve the last HTTP-reported version.
+A failed activity write is logged without closing the socket. The timestamp remains an
+approximation of connection/request activity, not an exact disconnect or foreground time;
+normal write delay is about five minutes plus one heartbeat interval and scheduling latency.
+
+User discoverability is limited to self, friends, or current shared regular-group membership.
+An existing DM without friendship or a shared regular group does not grant presence access.
+Group snapshots are limited to current members of regular groups; thread participation alone
+does not grant presence access. Either blocking direction prevents disclosure of real activity.
 
 Group aggregates are shared across viewers using Moka's async cache, with a 15-second TTL and
 a capacity target of 128 groups. Concurrent misses for the same group share one database load
@@ -164,11 +176,11 @@ The live registry is intentionally process-local. These snapshots require a sing
 instance; multi-instance deployments need a shared presence registry and cross-instance
 coordination before the counts are globally authoritative. Sticky sessions alone are insufficient.
 The existing 300-second stale-connection timeout and 60-second pruning interval remain unchanged;
-silent network loss is not an immediate offline transition. No persistent presence writes are added.
+silent network loss is not an immediate offline transition. Snapshot reads never write activity.
 
 ## Individual presence privacy
 
-Privacy applies to individual `online` and `lastSeenAt` together, including DM indicators
+Privacy applies to individual `online`, `away`, and `lastSeenAt` together, including DM indicators
 and user details. Both users must permit sharing with each other to expose exact presence. The existing self,
 friend/shared-group discoverability, and blocking checks still apply; `everyone` does
 not make arbitrary UIDs discoverable. Self-presence remains available.
@@ -194,19 +206,34 @@ user-extra read loads the viewer and candidate peers' policies with last-seen da
 there are no per-peer queries or materialized visibility pairs. Existing primary keys
 and friendship indexes serve these lookups; global changes update one row.
 
-Users outside the discoverable scope or blocked in either direction are omitted, and clients
-must clear them. Within that scope, privacy-hidden users receive `online: false` (indicator
-suppression, not an offline assertion) and optional `lastSeenBucket`: `recently` (<3 days),
-`withinWeek` (3–7 days), `withinMonth` (7–30 days), or `longAgo` (>=30 days).
-Hidden online users receive `recently`; unknown activity without an online connection has
-no bucket. Hidden responses never include `lastSeenAt`. Exact responses retain `online`
-and optional `lastSeenAt` and omit the bucket. Clients replace the whole user snapshot,
-including clearing previously received exact timestamps when a bucket arrives. Policies are rechecked on every snapshot; no privacy authorization
-cache or separate policy-change push is used. Other clients apply changes on their
-next normal snapshot, while the saving PWA invalidates its affected individual cache
-and immediately re-requests its scope. Group aggregates, their cache, and registry
-online membership ignore individual privacy, so small-group counts may indirectly
-reveal activity.
+Users outside the discoverable scope are omitted, and clients must clear them. A discoverable
+peer blocked in either direction receives only `uid`, `online: false`, and
+`lastSeenBucket: "longAgo"`, regardless of friend overrides. Their real timestamp and connection
+state are not used to form that response. No block reason or `away` field is exposed.
+
+Other privacy-hidden users receive `online: false` (indicator suppression, not an offline
+assertion) and optional `lastSeenBucket`: `recently` (<3 days), `withinWeek` (3–7 days),
+`withinMonth` (7–30 days), or `longAgo` (>=30 days). Hidden active or away users receive
+`recently`; unknown activity without a fresh connection has no bucket. Hidden responses never
+include `away` or `lastSeenAt`. Exact responses retain `online`, optional `away` and
+`lastSeenAt`, and omit the bucket. Clients replace the whole user snapshot, clearing previously
+received exact timestamps and online/away assertions when a bucket arrives.
+
+Policies are rechecked on every snapshot without an authorization cache. Committed global
+settings, friend overrides, blocks/unblocks and friendship changes publish an internal
+process-local notification. Each socket filters changes against its viewer and current personal
+watch scope and immediately re-queries affected snapshots, keeping the same request ID.
+Global changes also refresh the owner's view of peers because sharing is reciprocal. Pending
+notifications are coalesced; a relevant change during a query discards that result and reloads.
+Lagged receivers recheck their current personal scope. No public policy-change event is added.
+The 15-second schedule remains in place, and group aggregate caches are not invalidated.
+
+The saving PWA clears its affected individual cache and re-requests its scope. Other clients'
+retained, unwatched entries are reconciled when watched again. Snapshot query/serialization
+failures still only log and wait for a later refresh: there is no presence TTL, added query
+timeout or forced socket close, so clients can retain stale state during failures.
+Group aggregates and registry online membership ignore individual privacy, so small-group
+counts may indirectly reveal activity.
 
 ## Direct-message read receipts
 

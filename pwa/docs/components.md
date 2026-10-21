@@ -93,7 +93,7 @@ ChatListContent 的普通会话行和话题行都是共享资料、查询成员�
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图不可见的消息（撤回的普通消息整行移除，话题根保留为墓碑行）。日期与连续作者分组从最终可见行派生。
 会话标题在普通私聊显示 `UserPresenceDisplay`，普通群聊显示 `GroupPresenceDisplay`；话题不显示群人数。展示组件注册可见范围到应用级 Presence，ChatDetails 的私聊资料和群资料复用相同展示组件，不自行保存在线或人数副本。
-UserPresenceDisplay 和 GroupPresenceDisplay 始终保留状态行，仅在对应有效范围等待快照时展示紧凑线框；pending 范围属于 Presence，而不是组件自行启动的定时器。列表行的在线布尔值直接派生自同一 Presence，不向 ChatStore 或聊天列表响应复制在线字段。
+UserPresenceDisplay 按 online、away、模糊区间、精确时间的顺序展示；away 使用普通状态文字，不向头像传递在线断言。UserPresenceDisplay 和 GroupPresenceDisplay 始终保留状态行，仅在对应有效范围等待快照时展示紧凑线框；pending 范围属于 Presence，而不是组件自行启动的定时器。列表行的在线布尔值直接派生自同一 Presence，不向 ChatStore 或聊天列表响应复制在线字段。
 
 
 
