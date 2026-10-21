@@ -235,9 +235,12 @@ impl UnreadService {
             .collect())
     }
 
-    /// Full category presence, independent of list pagination. The mention index
-    /// leads with mentioned_uid; membership, thread state and root joins use their
-    /// keys. SQL handles the different main/thread read cursors in one scan.
+    /// Full category presence, independent of list pagination. Raw SQL keeps each
+    /// scope's LATERAL range seek parameterized by its membership/thread cursor:
+    /// message_mentions_unread_idx (mentioned_uid, chat_id, thread_root_id,
+    /// message_id) skips read history, and the inner LIMIT bounds work before
+    /// COUNT. Per-scope caps preserve the capped total without hiding categories.
+    /// Keep thread_root_id in ORDER BY even for IS NULL to align index ordering.
     pub fn count_user_mention_summary(
         &self,
         conn: &mut PgConnection,
@@ -251,23 +254,53 @@ impl UnreadService {
         DieselError,
     > {
         let rows = sql_query(
-            "SELECT g.kind,
-                    CASE WHEN mm.thread_root_id IS NULL THEN gm.archived ELSE ts.archived END AS archived,
-                    (mm.thread_root_id IS NOT NULL) AS is_thread,
-                    COUNT(*)::BIGINT AS count
-             FROM message_mentions mm
-             JOIN group_membership gm ON gm.chat_id = mm.chat_id AND gm.uid = mm.mentioned_uid
-             JOIN groups g ON g.id = mm.chat_id
-             LEFT JOIN thread_user_states ts ON ts.chat_id = mm.chat_id
-                  AND ts.thread_root_id = mm.thread_root_id AND ts.uid = mm.mentioned_uid
-             LEFT JOIN messages root ON root.id = mm.thread_root_id
-             WHERE mm.mentioned_uid = $1
-               AND ((mm.thread_root_id IS NULL AND mm.message_id > COALESCE(gm.last_read_message_id, 0))
-                 OR (ts.subscribed = TRUE AND root.reply_root_id IS NULL
-                     AND root.has_thread = TRUE AND root.is_published = TRUE
-                     AND mm.message_id > COALESCE(ts.last_read_message_id, 0)))
-             GROUP BY 1, 2, 3",
-        ).bind::<diesel::sql_types::Integer, _>(uid).load::<MentionScopeCount>(conn)?;
+            "SELECT kind, archived, is_thread, SUM(count)::BIGINT AS count
+             FROM (
+                 SELECT g.kind, gm.archived, FALSE AS is_thread, mentions.count
+                 FROM group_membership gm
+                 JOIN groups g ON g.id = gm.chat_id
+                 CROSS JOIN LATERAL (
+                     SELECT COUNT(*)::BIGINT AS count
+                     FROM (
+                         SELECT 1
+                         FROM message_mentions mm
+                         WHERE mm.mentioned_uid = gm.uid
+                           AND mm.chat_id = gm.chat_id
+                           AND mm.thread_root_id IS NULL
+                           AND mm.message_id > COALESCE(gm.last_read_message_id, 0)
+                         ORDER BY mm.thread_root_id, mm.message_id
+                         LIMIT $2
+                     ) unread
+                 ) mentions
+                 WHERE gm.uid = $1
+                 UNION ALL
+                 SELECT g.kind, ts.archived, TRUE AS is_thread, mentions.count
+                 FROM thread_user_states ts
+                 JOIN group_membership gm ON gm.chat_id = ts.chat_id AND gm.uid = ts.uid
+                 JOIN groups g ON g.id = ts.chat_id
+                 JOIN messages root ON root.id = ts.thread_root_id
+                 CROSS JOIN LATERAL (
+                     SELECT COUNT(*)::BIGINT AS count
+                     FROM (
+                         SELECT 1
+                         FROM message_mentions mm
+                         WHERE mm.mentioned_uid = ts.uid
+                           AND mm.chat_id = ts.chat_id
+                           AND mm.thread_root_id = ts.thread_root_id
+                           AND mm.message_id > COALESCE(ts.last_read_message_id, 0)
+                         ORDER BY mm.thread_root_id, mm.message_id
+                         LIMIT $2
+                     ) unread
+                 ) mentions
+                 WHERE ts.uid = $1 AND ts.subscribed = TRUE
+                   AND root.reply_root_id IS NULL
+                   AND root.has_thread = TRUE AND root.is_published = TRUE
+             ) scopes
+             GROUP BY kind, archived, is_thread",
+        )
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .bind::<diesel::sql_types::BigInt, _>(MAX_UNREAD_COUNT)
+        .load::<MentionScopeCount>(conn)?;
         Ok(mention_summary(rows))
     }
 
@@ -1587,6 +1620,310 @@ mod tests {
                 threads: false
             }
         );
+    }
+
+    struct MentionSummaryFixture {
+        uid: i32,
+        next_id: i64,
+    }
+
+    impl MentionSummaryFixture {
+        fn chat(
+            &mut self,
+            conn: &mut diesel::PgConnection,
+            kind: &str,
+            archived: bool,
+            member: bool,
+        ) -> diesel::QueryResult<i64> {
+            use diesel::RunQueryDsl;
+
+            let chat_id = self.next_id;
+            self.next_id += 1;
+            diesel::sql_query(
+                "INSERT INTO groups (id, name, kind, dm_uid1, dm_uid2)
+                 VALUES (
+                     $1, 'mention-summary-test', $2::group_kind,
+                     CASE WHEN $2 = 'dm' THEN $3 ELSE NULL END,
+                     CASE WHEN $2 = 'dm' THEN ($1 % 1000000000)::INTEGER ELSE NULL END
+                 )",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .bind::<diesel::sql_types::Text, _>(kind)
+            .bind::<diesel::sql_types::Integer, _>(self.uid)
+            .execute(conn)?;
+            if member {
+                diesel::sql_query(
+                    "INSERT INTO group_membership (chat_id, uid, archived, muted_until)
+                     VALUES ($1, $2, $3, 'infinity')",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::Integer, _>(self.uid)
+                .bind::<diesel::sql_types::Bool, _>(archived)
+                .execute(conn)?;
+            }
+            Ok(chat_id)
+        }
+
+        fn thread(
+            &mut self,
+            conn: &mut diesel::PgConnection,
+            chat_id: i64,
+            archived: bool,
+            subscribed: Option<bool>,
+        ) -> diesel::QueryResult<i64> {
+            use diesel::RunQueryDsl;
+
+            let root_id = self.next_id;
+            self.next_id += 1;
+            diesel::sql_query(
+                "INSERT INTO messages
+                    (id, message_type, client_generated_id, sender_uid, chat_id,
+                     has_thread, is_published, created_at)
+                 VALUES ($1, 'text', $1::text, $2, $3, TRUE, TRUE, NOW())",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(root_id)
+            .bind::<diesel::sql_types::Integer, _>(self.uid)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .execute(conn)?;
+            if let Some(subscribed) = subscribed {
+                diesel::sql_query(
+                    "INSERT INTO thread_user_states
+                        (chat_id, thread_root_id, uid, archived, subscribed, subscribed_at)
+                     VALUES ($1, $2, $3, $4, $5, NOW())",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::BigInt, _>(root_id)
+                .bind::<diesel::sql_types::Integer, _>(self.uid)
+                .bind::<diesel::sql_types::Bool, _>(archived)
+                .bind::<diesel::sql_types::Bool, _>(subscribed)
+                .execute(conn)?;
+            }
+            Ok(root_id)
+        }
+
+        fn mentions(
+            &mut self,
+            conn: &mut diesel::PgConnection,
+            chat_id: i64,
+            root_id: Option<i64>,
+            count: i64,
+        ) -> diesel::QueryResult<(i64, i64)> {
+            use diesel::RunQueryDsl;
+
+            let first_id = self.next_id;
+            self.next_id += count;
+            diesel::sql_query(
+                "WITH inserted AS (
+                     INSERT INTO messages
+                         (id, message_type, client_generated_id, sender_uid,
+                          chat_id, reply_root_id, is_published, created_at)
+                     SELECT $1 + n, 'text', ($1 + n)::text, $5, $3, $4, TRUE, NOW()
+                     FROM generate_series(0::BIGINT, $2 - 1) n
+                     RETURNING id
+                 )
+                 INSERT INTO message_mentions
+                     (message_id, mentioned_uid, chat_id, thread_root_id, created_at)
+                 SELECT id, $5, $3, $4, NOW() FROM inserted",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(first_id)
+            .bind::<diesel::sql_types::BigInt, _>(count)
+            .bind::<diesel::sql_types::BigInt, _>(chat_id)
+            .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(root_id)
+            .bind::<diesel::sql_types::Integer, _>(self.uid)
+            .execute(conn)?;
+            Ok((first_id, self.next_id - 1))
+        }
+
+        fn read(
+            &self,
+            conn: &mut diesel::PgConnection,
+            chat_id: i64,
+            root_id: Option<i64>,
+            message_id: i64,
+        ) -> diesel::QueryResult<()> {
+            use diesel::RunQueryDsl;
+
+            if let Some(root_id) = root_id {
+                diesel::sql_query(
+                    "UPDATE thread_user_states SET last_read_message_id = $1
+                     WHERE uid = $2 AND chat_id = $3 AND thread_root_id = $4",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(message_id)
+                .bind::<diesel::sql_types::Integer, _>(self.uid)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .bind::<diesel::sql_types::BigInt, _>(root_id)
+                .execute(conn)?;
+            } else {
+                diesel::sql_query(
+                    "UPDATE group_membership SET last_read_message_id = $1
+                     WHERE uid = $2 AND chat_id = $3",
+                )
+                .bind::<diesel::sql_types::BigInt, _>(message_id)
+                .bind::<diesel::sql_types::Integer, _>(self.uid)
+                .bind::<diesel::sql_types::BigInt, _>(chat_id)
+                .execute(conn)?;
+            }
+            Ok(())
+        }
+
+        fn assert_summary(
+            &self,
+            conn: &mut diesel::PgConnection,
+            total: i64,
+            active: [bool; 3],
+            archived: [bool; 3],
+        ) -> diesel::QueryResult<()> {
+            let (actual_total, actual_active, actual_archived) =
+                UnreadService::new().count_user_mention_summary(conn, self.uid)?;
+            assert_eq!(
+                (
+                    actual_total,
+                    [
+                        actual_active.groups,
+                        actual_active.friends,
+                        actual_active.threads,
+                    ],
+                    [
+                        actual_archived.groups,
+                        actual_archived.friends,
+                        actual_archived.threads,
+                    ],
+                ),
+                (total, active, archived),
+            );
+            Ok(())
+        }
+    }
+
+    fn with_mention_summary_fixture(
+        uid: i32,
+        first_id: i64,
+        test: impl FnOnce(
+            &mut diesel::PgConnection,
+            &mut MentionSummaryFixture,
+        ) -> diesel::QueryResult<()>,
+    ) {
+        use diesel::Connection;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = diesel::PgConnection::establish(&url).expect("connect to test database");
+        // Separate fixture users/ID ranges avoid interference with other DB tests.
+        // test_transaction rolls back every write, including on assertion failure.
+        conn.test_transaction::<(), diesel::result::Error, _>(|conn| {
+            test(
+                conn,
+                &mut MentionSummaryFixture {
+                    uid,
+                    next_id: first_id,
+                },
+            )
+        });
+    }
+
+    #[test]
+    fn mention_summary_respects_scope_cursors_membership_and_root_visibility() {
+        use diesel::RunQueryDsl;
+
+        with_mention_summary_fixture(-541_001, 9_876_800_000, |conn, fixture| {
+            let active_group = fixture.chat(conn, "group", false, true)?;
+            let active_dm = fixture.chat(conn, "dm", false, true)?;
+            let archived_group = fixture.chat(conn, "group", true, true)?;
+            let archived_dm = fixture.chat(conn, "dm", true, true)?;
+            let departed = fixture.chat(conn, "group", false, false)?;
+
+            // A mention exactly at each cursor is read; only its successor counts.
+            for chat_id in [active_group, active_dm, archived_group, archived_dm] {
+                let (_, last) = fixture.mentions(conn, chat_id, None, 17)?;
+                fixture.read(conn, chat_id, None, last - 1)?;
+            }
+            // Thread archive state, not the parent chat's archive state, wins.
+            let active_thread = fixture.thread(conn, archived_group, false, Some(true))?;
+            let archived_thread = fixture.thread(conn, active_dm, true, Some(true))?;
+            for (chat_id, root_id) in [
+                (archived_group, active_thread),
+                (active_dm, archived_thread),
+            ] {
+                let (_, last) = fixture.mentions(conn, chat_id, Some(root_id), 17)?;
+                fixture.read(conn, chat_id, Some(root_id), last - 1)?;
+            }
+            // Preserve the existing root visibility policy: deletion alone does
+            // not hide an otherwise published, top-level threaded root.
+            diesel::sql_query("UPDATE messages SET deleted_at = NOW() WHERE id = $1")
+                .bind::<diesel::sql_types::BigInt, _>(active_thread)
+                .execute(conn)?;
+
+            let unsubscribed = fixture.thread(conn, active_group, false, Some(false))?;
+            let no_state = fixture.thread(conn, active_group, false, None)?;
+            let no_thread = fixture.thread(conn, active_group, false, Some(true))?;
+            let unpublished = fixture.thread(conn, active_group, false, Some(true))?;
+            let nested = fixture.thread(conn, active_group, false, Some(true))?;
+            let departed_thread = fixture.thread(conn, departed, false, Some(true))?;
+            diesel::sql_query(
+                "UPDATE messages
+                 SET has_thread = (id <> $1), is_published = (id <> $2),
+                     reply_root_id = CASE WHEN id = $3 THEN $4 ELSE NULL END
+                 WHERE id IN ($1, $2, $3)",
+            )
+            .bind::<diesel::sql_types::BigInt, _>(no_thread)
+            .bind::<diesel::sql_types::BigInt, _>(unpublished)
+            .bind::<diesel::sql_types::BigInt, _>(nested)
+            .bind::<diesel::sql_types::BigInt, _>(unsubscribed)
+            .execute(conn)?;
+            for root_id in [unsubscribed, no_state, no_thread, unpublished, nested] {
+                fixture.mentions(conn, active_group, Some(root_id), 3)?;
+            }
+            fixture.mentions(conn, departed, None, 3)?;
+            fixture.mentions(conn, departed, Some(departed_thread), 3)?;
+
+            fixture.assert_summary(conn, 6, [true; 3], [true; 3])?;
+            // Advancing main cursors must leave both thread scopes unread.
+            for chat_id in [active_group, active_dm, archived_group, archived_dm] {
+                fixture.read(conn, chat_id, None, fixture.next_id)?;
+            }
+            fixture.assert_summary(conn, 2, [false, false, true], [false, false, true])?;
+            fixture.read(conn, archived_group, Some(active_thread), fixture.next_id)?;
+            fixture.read(conn, active_dm, Some(archived_thread), fixture.next_id)?;
+            fixture.assert_summary(conn, 0, [false; 3], [false; 3])
+        });
+    }
+
+    #[test]
+    fn mention_summary_saturation_preserves_all_categories_and_remaining_counts() {
+        with_mention_summary_fixture(-541_002, 9_876_900_000, |conn, fixture| {
+            let active_group = fixture.chat(conn, "group", false, true)?;
+            let active_dm = fixture.chat(conn, "dm", false, true)?;
+            let archived_group = fixture.chat(conn, "group", true, true)?;
+            let archived_dm = fixture.chat(conn, "dm", true, true)?;
+            let active_thread = fixture.thread(conn, archived_group, false, Some(true))?;
+            let archived_thread = fixture.thread(conn, active_group, true, Some(true))?;
+            let mut saturated_scopes = Vec::new();
+            // Both branches have read history followed by more than the cap.
+            for (chat_id, root_id) in [(active_group, None), (archived_group, Some(active_thread))]
+            {
+                let (first, last) =
+                    fixture.mentions(conn, chat_id, root_id, MAX_UNREAD_COUNT * 2 + 11)?;
+                fixture.read(conn, chat_id, root_id, first + MAX_UNREAD_COUNT - 1)?;
+                saturated_scopes.push((chat_id, root_id, last));
+            }
+            for (chat_id, root_id) in [
+                (active_dm, None),
+                (archived_group, None),
+                (archived_dm, None),
+                (active_group, Some(archived_thread)),
+            ] {
+                fixture.mentions(conn, chat_id, root_id, 1)?;
+            }
+            fixture.assert_summary(conn, MAX_UNREAD_COUNT, [true; 3], [true; 3])?;
+            let (chat_id, root_id, last) = saturated_scopes[0];
+            fixture.read(conn, chat_id, root_id, last)?;
+            fixture.assert_summary(conn, MAX_UNREAD_COUNT, [false, true, true], [true; 3])?;
+            let (chat_id, root_id, last) = saturated_scopes[1];
+            fixture.read(conn, chat_id, root_id, last)?;
+            fixture.assert_summary(conn, 4, [false, true, false], [true; 3])
+        });
     }
 
     /// Chat-level reaction read state: ordinary message/thread reads do not

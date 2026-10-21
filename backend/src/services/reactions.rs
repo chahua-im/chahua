@@ -36,6 +36,11 @@ pub fn insert_reaction(
     emoji: String,
 ) -> QueryResult<usize> {
     conn.transaction(|conn| {
+        // Match deletion's message-before-membership lock order. This UPDATE
+        // takes NO KEY UPDATE, allowing concurrent foreign-key key-share locks.
+        diesel::update(messages::table.filter(messages::id.eq(message.id)))
+            .set(messages::has_reactions.eq(true))
+            .execute(conn)?;
         let created_at = lock_scope(conn, message.chat_id, message.sender_uid)?;
         let inserted = diesel::insert_into(message_reactions::table)
             .values(&MessageReaction {
@@ -46,9 +51,6 @@ pub fn insert_reaction(
                 message_author_uid: message.sender_uid,
             })
             .on_conflict_do_nothing()
-            .execute(conn)?;
-        diesel::update(messages::table.filter(messages::id.eq(message.id)))
-            .set(messages::has_reactions.eq(true))
             .execute(conn)?;
         Ok(inserted)
     })
@@ -74,18 +76,20 @@ mod tests {
         conn
     }
 
-    struct Fixture(String);
+    struct Fixture(String, i64);
 
     impl Drop for Fixture {
         fn drop(&mut self) {
             let mut conn = connect(&self.0);
+            let chat_id = self.1;
             conn.batch_execute(&format!(
                 "BEGIN;
-                 DELETE FROM message_reactions WHERE message_id IN ({ROOT}, {REPLY});
-                 DELETE FROM thread_user_states WHERE chat_id = {CHAT};
-                 DELETE FROM messages WHERE chat_id = {CHAT};
-                 DELETE FROM group_membership WHERE chat_id = {CHAT};
-                 DELETE FROM groups WHERE id = {CHAT};
+                 DELETE FROM message_reactions
+                     WHERE message_id IN (SELECT id FROM messages WHERE chat_id = {chat_id});
+                 DELETE FROM thread_user_states WHERE chat_id = {chat_id};
+                 DELETE FROM messages WHERE chat_id = {chat_id};
+                 DELETE FROM group_membership WHERE chat_id = {chat_id};
+                 DELETE FROM groups WHERE id = {chat_id};
                  COMMIT;"
             ))
             .expect("remove committed concurrency-test fixtures");
@@ -139,7 +143,7 @@ mod tests {
                  VALUES ({CHAT}, {ROOT}, {AUTHOR}, NOW(), '-infinity');
              COMMIT;"
         )).unwrap();
-        let _fixture = Fixture(url.clone());
+        let _fixture = Fixture(url.clone(), CHAT);
         let service = UnreadService::new();
 
         for (scope, message_id) in [(None, ROOT), (Some(ROOT), REPLY)] {
@@ -221,5 +225,84 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[test]
+    fn reaction_insert_and_deletion_shift_read_pointer_without_deadlock() {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        const CHAT_ID: i64 = 9_876_720_000;
+        const PREVIOUS: i64 = CHAT_ID + 1;
+        const TARGET: i64 = CHAT_ID + 2;
+        const AUTHOR_UID: i32 = 4307;
+        const ACTOR_UID: i32 = 4308;
+
+        let mut conn = connect(&url);
+        conn.batch_execute(&format!(
+            "BEGIN;
+             INSERT INTO groups (id, name) VALUES ({CHAT_ID}, 'reaction-delete-concurrency-test');
+             INSERT INTO messages (id, message_type, client_generated_id, sender_uid, chat_id, created_at, is_published, has_thread)
+                 VALUES ({PREVIOUS}, 'text', 'reaction-delete-previous', {AUTHOR_UID}, {CHAT_ID}, NOW(), TRUE, FALSE),
+                        ({TARGET}, 'text', 'reaction-delete-target', {AUTHOR_UID}, {CHAT_ID}, NOW(), TRUE, FALSE);
+             INSERT INTO group_membership (chat_id, uid, last_read_message_id)
+                 VALUES ({CHAT_ID}, {AUTHOR_UID}, {TARGET});
+             COMMIT;"
+        ))
+        .unwrap();
+        let _fixture = Fixture(url.clone(), CHAT_ID);
+        let message = messages::table
+            .find(TARGET)
+            .first::<Message>(&mut conn)
+            .unwrap();
+
+        let writer = conn
+            .transaction::<_, diesel::result::Error, _>(|conn| {
+                // Deletion owns the message lock before it shifts any anchored
+                // membership pointers, exactly as in the deletion service.
+                diesel::update(messages::table.find(TARGET))
+                    .set(messages::deleted_at.eq(Some(Utc::now())))
+                    .execute(conn)?;
+
+                let (ready, started) = mpsc::channel();
+                let url = url.clone();
+                let writer = std::thread::spawn(move || {
+                    let mut conn = connect(&url);
+                    ready.send(backend_pid(&mut conn)).unwrap();
+                    insert_reaction(&mut conn, &message, ACTOR_UID, "👍".into())
+                });
+                // The only possible blocker is this deletion's message lock.
+                // With the old order, the writer already owns the membership
+                // lock here; shifting the pointer would complete a deadlock.
+                wait_until_blocked(conn, started.recv().unwrap());
+                assert_eq!(
+                    crate::services::chat::shift_chat_read_pointers_on_delete(
+                        conn,
+                        CHAT_ID,
+                        &[TARGET],
+                    )?,
+                    1
+                );
+                Ok(writer)
+            })
+            .unwrap();
+
+        assert_eq!(writer.join().unwrap().unwrap(), 1);
+        assert_eq!(
+            group_membership::table
+                .filter(group_membership::chat_id.eq(CHAT_ID))
+                .filter(group_membership::uid.eq(AUTHOR_UID))
+                .select(group_membership::last_read_message_id)
+                .first::<Option<i64>>(&mut conn)
+                .unwrap(),
+            Some(PREVIOUS)
+        );
+        let message = messages::table
+            .find(TARGET)
+            .first::<Message>(&mut conn)
+            .unwrap();
+        assert!(message.deleted_at.is_some());
+        assert!(message.has_reactions);
     }
 }
