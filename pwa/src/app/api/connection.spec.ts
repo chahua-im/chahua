@@ -72,6 +72,33 @@ describe('Connection', () => {
     expect(socket.send).toHaveBeenLastCalledWith(
       JSON.stringify({ type: 'watchPresence', requestId: 7, userIds: [2], chatIds: [wireChat.id] }),
     );
+    realtime.watchConversationUnread(
+      8,
+      [
+        {
+          key: 'custom',
+          selector: {
+            include: [{ chatId: testChat.id, threadId: testMessage.id }],
+            exclude: [{ chatId: testChat.id }],
+          },
+        },
+      ],
+      true,
+    );
+    expect(JSON.parse(socket.send.mock.calls.at(-1)![0])).toEqual({
+      type: 'watchConversationUnread',
+      requestId: 8,
+      appBadge: true,
+      views: [
+        {
+          key: 'custom',
+          selector: {
+            include: [{ chatId: wireChat.id, threadId: wireMessage.id }],
+            exclude: [{ chatId: wireChat.id }],
+          },
+        },
+      ],
+    });
     realtime.accept(testMessage);
     socket.receive({ type: 'message', payload: wireMessage });
     socket.receive({

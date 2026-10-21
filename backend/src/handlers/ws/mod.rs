@@ -234,6 +234,17 @@ async fn handle_socket(
     let mut presence_changes = state.presence_service.subscribe_changes();
     let mut activity_tasks = tokio::task::JoinSet::new();
     let mut watch: Option<PresenceWatch> = None;
+    let (unread_subscription, unread_receiver) = tokio::sync::watch::channel(None);
+    let (unread_output, mut unread_messages) = tokio::sync::mpsc::channel(1);
+    let unread_task = tokio::spawn(crate::services::unread::watch::run(
+        state.db.clone(),
+        state.unread_service.clone(),
+        uid,
+        entry.unread_changed.clone(),
+        unread_receiver,
+        unread_output,
+    ));
+    let mut unread_request_id = None;
     let mut presence_refresh =
         tokio::time::interval_at(tokio::time::Instant::now(), PRESENCE_REFRESH_INTERVAL);
     loop {
@@ -241,6 +252,17 @@ async fn handle_socket(
             Some(result) = activity_tasks.join_next(), if !activity_tasks.is_empty() => {
                 if let Err(error) = result {
                     warn!(?error, uid, "ws activity task failed");
+                }
+            }
+            Some(message) = unread_messages.recv() => {
+                let request_id = match &message {
+                    ServerWsMessage::ConversationUnread(payload) => payload.request_id,
+                    ServerWsMessage::ConversationUnreadError(payload) => payload.request_id,
+                    _ => unreachable!(),
+                };
+                if unread_request_id != Some(request_id) { continue; }
+                if let Ok(text) = serde_json::to_string(&message) {
+                    if socket.send(Message::Text(text.into())).await.is_err() { break; }
                 }
             }
             msg = rx.recv() => {
@@ -328,6 +350,19 @@ async fn handle_socket(
                                     }
                                 }
                             }
+                            ClientWsMessage::WatchConversationUnread { request_id, views, app_badge } => {
+                                if crate::services::unread::validate_conversation_views(&views).is_err() {
+                                    let error = ServerWsMessage::ConversationUnreadError(
+                                        crate::dto::conversations::ConversationUnreadErrorPayload { request_id }
+                                    );
+                                    if socket.send(Message::Text(serde_json::to_string(&error).unwrap().into())).await.is_err() { break; }
+                                    continue;
+                                }
+                                unread_request_id = Some(request_id);
+                                unread_subscription.send_replace(if views.is_empty() && !app_badge { None } else {
+                                    Some(crate::services::unread::watch::UnreadWatch { request_id, views, app_badge })
+                                });
+                            }
                             ClientWsMessage::Auth { .. } | ClientWsMessage::Unknown => {}
                         }
                     }
@@ -337,6 +372,7 @@ async fn handle_socket(
             }
         }
     }
+    unread_task.abort();
     registry.remove_connection(uid, conn_id);
     state
         .metrics

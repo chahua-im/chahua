@@ -281,6 +281,7 @@ async fn post_add_member(
         .values(&new_membership)
         .execute(conn)?;
 
+    state.ws_registry.invalidate_unread(&[body.uid]);
     let target_username = profile
         .and_then(|p| p.username.clone())
         .unwrap_or_else(|| "Someone".to_string());
@@ -429,6 +430,8 @@ async fn delete_remove_member(
         crate::services::threads::unsubscribe_user_from_chat(conn, chat_id, target_uid)?;
         Ok::<(), diesel::result::Error>(())
     })?;
+
+    state.ws_registry.invalidate_unread(&[target_uid]);
 
     let (sys_sender_uid, sys_msg) = if is_admin_removing_other {
         (uid, format!("removed {}", target_username))

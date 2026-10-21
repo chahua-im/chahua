@@ -633,6 +633,7 @@ async fn post_message(
         }
     };
 
+    state.ws_registry.invalidate_unread(&[uid]);
     let response = match send_result {
         SendMessageOutcome::Created(send_result) => {
             let send_result = *send_result;
@@ -979,6 +980,7 @@ pub(super) async fn post_thread_message(
     let member_uids = send_result.member_uids;
     let msg_side_effects = send_result.side_effects;
 
+    state.ws_registry.invalidate_unread(&[uid]);
     // Post-commit: fire deferred side effects (new message WS broadcast + push)
     msg_side_effects.fire(&state);
     if let Some(search_service) = state.message_search.clone() {

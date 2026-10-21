@@ -12,9 +12,10 @@ export enum ServerWsMessageType {
   messageDeleted = 'messageDeleted',
   messagesBulkDeleted = 'messagesBulkDeleted',
   reactionUpdated = 'reactionUpdated',
-  notification = 'notification',
   presenceUpdate = 'presenceUpdate',
   presenceSnapshot = 'presenceSnapshot',
+  conversationUnread = 'conversationUnread',
+  conversationUnreadError = 'conversationUnreadError',
   threadUpdate = 'threadUpdate',
   threadMembershipChanged = 'threadMembershipChanged',
   chatArchiveStateChanged = 'chatArchiveStateChanged',
@@ -27,4 +28,5 @@ export enum ServerWsMessageType {
   friendRequestReceived = 'friendRequestReceived',
   friendRequestResolved = 'friendRequestResolved',
   friendshipRemoved = 'friendshipRemoved',
+  notification = 'notification',
 }

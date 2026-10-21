@@ -91,7 +91,7 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 话题 tab，或消息 tab 开启话题 | `GET /threads?limit=20`，archived 与 before 时间游标                   | ChatListStore → ChatStore → ChatListContent |
 | 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatListContent             |
 | 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                                |
-| 显示归档计数                  | `POST /conversations/unread-summary`，选择对应 tab 的 archived 集合                    | 查询由实际消费者激活                        |
+| 显示 tab、归档计数或系统角标 | WS `watchConversationUnread`，包含对应 tab 的普通/archived 集合与 appBadge | 消费者共享订阅，服务端推送变化 |
 | 被覆盖的列表收到消息                       | 已加载聊天立即读 `GET /chats/{c}/unread`；页面在后台时留到返回后补读，窗口外的新聊天返回时从首页补读至原覆盖边界 | ChatListStore → ChatStore                                   |
 | 列表失效（断线重连、归档、成员关系、删除） | `GET /chats?limit=50`，读取到已加载条数或末尾                                                                    | ChatListStore → ChatStore → ChatListContent                 |
 | 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限                |
@@ -218,14 +218,16 @@ NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持�
 
 Worker 串行处理页面与 Push，在独立的 `chahua-notifications` IndexedDB 中按账号保存已处理消息 ID、聊天/话题已读边界。通知成功展示、前台阅读时抑制或撤回后登记具体 ID；仅确认已读才推进范围边界，乱序消息不会因更大的 ID 已提醒而被忽略。记录保存 30 天，覆盖后端 web-push 默认 28 天有效期，按过期索引清理；Worker 重启和通知被划掉均不丢失有效记录。通知中心补回仍显示的通知，账号变化清理旧通知，退出后停止处理 Push。页面通过 CHAHUA_SESSION 同步账号，控制器切换后重新同步。通知点击使用 `#msg=ID`；新通知由 Angular onActionClick 唤起，缺少该字段的旧通知由兼容监听器唤起并发送导航事件，已有页面不整页刷新。
 
-ChatListStore.unread 保留账号级系统角标查询。ChatListStore.viewUnread 通过 `/conversations/unread-summary` 一次读取内置 tab 的普通、归档及“消息是否包含话题”两种集合，供 tab badge、归档入口和后台标题共享。普通列表与归档列表的下拉刷新均刷新该汇总。ChatList 只在 active 时发布当前 selection，进入会话或设置后保留最近选择；隐藏的 Ionic 缓存页不能覆盖当前选择。标题读取选中集合的 `unreadMessageCount` 与 `unreadUnmutedAttentionCount`，前台恢复普通标题。系统角标和通知不受 selection 影响。
+ChatListStore.viewUnread 使用连接级 `watchConversationUnread` 订阅内置 tab 的普通、归档及“消息是否包含话题”两种集合，并请求账号级 `appBadgeCount`。tab badge、归档入口、后台标题和系统角标共享同一订阅；ChatListStore.unread 只适配系统角标的读取接口。切 tab 和健康连接恢复前台不重订阅，消息/已读等事件不再触发汇总 HTTP 请求。普通及归档列表下拉刷新通过新的 requestId 请求完整 WS 快照。ChatList 只在 active 时发布当前 selection，进入会话或设置后保留最近选择；隐藏的 Ionic 缓存页不能覆盖当前选择。标题读取选中集合的 `unreadMessageCount` 与 `unreadUnmutedAttentionCount`，前台恢复普通标题；页面隐藏时保留未读订阅。系统角标和通知不受 selection 影响。
+
+`conversationUnread` 首次返回 `full: true`，之后仅发送变化集合的六个绝对计数，归零也发送；未出现的 key 保持原值。appBadgeCount 未出现时保持原值，0 表示清除角标。requestId 隔离订阅，旧回包和首次完整快照前的局部更新被丢弃。重连重新订阅并获取全量；断线及刷新期间保留同账号已有数字，账号变化立即隐藏旧值。`conversationUnreadError` 保留已有数字，后端退避重试并用完整快照恢复，不回退 HTTP 轮询。最后一个消费者退出后取消订阅。协议和后端触发规则见[未读 WS 协议](../../backend/docs/conversation-unread-ws.md)。
 
 ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c}/mute`；永久省略 durationSeconds。一个到期定时器更新标志与计数，取消静音按协议同时取消归档。话题使用自身订阅/归档操作。
 
 测试拦截 HTTP、WebSocket 与上传。禁止向生产服写入或测试上传 S3；必须实测写入时使用本地后端及开发数据库。
 
-静音与归档通过 ChatStore 乐观修改共享字段，话题订阅修改已知订阅状态；未知状态在写入后读取。失败只回退版本仍属于本次操作的字段，后到的推送或选择优先。汇总计数在写入确认后刷新。SavedMessageList 取消收藏时先移除快照，失败且列表未重置时按原位置恢复。
+静音与归档通过 ChatStore 乐观修改共享字段，话题订阅修改已知订阅状态；未知状态在写入后读取。失败只回退版本仍属于本次操作的字段，后到的推送或选择优先。汇总计数由服务端在写入提交后推送更新。SavedMessageList 取消收藏时先移除快照，失败且列表未重置时按原位置恢复。
 
 媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。每次路由导航关闭已经存在的 modal、popover、alert 和 action-sheet，Toast 保留自己的生命周期。
 
-会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字使用 `unreadUnmutedConversationCount`，标题数字仍使用包含静音的 `unreadMessageCount`。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab 和后台标题使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天 mutedUntil 或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；消息、编辑、撤回、已读、订阅、归档、静音变更、已知静音到期、好友变化和重连使缓存失效，多个消费者共用请求。刷新保留同一账号的已知结果，版本丢弃迟到回包；账号切换立即隐藏旧账号快照并重新查询。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。
+会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字使用 `unreadUnmutedConversationCount`，标题数字仍使用包含静音的 `unreadMessageCount`。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab 和后台标题使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天 mutedUntil 或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。

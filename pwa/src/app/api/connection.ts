@@ -2,7 +2,7 @@ import { computed, effect, inject, Service, signal } from '@angular/core';
 import { filter, map, Subject } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../generated/endpoints/chahua.base-url';
 import { wsPayloadCodecs } from '../../generated/json-codecs';
-import type { MessageResponse, ServerWsMessage } from '../../generated/models';
+import type { ConversationView, MessageResponse, ServerWsMessage } from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
 import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
 import { SessionStore } from '../session/session-store';
@@ -15,6 +15,7 @@ const enum WsControl {
   Pong = 'pong',
   AppState = 'appState',
   WatchPresence = 'watchPresence',
+  WatchConversationUnread = 'watchConversationUnread',
 }
 
 const enum WsAppState {
@@ -71,6 +72,30 @@ export class Connection {
         requestId,
         userIds,
         chatIds: chatIds.map(decodeId),
+      }),
+    );
+  }
+
+  watchConversationUnread(requestId: number, views: readonly ConversationView[], appBadge: boolean) {
+    if (!this.connected() || this.socket?.readyState !== WebSocket.OPEN) return;
+    const refs = (items: ConversationView['selector']['include']) =>
+      items?.map((ref) => ({
+        chatId: decodeId(ref.chatId),
+        ...(ref.threadId == null ? {} : { threadId: decodeId(ref.threadId) }),
+      }));
+    this.socket.send(
+      JSON.stringify({
+        type: WsControl.WatchConversationUnread,
+        requestId,
+        appBadge,
+        views: views.map((view) => ({
+          ...view,
+          selector: {
+            ...view.selector,
+            include: refs(view.selector.include),
+            exclude: refs(view.selector.exclude),
+          },
+        })),
       }),
     );
   }

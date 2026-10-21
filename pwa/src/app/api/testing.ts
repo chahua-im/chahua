@@ -63,5 +63,6 @@ export function mockRealtime({
     acceptPin: (event: PinChange) => events$.next(event),
     acceptChange: (event: MessageChange) => events$.next(event),
     watchPresence: () => {},
+    watchConversationUnread: () => {},
   };
 }

@@ -140,11 +140,9 @@ describe('ChatListStore', () => {
     expect(query.items()[0].unreadReactions).toBe(0);
   });
 
-  it('clears a mention badge and refreshes the global summary when an edit removes it', async () => {
+  it('clears a row mention badge without fetching a global summary when an edit removes it', async () => {
     http.expectOne('/_api/chats?limit=50').flush({ chats: [{ ...wireChat, unreadMentions: 1 }] });
-    const release = data.unread.activate();
     await settle();
-    http.expectOne('/_api/chats/unread').flush({ unreadCount: 1, unreadMentions: 1 });
     await settle();
     messages.acceptChange({
       type: ServerWsMessageType.messageUpdated,
@@ -152,11 +150,9 @@ describe('ChatListStore', () => {
     });
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 1, unreadMentions: 0 });
     await settle();
-    http.expectOne('/_api/chats/unread').flush({ unreadCount: 1, unreadMentions: 0 });
     await settle();
     expect(query.items()[0].unreadMentions).toBe(0);
-    expect(data.unread.value()?.unreadMentions).toBe(0);
-    release();
+    http.expectNone('/_api/chats/unread');
   });
 
   it('loads archives separately and excludes topic messages from main chat previews', async () => {

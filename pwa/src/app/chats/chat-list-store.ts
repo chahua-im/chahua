@@ -13,9 +13,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
-import { ConversationsService } from '../../generated/endpoints/conversations/conversations.service';
 import { SessionStore } from '../session/session-store';
-import { builtinConversationViews } from './conversation-views';
+import { conversationUnread } from './conversation-unread';
 import { ListTab, type ListSelection } from './list-tabs';
 import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import {
@@ -26,8 +25,6 @@ import {
   type ConversationView,
   type FriendRequestHistoryEntry,
   type MessageResponse,
-  type UnreadCountResponse,
-  type UnreadThreadCountResponse,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { activeQuery, readPages } from '../api/query';
@@ -112,68 +109,25 @@ export class ChatListStore {
   private readonly historicalRequests = this.requestCache(true);
   private readonly activeThreads = this.threadCache(false);
   private readonly archivedThreads = this.threadCache(true);
-  private readonly conversationApi = inject(ConversationsService);
   private readonly session = inject(SessionStore);
   readonly selection = signal<ListSelection>({ tab: ListTab.Messages, archived: false, requestHistory: false });
-  private readonly viewQuery = activeQuery<
-    { uid: number | undefined; summaries: ConversationUnreadSummary[] } | undefined
-  >(
-    this.destroyRef,
-    async (cancel) => {
-      const uid = this.session.user()?.uid;
-      if (uid == null) return { uid, summaries: [] };
-      const response = await this.response(
-        this.conversationApi.unreadSummary({ views: builtinConversationViews() }),
-        cancel,
-      );
-      return { uid, summaries: response.summaries };
-    },
-    undefined,
-  );
-  readonly viewUnread = {
-    ...this.viewQuery,
+  readonly viewUnread = conversationUnread(this.realtime, this.session, this.destroyRef);
+  readonly unread = {
+    activate: this.viewUnread.activate,
     value: computed(() => {
-      const snapshot = this.viewQuery.value();
-      return snapshot?.uid === this.session.user()?.uid ? snapshot?.summaries : undefined;
+      const unreadCount = this.viewUnread.appBadgeCount();
+      return unreadCount == null ? undefined : { unreadCount };
     }),
   };
   summary(view: ConversationView): ConversationUnreadSummary | undefined {
     return this.viewUnread.value()?.find((summary) => summary.key === view.key);
   }
 
-  readonly unread = activeQuery<UnreadCountResponse | undefined>(
-    this.destroyRef,
-    (cancel) => this.response(this.api.getUnreadCount({ timeout: 10000 }), cancel),
-    undefined,
-  );
-  readonly threadUnread = activeQuery<UnreadThreadCountResponse | undefined>(
-    this.destroyRef,
-    (cancel) => this.response(this.threadsApi.getUnreadThreadCount(), cancel),
-    undefined,
-  );
-  readonly archivedUnread = {
-    chats: {
-      ...this.unread,
-      value: computed(() => this.unread.value()?.archivedUnreadCount),
-    },
-    threads: {
-      ...this.threadUnread,
-      value: computed(() => this.threadUnread.value()?.archivedUnreadMessageCount),
-    },
-    refresh: () => this.refreshArchivedUnread(),
-    refreshChats: () => this.refreshChatUnread(),
-  };
-
   constructor() {
-    effect(() => {
-      this.session.user()?.uid;
-      untracked(() => void this.viewUnread.refresh());
-    });
     for (const archived of [false, true]) this.queries.set(archived, this.createQuery(archived));
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
       void this.invalidateRequests();
       void this.invalidateThreads();
-      this.refreshArchivedUnread();
     });
     // Live events keep a foregrounded list current; only a dropped socket can have missed rows.
     let wasConnected = this.realtime.connected();
@@ -188,12 +142,9 @@ export class ChatListStore {
       wasConnected = connected;
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, threadId }) => {
-      void this.viewUnread.refresh();
       if (threadId) {
-        void this.threadUnread.refresh();
         if (kind === ChatChangeKind.Membership) void this.invalidateThreads();
       } else {
-        this.refreshChatUnread();
         if (kind === ChatChangeKind.Membership) this.refreshChats();
       }
     });
@@ -204,12 +155,10 @@ export class ChatListStore {
       }
       switch (event.type) {
         case ServerWsMessageType.message:
-          void this.viewUnread.refresh();
           this.receiveMessage(event.payload);
           if (event.payload.replyRootId) {
             void this.invalidateThreads();
-            void this.archivedUnread.threads.refresh();
-          } else this.refreshChatUnread();
+          }
           break;
         case ServerWsMessageType.friendRequestReceived:
         case ServerWsMessageType.friendRequestResolved:
@@ -222,45 +171,27 @@ export class ChatListStore {
           break;
         case ServerWsMessageType.threadUpdate:
         case ServerWsMessageType.threadMembershipChanged:
-          void this.viewUnread.refresh();
           void this.invalidateThreads();
-          void this.archivedUnread.threads.refresh();
           break;
         case ServerWsMessageType.chatArchiveStateChanged: {
           this.refreshChats();
-          this.refreshChatUnread();
           break;
         }
         case ServerWsMessageType.messageUpdated:
           if (!event.payload.replyRootId) this.chatInfo.invalidateReads(new Set([event.payload.chatId]));
-          this.refreshChatUnread();
           if (this.chatInfo.unreadMentions(event.payload.chatId, event.payload.replyRootId) > 0) {
             if (event.payload.replyRootId) void this.invalidateThreads();
             else this.syncUnread(event.payload.chatId);
           }
           break;
         case ServerWsMessageType.notification:
-          // Every notification type (mention/reply/reaction) changes a count
-          // carried by the list, thread read state, or the global title
-          // totals; refetch the authoritative scopes instead of guessing.
-          this.refreshChatUnread();
+          // Row state still comes from its own endpoint; collection totals arrive over WS.
           if (event.payload.threadRootId) {
             void this.invalidateThreads();
           } else {
             this.chatInfo.invalidateReads(new Set([event.payload.chatId]));
             this.syncUnread(event.payload.chatId);
           }
-          break;
-        case ServerWsMessageType.friendshipRemoved:
-          this.refreshChatUnread();
-          break;
-        case ServerWsMessageType.messageDeleted:
-          void this.viewUnread.refresh();
-          if (event.payload.replyRootId) void this.archivedUnread.threads.refresh();
-          else this.refreshChatUnread();
-          break;
-        case ServerWsMessageType.messagesBulkDeleted:
-          this.refreshArchivedUnread();
           break;
       }
     });
@@ -528,7 +459,6 @@ export class ChatListStore {
 
   refreshChats() {
     if (this.destroyRef.destroyed) return;
-    void this.viewUnread.refresh();
     this.chatInfo.invalidateReads();
     for (const { state } of this.queries.values()) this.invalidateQuery(state);
   }
@@ -706,15 +636,5 @@ export class ChatListStore {
       current.loadingMore.set(false);
     });
     return operation.promise;
-  }
-
-  private refreshChatUnread() {
-    void this.viewUnread.refresh();
-    void this.unread.refresh();
-  }
-
-  private refreshArchivedUnread() {
-    this.refreshChatUnread();
-    void this.threadUnread.refresh();
   }
 }

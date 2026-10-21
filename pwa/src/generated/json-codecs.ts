@@ -41,9 +41,6 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     exclude: ['ConversationRef'],
     include: ['ConversationRef'],
   },
-  ConversationUnreadRequest: {
-    views: ['ConversationView'],
-  },
   ConversationView: {
     selector: 'ConversationSelector',
   },
@@ -478,11 +475,6 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'POST',
-    path: '/conversations/unread-summary',
-    body: 'ConversationUnreadRequest',
-  },
-  {
-    method: 'POST',
     path: '/external/invites',
     body: 'ExternalCreateInviteRequest',
     response: 'ExternalCreateInviteResponse',
@@ -681,6 +673,8 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   reactionUpdated: 'ReactionUpdatePayload',
   presenceUpdate: 0,
   presenceSnapshot: 'PresenceSnapshotPayload',
+  conversationUnread: 0,
+  conversationUnreadError: 0,
   threadUpdate: 'ThreadUpdatePayload',
   threadMembershipChanged: 'ThreadMembershipChangedPayload',
   chatArchiveStateChanged: 'ChatArchiveStateChangedPayload',

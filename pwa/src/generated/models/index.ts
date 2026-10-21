@@ -6,8 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export * from './groupRole';
 export * from './snowflakeID';
+export * from './groupRole';
 export * from './attachmentResponse';
 export * from './authTokenResponse';
 export * from './userGroupTagInfo';
@@ -21,6 +21,13 @@ export * from './mentionInfo';
 export * from './messageType';
 export * from './messagePreviewSticker';
 export * from './messagePreview';
+export * from './conversationCategory';
+export * from './conversationRef';
+export * from './conversationSelector';
+export * from './conversationUnreadErrorPayload';
+export * from './conversationUnreadSummary';
+export * from './conversationUnreadPayload';
+export * from './conversationView';
 export * from './inviteType';
 export * from './groupVisibility';
 export * from './inviteResponse';
@@ -59,7 +66,6 @@ export * from './attachments';
 export * from './auth';
 export * from './blocks';
 export * from './chats';
-export * from './conversations';
 export * from './external-invites';
 export * from './external-sessions';
 export * from './external-social';

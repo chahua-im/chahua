@@ -54,7 +54,10 @@ cargo test --locked openapi::tests::
 
 ## Conversation collection summaries
 
-`POST /conversations/unread-summary` accepts `{ "views": [{ "key": "...", "selector": { ... } }] }`.
+Authenticated WebSocket connections subscribe with
+`{ "type": "watchConversationUnread", "requestId": 1, "views": [{ "key": "...", "selector": { ... } }], "appBadge": true }`.
+The server sends an initial complete snapshot, then changed collections as absolute counters.
+See [the subscription protocol](docs/conversation-unread-ws.md) for lifecycle, errors and refresh behavior.
 A selector contains `categories` (`group`, `dm`, `groupThread`, `dmThread`),
 `include` and `exclude` arrays of `{ chatId, threadId? }`, and `archived` (default false).
 IDs are decimal strings on the wire. Categories and explicit inclusions form a union;

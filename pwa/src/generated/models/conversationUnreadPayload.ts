@@ -7,6 +7,13 @@
  */
 import type { ConversationUnreadSummary } from './conversationUnreadSummary';
 
-export interface ConversationUnreadResponse {
+/**
+ * Connection-scoped absolute counters. Partial publications replace only their listed keys.
+ */
+export interface ConversationUnreadPayload {
+  appBadgeCount?: number;
+  full: boolean;
+  /** @minimum 0 */
+  requestId: number;
   summaries: ConversationUnreadSummary[];
 }

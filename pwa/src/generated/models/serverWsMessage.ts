@@ -7,6 +7,8 @@
  */
 import type { BulkDeletedPayload } from './bulkDeletedPayload';
 import type { ChatArchiveStateChangedPayload } from './chatArchiveStateChangedPayload';
+import type { ConversationUnreadErrorPayload } from './conversationUnreadErrorPayload';
+import type { ConversationUnreadPayload } from './conversationUnreadPayload';
 import type { FriendRequestReceivedPayload } from './friendRequestReceivedPayload';
 import type { FriendRequestResolvedPayload } from './friendRequestResolvedPayload';
 import type { FriendshipRemovedPayload } from './friendshipRemovedPayload';
@@ -49,6 +51,14 @@ export type ServerWsMessage =
   | {
       payload: PresenceSnapshotPayload;
       type: 'presenceSnapshot';
+    }
+  | {
+      payload: ConversationUnreadPayload;
+      type: 'conversationUnread';
+    }
+  | {
+      payload: ConversationUnreadErrorPayload;
+      type: 'conversationUnreadError';
     }
   | {
       payload: ThreadUpdatePayload;

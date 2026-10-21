@@ -437,6 +437,7 @@ async fn mark_as_read(
         )?;
     }
 
+    state.ws_registry.invalidate_unread(&[uid]);
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: read_state.last_read_message_id,
         unread_count: read_state.unread_count,
@@ -603,6 +604,7 @@ async fn mark_as_unread(
         .unread_service
         .count_chat_unread_reactions(conn, uid, chat_id, None)?;
 
+    state.ws_registry.invalidate_unread(&[uid]);
     Ok(Json(MarkChatReadStateResponse {
         last_read_message_id: new_read_id,
         unread_count,

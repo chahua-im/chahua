@@ -35,6 +35,12 @@ pub enum ClientWsMessage {
         user_ids: Option<Vec<i32>>,
         chat_ids: Option<Vec<String>>,
     },
+    WatchConversationUnread {
+        request_id: u32,
+        views: Vec<crate::dto::conversations::ConversationView>,
+        #[serde(default)]
+        app_badge: bool,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -78,6 +84,8 @@ pub enum ServerWsMessage {
     ReactionUpdated(ReactionUpdatePayload),
     PresenceUpdate(PresenceUpdatePayload),
     PresenceSnapshot(PresenceSnapshotPayload),
+    ConversationUnread(crate::dto::conversations::ConversationUnreadPayload),
+    ConversationUnreadError(crate::dto::conversations::ConversationUnreadErrorPayload),
     ThreadUpdate(ThreadUpdatePayload),
     ThreadMembershipChanged(ThreadMembershipChangedPayload),
     ChatArchiveStateChanged(ChatArchiveStateChangedPayload),
@@ -107,6 +115,8 @@ impl ServerWsMessage {
             Self::ReactionUpdated(_) => "reactionUpdated",
             Self::PresenceUpdate(_) => "presenceUpdate",
             Self::PresenceSnapshot(_) => "presenceSnapshot",
+            Self::ConversationUnread(_) => "conversationUnread",
+            Self::ConversationUnreadError(_) => "conversationUnreadError",
             Self::ThreadUpdate(_) => "threadUpdate",
             Self::ThreadMembershipChanged(_) => "threadMembershipChanged",
             Self::ChatArchiveStateChanged(_) => "chatArchiveStateChanged",
@@ -328,6 +338,36 @@ mod tests {
         UserPresenceResponse,
     };
     use serde_json::json;
+
+    #[test]
+    fn unread_watch_preserves_large_ids_and_accepts_explicit_cancellation() {
+        let watch: ClientWsMessage = serde_json::from_str(r#"{"type":"watchConversationUnread","requestId":7,"views":[{"key":"custom","selector":{"include":[{"chatId":"9223372036854775807","threadId":"9007199254740993"}]}}],"appBadge":true}"#).unwrap();
+        let ClientWsMessage::WatchConversationUnread {
+            request_id,
+            views,
+            app_badge,
+        } = watch
+        else {
+            panic!()
+        };
+        assert_eq!(request_id, 7);
+        assert!(app_badge);
+        assert_eq!(views[0].selector.include[0].chat_id, i64::MAX);
+        assert_eq!(
+            views[0].selector.include[0].thread_id,
+            Some(9007199254740993)
+        );
+        assert!(matches!(
+            serde_json::from_str::<ClientWsMessage>(
+                r#"{"type":"watchConversationUnread","requestId":8,"views":[]}"#
+            )
+            .unwrap(),
+            ClientWsMessage::WatchConversationUnread {
+                app_badge: false,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn decodes_flat_client_controls_with_variant_specific_fields() {

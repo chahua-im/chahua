@@ -620,6 +620,7 @@ async fn patch_group(
     security(("bearer_jwt" = [])),
 )]
 async fn put_mute(
+    State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
@@ -646,6 +647,7 @@ async fn put_mute(
     .set(gm_dsl::muted_until.eq(muted_until))
     .execute(conn)?;
 
+    state.ws_registry.invalidate_unread(&[uid]);
     Ok(Json(MuteResponse { muted_until }))
 }
 
@@ -663,6 +665,7 @@ async fn put_mute(
     security(("bearer_jwt" = [])),
 )]
 async fn delete_mute(
+    State(state): State<AppState>,
     CurrentUid(uid): CurrentUid,
     Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
     mut conn: DbConn,
@@ -681,6 +684,7 @@ async fn delete_mute(
     ))
     .execute(conn)?;
 
+    state.ws_registry.invalidate_unread(&[uid]);
     Ok(StatusCode::NO_CONTENT)
 }
 

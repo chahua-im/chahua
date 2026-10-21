@@ -269,6 +269,7 @@ async fn mark_thread_read(
             false,
         )?;
     }
+    state.ws_registry.invalidate_unread(&[uid]);
     Ok(Json(applied.response))
 }
 
@@ -386,6 +387,7 @@ async fn mark_thread_read_in_chat(
             false,
         )?;
     }
+    state.ws_registry.invalidate_unread(&[uid]);
     Ok(Json(applied.response))
 }
 

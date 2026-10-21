@@ -84,7 +84,7 @@ describe('ChatListStore threads and friend requests', () => {
     disposed = false;
     inbox = scope.get(ChatListStore);
     refreshChats = vi.spyOn(inbox, 'refreshChats');
-    refreshCounts = vi.spyOn(inbox.threadUnread, 'refresh');
+    refreshCounts = vi.spyOn(inbox.viewUnread, 'refresh');
     requests = inbox.friendRequests(false);
     threads = inbox.threads(false);
     releaseList = () => {};
@@ -568,7 +568,7 @@ describe('ChatListStore threads and friend requests', () => {
     http.expectOne(topicUrl + '/subscribe').flush(null);
     await subscribing;
     expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: true, archived: true });
-    expect(refreshCounts).toHaveBeenCalledTimes(3);
+    expect(refreshCounts).not.toHaveBeenCalled();
     http.expectNone(() => true);
   });
 

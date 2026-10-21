@@ -43,13 +43,7 @@ pub struct ConversationView {
     pub selector: ConversationSelector,
 }
 
-#[derive(Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ConversationUnreadRequest {
-    pub views: Vec<ConversationView>,
-}
-
-#[derive(Debug, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationUnreadSummary {
     pub key: String,
@@ -67,8 +61,19 @@ pub struct ConversationUnreadSummary {
     pub unread_unmuted_attention_count: i64,
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
+/// Connection-scoped absolute counters. Partial publications replace only their listed keys.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConversationUnreadResponse {
+pub struct ConversationUnreadPayload {
+    pub request_id: u32,
+    pub full: bool,
     pub summaries: Vec<ConversationUnreadSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_badge_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationUnreadErrorPayload {
+    pub request_id: u32,
 }

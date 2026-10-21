@@ -1,4 +1,5 @@
 use crate::dto::attachments::ChatAttachmentKindFilter;
+use crate::dto::conversations::ConversationView;
 use crate::dto::ws::{
     ChatArchiveStateChangedPayload, FriendRequestReceivedPayload, FriendRequestResolvedPayload,
     FriendshipRemovedPayload, GroupPresenceResponse, PinUpdatePayload, PresenceSnapshotPayload,
@@ -21,6 +22,7 @@ use utoipa::OpenApi;
     components(
         schemas(
             ChatAttachmentKindFilter,
+            ConversationView,
             MessageSearchSort,
             GroupSearchMode,
             GroupSelectorScope,
@@ -70,6 +72,22 @@ mod tests {
         let mut document = ApiDoc::openapi();
         document.merge(crate::handlers::api_router().into_openapi());
         serde_json::to_value(document).unwrap()
+    }
+
+    #[test]
+    fn unread_collections_are_ws_only_and_legacy_unread_routes_remain() {
+        let document = api_document();
+        assert!(document["paths"]
+            .get("/conversations/unread-summary")
+            .is_none());
+        for path in ["/chats/unread", "/threads/unread"] {
+            assert!(document["paths"][path]["get"].is_object());
+        }
+        let schemas = &document["components"]["schemas"];
+        assert!(schemas["ConversationView"].is_object());
+        assert!(schemas["ConversationUnreadPayload"].is_object());
+        assert!(schemas.get("ConversationUnreadRequest").is_none());
+        assert!(schemas.get("ConversationUnreadResponse").is_none());
     }
 
     #[test]

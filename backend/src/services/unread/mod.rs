@@ -5,3 +5,5 @@ mod fenwick;
 mod service;
 
 pub use service::{ChatUnreadMembership, UnreadService};
+
+pub mod watch;

@@ -34,6 +34,8 @@ pub struct ConnectionEntry {
     pub conn_id: u64,
     pub client_id: String,
     pub tx: mpsc::Sender<Arc<ServerWsMessage>>,
+    /// Sticky, coalescing invalidation independent of the lossy ordinary-event queue.
+    pub unread_changed: Arc<tokio::sync::Notify>,
     /// Unix timestamp (seconds) when we last received a ping from the client.
     pub last_ping_at: AtomicU64,
     pub app_state: AtomicU8,
@@ -111,6 +113,7 @@ impl ConnectionRegistry {
             conn_id,
             client_id,
             tx,
+            unread_changed: Arc::new(tokio::sync::Notify::new()),
             last_ping_at: AtomicU64::new(now),
             app_state: AtomicU8::new(AppPresenceState::Active as u8),
             last_state_at: AtomicU64::new(now),
@@ -139,6 +142,21 @@ impl ConnectionRegistry {
     /// Broadcast a JSON string to all connections for the given user ids. Each uid may have multiple connections.
     /// Failures to send (e.g. full buffer) are logged but do not remove the connection here.
     pub fn broadcast_to_uids(&self, uids: &[i32], message: Arc<ServerWsMessage>) {
+        if matches!(
+            &*message,
+            ServerWsMessage::Message(_)
+                | ServerWsMessage::MessageUpdated(_)
+                | ServerWsMessage::MessageDeleted(_)
+                | ServerWsMessage::MessagesBulkDeleted(_)
+                | ServerWsMessage::ThreadUpdate(_)
+                | ServerWsMessage::ThreadMembershipChanged(_)
+                | ServerWsMessage::ChatArchiveStateChanged(_)
+                | ServerWsMessage::FriendRequestResolved(_)
+                | ServerWsMessage::FriendshipRemoved(_)
+                | ServerWsMessage::Notification(_)
+        ) {
+            self.invalidate_unread(uids);
+        }
         let msg_type = message.message_type();
         for &uid in uids {
             if let Some(vec) = self.inner.get(&uid) {
@@ -153,6 +171,17 @@ impl ConnectionRegistry {
                     } else {
                         self.metrics.record_message_pushed(msg_type);
                     }
+                }
+            }
+        }
+    }
+
+    /// Call after committing read/mute/membership changes that have no ordinary WS event.
+    pub fn invalidate_unread(&self, uids: &[i32]) {
+        for uid in uids {
+            if let Some(entries) = self.inner.get(uid) {
+                for entry in entries.iter() {
+                    entry.unread_changed.notify_one();
                 }
             }
         }
@@ -318,6 +347,40 @@ mod tests {
 
     fn registry() -> ConnectionRegistry {
         ConnectionRegistry::new(Arc::new(WsMetrics::new(&prometheus::Registry::new())))
+    }
+
+    #[tokio::test]
+    async fn unread_invalidation_survives_a_full_event_queue_and_reaches_every_device() {
+        let registry = registry();
+        let (first, _rx) = registry.register(7, "a".into());
+        let (second, _rx2) = registry.register(7, "b".into());
+        let event = Arc::new(ServerWsMessage::ThreadMembershipChanged(
+            crate::dto::ws::ThreadMembershipChangedPayload {
+                chat_id: 1,
+                thread_root_id: 2,
+            },
+        ));
+        while first.tx.try_send(event.clone()).is_ok() {}
+        registry.broadcast_to_uids(&[7], event);
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            first.unread_changed.notified(),
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            second.unread_changed.notified(),
+        )
+        .await
+        .unwrap();
+        registry.invalidate_unread(&[7]);
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            first.unread_changed.notified(),
+        )
+        .await
+        .unwrap();
     }
 
     #[test]
