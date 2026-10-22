@@ -100,7 +100,7 @@ pub struct ForwardMessagesBody {
     #[schema(value_type = String)]
     pub source_chat_id: i64,
     #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
-    #[schema(value_type = Vec<String>)]
+    #[schema(value_type = Vec<String>, min_items = 2, max_items = 100)]
     pub message_ids: Vec<i64>,
     pub client_generated_id: String,
 }

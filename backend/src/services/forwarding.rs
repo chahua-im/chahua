@@ -20,8 +20,10 @@ const SYSTEM_MESSAGE_FORWARD_FORBIDDEN: &str = "System messages cannot be forwar
 const INVITE_MESSAGE_FORWARD_FORBIDDEN: &str = "Invite messages cannot be forwarded";
 
 fn canonical_forward_message_ids(message_ids: &[i64]) -> Result<Vec<i64>, AppError> {
-    if message_ids.is_empty() {
-        return Err(AppError::BadRequest("Message IDs cannot be empty"));
+    if message_ids.len() < 2 {
+        return Err(AppError::BadRequest(
+            "Select at least two messages to forward",
+        ));
     }
     if message_ids.len() > MAX_FORWARD_MESSAGES {
         return Err(AppError::BadRequest("Too many messages to forward"));
@@ -318,6 +320,22 @@ mod tests {
 
         assert_eq!(first_attempt, vec![10, 20, 30]);
         assert_eq!(retry, first_attempt);
+    }
+
+    #[test]
+    fn forward_selection_requires_two_to_one_hundred_distinct_messages() {
+        for ids in [vec![], vec![10], vec![10, 10], (1..=101).collect()] {
+            assert!(matches!(
+                canonical_forward_message_ids(&ids),
+                Err(crate::errors::AppError::BadRequest(_))
+            ));
+        }
+        assert_eq!(
+            canonical_forward_message_ids(&[20, 10]).unwrap(),
+            vec![10, 20]
+        );
+        let maximum: Vec<i64> = (1..=100).collect();
+        assert_eq!(canonical_forward_message_ids(&maximum).unwrap(), maximum);
     }
 
     #[test]

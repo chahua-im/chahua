@@ -1,4 +1,4 @@
-//! Single-message forwarding keeps normal message content and a flattened origin.
+//! Single-message forwarding keeps message content, shared bundles and a flattened origin.
 
 use std::collections::{HashMap, HashSet};
 
@@ -34,12 +34,13 @@ fn validate_retry(
     destination_chat_id: i64,
     thread_id: Option<i64>,
     origin_id: i64,
+    bundle_id: Option<i64>,
 ) -> Result<(), AppError> {
     if existing.sender_uid == uid
         && existing.chat_id == destination_chat_id
         && existing.reply_root_id == thread_id
         && existing.forwarded_from_message_id == Some(origin_id)
-        && existing.forwarded_bundle_id.is_none()
+        && existing.forwarded_bundle_id == bundle_id
     {
         return Ok(());
     }
@@ -74,11 +75,6 @@ pub(crate) async fn prepare_single_forward(
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
     validate_forwardable_source(&source.message_type, source.transcode_status)?;
-    if source.message_type == MessageType::Forwarded {
-        return Err(AppError::BadRequest(
-            "Use the merged forwarding API for forwarded bundles",
-        ));
-    }
     let origin_id = source.forwarded_from_message_id.unwrap_or(source.id);
     if let Some(existing) = messages::table
         .filter(messages::client_generated_id.eq(&body.client_generated_id))
@@ -93,6 +89,7 @@ pub(crate) async fn prepare_single_forward(
             destination_chat_id,
             body.thread_id,
             origin_id,
+            source.forwarded_bundle_id,
         )?;
         return Ok(PreparedSingleForward::Existing(Box::new(existing)));
     }
@@ -142,7 +139,9 @@ pub(crate) async fn prepare_single_forward(
         attachment_ids,
         publish_immediately: true,
         forwarded_from_message_id: Some(origin_id),
-        forwarded_bundle_id: None,
+        // Bundles are immutable. Reuse the selected bundle without adding a nesting level;
+        // the normal message hydrator loads its compact preview for the send response.
+        forwarded_bundle_id: source.forwarded_bundle_id,
         forwarded_preview_total: None,
         forwarded_preview_contains_forwarded_messages: None,
         forwarded_preview_items: None,
@@ -327,7 +326,7 @@ mod tests {
         existing.forwarded_from_message_id = Some(1);
         existing.reply_root_id = Some(80);
         existing.message = Some("copied before source edit".into());
-        assert!(validate_retry(&existing, 7, 42, Some(80), 1).is_ok());
+        assert!(validate_retry(&existing, 7, 42, Some(80), 1, None).is_ok());
         for (uid, chat, thread, origin) in [
             (8, 42, Some(80), 1),
             (7, 43, Some(80), 1),
@@ -336,12 +335,38 @@ mod tests {
             (7, 42, Some(80), 2),
         ] {
             assert!(matches!(
-                validate_retry(&existing, uid, chat, thread, origin),
+                validate_retry(&existing, uid, chat, thread, origin, None),
                 Err(AppError::Conflict(_))
             ));
         }
         existing.forwarded_from_message_id = None;
-        assert!(validate_retry(&existing, 7, 42, Some(80), 1).is_err());
+        assert!(validate_retry(&existing, 7, 42, Some(80), 1, None).is_err());
+    }
+
+    #[test]
+    fn bundle_retry_requires_the_same_origin_bundle_and_destination() {
+        let mut existing = message(100);
+        existing.message_type = MessageType::Forwarded;
+        existing.forwarded_from_message_id = Some(1);
+        existing.forwarded_bundle_id = Some(90);
+        existing.reply_root_id = Some(80);
+        assert!(validate_retry(&existing, 7, 42, Some(80), 1, Some(90)).is_ok());
+        for (uid, chat, thread, origin, bundle) in [
+            (8, 42, Some(80), 1, Some(90)),
+            (7, 43, Some(80), 1, Some(90)),
+            (7, 42, None, 1, Some(90)),
+            (7, 42, Some(80), 2, Some(90)),
+            (7, 42, Some(80), 1, Some(91)),
+            (7, 42, Some(80), 1, None),
+        ] {
+            assert!(matches!(
+                validate_retry(&existing, uid, chat, thread, origin, bundle),
+                Err(AppError::Conflict(_))
+            ));
+        }
+        // A merged send using the same bundle is a different operation.
+        existing.forwarded_from_message_id = None;
+        assert!(validate_retry(&existing, 7, 42, Some(80), 1, Some(90)).is_err());
     }
 
     #[test]
@@ -556,6 +581,169 @@ mod tests {
             prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body,).await,
             Err(AppError::Forbidden(_))
         ));
+        conn.batch_execute("ROLLBACK").unwrap();
+    }
+
+    #[tokio::test]
+    async fn database_single_forward_reuses_flat_and_nested_bundles() {
+        use crate::{
+            dto::messages::ForwardMessagesBody,
+            schema::forwarded_bundles,
+            services::{
+                forwarding::prepare_forward_message,
+                messages::{load_chat_forwarded_bundle_id, load_target_forwarded_bundle_from_root},
+            },
+        };
+        use diesel::connection::SimpleConnection;
+
+        fn persist(conn: &mut PgConnection, id: i64, prepared: &PreparedMessageSend) {
+            diesel::insert_into(messages::table)
+                .values((
+                    messages::id.eq(id),
+                    messages::chat_id.eq(prepared.chat_id),
+                    messages::sender_uid.eq(prepared.sender_uid),
+                    messages::message.eq(&prepared.message),
+                    messages::message_type.eq(&prepared.message_type),
+                    messages::client_generated_id.eq(&prepared.client_generated_id),
+                    messages::created_at.eq(Utc::now()),
+                    messages::reply_root_id.eq(prepared.reply_root_id),
+                    messages::forwarded_bundle_id.eq(prepared.forwarded_bundle_id),
+                    messages::forwarded_from_message_id.eq(prepared.forwarded_from_message_id),
+                ))
+                .execute(conn)
+                .unwrap();
+        }
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+        conn.batch_execute(
+            "BEGIN;
+             INSERT INTO groups(id, name) VALUES (-76200, 'bundle-source'), (-76210, 'bundle-destination');
+             INSERT INTO group_membership(chat_id, uid) VALUES (-76200, 76200), (-76210, 76200);
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message, client_generated_id, created_at)
+             VALUES (-76201, -76200, 76201, 'text', 'first', 'bundle-first', NOW()),
+                    (-76202, -76200, 76201, 'text', 'second', 'bundle-second', NOW()),
+                    (-76211, -76210, 76200, 'text', 'thread root', 'bundle-thread', NOW());",
+        ).unwrap();
+        let id_gen = test_id_gen();
+        let mut flat_bundle_id = None;
+        for (source_id, selection) in [
+            (-76203, vec![-76201, -76202]),
+            (-76204, vec![-76203, -76201]),
+        ] {
+            let merged = prepare_forward_message(
+                &mut conn,
+                id_gen,
+                76200,
+                -76200,
+                &ForwardMessagesBody {
+                    source_chat_id: -76200,
+                    message_ids: selection,
+                    client_generated_id: format!("bundle-merged-{source_id}"),
+                },
+            )
+            .await
+            .unwrap();
+            persist(&mut conn, source_id, &merged);
+            let bundle_id = merged.forwarded_bundle_id.unwrap();
+            let count_before = forwarded_bundles::table
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap();
+            let body = ForwardMessageBody {
+                source_chat_id: -76200,
+                client_generated_id: format!("bundle-single-{source_id}"),
+                thread_id: Some(-76211),
+            };
+            let PreparedSingleForward::New(prepared) =
+                prepare_single_forward(&mut conn, id_gen, 76200, -76210, source_id, &body)
+                    .await
+                    .unwrap()
+            else {
+                panic!("expected a new bundle copy")
+            };
+            assert_eq!(prepared.message_type, MessageType::Forwarded);
+            assert_eq!(prepared.message, merged.message);
+            assert_eq!(prepared.forwarded_bundle_id, Some(bundle_id));
+            assert_eq!(prepared.forwarded_from_message_id, Some(source_id));
+            assert_eq!(prepared.reply_root_id, Some(-76211));
+            assert!(prepared.attachment_ids.is_empty());
+            let copy_id = source_id - 10;
+            persist(&mut conn, copy_id, &prepared);
+            let PreparedSingleForward::Existing(existing) =
+                prepare_single_forward(&mut conn, id_gen, 76200, -76210, source_id, &body)
+                    .await
+                    .unwrap()
+            else {
+                panic!("retry must reuse the existing copy")
+            };
+            assert_eq!(existing.id, copy_id);
+
+            // Deleting the source wrapper leaves the destination's bundle and
+            // its child details accessible through destination membership.
+            diesel::update(messages::table.find(source_id))
+                .set(messages::deleted_at.eq(Utc::now()))
+                .execute(&mut conn)
+                .unwrap();
+            let root = load_chat_forwarded_bundle_id(&mut conn, -76210, copy_id, 76200).unwrap();
+            assert_eq!(root, bundle_id);
+            let bundle = load_target_forwarded_bundle_from_root(&mut conn, root, root).unwrap();
+            assert_eq!(bundle.item_count, 2);
+            assert_eq!(bundle.preview.as_array().unwrap().len(), 2);
+            if let Some(child) = flat_bundle_id {
+                assert_eq!(bundle.child_bundle_ids, vec![child]);
+                assert_eq!(
+                    load_target_forwarded_bundle_from_root(&mut conn, root, child)
+                        .unwrap()
+                        .id,
+                    child
+                );
+            } else {
+                assert!(bundle.child_bundle_ids.is_empty());
+                flat_bundle_id = Some(root);
+            }
+            assert!(load_chat_forwarded_bundle_id(&mut conn, -76210, copy_id, 76201).is_err());
+            assert!(matches!(
+                prepare_single_forward(&mut conn, id_gen, 76200, -76210, source_id, &body).await,
+                Err(AppError::NotFound(_))
+            ));
+
+            // Re-forwarding a copy retains the root origin even after deletion,
+            // and must not add a bundle or increase the nesting depth.
+            let PreparedSingleForward::New(repeated) = prepare_single_forward(
+                &mut conn,
+                id_gen,
+                76200,
+                -76210,
+                copy_id,
+                &ForwardMessageBody {
+                    source_chat_id: -76210,
+                    client_generated_id: format!("bundle-repeat-{source_id}"),
+                    thread_id: None,
+                },
+            )
+            .await
+            .unwrap() else {
+                panic!("expected a repeated bundle copy")
+            };
+            assert_eq!(repeated.forwarded_bundle_id, Some(bundle_id));
+            assert_eq!(repeated.forwarded_from_message_id, Some(source_id));
+            assert_eq!(
+                forwarded_bundles::table
+                    .count()
+                    .get_result::<i64>(&mut conn)
+                    .unwrap(),
+                count_before
+            );
+            // Restore the flat wrapper so the next iteration can select it.
+            diesel::update(messages::table.find(source_id))
+                .set(messages::deleted_at.eq(None::<chrono::DateTime<Utc>>))
+                .execute(&mut conn)
+                .unwrap();
+        }
         conn.batch_execute("ROLLBACK").unwrap();
     }
 
