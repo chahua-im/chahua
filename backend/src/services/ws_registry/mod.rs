@@ -356,6 +356,7 @@ mod tests {
         let (second, _rx2) = registry.register(7, "b".into());
         let event = Arc::new(ServerWsMessage::ThreadMembershipChanged(
             crate::dto::ws::ThreadMembershipChangedPayload {
+                status: None,
                 chat_id: 1,
                 thread_root_id: 2,
             },

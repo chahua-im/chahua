@@ -389,3 +389,5 @@ envelope, including `threadRootId` when present.
 These are read-only snapshots using the same counting rules as thread reads; they do not
 advance either read cursor. Clients can refresh a loaded thread's badges without reloading
 all thread-list pages. Existing clients can continue to use only `lastReadMessageId`.
+
+`threadMembershipChanged` carries an optional `status` snapshot (`subscribed`, `archived`). Explicit subscription/archive operations and automatic subscriptions after replies or edited mentions publish the resulting state after commit. Clients can keep subscription caches across ordinary thread messages; older invalidation-only events still require a refetch.

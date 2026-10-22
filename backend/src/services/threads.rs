@@ -492,18 +492,26 @@ pub fn broadcast_thread_update_to_subscribers(
 }
 
 pub fn broadcast_thread_membership_changed_to_user(
+    conn: &mut PgConnection,
     ws_registry: &Arc<ConnectionRegistry>,
     uid: i32,
     chat_id: i64,
     thread_root_id: i64,
-) {
+) -> Result<(), diesel::result::Error> {
+    let (archived, subscribed) =
+        get_subscription_state(conn, chat_id, thread_root_id, uid)?.unwrap_or((false, false));
     let msg = Arc::new(ServerWsMessage::ThreadMembershipChanged(
         ThreadMembershipChangedPayload {
+            status: Some(crate::dto::threads::ThreadSubscriptionStatusResponse {
+                subscribed,
+                archived,
+            }),
             thread_root_id,
             chat_id,
         },
     ));
     ws_registry.broadcast_to_uids(&[uid], msg);
+    Ok(())
 }
 
 #[derive(QueryableByName)]

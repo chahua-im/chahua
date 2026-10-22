@@ -59,7 +59,7 @@ pub struct UnreadThreadCountResponse {
     pub archived_unread_message_count: i64,
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSubscriptionStatusResponse {
     pub subscribed: bool,

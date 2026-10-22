@@ -190,7 +190,6 @@ export class ChatStore {
         case ServerWsMessageType.message:
           this.rememberMentions([event.payload]);
           if (event.payload.replyRootId) {
-            this.invalidateSubscriptions(event.payload.replyRootId);
             this.receiveThreadMessage(event.payload, event.payload.replyRootId);
           } else this.receiveMessage(event.payload);
           break;
@@ -207,7 +206,9 @@ export class ChatStore {
           break;
         }
         case ServerWsMessageType.threadMembershipChanged:
-          this.invalidateSubscriptions(event.payload.threadRootId);
+          if (event.payload.status)
+            this.setSubscription(event.payload.chatId, event.payload.threadRootId, event.payload.status);
+          else this.invalidateSubscriptions(event.payload.threadRootId);
           break;
         case ServerWsMessageType.chatArchiveStateChanged:
           this.applyChatState(event.payload.chatId, event.payload);

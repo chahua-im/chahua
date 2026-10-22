@@ -6,8 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { SnowflakeID } from './snowflakeID';
+import type { ThreadSubscriptionStatusResponse } from './threads/threadSubscriptionStatusResponse';
 
 export interface ThreadMembershipChangedPayload {
   chatId: SnowflakeID;
+  /** Absolute subscription state; omitted only by older servers. */
+  status?: ThreadSubscriptionStatusResponse;
   threadRootId: SnowflakeID;
 }

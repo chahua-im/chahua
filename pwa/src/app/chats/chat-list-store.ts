@@ -188,7 +188,7 @@ export class ChatListStore {
             this.threadMessages.add(event.payload.id);
             if (this.threadMessages.size > 256) this.threadMessages.delete(this.threadMessages.values().next().value!);
             this.chatInfo.invalidateThreadReads([event.payload.replyRootId]);
-            this.refreshThreadRead(event.payload.replyRootId);
+            this.refreshThreadRead(event.payload.replyRootId, true, false);
           }
           break;
         case ServerWsMessageType.friendRequestReceived:
@@ -490,7 +490,7 @@ export class ChatListStore {
     }
   }
 
-  private refreshThreadRead(rootId: SnowflakeID, newMessage = true) {
+  private refreshThreadRead(rootId: SnowflakeID, newMessage = true, discover = true) {
     let known = false;
     for (const { state } of [this.activeThreads, this.archivedThreads]) {
       if (!state.ids().includes(rootId)) continue;
@@ -498,7 +498,7 @@ export class ChatListStore {
       state.pendingReads.add(rootId);
       this.flushThreadReads(state);
     }
-    if (!known) void this.scheduleThreadHead(newMessage);
+    if (!known && discover) void this.scheduleThreadHead(newMessage);
   }
 
   private flushThreadReads(state: ThreadQuery) {

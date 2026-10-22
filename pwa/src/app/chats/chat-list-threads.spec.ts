@@ -521,6 +521,24 @@ describe('ChatListStore threads and friend requests', () => {
     expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
   });
 
+  it('applies explicit subscription snapshots without fetching subscription status', async () => {
+    await startThreads();
+    await hideLists();
+    events.next({
+      type: ServerWsMessageType.threadMembershipChanged,
+      payload: {
+        chatId: testChat.id,
+        threadRootId: rootId,
+        status: { subscribed: false, archived: true },
+      },
+    });
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
+    messages.next({ ...testMessage, id: encodeId('203'), replyRootId: rootId });
+    await settle();
+    expect(inbox['chatInfo'].subscription(testChat.id, rootId)).toEqual({ subscribed: false, archived: true });
+    http.expectNone(() => true);
+  });
+
   it('invalidates subscription state on membership changes and reconnect without hidden reads', async () => {
     const loading = inbox['chatInfo'].loadSubscription(testChat.id, rootId);
     http.expectOne(topicUrl + '/subscribe').flush({ subscribed: true, archived: false });
@@ -794,6 +812,17 @@ describe('ChatListStore threads and friend requests', () => {
     );
     await paging;
     messages.next({ ...testMessage, id: encodeId('203'), replyRootId: encodeId('200') });
+    await flushReads();
+    http.expectNone((request) => request.url === '/_api/threads');
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: {
+        chatId: testChat.id,
+        threadRootId: encodeId('200'),
+        replyCount: 1,
+        lastReplyAt: testMessage.createdAt,
+      },
+    });
     await flushReads();
     http.expectOne(activeThreadsUrl).flush(
       structuredClone({

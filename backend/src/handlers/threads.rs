@@ -506,6 +506,13 @@ async fn subscribe_thread(
 
     let inserted = thread_svc::ensure_thread_subscription(conn, chat_id, thread_root_id, uid)?;
     if inserted {
+        thread_svc::broadcast_thread_membership_changed_to_user(
+            conn,
+            &state.ws_registry,
+            uid,
+            chat_id,
+            thread_root_id,
+        )?;
         thread_svc::broadcast_thread_update_to_uids(
             conn,
             &state.ws_registry,
@@ -548,11 +555,12 @@ async fn unsubscribe_thread(
     let removed = thread_svc::unsubscribe_from_thread(conn, chat_id, thread_root_id, uid)?;
     if removed {
         thread_svc::broadcast_thread_membership_changed_to_user(
+            conn,
             &state.ws_registry,
             uid,
             chat_id,
             thread_root_id,
-        );
+        )?;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -633,11 +641,12 @@ async fn archive_thread(
     let updated = thread_svc::archive_thread(conn, chat_id, thread_root_id, uid)?;
     if updated {
         thread_svc::broadcast_thread_membership_changed_to_user(
+            conn,
             &state.ws_registry,
             uid,
             chat_id,
             thread_root_id,
-        );
+        )?;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -673,11 +682,12 @@ async fn unarchive_thread(
     let updated = thread_svc::unarchive_thread(conn, chat_id, thread_root_id, uid)?;
     if updated {
         thread_svc::broadcast_thread_membership_changed_to_user(
+            conn,
             &state.ws_registry,
             uid,
             chat_id,
             thread_root_id,
-        );
+        )?;
     }
 
     Ok(StatusCode::NO_CONTENT)

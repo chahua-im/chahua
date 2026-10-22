@@ -221,6 +221,9 @@ pub struct ThreadMembershipChangedPayload {
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub chat_id: i64,
+    /// Absolute subscription state; omitted only by older servers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<crate::dto::threads::ThreadSubscriptionStatusResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -571,6 +574,10 @@ mod tests {
     fn serializes_thread_membership_changed_as_camel_case() {
         let value = serde_json::to_value(ServerWsMessage::ThreadMembershipChanged(
             ThreadMembershipChangedPayload {
+                status: Some(crate::dto::threads::ThreadSubscriptionStatusResponse {
+                    subscribed: true,
+                    archived: false,
+                }),
                 thread_root_id: 42,
                 chat_id: 7,
             },
@@ -579,6 +586,10 @@ mod tests {
 
         assert_eq!(value["type"], json!("threadMembershipChanged"));
         assert_eq!(value["payload"]["threadRootId"], json!("42"));
+        assert_eq!(
+            value["payload"]["status"],
+            json!({"subscribed": true, "archived": false})
+        );
         assert_eq!(value["payload"]["chatId"], json!("7"));
     }
 

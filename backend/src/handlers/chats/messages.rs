@@ -894,14 +894,17 @@ pub(super) async fn post_thread_message(
         let send_result = match send_result {
             SendMessageOutcome::Created(send_result) => *send_result,
             SendMessageOutcome::Duplicate(response) => {
-                return Ok((SendMessageOutcome::Duplicate(response), false));
+                return Ok((SendMessageOutcome::Duplicate(response), false, Vec::new()));
             }
         };
         let response = send_result.response.clone();
         let publish_now = publish_immediately;
 
         // Auto-subscribe the replying user and track read position.
-        crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)?;
+        let mut subscription_changes = Vec::new();
+        if crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)? {
+            subscription_changes.push(uid);
+        }
         crate::services::threads::mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
         let receipt_advanced = crate::services::read_receipts::advance_thread_read_receipt(
             conn,
@@ -913,26 +916,32 @@ pub(super) async fn post_thread_message(
 
         // Ensure the root author has an initial participant row without
         // overriding any existing subscription or archive preference.
-        if root_msg.sender_uid != uid && send_result.member_uids.contains(&root_msg.sender_uid) {
-            crate::services::threads::ensure_thread_user_state(
+        if root_msg.sender_uid != uid
+            && send_result.member_uids.contains(&root_msg.sender_uid)
+            && crate::services::threads::ensure_thread_user_state(
                 conn,
                 chat_id,
                 thread_id,
                 root_msg.sender_uid,
                 true,
-            )?;
+            )?
+        {
+            subscription_changes.push(root_msg.sender_uid);
         }
 
         // Auto-subscribe mentioned users
         if let Some(ref text) = response.message {
             for mentioned_uid in extract_mention_uids(text) {
-                if mentioned_uid != uid && send_result.member_uids.contains(&mentioned_uid) {
-                    crate::services::threads::ensure_thread_subscription(
+                if mentioned_uid != uid
+                    && send_result.member_uids.contains(&mentioned_uid)
+                    && crate::services::threads::ensure_thread_subscription(
                         conn,
                         chat_id,
                         thread_id,
                         mentioned_uid,
-                    )?;
+                    )?
+                {
+                    subscription_changes.push(mentioned_uid);
                 }
             }
         }
@@ -954,11 +963,12 @@ pub(super) async fn post_thread_message(
         Ok((
             SendMessageOutcome::Created(Box::new(send_result)),
             receipt_advanced,
+            subscription_changes,
         ))
     }
     .await;
 
-    let (send_result, receipt_advanced) = match tx_result {
+    let (send_result, receipt_advanced, subscription_changes) = match tx_result {
         Ok(data) => {
             diesel::sql_query("COMMIT").execute(conn)?;
             data
@@ -996,6 +1006,16 @@ pub(super) async fn post_thread_message(
             &state.ws_registry,
             chat_id,
             false,
+        )?;
+    }
+
+    for changed_uid in subscription_changes {
+        crate::services::threads::broadcast_thread_membership_changed_to_user(
+            conn,
+            &state.ws_registry,
+            changed_uid,
+            chat_id,
+            thread_id,
         )?;
     }
 
@@ -1187,6 +1207,17 @@ async fn patch_message(
     // Notify members newly mentioned by the edit. The mention rows are synced
     // inside the transaction above; this is the realtime counterpart, fired
     // post-commit like the send path.
+    if let Some(root_id) = edited_thread_root_id {
+        for mentioned_uid in &added_mention_uids {
+            crate::services::threads::broadcast_thread_membership_changed_to_user(
+                conn,
+                &state.ws_registry,
+                *mentioned_uid,
+                chat_id,
+                root_id,
+            )?;
+        }
+    }
     if !added_mention_uids.is_empty() {
         let actor_name = load_username_by_uid(conn, uid)?.unwrap_or_else(|| "Someone".to_string());
         let payload = NotificationPayload {
