@@ -28,7 +28,7 @@ pub(crate) struct ThreadSendState {
 }
 
 /// Persist thread state in the same transaction as a newly created message.
-/// Single forwards share this path but their quoted mentions are display-only.
+/// Forwards share this path but their quoted mentions are display-only.
 pub(crate) fn record_thread_send(
     conn: &mut PgConnection,
     response: &crate::dto::messages::MessageResponse,

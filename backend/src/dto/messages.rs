@@ -103,6 +103,10 @@ pub struct ForwardMessagesBody {
     #[schema(value_type = Vec<String>, min_items = 2, max_items = 100)]
     pub message_ids: Vec<i64>,
     pub client_generated_id: String,
+    /// Destination thread root; omit to send to the chat timeline.
+    #[serde(default, with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub thread_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
