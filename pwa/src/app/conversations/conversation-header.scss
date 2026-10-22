@@ -1,0 +1,32 @@
+ion-header > ion-toolbar:first-of-type {
+  --border-width: 0 0 0.55px;
+  --padding-top: 0;
+  --padding-bottom: 0;
+}
+ion-title {
+  position: static;
+  padding-inline: 8px;
+  text-align: start;
+}
+
+.conversation-title {
+  padding-block: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  font-weight: 400;
+}
+
+.conversation-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}

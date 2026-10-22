@@ -1,0 +1,72 @@
+<ion-modal
+  [isOpen]="open()"
+  [initialBreakpoint]="mobile ? 0.5 : undefined"
+  [breakpoints]="mobile ? [0, 0.5, 0.9] : undefined"
+  (didDismiss)="open.set(false); confirmation.set(undefined); closed.emit()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>{{ 'messages.forward.to' | transloco }}</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="open.set(false)">{{ 'common.cancel' | transloco }}</ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+      <ion-searchbar
+        [value]="query()"
+        (ionInput)="query.set($event.detail.value ?? '')"
+        [debounce]="200"
+        [placeholder]="'messages.forward.search' | transloco" />
+    </ion-header>
+    <ion-content appScrollbars>
+      @if (invalid()) {
+        <p class="ion-padding">{{ 'messages.forward.invalid' | transloco }}</p>
+      }
+      @if (loading() && !targets().length) {
+        <div class="page-loading"><ion-spinner /></div>
+      } @else {
+        <ion-list>
+          @for (target of targets(); track target.threadId ?? target.chatId) {
+            <ion-item [button]="true" [disabled]="invalid() || submitted()" (click)="select(target)">
+              <app-chat-avatar slot="start" [entry]="target.avatar" [size]="40" />
+              <ion-label>
+                <h3>{{ target.name ?? ('conversation.chat' | transloco) }}</h3>
+                @if (target.preview; as preview) {
+                  <p><app-message-preview [message]="preview" /></p>
+                  <p>{{ 'messages.forward.replies' | transloco: { count: target.replies } }}</p>
+                }
+              </ion-label>
+            </ion-item>
+          } @empty {
+            @if (!failed()) {
+              <p class="ion-padding">{{ 'messages.forward.empty' | transloco }}</p>
+            }
+          }
+        </ion-list>
+      }
+      @if (chats.error()) {
+        <app-load-error compact [message]="'messages.forward.chatsFailed' | transloco" (retry)="chats.refresh()" />
+      }
+      @if (threads.error()) {
+        <app-load-error compact [message]="'messages.forward.threadsFailed' | transloco" (retry)="threads.refresh()" />
+      }
+      @if (moreAvailable()) {
+        <div class="ion-text-center">
+          <ion-button fill="clear" [disabled]="paging()" (click)="more()">
+            {{ 'messages.forward.loadMore' | transloco }}
+          </ion-button>
+        </div>
+        <ion-infinite-scroll (ionInfinite)="more($event)"><ion-infinite-scroll-content /></ion-infinite-scroll>
+      }
+    </ion-content>
+  </ng-template>
+</ion-modal>
+
+<ion-alert
+  [isOpen]="open() && !!confirmation()"
+  [header]="'messages.forward.confirmTitle' | transloco"
+  [message]="confirmation() ? (confirmation()!.prompt | transloco) : ''"
+  [buttons]="[
+    { text: ('common.cancel' | transloco), role: 'cancel' },
+    { text: ('messages.forward.continue' | transloco), role: 'confirm' },
+  ]"
+  (didDismiss)="confirm($event)" />

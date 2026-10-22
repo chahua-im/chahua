@@ -13,4 +13,6 @@ export enum MessageType {
   sticker = 'sticker',
   invite = 'invite',
   system = 'system',
+  forwarded = 'forwarded',
+  placeholder = 'placeholder',
 }

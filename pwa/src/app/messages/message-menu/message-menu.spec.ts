@@ -302,7 +302,7 @@ describe('MessageMenu', () => {
     expect(menu['selection']()?.messageId).toBeUndefined();
     expect(menu['serverMessage']()).toBe(confirmed);
     expect(menu['message']()).toBe(confirmed);
-    expect(labels()).toEqual(['回复', '话题', '复制', '编辑', '收藏', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '话题', '复制', '转发', '编辑', '收藏', '链接', '撤回']);
     expect(ensureDetails).toHaveBeenCalledExactlyOnceWith(testChat.id);
     expect(conversation.ensure).toHaveBeenCalledOnce();
     await menu['choose'](MessageAction.Save);
@@ -366,11 +366,34 @@ describe('MessageMenu', () => {
     expect(menu['serverMessage']()).toBe(other);
   });
 
+  it('offers selection only when its owner supports it and never edits forwarded text', async () => {
+    fixture.componentRef.setInput('allowSelect', true);
+    setMessages([
+      {
+        ...testMessage,
+        sender: { ...testMessage.sender, uid: testUser.uid },
+        forwardedFrom: {
+          sender: testMessage.sender,
+          originalChatId: testChat.id,
+          originalMessageId: testMessage.id,
+        },
+      },
+    ]);
+    fixture.detectChanges();
+    expect(labels()).toContain('多选');
+    expect(labels()).toContain('转发');
+    expect(labels()).not.toContain('编辑');
+    const select = vi.fn();
+    menu.select.subscribe(select);
+    await menu['choose'](MessageAction.Select);
+    expect(select).toHaveBeenCalledWith(messages()[0]);
+  });
+
   it('shows member actions, then adds admin pin and recall actions in order', () => {
-    expect(labels()).toEqual(['回复', '话题', '复制', '收藏', '链接']);
+    expect(labels()).toEqual(['回复', '话题', '复制', '转发', '收藏', '链接']);
     admin.set(true);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '话题', '置顶', '复制', '收藏', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '话题', '置顶', '复制', '转发', '收藏', '链接', '撤回']);
     pinned.set(true);
     fixture.detectChanges();
     expect(labels()).toContain('取消置顶');
@@ -379,7 +402,7 @@ describe('MessageMenu', () => {
   it('lets a DM participant pin without group admin rights and drops the link action', () => {
     kind.set(GroupKind.dm);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '话题', '置顶', '复制', '收藏']);
+    expect(labels()).toEqual(['回复', '话题', '置顶', '复制', '转发', '收藏']);
     expect(menu['admin']()).toBe(false);
   });
 
@@ -388,13 +411,13 @@ describe('MessageMenu', () => {
     canDm.set(false);
     setMessages([{ ...testMessage, reactions: [{ emoji: '👍', count: 1, reactedByMe: false }] }]);
     fixture.detectChanges();
-    expect(labels()).toEqual(['复制', '收藏', '查看表态']);
+    expect(labels()).toEqual(['复制', '转发', '收藏', '查看表态']);
   });
 
   it('leaves group actions unaffected by the DM relationship', () => {
     canDm.set(false);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '话题', '复制', '收藏', '链接']);
+    expect(labels()).toEqual(['回复', '话题', '复制', '转发', '收藏', '链接']);
   });
 
   it('dismisses a reaction in a read-only DM without sending it', async () => {
@@ -416,7 +439,7 @@ describe('MessageMenu', () => {
     admin.set(true);
     setMessages([{ ...testMessage, messageType: MessageType.sticker }]);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '转发', '链接', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     setMessages([{ ...testMessage, messageType: MessageType.invite }]);
     fixture.detectChanges();
@@ -657,7 +680,7 @@ describe('MessageMenu', () => {
       },
     ]);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '收藏表情', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '转发', '收藏表情', '链接', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     await menu['choose'](MessageAction.FavoriteSticker);
     expect(favoriteStickers.set).toHaveBeenCalledWith(sticker.id, true);

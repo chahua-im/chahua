@@ -7,7 +7,10 @@
  */
 import type { SnowflakeID } from '../snowflakeID';
 
-export interface UnreadMentionIdsResponse {
-  /** Unread mention message ids, newest-first. Serialized as strings (JS-safe). */
-  messageIds: SnowflakeID[];
+export interface ForwardMessageBody {
+  clientGeneratedId: string;
+  sourceChatId: SnowflakeID;
+  threadId?: SnowflakeID;
+  /** User confirmed replacing pending audio or excessive nesting with immutable placeholders. */
+  allowPlaceholders?: boolean;
 }

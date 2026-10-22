@@ -3,6 +3,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { RouterLink } from '@angular/router';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { MediaKind, attachmentKind } from '../message-attachments/media-kind';
+import { placeholderLabel } from '../forward-placeholder';
 import { MarkdownSummary } from './markdown-summary';
 
 type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
@@ -28,7 +29,7 @@ enum SystemMessageKind {
   imports: [MarkdownSummary, RouterLink, TranslocoPipe],
   host: {
     '[class.action]':
-      'message().isDeleted || message().messageType === MessageType.system || message().messageType === MessageType.invite || !message().message?.trim()',
+      'message().isDeleted || message().messageType === MessageType.placeholder || message().messageType === MessageType.system || message().messageType === MessageType.invite || !message().message?.trim()',
   },
   styles: `
     :host(.action) {
@@ -44,6 +45,7 @@ export class MessagePreview {
   readonly message = input.required<PreviewSource>();
   readonly interactive = input(false);
   protected readonly MessageType = MessageType;
+  protected readonly placeholderLabel = placeholderLabel;
   protected readonly SystemMessageKind = SystemMessageKind;
   protected readonly systemMessage = computed(() => {
     const text = this.message().message ?? '';

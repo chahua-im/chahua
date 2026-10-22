@@ -69,6 +69,64 @@ describe('Message', () => {
     return fixture;
   }
 
+  it('renders a source and a display-only original reply, and suppresses attribution on record cards', async () => {
+    const fixture = await render();
+    const forwardedFrom = {
+      sender: { ...testMessage.sender, name: 'Original' },
+      originalChatId: encodeId('999'),
+      originalMessageId: encodeId('1000'),
+      originalReplyTo: { ...testMessage, mentions: [] },
+    };
+    fixture.componentRef.setInput('message', { ...testMessage, forwardedFrom });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.forward-origin').textContent).toContain('Original');
+    expect(fixture.nativeElement.querySelector('.original-reply').tagName).toBe('DIV');
+    expect(fixture.nativeElement.querySelector('.original-reply button')).toBeNull();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      messageType: MessageType.forwarded,
+      forwardedFrom,
+      forwardedPreview: { total: 2, containsForwardedMessages: false, messages: [] },
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.forward-origin')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.original-reply')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-forwarded-card').textContent).toContain('聊天记录');
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      message: undefined,
+      messageType: MessageType.forwarded,
+      isDeleted: true,
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-forwarded-card')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('消息已删除');
+  });
+
+  it('selects a row instead of opening its mention or replying while in selection mode', async () => {
+    const fixture = await render();
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      message: '@[uid:2]',
+      mentions: [{ uid: 2, username: 'friend', gender: 0 }],
+    });
+    fixture.componentRef.setInput('selecting', true);
+    fixture.detectChanges();
+    const toggle = vi.fn();
+    const reply = vi.fn();
+    fixture.componentInstance.toggleSelected.subscribe(toggle);
+    fixture.componentInstance.reply.subscribe(reply);
+    fixture.nativeElement.querySelector('.bubble').click();
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(fixture.nativeElement.querySelector('.reply-button')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-message-text button')).toBeNull();
+    fixture.componentRef.setInput('selectable', false);
+    fixture.detectChanges();
+    fixture.nativeElement.querySelector('.bubble').click();
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(reply).not.toHaveBeenCalled();
+  });
+
   it('renders block-level Markdown bodies without headings and keeps plain text on the legacy path', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('message', { ...testMessage, message: '# 标题\n\nline two **bold**' });

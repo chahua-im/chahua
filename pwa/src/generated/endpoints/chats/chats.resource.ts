@@ -7,10 +7,11 @@ import { decodeId } from '../../../app/api/snowflake-id';
  * OpenAPI spec version: 0.1.0
  */
 import type {
+  ForwardedMessagesResponse,
   GetChatAttachmentsParams,
-  GetChatReadReceiptParams,
   GetChatMentionsParams,
   GetChatReactionsParams,
+  GetChatReadReceiptParams,
   GetChatsParams,
   GetMessagesParams,
   ListChatAttachmentsResponse,
@@ -357,6 +358,69 @@ export function getMessageResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getForwardedBundleMessagesResource(
+  chatId: Signal<SnowflakeID>,
+  messageId: Signal<SnowflakeID>,
+  bundleId: Signal<SnowflakeID>,
+  options: OrvalHttpResourceOptions<ForwardedMessagesResponse, unknown> & {
+    defaultValue: NoInfer<ForwardedMessagesResponse>;
+  },
+): HttpResourceRef<ForwardedMessagesResponse>;
+export function getForwardedBundleMessagesResource(
+  chatId: Signal<SnowflakeID>,
+  messageId: Signal<SnowflakeID>,
+  bundleId: Signal<SnowflakeID>,
+  options?: OrvalHttpResourceOptions<ForwardedMessagesResponse, unknown>,
+): HttpResourceRef<ForwardedMessagesResponse | undefined>;
+export function getForwardedBundleMessagesResource(
+  chatId: Signal<SnowflakeID>,
+  messageId: Signal<SnowflakeID>,
+  bundleId: Signal<SnowflakeID>,
+  options?: OrvalHttpResourceOptions<ForwardedMessagesResponse, unknown>,
+): HttpResourceRef<ForwardedMessagesResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<ForwardedMessagesResponse>(
+    () =>
+      applyOrvalRequestExtension(
+        `${baseUrl}/chats/${decodeId(chatId())}/messages/${decodeId(messageId())}/forwarded-bundles/${decodeId(bundleId())}/messages`,
+        options,
+      ),
+    options,
+  );
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getForwardedMessagesResource(
+  chatId: Signal<SnowflakeID>,
+  messageId: Signal<SnowflakeID>,
+  options: OrvalHttpResourceOptions<ForwardedMessagesResponse, unknown> & {
+    defaultValue: NoInfer<ForwardedMessagesResponse>;
+  },
+): HttpResourceRef<ForwardedMessagesResponse>;
+export function getForwardedMessagesResource(
+  chatId: Signal<SnowflakeID>,
+  messageId: Signal<SnowflakeID>,
+  options?: OrvalHttpResourceOptions<ForwardedMessagesResponse, unknown>,
+): HttpResourceRef<ForwardedMessagesResponse | undefined>;
+export function getForwardedMessagesResource(
+  chatId: Signal<SnowflakeID>,
+  messageId: Signal<SnowflakeID>,
+  options?: OrvalHttpResourceOptions<ForwardedMessagesResponse, unknown>,
+): HttpResourceRef<ForwardedMessagesResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<ForwardedMessagesResponse>(
+    () =>
+      applyOrvalRequestExtension(
+        `${baseUrl}/chats/${decodeId(chatId())}/messages/${decodeId(messageId())}/forwarded-messages`,
+        options,
+      ),
+    options,
+  );
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function getReactionDetailsResource(
   chatId: Signal<SnowflakeID>,
   messageId: Signal<SnowflakeID>,
@@ -387,35 +451,6 @@ export function getReactionDetailsResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
-export function getChatReadReceiptResource(
-  chatId: Signal<SnowflakeID>,
-  params: Signal<GetChatReadReceiptParams> | undefined,
-  options: OrvalHttpResourceOptions<ReadReceiptResponse, unknown> & {
-    defaultValue: NoInfer<ReadReceiptResponse>;
-  },
-): HttpResourceRef<ReadReceiptResponse>;
-export function getChatReadReceiptResource(
-  chatId: Signal<SnowflakeID>,
-  params?: Signal<GetChatReadReceiptParams>,
-  options?: OrvalHttpResourceOptions<ReadReceiptResponse, unknown>,
-): HttpResourceRef<ReadReceiptResponse | undefined>;
-export function getChatReadReceiptResource(
-  chatId: Signal<SnowflakeID>,
-  params?: Signal<GetChatReadReceiptParams>,
-  options?: OrvalHttpResourceOptions<ReadReceiptResponse, unknown>,
-): HttpResourceRef<ReadReceiptResponse | undefined> {
-  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
-  return httpResource<ReadReceiptResponse>(() => {
-    const request = {
-      url: `${baseUrl}/chats/${decodeId(chatId())}/read-receipt`,
-      params: filterParams(params?.() ?? {}, new Set<string>([])),
-    };
-    return applyOrvalRequestExtension(request, options);
-  }, options);
-}
-/**
- * @remarks httpResource is available in Angular 19.2 and later.
- */
 export function getChatReactionsResource(
   chatId: Signal<SnowflakeID>,
   params: Signal<GetChatReactionsParams> | undefined,
@@ -437,6 +472,35 @@ export function getChatReactionsResource(
   return httpResource<UnreadReactionIdsResponse>(() => {
     const request = {
       url: `${baseUrl}/chats/${decodeId(chatId())}/reactions`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getChatReadReceiptResource(
+  chatId: Signal<SnowflakeID>,
+  params: Signal<GetChatReadReceiptParams> | undefined,
+  options: OrvalHttpResourceOptions<ReadReceiptResponse, unknown> & {
+    defaultValue: NoInfer<ReadReceiptResponse>;
+  },
+): HttpResourceRef<ReadReceiptResponse>;
+export function getChatReadReceiptResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatReadReceiptParams>,
+  options?: OrvalHttpResourceOptions<ReadReceiptResponse, unknown>,
+): HttpResourceRef<ReadReceiptResponse | undefined>;
+export function getChatReadReceiptResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatReadReceiptParams>,
+  options?: OrvalHttpResourceOptions<ReadReceiptResponse, unknown>,
+): HttpResourceRef<ReadReceiptResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<ReadReceiptResponse>(() => {
+    const request = {
+      url: `${baseUrl}/chats/${decodeId(chatId())}/read-receipt`,
       params: filterParams(params?.() ?? {}, new Set<string>([])),
     };
     return applyOrvalRequestExtension(request, options);
@@ -501,9 +565,11 @@ export type GetChatMentionsResourceResult = NonNullable<UnreadMentionIdsResponse
 export type GetMessagesResourceResult = NonNullable<ListMessagesResponse>;
 export type SearchMessagesResourceResult = NonNullable<SearchMessagesResponse>;
 export type GetMessageResourceResult = NonNullable<MessageResponse>;
+export type GetForwardedBundleMessagesResourceResult = NonNullable<ForwardedMessagesResponse>;
+export type GetForwardedMessagesResourceResult = NonNullable<ForwardedMessagesResponse>;
 export type GetReactionDetailsResourceResult = NonNullable<ReactionDetailResponse>;
-export type GetChatReadReceiptResourceResult = NonNullable<ReadReceiptResponse>;
 export type GetChatReactionsResourceResult = NonNullable<UnreadReactionIdsResponse>;
+export type GetChatReadReceiptResourceResult = NonNullable<ReadReceiptResponse>;
 export type ListChatSavedMessagesResourceResult = NonNullable<ListSavedMessagesResponse>;
 export type GetChatUnreadCountResourceResult = NonNullable<MarkChatReadStateResponse>;
 /**

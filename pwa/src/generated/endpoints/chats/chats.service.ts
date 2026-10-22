@@ -13,10 +13,13 @@ import type { Observable } from 'rxjs';
 import type {
   AcknowledgeReactionsBody,
   CreateMessageBody,
+  ForwardMessageBody,
+  ForwardMessagesBody,
+  ForwardedMessagesResponse,
   GetChatAttachmentsParams,
-  GetChatReadReceiptParams,
   GetChatMentionsParams,
   GetChatReactionsParams,
+  GetChatReadReceiptParams,
   GetChatsParams,
   GetMessagesParams,
   ListChatAttachmentsResponse,
@@ -447,6 +450,46 @@ export class ChatsService {
     });
   }
   /**
+   * @summary POST /chats/:chat_id/messages/forward — Merge 2–100 distinct messages into a chat or thread.
+   */
+  forwardMessages<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    forwardMessagesBody: ForwardMessagesBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  forwardMessages<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    forwardMessagesBody: ForwardMessagesBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  forwardMessages<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    forwardMessagesBody: ForwardMessagesBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  forwardMessages<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    forwardMessagesBody: ForwardMessagesBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.post<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/forward`, forwardMessagesBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.post<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/forward`, forwardMessagesBody, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.post<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/messages/forward`, forwardMessagesBody, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  /**
    * @summary GET /chats/:chat_id/messages/search — Search visible messages in a chat.
    */
   searchMessages<TData = SearchMessagesResponse>(
@@ -626,6 +669,164 @@ export class ChatsService {
       },
     );
   }
+  /**
+   * @summary Single forwards retain the original message type, with flattened attribution.
+   */
+  forwardMessage<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    forwardMessageBody: ForwardMessageBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  forwardMessage<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    forwardMessageBody: ForwardMessageBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  forwardMessage<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    forwardMessageBody: ForwardMessageBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  forwardMessage<TData = MessageResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    forwardMessageBody: ForwardMessageBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.post<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forward`,
+        forwardMessageBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.post<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forward`,
+        forwardMessageBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.post<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forward`,
+      forwardMessageBody,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
+  /**
+   * @summary GET /chats/:chat_id/messages/:message_id/forwarded-bundles/:bundle_id/messages — List forwarded message details by reachable bundle.
+   */
+  getForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forwarded-bundles/${decodeId(bundleId)}/messages`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forwarded-bundles/${decodeId(bundleId)}/messages`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.get<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forwarded-bundles/${decodeId(bundleId)}/messages`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
+  /**
+   * @summary GET /chats/:chat_id/messages/:message_id/forwarded-messages — List forwarded message details.
+   */
+  getForwardedMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getForwardedMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getForwardedMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getForwardedMessages<TData = ForwardedMessagesResponse>(
+    chatId: SnowflakeID,
+    messageId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forwarded-messages`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forwarded-messages`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.get<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/messages/${decodeId(messageId)}/forwarded-messages`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
   getReactionDetails<TData = ReactionDetailResponse>(
     chatId: SnowflakeID,
     messageId: SnowflakeID,
@@ -778,7 +979,7 @@ export class ChatsService {
    * thread. Ids are newest-first, one entry per message regardless of how many
    * new reactions it carries (default 1000, hard cap 1000). A reaction is
    * unread while `created_at > last_reactions_read_at` (cursor-derived; the
-   * cursor advances on mark-read).
+   * cursor advances only through the explicit reaction acknowledgement).
    * @summary GET /chats/{chat_id}/reactions - Message ids with unread reactions for the current user.
    */
   getChatReactions<TData = UnreadReactionIdsResponse>(
@@ -824,7 +1025,8 @@ export class ChatsService {
   }
   /**
    * Chat-level read state: entering a chat or thread acknowledges every reaction
-   * currently in that scope, even if no reacted message was opened. The cursor
+   * in the returned snapshot (readThrough), even if no reacted message was opened.
+   * Omitting readThrough acknowledges through the current time on exit. The cursor
    * only advances; ordinary message reads never call this. Returns the fresh
    * unread-reaction count (normally 0).
    * @summary POST /chats/{chat_id}/reactions/read — Mark the conversation scope's reactions read.
@@ -875,7 +1077,7 @@ export class ChatsService {
     });
   }
   /**
-   * @summary POST /chats/:chat_id/messages/read — Mark messages as read up to a specific message ID.
+   * @summary POST /chats/:chat_id/read — Mark messages as read up to a specific message ID.
    */
   markAsRead<TData = MarkChatReadStateResponse>(
     chatId: SnowflakeID,

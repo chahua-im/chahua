@@ -5,6 +5,7 @@
       <p class="saved-source">{{ item.chat.name }} · {{ item.originalCreatedAt | localDate: 'date' }}</p>
       <app-message
         [message]="row.content"
+        [savedId]="item.id"
         [interactive]="false"
         [contextMenu]="true"
         (menu)="openMenu(item, $event)"

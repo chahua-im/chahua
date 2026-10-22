@@ -68,6 +68,7 @@ export class MessageAttachments {
     );
   }
   readonly message = input.required<MessageAttachmentSource>();
+  readonly dockEnabled = input(true);
   readonly overlayTime = input(false);
   readonly outgoing = input(false);
   readonly delivery = input<MessageDelivery>();
@@ -76,7 +77,9 @@ export class MessageAttachments {
   /** Confirmed messages hand their identity to the voice player so the docked bar can label and locate them. */
   protected readonly dock = computed<VoiceDock | undefined>(() => {
     const { id, chatId, sender, createdAt } = this.message();
-    return id ? { messageId: id, chatId, label: sender.name ?? String(sender.uid), createdAt } : undefined;
+    return id && this.dockEnabled()
+      ? { messageId: id, chatId, label: sender.name ?? String(sender.uid), createdAt }
+      : undefined;
   });
   protected readonly MediaKind = MediaKind;
   protected readonly items = computed(() => {

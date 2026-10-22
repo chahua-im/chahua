@@ -4,7 +4,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { NavigationEnd, provideRouter, Router, RouterLink } from '@angular/router';
+import { ActivatedRouteSnapshot, NavigationEnd, provideRouter, Router, RouterLink } from '@angular/router';
 import {
   IonActionSheet,
   IonContent,
@@ -192,6 +192,100 @@ describe('ConversationPage', () => {
     vi.restoreAllMocks();
     TestBed.inject(VoicePlayback).active.set(undefined);
     http.verify();
+  });
+
+  it('retains draft and message nodes while selecting, enforces 100 items, and freezes the submitted selection', () => {
+    component['draft'].set('unfinished draft');
+    const node = fixture.nativeElement.querySelector('app-message');
+    component['beginSelection'](testMessage);
+    for (let index = 0; index < 105; index++)
+      component['toggleSelection']({ ...testMessage, id: encodeId(String(100 + index)) });
+    expect(component['selectedMessages']().size).toBe(100);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    expect(fixture.nativeElement.querySelector('app-message-composer').hidden).toBe(true);
+    component['forwardSelection']();
+    expect(component['forwardSources']()).toHaveLength(100);
+    component['toggleSelection'](testMessage);
+    expect(component['forwardSources']()).toHaveLength(100);
+    component['forwardSources'].set([]);
+    component['cancelSelection']();
+    fixture.detectChanges();
+    expect(component['draft']()).toBe('unfinished draft');
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+  });
+
+  it('keeps a one-item multi-selection eligible for forwarding and removes recalled selections', () => {
+    component['beginSelection'](testMessage);
+    component['forwardSelection']();
+    expect(component['forwardSources']()).toEqual([testMessage]);
+    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
+    expect(component['selectedMessages']().size).toBe(0);
+    expect(component['forwardSources']()).toEqual([testMessage]);
+    component['forwardSources'].set([]);
+    component['cancelSelection']();
+  });
+
+  async function acknowledgedSelection(messageType = MessageType.text) {
+    const item = TestBed.inject(MessageOutbox).enqueue(testChat.id, undefined, 'queued', {
+      messageType,
+      attachmentIds: [],
+    });
+    const response = { ...wireMessage, id: '901', messageType, clientGeneratedId: item.clientGeneratedId };
+    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush(response);
+    await item.operation;
+    component['beginSelection'](item);
+    return { item, response };
+  }
+
+  it('keeps a rejected queued recall selected and reports success only after a successful retry', async () => {
+    const { item } = await acknowledgedSelection();
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    await Promise.resolve();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages/901`)
+      .flush('Forbidden', { status: 403, statusText: 'Forbidden' });
+    await recall;
+    expect(component['recallResult']()).toEqual({ succeeded: 0, failed: 1 });
+    expect(component['selectedMessages']().size).toBe(1);
+    expect(component['canRecallSelection']()).toBe(true);
+    expect(item.cancelled()).toBe(false);
+    component['recallSelection']();
+    const retry = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/901`).flush(null, { status: 204, statusText: 'No Content' });
+    await retry;
+    expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 0 });
+    expect(component['selecting']()).toBe(false);
+  });
+
+  it('waits for selected audio publication and then confirms its server deletion', async () => {
+    const { item } = await acknowledgedSelection(MessageType.audio);
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    await Promise.resolve();
+    expect(component['recalling']()).toBe(true);
+    expect(component['recallResult']()).toBeUndefined();
+    expect(item.cancelled()).toBe(false);
+    http.expectNone((request) => request.method === 'DELETE');
+    incoming.next(item.confirmed()!);
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/901`).flush(null, { status: 204, statusText: 'No Content' });
+    await recall;
+    expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 0 });
+  });
+
+  it('does not issue a late DELETE after leaving a selection that waits for audio publication', async () => {
+    const { item } = await acknowledgedSelection(MessageType.audio);
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    component['cancelSelection']();
+    incoming.next(item.confirmed()!);
+    await recall;
+    http.expectNone((request) => request.method === 'DELETE');
+    expect(component['recallResult']()).toBeUndefined();
+    expect(item.cancelled()).toBe(false);
   });
 
   it.each([undefined, wireMessage.id])('ignores DM mention/reply navigation for thread %s', async (threadId) => {
@@ -3705,6 +3799,21 @@ describe('ConversationPage', () => {
     privacy.flush({});
     await fixture.whenStable();
     expect(component['readReceiptId']()).toBeUndefined();
+  });
+
+  it('retains conversation nodes, drafts and composer uploads when a record page covers it', () => {
+    const destination = new ActivatedRouteSnapshot();
+    destination.data = { preserveConversation: true };
+    vi.spyOn(TestBed.inject(Router).routerState.snapshot.root, 'firstChild', 'get').mockReturnValue(destination);
+    const node = fixture.nativeElement.querySelector('app-message');
+    const page = component['conversation'].page();
+    component['draft'].set('unfinished draft');
+    const reset = vi.spyOn(component['composer']()!, 'reset');
+    component.ionViewDidLeave();
+    expect(component['conversation'].page()).toBe(page);
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    expect(component['draft']()).toBe('unfinished draft');
+    expect(reset).not.toHaveBeenCalled();
   });
 
   it('retains DM read checks while covered and applies local privacy saves without a WebSocket echo', async () => {

@@ -41,6 +41,26 @@ describe('notification policy', () => {
     expect(shouldNotify({ ...message, messageType: MessageType.system }, 1, undefined, undefined)).toBe(false);
     expect(shouldNotify(message, 1, { mutedUntil: '2000-01-01' }, undefined)).toBe(true);
   });
+  it('treats forwarded mentions as display metadata and localizes history-card notifications', () => {
+    const forwarded = {
+      ...mention,
+      forwardedFrom: {
+        sender: testMessage.sender,
+        originalChatId: testMessage.chatId,
+        originalMessageId: testMessage.id,
+      },
+    };
+    expect(shouldNotify(forwarded, 1, muted, undefined)).toBe(false);
+    expect(
+      shouldNotify({ ...forwarded, replyRootId: topic.replyRootId }, 1, muted, { subscribed: false, archived: false }),
+    ).toBe(false);
+    expect(shouldNotify(forwarded, 1, { kind: GroupKind.group }, undefined)).toBe(true);
+    expect(
+      notificationText({ ...message, messageType: MessageType.forwarded, message: 'Forwarded 2 messages' }, (key) =>
+        key === 'messages.preview.forwarded' ? '[聊天记录]' : key,
+      ),
+    ).toBe('[聊天记录]');
+  });
   it('keeps mentions and ordinary replies through a mute', () => {
     expect(shouldNotify(message, 1, muted, undefined)).toBe(false);
     expect(shouldNotify(mention, 1, muted, undefined)).toBe(true);

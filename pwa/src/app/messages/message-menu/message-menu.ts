@@ -19,6 +19,8 @@ import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast } fr
 import {
   addOutline,
   arrowUndoOutline,
+  arrowRedoOutline,
+  checkboxOutline,
   bookmark,
   bookmarkOutline,
   chatbubblesOutline,
@@ -40,6 +42,8 @@ import { ChatStore } from '../../chats/chat-store';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { EmojiPicker } from '../emoji-picker/emoji-picker';
+import { ForwardPicker } from '../forward-picker/forward-picker';
+import { canForward, canSelect, type ForwardSource } from '../forwarding';
 import { MessageActions } from '../message-actions';
 import { MessageNotice } from '../message-notice';
 import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
@@ -60,6 +64,8 @@ export enum MessageAction {
   Edit,
   Reactions,
   FavoriteSticker,
+  Forward,
+  Select,
 }
 
 const COLUMNS = 5;
@@ -83,7 +89,7 @@ export function pageSlots(actions: readonly MenuSlot[], page: number): readonly 
   selector: 'app-message-menu',
   templateUrl: './message-menu.html',
   styleUrl: './message-menu.scss',
-  imports: [Message, EmojiPicker, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, TranslocoPipe],
+  imports: [ForwardPicker, Message, EmojiPicker, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, TranslocoPipe],
   providers: [MessageActions],
 })
 export class MessageMenu {
@@ -92,6 +98,9 @@ export class MessageMenu {
   readonly canReply = input(true);
   readonly reply = output<MessageResponse>();
   readonly edit = output<MessageResponse>();
+  readonly allowSelect = input(false);
+  readonly select = output<MessageResponse | OutgoingMessage>();
+  protected readonly forwarding = signal<readonly ForwardSource[]>([]);
   readonly editQueued = output<OutgoingMessage>();
   readonly openThread = output<SnowflakeID>();
   readonly messages = input.required<readonly MessageResponse[]>();
@@ -175,6 +184,8 @@ export class MessageMenu {
   protected readonly Action = MessageAction;
   protected readonly icons = { addOutline, chevronDown, chevronUp };
   protected readonly actionIcons = computed<Record<MessageAction, string>>(() => ({
+    [MessageAction.Forward]: arrowRedoOutline,
+    [MessageAction.Select]: checkboxOutline,
     [MessageAction.Reply]: arrowUndoOutline,
     [MessageAction.Thread]: chatbubblesOutline,
     [MessageAction.Pin]: pinOutline,
@@ -218,6 +229,8 @@ export class MessageMenu {
       !!message &&
       !message.isDeleted &&
       !!message.message?.trim() &&
+      message.messageType !== MessageType.placeholder &&
+      message.messageType !== MessageType.forwarded &&
       message.messageType !== MessageType.audio &&
       message.messageType !== MessageType.sticker &&
       message.messageType !== MessageType.invite
@@ -238,6 +251,8 @@ export class MessageMenu {
       !!message &&
       !message.isDeleted &&
       message.messageType === MessageType.text &&
+      !message.forwardedFrom &&
+      !this.queued()?.forwarding &&
       (!!this.queued() || message.sender.uid === this.session.user()?.uid)
     );
   });
@@ -270,6 +285,9 @@ export class MessageMenu {
     )
       add(MessageAction.Pin, { disabled: this.pins().loading() || this.busy() });
     if (this.canCopy()) add(MessageAction.Copy);
+    const source = this.queued() ? this.queued()!.confirmed() : this.serverMessage();
+    if (source && canForward(source)) add(MessageAction.Forward);
+    if (this.allowSelect() && source && canSelect(source)) add(MessageAction.Select);
     if (writable && this.canEdit()) add(MessageAction.Edit, { disabled: !this.queued() && !this.canReply() });
     if (this.canSave()) add(MessageAction.Save);
     else if (
@@ -315,7 +333,7 @@ export class MessageMenu {
       const actions = this.actions()?.nativeElement;
       const preview = this.preview()!.nativeElement;
       const row = preview.querySelector<HTMLElement>('.chat-row')!;
-      // The overlay always shows the sender row, which the chat may omit for grouped messages.
+      // When present, the overlay's sender row also appears for grouped messages.
       // Measure the complete author row once and widen the preview instead of eliding it.
       let nameWidth = 0;
       const place = () => {
@@ -475,6 +493,7 @@ export class MessageMenu {
   }
 
   reset() {
+    this.forwarding.set([]);
     this.version++;
     this.selection.set(undefined);
     this.confirmation.set(undefined);
@@ -507,7 +526,18 @@ export class MessageMenu {
     }
     const queued = this.queued();
     if (queued) {
-      if (action === MessageAction.Recall) {
+      if (
+        action === MessageAction.Select &&
+        this.allowSelect() &&
+        queued.confirmed() &&
+        canSelect(queued.confirmed()!)
+      ) {
+        await this.close();
+        if (version === this.version && !queued.cancelled()) this.select.emit(queued);
+      } else if (action === MessageAction.Forward && queued.confirmed() && canForward(queued.confirmed()!)) {
+        await this.close();
+        if (version === this.version && !queued.cancelled()) this.forwarding.set([queued]);
+      } else if (action === MessageAction.Recall) {
         void this.outbox.cancel(queued);
         await this.close();
       } else if (action === MessageAction.Edit && this.canEdit()) {
@@ -538,6 +568,12 @@ export class MessageMenu {
     await this.close();
     if (version !== this.version) return;
     switch (action) {
+      case MessageAction.Forward:
+        this.forwarding.set([message]);
+        break;
+      case MessageAction.Select:
+        this.select.emit(message);
+        break;
       case MessageAction.Reactions: {
         await this.router.navigate([
           '/chats/chat',

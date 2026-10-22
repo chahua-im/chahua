@@ -2,13 +2,31 @@
   <p
     #systemMessage
     class="system-message"
+    [attr.inert]="selecting() ? '' : null"
     (contextmenu)="showMenu($event, systemMessage)"
     (pointerdown)="startPress($event, systemMessage)">
     <app-message-preview [message]="message()" [interactive]="canInteract()"></app-message-preview>
   </p>
 } @else {
+  @if (selecting()) {
+    <span class="selection-mark">
+      @if (selected()) {
+        <svg viewBox="0 0 16 16">
+          <path
+            d="M3 7.5 6.5 11 13 4.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="square"
+            stroke-linejoin="miter" />
+        </svg>
+      }
+    </span>
+  }
+  <!-- Let the host receive selection clicks, including over disabled buttons and media controls. -->
   <div
     class="chat-row"
+    [attr.inert]="selecting() ? '' : null"
     [class.sent]="own()"
     [class.group-start]="first()"
     [class.no-details]="!showDetails()"
@@ -67,12 +85,29 @@
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
       <div class="bubble-surface">
-        @if (first() && !isSticker() && showDetails()) {
+        @if (first() && !isSticker() && message().messageType !== Type.forwarded && showDetails()) {
           <app-message-author
             class="sender"
             [sender]="message().sender"
             [own]="own()"
             (click)="profile()"></app-message-author>
+        }
+        @if (origin(); as origin) {
+          <app-forwarded-label class="forward-origin" [name]="origin.sender.name" />
+          @if (origin.originalReplyTo; as originalReply) {
+            @if (!originalReply.isDeleted) {
+              <div class="reply-preview original-reply">
+                <span class="reply-content">
+                  @if (originalReply.forwardedFromName) {
+                    <app-forwarded-label [name]="originalReply.forwardedFromName" />
+                  } @else {
+                    <span class="reply-name">{{ originalReply.sender.name ?? originalReply.sender.uid }}</span>
+                  }
+                  <span class="reply-text"><app-message-preview [message]="originalReply" /></span>
+                </span>
+              </div>
+            }
+          }
         }
         @if (quoted(); as quote) {
           <button
@@ -83,7 +118,11 @@
             [class.busy]="jumpingTo() === quote.id"
             (click)="jump.emit(quote.id)">
             <span class="reply-content">
-              <span class="reply-name">{{ quoteName() }}</span>
+              @if (quote.forwardedFromName) {
+                <app-forwarded-label [name]="quote.forwardedFromName" />
+              } @else {
+                <span class="reply-name">{{ quoteName() }}</span>
+              }
               <span class="reply-text"><app-message-preview [message]="quote"></app-message-preview></span>
             </span>
             @if (jumpingTo() === quote.id) {
@@ -95,6 +134,7 @@
           <div class="media-content" [attr.inert]="preview() ? '' : null" (click)="sticker($event)">
             <app-message-attachments
               [message]="message()"
+              [dockEnabled]="!record()"
               [overlayTime]="mediaOverlay()"
               [outgoing]="own()"
               [delivery]="status()"
@@ -103,10 +143,32 @@
           </div>
         }
         @if (!mediaOverlay()) {
+          @let showForwardedCard = !hasMedia() && message().messageType === Type.forwarded && !message().isDeleted;
+          <ng-template #timestamp>
+            <time class="timestamp" [attr.datetime]="message().createdAt">
+              @if (message().isEdited) {
+                <span>{{ 'messages.message.edited' | transloco }}</span>
+              }
+              {{ message().createdAt | localDate: 'time' }}
+              <app-message-status [delivery]="status()" [read]="read()" />
+            </time>
+          </ng-template>
           <div class="message-body">
             @if (!hasMedia()) {
               <span class="message-text">
-                @if (message().messageType === Type.invite) {
+                @if (message().messageType === Type.placeholder) {
+                  <app-message-preview [message]="message()" />
+                } @else if (showForwardedCard) {
+                  <button
+                    type="button"
+                    class="forwarded-card"
+                    [disabled]="preview() || selecting() || (!canInteract() && savedId() == null && !record())"
+                    (click)="openBundle()">
+                    <app-forwarded-card [preview]="message().forwardedPreview">
+                      <ng-container [ngTemplateOutlet]="timestamp" />
+                    </app-forwarded-card>
+                  </button>
+                } @else if (message().messageType === Type.invite) {
                   <button type="button" class="invite-card" [disabled]="!canInteract()" (click)="invite($event)">
                     <app-invite-card [code]="message().message ?? ''" />
                   </button>
@@ -114,7 +176,8 @@
                   <app-message-text
                     [text]="message().message!"
                     [mentions]="message().mentions ?? []"
-                    [interactive]="canInteract()" />
+                    [interactive]="canInteract()"
+                    [profilesEnabled]="!record()" />
                 } @else {
                   <app-message-preview [message]="message()" />
                 }
@@ -124,20 +187,20 @@
                 <app-message-text
                   [text]="message().message!"
                   [mentions]="message().mentions ?? []"
-                  [interactive]="canInteract()" />
+                  [interactive]="canInteract()"
+                  [profilesEnabled]="!record()" />
               </span>
             }
-            <time class="timestamp" [attr.datetime]="message().createdAt">
-              @if (message().isEdited) {
-                <span>{{ 'messages.message.edited' | transloco }}</span>
-              }
-              {{ message().createdAt | localDate: 'time' }}
-              <app-message-status [delivery]="status()" [read]="read()" />
-            </time>
+            @if (!showForwardedCard) {
+              <ng-container [ngTemplateOutlet]="timestamp" />
+            }
           </div>
         }
         @if (threadInfo(); as info) {
-          <app-message-thread [info]="info" [preview]="!canInteract()" (open)="showThread()"></app-message-thread>
+          <app-message-thread
+            [info]="info"
+            [preview]="!canInteract() || record()"
+            (open)="showThread()"></app-message-thread>
         }
       </div>
       @if (busy()) {
@@ -153,10 +216,10 @@
       <app-message-reactions
         [reactions]="message().reactions ?? []"
         [own]="own()"
-        [preview]="!canInteract()"
+        [preview]="!canInteract() || record()"
         (react)="react.emit($event)"></app-message-reactions>
     }
-    @if (canInteract()) {
+    @if (canInteract() && !record()) {
       <button type="button" class="reply-button" [disabled]="!canReply()" (click)="reply.emit(message())">
         <ion-icon [icon]="replyIcon"></ion-icon>
       </button>

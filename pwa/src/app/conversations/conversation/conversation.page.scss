@@ -1,11 +1,7 @@
 :host:has(> .details-sidebar) {
   padding-inline-end: 360px;
 }
-ion-header > ion-toolbar:first-of-type {
-  --border-width: 0 0 0.55px;
-  --padding-top: 0;
-  --padding-bottom: 0;
-}
+
 .details-sidebar {
   position: absolute;
   top: 0;
@@ -119,11 +115,6 @@ ion-content::part(scroll) {
   background: none;
   color: var(--ion-color-medium);
   font-size: 22px;
-}
-ion-title {
-  position: static;
-  padding-inline: 8px;
-  text-align: start;
 }
 
 ion-title app-message-preview {
@@ -243,28 +234,6 @@ ion-title app-message-preview {
   height: 14px;
 }
 
-.conversation-title {
-  padding-block: 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.conversation-heading {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  font-weight: 400;
-}
-
-.conversation-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
 .sticky-avatar-container {
   position: absolute;
   bottom: 0;
@@ -298,4 +267,26 @@ ion-title app-message-preview {
     height: 100%;
     object-fit: cover;
   }
+}
+
+app-message-composer[hidden] {
+  display: none;
+}
+
+.selection-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding-inline: 4px;
+}
+.selection-start {
+  justify-self: start;
+}
+.selection-end {
+  justify-self: end;
+}
+.selection-count {
+  text-align: center;
+  white-space: nowrap;
 }

@@ -1,3 +1,4 @@
+import { ForwardedRecords } from './messages/forwarded-records/forwarded-records';
 import { ReactionDetails } from './messages/reaction-details/reaction-details';
 import { MediaViewer } from './messages/media-viewer/media-viewer';
 import { inject } from '@angular/core';
@@ -39,6 +40,22 @@ export const routes: Routes = [
     path: 'chats/chat/:id/message/:messageId/reactions',
     component: ChatLink,
     data: { modal: true, component: ReactionDetails },
+  },
+  {
+    path: 'chats/chat/:id/message/:messageId/forwarded',
+    component: ForwardedRecords,
+    data: { preserveConversation: true },
+  },
+  {
+    path: 'chats/chat/:id/message/:messageId/forwarded/:bundleId',
+    component: ForwardedRecords,
+    data: { preserveConversation: true },
+  },
+  { path: 'chats/saved/:savedId/forwarded', component: ForwardedRecords, data: { preserveConversation: true } },
+  {
+    path: 'chats/saved/:savedId/forwarded/:bundleId',
+    component: ForwardedRecords,
+    data: { preserveConversation: true },
   },
   { path: 'profile', component: ChatLink, data: { modal: true } },
   { path: 'profile/:uid', component: ChatLink, data: { modal: true } },

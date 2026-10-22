@@ -1,10 +1,14 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Router } from '@angular/router';
 import { Component, computed, DestroyRef, ElementRef, inject, input, output, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
 import { arrowUndoOutline } from 'ionicons/icons';
-import { MessageType, type MessageResponse } from '../../../generated/models';
+import { ForwardedLabel } from '../forwarded-label';
+import { ForwardedCard } from '../forwarded-card';
+import { showsForwardOrigin } from '../forwarding';
+import { MessageType, type MessageResponse, type MessagePreview as Quote } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { AvatarTextPipe } from '../../chats/avatar-text.pipe';
 import { InviteCard } from '../invite-card/invite-card';
@@ -25,9 +29,18 @@ export type MessageContent = MessageAttachmentSource &
   Partial<
     Pick<
       MessageResponse,
-      'id' | 'isEdited' | 'mentions' | 'isDeleted' | 'reactions' | 'replyRootId' | 'threadInfo' | 'replyToMessage'
+      | 'forwardedFrom'
+      | 'forwardedBundleId'
+      | 'forwardedPreview'
+      | 'id'
+      | 'isEdited'
+      | 'mentions'
+      | 'isDeleted'
+      | 'reactions'
+      | 'replyRootId'
+      | 'threadInfo'
     >
-  >;
+  > & { replyToMessage?: Omit<Quote, 'clientGeneratedId'> };
 
 export interface MessageMenuSelection {
   messageId?: SnowflakeID;
@@ -43,6 +56,9 @@ export interface MessageMenuSelection {
   templateUrl: './message.html',
   styleUrl: './message.scss',
   imports: [
+    NgTemplateOutlet,
+    ForwardedLabel,
+    ForwardedCard,
     AvatarTextPipe,
     InviteCard,
     LocalDatePipe,
@@ -59,6 +75,9 @@ export interface MessageMenuSelection {
     MessageStatus,
   ],
   host: {
+    '[class.selecting]': 'selecting()',
+    '[class.selected]': 'selected()',
+    '[class.unselectable]': 'selecting() && !selectable()',
     '[attr.data-message-id]': 'messageId()',
     '[style.--sender-light]': 'senderColors().light',
     '[style.--sender-dark]': 'senderColors().dark',
@@ -69,7 +88,7 @@ export interface MessageMenuSelection {
 export class Message<T extends MessageContent = MessageResponse> {
   private readonly router = inject(Router);
   protected async profile() {
-    if (!this.canInteract()) return;
+    if (!this.canInteract() || this.record()) return;
     const sender = this.message().sender;
     await this.router.navigate(['/profile', sender.uid]);
   }
@@ -86,9 +105,36 @@ export class Message<T extends MessageContent = MessageResponse> {
     await this.router.navigate(['/chats/join', this.message().message ?? '']);
   }
   protected async sticker(event: Event) {
-    if (!this.isSticker() || !this.canInteract()) return;
+    if (!this.isSticker() || !this.canInteract() || this.record()) return;
     event.stopPropagation();
     await this.router.navigate(['/sticker', decodeId(this.message().sticker!.id)]);
+  }
+  readonly selecting = input(false);
+  readonly selected = input(false);
+  readonly selectable = input(true);
+  readonly toggleSelected = output<void>();
+  readonly record = input(false);
+  readonly savedId = input<SnowflakeID>();
+  readonly bundleOpened = output<SnowflakeID>();
+  protected readonly origin = computed(() =>
+    showsForwardOrigin(this.message()) ? this.message().forwardedFrom : undefined,
+  );
+  protected openBundle() {
+    const message = this.message();
+    if (this.preview() || this.selecting()) return;
+    if (this.record()) {
+      if (message.forwardedBundleId != null) this.bundleOpened.emit(message.forwardedBundleId);
+    } else if (this.savedId() != null) {
+      void this.router.navigate(['/chats/saved', decodeId(this.savedId()!), 'forwarded']);
+    } else if (this.canInteract() && message.id != null) {
+      void this.router.navigate([
+        '/chats/chat',
+        decodeId(message.chatId),
+        'message',
+        decodeId(message.id),
+        'forwarded',
+      ]);
+    }
   }
   readonly own = input.required<boolean>();
   readonly first = input(true);
@@ -101,10 +147,14 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly interactive = input(true);
   readonly contextMenu = input(false);
   readonly outgoingId = input<string>();
-  protected readonly canInteract = computed(() => this.interactive() && !this.preview() && this.message().id != null);
+  protected readonly canInteract = computed(
+    () => this.interactive() && !this.preview() && !this.selecting() && this.message().id != null,
+  );
   protected readonly canMenu = computed(
     () =>
       !this.preview() &&
+      !this.selecting() &&
+      !this.record() &&
       (this.contextMenu() ||
         (this.message().messageType !== MessageType.system && (this.canInteract() || !!this.outgoingId()))),
   );
@@ -116,7 +166,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly retry = output<void>();
   protected readonly Delivery = MessageDelivery;
   protected readonly status = computed(() => {
-    if (!this.own()) return;
+    if (!this.own() || this.record()) return;
     const delivery = this.delivery() ?? (this.message().id != null ? MessageDelivery.Sent : undefined);
     if (delivery !== MessageDelivery.Sending) return delivery;
     return this.uploads().some((upload) => {
@@ -200,7 +250,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   protected readonly mediaOverlay = computed(() => !this.message().isDeleted && mediaOverlay(this.message()));
   // Voice bars are transparent controls: they carry the overlaid time but keep the bubble's own padding and tail.
   protected readonly mediaOnly = computed(
-    () => this.mediaOverlay() && this.message().messageType !== MessageType.audio,
+    () => this.mediaOverlay() && !this.origin() && this.message().messageType !== MessageType.audio,
   );
   protected readonly hasReactions = computed(() => !this.message().isDeleted && !!this.message().reactions?.length);
   protected readonly threadInfo = computed(() => {
@@ -212,7 +262,7 @@ export class Message<T extends MessageContent = MessageResponse> {
     return message.isDeleted || message.replyToMessage?.isDeleted ? undefined : message.replyToMessage;
   });
   protected readonly quoteName = computed(() => {
-    const sender = this.quoted()?.sender;
+    const sender = this.quoted()?.sender ?? this.origin()?.originalReplyTo?.sender;
     return sender ? (sender.name ?? String(sender.uid)) : '';
   });
   protected readonly replyColors = computed(() => userColors(this.quoteName()));
@@ -221,6 +271,12 @@ export class Message<T extends MessageContent = MessageResponse> {
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
     const suppressClick = (event: MouseEvent) => {
+      if (this.selecting()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (this.selectable()) this.toggleSelected.emit();
+        return;
+      }
       if (this.preview() && (event.target as Element).closest('.message-text')) return;
       if (this.preview() || (this.longPressed && event.detail > 0)) {
         this.longPressed = false;

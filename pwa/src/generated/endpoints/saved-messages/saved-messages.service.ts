@@ -11,6 +11,7 @@ import type { HttpContext, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type {
+  ForwardedMessagesResponse,
   ListSavedMessagesParams,
   ListSavedMessagesResponse,
   SavedMessageResponse,
@@ -252,6 +253,85 @@ export class SavedMessagesService {
       });
     }
     return this.http.put<TData>(`${this.baseUrl}/saved-messages/${decodeId(messageId)}`, undefined, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  getSavedForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getSavedForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getSavedForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getSavedForwardedBundleMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    bundleId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/saved-messages/${decodeId(savedMessageId)}/forwarded-bundles/${decodeId(bundleId)}/messages`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/saved-messages/${decodeId(savedMessageId)}/forwarded-bundles/${decodeId(bundleId)}/messages`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.get<TData>(
+      `${this.baseUrl}/saved-messages/${decodeId(savedMessageId)}/forwarded-bundles/${decodeId(bundleId)}/messages`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
+  getSavedForwardedMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getSavedForwardedMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getSavedForwardedMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getSavedForwardedMessages<TData = ForwardedMessagesResponse>(
+    savedMessageId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/saved-messages/${decodeId(savedMessageId)}/forwarded-messages`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/saved-messages/${decodeId(savedMessageId)}/forwarded-messages`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/saved-messages/${decodeId(savedMessageId)}/forwarded-messages`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

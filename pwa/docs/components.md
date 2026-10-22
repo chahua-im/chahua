@@ -109,7 +109,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Message            | message、own、分组标志、preview/interactive、待发状态/附件、菜单操作等待、跳转状态 → reply、jump、openThread、menu、react、retry；只持有手势和点击抑制状态 |
 | MessageAuthor      | sender、own；派生用户名、用户组和性别                                                                                                        |
-| MessageText        | text、mentions、interactive；派生文本片段，点击提及才打开资料                                                                                |
+| MessageText        | text、mentions、interactive、profilesEnabled；派生文本片段，点击提及才打开资料                                                                                |
 | MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文、系统短语枚举；交互模式下系统用户名链接资料                                  |
 | MessageAttachments | message、overlayTime、outgoing、delivery、read、uploads；派生媒体框、相册布局、时间、发送/已读及上传反馈；局部保留相册初始尺寸、容器宽度、窗口及消息区域尺寸与资源加载失败 |
 | MessageStatus      | delivery、read；把 MessageDelivery 枚举显示为图标，并仅按 ConversationPage 传入的当前 DM 范围授权回执将确认单勾替换为双勾 |
@@ -122,7 +122,24 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 
 MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。可用操作、排序和翻页页码由消息状态、聊天类型与好友关系派生，页码在 open 和 reset 时归零。确认意图、操作提示、选择表情和弹窗状态属于菜单，busyMessageId 标识正在执行操作的消息；菜单测量完整预览与面板的尺寸，预览保留原横向位置与宽度，面板各自避让左右边缘；高度能容纳时整体竖向定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
 
-MessageActions 由菜单提供，执行收藏、撤回和表态；ChatPins 执行置顶。菜单关闭后的 busyMessageId 由页面传给对应消息，在消息右上角显示等待。复制在点击处理内发起，以保留 Safari 用户激活；缺少异步剪贴板（非安全上下文、部分 WebView）时由 `api/clipboard.ts` 降级到临时文本框和 `document.execCommand`，两者都失败才作为操作失败。菜单 reset 使旧操作的界面反馈失效，最近表情保存到 Preferences。
+MessageActions 由菜单和会话页各自提供，复用逐条撤回及表态请求；收藏由 SavedMessageStore 执行；ChatPins 执行置顶。菜单关闭后的 busyMessageId 由页面传给对应消息，在消息右上角显示等待。复制在点击处理内发起，以保留 Safari 用户激活；缺少异步剪贴板（非安全上下文、部分 WebView）时由 `api/clipboard.ts` 降级到临时文本框和 `document.execCommand`，两者都失败才作为操作失败。菜单 reset 使旧操作的界面反馈失效，最近表情保存到 Preferences。
+
+## 转发组件
+
+| 组件 | 状态与职责 |
+| --- | --- |
+| ForwardPicker | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用；closed／forwarded 输出；持有搜索、弹窗开关、占位替换确认、提交与失效状态；消费共享聊天／话题查询，选择目标后交给 MessageOutbox |
+| ForwardedLabel | name 输入；复用转发来源图标与文案，用于气泡、引用和输入栏 |
+| ForwardedCard | preview 输入；只展示标题、前三条摘要与总数，不请求详情 |
+| ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows 和 Message；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件 |
+
+ConversationPage 的选择项保存已确认消息或 OutgoingMessage 引用，分别用服务端 ID 或 clientGeneratedId 标识；仅已获得服务端 ID 的队列消息可选；发布后沿用选择，提交转发时读取其最新确认及发布状态。多选期间停用浮动头像，显示消息行原位头像，点击统一用于选择。页面持有多选撤回确认快照、处理状态与结果提示；权限沿用单条撤回规则，失败项保留选中。
+
+Message 的 selecting／selected／selectable 与 toggleSelected 输出用于会话多选；多选时内部消息行设为 inert，使禁用按钮、媒体控件及其他内容均不参与点击命中，由外层宿主统一捕获点击并按 selectable 切换选择。record 输入禁用内嵌消息菜单、普通回复及语音源位置跳转，bundleOpened 由详情处理。savedId 指定收藏卡片的读取入口。MessageMenu 持有直接转发的选择器，仅 allowSelect 为真时显示多选并向页面输出 select；置顶列表支持直接转发。
+
+ConversationPage 持有 selecting、selectedMessages 与 forwardSources；输入组件在多选时隐藏而不销毁。MessageOutbox 的转发任务保存固定请求与用户确认的 allowPlaceholders，展示内容沿用 MessageContent；前端无法预测而由后端报告的占位需求在队列中请求确认，同意后复用原操作 ID；详情快照不写入活消息缓存。
+
+ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻译键；MessagePreview 和应用通知共同使用，Message 正文复用预览展示占位内容。
 
 ## 输入和媒体
 

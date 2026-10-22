@@ -229,4 +229,4 @@ Migration schema generation reports the existing Diesel distinction between `Arr
 
 ### Placeholder implementation (2026-10-22)
 
-The implementation uses the existing message type and content fields, with the new `placeholder` enum value and the `allowPlaceholders` forwarding option. Per request, no tests, builds, checks or database migrations were executed for this change. Frontend confirmation, rendering, and local-selection gating are a separate client integration step.
+The implementation uses the existing message type and content fields, with the new `placeholder` enum value and the `allowPlaceholders` forwarding option. Per request, no tests, builds, checks or database migrations were executed for this change. The PWA implements confirmation, localized placeholder rendering, and local-selection gating; its client contract is documented in [PWA requirements](../pwa/docs/requirements.md#消息转发) and [data flow](../pwa/docs/data-flow.md#转发与聊天记录).

@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
+import { AlertController } from '@ionic/angular';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import {
   AttachmentUploadPurpose,
@@ -28,6 +29,8 @@ describe('MessageOutbox', () => {
   let deletions: Subject<void>[];
   let session: { user: ReturnType<typeof signal<typeof testUser | undefined>> };
   const api = {
+    forwardMessage: vi.fn(),
+    forwardMessages: vi.fn(),
     postMessage: vi.fn(),
     postThreadMessage: vi.fn(),
     getMessage: vi.fn(),
@@ -48,6 +51,8 @@ describe('MessageOutbox', () => {
       replies.push(response);
       return response;
     };
+    api.forwardMessage.mockReset().mockImplementation(post);
+    api.forwardMessages.mockReset().mockImplementation(post);
     api.postMessage.mockReset().mockImplementation(post);
     api.postThreadMessage.mockReset().mockImplementation(post);
     api.getMessage.mockReset();
@@ -75,6 +80,161 @@ describe('MessageOutbox', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
+  it('sends a single selection to a thread through the single endpoint and confirms forwarded audio immediately', async () => {
+    const threadId = encodeId('9007199254741888');
+    const source = { ...testMessage, messageType: MessageType.audio };
+    const item = outbox.enqueueForward(testChat.id, threadId, [source]);
+    expect(api.forwardMessage).toHaveBeenCalledWith(testChat.id, source.id, {
+      sourceChatId: source.chatId,
+      allowPlaceholders: false,
+      threadId,
+      clientGeneratedId: item.clientGeneratedId,
+    });
+    expect(api.forwardMessages).not.toHaveBeenCalled();
+    expect(api.postThreadMessage).not.toHaveBeenCalled();
+    const response = { ...source, replyRootId: threadId, clientGeneratedId: item.clientGeneratedId };
+    replies[0].next(response);
+    await item.operation;
+    expect(item.published()).toBe(true);
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+  });
+
+  it('serializes merged forwards with ordinary sends and retains the same selection and retry key', async () => {
+    const sources = [
+      { ...testMessage, id: encodeId('9007199254741999') },
+      { ...testMessage, id: encodeId('9007199254741888') },
+    ];
+    const first = outbox.enqueue(testChat.id, undefined, 'before', text);
+    const item = outbox.enqueueForward(testChat.id, undefined, sources);
+    expect(api.forwardMessages).not.toHaveBeenCalled();
+    replies[0].next(accepted());
+    await first.operation;
+    const body = api.forwardMessages.mock.calls[0][1];
+    expect(body.messageIds).toEqual([sources[1].id, sources[0].id]);
+    expect(item.message().forwardedPreview?.total).toBe(2);
+    replies[1].error({ status: 503 });
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    void outbox.retry(item);
+    expect(api.forwardMessages.mock.calls[1][1]).toEqual(body);
+    replies[2].next({ ...testMessage, messageType: MessageType.forwarded, clientGeneratedId: item.clientGeneratedId });
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+  });
+
+  it('forwards an already nested card as one message without another bundle or visible origin', () => {
+    const source = {
+      ...testMessage,
+      messageType: MessageType.forwarded,
+      forwardedBundleId: encodeId('999'),
+      forwardedPreview: { total: 3, containsForwardedMessages: true, messages: [] },
+    };
+    const item = outbox.enqueueForward(testChat.id, undefined, [source]);
+    expect(item.message().forwardedBundleId).toBe(source.forwardedBundleId);
+    expect(item.message().forwardedPreview).toBe(source.forwardedPreview);
+    expect(item.message().forwardedFrom).toBeUndefined();
+    expect(api.forwardMessage).toHaveBeenCalled();
+    expect(api.forwardMessages).not.toHaveBeenCalled();
+  });
+
+  it('lets the WS confirmation win over a failed forward HTTP response', async () => {
+    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    live.next({ ...testMessage, sender: item.message().sender, clientGeneratedId: item.clientGeneratedId });
+    replies[0].error({ status: 500 });
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+    expect(api.forwardMessage).toHaveBeenCalledTimes(1);
+  });
+
+  function fallbackAlert() {
+    let dismiss!: (result: { role?: string }) => void;
+    const dismissed = new Promise<{ role?: string }>((resolve) => {
+      dismiss = resolve;
+    });
+    const alert = {
+      present: vi.fn().mockResolvedValue(undefined),
+      onDidDismiss: () => dismissed,
+      dismiss: vi.fn((_data?: unknown, role?: string) => {
+        dismiss({ role });
+        return Promise.resolve(true);
+      }),
+    };
+    vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue(alert as unknown as HTMLIonAlertElement);
+    return { alert, dismiss };
+  }
+
+  it.each([
+    'Audio messages cannot be forwarded until transcoding finishes',
+    'Forwarded messages cannot include nested forwarded messages',
+  ])('retries the same forward key only after consent to server fallback: %s', async (error) => {
+    const { alert, dismiss } = fallbackAlert();
+    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    const initial = api.forwardMessage.mock.calls[0][2];
+    replies[0].error({ status: 400, error });
+    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
+    expect(api.forwardMessage).toHaveBeenCalledOnce();
+    dismiss({ role: 'confirm' });
+    await vi.waitFor(() => expect(api.forwardMessage).toHaveBeenCalledTimes(2));
+    expect(api.forwardMessage.mock.calls[1][2]).toEqual({ ...initial, allowPlaceholders: true });
+    replies[1].next({ ...testMessage, clientGeneratedId: item.clientGeneratedId });
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Sent);
+  });
+
+  it('leaves a rejected fallback failed without silently agreeing or automatically retrying', async () => {
+    const { alert, dismiss } = fallbackAlert();
+    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    replies[0].error({ status: 400, error: 'Audio messages cannot be forwarded until transcoding finishes' });
+    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
+    dismiss({ role: 'cancel' });
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(api.forwardMessage).toHaveBeenCalledOnce();
+    resync.next();
+    expect(api.forwardMessage).toHaveBeenCalledOnce();
+  });
+
+  it('dismisses fallback confirmation on account change without resubmitting', async () => {
+    const { alert } = fallbackAlert();
+    const item = outbox.enqueueForward(testChat.id, undefined, [testMessage]);
+    replies[0].error({ status: 400, error: 'Audio messages cannot be forwarded until transcoding finishes' });
+    await vi.waitFor(() => expect(alert.present).toHaveBeenCalledOnce());
+    session.user.set({ ...testUser, uid: 2 });
+    TestBed.tick();
+    await item.operation;
+    expect(alert.dismiss).toHaveBeenCalledWith(undefined, 'cancel');
+    expect(api.forwardMessage).toHaveBeenCalledOnce();
+    expect(outbox.items()).toEqual([]);
+  });
+
+  it('waits for publication without cancelling an acknowledged audio selected for batch recall', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, '', { messageType: MessageType.audio, attachmentIds: [] });
+    const response = { ...accepted(), messageType: MessageType.audio };
+    replies[0].next(response);
+    await item.operation;
+    const resolved = vi.fn();
+    const waiting = outbox.waitForPublication(item).then(resolved);
+    await Promise.resolve();
+    expect(resolved).not.toHaveBeenCalled();
+    expect(item.cancelled()).toBe(false);
+    live.next(response);
+    await waiting;
+    expect(resolved).toHaveBeenCalledWith(response);
+    expect(api.deleteMessage).not.toHaveBeenCalled();
+  });
+
+  it('times out publication waiting while preserving the selected audio for another attempt', async () => {
+    vi.useFakeTimers();
+    const item = outbox.enqueue(testChat.id, undefined, '', { messageType: MessageType.audio, attachmentIds: [] });
+    replies[0].next({ ...accepted(), messageType: MessageType.audio });
+    await item.operation;
+    const result = outbox.waitForPublication(item).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await result).name).toBe('TimeoutError');
+    expect(item.cancelled()).toBe(false);
+    expect(item.confirmed()).toBeDefined();
+  });
+
   function accepted(index = 0) {
     const [, body] = api.postMessage.mock.calls[index];
     return {

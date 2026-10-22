@@ -1,12 +1,32 @@
-import { computed, DestroyRef, effect, inject, Service, signal, type Signal, type WritableSignal } from '@angular/core';
+import {
+  computed,
+  DestroyRef,
+  effect,
+  inject,
+  Injector,
+  Service,
+  signal,
+  type Signal,
+  type WritableSignal,
+} from '@angular/core';
+import { AlertController } from '@ionic/angular';
+import { TranslocoService } from '@jsverse/transloco';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, from, fromEvent, merge, Subject, takeUntil, timeout, type Observable } from 'rxjs';
+import { filter, firstValueFrom, from, fromEvent, merge, Subject, takeUntil, timeout, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
-import { MessageType, ServerWsMessageType, type CreateMessageBody, type MessageResponse } from '../../generated/models';
+import {
+  MessageType,
+  ServerWsMessageType,
+  type CreateMessageBody,
+  type ForwardMessagesBody,
+  type MessageResponse,
+} from '../../generated/models';
 import { Connection } from '../api/connection';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import type { Composition } from './message-composer/message-composer';
+import { forwardPreview, placeholderMessage, showsForwardOrigin } from './forwarding';
+import type { ForwardPlaceholder } from './forward-placeholder';
 import { MessageDelivery } from './message-delivery';
 import type { MessageContent } from './message/message';
 import { UploadStatus, type AttachmentUpload } from './upload';
@@ -25,11 +45,13 @@ export interface OutgoingMessage {
   readonly published: WritableSignal<boolean>;
   readonly cancelled: Signal<boolean>;
   readonly body: CreateMessageBody;
+  readonly forwarding?: boolean;
   operation?: Promise<void>;
   disposed: boolean;
 }
 
 interface Submission {
+  forward?: ForwardMessagesBody;
   body: CreateMessageBody;
   uploads: readonly AttachmentUpload[];
   revision: number;
@@ -62,6 +84,7 @@ interface Task {
 @Service()
 export class MessageOutbox {
   private readonly api = inject(ChatsService);
+  private readonly injector = inject(Injector);
   private readonly connection = inject(Connection);
   private readonly session = inject(SessionStore);
   private readonly destroyRef = inject(DestroyRef);
@@ -160,9 +183,66 @@ export class MessageOutbox {
         createdAt: new Date().toISOString(),
         messageType: composition.messageType,
         mentions: composition.mentions,
-        replyToMessage: replyTo && { ...replyTo, mentions: replyTo.mentions ?? [] },
+        replyToMessage: replyTo && {
+          ...replyTo,
+          forwardedFromName: replyTo.forwardedFrom?.sender.name,
+          mentions: replyTo.mentions ?? [],
+        },
         sticker: composition.sticker,
         attachments: [],
+      },
+    });
+  }
+
+  enqueueForward(
+    chatId: SnowflakeID,
+    threadId: SnowflakeID | undefined,
+    sources: readonly MessageResponse[],
+    options: { allowPlaceholders?: boolean; placeholders?: ReadonlyMap<SnowflakeID, ForwardPlaceholder> } = {},
+  ) {
+    const messages = [...sources]
+      .sort((a, b) => a.id - b.id)
+      .map((message) => {
+        const reason = options.allowPlaceholders ? options.placeholders?.get(message.id) : undefined;
+        return reason ? placeholderMessage(message, reason) : message;
+      });
+    const source = messages[0];
+    const single = messages.length === 1;
+    const clientGeneratedId = crypto.randomUUID();
+    return this.add(chatId, threadId, {
+      forward: {
+        sourceChatId: source.chatId,
+        messageIds: messages.map((message) => message.id),
+        allowPlaceholders: options.allowPlaceholders ?? false,
+        clientGeneratedId,
+        threadId,
+      },
+      body: {
+        clientGeneratedId,
+        messageType: single ? source.messageType : MessageType.forwarded,
+        message: single ? source.message : undefined,
+      },
+      uploads: [],
+      revision: 0,
+      local: {
+        chatId,
+        sender: this.sender()!,
+        createdAt: new Date().toISOString(),
+        messageType: single ? source.messageType : MessageType.forwarded,
+        attachments: single ? source.attachments : [],
+        sticker: single ? source.sticker : undefined,
+        mentions: single ? source.mentions : undefined,
+        forwardedFrom:
+          single && showsForwardOrigin(source)
+            ? (source.forwardedFrom ?? {
+                sender: source.sender,
+                originalChatId: source.chatId,
+                originalMessageId: source.id,
+                originalReplyTo: source.replyToMessage,
+              })
+            : undefined,
+        forwardedBundleId: single ? source.forwardedBundleId : undefined,
+        forwardedPreview: single ? source.forwardedPreview : forwardPreview(messages),
       },
     });
   }
@@ -239,6 +319,18 @@ export class MessageOutbox {
     return item;
   }
 
+  /** Batch recall keeps the row and uploads until publication and a successful DELETE. */
+  waitForPublication(item: OutgoingMessage): Promise<MessageResponse> {
+    if (item.published()) return Promise.resolve(item.confirmed()!);
+    return this.request(
+      item,
+      this.connection.messages$.pipe(
+        filter((message) => this.matches(item, message)),
+        takeUntil(this.tasks.get(item)!.changed),
+      ),
+    );
+  }
+
   cancel(item: OutgoingMessage): Promise<void> {
     const task = this.tasks.get(item)!;
     task.cancelled.set(true);
@@ -272,6 +364,7 @@ export class MessageOutbox {
       chatId,
       threadId,
       editId: original?.id,
+      forwarding: !!initial.forward,
       get body() {
         return intent().body;
       },
@@ -431,13 +524,22 @@ export class MessageOutbox {
               message: submitted.body.message!,
               attachmentIds: submitted.body.attachmentIds,
             })
-          : item.threadId != null
-            ? this.api.postThreadMessage(item.chatId, item.threadId, submitted.body)
-            : this.api.postMessage(item.chatId, submitted.body),
+          : submitted.forward
+            ? submitted.forward.messageIds.length === 1
+              ? this.api.forwardMessage(item.chatId, submitted.forward.messageIds[0], {
+                  sourceChatId: submitted.forward.sourceChatId,
+                  allowPlaceholders: submitted.forward.allowPlaceholders,
+                  clientGeneratedId: submitted.forward.clientGeneratedId,
+                  threadId: submitted.forward.threadId,
+                })
+              : this.api.forwardMessages(item.chatId, submitted.forward)
+            : item.threadId != null
+              ? this.api.postThreadMessage(item.chatId, item.threadId, submitted.body)
+              : this.api.postMessage(item.chatId, submitted.body),
       );
       if (item.disposed) return;
       if (id == null) {
-        this.created(item, response, submitted.body.messageType !== MessageType.audio);
+        this.created(item, response, !!submitted.forward || submitted.body.messageType !== MessageType.audio);
         if (!item.cancelled() && item.published() && task.acknowledged() === submitted.revision) {
           this.connection.accept(item.confirmed()!);
         }
@@ -455,12 +557,56 @@ export class MessageOutbox {
       if (!this.needsSend(item)) return;
       // A WS acknowledgement wins over failed HTTP; pump will submit any newer edit.
       if (task.inflight && task.acknowledged() >= task.inflight.revision) return;
+      if (await this.confirmForwardFallback(item, submitted, error)) {
+        await this.send(item);
+        return;
+      }
+      if (!this.needsSend(item)) return;
       item.delivery.set(MessageDelivery.Failed);
       task.retryable = task.retryable && retryable(error);
       this.schedule(item);
     } finally {
       task.inflight = undefined;
       this.cleanUploads(item);
+    }
+  }
+
+  /** Published legacy audio has no transcode status in the public message DTO.
+   * Ask for consent if the server discovers a replacement the picker could not predict. */
+  private async confirmForwardFallback(item: OutgoingMessage, submitted: Submission, error: unknown): Promise<boolean> {
+    if (!submitted.forward || submitted.forward.allowPlaceholders || errorStatus(error) !== 400) return false;
+    const detail = error && typeof error === 'object' && 'error' in error ? error.error : undefined;
+    const replacementRequired =
+      detail === 'Audio messages cannot be forwarded until transcoding finishes' ||
+      detail === 'Forwarded messages cannot include nested forwarded messages';
+    if (!replacementRequired) return false;
+    const task = this.tasks.get(item)!;
+    const i18n = this.injector.get(TranslocoService);
+    const alert = await this.injector.get(AlertController).create({
+      header: i18n.translate('messages.forward.confirmTitle'),
+      // The server stops at the first invalid source, so consent covers both reasons.
+      message: i18n.translate('messages.forward.confirmBoth'),
+      buttons: [
+        { text: i18n.translate('common.cancel'), role: 'cancel' },
+        { text: i18n.translate('messages.forward.continue'), role: 'confirm' },
+      ],
+    });
+    if (!this.needsSend(item)) return false;
+    const dismissed = alert.onDidDismiss();
+    const stop = merge(task.changed, task.stopped).subscribe(() => {
+      if (!this.needsSend(item)) void alert.dismiss(undefined, 'cancel');
+    });
+    try {
+      await alert.present();
+      if (!this.needsSend(item)) await alert.dismiss(undefined, 'cancel');
+      const result = await dismissed;
+      if (result.role !== 'confirm' || !this.needsSend(item)) return false;
+      // Retry the same operation key; only explicit consent changes.
+      submitted.forward = { ...submitted.forward, allowPlaceholders: true };
+      task.intent.update((intent) => ({ ...intent, forward: submitted.forward }));
+      return true;
+    } finally {
+      stop.unsubscribe();
     }
   }
 
@@ -691,6 +837,7 @@ function existingUploads(composition: Composition, original?: MessageResponse, d
 
 function submission(intent: Intent, ids: SnowflakeID[]): Submission {
   return {
+    forward: intent.forward,
     revision: intent.revision,
     uploads: intent.uploads,
     body: { ...intent.body, attachmentIds: [...new Set([...(intent.body.attachmentIds ?? []), ...ids])] },
@@ -706,6 +853,9 @@ function tombstone(message: MessageResponse): MessageResponse {
     mentions: undefined,
     reactions: [],
     replyToMessage: undefined,
+    forwardedFrom: undefined,
+    forwardedPreview: undefined,
+    forwardedBundleId: undefined,
     sticker: undefined,
   };
 }

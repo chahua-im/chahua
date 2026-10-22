@@ -359,6 +359,7 @@
   },
   "messages": {
     "preview": {
+      "forwarded": "[聊天记录]",
       "deleted": "消息已删除",
       "someone": "有人",
       "system": {
@@ -452,6 +453,42 @@
     },
     "thread": {
       "replies": "{{ count }} 条回复"
+    },
+    "selection": {
+      "recallConfirm": "确定撤回选中的 {{count}} 条消息？撤回后，其他成员将无法查看这些消息。",
+      "recalled": "已撤回 {{count}} 条消息",
+      "recallFailed": "已撤回 {{succeeded}} 条，{{failed}} 条未能撤回，请重试。"
+    },
+    "forward": {
+      "loadMore": "继续加载",
+      "chatsFailed": "聊天加载失败，请重试。",
+      "threadsFailed": "话题加载失败，请重试。",
+      "recordsUnavailable": "聊天记录已无法访问。",
+      "unavailable": "所选消息中包含无法转发的消息，请调整选择。",
+      "action": "转发",
+      "select": "多选",
+      "from": "转发自 {{name}}",
+      "unknown": "未知用户",
+      "records": "聊天记录",
+      "count": "{{count}} 条消息",
+      "to": "转发到",
+      "search": "搜索聊天和话题",
+      "replies": "{{count}} 条回复",
+      "empty": "没有匹配的聊天或话题",
+      "sending": "正在转发…",
+      "invalid": "所选消息已无法转发，请关闭窗口后重新选择。",
+      "selected": "已选 {{count}} / {{max}} 条",
+      "redacted": "[引用内容已隐藏]",
+      "close": "关闭",
+      "confirmTitle": "确认转发",
+      "continue": "继续转发",
+      "confirmPendingAudio": "尚未完成转码的语音将替换为[待转码语音]，无法播放，之后也不会自动恢复。是否继续转发？",
+      "confirmNested": "嵌套过深的聊天记录将替换为[聊天记录]，无法展开。是否继续转发？",
+      "confirmBoth": "尚未完成转码的语音和嵌套过深的聊天记录将分别替换为[待转码语音]和[聊天记录]，无法播放或展开，之后也不会自动恢复。是否继续转发？"
+    },
+    "placeholder": {
+      "pendingAudio": "[待转码语音]",
+      "unavailable": "[无法显示的消息]"
     }
   },
   "stickers": {
