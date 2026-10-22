@@ -216,6 +216,15 @@ describe('ConversationPage', () => {
     expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
   });
 
+  it('Escape leaves multi-selection without reaching the page-level navigation shortcut', () => {
+    component['beginSelection'](testMessage);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    fixture.nativeElement.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(component['selecting']()).toBe(false);
+    expect(component['selectedMessages']().size).toBe(0);
+  });
+
   it('keeps a one-item multi-selection eligible for forwarding and removes recalled selections', () => {
     component['beginSelection'](testMessage);
     component['forwardSelection']();

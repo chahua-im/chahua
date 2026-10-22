@@ -884,6 +884,15 @@ export class ConversationPage {
   );
 
   constructor() {
+    // Selection is page state: Escape must leave it before the app-level shortcut leaves the chat.
+    const escapeSelection = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !this.selecting()) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.cancelSelection();
+    };
+    this.document.addEventListener('keydown', escapeSelection, true);
+    this.destroyRef.onDestroy(() => this.document.removeEventListener('keydown', escapeSelection, true));
     this.chatInfo.receiptPrivacyChanges$.pipe(takeUntilDestroyed()).subscribe((peerUid) => {
       if (peerUid == null || peerUid === this.peerUid()) this.invalidateReadReceipt(true);
     });
