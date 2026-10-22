@@ -12,8 +12,10 @@
 .env
 
 # Local runspace configuration and generated seed progress
-/runspace/.env
-/runspace/seed-state.json
+/runspace
+!/runsapce/dev.mjs
+!/runspace/docker-compose.yml
+!/runspace/seed.py
 /reference
 /ci-deploy/
 .geminiignore
