@@ -746,6 +746,8 @@ async fn forward_messages(
             &state.ws_registry,
             dest_chat_id,
             false,
+            Some(uid),
+            None,
         )?;
     }
 
