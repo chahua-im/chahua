@@ -24,6 +24,7 @@ import { SessionStore } from '../session/session-store';
 import { notificationText, shouldNotify } from './notification-policy';
 
 const ENABLED_KEY = 'chahua.notifications.enabled';
+const REGISTRATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export enum PushNotificationError {
   UnsupportedBrowser = 'unsupported_browser',
@@ -52,6 +53,8 @@ export class PushNotifications {
   readonly supported =
     'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator && this.push.isEnabled;
   private syncing: Promise<void> = Promise.resolve();
+  private pendingSync?: { key: string; promise: Promise<void> };
+  private registration?: { key: string; at: number };
 
   private readonly destroy = inject(DestroyRef);
   private readonly connection = inject(Connection);
@@ -340,8 +343,18 @@ export class PushNotifications {
   private synchronize(): Promise<void> {
     // A toggle can change while a background registration is pending. Cleanup runs after it,
     // reads the latest choice, and cannot be undone by that older registration completing.
-    this.syncing = this.syncing.catch(() => {}).then(() => (this.enabled() ? this.subscribe() : this.unsubscribe()));
-    return this.syncing;
+    const key = `${this.session.user()?.uid}:${this.enabled()}`;
+    if (this.pendingSync?.key === key) return this.pendingSync.promise;
+    const promise = this.syncing.catch(() => {}).then(() => (this.enabled() ? this.subscribe() : this.unsubscribe()));
+    const pending = { key, promise };
+    this.pendingSync = pending;
+    this.syncing = promise;
+    void promise
+      .finally(() => {
+        if (this.pendingSync === pending) this.pendingSync = undefined;
+      })
+      .catch(() => {});
+    return promise;
   }
 
   private async currentSubscription(): Promise<PushSubscription | null> {
@@ -359,6 +372,10 @@ export class PushNotifications {
       subscription = await this.push.requestSubscription({ serverPublicKey: publicKey });
     }
     const keys = subscription.toJSON().keys!;
+    const uid = this.session.user()?.uid;
+    if (uid == null) return;
+    const key = JSON.stringify([uid, localStorage.getItem('chahua.client-id'), subscription.endpoint, keys]);
+    if (this.registration?.key === key && Date.now() - this.registration.at < REGISTRATION_MAX_AGE_MS) return;
     try {
       await firstValueFrom(
         this.api.postSubscribe(
@@ -370,12 +387,15 @@ export class PushNotifications {
           { timeout: 10000 },
         ),
       );
+      this.registration = { key, at: Date.now() };
     } catch {
+      this.registration = undefined;
       throw PushNotificationError.BackendSubscribeFailed;
     }
   }
 
   private async unsubscribe(): Promise<void> {
+    this.registration = undefined;
     const subscription = await this.currentSubscription();
     if (!subscription) return;
     try {

@@ -238,3 +238,5 @@ ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c
 媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。每次路由导航关闭已经存在的 modal、popover、alert 和 action-sheet，Toast 保留自己的生命周期。
 
 会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字使用 `unreadUnmutedConversationCount`，标题数字仍使用包含静音的 `unreadMessageCount`。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab 和后台标题使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天 mutedUntil 或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。
+
+Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内成功结果；相同同步请求共享进行中的操作，失败可重试，关闭通知清除成功记录。订阅不变时最多每 24 小时在正常同步入口修复一次服务端注册，重新加载应用仍会注册。

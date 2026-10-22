@@ -289,6 +289,29 @@ describe('PushNotifications', () => {
     expect(browser.requestSubscription).toHaveBeenCalledOnce();
   });
 
+  it('coalesces registration and reuses success until the subscription or account changes', async () => {
+    const service = TestBed.inject(PushNotifications);
+    await Promise.all([service.refresh(), service.refresh(), service.refresh()]);
+    await service.refresh();
+    expect(api.postSubscribe).toHaveBeenCalledOnce();
+    (TestBed.inject(SessionStore).user as ReturnType<typeof signal<typeof testUser>>).set({ ...testUser, uid: 2 });
+    await service.refresh();
+    expect(api.postSubscribe).toHaveBeenCalledTimes(2);
+    current.next({ ...subscription, endpoint: 'https://push.example/rotated' });
+    await service.refresh();
+    expect(api.postSubscribe).toHaveBeenCalledTimes(3);
+  });
+
+  it('periodically repairs an unchanged registration without checking every resume', async () => {
+    const service = TestBed.inject(PushNotifications);
+    await service.refresh();
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 24 * 60 * 60 * 1000 + 1);
+    await service.refresh();
+    expect(api.postSubscribe).toHaveBeenCalledTimes(2);
+    vi.restoreAllMocks();
+  });
+
   it('repairs backend registration for this endpoint without fetching registration status', async () => {
     localStorage.setItem(preferenceKey, 'true');
     current.next(subscription);
