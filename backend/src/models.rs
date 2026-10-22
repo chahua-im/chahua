@@ -134,6 +134,43 @@ pub enum MessageType {
     Invite,
     System,
     Forwarded,
+    /// Server-generated forwarding replacement. The message body contains
+    /// `pendingAudio` or `nestedForward`, which clients localize for display.
+    Placeholder,
+}
+
+/// Reason code stored in `message` only when `message_type` is `placeholder`.
+/// Ordinary text with the same contents remains ordinary text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardPlaceholder {
+    PendingAudio,
+    NestedForward,
+}
+
+impl ForwardPlaceholder {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PendingAudio => "pendingAudio",
+            Self::NestedForward => "nestedForward",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "pendingAudio" => Some(Self::PendingAudio),
+            "nestedForward" => Some(Self::NestedForward),
+            _ => None,
+        }
+    }
+
+    /// Fallback notification text; structured previews keep the reason code so
+    /// clients can render in the recipient's language.
+    pub fn notification_text(self) -> &'static str {
+        match self {
+            Self::PendingAudio => "[Pending voice message]",
+            Self::NestedForward => "[Chat history]",
+        }
+    }
 }
 
 /// Why a `message_mentions` row exists: an explicit @mention in the message

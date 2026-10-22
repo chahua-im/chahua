@@ -1,20 +1,43 @@
 # Forwarded messages
 
-Backend design and decisions, updated 2026-10-21. Flutter/PWA presentation is outside this backend change.
+Backend design and decisions, updated 2026-10-22. Flutter/PWA presentation is outside this backend change.
 
 ## Contract
 
-- Forward 1–100 distinct published, nondeleted messages from one source chat into one destination chat.
+- Merge 2–100 distinct, nondeleted messages from one source chat. A selection of one uses the single-message endpoint. Destinations may be a chat timeline or a thread via `threadId`.
 - Sources are ordered by message ID, not request-array order. System and invite messages are excluded.
-- New forwards require audio sources to have a final transcode status (`done` or `failed`). Published legacy audio with status `none` or `pending` rejects the entire selection with `400` until processing finishes, because transcoding can replace and delete its current media object. Successful-operation retries still return the existing snapshot without revalidating source state.
+- Both forwarding request bodies accept `allowPlaceholders` (default `false`). After user confirmation, `true` permits pending audio and excessive bundle nesting to be captured as immutable placeholders. Without confirmation these cases still return `400`; final audio states (`done` or `failed`) are forwarded normally. Successful retries return the stored result without rebuilding content.
 - Require `clientGeneratedId` alongside `sourceChatId` and `messageIds`.
 - Repeating a successful operation with the same authenticated sender, destination and canonical source selection returns the original message. Reusing its key for different content returns `409`.
 - Retries do not rebuild snapshots, insert another bundle, advance read state again, or repeat delivery effects.
 - New forwards atomically advance the sender's unread and read-receipt cursors; DM receipt invalidations are broadcast after commit.
-- Forwarding creates a top-level message. Destination threads, captions, and reply targets are not supported.
+- Forwarding accepts an optional destination `threadId`; destination thread authorization and ordinary thread-send side effects apply. Captions and reply targets are not supported.
 - Source membership and normal destination send authorization apply to creation. Blocked/unfriended DMs cannot receive forwards.
 - Each bundle is immutable. Message rows and saved-message rows hold bundle foreign keys.
-- A flat bundle may be included by reference in a new bundle. A bundle already containing children cannot itself be nested again.
+- A flat bundle may be included by reference in a new bundle. A bundle already containing children becomes a placeholder when merged with confirmed degradation; it is never recursively embedded. Single-message forwarding reuses an existing bundle unchanged, regardless of its children.
+
+## Confirmed placeholder contract
+
+The frontend must not allow selection of local messages that have not been uploaded and acknowledged with a server message ID. Forwarding only accepts server IDs. Persisted audio still processing can be selected; the client uses the acknowledged ID even before its publication event.
+
+The client asks for confirmation when the selection requires replacement, then sends `allowPlaceholders: true` to either the single or merged endpoint. The server decides which sources need replacement from current database state, not client-provided content. If processing completed before submission, it captures the now-available audio normally. The flag does not relax source membership, destination authorization, deletion checks, system/invite exclusions, selection size, or duplicate-ID validation.
+
+Published sources remain readable to source-chat members. The sole unpublished exception is an authenticated user's own audio in `none`/`pending` transcode state, and it can only produce a placeholder after confirmation. Other users' unpublished messages, unpublished non-audio sources, deleted rows and nonexistent IDs remain unavailable. Source queries are still bounded by at most 100 primary-key IDs; no new index is required.
+
+Placeholder responses use `messageType: "placeholder"`; the existing `message` field contains one of these reason codes:
+
+| Value | Display | Trigger |
+|---|---|---|
+| `pendingAudio` | `[待转码语音]` | Audio whose transcode status is not final |
+| `nestedForward` | `[聊天记录]` | Merging a card whose bundle already has children |
+
+A placeholder has a distinct message type, for example `{ "messageType": "placeholder", "message": "pendingAudio" }`. Clients render a localized label only for this type and offer no playback or child-record action for it. Ordinary `text` messages containing `pendingAudio`, `nestedForward`, or the translated labels remain literal user text. Generic message-create APIs reject client-supplied `placeholder` types, and placeholder messages cannot be edited into text. The send pipeline accepts only the documented reason codes and rejects media or bundle references for placeholders. It has no attachments, sticker, mentions, bundle reference or child preview. Merged records retain the source sender, timestamp, original IDs, order and bundle-local reply relationships; replies to these records use the same placeholder preview. A replaced card contributes no child bundle ID, so it grants no access to the discarded bundle. Normal flat cards remain navigable.
+
+Single pending-audio forwarding produces one immediately published placeholder message through the single-message API, with ordinary flattened forwarding attribution and no copied media. Single forwarding of a normal history card still reuses its bundle without replacement or a new nesting level. A single forwarded placeholder remains a placeholder on subsequent single or merged forwarding, even after the original audio finishes. It does not require another confirmation just to copy an existing placeholder.
+
+No new database columns or response fields are needed. Messages use the existing `message_type`/`message` columns; saved messages use `snapshot_message_type`/`snapshot_message`; forwarded payload/preview JSON uses its existing type and text fields. Message responses, reply/thread previews, forwarded detail/preview responses, saved responses, and structured push previews retain both the placeholder type and the reason code. No localized display text is stored in snapshots. Fallback notification text follows the existing server-side English notification convention, while structured push data keeps the code for client localization. APNs fallback bodies also render a label rather than exposing the code.
+
+Snapshots never auto-upgrade when the source becomes available. Retrying an already successful operation returns the same result even if `allowPlaceholders` or transcode status changed. Single-forward retries retain their existing live-source-access requirement; merged retries retain their existing source-independent reconciliation. Clients must reuse the same `clientGeneratedId` after a lost response.
 
 ## Creation and retry flow
 
@@ -120,7 +143,8 @@ Knowing a bundle ID alone is not authorization. Saved details intentionally surv
 
 Routes, relative to the API mount:
 
-- `POST /chats/{chat_id}/messages/forward`
+- `POST /chats/{chat_id}/messages/forward` (merged, 2–100 IDs)
+- `POST /chats/{chat_id}/messages/{message_id}/forward` (single)
 - `GET /chats/{chat_id}/messages/{message_id}/forwarded-messages`
 - `GET /chats/{chat_id}/messages/{message_id}/forwarded-bundles/{bundle_id}/messages`
 - `PUT /saved-messages/{message_id}`
@@ -145,11 +169,13 @@ The compact preview format is also a clean cutover: earlier local forwarding bun
 
 History cleanup preserves the original feature author separately from integration and subsequent correctness work. Backup branches retain the pre-rewrite history. No remote force-push is part of this change.
 
+The migration `backend/migrations/2026-10-22-121835-0000_add_placeholder_message_type` adds `placeholder` to the existing PostgreSQL `message_type` enum. It adds no columns, rewrites no rows, and changes no indexes. The earlier, unapplied column-based migration has been removed. Apply the enum migration before deploying this backend; no database migration was executed as part of this task. PostgreSQL cannot remove an enum value in place, so rollback retains the value and existing placeholder data. Clients must support the new type before enabling confirmed placeholder forwarding.
+
 ## Remaining product limitations
 
 - No forwarding directly from a saved item after source access is lost.
 - No selecting individual embedded items without access to their original messages.
-- No recursive re-forwarding of already-nested bundles.
+- No deeper bundle nesting: merged forwarding uses confirmed placeholders for already-nested cards; single forwarding reuses the existing bundle.
 - Search indexes text messages, not forwarded snapshots.
 - Deleting source content does not recall existing forwarded/saved copies.
 - Child references are application-maintained arrays, not foreign keys. Future garbage collection must trace message/saved roots and child edges, including media referenced in snapshots.
@@ -200,3 +226,7 @@ Migration schema generation reports the existing Diesel distinction between `Arr
 - Query statistics confirmed child access selects only the root's child-ID array before loading target details. A malformed-preview read emitted an error identifying the failing bundle.
 - A single local before/after capture run selected 100 messages with 500,000 reactions: baseline fetched all 500,000 reactor rows and took 1540.6 ms; the fixed request issued no reaction SELECTs and took 89.6 ms. This synthetic sample demonstrates removal of the query amplification, not production throughput or a controlled benchmark.
 - No shared database was modified. Media checks covered metadata/URLs, not object downloads or audio playback.
+
+### Placeholder implementation (2026-10-22)
+
+The implementation uses the existing message type and content fields, with the new `placeholder` enum value and the `allowPlaceholders` forwarding option. Per request, no tests, builds, checks or database migrations were executed for this change. Frontend confirmation, rendering, and local-selection gating are a separate client integration step.

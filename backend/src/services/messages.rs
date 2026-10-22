@@ -25,8 +25,8 @@ use crate::{
     },
     errors::AppError,
     models::{
-        Attachment, ForwardedBundle, GroupKind, Media, MentionKind, Message, MessageMention,
-        MessageType, NewMessage, Sticker, TranscodeStatus,
+        Attachment, ForwardPlaceholder, ForwardedBundle, GroupKind, Media, MentionKind, Message,
+        MessageMention, MessageType, NewMessage, Sticker, TranscodeStatus,
     },
     schema::{
         attachments, forwarded_bundles, group_membership, groups, media, message_mentions,
@@ -687,11 +687,24 @@ fn build_forwarded_bundle_ref_snapshot(
 pub(crate) fn capture_forwarded_bundle_items(
     conn: &mut PgConnection,
     source_messages: &[Message],
+    allow_placeholders: bool,
 ) -> Result<Vec<ForwardedBundlePayloadItem>, AppError> {
     let selected_message_ids: std::collections::HashSet<i64> =
         source_messages.iter().map(|message| message.id).collect();
-    let mut attachment_snapshots = load_forwarded_attachment_snapshots(conn, source_messages)?;
-    let sticker_snapshots = load_forwarded_sticker_snapshots(conn, source_messages)?;
+    let mut placeholders = std::collections::HashMap::new();
+    for message in source_messages {
+        if let Some(reason) = super::forwarding::source_placeholder(message, allow_placeholders)? {
+            placeholders.insert(message.id, reason);
+        }
+    }
+    // Do not even capture temporary media keys for pending audio.
+    let stable_sources: Vec<Message> = source_messages
+        .iter()
+        .filter(|message| !placeholders.contains_key(&message.id))
+        .cloned()
+        .collect();
+    let mut attachment_snapshots = load_forwarded_attachment_snapshots(conn, &stable_sources)?;
+    let sticker_snapshots = load_forwarded_sticker_snapshots(conn, &stable_sources)?;
     let referenced_bundle_ids: Vec<i64> = source_messages
         .iter()
         .filter(|message| matches!(&message.message_type, MessageType::Forwarded))
@@ -699,12 +712,44 @@ pub(crate) fn capture_forwarded_bundle_items(
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let referenced_bundle_previews =
-        load_forwarded_bundle_preview_items(conn, &referenced_bundle_ids)?;
+    let referenced_bundle_previews = load_forwarded_bundle_previews(conn, &referenced_bundle_ids)?;
+    for message in source_messages {
+        if message
+            .forwarded_bundle_id
+            .and_then(|id| referenced_bundle_previews.get(&id))
+            .is_some_and(|preview| preview.contains_forwarded_messages)
+        {
+            if !allow_placeholders {
+                return Err(AppError::BadRequest(
+                    "Forwarded messages cannot include nested forwarded messages",
+                ));
+            }
+            placeholders.insert(message.id, ForwardPlaceholder::NestedForward);
+        }
+    }
 
     source_messages
         .iter()
         .map(|source_message| {
+            if let Some(&reason) = placeholders.get(&source_message.id) {
+                return Ok(ForwardedBundlePayloadItem::MessageSnapshot {
+                    snapshot: ForwardedMessageSnapshot {
+                        original_message_id: source_message.id,
+                        original_chat_id: source_message.chat_id,
+                        message: Some(reason.as_str().to_owned()),
+                        message_type: MessageType::Placeholder,
+                        sender_uid: source_message.sender_uid,
+                        original_created_at: source_message.created_at,
+                        sticker: None,
+                        reply: build_forwarded_reply_snapshot(
+                            source_message.reply_to_id,
+                            &selected_message_ids,
+                        ),
+                        attachments: Vec::new(),
+                        mention_uids: Vec::new(),
+                    },
+                });
+            }
             if matches!(&source_message.message_type, MessageType::Forwarded) {
                 Ok(ForwardedBundlePayloadItem::ForwardedBundleRef {
                     bundle_ref: build_forwarded_bundle_ref_snapshot(
@@ -788,22 +833,6 @@ pub(crate) fn build_forwarded_preview_payload(
 ) -> Result<serde_json::Value, AppError> {
     serde_json::to_value(&items[..items.len().min(FORWARDED_PREVIEW_LIMIT)])
         .map_err(|_| AppError::Internal("Failed to serialize forwarded message preview"))
-}
-
-fn load_forwarded_bundle_preview_items(
-    conn: &mut PgConnection,
-    bundle_ids: &[i64],
-) -> Result<std::collections::HashMap<i64, ForwardedMessagesPreviewSnapshot>, AppError> {
-    let previews = load_forwarded_bundle_previews(conn, bundle_ids)?;
-    if previews
-        .values()
-        .any(|preview| preview.contains_forwarded_messages)
-    {
-        return Err(AppError::BadRequest(
-            "Forwarded messages cannot include nested forwarded messages",
-        ));
-    }
-    Ok(previews)
 }
 
 fn load_forwarded_bundle_previews(
@@ -1264,6 +1293,15 @@ fn build_push_preview_bundle(response: &MessageResponse) -> PushPreviewBundle {
                 .to_string(),
             ),
             MessageType::Forwarded => Some("forwarded messages".to_string()),
+            MessageType::Placeholder => Some(
+                response
+                    .message
+                    .as_deref()
+                    .and_then(ForwardPlaceholder::from_code)
+                    .map(ForwardPlaceholder::notification_text)
+                    .unwrap_or("[Unavailable message]")
+                    .to_owned(),
+            ),
             _ => rendered_message.clone(),
         }
     };
@@ -1614,6 +1652,11 @@ fn validate_message_shape(
     message: Option<&str>,
     sticker_id: Option<i64>,
 ) -> Result<(), AppError> {
+    if matches!(message_type, MessageType::Placeholder)
+        && message.and_then(ForwardPlaceholder::from_code).is_none()
+    {
+        return Err(AppError::BadRequest("Invalid placeholder reason"));
+    }
     if sticker_id.is_some() && !matches!(message_type, MessageType::Sticker) {
         return Err(AppError::BadRequest(
             "Sticker ID is only valid for sticker messages",
@@ -1691,6 +1734,15 @@ pub fn validate_message(
             } else {
                 Err(AppError::BadRequest(
                     "Sticker messages cannot include attachments",
+                ))
+            }
+        }
+        MessageType::Placeholder => {
+            if attachments.is_empty() {
+                Ok(())
+            } else {
+                Err(AppError::BadRequest(
+                    "Placeholder messages cannot include attachments",
                 ))
             }
         }
@@ -1775,6 +1827,13 @@ pub async fn send_prepared_message(
     state: &AppState,
     prepared: PreparedMessageSend,
 ) -> Result<SendMessageOutcome, AppError> {
+    if prepared.message_type == MessageType::Placeholder
+        && (!prepared.attachment_ids.is_empty() || prepared.forwarded_bundle_id.is_some())
+    {
+        return Err(AppError::BadRequest(
+            "Placeholder messages cannot reference media or bundles",
+        ));
+    }
     if let Some(reply_to_id) = prepared.reply_to_id {
         validate_reply_target(conn, prepared.chat_id, prepared.reply_root_id, reply_to_id)?;
     }

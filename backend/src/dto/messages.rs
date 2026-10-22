@@ -51,6 +51,9 @@ pub struct ForwardMessageBody {
     #[serde(default, with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
     pub thread_id: Option<i64>,
+    /// User confirmed replacing pending audio or excessive nesting with immutable placeholders.
+    #[serde(default)]
+    pub allow_placeholders: bool,
 }
 
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
@@ -107,6 +110,9 @@ pub struct ForwardMessagesBody {
     #[serde(default, with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
     pub thread_id: Option<i64>,
+    /// User confirmed replacing pending audio or excessive nesting with immutable placeholders.
+    #[serde(default)]
+    pub allow_placeholders: bool,
 }
 
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
