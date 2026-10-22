@@ -128,6 +128,8 @@ const SYSTEM_MESSAGE_TYPE_FORBIDDEN: &str = "System messages cannot be sent by c
 const INVITE_MESSAGE_TYPE_FORBIDDEN: &str = "Invite messages must be sent through invite APIs";
 const FORWARDED_MESSAGE_TYPE_FORBIDDEN: &str =
     "Forwarded messages must be sent through forward APIs";
+const PLACEHOLDER_MESSAGE_TYPE_FORBIDDEN: &str =
+    "Placeholder messages must be created through forward APIs";
 const DEFAULT_SEARCH_LIMIT: i64 = 20;
 const MAX_SEARCH_RESULT_WINDOW: usize = 1_000;
 
@@ -136,6 +138,7 @@ fn validate_client_message_type(message_type: &MessageType) -> Result<(), AppErr
         MessageType::System => Err(AppError::BadRequest(SYSTEM_MESSAGE_TYPE_FORBIDDEN)),
         MessageType::Invite => Err(AppError::BadRequest(INVITE_MESSAGE_TYPE_FORBIDDEN)),
         MessageType::Forwarded => Err(AppError::BadRequest(FORWARDED_MESSAGE_TYPE_FORBIDDEN)),
+        MessageType::Placeholder => Err(AppError::BadRequest(PLACEHOLDER_MESSAGE_TYPE_FORBIDDEN)),
         _ => Ok(()),
     }
 }
@@ -1230,7 +1233,9 @@ async fn patch_message(
         // bodies are generated server-side (an invite code, a membership
         // notice), and stickers, voice notes, and file messages have no
         // editable text.
-        if message.forwarded_from_message_id.is_some() {
+        if message.forwarded_from_message_id.is_some()
+            || message.message_type == MessageType::Placeholder
+        {
             return Err(AppError::Forbidden("Forwarded messages cannot be edited"));
         }
         if !matches!(message.message_type, MessageType::Text) {

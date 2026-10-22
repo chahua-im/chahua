@@ -4,7 +4,7 @@ use diesel::prelude::*;
 use crate::{
     dto::messages::{ForwardMessagesBody, ForwardedBundlePayloadItem},
     errors::AppError,
-    models::{Message, MessageType, NewForwardedBundle, TranscodeStatus},
+    models::{ForwardPlaceholder, Message, MessageType, NewForwardedBundle, TranscodeStatus},
     schema::{forwarded_bundles, group_membership, messages, messages::dsl},
     services::messages::{
         build_forwarded_preview_items, build_forwarded_preview_payload,
@@ -63,6 +63,32 @@ pub(crate) fn validate_forwardable_source(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn source_placeholder(
+    message: &Message,
+    allow_placeholders: bool,
+) -> Result<Option<ForwardPlaceholder>, AppError> {
+    if message.message_type == MessageType::Audio
+        && !matches!(
+            message.transcode_status,
+            TranscodeStatus::Done | TranscodeStatus::Failed
+        )
+        && allow_placeholders
+    {
+        return Ok(Some(ForwardPlaceholder::PendingAudio));
+    }
+    validate_forwardable_source(&message.message_type, message.transcode_status)?;
+    // Already captured placeholders never recover their original content.
+    if message.message_type == MessageType::Placeholder {
+        return message
+            .message
+            .as_deref()
+            .and_then(ForwardPlaceholder::from_code)
+            .map(Some)
+            .ok_or(AppError::Internal("Invalid stored placeholder reason"));
+    }
+    Ok(None)
 }
 
 fn forwarded_payload_matches_selection(
@@ -228,7 +254,15 @@ pub async fn prepare_forward_message(
                 .eq(body.source_chat_id)
                 .and(dsl::id.eq_any(&canonical_message_ids))
                 .and(dsl::deleted_at.is_null())
-                .and(dsl::is_published.eq(true)),
+                .and(
+                    dsl::is_published.eq(true).or(dsl::sender_uid
+                        .eq(uid)
+                        .and(dsl::message_type.eq(MessageType::Audio))
+                        .and(
+                            dsl::transcode_status
+                                .eq_any([TranscodeStatus::None, TranscodeStatus::Pending]),
+                        )),
+                ),
         )
         .order(dsl::id.asc())
         .select(Message::as_select())
@@ -236,14 +270,7 @@ pub async fn prepare_forward_message(
     if source_messages.len() != canonical_message_ids.len() {
         return Err(AppError::BadRequest("Invalid message IDs"));
     }
-    for source_message in &source_messages {
-        validate_forwardable_source(
-            &source_message.message_type,
-            source_message.transcode_status,
-        )?;
-    }
-
-    let items = capture_forwarded_bundle_items(conn, &source_messages)?;
+    let items = capture_forwarded_bundle_items(conn, &source_messages, body.allow_placeholders)?;
     let message_count = items.len();
     let child_bundle_ids = direct_child_bundle_ids(&items);
     let contains_forwarded_messages = !child_bundle_ids.is_empty();
@@ -445,6 +472,7 @@ mod tests {
         let id_gen = ids::new_generator();
         for (message_id, thread_id) in [(-76313, None), (-76314, Some(-76311))] {
             let mut body = ForwardMessagesBody {
+                allow_placeholders: false,
                 source_chat_id: -76300,
                 message_ids: vec![-76301, -76302],
                 client_generated_id: format!("merged-thread-copy-{message_id}"),

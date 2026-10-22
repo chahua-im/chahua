@@ -1,0 +1,2 @@
+-- PostgreSQL cannot drop an enum value in place. Keep 'placeholder' so existing
+-- message rows and immutable saved/forwarded records retain their meaning.

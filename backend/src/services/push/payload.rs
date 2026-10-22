@@ -151,10 +151,24 @@ pub(super) fn build_apns_notification(
     let is_mention = job.mentioned_uids.contains(&recipient_uid);
     let payload_type = payload_type_for(job, recipient_uid);
     let is_reply = matches!(payload_type, PushPayloadType::Reply);
+    // Keep reason codes in the structured payload, but never use them as the
+    // human-readable APNs body (including reply notifications).
+    let display_message = if preview.message_type == MessageType::Placeholder {
+        Some(
+            preview
+                .message
+                .as_deref()
+                .and_then(crate::models::ForwardPlaceholder::from_code)
+                .map(crate::models::ForwardPlaceholder::notification_text)
+                .unwrap_or("[Unavailable message]"),
+        )
+    } else {
+        preview.message.as_deref()
+    };
 
     let (body_loc_key, body_loc_args) = if is_mention {
         // Mentions only occur on text messages; surface a dedicated localized body.
-        let text = preview.message.as_deref().unwrap_or("");
+        let text = display_message.unwrap_or("");
         (
             APNS_BODY_LOC_KEY_MENTION,
             vec![job.sender_username.clone(), truncate_preview(text)],
@@ -162,7 +176,7 @@ pub(super) fn build_apns_notification(
     } else if is_reply {
         // Reply targets get a mention-style body: sender name + the reply's
         // preview text (empty when the reply is a media-only message).
-        let text = preview.message.as_deref().unwrap_or("");
+        let text = display_message.unwrap_or("");
         (
             APNS_BODY_LOC_KEY_REPLY,
             vec![job.sender_username.clone(), truncate_preview(text)],
@@ -171,6 +185,13 @@ pub(super) fn build_apns_notification(
         (APNS_BODY_LOC_KEY_DELETED, vec![job.sender_username.clone()])
     } else {
         match preview.message_type {
+            MessageType::Placeholder => (
+                APNS_BODY_LOC_KEY_WITH_PREVIEW,
+                vec![
+                    job.sender_username.clone(),
+                    display_message.unwrap_or("").to_owned(),
+                ],
+            ),
             MessageType::Audio => (APNS_BODY_LOC_KEY_AUDIO, vec![job.sender_username.clone()]),
             MessageType::Sticker => match &preview.sticker {
                 Some(s) if !s.emoji.trim().is_empty() => (

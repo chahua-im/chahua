@@ -8,12 +8,10 @@ use diesel::prelude::*;
 use crate::{
     dto::messages::{ForwardMessageBody, ForwardedFromInfo},
     errors::AppError,
-    models::{Attachment, Message, MessageType, NewAttachment},
+    models::{Attachment, Message, MessageType, NewAttachment, TranscodeStatus},
     schema::{attachments, messages},
     services::{
-        forwarding::{
-            acquire_forward_retry_lock, check_source_membership, validate_forwardable_source,
-        },
+        forwarding::{acquire_forward_retry_lock, check_source_membership, source_placeholder},
         messages::{
             attachment_previews, build_message_preview, build_sender, extract_mention_uids,
             MessagePreviewInput, PreparedMessageSend,
@@ -68,13 +66,20 @@ pub(crate) async fn prepare_single_forward(
         .filter(messages::id.eq(source_message_id))
         .filter(messages::chat_id.eq(body.source_chat_id))
         .filter(messages::deleted_at.is_null())
-        .filter(messages::is_published.eq(true))
+        .filter(
+            messages::is_published.eq(true).or(messages::sender_uid
+                .eq(uid)
+                .and(messages::message_type.eq(MessageType::Audio))
+                .and(
+                    messages::transcode_status
+                        .eq_any([TranscodeStatus::None, TranscodeStatus::Pending]),
+                )),
+        )
         .for_update()
         .select(Message::as_select())
         .first::<Message>(conn)
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
-    validate_forwardable_source(&source.message_type, source.transcode_status)?;
     let origin_id = source.forwarded_from_message_id.unwrap_or(source.id);
     if let Some(existing) = messages::table
         .filter(messages::client_generated_id.eq(&body.client_generated_id))
@@ -92,6 +97,26 @@ pub(crate) async fn prepare_single_forward(
             source.forwarded_bundle_id,
         )?;
         return Ok(PreparedSingleForward::Existing(Box::new(existing)));
+    }
+
+    if let Some(reason) = source_placeholder(&source, body.allow_placeholders)? {
+        return Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
+            chat_id: destination_chat_id,
+            sender_uid: uid,
+            message: Some(reason.as_str().to_owned()),
+            message_type: MessageType::Placeholder,
+            sticker_id: None,
+            reply_to_id: None,
+            reply_root_id: body.thread_id,
+            client_generated_id: body.client_generated_id.clone(),
+            attachment_ids: Vec::new(),
+            publish_immediately: true,
+            forwarded_from_message_id: Some(origin_id),
+            forwarded_bundle_id: None,
+            forwarded_preview_total: None,
+            forwarded_preview_contains_forwarded_messages: None,
+            forwarded_preview_items: None,
+        })));
     }
 
     let source_attachments = attachments::table
@@ -505,6 +530,7 @@ mod tests {
         ).unwrap();
         let id_gen = test_id_gen();
         let body = ForwardMessageBody {
+            allow_placeholders: false,
             source_chat_id: -76000,
             client_generated_id: "single-forward-retry-test".into(),
             thread_id: None,
@@ -640,6 +666,7 @@ mod tests {
                 76200,
                 -76200,
                 &ForwardMessagesBody {
+                    allow_placeholders: false,
                     source_chat_id: -76200,
                     message_ids: selection,
                     client_generated_id: format!("bundle-merged-{source_id}"),
@@ -655,6 +682,7 @@ mod tests {
                 .get_result::<i64>(&mut conn)
                 .unwrap();
             let body = ForwardMessageBody {
+                allow_placeholders: false,
                 source_chat_id: -76200,
                 client_generated_id: format!("bundle-single-{source_id}"),
                 thread_id: Some(-76211),
@@ -721,6 +749,7 @@ mod tests {
                 -76210,
                 copy_id,
                 &ForwardMessageBody {
+                    allow_placeholders: false,
                     source_chat_id: -76210,
                     client_generated_id: format!("bundle-repeat-{source_id}"),
                     thread_id: None,
@@ -791,6 +820,7 @@ mod tests {
         ).unwrap();
         let id_gen = test_id_gen();
         let body = ForwardMessageBody {
+            allow_placeholders: false,
             source_chat_id: -76100,
             client_generated_id: "forward-lock-copy".into(),
             thread_id: None,
