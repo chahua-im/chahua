@@ -19,7 +19,7 @@ import {
   type ThreadListItem,
   type ThreadSubscriptionStatusResponse,
 } from '../../generated/models';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { SessionStore } from '../session/session-store';
 import { conversationStates } from './conversation-states';
 import type { ConversationRef, ConversationState } from '../../generated/models';
@@ -182,10 +182,13 @@ export class ChatStore {
       this.mentionAccount();
       this.knownMentions.clear();
     });
-    this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
+    this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
       this.muteTime.set(Date.now());
       for (const query of this.relationships.values()) void query.refresh();
       this.invalidate();
+      // Group metadata and relationship policy have no complete change stream.
+      // Read, subscription and pin state do; retain them on a healthy foreground.
+      if (reason === ResyncReason.Foreground && this.realtime.connected()) return;
       this.invalidateReads();
       this.invalidateThreadReads();
       this.invalidateSubscriptions();

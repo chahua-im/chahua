@@ -182,7 +182,7 @@ describe('Connection', () => {
     expect(TestSocket.instances).toHaveLength(2);
   });
 
-  it('notifies foreground resync once regardless of socket readiness and stops listening after logout', () => {
+  it('notifies foreground resync only on an authenticated socket and stops listening after logout', () => {
     vi.useFakeTimers();
     vi.stubGlobal('WebSocket', TestSocket);
     TestSocket.instances = [];
@@ -199,19 +199,28 @@ describe('Connection', () => {
     TestBed.inject(Connection).resync$.subscribe(resync);
     TestBed.tick();
     const socket = TestSocket.instances[0];
-    for (const readyState of [0, 1, 3]) {
-      socket.readyState = readyState;
-      hidden = true;
-      document.dispatchEvent(new Event('visibilitychange'));
-      resync.mockClear();
-      hidden = false;
-      document.dispatchEvent(new Event('visibilitychange'));
-      expect(resync).toHaveBeenCalledOnce();
-      window.dispatchEvent(new Event('focus'));
-      document.dispatchEvent(new Event('visibilitychange'));
-      expect(resync).toHaveBeenCalledOnce();
-    }
+    hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(resync).not.toHaveBeenCalled();
+    socket.open();
+    socket.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
+    resync.mockClear();
+    hidden = true;
+    document.dispatchEvent(new Event('visibilitychange'));
+    hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(resync).toHaveBeenCalledOnce();
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(resync).toHaveBeenCalledOnce();
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'appState', state: 'active' }));
+    socket.close();
+    resync.mockClear();
+    hidden = true;
+    document.dispatchEvent(new Event('visibilitychange'));
+    hidden = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(resync).not.toHaveBeenCalled();
     user.set(undefined);
     TestBed.tick();
     resync.mockClear();
@@ -239,6 +248,8 @@ describe('Connection', () => {
     TestBed.tick();
     const socket = TestSocket.instances[0];
     socket.open();
+    socket.receive({ type: 'presenceUpdate', payload: { activeConnections: 1 } });
+    resync.mockClear();
     expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'appState', state: 'inactive' }));
     focused = true;
     window.dispatchEvent(new Event('focus'));

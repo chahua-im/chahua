@@ -64,7 +64,7 @@ not part of this endpoint unless source code registers them later.
 | `ws_connections_total` | Counter | Successfully registered WebSocket connections. | No labels. |
 | `ws_connection_duration_seconds` | Histogram | Duration from the authenticated socket handler start through connection removal, in seconds. | `H2`; no labels. |
 | `ws_messages_pushed_total` | Counter; `message_type` | Broadcast messages accepted by a WebSocket send buffer. | One series per emitted message type, not per user or connection. |
-| `ws_messages_dropped_total` | Counter; `message_type` | Broadcast messages rejected by a full or closed WebSocket send buffer. | One series per emitted message type, not per user or connection. |
+| `ws_messages_dropped_total` | Counter; `message_type` | Broadcast messages rejected by a full or closed WebSocket send buffer. Rejection also signals that connection to disconnect, so clients can calibrate after reconnecting. | One series per emitted message type, not per user or connection. |
 
 Connection-local unread summaries and conversation-state snapshots are sent directly by the socket task, outside the broadcast queue; they do not increment the broadcast pushed/dropped counters.
 

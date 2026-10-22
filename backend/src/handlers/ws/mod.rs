@@ -265,6 +265,8 @@ async fn handle_socket(
                     warn!(?error, uid, "ws activity task failed");
                 }
             }
+            // A live socket with a dropped event cannot safely skip foreground calibration.
+            _ = entry.lagged.notified() => break,
             Some(message) = states_messages.recv() => {
                 let request_id = match &message {
                     ServerWsMessage::ConversationStates(payload) => payload.request_id,

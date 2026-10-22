@@ -29,7 +29,7 @@ import {
   type MessageResponse,
   type ThreadListItem,
 } from '../../generated/models';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { activeQuery, readPages } from '../api/query';
 import { type SnowflakeID } from '../api/snowflake-id';
 import { isMessageChange, type MessageChange } from '../messages/message-change';
@@ -140,9 +140,11 @@ export class ChatListStore {
 
   constructor() {
     for (const archived of [false, true]) this.queries.set(archived, this.createQuery(archived));
-    this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
-      this.membershipStates.clear();
+    this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
+      // Request history archiving has no cross-device event, so keep its calibration.
       void this.invalidateRequests();
+      if (reason === ResyncReason.Foreground && this.realtime.connected()) return;
+      this.membershipStates.clear();
       void this.invalidateThreads();
     });
     const visible = () => {

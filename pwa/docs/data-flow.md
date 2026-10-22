@@ -92,8 +92,8 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatListContent             |
 | 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                                |
 | 显示 tab、归档计数或系统角标 | WS `watchConversationUnread`，包含对应 tab 的普通/archived 集合与 appBadge | 消费者共享订阅，服务端推送变化 |
-| 被覆盖的列表收到消息                       | 保留共享预览并标记读状态过期；返回后合并补读 `GET /chats/{c}/unread`，窗口外的新聊天从首页补读至原覆盖边界 | ChatListStore → ChatStore                                   |
-| 列表失效（断线重连、归档、成员关系、删除） | `GET /chats?limit=50`，读取到已加载条数或末尾                                                                    | ChatListStore → ChatStore → ChatListContent                 |
+| 被覆盖的列表收到消息                       | 保留共享预览并标记读状态过期；返回后用逐会话 WS 快照校准，尚无快照时合并 HTTP 读取，窗口外的新聊天从首页补读至原覆盖边界 | ChatListStore → ChatStore                                   |
+| 列表失效（断线重连、手动刷新） | `GET /chats?limit=50`，读取到已加载条数或末尾                                                                    | ChatListStore → ChatStore → ChatListContent                 |
 | 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限                |
 | 私聊或用户资料缺关系          | `GET /friends/{uid}`                                                   | ChatStore.relationship → 三处共用           |
 | 用户资料的验证方式            | `GET /friends/add-info/{uid}`                                          | ChatDetails 在点击添加好友后读取            |
@@ -130,16 +130,17 @@ Mention 跳转列表按当前页面会话保存，首次读取、真实重连及
 
 候选搜索不延迟正文或草稿更新：输入法组合期间不查询，查询按账号、chatId、关键词去重，等待 200ms 后发出并取消上一查询。组件内最多缓存 32 个结果，各自有效 30 秒；账号、聊天或 mention 开关变化取消请求并清空候选。
 
-单会话读状态只在过期时读取，同范围实时变更在 100ms 内合并；列表无消费者或文档隐藏时只标记过期。已知消息的编辑比较当前用户的提及状态，未改变时不刷新；比较用的最多 256 条提及状态由已接受消息快照与实时事件维护，未知旧内容仍需校准。话题 read-state 同时返回 lastReadMessageId、unreadCount、unreadMentions、unreadReactions，GET 不推进游标。已加载话题更新自身计数及实时摘要，不重取其他分页；普通消息不引入未知话题；仅订阅者收到的 threadUpdate 补列表头部到原头部时间边界，订阅关系或无法确认位置的通知仍校准完整已加载范围。普通话题消息不作废订阅缓存，threadMembershipChanged 的 status 快照直接更新 subscribed 与 archived；旧事件缺少 status 时才读取校准。
-
+单会话读状态优先使用逐会话 WS 快照；尚未取得快照的范围只在过期时读取 HTTP，同范围实时变更在 100ms 内合并。列表无消费者或文档隐藏时只标记过期。已知消息的编辑比较当前用户的提及状态，未改变时不刷新；比较用的最多 256 条提及状态由已接受消息快照与实时事件维护，未知旧内容仍需校准。话题 read-state 同时返回 lastReadMessageId、unreadCount、unreadMentions、unreadReactions，GET 不推进游标。已加载话题更新自身计数及实时摘要，不重取其他分页；普通消息不引入未知话题；仅订阅者收到的 threadUpdate 补列表头部到原头部时间边界，订阅变化直接更新已知项，未知项或无法确认位置的通知按 ID 校准。普通话题消息不作废订阅缓存，threadMembershipChanged 的 status 快照直接更新 subscribed 与 archived；旧事件缺少 status 时才读取校准。
 
 创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。发送贴纸（自动整理开启且所属包在统计范围内）与拖拽重排后 `PUT /users/me/stickerpack-order`；同步失败时重新读取 `GET /users/me`，以服务器顺序恢复。请求期间的具体反馈见[加载标识](loading-indicators.md)。
 
 ## 分页、刷新与页面生命周期
 
-普通对话列表查询按普通/归档范围共享成员和进行中的请求；记录成员 ID、游标、覆盖边界和待补未读，字段从 ChatStore 派生。刷新从首页逐页读取到已加载条数或末尾，每页到达即合并进列表；刷新完成后以响应中的成员替换旧窗口，期间保留现有内容。被其他页面覆盖不使列表失效，也不在返回时读取内容：实时消息已更新预览，隐藏列表在收到消息时立即按受影响聊天补读未读状态（页面在后台时留到返回后补读），未加载窗口外的新聊天从首页按需补页至原覆盖边界或末尾。普通聊天撤回最新消息时，若会话页已加载包含该消息的连续最新区间，直接用区间内前一条未撤回的普通消息恢复摘要和排序时间；完整空区间清空摘要。历史区间、未加载的被删消息或前一条消息落在更早分页时，仍由列表对账恢复。删除后的对账用于校准成员与未读，本地可确定的摘要不等待对账。只有连接实际断开后重连、归档、成员关系和删除才重读列表；恢复前台本身不重读，避免切回窗口时等待请求。列表在进入动画开始前激活查询。初次显示或切分类等待当前分类的列表查询，固定入口和归档角标不参与等待。
+健康连接恢复前台时，消息区间、话题列表、订阅、置顶和成功读取的私聊回执由已接收的事件保持，不重复读取；失败的查询仍可重试。当前会话隐藏期间继续接收消息，恢复后校验可见读位置。群资料、好友关系和申请历史缺少完整跨设备事件，仍校准；收藏等无可靠事件的数据保留原有读取。真正重连仍恢复订阅、补消息、校准列表与元数据。服务端普通事件队列溢出会断开该连接，强制走重连校准，避免把漏事件的连接当作健康连接。
 
-已加载话题的回复消息通过 WS／HTTP 确认共用路径直接更新 ChatStore 的 lastReply 与 lastReplyAt；摘要版本阻止消息之前发起的列表响应覆盖新预览。待发回复直接从 MessageOutbox 派生预览与排序，不等待确认。话题列表的失效与重读仍负责成员、参与者、回复数和未读对账，已加载行的预览与排序不等待这些请求。撤回最新话题回复时，复用会话页已加载的连续最新区间恢复前一条回复及其时间，根消息不作为回复预览；完整区间已无有效回复时立即隐藏话题，并清除当前区间根消息的话题信息。摘要版本阻止旧列表响应复活已清空的话题；后续新回复可使缓存话题重新显示。无法从当前区间确定前一条回复时保留对账兜底。
+普通对话列表查询按普通/归档范围共享成员和进行中的请求；记录成员 ID、游标、覆盖边界和待补未读，字段从 ChatStore 派生。刷新从首页逐页读取到已加载条数或末尾，每页到达即合并进列表；刷新完成后以响应中的成员替换旧窗口，期间保留现有内容。被其他页面覆盖不使列表失效，也不在返回时读取内容：实时消息已更新预览，隐藏列表记录受影响聊天，返回后恢复逐会话 WS 订阅；尚无快照的范围按需补读，未加载窗口外的新聊天从首页按需补页至原覆盖边界或末尾。普通聊天撤回最新消息时，若会话页已加载包含该消息的连续最新区间，直接用区间内前一条未撤回的普通消息恢复摘要和排序时间；完整空区间清空摘要。历史区间、未加载的被删消息或前一条消息落在更早分页时，仍由列表对账恢复。删除后的对账用于校准成员与未读，本地可确定的摘要不等待对账。连接实际断开后重连及手动刷新才校准完整已加载范围；归档、成员关系和删除按项更新。恢复前台本身不重读，避免切回窗口时等待请求。列表在进入动画开始前激活查询。初次显示或切分类等待当前分类的列表查询，固定入口和归档角标不参与等待。
+
+已加载话题的回复消息通过 WS／HTTP 确认共用路径直接更新 ChatStore 的 lastReply 与 lastReplyAt；摘要版本阻止消息之前发起的列表响应覆盖新预览。待发回复直接从 MessageOutbox 派生预览与排序，不等待确认。话题列表的范围或按项校准负责成员、参与者、回复数，逐会话 WS 负责未读对账，已加载行的预览与排序不等待这些请求。撤回最新话题回复时，复用会话页已加载的连续最新区间恢复前一条回复及其时间，根消息不作为回复预览；完整区间已无有效回复时立即隐藏话题，并清除当前区间根消息的话题信息。摘要版本阻止旧列表响应复活已清空的话题；后续新回复可使缓存话题重新显示。无法从当前区间确定前一条回复时保留对账兜底。
 
 只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
 
@@ -164,16 +165,16 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                            |
 | notification（mention/reply/reaction）                    | 服务端定向发送（包括撤销他人消息上的表态）；非话题标记该 chat 的读状态过期，已加载话题定向读取 read-state，未知话题按列表覆盖情况校准；当前会话合并读取对应跳转 ID（reaction 还会按会话级 ack 清除） |
 | pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                 |
-| threadUpdate                                              | 更新根消息统计，刷新活跃话题列表与计数                                                                |
-| threadMembershipChanged                                   | 订阅失效，当前页面补读，列表和计数刷新                                                                |
+| threadUpdate                                              | 更新已加载根消息统计；新订阅话题补列表头部，未读由 WS 推送                                                                |
+| threadMembershipChanged                                   | 用 status 快照更新订阅与归档；旧事件无 status 时补读，列表按项更新                                                                |
 | friendRequestReceived / friendRequestResolved             | 请求列表失效；接受时刷新聊天，相关好友关系查询失效                                                    |
 | friendshipRemoved                                         | 刷新相关关系查询和聊天归档计数                                                                        |
-| chatArchiveStateChanged                                   | 更新归档/静音字段，刷新受影响列表与计数                                                               |
+| chatArchiveStateChanged                                   | 更新归档/静音字段并迁移已知列表项，未知项按 ID 校准                                                               |
 | readReceiptChanged                                      | 当前私聊页面按 chatId 失效并读取对应范围；`privacyChanged` 先清除已知回执，普通推进保留已知回执直至新响应 |
-| 首次 presenceUpdate、恢复前台                             | Connection 区分认证连接与前台恢复的 resync，同一次 focus/visibility 恢复只发布一次；活跃查询刷新，当前页面补必要元数据；聊天列表只在断线重连时重读                                                |
+| 首次 presenceUpdate、恢复前台                             | Connection 区分认证连接与前台恢复的 resync，同一次 focus/visibility 恢复只发布一次；健康连接保留事件维护的数据，断线重连校准已加载范围                                                |
 | presenceSnapshot                                           | Presence 仅接收当前 `requestId` 的绝对授权快照；清除当前请求中缺席的用户/群，刷新期间保留已知状态；本机断网、断开或文档隐藏时不显示实时结论 |
 
-Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过同一单例 Connection 发送 `{type:'watchPresence',requestId,userIds,chatIds}`，以该 socket 的可见范围替换服务端监看范围；Snowflake chatId 仅在 Connection 边界还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
+Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦、连接已认证时发出 resync；未连接时等待认证成功统一校准。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过同一单例 Connection 发送 `{type:'watchPresence',requestId,userIds,chatIds}`，以该 socket 的可见范围替换服务端监看范围；Snowflake chatId 仅在 Connection 边界还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
 
 ChatListContent 在活跃列表中使用一个 IntersectionObserver，按实际进入视口的私聊行收集并去重对方 UID，注册到同一 Presence；滚出视口、切换分类、离开页面或销毁时释放对应范围。群组、话题和好友请求不注册列表在线范围；不为已加载但未显示的分页成员请求在线状态，也不为每行创建 observer、WebSocket 或轮询。列表、会话标题和资料的范围由 Presence 合并，HTTP 聊天列表不另存在线副本。
 
@@ -217,7 +218,7 @@ NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持�
 
 设置行不等待异步请求。PushNotifications 同步检查浏览器 API 与 Worker 配置，读取 `chahua.notifications.enabled` 和 `Notification.permission`；本机关闭直接显示关，开启且已授权显示开。ChatList 在头像点击事件内调用 requestSettingsPermission，在导航之前为本机已开启但权限为 default 的场景申请权限。拒绝、关闭权限弹窗或无手势直接进入设置且缺授权时，保存关闭选择；Settings 的 refresh 不打断已开始的授权。
 
-启动、进入设置，以及 Connection 在重连或恢复前台时发出的 resync，通过 refresh 在后台同步订阅；没有本机选择或环境不支持时不继续。开启且已授权时，读取浏览器当前订阅，缺少则取得 VAPID key 并创建订阅，再直接调用 `/push/subscribe` 更新当前 endpoint 的登记，不额外查询后端登记状态。后台检查无等待标识、失败静默；权限仍为 granted 时保留本机开启选择和已创建的 endpoint，下一次 refresh 重试，在线系统提醒不受登记失败影响。
+启动、进入设置，以及 Connection 在重连或恢复前台时发出的 resync，通过 refresh 在后台同步订阅；没有本机选择或环境不支持时不继续。开启且已授权时，读取浏览器当前订阅，缺少则取得 VAPID key 并创建订阅，按账号、clientId、endpoint 和密钥复用 24 小时内成功的登记；内容变化或过期才调用 `/push/subscribe`，不额外查询后端登记状态。相同同步共享进行中的请求，失败保留重试能力。后台检查无等待标识、失败静默；权限仍为 granted 时保留本机开启选择和已创建的 endpoint，下一次 refresh 重试，在线系统提醒不受登记失败影响。
 
 关闭立即保存本机意图并清除已显示的通知，再调用 `/push/unsubscribe` 和浏览器取消订阅；后端请求失败仍尝试浏览器取消。订阅操作按顺序执行并读取最新选择，后台登记进行中关闭会在该请求结束后清理。未增加持久重试队列；浏览器取消成功但后端未删除的过期 endpoint，由后端投递失败时清理。用户主动开关才设置 busy 并展示错误；后台操作不占用开关。
 

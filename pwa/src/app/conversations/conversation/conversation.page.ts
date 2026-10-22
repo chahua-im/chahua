@@ -441,6 +441,7 @@ export class ConversationPage {
     source: this.receiptScopeKey,
     computation: (): SnowflakeID | undefined => undefined,
   });
+  private readonly receiptFresh = linkedSignal({ source: this.receiptScopeKey, computation: () => 0 });
   private receiptRequestVersion = 0;
   private receiptRequest?: { key: string; again: number };
   protected readonly isReadByPeer = (message: MessageContent) => {
@@ -472,6 +473,7 @@ export class ConversationPage {
       do {
         const requested = request.again;
         request.again = 0;
+        this.receiptFresh.update((fresh) => fresh & ~requested);
         const receipts = await firstValueFrom(
           forkJoin({
             scope:
@@ -493,6 +495,7 @@ export class ConversationPage {
         ) {
           if (receipts.scope) this.readReceiptId.set(receipts.scope.lastReadMessageId);
           if (receipts.root) this.rootReadReceiptId.set(receipts.root.lastReadMessageId);
+          this.receiptFresh.update((fresh) => fresh | requested);
         }
       } while (request.again && this.receiptRequest === request && this.active() && key === this.receiptScopeKey());
     } catch {
@@ -806,6 +809,22 @@ export class ConversationPage {
         const entry = this.entryKey();
         void this.enterReactionSession();
         void this.enterMentionSession();
+        if (reason === ResyncReason.Foreground && this.realtime.connected()) {
+          // Current pages receive messages even while the document is hidden.
+          // Retry failed reads, but do not re-read successful event-backed data.
+          if (this.conversation.error()) void this.conversation.reconnect();
+          void this.loadPins();
+          if (this.threadError()) void this.loadSubscription();
+          const missingReceipts = 3 & ~this.receiptFresh();
+          if (missingReceipts) void this.refreshReadReceipt(false, false, missingReceipts);
+          void this.chatInfo
+            .ensure(this.id())
+            .catch(() => {})
+            .then(() => {
+              if (this.isCurrent(entry)) void this.trackScroll();
+            });
+          return;
+        }
         void this.conversation.reconnect();
         void this.loadPins();
         this.invalidateReadReceipt();

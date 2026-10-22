@@ -31,7 +31,7 @@ import {
   type ServerWsMessage,
   type ThreadSubscriptionStatusResponse,
 } from '../../../generated/models';
-import { Connection } from '../../api/connection';
+import { Connection, ResyncReason } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
@@ -72,7 +72,7 @@ describe('ConversationPage', () => {
   let http: HttpTestingController;
   let incoming: Subject<MessageResponse>;
   let events: Subject<ServerWsMessage>;
-  let resync: Subject<void>;
+  let resync: Subject<ResyncReason | void>;
   let subscriptions: WritableSignal<Map<SnowflakeID, ThreadSubscriptionStatusResponse>>;
   let scroll: HTMLElement;
   let resizes: Map<Element, () => void>;
@@ -111,7 +111,7 @@ describe('ConversationPage', () => {
     dmDetails.set(true);
     incoming = new Subject<MessageResponse>();
     events = new Subject<ServerWsMessage>();
-    resync = new Subject<void>();
+    resync = new Subject<ResyncReason | void>();
     subscriptions = signal(new Map());
     scroll = document.createElement('div');
     vi.spyOn(IonContent.prototype, 'getScrollElement').mockResolvedValue(scroll);
@@ -2387,6 +2387,47 @@ describe('ConversationPage', () => {
     markRead.mockClear();
     await component['trackScroll']();
     expect(markRead).toHaveBeenLastCalledWith(testChat.id, testMessage.id);
+  });
+
+  it('keeps live messages and pins on healthy foreground while calibrating group metadata', async () => {
+    component.ionViewDidEnter();
+    await fixture.whenStable();
+    const pins = vi.mocked(TestBed.inject(PinsService).listPins);
+    pins.mockClear();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    const message = { ...testMessage, id: encodeId('9007199254741004'), clientGeneratedId: 'background' };
+    incoming.next(message);
+    await fixture.whenStable();
+    expect(component['conversation'].items()).toContainEqual(message);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    resync.next(ResyncReason.Foreground);
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, name: '新群名' });
+    await fixture.whenStable();
+    expect(pins).not.toHaveBeenCalled();
+    expect(TestBed.inject(ChatStore).getReadState).not.toHaveBeenCalled();
+    http.expectNone((request) => request.url.includes('/messages'));
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('新群名');
+  });
+
+  it('reuses a successful DM receipt on foreground and retries failed receipt reads', async () => {
+    const dm = { ...testChat, kind: GroupKind.dm };
+    TestBed.inject(ChatStore).remember([dm]);
+    await fixture.whenStable();
+    const url = `/_api/chats/${wireChat.id}/read-receipt`;
+    http.expectOne(url).flush({ lastReadMessageId: wireMessage.id });
+    await fixture.whenStable();
+    resync.next(ResyncReason.Foreground);
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, kind: GroupKind.dm });
+    await fixture.whenStable();
+    http.expectNone(url);
+    expect(component['isReadByPeer'](testMessage)).toBe(true);
+    events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id, readerUid: 2 } });
+    http.expectOne(url).flush('', { status: 503, statusText: 'Unavailable' });
+    await fixture.whenStable();
+    resync.next(ResyncReason.Foreground);
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, kind: GroupKind.dm });
+    http.expectOne(url).flush({ lastReadMessageId: wireMessage.id });
+    await fixture.whenStable();
   });
 
   it('refreshes metadata and reports the visible read position through the unified resync event', async () => {

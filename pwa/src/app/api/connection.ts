@@ -191,7 +191,7 @@ export class Connection {
           socket.close();
           return;
         }
-        if (resumed) this.resync.next(ResyncReason.Foreground);
+        if (resumed && this.connected()) this.resync.next(ResyncReason.Foreground);
         if (socket.readyState === WebSocket.OPEN)
           socket.send(JSON.stringify({ type: WsControl.AppState, state: state() }));
       };

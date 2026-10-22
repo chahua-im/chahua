@@ -15,7 +15,7 @@ import {
   NotificationType,
   ServerWsMessageType,
 } from '../../generated/models';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
@@ -63,14 +63,14 @@ describe('ChatListStore threads and friend requests', () => {
   let releaseList: () => void;
   let events: Subject<ServerWsMessage>;
   let messages: Subject<MessageResponse>;
-  let resync: Subject<void>;
+  let resync: Subject<ResyncReason | void>;
   let refreshChats: ReturnType<typeof vi.fn>;
   let refreshCounts: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     events = new Subject<ServerWsMessage>();
     messages = new Subject<MessageResponse>();
-    resync = new Subject<void>();
+    resync = new Subject<ResyncReason | void>();
     refreshChats = vi.fn();
     refreshCounts = vi.fn();
     TestBed.configureTestingModule({
@@ -164,6 +164,31 @@ describe('ChatListStore threads and friend requests', () => {
     scope.destroy();
     disposed = true;
   }
+
+  it('retains event-backed thread pages on foreground and reloads after reconnect', async () => {
+    await startThreads();
+    const before = threads.items();
+    resync.next(ResyncReason.Foreground);
+    await settle();
+    http.expectNone(() => true);
+    expect(threads.items()).toEqual(before);
+    resync.next(ResyncReason.Connected);
+    await settle();
+    http.expectOne(activeThreadsUrl).flush({ threads: [wireThread] });
+    await settle();
+  });
+
+  it('still calibrates request history on a healthy foreground', async () => {
+    await showRequests(true);
+    http.expectOne(historyUrl).flush({ requests: [wireRequest] });
+    await settle();
+    resync.next(ResyncReason.Foreground);
+    await settle();
+    expect(requests.items()).toEqual([request]);
+    http.expectOne(historyUrl).flush({ requests: [] });
+    await settle();
+    expect(requests.items()).toEqual([]);
+  });
 
   it('loads only activated request queries and reuses their cached results', async () => {
     http.expectNone(() => true);

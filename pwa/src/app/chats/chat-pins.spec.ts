@@ -6,7 +6,7 @@ import { Subject } from 'rxjs';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import type { PinResponse, ServerWsMessage } from '../../generated/models';
 import { ServerWsMessageType } from '../../generated/models';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireMessage } from '../api/testing';
@@ -38,7 +38,7 @@ describe('ChatStore pins', () => {
 
   let events: Subject<ServerWsMessage>;
 
-  let resync: Subject<void>;
+  let resync: Subject<ResyncReason | void>;
 
   beforeEach(() => {
     events = new Subject();
@@ -207,7 +207,12 @@ describe('ChatStore pins', () => {
     await conversation.ensure();
     http.expectNone(() => true);
 
-    resync.next();
+    resync.next(ResyncReason.Foreground);
+    await conversation.ensure();
+    http.expectNone(() => true);
+    expect(conversation.items()).toEqual([pin]);
+
+    resync.next(ResyncReason.Connected);
     expect(conversation.items()).toEqual([pin]);
     await loadPins();
     expect(conversation.items()).toEqual([]);

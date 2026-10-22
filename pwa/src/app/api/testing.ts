@@ -1,9 +1,10 @@
 import { signal } from '@angular/core';
-import { filter, map, merge, Subject } from 'rxjs';
+import { filter, map, merge, Subject, type Observable } from 'rxjs';
 import type { ChatListItem, MeResponse, MessageResponse } from '../../generated/models';
 import { GroupKind, MessageType, ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
 import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
 import { decodeId, encodeId } from './snowflake-id';
+import type { ResyncReason } from './connection';
 
 export const testUser: MeResponse = { uid: 1, username: '测试用户', gender: 0, permissions: [], stickerPackOrder: [] };
 export const testChat: ChatListItem = {
@@ -41,7 +42,7 @@ export const wireMessage = {
 export function mockRealtime({
   messages$ = new Subject<MessageResponse>(),
   events$ = new Subject<ServerWsMessage>(),
-  resync$ = new Subject<void>(),
+  resync$ = new Subject<void>() as Observable<ResyncReason | void>,
   connected = signal(true),
 } = {}) {
   return {

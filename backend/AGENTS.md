@@ -17,6 +17,11 @@ Auth uses JWTs (`src/utils/auth.rs`), with authorization policy in `src/services
 - The application is designed to handle 20K users, and ~2k messages a day (combined across all users).
 - Expect around 5K users in a large chat group.
 
+## HTTP Request Efficiency
+
+- Minimize HTTP request amplification: consider how a single user action or server event can trigger follow-up requests across connected clients, conversations, or list items. Avoid unnecessary per-item fetches and repeated refreshes; batch, deduplicate, or coalesce requests where practical.
+- When implementation complexity is comparable and the user experience is equivalent, prefer the existing WebSocket connection for real-time updates over HTTP polling or follow-up fetches. Include enough state in WebSocket events to apply updates directly when practical, rather than making every recipient fetch the same state again.
+
 ## API Serialization
 - All API should use camel case for field naming
 - use `#[serde(rename_all="camelCase")]

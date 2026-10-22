@@ -37,6 +37,8 @@ pub struct ConnectionEntry {
     /// Sticky, coalescing invalidation independent of the lossy ordinary-event queue.
     pub unread_changed: Arc<tokio::sync::Notify>,
     pub states_changed: Arc<tokio::sync::Notify>,
+    /// A dropped ordinary event requires reconnect calibration.
+    pub lagged: tokio::sync::Notify,
     /// Unix timestamp (seconds) when we last received a ping from the client.
     pub last_ping_at: AtomicU64,
     pub app_state: AtomicU8,
@@ -116,6 +118,7 @@ impl ConnectionRegistry {
             tx,
             unread_changed: Arc::new(tokio::sync::Notify::new()),
             states_changed: Arc::new(tokio::sync::Notify::new()),
+            lagged: tokio::sync::Notify::new(),
             last_ping_at: AtomicU64::new(now),
             app_state: AtomicU8::new(AppPresenceState::Active as u8),
             last_state_at: AtomicU64::new(now),
@@ -142,7 +145,7 @@ impl ConnectionRegistry {
     }
 
     /// Broadcast a JSON string to all connections for the given user ids. Each uid may have multiple connections.
-    /// Failures to send (e.g. full buffer) are logged but do not remove the connection here.
+    /// A full buffer signals the socket to disconnect; its owner removes the connection.
     pub fn broadcast_to_uids(&self, uids: &[i32], message: Arc<ServerWsMessage>) {
         if matches!(
             &*message,
@@ -168,9 +171,10 @@ impl ConnectionRegistry {
                         tracing::warn!(
                             uid,
                             conn_id = entry.conn_id,
-                            "ws broadcast try_send full, message dropped"
+                            "ws broadcast queue rejected message; reconnect required"
                         );
                         self.metrics.record_message_dropped(msg_type);
+                        entry.lagged.notify_one();
                     } else {
                         self.metrics.record_message_pushed(msg_type);
                     }
@@ -379,6 +383,18 @@ mod tests {
         )
         .await
         .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            first.lagged.notified(),
+        )
+        .await
+        .unwrap();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            second.lagged.notified()
+        )
+        .await
+        .is_err());
         for entry in [&first, &second] {
             tokio::time::timeout(
                 std::time::Duration::from_millis(50),
