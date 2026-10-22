@@ -6,6 +6,7 @@ Backend design and decisions, updated 2026-10-21. Flutter/PWA presentation is ou
 
 - Forward 1–100 distinct published, nondeleted messages from one source chat into one destination chat.
 - Sources are ordered by message ID, not request-array order. System and invite messages are excluded.
+- New forwards require audio sources to have a final transcode status (`done` or `failed`). Published legacy audio with status `none` or `pending` rejects the entire selection with `400` until processing finishes, because transcoding can replace and delete its current media object. Successful-operation retries still return the existing snapshot without revalidating source state.
 - Require `clientGeneratedId` alongside `sourceChatId` and `messageIds`.
 - Repeating a successful operation with the same authenticated sender, destination and canonical source selection returns the original message. Reusing its key for different content returns `409`.
 - Retries do not rebuild snapshots, insert another bundle, advance read state again, or repeat delivery effects.

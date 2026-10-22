@@ -4,7 +4,7 @@ use diesel::prelude::*;
 use crate::{
     dto::messages::{ForwardMessagesBody, ForwardedBundlePayloadItem},
     errors::AppError,
-    models::{Message, MessageType, NewForwardedBundle},
+    models::{Message, MessageType, NewForwardedBundle, TranscodeStatus},
     schema::{forwarded_bundles, group_membership, messages, messages::dsl},
     services::messages::{
         build_forwarded_preview_items, build_forwarded_preview_payload,
@@ -38,12 +38,27 @@ fn canonical_forward_message_ids(message_ids: &[i64]) -> Result<Vec<i64>, AppErr
     Ok(canonical_ids)
 }
 
-fn validate_forwardable_source_message_type(message_type: &MessageType) -> Result<(), AppError> {
+fn validate_forwardable_source(
+    message_type: &MessageType,
+    transcode_status: TranscodeStatus,
+) -> Result<(), AppError> {
     if matches!(message_type, MessageType::System) {
         return Err(AppError::BadRequest(SYSTEM_MESSAGE_FORWARD_FORBIDDEN));
     }
     if matches!(message_type, MessageType::Invite) {
         return Err(AppError::BadRequest(INVITE_MESSAGE_FORWARD_FORBIDDEN));
+    }
+    // Published legacy audio can still be transcoded, which deletes the old
+    // object. Only snapshot audio once its attachment has reached a final state.
+    if matches!(message_type, MessageType::Audio)
+        && !matches!(
+            transcode_status,
+            TranscodeStatus::Done | TranscodeStatus::Failed
+        )
+    {
+        return Err(AppError::BadRequest(
+            "Audio messages cannot be forwarded until transcoding finishes",
+        ));
     }
     Ok(())
 }
@@ -218,7 +233,10 @@ pub async fn prepare_forward_message(
         return Err(AppError::BadRequest("Invalid message IDs"));
     }
     for source_message in &source_messages {
-        validate_forwardable_source_message_type(&source_message.message_type)?;
+        validate_forwardable_source(
+            &source_message.message_type,
+            source_message.transcode_status,
+        )?;
     }
 
     let items = capture_forwarded_bundle_items(conn, &source_messages)?;
@@ -261,14 +279,14 @@ pub async fn prepare_forward_message(
 mod tests {
     use super::{
         canonical_forward_message_ids, direct_child_bundle_ids,
-        forwarded_payload_matches_selection, validate_forwardable_source_message_type,
+        forwarded_payload_matches_selection, validate_forwardable_source,
     };
     use crate::{
         dto::messages::{
             ForwardedBundlePayloadItem, ForwardedBundleRefSnapshot, ForwardedMessageSnapshot,
             ForwardedMessagesPreviewSnapshot,
         },
-        models::MessageType,
+        models::{MessageType, TranscodeStatus},
     };
     use chrono::Utc;
 
@@ -317,10 +335,39 @@ mod tests {
 
     #[test]
     fn rejects_non_forwardable_source_message_types() {
-        assert!(validate_forwardable_source_message_type(&MessageType::System).is_err());
-        assert!(validate_forwardable_source_message_type(&MessageType::Invite).is_err());
-        assert!(validate_forwardable_source_message_type(&MessageType::Text).is_ok());
-        assert!(validate_forwardable_source_message_type(&MessageType::Forwarded).is_ok());
+        assert!(validate_forwardable_source(&MessageType::System, TranscodeStatus::None).is_err());
+        assert!(validate_forwardable_source(&MessageType::Invite, TranscodeStatus::None).is_err());
+    }
+
+    #[test]
+    fn rejects_audio_whose_storage_object_may_still_be_replaced() {
+        for status in [TranscodeStatus::None, TranscodeStatus::Pending] {
+            assert!(matches!(
+                validate_forwardable_source(&MessageType::Audio, status),
+                Err(crate::errors::AppError::BadRequest(
+                    "Audio messages cannot be forwarded until transcoding finishes"
+                ))
+            ));
+        }
+    }
+
+    #[test]
+    fn allows_audio_with_a_final_transcode_outcome() {
+        for status in [TranscodeStatus::Done, TranscodeStatus::Failed] {
+            assert!(validate_forwardable_source(&MessageType::Audio, status).is_ok());
+        }
+    }
+
+    #[test]
+    fn non_audio_sources_do_not_require_transcoding() {
+        for message_type in [
+            MessageType::Text,
+            MessageType::File,
+            MessageType::Sticker,
+            MessageType::Forwarded,
+        ] {
+            assert!(validate_forwardable_source(&message_type, TranscodeStatus::None).is_ok());
+        }
     }
 
     #[test]
