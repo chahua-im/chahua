@@ -153,6 +153,8 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 | StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；详情选中项按 ID 从当前列表派生，不复制包内贴纸；包列表按用户贴纸包顺序排序，发送贴纸时按开关记录包使用顺序 |
 | MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                               | 当前消息的媒体集合与本地画布，不写入聊天状态                                                            |
 
+附件菜单使用原生 popover 顶层浮层，打开时按附件按钮当前位置定位，不改变输入焦点；点选媒体或文件时先关闭菜单、同步释放当前焦点，Android 上若选择前仍有输入焦点，等待至少 400ms 且 resize/scroll 静默 150ms 后触发文件输入，最长等待 1s，保持在浏览器临时用户激活时限内；其他情况直接触发文件输入。重新输入、重开菜单或重置输入区会取消尚未触发的选择器，重置也关闭菜单。菜单项继续使用 Ionic 列表组件。
+
 上传任务提交后归 MessageOutbox，编辑只借用任务引用。输入区可以继续输入和录音。VoicePlayer 不显示原生音频控制条，挂载即下载音频并解码波形，波形读取失败时仍保留可用播放。消息语音的播放由根服务 VoicePlayback 独占：播放中的语音在离开或切换会话后继续播放，VoiceBar 吸顶播放条随语音出现在会话页和聊天列表页的 header 底部，接管播放/暂停、跳转原消息、已播时长与倍速，关闭或播完即收起；倍速由 VoicePlayback 全局记忆，跨语音保持；录音预览与待发送预览不进吸顶条。
 
 创建贴纸包直接使用创建响应中的完整详情，并追加到包列表；贴纸库上传新贴纸后重读该包，包详情页上传后把响应追加到当前列表。收藏状态写回当前 content，随后订阅更新不会恢复过期的收藏值。
