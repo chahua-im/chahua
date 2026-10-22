@@ -90,7 +90,6 @@ esac
 
             env.RUN_PWA_CHECK = matchesAny(checkFiles, ['Jenkinsfile', 'ci/Jenkinsfile.pwa-build', 'pwa/**']).toString()
             env.RUN_BACKEND_CHECK = matchesAny(checkFiles, ['Jenkinsfile', 'backend/**']).toString()
-            env.RUN_FLUTTER_CHECK = matchesAny(checkFiles, ['Jenkinsfile', 'wetty-chat-flutter/**']).toString()
 
             env.RUN_PWA_BUILD = 'false'
             env.RUN_BACKEND_BUILD = 'false'
@@ -99,7 +98,6 @@ esac
           } else {
             env.RUN_PWA_CHECK = 'true'
             env.RUN_BACKEND_CHECK = 'true'
-            env.RUN_FLUTTER_CHECK = 'true'
 
             if (env.BRANCH_NAME == 'main') {
               def baseCommit = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT?.trim() ?: env.GIT_PREVIOUS_COMMIT?.trim()
@@ -126,7 +124,6 @@ esac
           echo """Change flags:
 RUN_PWA_CHECK=${env.RUN_PWA_CHECK}
 RUN_BACKEND_CHECK=${env.RUN_BACKEND_CHECK}
-RUN_FLUTTER_CHECK=${env.RUN_FLUTTER_CHECK}
 RUN_PWA_BUILD=${env.RUN_PWA_BUILD}
 RUN_BACKEND_BUILD=${env.RUN_BACKEND_BUILD}"""
         }
@@ -353,132 +350,6 @@ cargo nextest run --profile ci
               junit allowEmptyResults: true,
                 checksName: 'checks / Backend',
                 testResults: 'backend/target/**/rust-test-report.xml'
-            }
-          }
-        }
-
-        stage('Flutter') {
-          when {
-            expression { env.RUN_FLUTTER_CHECK == 'true' }
-          }
-
-          agent {
-            kubernetes {
-              defaultContainer 'flutter'
-              yaml '''
-apiVersion: v1
-kind: Pod
-spec:
-  containers:
-    - name: flutter
-      image: ghcr.io/cirruslabs/flutter:stable
-      command:
-        - cat
-      tty: true
-'''
-            }
-          }
-
-          stages {
-            stage('Install Tools') {
-              steps {
-                publishChecks name: 'checks / Flutter',
-                  title: 'Flutter',
-                  summary: 'Running Flutter checks',
-                  status: 'IN_PROGRESS',
-                  conclusion: 'NONE'
-
-                dir('wetty-chat-flutter') {
-                  sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-flutter --version
-dart --version
-dart pub global activate junitreport
-                  '''
-                }
-              }
-            }
-
-            stage('Pub Get') {
-              steps {
-                dir('wetty-chat-flutter') {
-                  sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-flutter pub get
-                  '''
-                }
-              }
-            }
-
-            stage('Format') {
-              steps {
-                dir('wetty-chat-flutter') {
-                  sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-dart format --output=none --set-exit-if-changed .
-                  '''
-                }
-              }
-            }
-
-            stage('Analyze') {
-              steps {
-                dir('wetty-chat-flutter') {
-                  sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-flutter analyze
-                  '''
-                }
-              }
-            }
-
-            stage('Test') {
-              steps {
-                dir('wetty-chat-flutter') {
-                  sh '''#!/usr/bin/env bash
-set -euo pipefail
-
-set +e
-flutter test --machine > test_results.jsonl
-test_status=$?
-set -e
-
-dart pub global run junitreport:tojunit \
-  --input test_results.jsonl \
-  --output flutter-test-report.xml
-
-exit "$test_status"
-                  '''
-                }
-              }
-            }
-          }
-
-          post {
-            failure {
-              publishChecks name: 'checks / Flutter',
-                title: 'Flutter',
-                summary: 'Flutter checks failed',
-                status: 'COMPLETED',
-                conclusion: 'FAILURE'
-            }
-
-            aborted {
-              publishChecks name: 'checks / Flutter',
-                title: 'Flutter',
-                summary: 'Flutter checks were aborted',
-                status: 'COMPLETED',
-                conclusion: 'CANCELED'
-            }
-
-            always {
-              junit allowEmptyResults: true,
-                checksName: 'checks / Flutter',
-                testResults: 'wetty-chat-flutter/flutter-test-report.xml'
             }
           }
         }

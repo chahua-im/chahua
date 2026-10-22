@@ -1,6 +1,6 @@
 # Forwarded messages
 
-Backend design and decisions, updated 2026-10-22. Flutter/PWA presentation is outside this backend change.
+Backend design and decisions, updated 2026-10-22. PWA presentation is outside this backend change.
 
 ## Contract
 

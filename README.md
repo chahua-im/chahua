@@ -6,7 +6,6 @@ chahua is a chat application targeting ~20k users / ~2k messages per day.
 
 - `backend/`: Rust, Axum, Diesel, PostgreSQL — see [backend/README.md](backend/README.md) and [backend/AGENTS.md](backend/AGENTS.md)
 - `pwa/`: Angular + Ionic PWA client — see [pwa/README.md](pwa/README.md) and [pwa/AGENTS.md](pwa/AGENTS.md)
-- `wetty-chat-flutter/`: Flutter client — see [wetty-chat-flutter/README.md](wetty-chat-flutter/README.md) and [wetty-chat-flutter/AGENTS.md](wetty-chat-flutter/AGENTS.md)
 
 ## Local development
 
