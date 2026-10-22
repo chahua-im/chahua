@@ -274,20 +274,9 @@ export class MessageMenu {
     const writable = !this.readOnly();
     if (!this.queued() && writable) add(MessageAction.Reply, { disabled: !this.canReply() });
     if (writable && this.canThread()) add(MessageAction.Thread);
-    // DMs let both participants manage shared pins; groups stay admin-only.
-    if (
-      message &&
-      !this.queued() &&
-      writable &&
-      (this.admin() || this.dm()) &&
-      message.messageType !== MessageType.sticker &&
-      (this.pinned() || !message.isDeleted)
-    )
-      add(MessageAction.Pin, { disabled: this.pins().loading() || this.busy() });
     if (this.canCopy()) add(MessageAction.Copy);
     const source = this.queued() ? this.queued()!.confirmed() : this.serverMessage();
     if (source && canForward(source)) add(MessageAction.Forward);
-    if (this.allowSelect() && source && canSelect(source)) add(MessageAction.Select);
     if (writable && this.canEdit()) add(MessageAction.Edit, { disabled: !this.queued() && !this.canReply() });
     if (this.canSave()) add(MessageAction.Save);
     else if (
@@ -298,9 +287,20 @@ export class MessageMenu {
       message.sticker
     )
       add(MessageAction.FavoriteSticker, { disabled: this.favoriteStickers.loading() });
-    if (message && !this.queued() && !this.dm() && message.messageType !== MessageType.invite) add(MessageAction.Link);
-    if (writable && this.canRecall()) add(MessageAction.Recall, { destructive: true });
+    if (this.allowSelect() && source && canSelect(source)) add(MessageAction.Select);
     if (this.canReact() && message?.reactions?.length) add(MessageAction.Reactions);
+    if (message && !this.queued() && !this.dm() && message.messageType !== MessageType.invite) add(MessageAction.Link);
+    // DMs let both participants manage shared pins; groups stay admin-only.
+    if (
+      message &&
+      !this.queued() &&
+      writable &&
+      (this.admin() || this.dm()) &&
+      message.messageType !== MessageType.sticker &&
+      (this.pinned() || !message.isDeleted)
+    )
+      add(MessageAction.Pin, { disabled: this.pins().loading() || this.busy() });
+    if (writable && this.canRecall()) add(MessageAction.Recall, { destructive: true });
     return slots;
   });
   private readonly page = signal(0);

@@ -393,7 +393,7 @@ describe('MessageMenu', () => {
     expect(labels()).toEqual(['回复', '话题', '复制', '转发', '收藏', '链接']);
     admin.set(true);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '话题', '置顶', '复制', '转发', '收藏', '链接', '撤回']);
+    expect(labels()).toEqual(['回复', '话题', '复制', '转发', '收藏', '链接', '置顶', '撤回']);
     pinned.set(true);
     fixture.detectChanges();
     expect(labels()).toContain('取消置顶');
@@ -402,7 +402,7 @@ describe('MessageMenu', () => {
   it('lets a DM participant pin without group admin rights and drops the link action', () => {
     kind.set(GroupKind.dm);
     fixture.detectChanges();
-    expect(labels()).toEqual(['回复', '话题', '置顶', '复制', '转发', '收藏']);
+    expect(labels()).toEqual(['回复', '话题', '复制', '转发', '收藏', '置顶']);
     expect(menu['admin']()).toBe(false);
   });
 
