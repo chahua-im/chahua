@@ -12,8 +12,8 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         messages::{
-            ForwardMessagesBody, ForwardedMessagesResponse, ListMessagesResponse, MessageResponse,
-            SearchMessagesResponse,
+            ForwardMessageBody, ForwardMessagesBody, ForwardedMessagesResponse,
+            ListMessagesResponse, MessageResponse, SearchMessagesResponse,
         },
         ws::{NotificationPayload, NotificationType, ServerWsMessage},
     },
@@ -38,12 +38,12 @@ use crate::services::authz::Action as AuthzAction;
 use crate::services::forwarding::prepare_forward_message;
 use crate::services::messages::{
     attach_metadata, attachment_position, authorize_message_send,
-    deserialize_forwarded_bundle_payload, extract_mention_uids,
-    forwarded_messages_response_from_items, load_forwarded_bundle,
-    load_target_forwarded_bundle_from_root, load_username_by_uid, parse_attachment_ids,
-    send_prepared_message, sync_edited_message_mentions, validate_message, PreparedMessageSend,
-    SendMessageOutcome,
+    deserialize_forwarded_bundle_payload, forwarded_messages_response_from_items,
+    load_forwarded_bundle, load_target_forwarded_bundle_from_root, load_username_by_uid,
+    parse_attachment_ids, send_prepared_message, sync_edited_message_mentions, validate_message,
+    PreparedMessageSend, SendMessageOutcome,
 };
+use crate::services::single_forwarding::{prepare_single_forward, PreparedSingleForward};
 use crate::services::social;
 #[derive(serde::Deserialize, utoipa::IntoParams)]
 #[serde(rename_all = "camelCase")]
@@ -588,6 +588,7 @@ async fn post_message(
             conn,
             &state,
             PreparedMessageSend {
+                forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
                 message: body.message,
@@ -754,6 +755,131 @@ async fn forward_messages(
     Ok((StatusCode::CREATED, Json(message)))
 }
 
+/// Single forwards retain the original message type, with flattened attribution.
+#[utoipa::path(
+    post,
+    path = "/{message_id}/forward",
+    tag = "chats",
+    params(
+        ("chat_id" = String, Path, description = "Destination Chat ID"),
+        ("message_id" = String, Path, description = "Source Message ID"),
+    ),
+    request_body = ForwardMessageBody,
+    responses((status = CREATED, body = MessageResponse)),
+    security(("bearer_jwt" = [])),
+)]
+async fn forward_message(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(MessageIdPath {
+        chat_id,
+        message_id,
+    }): Path<MessageIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<ForwardMessageBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let conn = &mut *conn;
+    let target = authorize_message_send(conn, chat_id, body.thread_id, uid)?;
+    diesel::sql_query("BEGIN").execute(conn)?;
+    let tx_result: Result<_, AppError> = async {
+        let prepared =
+            prepare_single_forward(conn, state.id_gen.as_ref(), uid, chat_id, message_id, &body)
+                .await?;
+        let send_result = match prepared {
+            PreparedSingleForward::Existing(existing) => {
+                let response =
+                    attach_metadata(conn, vec![*existing], &state.media, &state.avatars, uid)
+                        .await
+                        .into_iter()
+                        .next()
+                        .ok_or(AppError::Internal("Failed to build message response"))?;
+                return Ok((
+                    SendMessageOutcome::Duplicate(Box::new(response)),
+                    false,
+                    Vec::new(),
+                ));
+            }
+            PreparedSingleForward::New(prepared) => {
+                send_prepared_message(conn, &state, *prepared).await?
+            }
+        };
+        let SendMessageOutcome::Created(created) = &send_result else {
+            return Ok((send_result, false, Vec::new()));
+        };
+        let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
+            let thread_state = crate::services::threads::record_thread_send(
+                conn,
+                &created.response,
+                &created.member_uids,
+                root,
+                true,
+                false,
+            )?;
+            (
+                thread_state.receipt_advanced,
+                thread_state.subscription_changes,
+            )
+        } else {
+            crate::services::chat::mark_chat_as_read(conn, chat_id, uid, created.response.id)?;
+            (
+                crate::services::read_receipts::advance_chat_read_receipt(
+                    conn,
+                    chat_id,
+                    uid,
+                    created.response.id,
+                )?,
+                Vec::new(),
+            )
+        };
+        Ok((send_result, receipt_advanced, subscription_changes))
+    }
+    .await;
+    let (send_result, receipt_advanced, subscription_changes) = match tx_result {
+        Ok(result) => {
+            diesel::sql_query("COMMIT").execute(conn)?;
+            result
+        }
+        Err(error) => {
+            let _ = diesel::sql_query("ROLLBACK").execute(conn);
+            return Err(error);
+        }
+    };
+    let created = match send_result {
+        SendMessageOutcome::Created(created) => *created,
+        SendMessageOutcome::Duplicate(response) => {
+            return Ok((StatusCode::CREATED, Json(*response)))
+        }
+    };
+    created.side_effects.fire(&state);
+    if let Some(search) = &state.message_search {
+        search.upsert_message_best_effort(created.inserted_message);
+    }
+    if receipt_advanced {
+        crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
+            conn,
+            &state.ws_registry,
+            chat_id,
+            false,
+            Some(uid),
+            body.thread_id,
+        )?;
+    }
+    if let Some(thread_id) = body.thread_id {
+        for changed_uid in subscription_changes {
+            crate::services::threads::broadcast_thread_membership_changed_to_user(
+                conn,
+                &state.ws_registry,
+                changed_uid,
+                chat_id,
+                thread_id,
+            )?;
+        }
+        broadcast_thread_send_updates(conn, &state, chat_id, thread_id, &created.member_uids, uid)
+            .await;
+    }
+    Ok((StatusCode::CREATED, Json(created.response)))
+}
+
 /// GET /chats/:chat_id/messages/:message_id/forwarded-messages — List forwarded message details.
 #[utoipa::path(
     get,
@@ -878,6 +1004,7 @@ pub(super) async fn post_thread_message(
             conn,
             &state,
             PreparedMessageSend {
+                forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
                 message: body.message,
@@ -901,73 +1028,18 @@ pub(super) async fn post_thread_message(
                 return Ok((SendMessageOutcome::Duplicate(response), false, Vec::new()));
             }
         };
-        let response = send_result.response.clone();
-        let publish_now = publish_immediately;
-
-        // Auto-subscribe the replying user and track read position.
-        let mut subscription_changes = Vec::new();
-        if crate::services::threads::ensure_thread_subscription(conn, chat_id, thread_id, uid)? {
-            subscription_changes.push(uid);
-        }
-        crate::services::threads::mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
-        let receipt_advanced = crate::services::read_receipts::advance_thread_read_receipt(
+        let thread_state = crate::services::threads::record_thread_send(
             conn,
-            chat_id,
-            thread_id,
-            uid,
-            response.id,
+            &send_result.response,
+            &send_result.member_uids,
+            &root_msg,
+            publish_immediately,
+            true,
         )?;
-
-        // Ensure the root author has an initial participant row without
-        // overriding any existing subscription or archive preference.
-        if root_msg.sender_uid != uid
-            && send_result.member_uids.contains(&root_msg.sender_uid)
-            && crate::services::threads::ensure_thread_user_state(
-                conn,
-                chat_id,
-                thread_id,
-                root_msg.sender_uid,
-                true,
-            )?
-        {
-            subscription_changes.push(root_msg.sender_uid);
-        }
-
-        // Auto-subscribe mentioned users
-        if let Some(ref text) = response.message {
-            for mentioned_uid in extract_mention_uids(text) {
-                if mentioned_uid != uid
-                    && send_result.member_uids.contains(&mentioned_uid)
-                    && crate::services::threads::ensure_thread_subscription(
-                        conn,
-                        chat_id,
-                        thread_id,
-                        mentioned_uid,
-                    )?
-                {
-                    subscription_changes.push(mentioned_uid);
-                }
-            }
-        }
-
-        if publish_now {
-            crate::services::threads::increment_thread_meta(
-                conn,
-                chat_id,
-                thread_id,
-                response.created_at,
-            )?;
-
-            // Mark the root message as having a thread
-            diesel::update(messages::table.filter(dsl::id.eq(thread_id)))
-                .set(dsl::has_thread.eq(true))
-                .execute(conn)?;
-        }
-
         Ok((
             SendMessageOutcome::Created(Box::new(send_result)),
-            receipt_advanced,
-            subscription_changes,
+            thread_state.receipt_advanced,
+            thread_state.subscription_changes,
         ))
     }
     .await;
@@ -1025,42 +1097,52 @@ pub(super) async fn post_thread_message(
         )?;
     }
 
-    // Post-commit: WS broadcasts (root message update + thread update)
-    let root_msg_updated: Option<Message> = messages::table
-        .filter(dsl::id.eq(thread_id))
-        .select(Message::as_select())
-        .first(conn)
-        .ok();
-
     if publish_immediately {
-        if let Some(root_msg) = root_msg_updated {
-            let root_response =
-                attach_metadata(conn, vec![root_msg], &state.media, &state.avatars, uid)
-                    .await
-                    .into_iter()
-                    .next()
-                    .unwrap();
-            let ws_msg =
-                std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response.clone()));
-            state.ws_registry.broadcast_to_uids(&member_uids, ws_msg);
-        }
-
-        if let Err(err) = crate::services::threads::broadcast_thread_update_to_subscribers(
-            conn,
-            &state.ws_registry,
-            chat_id,
-            thread_id,
-        ) {
-            tracing::warn!(
-                chat_id,
-                thread_id,
-                ?err,
-                "failed to broadcast thread update to subscribers"
-            );
-        }
+        broadcast_thread_send_updates(conn, &state, chat_id, thread_id, &member_uids, uid).await;
     }
 
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn broadcast_thread_send_updates(
+    conn: &mut diesel::PgConnection,
+    state: &AppState,
+    chat_id: i64,
+    thread_id: i64,
+    member_uids: &[i32],
+    uid: i32,
+) {
+    let root = messages::table
+        .filter(dsl::id.eq(thread_id).and(dsl::chat_id.eq(chat_id)))
+        .select(Message::as_select())
+        .first::<Message>(conn)
+        .ok();
+    if let Some(root) = root {
+        if let Some(root_response) =
+            attach_metadata(conn, vec![root], &state.media, &state.avatars, uid)
+                .await
+                .into_iter()
+                .next()
+        {
+            state.ws_registry.broadcast_to_uids(
+                member_uids,
+                std::sync::Arc::new(ServerWsMessage::MessageUpdated(root_response)),
+            );
+        }
+    }
+    if let Err(error) = crate::services::threads::broadcast_thread_update_to_subscribers(
+        conn,
+        &state.ws_registry,
+        chat_id,
+        thread_id,
+    ) {
+        tracing::warn!(
+            chat_id,
+            thread_id,
+            ?error,
+            "failed to broadcast thread update after message send"
+        );
+    }
 }
 
 /// PATCH /chats/:chat_id/messages/:message_id — Edit a message.
@@ -1117,6 +1199,9 @@ async fn patch_message(
         // bodies are generated server-side (an invite code, a membership
         // notice), and stickers, voice notes, and file messages have no
         // editable text.
+        if message.forwarded_from_message_id.is_some() {
+            return Err(AppError::Forbidden("Forwarded messages cannot be edited"));
+        }
         if !matches!(message.message_type, MessageType::Text) {
             return Err(AppError::BadRequest("This message type cannot be edited"));
         }
@@ -1433,6 +1518,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_messages, post_message))
         .routes(utoipa_axum::routes!(forward_messages))
+        .routes(utoipa_axum::routes!(forward_message))
         .routes(utoipa_axum::routes!(get_forwarded_messages))
         .routes(utoipa_axum::routes!(get_forwarded_bundle_messages))
         .routes(utoipa_axum::routes!(search_messages))

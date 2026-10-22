@@ -385,6 +385,7 @@ async fn send_pin_system_message(
             conn,
             state,
             PreparedMessageSend {
+                forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
                 message: Some(text.to_string()),

@@ -448,8 +448,14 @@ async fn process_message(state: AppState, message_id: i64) -> Result<(), AppErro
     }
 
     let conn = &mut state.db.get()?;
-    let side_effects =
-        build_message_side_effects(conn, &response, message.sender_uid, message.chat_id, true)?;
+    let side_effects = build_message_side_effects(
+        conn,
+        &response,
+        message.sender_uid,
+        message.chat_id,
+        true,
+        true,
+    )?;
     let member_uids = side_effects.broadcast_uids.clone();
     side_effects.fire(&state);
 

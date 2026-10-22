@@ -38,7 +38,7 @@ fn canonical_forward_message_ids(message_ids: &[i64]) -> Result<Vec<i64>, AppErr
     Ok(canonical_ids)
 }
 
-fn validate_forwardable_source(
+pub(crate) fn validate_forwardable_source(
     message_type: &MessageType,
     transcode_status: TranscodeStatus,
 ) -> Result<(), AppError> {
@@ -90,7 +90,7 @@ struct AdvisoryLockAcquired {
     _lock_acquired: i32,
 }
 
-fn acquire_forward_retry_lock(
+pub(crate) fn acquire_forward_retry_lock(
     conn: &mut PgConnection,
     client_generated_id: &str,
 ) -> Result<(), AppError> {
@@ -103,7 +103,7 @@ fn acquire_forward_retry_lock(
     Ok(())
 }
 
-fn check_source_membership(
+pub(crate) fn check_source_membership(
     conn: &mut PgConnection,
     chat_id: i64,
     uid: i32,
@@ -152,6 +152,7 @@ fn prepared_forward_message(
     preview_items: Vec<crate::dto::messages::ForwardedMessagePreviewSnapshot>,
 ) -> PreparedMessageSend {
     PreparedMessageSend {
+        forwarded_from_message_id: None,
         chat_id,
         sender_uid,
         message: Some(forwarded_wrapper_text(message_count)),

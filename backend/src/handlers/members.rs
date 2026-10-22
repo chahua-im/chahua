@@ -291,6 +291,7 @@ async fn post_add_member(
             conn,
             &state,
             crate::services::messages::PreparedMessageSend {
+                forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
                 message: Some(format!("added {}", target_username)),
@@ -444,6 +445,7 @@ async fn delete_remove_member(
             conn,
             &state,
             crate::services::messages::PreparedMessageSend {
+                forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: sys_sender_uid,
                 message: Some(sys_msg),

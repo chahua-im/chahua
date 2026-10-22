@@ -295,6 +295,7 @@ diesel::table! {
         is_published -> Bool,
         transcode_status -> TranscodeStatus,
         forwarded_bundle_id -> Nullable<Int8>,
+        forwarded_from_message_id -> Nullable<Int8>,
     }
 }
 

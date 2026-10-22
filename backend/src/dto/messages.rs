@@ -28,7 +28,36 @@ pub struct ThreadInfo {
 
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct ForwardedFromInfo {
+    pub sender: User,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    /// Source reply context is display-only in the destination conversation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_reply_to: Option<Box<MessagePreview>>,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardMessageBody {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub source_chat_id: i64,
+    pub client_generated_id: String,
+    #[serde(default, with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub thread_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forwarded_from: Option<ForwardedFromInfo>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
@@ -359,6 +388,8 @@ pub struct MessagePreviewAttachment {
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarded_from_name: Option<String>,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
