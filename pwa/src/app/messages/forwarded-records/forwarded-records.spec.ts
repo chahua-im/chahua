@@ -13,6 +13,7 @@ import { ServerWsMessageType, type ServerWsMessage } from '../../../generated/mo
 import { Subject } from 'rxjs';
 import { SessionStore } from '../../session/session-store';
 import { By } from '@angular/platform-browser';
+import { IonContent } from '@ionic/angular';
 import { signal } from '@angular/core';
 import { Preferences } from '../../settings/preferences';
 import { Message } from '../message/message';
@@ -53,7 +54,7 @@ describe('ForwardedRecords', () => {
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
-        { provide: Preferences, useValue: { showAllAvatars: signal(false) } },
+        { provide: Preferences, useValue: { showAllAvatars: signal(false), showDmDetails: signal(false) } },
         { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
         { provide: ChatStore, useValue: { changes$: changes, watchReadStates } },
       ],
@@ -111,6 +112,154 @@ describe('ForwardedRecords', () => {
       'forwarded',
       '9007199254741999',
     ]);
+    http.verify();
+  });
+
+  it.each([false, true])(
+    'floats dates across days, yields to separators and keeps fixed nodes mounted (saved child: %s)',
+    async (savedChild) => {
+      const fixture = TestBed.createComponent(ForwardedRecords);
+      if (savedChild) {
+        fixture.componentRef.setInput('savedId', '123');
+        fixture.componentRef.setInput('bundleId', '456');
+      } else {
+        fixture.componentRef.setInput('id', wireChat.id);
+        fixture.componentRef.setInput('messageId', wireMessage.id);
+      }
+      fixture.detectChanges();
+      const http = TestBed.inject(HttpTestingController);
+      const url = savedChild
+        ? '/_api/saved-messages/123/forwarded-bundles/456/messages'
+        : `/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forwarded-messages`;
+      http.expectOne(url).flush({
+        total: 2,
+        messages: [
+          { ...record, originalCreatedAt: '2026-09-08T12:00:00Z' },
+          { ...record, originalMessageId: '102', originalCreatedAt: '2026-09-09T12:00:00Z' },
+        ],
+      });
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const content = fixture.nativeElement.querySelector('ion-content') as HTMLElement;
+      const children = [...content.children];
+      const floating = content.querySelector<HTMLElement>('.floating-date')!;
+      const dates = content.querySelectorAll<HTMLElement>('.message-date');
+      const messages = content.querySelectorAll('app-message');
+      const scroll = document.createElement('div');
+      vi.spyOn(
+        fixture.debugElement.query(By.directive(IonContent)).componentInstance,
+        'getScrollElement',
+      ).mockResolvedValue(scroll);
+      vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 400));
+      Object.defineProperties(floating, { offsetTop: { value: 12 }, offsetHeight: { value: 25 } });
+      const firstMessage = vi.spyOn(messages[0], 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 60, 300, 200));
+      const secondMessage = vi
+        .spyOn(messages[1], 'getBoundingClientRect')
+        .mockReturnValue(new DOMRect(0, 500, 300, 200));
+      const firstDate = vi.spyOn(dates[0], 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 12, 300, 40));
+      const secondDate = vi.spyOn(dates[1], 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 450, 300, 40));
+      const scrollAndRender = async () => {
+        content.dispatchEvent(new Event('ionScroll'));
+        await fixture.whenStable();
+        fixture.detectChanges();
+      };
+
+      expect(floating.classList.contains('scrolling')).toBe(false);
+      content.dispatchEvent(new Event('ionScrollStart'));
+      await scrollAndRender();
+      expect(floating.textContent?.trim()).toBe(dates[0].textContent?.trim());
+      expect(floating.classList.contains('scrolling')).toBe(true);
+      expect(floating.classList.contains('colliding')).toBe(true);
+      expect(dates[0].style.visibility).toBe('visible');
+
+      firstDate.mockReturnValue(new DOMRect(0, -50, 300, 40));
+      await scrollAndRender();
+      expect(floating.classList.contains('colliding')).toBe(false);
+      expect(dates[0].style.visibility).toBe('hidden');
+      expect(dates[1].style.visibility).toBe('visible');
+
+      firstMessage.mockReturnValue(new DOMRect(0, -200, 300, 200));
+      secondMessage.mockReturnValue(new DOMRect(0, 50, 300, 200));
+      firstDate.mockReturnValue(new DOMRect(0, -250, 300, 40));
+      secondDate.mockReturnValue(new DOMRect(0, 12, 300, 40));
+      await scrollAndRender();
+      expect(floating.textContent?.trim()).toBe(dates[1].textContent?.trim());
+      expect(floating.classList.contains('colliding')).toBe(true);
+      expect(dates[1].style.visibility).toBe('visible');
+
+      secondDate.mockReturnValue(new DOMRect(0, -50, 300, 40));
+      await scrollAndRender();
+      expect(floating.classList.contains('colliding')).toBe(false);
+      expect(dates[1].style.visibility).toBe('hidden');
+      content.dispatchEvent(new Event('ionScrollEnd'));
+      await fixture.whenStable();
+      expect(floating.classList.contains('scrolling')).toBe(false);
+      expect(dates[1].style.visibility).toBe('visible');
+      expect([...content.children]).toEqual(children);
+      expect(content.querySelector('.floating-date')).toBe(floating);
+
+      content.dispatchEvent(new Event('ionScrollStart'));
+      await fixture.whenStable();
+      fixture.componentInstance.ionViewWillLeave();
+      fixture.detectChanges();
+      expect(floating.classList.contains('scrolling')).toBe(false);
+      fixture.componentInstance.ionViewWillEnter();
+      await fixture.whenStable();
+      expect(floating.classList.contains('scrolling')).toBe(false);
+      expect(content.querySelector('.floating-date')).toBe(floating);
+      http.verify();
+    },
+  );
+
+  it('pins record avatars at the viewport bottom and follows all-avatar preferences independently of DM details', async () => {
+    const fixture = TestBed.createComponent(ForwardedRecords);
+    fixture.componentRef.setInput('id', wireChat.id);
+    fixture.componentRef.setInput('messageId', wireMessage.id);
+    fixture.detectChanges();
+    const http = TestBed.inject(HttpTestingController);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forwarded-messages`).flush({
+      total: 2,
+      messages: [record, { ...record, originalMessageId: '102' }],
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    const messages = element.querySelectorAll('app-message');
+    const scroll = document.createElement('div');
+    const rect = (top: number, bottom: number) => ({ top, bottom }) as DOMRect;
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(rect(0, 400));
+    const content = fixture.debugElement.query(By.directive(IonContent)).componentInstance as IonContent;
+    vi.spyOn(content, 'getScrollElement').mockResolvedValue(scroll);
+    vi.spyOn(messages[0], 'getBoundingClientRect').mockReturnValue(rect(0, 200));
+    vi.spyOn(messages[1], 'getBoundingClientRect').mockReturnValue(rect(200, 600));
+    vi.spyOn(messages[1].querySelector('.bubble')!, 'getBoundingClientRect').mockReturnValue(rect(200, 596));
+    const avatarRect = vi
+      .spyOn(messages[1].querySelector('.avatar')!, 'getBoundingClientRect')
+      .mockReturnValue(rect(562, 596));
+    await fixture.componentInstance['trackScroll']();
+    fixture.detectChanges();
+    expect(element.querySelector('.sticky-avatar')).not.toBeNull();
+    expect((messages[1].querySelector('.avatar') as HTMLElement).style.visibility).toBe('hidden');
+    expect(messages[0].querySelector('.avatar')).toBeNull();
+
+    const preferences = TestBed.inject(Preferences);
+    (preferences.showAllAvatars as ReturnType<typeof signal<boolean>>).set(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(element.querySelector('.sticky-avatar')).toBeNull();
+    expect(element.querySelectorAll('app-message .avatar')).toHaveLength(2);
+    expect((messages[1].querySelector('.avatar') as HTMLElement).style.visibility).toBe('');
+
+    (preferences.showAllAvatars as ReturnType<typeof signal<boolean>>).set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(element.querySelector('.sticky-avatar')).not.toBeNull();
+    avatarRect.mockReturnValue(rect(350, 384));
+    await fixture.componentInstance['trackScroll']();
+    fixture.detectChanges();
+    expect(element.querySelector('.sticky-avatar')).toBeNull();
+    expect((messages[1].querySelector('.avatar') as HTMLElement).style.visibility).toBe('');
     http.verify();
   });
 
@@ -243,6 +392,9 @@ describe('ForwardedRecords', () => {
       refresh.flush({ total: 1, messages: [record] });
       await fixture.whenStable();
       expect(fixture.componentInstance['data']()).toBeUndefined();
+      const date = fixture.nativeElement.querySelector('.floating-date') as HTMLElement;
+      expect(date.textContent?.trim()).toBe('');
+      expect(date.classList.contains('colliding')).toBe(true);
       http.verify();
     },
   );

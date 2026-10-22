@@ -131,7 +131,7 @@ MessageActions 由菜单和会话页各自提供，复用逐条撤回及表态�
 | ForwardPicker | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用，可选 load 在选择目标时读取当前来源（话题整体转发）；closed／forwarded 输出；持有搜索、弹窗开关、占位替换确认、解析与失效状态；消费共享聊天／话题查询，选择目标后交给 MessageOutbox |
 | ForwardedLabel | name 输入；复用转发来源图标与文案，用于气泡、引用和输入栏 |
 | ForwardedCard | preview 输入；只展示标题、前三条摘要与总数，不请求详情 |
-| ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows 和 Message；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件 |
+| ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows、Message 和 scrollActivity，视口测量同时派生浮动头像与日期；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件 |
 
 ConversationPage 的选择项保存已确认消息或 OutgoingMessage 引用，分别用服务端 ID 或 clientGeneratedId 标识；仅已获得服务端 ID 的队列消息可选；发布后沿用选择，提交转发时读取其最新确认及发布状态。多选期间停用浮动头像，显示消息行原位头像，点击统一用于选择。页面持有多选撤回确认快照、处理状态与结果提示；权限沿用单条撤回规则，失败项保留选中。
 
