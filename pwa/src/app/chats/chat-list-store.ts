@@ -15,6 +15,7 @@ import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
 import { SessionStore } from '../session/session-store';
 import { conversationUnread } from './conversation-unread';
+import { conversationView } from './conversation-views';
 import { ListTab, type ListSelection } from './list-tabs';
 import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import {
@@ -136,6 +137,24 @@ export class ChatListStore {
   };
   summary(view: ConversationView): ConversationUnreadSummary | undefined {
     return this.viewUnread.value()?.find((summary) => summary.key === view.key);
+  }
+  /** Unmuted unread conversation counts and mention flags shared by the tab bar and the document title. */
+  tabBadges(showThreadsInMessages: boolean) {
+    const badge = (tab: ListTab) => {
+      const summary = this.summary(
+        conversationView({ tab, archived: false, requestHistory: false }, showThreadsInMessages),
+      );
+      return {
+        count: summary?.unreadUnmutedConversationCount ?? 0,
+        mention: !!summary?.unreadUnmutedAttentionCount,
+      };
+    };
+    return {
+      messages: badge(ListTab.Messages),
+      groups: badge(ListTab.Groups),
+      friends: badge(ListTab.Friends),
+      threads: badge(ListTab.Threads),
+    };
   }
 
   constructor() {

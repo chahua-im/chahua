@@ -1,22 +1,22 @@
 import { DestroyRef, effect, inject, Injector, Service, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { NavigationEnd, Router } from '@angular/router';
 import { SwPush } from '@angular/service-worker';
 import { ModalController } from '@ionic/angular';
-import { firstValueFrom, timeout } from 'rxjs';
+import { filter, firstValueFrom, map, timeout } from 'rxjs';
 import { PushService } from '../../generated/endpoints/push/push.service';
 import {
   ApiPushProvider,
   GroupKind,
   MessageType,
   ServerWsMessageType,
+  type ConversationRef,
   type MessageResponse,
 } from '../../generated/models';
 import { TranslocoService } from '@jsverse/transloco';
 import { Connection } from '../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
 import { Preferences } from '../settings/preferences';
-import { conversationView } from '../chats/conversation-views';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
@@ -24,6 +24,7 @@ import { SessionStore } from '../session/session-store';
 import { notificationText, shouldNotify } from './notification-policy';
 
 const ENABLED_KEY = 'chahua.notifications.enabled';
+const ID = /^\d+$/;
 const REGISTRATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export enum PushNotificationError {
@@ -92,10 +93,26 @@ export class PushNotifications {
       document.removeEventListener('visibilitychange', visibility);
       document.title = baseTitle;
     });
+    const conversation = toSignal(
+      this.router.events.pipe(
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        map(() => this.routeConversation()),
+      ),
+      { injector: this.injector, initialValue: this.routeConversation() },
+    );
     effect(
       (onCleanup) => {
         if ('setAppBadge' in navigator) onCleanup(this.lists.unread.activate());
         if (hidden()) onCleanup(this.lists.viewUnread.activate());
+      },
+      { injector: this.injector },
+    );
+    // The conversation page watches its own read state only while visible; the title needs it in the background.
+    effect(
+      (onCleanup) => {
+        const scope = conversation();
+        if (!hidden() || !scope) return;
+        onCleanup(this.chats.watchReadStates([scope]));
       },
       { injector: this.injector },
     );
@@ -105,12 +122,15 @@ export class PushNotifications {
           document.title = baseTitle;
           return;
         }
-        const counts = this.lists.summary(
-          conversationView(this.lists.selection(), this.preferences.showThreadsInMessages()),
-        );
-        const count = counts?.unreadMessageCount ?? 0;
-        const mentioned = (counts?.unreadUnmutedAttentionCount ?? 0) > 0;
-        const prefix = [mentioned ? '(@)' : '', count > 0 ? `(${count >= 1000 ? '999+' : count})` : '']
+        const tabs = this.lists.tabBadges(this.preferences.showThreadsInMessages());
+        const scope = conversation();
+        const mentioned = scope
+          ? this.chats.unreadMentions(scope.chatId, scope.threadId) > 0
+          : Object.values(tabs).some((badge) => badge.mention);
+        const count = scope
+          ? this.chats.unreadCount(scope.chatId, scope.threadId)
+          : tabs[this.lists.selection().tab].count;
+        const prefix = [mentioned ? '(@)' : '', !mentioned && count > 0 ? `(${count >= 1000 ? '999+' : count})` : '']
           .filter(Boolean)
           .join(' ');
         document.title = prefix ? `${prefix} ${baseTitle}` : baseTitle;
@@ -170,6 +190,17 @@ export class PushNotifications {
       );
     });
     void this.refresh();
+  }
+
+  /** The conversation open in the router outlet, including a topic when one is shown. */
+  private routeConversation(): ConversationRef | undefined {
+    const parse = (value?: string) => (value && ID.test(value) ? encodeId(value) : undefined);
+    const segments = this.router.parseUrl(this.router.url).root.children['primary']?.segments ?? [];
+    const [root, kind, chatId, threadKind, threadId] = segments.map((segment) => segment.path);
+    const chat = parse(chatId);
+    if (root !== 'chats' || kind !== 'chat' || !chat) return undefined;
+    const thread = threadKind === 'thread' ? parse(threadId) : undefined;
+    return thread ? { chatId: chat, threadId: thread } : { chatId: chat };
   }
 
   private currentConversation(message: MessageResponse) {

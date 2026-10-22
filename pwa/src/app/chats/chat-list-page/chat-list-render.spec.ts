@@ -14,6 +14,13 @@ import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
 import { ChatListPage } from './chat-list.page';
 
+const emptyBadges = () => ({
+  messages: { count: 0, mention: false },
+  groups: { count: 0, mention: false },
+  friends: { count: 0, mention: false },
+  threads: { count: 0, mention: false },
+});
+
 @Component({ template: '<app-chats />', imports: [ChatListPage] })
 class Host {}
 
@@ -54,6 +61,7 @@ it('flushes the real cached list hierarchy before returning, without activating 
             friendRequests: () => empty,
             unread: count,
             selection: signal({ tab: ListTab.Messages, archived: false, requestHistory: false }),
+            tabBadges: emptyBadges,
             summary: () => undefined,
             viewUnread: { activate: () => () => {}, refresh: vi.fn() },
             threadUnread: count,

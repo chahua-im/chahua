@@ -9,7 +9,6 @@ import { PushService } from '../../generated/endpoints/push/push.service';
 import {
   GroupKind,
   MessageType,
-  type ConversationUnreadSummary,
   ServerWsMessageType,
   type ServerWsMessage,
   type ThreadSubscriptionStatusResponse,
@@ -45,7 +44,17 @@ describe('online notifications', () => {
     readThrough?: string;
   }[] = [];
   const total = signal<{ unreadCount: number; archivedUnreadCount: number } | undefined>(undefined);
-  const selectedSummary = signal<ConversationUnreadSummary | undefined>(undefined);
+  const tabBadges = signal({
+    messages: { count: 0, mention: false },
+    groups: { count: 0, mention: false },
+    friends: { count: 0, mention: false },
+    threads: { count: 0, mention: false },
+  });
+  const chatUnread = signal(0);
+  const chatMentions = signal(0);
+  const unreadCount = vi.fn(() => chatUnread());
+  const unreadMentions = vi.fn(() => chatMentions());
+  const watchReadStates = vi.fn(() => vi.fn());
   const viewUnread = { activate: vi.fn(() => vi.fn()) };
   const release = vi.fn();
   const unread = { value: total, activate: vi.fn(() => release) };
@@ -68,15 +77,17 @@ describe('online notifications', () => {
     reads = new Subject();
     clicks = new Subject();
     total.set({ unreadCount: 7, archivedUnreadCount: 900 });
-    selectedSummary.set({
-      key: 'friends',
-      unreadMessageCount: 7,
-      unreadUnmutedMessageCount: 7,
-      unreadConversationCount: 2,
-      unreadUnmutedConversationCount: 2,
-      unreadAttentionCount: 0,
-      unreadUnmutedAttentionCount: 0,
+    tabBadges.set({
+      messages: { count: 0, mention: false },
+      groups: { count: 0, mention: false },
+      friends: { count: 0, mention: false },
+      threads: { count: 0, mention: false },
     });
+    chatUnread.set(0);
+    chatMentions.set(0);
+    unreadCount.mockClear();
+    unreadMentions.mockClear();
+    watchReadStates.mockClear().mockReturnValue(vi.fn());
     unread.activate.mockClear();
     release.mockClear();
     badges.setAppBadge.mockReset().mockResolvedValue(undefined);
@@ -116,6 +127,9 @@ describe('online notifications', () => {
             ensureDetails: async () => {},
             loadSubscription: async () => {},
             subscription: () => subscription,
+            unreadCount,
+            unreadMentions,
+            watchReadStates,
           },
         },
         {
@@ -123,7 +137,7 @@ describe('online notifications', () => {
           useValue: {
             unread,
             viewUnread,
-            summary: selectedSummary,
+            tabBadges,
             selection: signal({ tab: ListTab.Friends, archived: false, requestHistory: false }),
           },
         },
@@ -192,7 +206,7 @@ describe('online notifications', () => {
           useValue: {
             unread,
             viewUnread,
-            summary: selectedSummary,
+            tabBadges,
             selection: signal({ tab: ListTab.Friends, archived: false, requestHistory: false }),
           },
         },
@@ -374,109 +388,94 @@ describe('online notifications', () => {
     expect(commands[0].payload?.body).toBe(incoming.message);
   });
 
-  it('shows only the selected collection while global app badges stay unchanged', () => {
+  it('mirrors the current tab badge and takes a mention from any tab', () => {
     const title = document.title;
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
-    selectedSummary.set({
-      key: 'friends',
-      unreadMessageCount: 4,
-      unreadUnmutedMessageCount: 4,
-      unreadConversationCount: 2,
-      unreadUnmutedConversationCount: 2,
-      unreadAttentionCount: 0,
-      unreadUnmutedAttentionCount: 0,
+    tabBadges.set({
+      messages: { count: 6, mention: false },
+      groups: { count: 1, mention: false },
+      friends: { count: 4, mention: false },
+      threads: { count: 3, mention: false },
     });
     TestBed.tick();
     expect(document.title).toBe(`(4) ${title}`.trim());
-    selectedSummary.set({
-      key: 'threads',
-      unreadMessageCount: 28,
-      unreadUnmutedMessageCount: 28,
-      unreadConversationCount: 5,
-      unreadUnmutedConversationCount: 5,
-      unreadAttentionCount: 2,
-      unreadUnmutedAttentionCount: 2,
-    });
-    TestBed.tick();
-    expect(document.title).toBe(`(@) (28) ${title}`.trim());
     expect(badges.setAppBadge).toHaveBeenLastCalledWith(7);
-    selectedSummary.set({
-      key: 'groups',
-      unreadMessageCount: 0,
-      unreadUnmutedMessageCount: 0,
-      unreadConversationCount: 0,
-      unreadUnmutedConversationCount: 0,
-      unreadAttentionCount: 0,
-      unreadUnmutedAttentionCount: 0,
+    tabBadges.update((value) => ({ ...value, threads: { count: 3, mention: true } }));
+    TestBed.tick();
+    expect(document.title).toBe(`(@) ${title}`.trim());
+    tabBadges.set({
+      messages: { count: 0, mention: false },
+      groups: { count: 0, mention: false },
+      friends: { count: 0, mention: false },
+      threads: { count: 0, mention: false },
     });
     TestBed.tick();
     expect(document.title).toBe(title);
   });
 
-  it('keeps muted attention out of the title without removing ordinary unread counts', () => {
+  it('shows the open conversation unread count and prefers its mentions', async () => {
     const title = document.title;
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
-    selectedSummary.set({
-      key: 'groups',
-      unreadMessageCount: 12,
-      unreadUnmutedMessageCount: 4,
-      unreadConversationCount: 2,
-      unreadUnmutedConversationCount: 1,
-      unreadAttentionCount: 5,
-      unreadUnmutedAttentionCount: 0,
+    tabBadges.set({
+      messages: { count: 9, mention: true },
+      groups: { count: 0, mention: false },
+      friends: { count: 0, mention: false },
+      threads: { count: 0, mention: false },
     });
+    await router.navigateByUrl(chatPath);
+    chatUnread.set(3);
     TestBed.tick();
-    expect(document.title).toBe(`(12) ${title}`.trim());
-    selectedSummary.update((summary) => ({ ...summary!, unreadUnmutedAttentionCount: 1 }));
+    expect(unreadCount).toHaveBeenLastCalledWith(testChat.id, undefined);
+    expect(document.title).toBe(`(3) ${title}`.trim());
+    chatMentions.set(2);
     TestBed.tick();
-    expect(document.title).toBe(`(@) (12) ${title}`.trim());
-    expect(badges.setAppBadge).toHaveBeenLastCalledWith(7);
+    expect(document.title).toBe(`(@) ${title}`.trim());
   });
 
-  it('caps collection title counts and clears them after logout', () => {
+  it('reads the topic scope while a topic is open', async () => {
     const title = document.title;
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
-    selectedSummary.set({
-      key: 'threads',
-      unreadMessageCount: 1000,
-      unreadUnmutedMessageCount: 1000,
-      unreadConversationCount: 50,
-      unreadUnmutedConversationCount: 50,
-      unreadAttentionCount: 2,
-      unreadUnmutedAttentionCount: 2,
-    });
+    const threadId = encodeId('9007199254741009');
+    await router.navigateByUrl(`${chatPath}/thread/${decodeId(threadId)}`);
+    chatUnread.set(2);
     TestBed.tick();
-    expect(document.title).toBe(`(@) (999+) ${title}`.trim());
-    vi.spyOn(TestBed.inject(SessionStore), 'user').mockReturnValue(undefined);
-    selectedSummary.set(undefined);
-    TestBed.tick();
-    expect(document.title).toBe(title);
+    expect(unreadCount).toHaveBeenLastCalledWith(testChat.id, threadId);
+    expect(document.title).toBe(`(2) ${title}`.trim());
   });
 
-  it('shows the selected unread total only while the browser tab is hidden', () => {
+  it('watches the open conversation read state only while hidden', async () => {
+    const release = vi.fn();
+    watchReadStates.mockReturnValue(release);
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    await router.navigateByUrl(chatPath);
+    document.dispatchEvent(new Event('visibilitychange'));
+    TestBed.tick();
+    expect(watchReadStates).toHaveBeenCalledExactlyOnceWith([{ chatId: testChat.id }]);
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+    TestBed.tick();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('caps the open conversation title, restores it while visible and clears it after logout', async () => {
     const title = document.title;
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     document.dispatchEvent(new Event('visibilitychange'));
+    await router.navigateByUrl(chatPath);
+    chatUnread.set(1000);
     TestBed.tick();
-    expect(document.title).toBe(`(7) ${title}`.trim());
-    selectedSummary.set({
-      key: 'friends',
-      unreadMessageCount: 4,
-      unreadUnmutedMessageCount: 4,
-      unreadConversationCount: 2,
-      unreadUnmutedConversationCount: 2,
-      unreadAttentionCount: 0,
-      unreadUnmutedAttentionCount: 0,
-    });
-    TestBed.tick();
-    expect(document.title).toBe(`(4) ${title}`.trim());
+    expect(document.title).toBe(`(999+) ${title}`.trim());
     hidden.mockReturnValue(false);
     document.dispatchEvent(new Event('visibilitychange'));
     TestBed.tick();
     expect(document.title).toBe(title);
-    hidden.mockRestore();
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.spyOn(TestBed.inject(SessionStore), 'user').mockReturnValue(undefined);
+    TestBed.tick();
+    expect(document.title).toBe(title);
   });
 });
