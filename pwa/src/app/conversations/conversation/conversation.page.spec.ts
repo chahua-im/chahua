@@ -39,6 +39,7 @@ import { ChatStore } from '../../chats/chat-store';
 import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
+import { ForwardSelectionError, forwardSourceMessage } from '../../messages/forwarding';
 import { MessageOutbox } from '../../messages/message-outbox';
 import { Message, type MessageContent } from '../../messages/message/message';
 import { SavedMessageStore } from '../../messages/saved-message-store';
@@ -330,6 +331,78 @@ describe('ConversationPage', () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     button.click();
     expect(navigate).toHaveBeenCalledWith(['/chats/chat', wireChat.id, 'search']);
+  });
+
+  it('offers topic forwarding only while the topic holds at most 100 messages', async () => {
+    await enterThread();
+    const forwardButton = () =>
+      [...fixture.nativeElement.querySelectorAll('ion-header ion-button')].find(
+        (element: HTMLElement) => element.querySelector('ion-icon')?.icon === component['toolbarIcons'].forwardOutline,
+      );
+    const update = (replyCount: number) =>
+      events.next({
+        type: ServerWsMessageType.threadUpdate,
+        payload: {
+          chatId: testChat.id,
+          threadRootId: encodeId('100'),
+          replyCount,
+          lastReplyAt: '2026-10-22T00:00:00Z',
+        },
+      });
+    update(99);
+    fixture.detectChanges();
+    expect(forwardButton()).toBeDefined();
+    forwardButton()!.click();
+    expect(component['topicForwardOpen']()).toBe(true);
+    component['topicForwardOpen'].set(false);
+    update(100);
+    fixture.detectChanges();
+    expect(forwardButton()).toBeUndefined();
+  });
+
+  it('reads every topic message at send time and explains an oversized topic', async () => {
+    await enterThread();
+    const request = () =>
+      http.expectOne(
+        (candidate) =>
+          candidate.url.endsWith(`/chats/${wireChat.id}/messages`) &&
+          candidate.params.get('threadId') === '100' &&
+          candidate.params.get('max') === '100',
+      );
+    const first = component['loadTopicSources']();
+    request().flush({
+      messages: [
+        { ...wireMessage, id: '100', clientGeneratedId: 'root-100' },
+        { ...wireMessage, id: '101', clientGeneratedId: 'reply-101', replyRootId: '100' },
+        {
+          ...wireMessage,
+          id: '102',
+          clientGeneratedId: 'system-102',
+          replyRootId: '100',
+          messageType: MessageType.system,
+        },
+        {
+          ...wireMessage,
+          id: '103',
+          clientGeneratedId: 'deleted-103',
+          replyRootId: '100',
+          isDeleted: true,
+        },
+      ],
+    });
+    const loading = await first;
+    expect('sources' in loading && loading.sources.map((source) => forwardSourceMessage(source)?.id)).toEqual([
+      encodeId('100'),
+      encodeId('101'),
+    ]);
+
+    const oversized = component['loadTopicSources']();
+    request().flush({ messages: [], olderCursor: '99' });
+    expect(await oversized).toEqual({ error: ForwardSelectionError.TooMany });
+
+    const failed = component['loadTopicSources']();
+    request().flush('failed', { status: 500, statusText: 'Server Error' });
+    expect(await failed).toEqual({ error: ForwardSelectionError.LoadFailed });
   });
 
   it('goes back through real history from the mobile header', () => {

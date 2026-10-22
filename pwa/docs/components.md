@@ -128,7 +128,7 @@ MessageActions 由菜单和会话页各自提供，复用逐条撤回及表态�
 
 | 组件 | 状态与职责 |
 | --- | --- |
-| ForwardPicker | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用；closed／forwarded 输出；持有搜索、弹窗开关、占位替换确认、提交与失效状态；消费共享聊天／话题查询，选择目标后交给 MessageOutbox |
+| ForwardPicker | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用，可选 load 在选择目标时读取当前来源（话题整体转发）；closed／forwarded 输出；持有搜索、弹窗开关、占位替换确认、解析与失效状态；消费共享聊天／话题查询，选择目标后交给 MessageOutbox |
 | ForwardedLabel | name 输入；复用转发来源图标与文案，用于气泡、引用和输入栏 |
 | ForwardedCard | preview 输入；只展示标题、前三条摘要与总数，不请求详情 |
 | ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows 和 Message；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件 |

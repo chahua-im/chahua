@@ -12,7 +12,7 @@ import { ChatStore } from '../../chats/chat-store';
 import { MessageOutbox } from '../message-outbox';
 import { ForwardPicker } from './forward-picker';
 import { ForwardPlaceholder } from '../forward-placeholder';
-import type { ForwardSource } from '../forwarding';
+import { ForwardSelectionError, type ForwardSource, type ForwardSourcesLoader } from '../forwarding';
 import { MessageDelivery } from '../message-delivery';
 import type { OutgoingMessage } from '../message-outbox';
 
@@ -41,7 +41,7 @@ describe('ForwardPicker', () => {
     TestBed.resetTestingModule();
     vi.unstubAllGlobals();
   });
-  function setup(messages: readonly ForwardSource[] = [testMessage]) {
+  function setup(messages: readonly ForwardSource[] = [testMessage], load?: ForwardSourcesLoader) {
     const chats = query([testChat]);
     const threads = query([
       {
@@ -54,20 +54,22 @@ describe('ForwardPicker', () => {
       },
     ]);
     const enqueueForward = vi.fn();
+    const toasts = vi.fn().mockResolvedValue({ present: vi.fn() });
     TestBed.configureTestingModule({
       providers: [
         { provide: ChatListStore, useValue: { chats: () => chats, threads: () => threads } },
         { provide: ChatStore, useValue: { get: () => testChat } },
         { provide: MessageOutbox, useValue: { enqueueForward } },
         { provide: Connection, useValue: { changes$: changes } },
-        { provide: ToastController, useValue: { create: vi.fn().mockResolvedValue({ present: vi.fn() }) } },
+        { provide: ToastController, useValue: { create: toasts } },
       ],
     });
     TestBed.overrideComponent(ForwardPicker, { set: { template: '' } });
     const fixture = TestBed.createComponent(ForwardPicker);
     fixture.componentRef.setInput('messages', messages);
+    if (load) fixture.componentRef.setInput('load', load);
     fixture.detectChanges();
-    return { fixture, picker: fixture.componentInstance, enqueueForward, chats, threads };
+    return { fixture, picker: fixture.componentInstance, enqueueForward, toasts, chats, threads };
   }
   it.each([1, 2])(
     'offers topics for %s selected messages and submits once without changing the source selection',
@@ -90,6 +92,36 @@ describe('ForwardPicker', () => {
       expect(threads.release).toHaveBeenCalledOnce();
     },
   );
+  it('reads the whole topic when a target is chosen and forwards that current selection', async () => {
+    const selection = [testMessage, { ...testMessage, id: encodeId('100') }];
+    const load = vi.fn<ForwardSourcesLoader>().mockResolvedValue({ sources: selection });
+    const { picker, enqueueForward } = setup([], load);
+    await picker['select'](picker['targets']()[0]);
+    expect(load).toHaveBeenCalledOnce();
+    expect(enqueueForward).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, selection, {
+      allowPlaceholders: false,
+      placeholders: new Map(),
+    });
+  });
+  it('reports a failed or oversized topic read and leaves another target choice possible', async () => {
+    const load = vi
+      .fn<ForwardSourcesLoader>()
+      .mockResolvedValueOnce({ error: ForwardSelectionError.LoadFailed })
+      .mockResolvedValueOnce({ error: ForwardSelectionError.TooMany })
+      .mockResolvedValueOnce({ sources: [testMessage] });
+    const { picker, enqueueForward, toasts } = setup([], load);
+    await picker['select'](picker['targets']()[0]);
+    expect(picker['failure']()).toBe(ForwardSelectionError.LoadFailed);
+    expect(picker['invalid']()).toBe(false);
+    expect(toasts).toHaveBeenCalledOnce();
+    await picker['select'](picker['targets']()[0]);
+    expect(picker['failure']()).toBe(ForwardSelectionError.TooMany);
+    expect(picker['invalid']()).toBe(false);
+    expect(toasts).toHaveBeenCalledTimes(2);
+    expect(enqueueForward).not.toHaveBeenCalled();
+    await picker['select'](picker['targets']()[0]);
+    expect(enqueueForward).toHaveBeenCalledOnce();
+  });
   it('rejects a source recalled while the target picker is open without silently changing modes', async () => {
     const { picker, enqueueForward } = setup([testMessage, { ...testMessage, id: encodeId('100') }]);
     changes.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
@@ -97,7 +129,7 @@ describe('ForwardPicker', () => {
     expect(picker['invalid']()).toBe(true);
     expect(enqueueForward).not.toHaveBeenCalled();
   });
-  it('requires explicit consent for a nested card in a merge and keeps the picker open on cancellation', () => {
+  it('requires explicit consent for a nested card in a merge and keeps the picker open on cancellation', async () => {
     const nested = {
       ...testMessage,
       messageType: MessageType.forwarded,
@@ -106,34 +138,34 @@ describe('ForwardPicker', () => {
     const sources = [nested, { ...testMessage, id: encodeId('100') }];
     const { picker, enqueueForward } = setup(sources);
     const target = picker['targets']()[0];
-    picker['select'](target);
+    await picker['select'](target);
     expect(enqueueForward).not.toHaveBeenCalled();
     expect(picker['confirmation']()?.prompt).toBe('messages.forward.confirmNested');
     picker['confirm'](new CustomEvent('dismiss', { detail: { role: 'cancel' } }));
     expect(picker['open']()).toBe(true);
     expect(enqueueForward).not.toHaveBeenCalled();
-    picker['select'](target);
+    await picker['select'](target);
     picker['confirm'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
     expect(enqueueForward).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, sources, {
       allowPlaceholders: true,
       placeholders: new Map([[nested.id, ForwardPlaceholder.NestedForward]]),
     });
   });
-  it('forwards a single nested card without replacement confirmation', () => {
+  it('forwards a single nested card without replacement confirmation', async () => {
     const nested = {
       ...testMessage,
       messageType: MessageType.forwarded,
       forwardedPreview: { total: 2, containsForwardedMessages: true, messages: [] },
     };
     const { picker, enqueueForward } = setup([nested]);
-    picker['select'](picker['targets']()[0]);
+    await picker['select'](picker['targets']()[0]);
     expect(picker['confirmation']()).toBeUndefined();
     expect(enqueueForward).toHaveBeenCalledWith(testChat.id, threadId, [nested], {
       allowPlaceholders: false,
       placeholders: new Map(),
     });
   });
-  it('reads the latest audio publication after asking for placeholder confirmation', () => {
+  it('reads the latest audio publication after asking for placeholder confirmation', async () => {
     const audio = { ...testMessage, messageType: MessageType.audio };
     const source: OutgoingMessage = {
       clientGeneratedId: audio.clientGeneratedId,
@@ -148,7 +180,7 @@ describe('ForwardPicker', () => {
       disposed: false,
     };
     const { picker, enqueueForward } = setup([source]);
-    picker['select'](picker['targets']()[0]);
+    await picker['select'](picker['targets']()[0]);
     expect(picker['confirmation']()?.prompt).toBe('messages.forward.confirmPendingAudio');
     expect(enqueueForward).not.toHaveBeenCalled();
     source.published.set(true);
