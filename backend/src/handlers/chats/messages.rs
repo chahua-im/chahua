@@ -664,7 +664,7 @@ async fn post_message(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-/// POST /chats/:chat_id/messages/forward — Forward messages to a chat.
+/// POST /chats/:chat_id/messages/forward — Merge 2–100 distinct messages into a chat.
 #[utoipa::path(
     post,
     path = "/forward",

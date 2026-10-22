@@ -75,6 +75,15 @@ mod tests {
     }
 
     #[test]
+    fn merged_forward_selection_documents_its_size_limits() {
+        let document = api_document();
+        let selection =
+            &document["components"]["schemas"]["ForwardMessagesBody"]["properties"]["messageIds"];
+        assert_eq!(selection["minItems"], 2);
+        assert_eq!(selection["maxItems"], 100);
+    }
+
+    #[test]
     fn list_row_filters_are_documented_as_optional_string_ids() {
         let document = api_document();
         for (path, name) in [("/chats", "chatId"), ("/threads", "rootId")] {
