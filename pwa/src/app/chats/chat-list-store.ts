@@ -73,6 +73,8 @@ interface QueryState {
   requests: Map<ListFetch, Promise<void>>;
   /** Chats whose unread changed while no list was visible; refreshed by id on activation. */
   pendingUnread: Set<SnowflakeID>;
+  pendingRows: Map<SnowflakeID, number>;
+  rowRequests: Set<SnowflakeID>;
   /** A message arrived for a chat outside the loaded ids; only the head page can place it. */
   headStale: boolean;
 }
@@ -97,6 +99,8 @@ function createThreadQuery(archived: boolean) {
     headOnly: false,
     headBoundary: -Infinity,
     pendingReads: new Set<SnowflakeID>(),
+    pendingRows: new Map<SnowflakeID, number>(),
+    rowRequests: new Set<SnowflakeID>(),
     request: undefined as QueryRequest | undefined,
   };
 }
@@ -108,7 +112,8 @@ export class ChatListStore {
   private readonly destroyRef = inject(DestroyRef);
   private readonly realtime = inject(Connection);
   private readonly queries = new Map<boolean, { state: QueryState; handle: ChatQuery }>();
-  private changeRefreshPending = false;
+  private readonly resolvedRequests = new Map<SnowflakeID, number>();
+  private readonly membershipStates = new Map<SnowflakeID, string>();
   private threadRefreshPending?: Promise<void>;
   private readonly threadMessages = new Set<SnowflakeID>();
   private readonly friendsApi = inject(FriendsService);
@@ -134,6 +139,7 @@ export class ChatListStore {
   constructor() {
     for (const archived of [false, true]) this.queries.set(archived, this.createQuery(archived));
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
+      this.membershipStates.clear();
       void this.invalidateRequests();
       void this.invalidateThreads();
     });
@@ -143,11 +149,13 @@ export class ChatListStore {
         if (!state.consumers.size) continue;
         if (state.dirty()) void this.fetchQuery(state, ListFetch.Load);
         else this.reconcile(state);
+        this.flushRows(state);
       }
       for (const { state } of [this.activeThreads, this.archivedThreads]) {
         if (!state.consumers) continue;
         if (state.dirty) void this.loadThreads(state);
         this.flushThreadReads(state);
+        this.flushRows(state);
       }
     };
     document.addEventListener('visibilitychange', visible);
@@ -171,9 +179,9 @@ export class ChatListStore {
         return;
       }
       if (threadId) {
-        if (kind === ChatChangeKind.Membership) void this.invalidateThreads();
+        if (kind === ChatChangeKind.Membership) this.membershipChanged(chatId, threadId);
       } else {
-        if (kind === ChatChangeKind.Membership) this.refreshChats();
+        if (kind === ChatChangeKind.Membership) this.membershipChanged(chatId);
       }
     });
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
@@ -193,6 +201,12 @@ export class ChatListStore {
           break;
         case ServerWsMessageType.friendRequestReceived:
         case ServerWsMessageType.friendRequestResolved:
+          if (event.type === ServerWsMessageType.friendRequestResolved) {
+            const id = event.payload.requestId;
+            this.resolvedRequests.set(id, (this.resolvedRequests.get(id) ?? 0) + 1);
+            if (this.resolvedRequests.size > 256)
+              this.resolvedRequests.delete(this.resolvedRequests.keys().next().value!);
+          }
           void this.invalidateRequests();
           if (
             event.type === ServerWsMessageType.friendRequestResolved &&
@@ -205,10 +219,11 @@ export class ChatListStore {
           this.refreshThreadRead(event.payload.threadRootId);
           break;
         case ServerWsMessageType.threadMembershipChanged:
-          void this.invalidateThreads();
+          if (event.payload.status) this.membershipChanged(event.payload.chatId, event.payload.threadRootId);
+          else void this.invalidateThreads();
           break;
         case ServerWsMessageType.chatArchiveStateChanged: {
-          this.refreshChats();
+          this.membershipChanged(event.payload.chatId);
           break;
         }
         case ServerWsMessageType.notification: {
@@ -250,6 +265,8 @@ export class ChatListStore {
       cancel: new Subject(),
       requests: new Map(),
       pendingUnread: new Set(),
+      pendingRows: new Map(),
+      rowRequests: new Set(),
       headStale: false,
     };
     const handle: ChatQuery = {
@@ -270,6 +287,7 @@ export class ChatListStore {
         state.consumers.add(consumer);
         if (state.dirty() && !state.requests.has(ListFetch.Load)) void this.fetchQuery(state, ListFetch.Load);
         else this.reconcile(state);
+        this.flushRows(state);
         return () => {
           state.consumers.delete(consumer);
           if (!state.consumers.size && state.requests.size) this.cancelQuery(state);
@@ -334,6 +352,7 @@ export class ChatListStore {
           if (mode === ListFetch.Load) {
             if (!(await this.readFromHead(query, generation))) return;
             query.dirty.set(false);
+            this.flushRows(query);
           } else if (mode === ListFetch.Recent) {
             if (!(await this.readRecent(query, generation))) return;
           } else {
@@ -470,15 +489,98 @@ export class ChatListStore {
 
   private receiveChange(change: MessageChange) {
     if (change.type === ServerWsMessageType.reactionUpdated) return;
+    if (change.type === ServerWsMessageType.messagesBulkDeleted && change.payload.complete === false) return;
     if (change.type !== ServerWsMessageType.messagesBulkDeleted && change.payload.replyRootId) return;
     // Edits are already applied to the shared preview; they never change list membership or order.
     if (change.type === ServerWsMessageType.messageUpdated) return;
-    if (!this.changeRefreshPending) {
-      this.changeRefreshPending = true;
-      void Promise.resolve().then(() => {
-        this.changeRefreshPending = false;
-        this.refreshChats();
-      });
+    this.queueRow(change.payload.chatId);
+  }
+
+  private membershipChanged(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const state = threadId ? this.chatInfo.cachedSubscription(chatId, threadId) : this.chatInfo.chatState(chatId);
+    const key = JSON.stringify(threadId ? state : state && { archived: state.archived });
+    if (key && this.membershipStates.get(threadId ?? chatId) === key) return;
+    if (key) this.membershipStates.set(threadId ?? chatId, key);
+    if (threadId) {
+      const status = this.chatInfo.cachedSubscription(chatId, threadId);
+      if (status && (!status.subscribed || this.chatInfo.thread(threadId))) {
+        for (const { state: query } of [this.activeThreads, this.archivedThreads]) {
+          query.ids.update((ids) => [
+            ...new Set([
+              ...ids.filter((id) => id !== threadId),
+              ...(status.subscribed && status.archived === query.archived ? [threadId] : []),
+            ]),
+          ]);
+        }
+        return;
+      }
+    } else if ([...this.queries.values()].some(({ state }) => state.ids().includes(chatId))) {
+      const archived = this.chatInfo.chatState(chatId)?.archived;
+      for (const { state: query } of this.queries.values()) {
+        query.ids.update((ids) => [
+          ...new Set([...ids.filter((id) => id !== chatId), ...(archived === query.archived ? [chatId] : [])]),
+        ]);
+      }
+      return;
+    }
+    this.queueRow(chatId, threadId);
+  }
+
+  private queueRow(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const id = threadId ?? chatId;
+    const queries = threadId
+      ? [this.activeThreads.state, this.archivedThreads.state]
+      : [...this.queries.values()].map(({ state }) => state);
+    for (const query of queries) {
+      query.pendingRows.set(id, (query.pendingRows.get(id) ?? 0) + 1);
+      this.flushRows(query);
+    }
+  }
+
+  /** Reconcile one row without touching the loaded page boundary or other rows. */
+  private flushRows(query: QueryState | ThreadQuery) {
+    const visible = () => !document.hidden && ('generation' in query ? query.consumers.size > 0 : query.consumers > 0);
+    const dirty = () => ('generation' in query ? query.dirty() : query.dirty);
+    if (!visible() || dirty()) return;
+    for (const id of query.pendingRows.keys()) {
+      if (query.rowRequests.has(id)) continue;
+      query.rowRequests.add(id);
+      void (async () => {
+        await Promise.resolve();
+        while (!this.destroyRef.destroyed && visible() && query.pendingRows.has(id)) {
+          const revision = query.pendingRows.get(id);
+          const version = this.chatInfo.snapshot();
+          const subscriptionVersion = this.chatInfo.subscriptionSnapshot();
+          if ('generation' in query) {
+            const page = await this.response(this.api.getChats({ limit: 1, chatId: id, archived: query.archived }));
+            if (query.pendingRows.get(id) !== revision) continue;
+            if (dirty()) return;
+            this.chatInfo.acceptChats(page.chats, version);
+            query.ids.update((ids) => [
+              ...new Set([...ids.filter((value) => value !== id), ...page.chats.map((row) => row.id)]),
+            ]);
+          } else {
+            const page = await this.response(
+              this.threadsApi.getThreads({ limit: 1, rootId: id, archived: query.archived }),
+            );
+            if (query.pendingRows.get(id) !== revision) continue;
+            if (dirty()) return;
+            this.chatInfo.acceptThreads(page.threads, version, subscriptionVersion);
+            query.ids.update((ids) => [
+              ...new Set([
+                ...ids.filter((value) => value !== id),
+                ...page.threads.map((row) => row.threadRootMessage.id),
+              ]),
+            ]);
+          }
+          query.pendingRows.delete(id);
+        }
+      })()
+        .catch(() => {
+          if ('generation' in query) query.error.set(ChatListError.Recent);
+          else query.error.set(true);
+        })
+        .finally(() => query.rowRequests.delete(id));
     }
   }
 
@@ -547,10 +649,23 @@ export class ChatListStore {
   }
 
   private receiveThreadChange(change: MessageChange) {
-    // Edits patch shared previews; attention changes have their own scoped read refresh.
     if (change.type === ServerWsMessageType.reactionUpdated || change.type === ServerWsMessageType.messageUpdated)
       return;
-    void this.invalidateThreads();
+    if (change.type === ServerWsMessageType.messageDeleted) {
+      if (change.payload.replyRootId) this.queueRow(change.payload.chatId, change.payload.replyRootId);
+      else if (change.payload.threadInfo || this.chatInfo.thread(change.payload.id))
+        this.queueRow(change.payload.chatId, change.payload.id);
+      return;
+    }
+    if (change.payload.complete === false) return;
+    if (change.payload.threadRootIds) {
+      for (const id of change.payload.threadRootIds) this.queueRow(change.payload.chatId, id);
+      return;
+    }
+    // Legacy bulk events have no scope list: only reconcile loaded threads in that chat.
+    const ids = new Set([...this.activeThreads.state.ids(), ...this.archivedThreads.state.ids()]);
+    for (const id of ids)
+      if (this.chatInfo.thread(id)?.chatId === change.payload.chatId) this.queueRow(change.payload.chatId, id);
   }
 
   friendRequests(history: boolean) {
@@ -606,6 +721,7 @@ export class ChatListStore {
     current.consumers++;
     if (current.dirty) void this.loadThreads(current);
     else this.flushThreadReads(current);
+    this.flushRows(current);
     let active = true;
     return () => {
       if (!active) return;
@@ -636,6 +752,7 @@ export class ChatListStore {
   }
 
   async decideRequest(id: SnowflakeID, action: FriendRequestAction) {
+    const revision = this.resolvedRequests.get(id);
     try {
       await this.response<unknown>(
         action === FriendRequestAction.Accept
@@ -644,10 +761,15 @@ export class ChatListStore {
             ? this.friendsApi.rejectFriendRequest(id)
             : this.friendsApi.archiveFriendRequest(id),
       );
-      if (!this.destroyRef.destroyed && action === FriendRequestAction.Accept) this.refreshChats();
+      if (
+        !this.destroyRef.destroyed &&
+        action === FriendRequestAction.Accept &&
+        revision === this.resolvedRequests.get(id)
+      )
+        this.refreshChats();
     } finally {
       // A conflict can mean another device has already decided the request.
-      if (!this.destroyRef.destroyed) await this.invalidateRequests();
+      if (!this.destroyRef.destroyed && revision === this.resolvedRequests.get(id)) await this.invalidateRequests();
     }
   }
 
@@ -720,6 +842,7 @@ export class ChatListStore {
             current.dirty = false;
             current.headOnly = false;
             this.flushThreadReads(current);
+            this.flushRows(current);
             return;
           }
         } catch {

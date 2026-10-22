@@ -20,6 +20,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   BulkDeletedPayload: {
     chatId: 1,
     messageIds: [1],
+    threadRootIds: [1],
   },
   ChatArchiveStateChangedPayload: {
     chatId: 1,
@@ -335,6 +336,7 @@ export const jsonOperations: JsonOperationCodec[] = [
     path: '/chats',
     response: 'ListChatsResponse',
     query: {
+      chatId: 1,
       after: 1,
     },
   },
@@ -635,6 +637,9 @@ export const jsonOperations: JsonOperationCodec[] = [
     method: 'GET',
     path: '/threads',
     response: 'ListThreadsResponse',
+    query: {
+      rootId: 1,
+    },
   },
   {
     method: 'POST',

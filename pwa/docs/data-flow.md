@@ -240,3 +240,5 @@ ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c
 会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字使用 `unreadUnmutedConversationCount`，标题数字仍使用包含静音的 `unreadMessageCount`。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab 和后台标题使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天 mutedUntil 或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。
 
 Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内成功结果；相同同步请求共享进行中的操作，失败可重试，关闭通知清除成功记录。订阅不变时最多每 24 小时在正常同步入口修复一次服务端注册，重新加载应用仍会注册。
+
+列表按项校准使用 `GET /chats?chatId=…` 或 `GET /threads?rootId=…`，仍受账号成员、订阅及 archived 条件约束。撤回只刷新受影响项，不移动已有分页游标；归档和已知话题订阅变更直接迁移已有列表项，未知项才读取。HTTP 操作完成与同一 WS 状态共用更新，好友申请决定的 WS 回声避免重复读取。批量撤回 `complete: false` 只应用墓碑，元数据与游标校准完成后的 `complete: true` 才读取摘要，threadRootIds 指定受影响话题；旧事件按聊天内已加载话题校准。

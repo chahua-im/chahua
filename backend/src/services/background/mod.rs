@@ -205,6 +205,7 @@ fn process_bulk_delete(
     // 2. Chunked delete loop
     let mut total_deleted: usize = 0;
     let mut thread_clamp: HashMap<i64, Vec<i64>> = HashMap::new();
+    let mut changed_roots = std::collections::HashSet::new();
     let mut chat_clamp_ids: Vec<i64> = Vec::new();
     loop {
         let mut query = messages::table
@@ -234,16 +235,21 @@ fn process_bulk_delete(
         // thread-level pointers (grouped by thread root). Top-level messages
         // that still have a thread stay visible in the around window, so their
         // pointers don't dangle and are skipped.
-        let batch_meta: Vec<(Option<i64>, bool)> = messages::table
+        let batch_meta: Vec<(i64, Option<i64>, bool)> = messages::table
             .filter(dsl::id.eq_any(&batch_ids))
-            .select((dsl::reply_root_id, dsl::has_thread))
+            .select((dsl::id, dsl::reply_root_id, dsl::has_thread))
             .load(conn)
             .map_err(map_db)?;
-        for (id, (reply_root_id, has_thread)) in batch_ids.iter().zip(batch_meta) {
+        for (id, reply_root_id, has_thread) in batch_meta {
+            if let Some(root_id) = reply_root_id {
+                changed_roots.insert(root_id);
+            } else if has_thread {
+                changed_roots.insert(id);
+            }
             match reply_root_id {
-                None if !has_thread => chat_clamp_ids.push(*id),
+                None if !has_thread => chat_clamp_ids.push(id),
                 Some(thread_root_id) => {
-                    thread_clamp.entry(thread_root_id).or_default().push(*id);
+                    thread_clamp.entry(thread_root_id).or_default().push(id);
                 }
                 None => {}
             }
@@ -286,6 +292,8 @@ fn process_bulk_delete(
 
         // Broadcast MessagesBulkDeleted for this batch
         let ws_msg = Arc::new(ServerWsMessage::MessagesBulkDeleted(BulkDeletedPayload {
+            complete: Some(false),
+            thread_root_ids: None,
             chat_id: chat_id.to_string(),
             message_ids: batch_ids.iter().map(|id| id.to_string()).collect(),
         }));
@@ -360,6 +368,16 @@ fn process_bulk_delete(
                 );
             }
         }
+
+        ws_registry.broadcast_to_uids(
+            &member_uids,
+            Arc::new(ServerWsMessage::MessagesBulkDeleted(BulkDeletedPayload {
+                chat_id: chat_id.to_string(),
+                message_ids: vec![],
+                complete: Some(true),
+                thread_root_ids: Some(changed_roots.into_iter().map(|id| id.to_string()).collect()),
+            })),
+        );
 
         info!(
             chat_id,

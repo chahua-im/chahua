@@ -546,8 +546,15 @@ pub fn get_user_threads(
     limit: i64,
     before_cursor: Option<DateTime<Utc>>,
     archived: bool,
+    root_id: Option<i64>,
 ) -> Result<Vec<ThreadListRow>, diesel::result::Error> {
-    let query = sql_query(
+    // Exact root lookups use the existing (thread_root_id, uid) key, without scanning list pages.
+    let root_filter = if root_id.is_some() {
+        "AND ts.thread_root_id = $5"
+    } else {
+        ""
+    };
+    let sql = format!(
         "SELECT
             ts.chat_id,
             g.kind AS chat_kind,
@@ -567,19 +574,24 @@ pub fn get_user_threads(
         WHERE ts.uid = $1
           AND ts.archived = $2
           AND ts.subscribed = TRUE
+          {root_filter}
           AND root_msg.reply_root_id IS NULL
           AND root_msg.has_thread = TRUE
           AND root_msg.is_published = TRUE
           AND ($3::timestamptz IS NULL OR COALESCE(tm.last_reply_at, ts.subscribed_at) < $3)
         ORDER BY COALESCE(tm.last_reply_at, ts.subscribed_at) DESC
         LIMIT $4",
-    )
-    .bind::<diesel::sql_types::Integer, _>(uid)
-    .bind::<diesel::sql_types::Bool, _>(archived)
-    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>, _>(before_cursor)
-    .bind::<diesel::sql_types::BigInt, _>(limit);
+    );
+    let query = sql_query(sql)
+        .bind::<diesel::sql_types::Integer, _>(uid)
+        .bind::<diesel::sql_types::Bool, _>(archived)
+        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>, _>(before_cursor)
+        .bind::<diesel::sql_types::BigInt, _>(limit);
 
-    query.load::<ThreadListRow>(conn)
+    match root_id {
+        Some(id) => query.bind::<diesel::sql_types::BigInt, _>(id).load(conn),
+        None => query.load(conn),
+    }
 }
 
 #[derive(QueryableByName)]

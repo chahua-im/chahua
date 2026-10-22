@@ -85,6 +85,12 @@ pub struct CreateMessageBody {
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListChatsQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    chat_id: Option<i64>,
     #[serde(default)]
     limit: Option<i64>,
     #[serde(
@@ -104,6 +110,7 @@ pub struct ListChatsQuery {
     tag = "chats",
     params(
         ("limit" = Option<i64>, Query, description = "Max number of chats to return"),
+        ("chatId" = Option<String>, Query, description = "Restrict to one chat visible to the current user"),
         ("after" = Option<String>, Query, description = "Cursor for pagination"),
         ("archived" = Option<bool>, Query, description = "When true, list archived chats instead of active ones"),
     ),
@@ -123,7 +130,7 @@ async fn get_chats(
     let limit = validate_limit(q.limit, MAX_CHATS_LIMIT);
     let archived = q.archived.unwrap_or(false);
 
-    let base_query = groups::table
+    let mut base_query = groups::table
         .inner_join(group_membership::table)
         .left_join(
             messages_schema::table.on(groups::last_message_id.eq(messages_schema::id.nullable())),
@@ -134,7 +141,11 @@ async fn get_chats(
                 .and(media::deleted_at.is_null())),
         )
         .filter(group_membership::uid.eq(uid))
-        .filter(group_membership::archived.eq(archived));
+        .filter(group_membership::archived.eq(archived))
+        .into_boxed();
+    if let Some(chat_id) = q.chat_id {
+        base_query = base_query.filter(groups::id.eq(chat_id));
+    }
 
     type RowType = (
         i64,

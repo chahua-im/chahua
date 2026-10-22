@@ -13,6 +13,10 @@ export type GetChatsParams = {
    */
   limit?: number;
   /**
+   * Restrict to one chat visible to the current user
+   */
+  chatId?: SnowflakeID;
+  /**
    * Cursor for pagination
    */
   after?: SnowflakeID;

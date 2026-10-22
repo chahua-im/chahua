@@ -391,3 +391,5 @@ advance either read cursor. Clients can refresh a loaded thread's badges without
 all thread-list pages. Existing clients can continue to use only `lastReadMessageId`.
 
 `threadMembershipChanged` carries an optional `status` snapshot (`subscribed`, `archived`). Explicit subscription/archive operations and automatic subscriptions after replies or edited mentions publish the resulting state after commit. Clients can keep subscription caches across ordinary thread messages; older invalidation-only events still require a refetch.
+
+Chat and thread lists accept optional exact-row filters (`chatId` on `/chats`, `rootId` on `/threads`), retaining membership/subscription and archive filtering. Bulk deletion events mark intermediate batches with `complete: false`; a final event with empty `messageIds`, `complete: true` and `threadRootIds` follows metadata/read-cursor reconciliation. Clients can defer summary reads until that final event while applying message tombstones immediately.

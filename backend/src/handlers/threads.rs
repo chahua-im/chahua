@@ -26,6 +26,12 @@ use crate::{
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListThreadsQuery {
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    #[schema(value_type = Option<String>)]
+    root_id: Option<i64>,
     #[serde(default)]
     limit: Option<i64>,
     #[serde(default)]
@@ -41,6 +47,7 @@ pub struct ListThreadsQuery {
     tag = "threads",
     params(
         ("limit" = Option<i64>, Query, description = "Page size limit"),
+        ("rootId" = Option<String>, Query, description = "Restrict to one subscribed thread"),
         ("before" = Option<DateTime<Utc>>, Query, description = "Cursor for pagination"),
         ("archived" = Option<bool>, Query, description = "When true, list archived thread subscriptions instead of active ones"),
     ),
@@ -59,7 +66,8 @@ async fn get_threads(
 
     let limit = validate_limit(query.limit.or(Some(20)), 50);
     let archived = query.archived.unwrap_or(false);
-    let rows = thread_svc::get_user_threads(conn, uid, limit + 1, query.before, archived)?;
+    let rows =
+        thread_svc::get_user_threads(conn, uid, limit + 1, query.before, archived, query.root_id)?;
 
     let has_more = rows.len() as i64 > limit;
     let rows: Vec<_> = rows.into_iter().take(limit as usize).collect();

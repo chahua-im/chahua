@@ -420,7 +420,7 @@ describe('ChatListStore threads and friend requests', () => {
     });
     expect(threads.items()[0]).toMatchObject({ lastReply: { isDeleted: true }, unreadCount: 2 });
     await settle();
-    http.expectOne(activeThreadsUrl).flush(
+    http.expectOne(`/_api/threads?limit=1&archived=false&rootId=${decodeId(rootId)}`).flush(
       structuredClone({
         threads: [{ ...wireThread, lastReply: { ...wireMessage, isDeleted: true }, unreadCount: 1 }],
       }),
@@ -451,7 +451,7 @@ describe('ChatListStore threads and friend requests', () => {
     });
     await settle();
     http.expectNone(activeThreadsUrl);
-    http.expectOne(archivedThreadsUrl).flush(
+    http.expectOne(`/_api/threads?limit=1&archived=true&rootId=${decodeId(rootId)}`).flush(
       structuredClone({
         threads: [
           {
@@ -467,7 +467,7 @@ describe('ChatListStore threads and friend requests', () => {
     await settle();
     expect(threads.items()[0].unreadCount).toBe(0);
     await showThreads();
-    http.expectOne(activeThreadsUrl).flush({ threads: [] });
+    http.expectOne(`/_api/threads?limit=1&archived=false&rootId=${decodeId(rootId)}`).flush({ threads: [] });
     await settle();
     expect(threads.items()).toEqual([]);
   });
@@ -489,7 +489,7 @@ describe('ChatListStore threads and friend requests', () => {
     await settle();
     http.expectNone(() => true);
     await showThreads();
-    http.expectOne(activeThreadsUrl).flush({ threads: [] });
+    http.expectOne(`/_api/threads?limit=1&archived=false&rootId=${decodeId(rootId)}`).flush({ threads: [] });
     await settle();
     expect(threads.items()).toEqual([]);
   });

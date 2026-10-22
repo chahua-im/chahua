@@ -5,12 +5,17 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { SnowflakeID } from '../snowflakeID';
 
 export type GetThreadsParams = {
   /**
    * Page size limit
    */
   limit?: number;
+  /**
+   * Restrict to one subscribed thread
+   */
+  rootId?: SnowflakeID;
   /**
    * Cursor for pagination
    */

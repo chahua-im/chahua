@@ -70,6 +70,11 @@ pub struct OnlineClientConnectionResponse {
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BulkDeletedPayload {
+    /// False for intermediate batches; true after metadata and read cursors are reconciled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complete: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_root_ids: Option<Vec<String>>,
     pub chat_id: String,
     pub message_ids: Vec<String>,
 }

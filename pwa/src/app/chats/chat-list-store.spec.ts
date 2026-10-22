@@ -260,7 +260,7 @@ describe('ChatListStore', () => {
     action.flush(null);
     await restoring;
     TestBed.tick();
-    http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
+    http.expectNone('/_api/chats?limit=50&archived=true');
     await settle();
     TestBed.tick();
     expect(query.items()).toEqual([]);
@@ -274,7 +274,7 @@ describe('ChatListStore', () => {
     http.expectOne(`/_api/chats/${decodeId(testChat.id)}/archive`).flush(null);
     await archiving;
     TestBed.tick();
-    http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
+    http.expectNone('/_api/chats?limit=50');
     await settle();
     TestBed.tick();
     reconnect();
@@ -413,8 +413,10 @@ describe('ChatListStore', () => {
     expect(query.items()[0].lastMessage).toMatchObject({ id: testMessage.id, isDeleted: true });
     expect(query.items()[0].unreadCount).toBe(7);
     await settle();
-    expect(stale.cancelled).toBe(true);
-    http.expectOne('/_api/chats?limit=50').flush(
+    expect(stale.cancelled).toBe(false);
+    stale.flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`).flush(
       structuredClone({
         chats: [{ ...wireChat, lastMessage: { ...wireMessage, isDeleted: true, message: null }, unreadCount: 3 }],
       }),
@@ -426,6 +428,36 @@ describe('ChatListStore', () => {
     await flushReads();
     http.expectNone(`/_api/chats/${decodeId(testChat.id)}/unread`);
     await settle();
+  });
+
+  it('waits for bulk reconciliation and refreshes one row without reloading its loaded pages', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat], nextCursor: wireChat.id }));
+    await settle();
+    const more = query.loadMore();
+    const older = { ...wireChat, id: '9007199254740995' };
+    http
+      .expectOne(`/_api/chats?limit=50&after=${wireChat.id}`)
+      .flush(structuredClone({ chats: [older], nextCursor: older.id }));
+    await more;
+    messages.acceptChange({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: { chatId: testChat.id, messageIds: [testMessage.id], complete: false },
+    });
+    await settle();
+    http.expectNone(() => true);
+    messages.acceptChange({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: { chatId: testChat.id, messageIds: [], complete: true, threadRootIds: [] },
+    });
+    await settle();
+    http
+      .expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`)
+      .flush(structuredClone({ chats: [{ ...wireChat, unreadCount: 0 }] }));
+    await settle();
+    expect(query.items()).toHaveLength(2);
+    const next = query.loadMore();
+    http.expectOne(`/_api/chats?limit=50&after=${older.id}`).flush({ chats: [] });
+    await next;
   });
 
   it('coalesces bulk withdrawals and takes unread state from the refreshed list', async () => {
@@ -445,7 +477,7 @@ describe('ChatListStore', () => {
     });
     await settle();
     http
-      .expectOne('/_api/chats?limit=50')
+      .expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`)
       .flush(
         structuredClone({ chats: [{ ...wireChat, lastMessage: { ...wireMessage, isDeleted: true }, unreadCount: 4 }] }),
       );
@@ -475,8 +507,9 @@ describe('ChatListStore', () => {
     await settle();
     http.expectNone(() => true);
     releaseQuery = query.activate();
+    await settle();
     http
-      .expectOne('/_api/chats?limit=50')
+      .expectOne(`/_api/chats?limit=1&archived=false&chatId=${wireChat.id}`)
       .flush(structuredClone({ chats: [{ ...wireChat, lastMessage: { ...wireMessage, isDeleted: true } }] }));
     await settle();
     expect(query.items()[0].lastMessage?.isDeleted).toBe(true);
@@ -821,7 +854,7 @@ describe('ChatListStore', () => {
     TestBed.tick();
     expect(query.items()[0].mutedUntil).toBe(mutedUntil);
     expect(query.items()[0].archived).toBe(false);
-    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...chat, mutedUntil }] }));
+    http.expectNone('/_api/chats?limit=50');
     await settle();
     reconnect();
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [chat] }));
@@ -847,13 +880,13 @@ describe('ChatListStore', () => {
     await unmuting;
     TestBed.tick();
     expect(query.items()).toEqual([]);
-    http.expectOne('/_api/chats?limit=50&archived=true').flush({ chats: [] });
+    http.expectNone('/_api/chats?limit=50&archived=true');
     await settle();
     selectQuery(false);
     TestBed.tick();
-    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [{ ...wireChat, mutedUntil: null }] }));
+    http.expectNone('/_api/chats?limit=50');
     await settle();
-    expect(query.items()[0]).toMatchObject({ mutedUntil: null, archived: false });
+    expect(query.items()[0]).toMatchObject({ mutedUntil: undefined, archived: false });
   });
 
   it('updates mute immediately and restores the original metadata when the command fails', async () => {
@@ -1445,6 +1478,6 @@ describe('ChatListStore', () => {
     http.expectOne({ method: 'DELETE', url: `/_api/group/${wireChat.id}/mute` }).flush(null);
     await latest;
     await settle();
-    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    http.expectNone('/_api/chats?limit=50');
   });
 });

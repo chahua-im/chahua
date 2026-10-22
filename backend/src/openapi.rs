@@ -75,6 +75,18 @@ mod tests {
     }
 
     #[test]
+    fn list_row_filters_are_documented_as_optional_string_ids() {
+        let document = api_document();
+        for (path, name) in [("/chats", "chatId"), ("/threads", "rootId")] {
+            let params = document["paths"][path]["get"]["parameters"]
+                .as_array()
+                .unwrap();
+            let parameter = params.iter().find(|p| p["name"] == name).unwrap();
+            assert_ne!(parameter["required"], true);
+        }
+    }
+
+    #[test]
     fn unread_collections_are_ws_only_and_legacy_unread_routes_remain() {
         let document = api_document();
         assert!(document["paths"]

@@ -9,5 +9,8 @@ import type { SnowflakeID } from './snowflakeID';
 
 export interface BulkDeletedPayload {
   chatId: SnowflakeID;
+  /** False for intermediate batches; true after metadata and read cursors are reconciled. */
+  complete?: boolean;
   messageIds: SnowflakeID[];
+  threadRootIds?: SnowflakeID[];
 }

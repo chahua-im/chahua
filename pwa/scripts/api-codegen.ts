@@ -58,7 +58,7 @@ const idFields = new Set([
   'threadRootId',
   'threadId',
 ]);
-const idArrays = new Set(['attachmentIds', 'messageIds']);
+const idArrays = new Set(['attachmentIds', 'messageIds', 'threadRootIds']);
 const cursorFields: Record<string, string[]> = {
   ListMessagesResponse: ['nextCursor', 'prevCursor', 'olderCursor', 'newerCursor'],
   ListChatAttachmentsResponse: ['olderCursor', 'newerCursor'],
@@ -79,8 +79,9 @@ const pathIds = new Set([
   'saved_message_id',
 ]);
 const queryIds: Record<string, string[]> = {
-  '/chats': ['after'],
+  '/chats': ['after', 'chatId'],
   '/group': ['after'],
+  '/threads': ['rootId'],
   '/chats/{chat_id}/attachments': ['before', 'after'],
   '/chats/{chat_id}/messages': ['before', 'after', 'around', 'threadId'],
   '/chats/{chat_id}/read-receipt': ['threadId'],
