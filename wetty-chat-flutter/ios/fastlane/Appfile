@@ -1,7 +1,0 @@
-app_identifier("app.chahua.chat") # The bundle identifier of your app
-apple_id("developer@codetector.org") # Your Apple Developer Portal username
-team_id("9422PL3GFR")
-
-
-# For more information about the Appfile, see:
-#     https://docs.fastlane.tools/advanced/#appfile

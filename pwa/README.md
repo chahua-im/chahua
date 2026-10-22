@@ -54,7 +54,7 @@ Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite
 
 ## CI 与发布
 
-根目录 `Jenkinsfile` 中的 PWA 检查针对 `pwa/`，执行 Angular 构建、单元测试和独立 Worker/启动更新测试；`npm run test:ci` 使用 Angular 的 CI 配置，一次性运行并同时输出终端结果与 `test_output/unit.xml`（相对于 `pwa/`）。开发时的 `npm test` 保留默认交互行为。后端与 Flutter 使用各自的检查阶段。PWA 检查与产物构建均使用 `node:22.22.3-bookworm`。
+根目录 `Jenkinsfile` 中的 PWA 检查针对 `pwa/`，执行 Angular 构建、单元测试和独立 Worker/启动更新测试；`npm run test:ci` 使用 Angular 的 CI 配置，一次性运行并同时输出终端结果与 `test_output/unit.xml`（相对于 `pwa/`）。开发时的 `npm test` 保留默认交互行为。后端使用独立的检查阶段。PWA 检查与产物构建均使用 `node:22.22.3-bookworm`。
 
 `chahua/chahua-pwa-build` 使用 `ci/Jenkinsfile.pwa-build`，按上游传入的 `GIT_COMMIT_SHA` 检出源代码；手动构建未指定时使用 `origin/main`。同一次检出生成两个 ZIP，均使用 `PWA2-构建号`，归档根目录包含 `index.html`、`.htaccess` 和 Worker 文件，不包含外层 `browser/` 目录。
 
