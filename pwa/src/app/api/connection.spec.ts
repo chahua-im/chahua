@@ -174,6 +174,9 @@ describe('Connection', () => {
       hidden = false;
       document.dispatchEvent(new Event('visibilitychange'));
       expect(resync).toHaveBeenCalledOnce();
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(resync).toHaveBeenCalledOnce();
     }
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'appState', state: 'active' }));
     user.set(undefined);

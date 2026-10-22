@@ -9,4 +9,7 @@ import type { SnowflakeID } from '../snowflakeID';
 
 export interface ThreadReadStateResponse {
   lastReadMessageId?: SnowflakeID;
+  unreadCount: number;
+  unreadMentions: number;
+  unreadReactions: number;
 }

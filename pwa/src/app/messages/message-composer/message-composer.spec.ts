@@ -589,6 +589,58 @@ describe('Message composer upload ownership', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(sent.url);
   });
 
+  it('debounces searches, cancels older requests and reuses a cached query after backspace', async () => {
+    vi.useFakeTimers();
+    const input = await composer['textarea']()!.getInputElement();
+    const type = async (text: string) => {
+      input.value = text;
+      input.setSelectionRange(text.length, text.length);
+      await composer['changed'](text);
+    };
+    for (const text of ['@', '@a', '@al', '@ali', '@alic', '@alice']) await type(text);
+    expect(composer.text()).toBe('@alice');
+    http.expectNone((request) => request.url.endsWith('/members'));
+    await vi.advanceTimersByTimeAsync(200);
+    const first = http.expectOne((request) => request.params.get('q') === 'alice');
+    await type('@alic');
+    expect(first.cancelled).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    const member = { uid: 42, username: 'alice', gender: 0, role: GroupRole.member, joinedAt: testMessage.createdAt };
+    http.expectOne((request) => request.params.get('q') === 'alic').flush({ members: [member] });
+    await type('@alice');
+    await type('@alic');
+    await vi.advanceTimersByTimeAsync(200);
+    http.expectNone((request) => request.url.endsWith('/members'));
+    expect(composer['suggestions']()).toEqual([member]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await type('@alic');
+    await vi.advanceTimersByTimeAsync(200);
+    const expired = http.expectOne((request) => request.params.get('q') === 'alic');
+    composer.reset();
+    expect(expired.cancelled).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('does not search during IME composition or after mentions are disabled', async () => {
+    vi.useFakeTimers();
+    const input = await composer['textarea']()!.getInputElement();
+    input.value = '@中';
+    input.setSelectionRange(2, 2);
+    await composer['changed']('@中', new InputEvent('input', { isComposing: true }));
+    await vi.advanceTimersByTimeAsync(200);
+    http.expectNone((request) => request.url.endsWith('/members'));
+    await composer['changed']('@中', new InputEvent('input', { isComposing: false }));
+    await vi.advanceTimersByTimeAsync(200);
+    const query = http.expectOne((request) => request.params.get('q') === '中');
+    fixture.componentRef.setInput('mentionsEnabled', false);
+    fixture.detectChanges();
+    expect(query.cancelled).toBe(true);
+    await composer['changed']('@中');
+    await vi.advanceTimersByTimeAsync(200);
+    http.expectNone((request) => request.url.endsWith('/members'));
+    vi.useRealTimers();
+  });
+
   it('captures only the current mentions with their displayed names and member information', async () => {
     const member = {
       uid: 42,

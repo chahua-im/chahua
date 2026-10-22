@@ -105,6 +105,7 @@ export class ConversationStore {
     this.isLoading.set(true);
     this.needsResync = false;
     try {
+      const mentionVersion = this.chatInfo.snapshot();
       let page = await firstValueFrom(this.getMessages(around ? { around } : {}));
       if (version !== this.version) return false;
       // A reconnect can happen while the first response is in flight. Reconcile once before committing it.
@@ -118,6 +119,7 @@ export class ConversationStore {
           : newer;
       }
       page = this.applyPendingUpdates(page);
+      this.chatInfo.rememberMentions(page.messages, mentionVersion);
       // `around` also returns neighbours when the target has been deleted.
       if (exact && !page.messages.some((message) => message.id === around && isVisibleMessage(message))) {
         this.currentError.set(ConversationError.Missing);
@@ -150,10 +152,12 @@ export class ConversationStore {
     this.pageDirection.set(direction);
     this.currentError.set(undefined);
     try {
+      const mentionVersion = this.chatInfo.snapshot();
       const page = await firstValueFrom(
         this.getMessages(direction === PageDirection.Older ? { before: cursor! } : { after: cursor! }),
       );
       if (version !== this.version) return;
+      this.chatInfo.rememberMentions(page.messages, mentionVersion);
       await beforeMerge?.();
       if (version !== this.version) return;
       this.currentPage.update((value) => {

@@ -380,3 +380,12 @@ envelope, including `threadRootId` when present.
 - Apple: [Create a private key to access a service](https://developer.apple.com/help/account/keys/create-a-private-key/)
 - Apple: [Communicate with APNs using authentication tokens](https://developer.apple.com/help/account/capabilities/communicate-with-apns-using-authentication-tokens/)
 - Apple: [Establishing a certificate-based connection to APNs](https://developer.apple.com/documentation/usernotifications/establishing-a-certificate-based-connection-to-apns)
+
+## Thread read state
+
+`GET /chats/{chat_id}/threads/{thread_root_id}/read-state` and the legacy
+`GET /threads/{thread_root_id}/read-state` return `lastReadMessageId`, `unreadCount`,
+`unreadMentions` and `unreadReactions`. The cursor remains a decimal string (or null).
+These are read-only snapshots using the same counting rules as thread reads; they do not
+advance either read cursor. Clients can refresh a loaded thread's badges without reloading
+all thread-list pages. Existing clients can continue to use only `lastReadMessageId`.

@@ -166,6 +166,40 @@ struct AppliedThreadRead {
     receipt_advanced: bool,
 }
 
+/// Read-only counterpart of the mark-read response; authorization belongs to the caller.
+fn load_thread_read_state(
+    conn: &mut PgConnection,
+    unread_service: &UnreadService,
+    chat_id: i64,
+    thread_root_id: i64,
+    uid: i32,
+) -> Result<ThreadReadStateResponse, AppError> {
+    let last_read_message_id =
+        thread_svc::get_thread_last_read_message_id(conn, chat_id, thread_root_id, uid)?;
+    Ok(ThreadReadStateResponse {
+        last_read_message_id,
+        unread_count: thread_svc::get_thread_unread_count(
+            conn,
+            thread_root_id,
+            uid,
+            last_read_message_id,
+        )?,
+        unread_mentions: unread_service.count_chat_unread_mentions(
+            conn,
+            uid,
+            chat_id,
+            last_read_message_id,
+            Some(thread_root_id),
+        )?,
+        unread_reactions: unread_service.count_chat_unread_reactions(
+            conn,
+            uid,
+            chat_id,
+            Some(thread_root_id),
+        )?,
+    })
+}
+
 /// Shared body of the chat-scoped and legacy "mark thread read" routes.
 /// Callers MUST have authorized `uid` for `chat_id` first.
 fn apply_thread_read(
@@ -291,6 +325,7 @@ async fn mark_thread_read(
 )]
 async fn get_thread_read_state(
     CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
     Path(ThreadRootIdPath { thread_root_id }): Path<ThreadRootIdPath>,
     mut conn: DbConn,
 ) -> Result<Json<ThreadReadStateResponse>, AppError> {
@@ -299,14 +334,13 @@ async fn get_thread_read_state(
     let chat_id = resolve_chat_id_for_thread(conn, thread_root_id)?;
     check_membership(conn, chat_id, uid)?;
 
-    Ok(Json(ThreadReadStateResponse {
-        last_read_message_id: thread_svc::get_thread_last_read_message_id(
-            conn,
-            chat_id,
-            thread_root_id,
-            uid,
-        )?,
-    }))
+    Ok(Json(load_thread_read_state(
+        conn,
+        &state.unread_service,
+        chat_id,
+        thread_root_id,
+        uid,
+    )?))
 }
 
 /// GET /threads/unread — Get total unread thread and message counts for the current user.
@@ -407,6 +441,7 @@ async fn mark_thread_read_in_chat(
 )]
 async fn get_thread_read_state_in_chat(
     CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
     Path(ThreadSubscribePath {
         chat_id,
         thread_root_id,
@@ -417,14 +452,13 @@ async fn get_thread_read_state_in_chat(
 
     authorize_thread_in_chat(conn, chat_id, thread_root_id, uid)?;
 
-    Ok(Json(ThreadReadStateResponse {
-        last_read_message_id: thread_svc::get_thread_last_read_message_id(
-            conn,
-            chat_id,
-            thread_root_id,
-            uid,
-        )?,
-    }))
+    Ok(Json(load_thread_read_state(
+        conn,
+        &state.unread_service,
+        chat_id,
+        thread_root_id,
+        uid,
+    )?))
 }
 
 /// PUT /chats/:chat_id/threads/:thread_root_id/subscribe — Follow a thread.
@@ -696,6 +730,23 @@ mod tests {
     use diesel::connection::SimpleConnection;
 
     #[test]
+    fn thread_read_state_serializes_counters_without_losing_the_cursor() {
+        let response = ThreadReadStateResponse {
+            last_read_message_id: Some(9_007_199_254_740_993),
+            unread_count: 3,
+            unread_mentions: 1,
+            unread_reactions: 0,
+        };
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "lastReadMessageId": "9007199254740993", "unreadCount": 3,
+                "unreadMentions": 1, "unreadReactions": 0,
+            })
+        );
+    }
+
+    #[test]
     fn thread_authorization_rejects_replies_and_checks_membership_first() {
         let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
             eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
@@ -717,6 +768,16 @@ mod tests {
             for id in [9876720001, 9876720002, 9876720099] {
                 assert!(matches!(authorize_thread_in_chat(conn, 9876720000, id, 4308), Err(AppError::Forbidden(_))));
             }
+            conn.batch_execute(
+                "INSERT INTO thread_user_states (chat_id, thread_root_id, uid, last_read_message_id)
+                    VALUES (9876720000, 9876720001, 4307, 9876720001);
+                 INSERT INTO message_mentions (message_id, mentioned_uid, chat_id, thread_root_id, created_at)
+                    VALUES (9876720002, 4307, 9876720000, 9876720001, NOW());"
+            )?;
+            let state = load_thread_read_state(conn, &UnreadService::new(), 9876720000, 9876720001, 4307).unwrap();
+            assert_eq!((state.unread_count, state.unread_mentions, state.unread_reactions), (1, 1, 0));
+            assert_eq!(state.last_read_message_id, Some(9876720001));
+            assert_eq!(thread_svc::get_thread_last_read_message_id(conn, 9876720000, 9876720001, 4307)?, Some(9876720001));
             Err(diesel::result::Error::RollbackTransaction)
         });
         assert!(matches!(

@@ -97,7 +97,7 @@
           [autoGrow]="true"
           [rows]="1"
           [value]="display().text"
-          (ionInput)="changed($event.detail.value || '')"
+          (ionInput)="changed($event.detail.value || '', $event.detail.event)"
           (ionFocus)="panel.set(Panel.None)"
           (paste)="paste($event)"
           (keydown)="key($event)" />

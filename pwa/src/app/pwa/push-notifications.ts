@@ -192,7 +192,10 @@ export class PushNotifications {
     )
       return;
     await this.chats.ensureDetails(message.chatId).catch(() => {});
-    if (message.replyRootId) await this.chats.loadSubscription(message.chatId, message.replyRootId).catch(() => {});
+    const knownChat = this.chats.get(message.chatId);
+    const knownState = { ...knownChat, ...this.chats.chatState(message.chatId) };
+    if (message.replyRootId && !knownState.archived && !shouldNotify(message, uid, knownState, undefined))
+      await this.chats.loadSubscription(message.chatId, message.replyRootId).catch(() => {});
     const modal = await this.modals.getTop();
     if (
       this.destroy.destroyed ||

@@ -12,6 +12,7 @@ import {
   type ThreadListItem,
   FriendRequestDirection,
   FriendRequestStatus,
+  NotificationType,
   ServerWsMessageType,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
@@ -97,6 +98,12 @@ describe('ChatListStore threads and friend requests', () => {
     http.verify();
     vi.useRealTimers();
   });
+
+  async function flushReads() {
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(100);
+    else await new Promise((resolve) => setTimeout(resolve, 110));
+    await settle();
+  }
 
   async function settle() {
     for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -320,7 +327,7 @@ describe('ChatListStore threads and friend requests', () => {
     keepActive();
   });
 
-  it('discards an invalidated older page and refreshes the first page', async () => {
+  it('patches a known thread and refreshes only its read state while paging keeps its cursor', async () => {
     await startThreads();
     const loading = threads.loadMore();
     await settle();
@@ -329,15 +336,17 @@ describe('ChatListStore threads and friend requests', () => {
     old.flush(
       structuredClone({
         threads: [{ ...wireThread, threadRootMessage: { ...wireThread.threadRootMessage, id: '99' } }],
-        nextCursor: 'stale',
+        nextCursor: 'tail',
       }),
     );
-    await settle();
-    http
-      .expectOne(activeThreadsUrl)
-      .flush(structuredClone({ threads: [{ ...wireThread, replyCount: 3 }], nextCursor: 'fresh' }));
     await loading;
-    expect(threads.items().map((item) => item.threadRootMessage.id)).toEqual([rootId]);
+    await flushReads();
+    http.expectOne(topicUrl + '/read-state').flush({ unreadCount: 3, unreadMentions: 1, unreadReactions: 0 });
+    await settle();
+    http.expectNone(activeThreadsUrl);
+    expect(threads.items().map((item) => item.threadRootMessage.id)).toEqual([rootId, encodeId('99')]);
+    expect(threads.items()[0].replyCount).toBe(3);
+    expect(threads.items()[0].unreadCount).toBe(3);
     expect(threads.hasMore()).toBe(true);
     expect(threads.loadingMore()).toBe(false);
   });
@@ -362,22 +371,24 @@ describe('ChatListStore threads and friend requests', () => {
     http.expectNone(() => true);
   });
 
-  it('uses one invalidation path for accepted HTTP replies and WebSocket replies', async () => {
+  it('coalesces replies into one targeted read and defers hidden rows until activation', async () => {
     await startThreads();
     const reply = { ...testMessage, replyRootId: rootId };
     TestBed.inject(Connection).accept(reply);
     messages.next(reply);
+    await flushReads();
+    http.expectOne(topicUrl + '/read-state').flush({ unreadCount: 3, unreadMentions: 1, unreadReactions: 0 });
     await settle();
-    http.expectOne(activeThreadsUrl).flush(structuredClone({ threads: [{ ...wireThread, replyCount: 3 }] }));
-    await settle();
+    http.expectNone(activeThreadsUrl);
     await hideLists();
-    TestBed.inject(Connection).accept(reply);
-    messages.next(reply);
-    await settle();
+    messages.next({ ...reply, id: encodeId('9007199254741004') });
+    await flushReads();
     http.expectNone(() => true);
     await showThreads();
-    http.expectOne(activeThreadsUrl).flush({ threads: [] });
+    await flushReads();
+    http.expectOne(topicUrl + '/read-state').flush({ unreadCount: 4, unreadMentions: 1, unreadReactions: 0 });
     await settle();
+    http.expectNone(activeThreadsUrl);
   });
 
   it('updates a topic root immediately and rejects a list snapshot from before the edit', async () => {
@@ -393,11 +404,7 @@ describe('ChatListStore threads and friend requests', () => {
     stale.flush(structuredClone({ threads: [wireThread] }));
     await settle();
     expect(threads.items()[0].threadRootMessage.message).toBe('修改后的话题');
-    http.expectOne(activeThreadsUrl).flush(
-      structuredClone({
-        threads: [{ ...wireThread, threadRootMessage: { ...wireThread.threadRootMessage, message: '修改后的话题' } }],
-      }),
-    );
+    http.expectNone(activeThreadsUrl);
     await settle();
     expect(threads.items()[0].threadRootMessage.message).toBe('修改后的话题');
     expect(refreshChats).not.toHaveBeenCalled();
@@ -614,11 +621,10 @@ describe('ChatListStore threads and friend requests', () => {
     const delayed = http.expectOne(topicUrl + '/read');
     updatedThread();
     await settle();
-    http.expectOne(activeThreadsUrl).flush(
-      structuredClone({
-        threads: [{ ...wireThread, lastReadMessageId: '102', unreadCount: 1 }],
-      }),
-    );
+    await flushReads();
+    http
+      .expectOne(topicUrl + '/read-state')
+      .flush({ lastReadMessageId: '102', unreadCount: 1, unreadMentions: 0, unreadReactions: 0 });
     await settle();
     delayed.flush({ lastReadMessageId: '102', unreadCount: 0 });
     await settle();
@@ -720,7 +726,7 @@ describe('ChatListStore threads and friend requests', () => {
     await hideLists();
     updatedThread();
     expect(inbox['chatInfo'].threadReadState(testChat.id, rootId)).toBeUndefined();
-    expect(inbox['chatInfo'].threadReadState(testChat.id, encodeId('200'))).toBeUndefined();
+    expect(inbox['chatInfo'].threadReadState(testChat.id, encodeId('200'))).toEqual({ lastReadMessageId: undefined });
     http.expectNone(() => true);
   });
 
@@ -747,6 +753,63 @@ describe('ChatListStore threads and friend requests', () => {
     expect(cached.unreadCount).toBe(0);
     http.expectNone(activeThreadsUrl);
   });
+  it('refreshes a mention on a deep loaded row without reading any list pages', async () => {
+    await startThreads();
+    const older = { ...wireThread, threadRootMessage: { ...wireThread.threadRootMessage, id: '99' } };
+    const paging = threads.loadMore();
+    await settle();
+    http.expectOne(activeThreadsUrl + '&before=older').flush({ threads: [older], nextCursor: 'tail' });
+    await paging;
+    for (let i = 0; i < 3; i++)
+      events.next({
+        type: ServerWsMessageType.notification,
+        payload: {
+          chatId: testChat.id,
+          threadRootId: encodeId('99'),
+          messageId: testMessage.id,
+          actorUid: 2,
+          notificationType: NotificationType.mention,
+        },
+      });
+    await flushReads();
+    http
+      .expectOne('/_api/chats/' + decodeId(testChat.id) + '/threads/99/read-state')
+      .flush({ unreadCount: 3, unreadMentions: 1, unreadReactions: 0 });
+    await settle();
+    expect(threads.items()).toHaveLength(2);
+    expect(threads.items()[1].unreadMentions).toBe(1);
+    expect(inbox['chatInfo'].threadReadState(testChat.id, rootId)).toBeDefined();
+    http.expectNone((request) => request.url === '/_api/threads');
+  });
+
+  it('adds a new live thread from the head without reloading deeper pages or changing the tail cursor', async () => {
+    await startThreads();
+    const paging = threads.loadMore();
+    await settle();
+    http.expectOne(activeThreadsUrl + '&before=older').flush(
+      structuredClone({
+        threads: [{ ...wireThread, threadRootMessage: { ...wireThread.threadRootMessage, id: '99' } }],
+        nextCursor: 'tail',
+      }),
+    );
+    await paging;
+    messages.next({ ...testMessage, id: encodeId('203'), replyRootId: encodeId('200') });
+    await flushReads();
+    http.expectOne(activeThreadsUrl).flush(
+      structuredClone({
+        threads: [{ ...wireThread, threadRootMessage: { ...wireThread.threadRootMessage, id: '200' } }, wireThread],
+        nextCursor: 'older',
+      }),
+    );
+    await settle();
+    expect(threads.items()).toHaveLength(3);
+    http.expectNone(activeThreadsUrl + '&before=older');
+    const more = threads.loadMore();
+    await settle();
+    http.expectOne(activeThreadsUrl + '&before=tail').flush({ threads: [] });
+    await more;
+  });
+
   it('refreshes the loaded topic depth without shrinking to the first page', async () => {
     await startThreads();
     const olderThread = { ...wireThread, threadRootMessage: { ...wireThread.threadRootMessage, id: '99' } };
@@ -756,7 +819,9 @@ describe('ChatListStore threads and friend requests', () => {
     await more;
     const refreshing = threads.refresh();
     await settle();
-    http.expectOne(activeThreadsUrl).flush({ threads: [{ ...wireThread, replyCount: 5 }], nextCursor: 'older' });
+    http
+      .expectOne(activeThreadsUrl)
+      .flush(structuredClone({ threads: [{ ...wireThread, replyCount: 5 }], nextCursor: 'older' }));
     await settle();
     expect(threads.items()).toHaveLength(2);
     http.expectOne(activeThreadsUrl + '&before=older').flush({ threads: [olderThread], nextCursor: 'tail' });
@@ -819,11 +884,9 @@ describe('ChatListStore threads and friend requests', () => {
     http.expectOne(topicUrl + '/read').flush({ lastReadMessageId: '102', unreadCount: 0 });
     await reading;
     await showThreads();
-    http.expectOne(activeThreadsUrl).flush(
-      structuredClone({
-        threads: [{ ...wireThread, lastReadMessageId: '102', unreadCount: 1 }],
-      }),
-    );
+    http
+      .expectOne(activeThreadsUrl)
+      .flush(structuredClone({ threads: [{ ...wireThread, lastReadMessageId: '102', unreadCount: 1 }] }));
     await settle();
     expect(threads.items()[0].unreadCount).toBe(1);
   });

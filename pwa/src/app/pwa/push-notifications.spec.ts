@@ -6,9 +6,10 @@ import { ModalController } from '@ionic/angular';
 import { BehaviorSubject, NEVER, of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { PushService } from '../../generated/endpoints/push/push.service';
-import { ApiPushProvider } from '../../generated/models';
+import { ApiPushProvider, GroupKind } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { testUser } from '../api/testing';
+import { testUser, testChat, testMessage } from '../api/testing';
+import { encodeId } from '../api/snowflake-id';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
 import { SessionStore } from '../session/session-store';
@@ -87,6 +88,27 @@ describe('PushNotifications', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('loads a thread subscription only when the notification decision depends on it', async () => {
+    localStorage.setItem(preferenceKey, 'true');
+    const chats = TestBed.inject(ChatStore);
+    const load = vi.fn().mockResolvedValue(undefined);
+    Object.assign(chats, {
+      ensureDetails: vi.fn().mockResolvedValue(undefined),
+      get: () => ({ kind: GroupKind.group }),
+      chatState: () => ({ archived: false }),
+      subscription: () => ({ subscribed: true, archived: false }),
+      loadSubscription: load,
+    });
+    const service = TestBed.inject(PushNotifications);
+    const topic = { ...testMessage, sender: { ...testMessage.sender, uid: 2 }, replyRootId: encodeId('100') };
+    await service['notify']({ ...topic, mentions: [{ uid: testUser.uid, gender: 0 }] });
+    expect(load).not.toHaveBeenCalled();
+    await service['notify']({ ...topic, id: encodeId('202'), replyToMessage: { ...testMessage, mentions: [] } });
+    expect(load).not.toHaveBeenCalled();
+    await service['notify']({ ...topic, id: encodeId('203') });
+    expect(load).toHaveBeenCalledExactlyOnceWith(testChat.id, topic.replyRootId);
   });
 
   it.each(['default', 'denied'] as const)(

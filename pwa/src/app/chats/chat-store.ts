@@ -1,4 +1,4 @@
-import { DestroyRef, effect, inject, Service, signal } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, timer, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
@@ -9,6 +9,7 @@ import { ThreadsService } from '../../generated/endpoints/threads/threads.servic
 import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
+  GroupKind,
   type ChatListItem,
   type GroupInfoResponse,
   type MarkChatReadStateResponse,
@@ -19,6 +20,7 @@ import {
   type ThreadSubscriptionStatusResponse,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
+import { SessionStore } from '../session/session-store';
 import { activeQuery } from '../api/query';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { isMessageChange, type MessageChange } from '../messages/message-change';
@@ -43,6 +45,7 @@ type Subscription = { chatId: SnowflakeID; status?: ThreadSubscriptionStatusResp
 export enum ChatChangeKind {
   Read,
   Membership,
+  Attention,
 }
 
 @Service()
@@ -71,6 +74,11 @@ export class ChatStore {
   private readonly pinsApi = inject(PinsService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly realtime = inject(Connection);
+  private readonly session = inject(SessionStore);
+  private readonly mentionAccount = computed(() => this.session.user()?.uid);
+  private readonly knownMentions = new Map<SnowflakeID, { mentioned: boolean; version: number }>();
+  private readonly scheduledReads = new Map<SnowflakeID, Promise<MarkChatReadStateResponse>>();
+  private readonly threadReadRefreshes = new Map<SnowflakeID, Promise<MarkThreadReadResponse>>();
   private readonly entries = signal(new Map<SnowflakeID, ChatInfo>());
   private readonly fresh = new Set<SnowflakeID>();
   private readonly detailsFresh = new Set<SnowflakeID>();
@@ -138,6 +146,10 @@ export class ChatStore {
       );
       onCleanup(() => clearTimeout(timer));
     });
+    effect(() => {
+      this.mentionAccount();
+      this.knownMentions.clear();
+    });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe(() => {
       this.muteTime.set(Date.now());
       for (const query of this.relationships.values()) void query.refresh();
@@ -148,6 +160,22 @@ export class ChatStore {
       for (const pins of this.pinScopes.values()) pins.invalidate();
     });
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
+      if (event.type === ServerWsMessageType.messageUpdated) {
+        const message = event.payload;
+        const previous = this.knownMentions.get(message.id)?.mentioned;
+        const next = message.mentions?.some((mention) => mention.uid === this.session.user()?.uid) ?? false;
+        this.rememberMentions([message]);
+        if (
+          (previous == null
+            ? next || this.cachedUnreadMentions(message.chatId, message.replyRootId) !== 0
+            : previous !== next) &&
+          this.get(message.chatId)?.kind !== GroupKind.dm
+        ) {
+          if (message.replyRootId) this.invalidateThreadReads([message.replyRootId]);
+          else this.invalidateReads(new Set([message.chatId]));
+          this.changed(ChatChangeKind.Attention, message.chatId, message.replyRootId);
+        }
+      }
       if (isMessageChange(event)) {
         this.receiveChange(event);
         for (const pins of this.pinScopes.values()) pins.receiveChange(event);
@@ -160,11 +188,24 @@ export class ChatStore {
           void this.relationships.get(event.payload.byUid)?.refresh();
           break;
         case ServerWsMessageType.message:
+          this.rememberMentions([event.payload]);
           if (event.payload.replyRootId) {
             this.invalidateSubscriptions(event.payload.replyRootId);
             this.receiveThreadMessage(event.payload, event.payload.replyRootId);
           } else this.receiveMessage(event.payload);
           break;
+        case ServerWsMessageType.threadUpdate: {
+          const { threadRootId, replyCount, lastReplyAt } = event.payload;
+          const current = this.threadSummaries().get(threadRootId);
+          if (current)
+            this.threadSummaries.update((entries) =>
+              new Map(entries).set(threadRootId, {
+                value: { ...current.value, replyCount, lastReplyAt },
+                version: ++this.version,
+              }),
+            );
+          break;
+        }
         case ServerWsMessageType.threadMembershipChanged:
           this.invalidateSubscriptions(event.payload.threadRootId);
           break;
@@ -258,6 +299,10 @@ export class ChatStore {
   }
 
   acceptChats(chats: readonly ChatListItem[], version: number) {
+    this.rememberMentions(
+      chats.flatMap((chat) => (chat.lastMessage ? [chat.lastMessage] : [])),
+      version,
+    );
     this.remember(chats);
     const summaries = new Map(this.summaries());
     const reads = new Map(this.readStates());
@@ -294,7 +339,16 @@ export class ChatStore {
 
   private receiveMessage(message: MessageResponse) {
     const previous = this.summaries().get(message.chatId)?.value.lastMessage;
-    if (previous?.id === message.id) return;
+    if (previous?.id === message.id) {
+      const lastRead = this.readStates().get(message.chatId)?.state.lastReadMessageId;
+      if (
+        !previous.isDeleted &&
+        message.sender.uid === this.session.user()?.uid &&
+        (!lastRead || lastRead < message.id)
+      )
+        this.invalidateReads(new Set([message.chatId]));
+      return;
+    }
     this.invalidateReads(new Set([message.chatId]));
     if (previous && previous.id > message.id) return;
     const preview = messagePreview(message);
@@ -400,6 +454,28 @@ export class ChatStore {
     );
   }
 
+  rememberMentions(messages: readonly Pick<MessageResponse, 'id' | 'mentions'>[], version = ++this.version) {
+    for (const message of messages) {
+      if ((this.knownMentions.get(message.id)?.version ?? 0) > version) continue;
+      this.knownMentions.delete(message.id);
+      this.knownMentions.set(message.id, {
+        mentioned: message.mentions?.some((mention) => mention.uid === this.session.user()?.uid) ?? false,
+        version,
+      });
+      if (this.knownMentions.size > 256) this.knownMentions.delete(this.knownMentions.keys().next().value!);
+    }
+  }
+
+  scheduleReadState(chatId: SnowflakeID): Promise<MarkChatReadStateResponse> {
+    const pending = this.scheduledReads.get(chatId);
+    if (pending) return pending;
+    const request = this.response(timer(100))
+      .then(() => this.getReadState(chatId))
+      .finally(() => this.scheduledReads.delete(chatId));
+    this.scheduledReads.set(chatId, request);
+    return request;
+  }
+
   cachedReadState(chatId: SnowflakeID) {
     const read = this.readStates().get(chatId);
     return read && !read.dirty ? read.state : undefined;
@@ -413,6 +489,11 @@ export class ChatStore {
   unreadReactions(chatId: SnowflakeID, threadId?: SnowflakeID) {
     const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
     return read?.state.unreadReactions ?? 0;
+  }
+
+  cachedUnreadMentions(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
+    return read && !read.dirty ? read.state.unreadMentions : undefined;
   }
 
   unreadMentions(chatId: SnowflakeID, threadId?: SnowflakeID) {
@@ -489,7 +570,10 @@ export class ChatStore {
     this.changes.next({ kind, chatId, threadId, readThrough });
   }
   getReadState(chatId: SnowflakeID): Promise<MarkChatReadStateResponse> {
-    return this.readOperation(chatId).refresh ?? this.refreshUnread(chatId);
+    const current = this.readOperations.get(chatId)?.refresh;
+    if (current) return current;
+    const cached = this.cachedReadState(chatId);
+    return cached ? Promise.resolve(cached) : this.refreshUnread(chatId);
   }
   private refreshUnread(chatId: SnowflakeID): Promise<MarkChatReadStateResponse> {
     const operation = this.readOperation(chatId);
@@ -642,6 +726,10 @@ export class ChatStore {
   }
 
   acceptThreads(threads: readonly ThreadListItem[], version: number, subscriptionVersion: number) {
+    this.rememberMentions(
+      threads.flatMap((thread) => [thread.threadRootMessage, ...(thread.lastReply ? [thread.lastReply] : [])]),
+      version,
+    );
     const summaries = new Map(this.threadSummaries());
     const reads = new Map(this.threadReads());
     for (const thread of threads) {
@@ -676,6 +764,31 @@ export class ChatStore {
           ),
         ),
     );
+  }
+
+  getThreadReadState(chatId: SnowflakeID, rootId: SnowflakeID): Promise<MarkThreadReadResponse> {
+    const pending = this.threadReadRefreshes.get(rootId);
+    if (pending) return pending;
+    const cached = this.threadReads().get(rootId);
+    if (cached && !cached.dirty) return Promise.resolve(cached.state);
+    const request = (async () => {
+      while (true) {
+        await this.response(timer(100));
+        const version = this.version;
+        const state = await this.response(this.threadsApi.getThreadReadStateInChat(chatId, rootId));
+        const current = this.threadReads().get(rootId);
+        if (current && current.version > version) {
+          if (!current.dirty) return current.state;
+          continue;
+        }
+        this.threadReads.update((states) =>
+          new Map(states).set(rootId, { state, version: ++this.version, dirty: false }),
+        );
+        return state;
+      }
+    })().finally(() => this.threadReadRefreshes.delete(rootId));
+    this.threadReadRefreshes.set(rootId, request);
+    return request;
   }
 
   threadReadState(chatId: SnowflakeID, rootId: SnowflakeID) {
@@ -809,7 +922,7 @@ export class ChatStore {
           state =
             !current.dirty && (current.state.lastReadMessageId ?? rootId) >= (state.lastReadMessageId ?? rootId)
               ? current.state
-              : await this.response(this.threadsApi.getThreadReadStateInChat(chatId, rootId));
+              : await this.getThreadReadState(chatId, rootId);
         }
         if (this.destroyRef.destroyed) return;
         this.changed(ChatChangeKind.Read, chatId, rootId, state.lastReadMessageId ?? target);

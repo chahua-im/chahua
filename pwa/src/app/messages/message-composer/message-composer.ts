@@ -35,7 +35,8 @@ import {
   send,
   videocamOutline,
 } from 'ionicons/icons';
-import { firstValueFrom } from 'rxjs';
+import { switchMap, timer, type Subscription } from 'rxjs';
+import { SessionStore } from '../../session/session-store';
 import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
 import type { FriendRelationshipResponse } from '../../../generated/models';
@@ -157,6 +158,11 @@ export class MessageComposer {
   protected readonly tooMany = signal(false);
   protected readonly unsupported = signal(false);
   private mentionVersion = 0;
+  private readonly session = inject(SessionStore);
+  private readonly mentionAccount = computed(() => this.session.user()?.uid);
+  private mentionSearch?: Subscription;
+  private mentionQuery?: string;
+  private readonly mentionCache = new Map<string, { at: number; members: MemberResponse[] }>();
   private mentionRange?: { start: number; end: number };
   private readonly mentionInfos = signal(new Map<number, MentionInfo>());
   protected readonly display = computed(() =>
@@ -205,6 +211,14 @@ export class MessageComposer {
         this.borrowedUploads.set(message ? this.editingUploads() : []);
       });
     });
+    effect(() => {
+      this.mentionAccount();
+      this.mentionsEnabled();
+      untracked(() => {
+        this.cancelMentionSearch();
+        this.suggestions.set([]);
+      });
+    });
     this.destroy.onDestroy(() => this.reset());
   }
 
@@ -243,7 +257,7 @@ export class MessageComposer {
     this.voice()?.reset();
     this.panel.set(Panel.None);
     this.dragDepth.set(0);
-    this.mentionVersion++;
+    this.cancelMentionSearch();
     this.mentionRange = undefined;
     this.suggestions.set([]);
     this.tooMany.set(false);
@@ -305,25 +319,54 @@ export class MessageComposer {
   protected removeExisting(id: SnowflakeID) {
     this.existing.update((items) => items.filter((item) => item.id !== id));
   }
-  protected async changed(text: string) {
+  private cancelMentionSearch() {
+    this.mentionVersion++;
+    this.mentionSearch?.unsubscribe();
+    this.mentionSearch = undefined;
+    this.mentionQuery = undefined;
+  }
+  protected async changed(text: string, event?: Event) {
     this.text.set(wireText(editText(this.display(), text)));
+    const version = ++this.mentionVersion;
     const input = await this.textarea()?.getInputElement();
+    if (version !== this.mentionVersion) return;
     const end = input?.selectionStart ?? text.length;
     const match = text.slice(0, end).match(/(?:^|\s)@([^\s@\[\]]*)$/);
-    const version = ++this.mentionVersion;
-    if (!this.mentionsEnabled() || !match) {
+    if (!this.mentionsEnabled() || !match || (event instanceof InputEvent && event.isComposing)) {
+      this.cancelMentionSearch();
       this.suggestions.set([]);
       return;
     }
     this.mentionRange = { start: end - match[1].length - 1, end };
-    try {
-      const result = await firstValueFrom(
-        this.members.getMembers(this.chatId(), { q: match[1], mode: UserSearchMode.autocomplete, limit: 8 }),
-      );
-      if (version === this.mentionVersion) this.suggestions.set(result.members);
-    } catch {
-      if (version === this.mentionVersion) this.suggestions.set([]);
+    const chatId = this.chatId();
+    const q = match[1];
+    const key = `${this.mentionAccount()}:${chatId}:${q}`;
+    const cached = this.mentionCache.get(key);
+    if (key === this.mentionQuery && (this.mentionSearch || (cached && Date.now() - cached.at < 30_000))) return;
+    this.cancelMentionSearch();
+    this.mentionQuery = key;
+    if (cached && Date.now() - cached.at < 30_000) {
+      this.suggestions.set(cached.members);
+      return;
     }
+    this.mentionSearch = timer(200)
+      .pipe(switchMap(() => this.members.getMembers(chatId, { q, mode: UserSearchMode.autocomplete, limit: 8 })))
+      .subscribe({
+        next: ({ members }) => {
+          this.mentionCache.delete(key);
+          this.mentionCache.set(key, { at: Date.now(), members });
+          if (this.mentionCache.size > 32) this.mentionCache.delete(this.mentionCache.keys().next().value!);
+          this.suggestions.set(members);
+        },
+        error: () => {
+          this.mentionQuery = undefined;
+          this.mentionSearch = undefined;
+          this.suggestions.set([]);
+        },
+        complete: () => {
+          this.mentionSearch = undefined;
+        },
+      });
   }
   protected async mention(member: MemberResponse) {
     const range = this.mentionRange;
@@ -417,7 +460,7 @@ export class MessageComposer {
       event.stopPropagation();
       if (event.key === 'Enter') void this.mention(suggestions[this.selectedSuggestion()]);
       else if (event.key === 'Escape') {
-        this.mentionVersion++;
+        this.cancelMentionSearch();
         this.suggestions.set([]);
       } else
         this.selectedSuggestion.update(

@@ -92,7 +92,7 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatListContent             |
 | 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                                |
 | 显示 tab、归档计数或系统角标 | WS `watchConversationUnread`，包含对应 tab 的普通/archived 集合与 appBadge | 消费者共享订阅，服务端推送变化 |
-| 被覆盖的列表收到消息                       | 已加载聊天立即读 `GET /chats/{c}/unread`；页面在后台时留到返回后补读，窗口外的新聊天返回时从首页补读至原覆盖边界 | ChatListStore → ChatStore                                   |
+| 被覆盖的列表收到消息                       | 保留共享预览并标记读状态过期；返回后合并补读 `GET /chats/{c}/unread`，窗口外的新聊天从首页补读至原覆盖边界 | ChatListStore → ChatStore                                   |
 | 列表失效（断线重连、归档、成员关系、删除） | `GET /chats?limit=50`，读取到已加载条数或末尾                                                                    | ChatListStore → ChatStore → ChatListContent                 |
 | 缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限                |
 | 私聊或用户资料缺关系          | `GET /friends/{uid}`                                                   | ChatStore.relationship → 三处共用           |
@@ -126,6 +126,13 @@ Reaction 的已读是会话级：进入前台会话/话题、恢复可见或重�
 
 Mention/reply 的未读由消息已读游标派生（`message_id > last_read_message_id`），没有单独的 ack：进入会话时读取 messageIds 供会话内跳转，读到最新后计数自然清零；跳转同样按时间从旧到新。
 
+Mention 跳转列表按当前页面会话保存，首次读取、真实重连及新提及/相关编辑时校准。有效的已知零可跳过首次请求，未知或过期计数不能当作零；冷进入先复用聊天资料请求，确认群聊后再查。普通前台恢复和重复进入共享已知结果或进行中的请求；新数据在 100ms 窗口合并，查询期间发生变化才追加校准。离开、隐藏及切换会话取消请求；覆盖后返回保留已有目标，撤回和成功跳转的 ID 不被迟到快照重新加入。
+
+候选搜索不延迟正文或草稿更新：输入法组合期间不查询，查询按账号、chatId、关键词去重，等待 200ms 后发出并取消上一查询。组件内最多缓存 32 个结果，各自有效 30 秒；账号、聊天或 mention 开关变化取消请求并清空候选。
+
+单会话读状态只在过期时读取，同范围实时变更在 100ms 内合并；列表无消费者或文档隐藏时只标记过期。已知消息的编辑比较当前用户的提及状态，未改变时不刷新；比较用的最多 256 条提及状态由已接受消息快照与实时事件维护，未知旧内容仍需校准。话题 read-state 同时返回 lastReadMessageId、unreadCount、unreadMentions、unreadReactions，GET 不推进游标。已加载话题更新自身计数及实时摘要，不重取其他分页；新消息引入未知话题时补列表头部到原头部时间边界，订阅关系或无法确认位置的通知仍校准完整已加载范围。
+
+
 创建、编辑、归档、订阅、置顶、收藏、好友和群管理等写操作仅由用户动作触发。消息读标记由可见性触发。发送贴纸（自动整理开启且所属包在统计范围内）与拖拽重排后 `PUT /users/me/stickerpack-order`；同步失败时重新读取 `GET /users/me`，以服务器顺序恢复。请求期间的具体反馈见[加载标识](loading-indicators.md)。
 
 ## 分页、刷新与页面生命周期
@@ -155,7 +162,7 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；隐藏列表记录待补未读或首页位置；当前页面决定接收和是否跟随底部 |
 | messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；编辑按服务器预览形状改写引用方内嵌的引用快照，撤回将其改为墓碑；正在读取的区间保留补丁；编辑刷新提及计数与全局汇总 |
 | reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                            |
-| notification（mention/reply/reaction）                    | 服务端定向发送（包括撤销他人消息上的表态）；非话题刷新该 chat 的读状态，话题刷新话题列表；当前会话重新读取对应跳转 ID（reaction 还会按会话级 ack 清除） |
+| notification（mention/reply/reaction）                    | 服务端定向发送（包括撤销他人消息上的表态）；非话题标记该 chat 的读状态过期，已加载话题定向读取 read-state，未知话题按列表覆盖情况校准；当前会话合并读取对应跳转 ID（reaction 还会按会话级 ack 清除） |
 | pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                 |
 | threadUpdate                                              | 更新根消息统计，刷新活跃话题列表与计数                                                                |
 | threadMembershipChanged                                   | 订阅失效，当前页面补读，列表和计数刷新                                                                |
@@ -163,7 +170,7 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 | friendshipRemoved                                         | 刷新相关关系查询和聊天归档计数                                                                        |
 | chatArchiveStateChanged                                   | 更新归档/静音字段，刷新受影响列表与计数                                                               |
 | readReceiptChanged                                      | 当前私聊页面按 chatId 失效并读取对应范围；`privacyChanged` 先清除已知回执，普通推进保留已知回执直至新响应 |
-| 首次 presenceUpdate、恢复前台                             | Connection 发出 resync；活跃查询刷新，当前页面补必要元数据；聊天列表只在断线重连时重读                                                |
+| 首次 presenceUpdate、恢复前台                             | Connection 区分认证连接与前台恢复的 resync，同一次 focus/visibility 恢复只发布一次；活跃查询刷新，当前页面补必要元数据；聊天列表只在断线重连时重读                                                |
 | presenceSnapshot                                           | Presence 仅接收当前 `requestId` 的绝对授权快照；清除当前请求中缺席的用户/群，刷新期间保留已知状态；本机断网、断开或文档隐藏时不显示实时结论 |
 
 Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦时发出 resync。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过同一单例 Connection 发送 `{type:'watchPresence',requestId,userIds,chatIds}`，以该 socket 的可见范围替换服务端监看范围；Snowflake chatId 仅在 Connection 边界还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
@@ -214,7 +221,7 @@ NotificationPrompt 在登录后的应用壳内读取本机通知选择；支持�
 
 关闭立即保存本机意图并清除已显示的通知，再调用 `/push/unsubscribe` 和浏览器取消订阅；后端请求失败仍尝试浏览器取消。订阅操作按顺序执行并读取最新选择，后台登记进行中关闭会在该请求结束后清理。未增加持久重试队列；浏览器取消成功但后端未删除的过期 endpoint，由后端投递失败时清理。用户主动开关才设置 busy 并展示错误；后台操作不占用开关。
 
-规则读取 ChatStore：自己、系统和已撤回消息不提醒。私聊及其话题的提及和回复按普通消息处理，不绕过静音、归档或话题订阅规则，不显示额外的 `@` badge、跳转按钮或后台标题提醒；普通未读数和表态提醒保留。群聊提及绕过静音，回复自己可绕过归档；群聊话题按订阅/归档判断，提及自己或回复自己均可绕过话题归档和取消订阅，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史。后台 Web Push 在服务端按私聊普通消息规则筛选收件人，不投递仅由提及/回复例外触发的通知；私聊载荷携带 `ordinaryMessageBody`，Worker 使用普通消息文案。APNs 保留原有策略。
+规则读取 ChatStore：自己、系统和已撤回消息不提醒。私聊及其话题的提及和回复按普通消息处理，不绕过静音、归档或话题订阅规则，不显示额外的 `@` badge、跳转按钮或后台标题提醒；普通未读数和表态提醒保留。群聊提及绕过静音，回复自己可绕过归档；群聊话题按订阅/归档判断，提及自己或回复自己均可绕过话题归档和取消订阅，父聊天归档仍优先。缺元数据只补必要详情/订阅，不扫描归档历史；群聊话题的提及/回复已经能确定通知结果时，不再查询话题订阅状态。后台 Web Push 在服务端按私聊普通消息规则筛选收件人，不投递仅由提及/回复例外触发的通知；私聊载荷携带 `ordinaryMessageBody`，Worker 使用普通消息文案。APNs 保留原有策略。
 
 Worker 串行处理页面与 Push，在独立的 `chahua-notifications` IndexedDB 中按账号保存已处理消息 ID、聊天/话题已读边界。通知成功展示、前台阅读时抑制或撤回后登记具体 ID；仅确认已读才推进范围边界，乱序消息不会因更大的 ID 已提醒而被忽略。记录保存 30 天，覆盖后端 web-push 默认 28 天有效期，按过期索引清理；Worker 重启和通知被划掉均不丢失有效记录。通知中心补回仍显示的通知，账号变化清理旧通知，退出后停止处理 Push。页面通过 CHAHUA_SESSION 同步账号，控制器切换后重新同步。通知点击使用 `#msg=ID`；新通知由 Angular onActionClick 唤起，缺少该字段的旧通知由兼容监听器唤起并发送导航事件，已有页面不整页刷新。
 

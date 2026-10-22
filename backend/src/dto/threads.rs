@@ -72,4 +72,7 @@ pub struct ThreadReadStateResponse {
     #[serde(serialize_with = "crate::serde_i64_string::opt::serialize")]
     #[schema(value_type = Option<String>)]
     pub last_read_message_id: Option<i64>,
+    pub unread_count: i64,
+    pub unread_mentions: i64,
+    pub unread_reactions: i64,
 }

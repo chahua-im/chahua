@@ -1114,6 +1114,7 @@ describe('ConversationPage', () => {
     const data = TestBed.inject(ChatStore);
     component['atBottom'].set(false);
     incoming.next({ ...testMessage, id: encodeId('9007199254741999') });
+    await notificationSettled();
     expect(data.getReadState).toHaveBeenCalledWith(testChat.id);
     expect(component['position']()).toBeUndefined();
   });
@@ -1953,6 +1954,7 @@ describe('ConversationPage', () => {
     vi.mocked(TestBed.inject(ChatsService).getChatMentions).mockRestore();
   }
   async function notificationSettled() {
+    await new Promise((resolve) => setTimeout(resolve, 110));
     for (let i = 0; i < 12; i++) await Promise.resolve();
   }
   const reactionBoundary = '2026-10-20T00:00:00Z';
@@ -2001,6 +2003,7 @@ describe('ConversationPage', () => {
 
     component.ionViewDidEnter();
     await Promise.resolve();
+    await notificationSettled();
     http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ids.map(decodeId) });
     await Promise.resolve();
     await Promise.resolve();
@@ -2008,6 +2011,53 @@ describe('ConversationPage', () => {
     expect(component['mentionJumpIds']()).toEqual(ids);
     expect(component['canJumpMention']()).toBe(true);
     http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+  });
+
+  it('shares lifecycle requests and keeps mention targets through healthy foreground restores', async () => {
+    useMentionHttp();
+    const first = component['enterMentionSession']();
+    const second = component['enterMentionSession']();
+    expect(second).toBe(first);
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
+    request.flush({ messageIds: ['201'] });
+    await first;
+    await component['enterMentionSession']();
+    component['visibilityChanged']();
+    await notificationSettled();
+    http.expectNone(`/_api/chats/${wireChat.id}/mentions`);
+    expect(component['mentionJumpIds']()).toEqual([encodeId('201')]);
+  });
+
+  it('skips a confirmed zero but reads unknown counts, cancelling the query when the page leaves', async () => {
+    useMentionHttp();
+    const known = vi.spyOn(TestBed.inject(ChatStore), 'cachedUnreadMentions').mockReturnValue(0);
+    await component['enterMentionSession']();
+    http.expectNone(`/_api/chats/${wireChat.id}/mentions`);
+    component['resetMentionSession']();
+    known.mockReturnValue(undefined);
+    const reading = component['enterMentionSession']();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
+    component['leave'](true);
+    expect(request.cancelled).toBe(true);
+    await reading;
+  });
+
+  it('removes withdrawn mention targets before jumping and ignores them in delayed snapshots', async () => {
+    useMentionHttp();
+    const reading = component['enterMentionSession']();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
+    events.next({
+      type: ServerWsMessageType.messagesBulkDeleted,
+      payload: { chatId: testChat.id, messageIds: [encodeId('201'), encodeId('202')] },
+    });
+    request.flush({ messageIds: ['203', '202', '201'] });
+    await reading;
+    expect(component['mentionJumpIds']()).toEqual([encodeId('203')]);
+    const jump = vi.fn().mockResolvedValue(true);
+    component['goTo'] = jump;
+    await component['jumpToNextMention']();
+    expect(jump).toHaveBeenCalledOnce();
+    expect(component['mentionJumpIds']()).toEqual([]);
   });
 
   it('refreshes mention IDs on a mention notification while the conversation is active', async () => {
@@ -2026,6 +2076,7 @@ describe('ConversationPage', () => {
       },
     });
     await Promise.resolve();
+    await notificationSettled();
     http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: [decodeId(testMessage.id)] });
     await Promise.resolve();
     await Promise.resolve();
@@ -2177,6 +2228,7 @@ describe('ConversationPage', () => {
     http
       .expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=100`)
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await notificationSettled();
     http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=100`).flush({ messageIds: ['102'] });
     await notificationSettled();
     const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
@@ -2200,6 +2252,7 @@ describe('ConversationPage', () => {
     http
       .expectOne(`/_api/chats/${wireChat.id}/reactions?threadId=100`)
       .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await notificationSettled();
     http.expectOne(`/_api/chats/${wireChat.id}/mentions?threadId=100`).flush({ messageIds: [] });
     await notificationSettled();
     http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
@@ -2222,7 +2275,10 @@ describe('ConversationPage', () => {
       });
     notify();
     notify();
-    http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ['101'] });
+    await notificationSettled();
+    const first = http.expectOne(`/_api/chats/${wireChat.id}/mentions`);
+    notify();
+    first.flush({ messageIds: ['101'] });
     await notificationSettled();
     http.expectOne(`/_api/chats/${wireChat.id}/mentions`).flush({ messageIds: ['102', '101'] });
     await notificationSettled();

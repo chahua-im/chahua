@@ -30,12 +30,17 @@ const FOREGROUND_STALE_MS = 30_000;
 const RECONNECT_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 
+export enum ResyncReason {
+  Connected,
+  Foreground,
+}
+
 @Service()
 export class Connection {
   readonly connected = signal(false);
   private readonly session = inject(SessionStore);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
-  private readonly resync = new Subject<void>();
+  private readonly resync = new Subject<ResyncReason>();
   private readonly events = new Subject<ServerWsMessage>();
   readonly events$ = this.events.asObservable();
   readonly messages$ = this.events$.pipe(
@@ -114,6 +119,7 @@ export class Connection {
       let connected = false;
       let lastPong = Date.now();
       const state = () => (document.hidden || !document.hasFocus() ? WsAppState.Inactive : WsAppState.Active);
+      let wasActive = state() === WsAppState.Active;
       const connect = () => {
         socket = new WebSocket(url);
         this.socket = socket;
@@ -146,7 +152,7 @@ export class Connection {
             connected = true;
             this.connected.set(true);
             attempts = 0;
-            this.resync.next();
+            this.resync.next(ResyncReason.Connected);
           }
           if (message.type === ServerWsMessageType.message) this.accept(message.payload);
           else if (message.type !== WsControl.Pong) this.events.next(message);
@@ -164,13 +170,15 @@ export class Connection {
       };
       const visibilityChanged = () => {
         const active = state() === WsAppState.Active;
-        if (active) this.resync.next();
-        if (socket.readyState !== WebSocket.OPEN) return;
-        if (active && Date.now() - lastPong > FOREGROUND_STALE_MS) {
+        const resumed = active && !wasActive;
+        wasActive = active;
+        if (socket.readyState === WebSocket.OPEN && active && Date.now() - lastPong > FOREGROUND_STALE_MS) {
           socket.close();
           return;
         }
-        socket.send(JSON.stringify({ type: WsControl.AppState, state: state() }));
+        if (resumed) this.resync.next(ResyncReason.Foreground);
+        if (socket.readyState === WebSocket.OPEN)
+          socket.send(JSON.stringify({ type: WsControl.AppState, state: state() }));
       };
       connect();
       document.addEventListener(VISIBILITY_CHANGE, visibilityChanged);
