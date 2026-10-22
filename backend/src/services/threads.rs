@@ -11,7 +11,7 @@ use crate::dto::{
     users::User,
     ws::{ServerWsMessage, ThreadMembershipChangedPayload, ThreadUpdatePayload},
 };
-use crate::models::{Attachment, GroupKind, Message, MessageType};
+use crate::models::{Attachment, GroupKind, Message};
 use crate::schema::{attachments, messages, stickers, thread_meta, thread_user_states};
 use crate::services::avatars::AvatarService;
 use crate::services::media::MediaStore;
@@ -931,39 +931,18 @@ pub fn enrich_thread_list(
     .load(conn)?;
 
     // 2. Batch query: latest reply per thread (DISTINCT ON)
-    #[derive(QueryableByName)]
-    struct LatestReplyRow {
-        #[diesel(sql_type = diesel::sql_types::BigInt)]
-        reply_root_id: i64,
-        #[diesel(sql_type = diesel::sql_types::BigInt)]
-        id: i64,
-        #[diesel(sql_type = diesel::sql_types::Text)]
-        client_generated_id: String,
-        #[diesel(sql_type = diesel::sql_types::Timestamptz)]
-        created_at: DateTime<Utc>,
-        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
-        message: Option<String>,
-        #[diesel(sql_type = crate::schema::sql_types::MessageType)]
-        message_type: MessageType,
-        #[diesel(sql_type = diesel::sql_types::Integer)]
-        sender_uid: i32,
-        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::BigInt>)]
-        sticker_id: Option<i64>,
-        #[diesel(sql_type = diesel::sql_types::Bool)]
-        has_attachments: bool,
-    }
-    let latest_reply_rows: Vec<LatestReplyRow> = sql_query(
-        "SELECT DISTINCT ON (m.reply_root_id)
-            m.reply_root_id, m.id, m.client_generated_id, m.created_at, m.message, m.message_type,
-            m.sender_uid, m.sticker_id, m.has_attachments
-         FROM messages m
-         WHERE m.reply_root_id = ANY($1)
-           AND m.deleted_at IS NULL
-           AND m.is_published = TRUE
-         ORDER BY m.reply_root_id, m.id DESC",
-    )
-    .bind::<diesel::sql_types::Array<diesel::sql_types::BigInt>, _>(&root_ids)
-    .load(conn)?;
+    let latest_reply_rows = messages::table
+        .filter(messages::reply_root_id.eq_any(&root_ids))
+        .filter(messages::deleted_at.is_null())
+        .filter(messages::is_published.eq(true))
+        .distinct_on(messages::reply_root_id)
+        .order((messages::reply_root_id.asc(), messages::id.desc()))
+        .select(Message::as_select())
+        .load::<Message>(conn)?;
+    let forward_origins = crate::services::single_forwarding::ForwardOrigins::load_attribution(
+        conn,
+        root_messages.iter().chain(latest_reply_rows.iter()),
+    )?;
 
     // 3. Collect ALL UIDs that need profile/avatar lookup in one pass
     let mut all_uids: Vec<i32> = participant_rows.iter().map(|r| r.sender_uid).collect();
@@ -973,6 +952,10 @@ pub fn enrich_thread_list(
     for msg in &root_messages {
         all_uids.push(msg.sender_uid);
     }
+
+    let mut origin_uids = std::collections::HashSet::new();
+    forward_origins.collect_uids(&mut origin_uids);
+    all_uids.extend(origin_uids);
 
     // Pre-scan mentions from both root messages and latest replies
     let mut mention_uids_per_root: HashMap<i64, Vec<i32>> = HashMap::new();
@@ -991,7 +974,7 @@ pub fn enrich_thread_list(
         if let Some(ref text) = lr.message {
             let uids = extract_mention_uids(text);
             all_uids.extend(&uids);
-            mention_uids_per_reply.insert(lr.reply_root_id, uids);
+            mention_uids_per_reply.insert(lr.id, uids);
         }
     }
 
@@ -1075,11 +1058,14 @@ pub fn enrich_thread_list(
     // 7. Build latest reply map
     let mut latest_reply_map: HashMap<i64, MessagePreview> = HashMap::new();
     for lr in latest_reply_rows {
+        let Some(thread_root_id) = lr.reply_root_id else {
+            continue;
+        };
         latest_reply_map.insert(
-            lr.reply_root_id,
+            thread_root_id,
             build_message_preview(
                 MessagePreviewInput {
-                    forwarded_from_name: None,
+                    forwarded_from_name: forward_origins.name_for(&lr, &user_profiles),
                     id: lr.id,
                     client_generated_id: lr.client_generated_id,
                     created_at: lr.created_at,
@@ -1093,7 +1079,7 @@ pub fn enrich_thread_list(
                         .unwrap_or_default(),
                     deleted_at: None,
                     mention_source: None,
-                    mention_uids: mention_uids_per_reply.get(&lr.reply_root_id).cloned(),
+                    mention_uids: mention_uids_per_reply.get(&lr.id).cloned(),
                 },
                 &sticker_emoji_map,
                 &user_avatars,
@@ -1115,7 +1101,7 @@ pub fn enrich_thread_list(
             let root_msg = root_msg_map.get(&row.thread_root_id)?;
             let root_preview = build_message_preview(
                 MessagePreviewInput {
-                    forwarded_from_name: None,
+                    forwarded_from_name: forward_origins.name_for(root_msg, &user_profiles),
                     id: root_msg.id,
                     client_generated_id: root_msg.client_generated_id.clone(),
                     created_at: root_msg.created_at,
@@ -1268,5 +1254,105 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn database_thread_previews_preserve_forward_authors() {
+        use super::*;
+        use crate::config::MediaConfig;
+        use crate::services::avatars::AvatarMetrics;
+        use diesel::connection::SimpleConnection;
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.batch_execute(
+            "BEGIN;
+             INSERT INTO groups(id, name) VALUES (76200, 'forward-thread-test'), (76300, 'source');
+             INSERT INTO discuz.common_member(uid, username, loginname)
+             VALUES (76200, 'forwarder', 'forwarder'), (76201, 'root author', 'root-author'),
+                    (76202, 'reply author', 'reply-author');
+             INSERT INTO group_membership(chat_id, uid) VALUES (76200, 76200);
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
+                                  client_generated_id, created_at)
+             VALUES (76301, 76300, 76201, 'text', 'root', 'thread-origin-root', NOW()),
+                    (76302, 76300, 76202, 'text', 'reply', 'thread-origin-reply', NOW());
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
+                                  client_generated_id, created_at, forwarded_from_message_id,
+                                  reply_root_id, has_thread)
+             VALUES (76201, 76200, 76200, 'text', 'root', 'thread-copy-root', NOW(), 76301, NULL, true),
+                    (76202, 76200, 76200, 'text', 'reply', 'thread-copy-reply', NOW(), 76302, 76201, false);
+             INSERT INTO thread_user_states(chat_id, thread_root_id, uid, subscribed)
+             VALUES (76200, 76201, 76200, true);",
+        ).unwrap();
+        let media = MediaStore::new(
+            aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::Config::builder()
+                    .behavior_version_latest()
+                    .build(),
+            ),
+            Arc::new(MediaConfig {
+                bucket: "test".into(),
+                attachment_prefix: "attachments".into(),
+                base_url: None,
+                endpoint_url: None,
+                max_attachment_file_size_bytes: 1,
+            }),
+        );
+        let avatars = AvatarService::new(
+            None,
+            Arc::new(AvatarMetrics::new(&prometheus::Registry::new())),
+        );
+        let load = |conn: &mut PgConnection| {
+            let roots = messages::table
+                .filter(messages::id.eq(76201))
+                .select(Message::as_select())
+                .load(conn)
+                .unwrap();
+            let rows = get_user_threads(conn, 76200, 20, None, false, None).unwrap();
+            enrich_thread_list(conn, rows, false, roots, 76200, &media, &avatars)
+                .unwrap()
+                .threads
+                .remove(0)
+        };
+        let thread = load(&mut conn);
+        assert_eq!(
+            thread.thread_root_message.forwarded_from_name.as_deref(),
+            Some("root author")
+        );
+        assert_eq!(
+            thread.last_reply.unwrap().forwarded_from_name.as_deref(),
+            Some("reply author")
+        );
+
+        // Attribution survives source deletion, and never changes the copy's sender.
+        conn.batch_execute("UPDATE messages SET deleted_at = NOW() WHERE chat_id = 76300;")
+            .unwrap();
+        let thread = load(&mut conn);
+        assert_eq!(thread.thread_root_message.sender.uid, 76200);
+        assert_eq!(
+            thread.thread_root_message.forwarded_from_name.as_deref(),
+            Some("root author")
+        );
+        assert_eq!(
+            thread.last_reply.unwrap().forwarded_from_name.as_deref(),
+            Some("reply author")
+        );
+
+        // Redact a deleted root; an ordinary latest reply has no attribution.
+        conn.batch_execute(
+            "UPDATE messages SET deleted_at = NOW() WHERE id = 76201;
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
+                                  client_generated_id, created_at, reply_root_id)
+             VALUES (76203, 76200, 76200, 'text', 'ordinary reply', 'thread-ordinary-reply', NOW(), 76201);",
+        ).unwrap();
+        let thread = load(&mut conn);
+        assert!(thread.thread_root_message.is_deleted);
+        assert!(thread.thread_root_message.forwarded_from_name.is_none());
+        let reply = thread.last_reply.unwrap();
+        assert_eq!(reply.id, 76203);
+        assert!(reply.forwarded_from_name.is_none());
+        conn.batch_execute("ROLLBACK").unwrap();
     }
 }
