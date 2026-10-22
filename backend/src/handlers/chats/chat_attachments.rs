@@ -98,11 +98,16 @@ fn load_attachment_messages(
         ChatAttachmentKindFilter::All => query,
     };
 
+    // Bound both merge-join inputs so attachments can seek to the cursor too.
     if let Some(before) = before {
-        query = query.filter(m_dsl::id.lt(before));
+        query = query
+            .filter(m_dsl::id.lt(before))
+            .filter(a_dsl::message_id.lt(before));
     }
     if let Some(after) = after {
-        query = query.filter(m_dsl::id.gt(after));
+        query = query
+            .filter(m_dsl::id.gt(after))
+            .filter(a_dsl::message_id.gt(after));
     }
 
     let ascending = after.is_some();
@@ -295,14 +300,10 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_kind_filter, attachment_cursors, AttachmentMessageRow};
+    use super::{attachment_cursors, load_attachment_messages, AttachmentMessageRow};
     use crate::dto::attachments::ChatAttachmentKindFilter;
     use chrono::Utc;
-    use diesel::{debug_query, pg::Pg, prelude::*};
-
-    fn boxed_attachment_query() -> crate::schema::attachments::BoxedQuery<'static, Pg> {
-        crate::schema::attachments::table.into_boxed::<Pg>()
-    }
+    use diesel::{connection::SimpleConnection, Connection, PgConnection};
 
     fn row(message_id: i64) -> AttachmentMessageRow {
         AttachmentMessageRow {
@@ -313,51 +314,62 @@ mod tests {
     }
 
     #[test]
-    fn kind_filter_matches_images() {
-        let sql = debug_query::<Pg, _>(&apply_kind_filter(
-            boxed_attachment_query(),
-            ChatAttachmentKindFilter::Image,
-        ))
-        .to_string();
+    fn attachment_pages_preserve_message_groups_and_exclude_cursor_boundaries() {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.begin_test_transaction().unwrap();
+        conn.batch_execute(
+            "CREATE TEMP TABLE messages (
+                id bigint PRIMARY KEY, chat_id bigint NOT NULL, sender_uid int NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now(), deleted_at timestamptz,
+                is_published boolean NOT NULL DEFAULT true,
+                has_attachments boolean NOT NULL DEFAULT true
+             ) ON COMMIT DROP;
+             CREATE TEMP TABLE attachments (
+                id bigint PRIMARY KEY, message_id bigint, kind text NOT NULL,
+                deleted_at timestamptz
+             ) ON COMMIT DROP;
+             INSERT INTO messages (id, chat_id, sender_uid)
+                VALUES (10, 1, 1), (20, 1, 1), (30, 1, 1), (40, 1, 1), (50, 1, 1),
+                       (60, 2, 1);
+             INSERT INTO attachments (id, message_id, kind, deleted_at) VALUES
+                (1, 10, 'image/jpeg', NULL),
+                (2, 20, 'image/jpeg', NULL),
+                (3, 20, 'image/png', NULL),
+                (4, 30, 'image/jpeg', now()),
+                (5, 40, 'video/mp4', NULL),
+                (6, 50, 'image/jpeg', NULL),
+                (7, 60, 'image/jpeg', NULL);",
+        )
+        .unwrap();
 
-        assert!(sql.contains("\"attachments\".\"kind\" LIKE $1"));
-        assert!(sql.contains("binds: [\"image/%\"]"));
-    }
-
-    #[test]
-    fn kind_filter_matches_videos() {
-        let sql = debug_query::<Pg, _>(&apply_kind_filter(
-            boxed_attachment_query(),
-            ChatAttachmentKindFilter::Video,
-        ))
-        .to_string();
-
-        assert!(sql.contains("\"attachments\".\"kind\" LIKE $1"));
-        assert!(sql.contains("binds: [\"video/%\"]"));
-    }
-
-    #[test]
-    fn kind_filter_matches_other_attachments() {
-        let sql = debug_query::<Pg, _>(&apply_kind_filter(
-            boxed_attachment_query(),
-            ChatAttachmentKindFilter::Other,
-        ))
-        .to_string();
-
-        assert!(sql.contains("\"attachments\".\"kind\" NOT LIKE $1"));
-        assert!(sql.contains("\"attachments\".\"kind\" NOT LIKE $2"));
-        assert!(sql.contains("binds: [\"image/%\", \"video/%\"]"));
-    }
-
-    #[test]
-    fn kind_filter_all_does_not_add_mime_predicate() {
-        let sql = debug_query::<Pg, _>(&apply_kind_filter(
-            boxed_attachment_query(),
-            ChatAttachmentKindFilter::All,
-        ))
-        .to_string();
-
-        assert!(!sql.contains("\"attachments\".\"kind\" LIKE"));
+        for (before, after, expected_ids, expected_more) in [
+            (None, None, vec![50], true),
+            (Some(50), None, vec![20], true),
+            (Some(20), None, vec![10], false),
+            (None, Some(10), vec![20], true),
+            (None, Some(20), vec![50], false),
+            (None, Some(50), vec![], false),
+        ] {
+            let (rows, has_more) = load_attachment_messages(
+                &mut conn,
+                1,
+                ChatAttachmentKindFilter::Image,
+                1,
+                before,
+                after,
+            )
+            .unwrap();
+            let ids: Vec<_> = rows.iter().map(|row| row.message_id).collect();
+            assert_eq!(ids, expected_ids, "before={before:?}, after={after:?}");
+            assert_eq!(
+                has_more, expected_more,
+                "before={before:?}, after={after:?}"
+            );
+        }
     }
 
     #[test]

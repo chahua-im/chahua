@@ -271,6 +271,19 @@ Receipt advances omit `privacyChanged`; a policy, friendship, or block change
 sets `privacyChanged: true` so clients clear a cached check before refetching.
 Neither form contains a receipt cursor or timestamp.
 
+## Chat attachment browsing
+
+`GET /chats/{chat_id}/attachments` requires chat membership and a `kind` filter
+(`image`, `video`, `other`, or `all`). `before` and `after` are mutually exclusive
+message-ID cursors. Pages preserve whole messages, so the attachment count can
+exceed the requested limit.
+
+The browse query applies each cursor to both `messages.id` and
+`attachments.message_id`. Both join inputs can seek to the page boundary using
+the existing indexes, rather than scanning attachments outside the cursor range.
+The message-side index is `idx_messages_chat_attachments_visible`; attachment
+lookup uses the existing message-ID indexes.
+
 ## APNs setup
 
 This backend talks to Apple Push Notification service directly using **token-based auth**.
