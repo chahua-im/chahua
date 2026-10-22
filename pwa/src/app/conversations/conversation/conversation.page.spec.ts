@@ -35,7 +35,7 @@ import { Connection, ResyncReason } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
-import { ChatStore } from '../../chats/chat-store';
+import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
 import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
@@ -223,6 +223,27 @@ describe('ConversationPage', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(component['selecting']()).toBe(false);
     expect(component['selectedMessages']().size).toBe(0);
+  });
+
+  it('clears mention and reaction targets as scrolling advances the read cursor', () => {
+    component['mentionJumpIds'].set([encodeId('201'), encodeId('202')]);
+    component['reactionJumpIds'].set([encodeId('302'), encodeId('301')]);
+    const changes = TestBed.inject(ChatStore) as unknown as {
+      changes: { next: (change: object) => void };
+    };
+    changes.changes.next({
+      kind: ChatChangeKind.Read,
+      chatId: testChat.id,
+      readThrough: encodeId('201'),
+    });
+    expect(component['mentionJumpIds']()).toEqual([encodeId('202')]);
+    expect(component['reactionJumpIds']()).toEqual([encodeId('302'), encodeId('301')]);
+    changes.changes.next({
+      kind: ChatChangeKind.Read,
+      chatId: testChat.id,
+      readThrough: encodeId('301'),
+    });
+    expect(component['reactionJumpIds']()).toEqual([encodeId('302')]);
   });
 
   it('keeps a one-item multi-selection eligible for forwarding and removes recalled selections', () => {
@@ -2308,6 +2329,32 @@ describe('ConversationPage', () => {
     await Promise.resolve();
     http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
     await Promise.resolve();
+  });
+
+  it('discards a delayed reaction target cleared by reading, but allows a later reaction on that message', async () => {
+    useReactionHttp();
+    reactionNotification(encodeId('101'));
+    const snapshot = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    component['reactionJumpIds'].set([encodeId('101')]);
+    const changes = TestBed.inject(ChatStore) as unknown as {
+      changes: { next: (change: object) => void };
+    };
+    changes.changes.next({ kind: ChatChangeKind.Read, chatId: testChat.id, readThrough: encodeId('101') });
+    expect(component['reactionJumpIds']()).toEqual([]);
+    snapshot.flush({ messageIds: ['101', '102'], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102')]);
+
+    reactionNotification(encodeId('101'));
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
   it('preserves unvisited reaction targets when another notification arrives', async () => {
