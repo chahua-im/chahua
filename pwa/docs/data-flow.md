@@ -122,7 +122,7 @@ Service Worker 缓存应用资源和表情数据（包括 landing 安装页）�
 | 打开贴纸包详情                | `GET /stickers/packs/{id}`                                             | StickerPackDetail                                           |
 | 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                                    |
 
-Reaction 的已读是会话级：进入前台会话/话题、恢复可见或重连时读取 messageIds 与 readThrough；保留未跳转的目标，将新目标去重合并，再按 readThrough 确认快照。请求期间到达的通知合并为后续查询；查询失败不确认。后台不查询或确认，前台离开时使用保存的聊天/话题身份再确认一次，不依赖旧路由仍激活。普通消息已读不推进 reaction 游标。
+Reaction 的已读是会话级：进入前台会话/话题、恢复可见或重连时读取 messageIds 与 readThrough；保留未跳转的目标，将新目标去重合并，再按 readThrough 确认快照。重复生命周期共享当前查询或已知结果；有效未读零跳过查询，真实重连或新通知强制校准。请求期间只有新通知或确认后仍有未读才追加查询；查询失败不确认。后台不查询或确认，前台离开时使用保存的聊天/话题身份再确认一次，不依赖旧路由仍激活。普通消息已读不推进 reaction 游标。
 
 Mention/reply 的未读由消息已读游标派生（`message_id > last_read_message_id`），没有单独的 ack：进入会话时读取 messageIds 供会话内跳转，读到最新后计数自然清零；跳转同样按时间从旧到新。
 

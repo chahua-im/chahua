@@ -491,6 +491,11 @@ export class ChatStore {
     return read?.state.unreadReactions ?? 0;
   }
 
+  cachedUnreadReactions(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
+    return read && !read.dirty ? read.state.unreadReactions : undefined;
+  }
+
   cachedUnreadMentions(chatId: SnowflakeID, threadId?: SnowflakeID) {
     const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
     return read && !read.dirty ? read.state.unreadMentions : undefined;

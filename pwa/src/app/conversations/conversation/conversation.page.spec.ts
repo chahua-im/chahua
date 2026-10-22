@@ -2153,6 +2153,35 @@ describe('ConversationPage', () => {
     expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
   });
 
+  it('shares reaction lifecycle refreshes without scheduling a second snapshot', async () => {
+    useReactionHttp();
+    component['visibilityChanged']();
+    component['visibilityChanged']();
+    const snapshot = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    snapshot.flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await notificationSettled();
+    component['visibilityChanged']();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+    component['visibilityChanged']();
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
+    expect(component['reactionJumpIds']()).toEqual([encodeId('101')]);
+  });
+
+  it('skips a fresh known zero reaction count but still fetches a new notification', async () => {
+    useReactionHttp();
+    vi.spyOn(TestBed.inject(ChatStore), 'cachedUnreadReactions').mockReturnValue(0);
+    component['visibilityChanged']();
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
+    reactionNotification();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await notificationSettled();
+    http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`).flush({ unreadReactions: 0 });
+    await notificationSettled();
+  });
+
   it('requeries a notification received between the reaction snapshot and its acknowledgement', async () => {
     useReactionHttp();
     reactionNotification(encodeId('101'));

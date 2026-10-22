@@ -593,6 +593,8 @@ export class ConversationPage {
   );
   private reactionSessionEntered = false;
   private reactionRequest?: { again: boolean };
+  private reactionFresh = false;
+  private reactionChanged = false;
   private mentionRequest?: { cancel: Subject<void>; promise: Promise<void> };
   private mentionDirty = true;
   private mentionChanged = false;
@@ -737,6 +739,13 @@ export class ConversationPage {
           this.mentionChanged = true;
         }
       }
+      if (
+        event.type === ServerWsMessageType.notification &&
+        event.payload.notificationType === NotificationType.reaction &&
+        event.payload.chatId === this.id() &&
+        (event.payload.threadRootId ?? null) === (this.threadId() ?? null)
+      )
+        this.invalidateReactions();
       if (!this.isCurrent()) return;
       if (event.type === ServerWsMessageType.messageUpdated && event.payload.id === this.threadId())
         this.loadedThreadRoot.set(event.payload);
@@ -761,6 +770,7 @@ export class ConversationPage {
     });
     this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
       if (reason !== ResyncReason.Foreground) {
+        this.invalidateReactions();
         this.mentionDirty = true;
         this.mentionChanged = true;
       }
@@ -1042,7 +1052,15 @@ export class ConversationPage {
     }
   }
 
+  private invalidateReactions() {
+    this.reactionFresh = false;
+    this.reactionChanged = true;
+    if (this.reactionRequest) this.reactionRequest.again = true;
+  }
+
   private resetReactionSession() {
+    this.reactionFresh = false;
+    this.reactionChanged = false;
     this.reactionSessionEntered = false;
     this.reactionRequest = undefined;
     this.reactionJumpIds.set([]);
@@ -1050,8 +1068,10 @@ export class ConversationPage {
 
   private async enterReactionSession() {
     if (this.document.hidden || !this.isCurrent()) return;
-    if (this.reactionRequest) {
-      this.reactionRequest.again = true;
+    if (this.reactionRequest || this.reactionFresh) return;
+    if (!this.reactionChanged && this.chatInfo.cachedUnreadReactions(this.id(), this.threadId()) === 0) {
+      this.reactionSessionEntered = true;
+      this.reactionFresh = true;
       return;
     }
     const entry = this.entryKey();
@@ -1069,7 +1089,13 @@ export class ConversationPage {
         if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden) return;
         this.reactionJumpIds.update((ids) => [...new Set([...ids, ...response.messageIds])].sort((a, b) => b - a));
         const unread = await this.ackReactions(entry, chatId, threadId, response.readThrough);
-        if (unread != null && unread > 0) request.again = true;
+        if (this.reactionRequest !== request || !this.isCurrent(entry)) return;
+        if (unread == null) return;
+        if (unread > 0) request.again = true;
+        if (!request.again) {
+          this.reactionFresh = true;
+          this.reactionChanged = false;
+        }
       } while (request.again && this.reactionRequest === request && this.isCurrent(entry) && !this.document.hidden);
     } catch {
       // Keep the server cursor and session targets on failure; entry/resync retries.
