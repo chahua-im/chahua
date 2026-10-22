@@ -87,6 +87,7 @@ pub fn extract_mention_uids(text: &str) -> Vec<i32> {
 
 #[derive(Clone)]
 pub struct PreparedMessageSend {
+    pub forwarded_from_message_id: Option<i64>,
     pub chat_id: i64,
     pub sender_uid: i32,
     pub message: Option<String>,
@@ -363,6 +364,10 @@ pub fn build_sender(
 pub fn message_response_preview(response: MessageResponse) -> MessagePreview {
     let is_deleted = response.is_deleted;
     MessagePreview {
+        forwarded_from_name: response
+            .forwarded_from
+            .and_then(|origin| origin.sender.name)
+            .filter(|_| !is_deleted),
         id: response.id,
         client_generated_id: response.client_generated_id,
         created_at: response.created_at,
@@ -401,7 +406,7 @@ pub fn build_mention_info(
     }
 }
 
-fn attachment_previews(
+pub(crate) fn attachment_previews(
     map: &std::collections::HashMap<i64, Vec<Attachment>>,
     message_id: i64,
 ) -> Vec<MessagePreviewAttachment> {
@@ -417,6 +422,7 @@ fn attachment_previews(
 }
 
 pub struct MessagePreviewInput {
+    pub forwarded_from_name: Option<String>,
     pub id: i64,
     pub client_generated_id: String,
     pub created_at: DateTime<Utc>,
@@ -437,6 +443,7 @@ pub fn build_message_preview(
     user_profiles: &std::collections::HashMap<i32, UserProfile>,
 ) -> MessagePreview {
     let MessagePreviewInput {
+        forwarded_from_name,
         id,
         client_generated_id,
         created_at,
@@ -452,6 +459,7 @@ pub fn build_message_preview(
     let is_deleted = deleted_at.is_some();
     let sticker_emoji = sticker_id.and_then(|sid| sticker_emoji_map.get(&sid).cloned());
     MessagePreview {
+        forwarded_from_name: forwarded_from_name.filter(|_| !is_deleted),
         id,
         client_generated_id,
         created_at,
@@ -507,6 +515,7 @@ pub fn redact_deleted_message_response(response: &mut MessageResponse) {
     response.reactions.clear();
     response.mentions.clear();
     response.forwarded_preview = None;
+    response.forwarded_from = None;
 }
 
 pub const FORWARDED_PREVIEW_LIMIT: usize = 3;
@@ -1286,6 +1295,7 @@ pub fn build_message_side_effects(
     sender_uid: i32,
     chat_id: i64,
     enqueue_push: bool,
+    notify_mentions: bool,
 ) -> Result<PendingSideEffects, AppError> {
     let member_uids: Vec<i32> = {
         use crate::schema::group_membership as gm_dsl;
@@ -1301,7 +1311,7 @@ pub fn build_message_side_effects(
     let member_set: std::collections::HashSet<i32> = member_uids.iter().copied().collect();
     // Persisted mention rows and the push job's mention list must agree: both are
     // member-filtered and exclude the sender. Derive the list once.
-    let mentioned_member_uids: Vec<i32> = if is_system_message {
+    let mentioned_member_uids: Vec<i32> = if is_system_message || !notify_mentions {
         Vec::new()
     } else {
         response
@@ -1804,6 +1814,7 @@ pub async fn send_prepared_message(
     };
 
     let new_msg = NewMessage {
+        forwarded_from_message_id: prepared.forwarded_from_message_id,
         id,
         message: stored_message.clone(),
         message_type,
@@ -1949,6 +1960,7 @@ pub async fn send_prepared_message(
             prepared.sender_uid,
             prepared.chat_id,
             !is_system_message,
+            prepared.forwarded_from_message_id.is_none(),
         )?;
         let member_uids = side_effects.broadcast_uids.clone();
         (member_uids, side_effects)
@@ -2038,6 +2050,7 @@ fn validate_idempotent_message_payload(
         && existing.sticker_id == prepared.sticker_id
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
+        && existing.forwarded_from_message_id == prepared.forwarded_from_message_id
         && existing.forwarded_bundle_id == prepared.forwarded_bundle_id
         && attachment_ids_match
     {
@@ -2090,6 +2103,16 @@ pub async fn attach_metadata(
             })
         })
     });
+    let forward_origins = crate::services::single_forwarding::ForwardOrigins::load(
+        conn,
+        messages_to_process
+            .iter()
+            .chain(reply_messages_map.values()),
+    )
+    .unwrap_or_else(|error| {
+        tracing::error!(?error, "failed to load single-forward origins");
+        Default::default()
+    });
     let forwarded_bundle_ids: Vec<i64> = messages_to_process
         .iter()
         .filter(|message| {
@@ -2123,6 +2146,7 @@ pub async fn attach_metadata(
     for preview in forwarded_bundle_previews.values() {
         collect_forwarded_preview_item_uids(&preview.messages, &mut avatar_uids);
     }
+    forward_origins.collect_uids(&mut avatar_uids);
     let target_uids: Vec<i32> = avatar_uids.into_iter().collect();
     let mut user_avatars = avatars.lookup(&target_uids);
     let mut user_profiles = lookup_user_profiles(conn, &target_uids).unwrap_or_default();
@@ -2134,6 +2158,12 @@ pub async fn attach_metadata(
         .filter(|message| message.deleted_at.is_none())
         .map(|message| message.id)
         .chain(reply_messages_map.keys().copied())
+        .chain(
+            forward_origins
+                .replies()
+                .filter(|reply| reply.deleted_at.is_none())
+                .map(|reply| reply.id),
+        )
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
@@ -2171,6 +2201,12 @@ pub async fn attach_metadata(
             reply_messages_map
                 .values()
                 .filter_map(|reply_msg| reply_msg.sticker_id),
+        )
+        .chain(
+            forward_origins
+                .replies()
+                .filter(|reply| reply.deleted_at.is_none())
+                .filter_map(|reply| reply.sticker_id),
         )
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
@@ -2329,6 +2365,10 @@ pub async fn attach_metadata(
         user_avatars.extend(avatars.lookup(&extra_mention_uids));
     }
 
+    let sticker_emojis = sticker_rows
+        .iter()
+        .map(|(&id, (sticker, _))| (id, sticker.emoji.clone()))
+        .collect();
     let mut responses = Vec::with_capacity(messages_to_process.len());
     for (idx, m) in messages_to_process.into_iter().enumerate() {
         let reply_to_message = m
@@ -2358,12 +2398,9 @@ pub async fn attach_metadata(
                     );
                 }
 
-                let sticker_emoji_map: std::collections::HashMap<i64, String> = sticker_rows
-                    .iter()
-                    .map(|(&id, (sticker, _))| (id, sticker.emoji.clone()))
-                    .collect();
                 let preview = build_message_preview(
                     MessagePreviewInput {
+                        forwarded_from_name: forward_origins.name_for(reply_msg, &user_profiles),
                         id: reply_msg.id,
                         client_generated_id: reply_msg.client_generated_id.clone(),
                         created_at: reply_msg.created_at,
@@ -2376,7 +2413,7 @@ pub async fn attach_metadata(
                         mention_source: reply_msg.message.clone(),
                         mention_uids: None,
                     },
-                    &sticker_emoji_map,
+                    &sticker_emojis,
                     &user_avatars,
                     &user_profiles,
                 );
@@ -2418,7 +2455,15 @@ pub async fn attach_metadata(
                     &user_profiles,
                 )
             });
+        let forwarded_from = forward_origins.info_for(
+            &m,
+            &user_avatars,
+            &user_profiles,
+            &sticker_emojis,
+            &message_attachments_map,
+        );
         let mut response = MessageResponse {
+            forwarded_from,
             id: m.id,
             message: if is_deleted { None } else { m.message },
             message_type: m.message_type,
@@ -2597,6 +2642,7 @@ mod tests {
 
     fn message(id: i64, patch: impl FnOnce(&mut Message)) -> Message {
         let mut message = Message {
+            forwarded_from_message_id: None,
             id,
             message: Some(format!("message {id}")),
             message_type: MessageType::Text,
@@ -3104,6 +3150,7 @@ mod tests {
 
     fn test_message() -> Message {
         Message {
+            forwarded_from_message_id: None,
             id: 1,
             message: Some("hello".to_string()),
             message_type: MessageType::Text,
@@ -3127,6 +3174,7 @@ mod tests {
 
     fn test_prepared_message() -> PreparedMessageSend {
         PreparedMessageSend {
+            forwarded_from_message_id: None,
             chat_id: 42,
             forwarded_bundle_id: None,
             forwarded_preview_total: None,
@@ -3147,6 +3195,7 @@ mod tests {
     #[test]
     fn build_push_preview_bundle_uses_typed_invite_preview() {
         let response = super::MessageResponse {
+            forwarded_from: None,
             id: 1,
             message: Some("abc123".to_string()),
             message_type: MessageType::Invite,
@@ -3183,6 +3232,7 @@ mod tests {
     #[test]
     fn serializes_reply_to_message_type_and_camel_case_keys() {
         let reply = MessagePreview {
+            forwarded_from_name: None,
             id: 42,
             client_generated_id: "cgid".to_string(),
             created_at: Utc::now(),
@@ -3241,6 +3291,7 @@ mod tests {
     #[test]
     fn deleted_message_response_redaction_preserves_metadata_only() {
         let mut response = MessageResponse {
+            forwarded_from: None,
             id: 10,
             message: Some("secret root".to_string()),
             message_type: MessageType::Text,
@@ -3297,6 +3348,7 @@ mod tests {
         let sticker_map = HashMap::from([(42, "🙂".to_string())]);
         let preview = build_message_preview(
             MessagePreviewInput {
+                forwarded_from_name: None,
                 id: 10,
                 client_generated_id: "client-10".to_string(),
                 created_at: Utc::now(),

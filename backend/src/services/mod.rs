@@ -17,6 +17,7 @@ pub mod reactions;
 pub mod read_receipts;
 pub mod saved_messages;
 pub mod service_tokens;
+pub mod single_forwarding;
 pub mod social;
 pub mod threads;
 pub mod token_generation;

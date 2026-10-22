@@ -445,6 +445,7 @@ async fn send_friendship_accepted_message(
             conn,
             state,
             PreparedMessageSend {
+                forwarded_from_message_id: None,
                 chat_id,
                 sender_uid,
                 message: Some(format!("accepted {peer_username}'s friend request")),

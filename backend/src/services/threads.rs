@@ -22,6 +22,66 @@ use crate::services::user::lookup_user_profiles;
 use crate::services::ws_registry::ConnectionRegistry;
 use std::sync::Arc;
 
+pub(crate) struct ThreadSendState {
+    pub receipt_advanced: bool,
+    pub subscription_changes: Vec<i32>,
+}
+
+/// Persist thread state in the same transaction as a newly created message.
+/// Single forwards share this path but their quoted mentions are display-only.
+pub(crate) fn record_thread_send(
+    conn: &mut PgConnection,
+    response: &crate::dto::messages::MessageResponse,
+    member_uids: &[i32],
+    root: &Message,
+    publish_immediately: bool,
+    notify_mentions: bool,
+) -> QueryResult<ThreadSendState> {
+    let chat_id = response.chat_id;
+    let thread_id = root.id;
+    let uid = response.sender.uid;
+    let mut subscription_changes = Vec::new();
+    if ensure_thread_subscription(conn, chat_id, thread_id, uid)? {
+        subscription_changes.push(uid);
+    }
+    mark_thread_as_read(conn, chat_id, thread_id, uid, response.id)?;
+    let receipt_advanced = crate::services::read_receipts::advance_thread_read_receipt(
+        conn,
+        chat_id,
+        thread_id,
+        uid,
+        response.id,
+    )?;
+    if root.sender_uid != uid
+        && member_uids.contains(&root.sender_uid)
+        && ensure_thread_user_state(conn, chat_id, thread_id, root.sender_uid, true)?
+    {
+        subscription_changes.push(root.sender_uid);
+    }
+    if notify_mentions {
+        if let Some(text) = &response.message {
+            for mentioned_uid in extract_mention_uids(text) {
+                if mentioned_uid != uid
+                    && member_uids.contains(&mentioned_uid)
+                    && ensure_thread_subscription(conn, chat_id, thread_id, mentioned_uid)?
+                {
+                    subscription_changes.push(mentioned_uid);
+                }
+            }
+        }
+    }
+    if publish_immediately {
+        increment_thread_meta(conn, chat_id, thread_id, response.created_at)?;
+        diesel::update(messages::table.filter(messages::id.eq(thread_id)))
+            .set(messages::has_thread.eq(true))
+            .execute(conn)?;
+    }
+    Ok(ThreadSendState {
+        receipt_advanced,
+        subscription_changes,
+    })
+}
+
 /// Ensure a thread-user state row exists. This is an insert-only helper:
 /// conflicts preserve the user's current subscription, archive, and read state.
 ///
@@ -1019,6 +1079,7 @@ pub fn enrich_thread_list(
             lr.reply_root_id,
             build_message_preview(
                 MessagePreviewInput {
+                    forwarded_from_name: None,
                     id: lr.id,
                     client_generated_id: lr.client_generated_id,
                     created_at: lr.created_at,
@@ -1054,6 +1115,7 @@ pub fn enrich_thread_list(
             let root_msg = root_msg_map.get(&row.thread_root_id)?;
             let root_preview = build_message_preview(
                 MessagePreviewInput {
+                    forwarded_from_name: None,
                     id: root_msg.id,
                     client_generated_id: root_msg.client_generated_id.clone(),
                     created_at: root_msg.created_at,

@@ -360,6 +360,7 @@ async fn post_send_invite_message(
         conn,
         &state,
         PreparedMessageSend {
+            forwarded_from_message_id: None,
             chat_id: body.destination_chat_id,
             sender_uid: uid,
             message: Some(invite.code.clone()),
@@ -721,6 +722,7 @@ async fn post_redeem_invite(
             conn,
             &state,
             crate::services::messages::PreparedMessageSend {
+                forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
                 message: Some("joined the chat".to_string()),
