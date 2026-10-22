@@ -5,6 +5,7 @@ import { IonButton, IonItemOption, IonItemSliding } from '@ionic/angular';
 import { vi } from 'vitest';
 
 import { archiveOutline } from 'ionicons/icons';
+import { MessageDelivery } from '../../messages/message-delivery';
 import { ChatListItem } from './chat-list-item';
 
 describe('ChatListItem', () => {
@@ -51,6 +52,14 @@ describe('ChatListItem', () => {
     expect(fixture.nativeElement.querySelector('ion-avatar.icon-avatar ion-icon')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('ion-button')).toBeNull();
     expect(fixture.nativeElement.querySelector('ion-item-options')).toBeNull();
+  });
+
+  it('renders the shared delivery icon after the message preview', () => {
+    fixture.componentRef.setInput('entry', { ...entry, delivery: MessageDelivery.Sent, read: true });
+    fixture.detectChanges();
+    const status = fixture.nativeElement.querySelector('app-message-status');
+    expect(status).not.toBeNull();
+    expect(status.querySelector('ion-icon')).not.toBeNull();
   });
 
   it('renders a mention badge without a numeric unread count', async () => {

@@ -274,6 +274,14 @@ export class ChatListStore {
           this.membershipChanged(event.payload.chatId);
           break;
         }
+        case ServerWsMessageType.readReceiptChanged:
+          if (
+            !event.payload.privacyChanged &&
+            this.showsPeerReceipt(event.payload.chatId, event.payload.threadRootId)
+          ) {
+            this.chatInfo.applyPeerRead(event.payload);
+          }
+          break;
         case ServerWsMessageType.notification: {
           const { chatId, threadRootId, notificationType } = event.payload;
           const kind =
@@ -716,6 +724,12 @@ export class ChatListStore {
     const ids = new Set([...this.activeThreads.state.ids(), ...this.archivedThreads.state.ids()]);
     for (const id of ids)
       if (this.chatInfo.thread(id)?.chatId === change.payload.chatId) this.queueRow(change.payload.chatId, id);
+  }
+
+  private showsPeerReceipt(chatId: SnowflakeID, threadRootId?: SnowflakeID) {
+    return threadRootId
+      ? this.activeThreads.state.ids().includes(threadRootId) || this.archivedThreads.state.ids().includes(threadRootId)
+      : [...this.queries.values()].some(({ state }) => state.ids().includes(chatId));
   }
 
   friendRequests(history: boolean) {

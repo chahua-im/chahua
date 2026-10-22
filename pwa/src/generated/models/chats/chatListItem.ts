@@ -22,6 +22,7 @@ export interface ChatListItem {
   name?: string;
   /** The other participant, for DM chats; `None` for regular groups. */
   peer?: MemberSummary;
+  peerLastReadMessageId?: SnowflakeID;
   unreadCount: number;
   unreadMentions?: number;
   /**

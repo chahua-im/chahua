@@ -17,11 +17,15 @@ import {
   IonText,
 } from '@ionic/angular';
 import { heartOutline, notificationsOffOutline } from 'ionicons/icons';
+import { MessageDelivery } from '../../messages/message-delivery';
+import { MessageStatus } from '../../messages/message-status/message-status';
 import { ChatAvatar, type ChatAvatarData } from '../chat-avatar/chat-avatar';
 import { ChatDatePipe } from '../chat-date.pipe';
 
 export interface ChatListEntry extends ChatAvatarData {
   subtitle?: string;
+  delivery?: MessageDelivery;
+  read?: boolean;
   link?: string[];
   state?: Record<string, unknown>;
   sender?: string;
@@ -47,6 +51,7 @@ export interface ChatListAction {
   imports: [
     ChatDatePipe,
     ChatAvatar,
+    MessageStatus,
     NgTemplateOutlet,
     RouterLink,
     RouterLinkActive,

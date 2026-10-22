@@ -17,6 +17,7 @@ export interface ThreadListItem {
   chatKind: GroupKind;
   chatName: string;
   lastReadMessageId?: SnowflakeID;
+  peerLastReadMessageId?: SnowflakeID;
   lastReply?: MessagePreview;
   lastReplyAt: string;
   participants: User[];

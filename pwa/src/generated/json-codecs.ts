@@ -33,6 +33,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     id: 1,
     lastMessage: 'MessagePreview',
     lastReadMessageId: 1,
+    peerLastReadMessageId: 1,
   },
   ConversationRef: {
     chatId: 1,
@@ -340,6 +341,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     chatId: 1,
     lastReadMessageId: 1,
     lastReply: 'MessagePreview',
+    peerLastReadMessageId: 1,
     threadRootMessage: 'MessagePreview',
   },
   ThreadMembershipChangedPayload: {

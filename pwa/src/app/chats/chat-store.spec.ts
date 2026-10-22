@@ -9,8 +9,9 @@ import { GroupKind, GroupRole, type ServerWsMessage } from '../../generated/mode
 import { Connection } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
-import { mockRealtime, testChat, testMessage, wireChat } from '../api/testing';
+import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
 import { ChatStore } from './chat-store';
+import { SessionStore } from '../session/session-store';
 
 describe('ChatStore', () => {
   let store: ChatStore;
@@ -74,6 +75,151 @@ describe('ChatStore', () => {
     expect(store.unreadReactions(testChat.id)).toBe(0);
     expect(store.chat(testChat.id).unreadReactions).toBe(0);
     http.expectNone(url);
+  });
+
+  describe('peer receipt invalidation', () => {
+    const receiptUrl = `/_api/chats/${wireChat.id}/read-receipt`;
+    const rootId = encodeId('9007199254741999');
+    const threadUrl = `${receiptUrl}?threadId=${decodeId(rootId)}`;
+    const thread = {
+      chatId: testChat.id,
+      chatKind: GroupKind.dm,
+      chatName: 'DM',
+      threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
+      participants: [],
+      replyCount: 1,
+      lastReplyAt: testMessage.createdAt,
+      subscribedAt: testMessage.createdAt,
+      archived: false,
+      unreadCount: 0,
+      peerLastReadMessageId: testMessage.id,
+    };
+    beforeEach(() => TestBed.inject(SessionStore).user.set(testUser));
+
+    it('merges conversation receipts by scope and rejects responses older than a list snapshot or privacy change', async () => {
+      const dm = { ...testChat, kind: GroupKind.dm };
+      store.acceptChats([dm], store.snapshot());
+      store.acceptThreads([thread], store.snapshot(), store.subscriptionSnapshot());
+      store.acceptPeerRead(testChat.id, undefined, testMessage.id, store.snapshot());
+      store.acceptPeerRead(testChat.id, rootId, encodeId('100'), store.snapshot());
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBe(testMessage.id);
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBe(encodeId('100'));
+
+      const oldVersion = store.snapshot();
+      store.acceptChats([dm], store.snapshot());
+      store.acceptPeerRead(testChat.id, undefined, testMessage.id, oldVersion);
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeUndefined();
+
+      const beforePrivacy = store.snapshot();
+      store.applyPeerRead({ chatId: testChat.id, privacyChanged: true });
+      store.acceptPeerRead(testChat.id, undefined, testMessage.id, beforePrivacy);
+      store.acceptPeerRead(testChat.id, rootId, testMessage.id, beforePrivacy);
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeUndefined();
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeUndefined();
+      http.expectOne(receiptUrl).flush({});
+      http.expectOne(threadUrl).flush({});
+      await Promise.resolve();
+    });
+
+    it('discards an in-flight receipt and old list snapshot after privacy is revoked', async () => {
+      const dm = { ...testChat, kind: GroupKind.dm, peerLastReadMessageId: testMessage.id };
+      store.acceptChats([dm], store.snapshot());
+      store.applyPeerRead({ chatId: testChat.id, readerUid: 2 });
+      const pending = http.expectOne(receiptUrl);
+      const listVersion = store.snapshot();
+      store.applyPeerRead({ chatId: testChat.id, privacyChanged: true });
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeUndefined();
+      store.acceptChats([dm], listVersion);
+      pending.flush({ lastReadMessageId: wireMessage.id });
+      await Promise.resolve();
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeUndefined();
+      http.expectOne(receiptUrl).flush({ lastReadMessageId: null });
+      await Promise.resolve();
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeNull();
+    });
+
+    it('clears and reauthorizes all thread scopes without a loaded parent chat', async () => {
+      store.acceptThreads([thread], store.snapshot(), store.subscriptionSnapshot());
+      store.applyPeerRead({ chatId: testChat.id, threadRootId: rootId, readerUid: 2 });
+      const pending = http.expectOne(threadUrl);
+      const version = store.snapshot();
+      store.applyPeerRead({ chatId: testChat.id, privacyChanged: true });
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeUndefined();
+      store.acceptThreads([thread], version, store.subscriptionSnapshot());
+      pending.flush({ lastReadMessageId: wireMessage.id });
+      await Promise.resolve();
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeUndefined();
+      http.expectOne(threadUrl).flush({ lastReadMessageId: null });
+      await Promise.resolve();
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeNull();
+      http.expectNone(receiptUrl);
+    });
+
+    it('does not expose a thread first loaded from a snapshot predating privacy invalidation', () => {
+      const version = store.snapshot();
+      store.applyPeerRead({ chatId: testChat.id, privacyChanged: true });
+      store.acceptThreads([thread], version, store.subscriptionSnapshot());
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeUndefined();
+    });
+
+    it('restores the authorized receipt when sharing is enabled again', async () => {
+      store.acceptChats([{ ...testChat, kind: GroupKind.dm }], store.snapshot());
+      store.applyPeerRead({ chatId: testChat.id, privacyChanged: true });
+      http.expectOne(receiptUrl).flush({ lastReadMessageId: wireMessage.id });
+      await Promise.resolve();
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBe(testMessage.id);
+    });
+
+    it('coalesces successive peer reads and prevents an older result from replacing a newer list result', async () => {
+      store.acceptChats([{ ...testChat, kind: GroupKind.dm }], store.snapshot());
+      store.applyPeerRead({ chatId: testChat.id, readerUid: 2 });
+      const pending = http.expectOne(receiptUrl);
+      store.applyPeerRead({ chatId: testChat.id, readerUid: 2 });
+      store.applyPeerRead({ chatId: testChat.id, readerUid: 2 });
+      http.expectNone(receiptUrl);
+      pending.flush({ lastReadMessageId: '100' });
+      await Promise.resolve();
+      const next = http.expectOne(receiptUrl);
+      store.acceptChats([{ ...testChat, kind: GroupKind.dm, peerLastReadMessageId: testMessage.id }], store.snapshot());
+      next.flush({ lastReadMessageId: '200' });
+      await Promise.resolve();
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBe(testMessage.id);
+    });
+
+    it('rechecks privacy after a failed in-flight refresh', async () => {
+      store.acceptChats([{ ...testChat, kind: GroupKind.dm, peerLastReadMessageId: testMessage.id }], store.snapshot());
+      store.applyPeerRead({ chatId: testChat.id, readerUid: 2 });
+      const pending = http.expectOne(receiptUrl);
+      store.applyPeerRead({ chatId: testChat.id, privacyChanged: true });
+      pending.flush({}, { status: 500, statusText: 'Failed' });
+      await Promise.resolve();
+      http.expectOne(receiptUrl).flush({ lastReadMessageId: null });
+      await Promise.resolve();
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeNull();
+    });
+
+    it('applies a locally saved privacy change to cached chat and thread receipts', async () => {
+      store.acceptChats(
+        [{ ...testChat, kind: GroupKind.dm, peer: { uid: 2, gender: 0 }, peerLastReadMessageId: testMessage.id }],
+        store.snapshot(),
+      );
+      store.acceptThreads([thread], store.snapshot(), store.subscriptionSnapshot());
+      store.invalidateReadReceiptPrivacy(2);
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeUndefined();
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeUndefined();
+      http.expectOne(receiptUrl).flush({ lastReadMessageId: null });
+      http.expectOne(threadUrl).flush({ lastReadMessageId: null });
+      await Promise.resolve();
+    });
+  });
+
+  it('refreshes a loaded DM preview receipt when the peer reads', async () => {
+    store.acceptChats([{ ...testChat, kind: GroupKind.dm }], store.snapshot());
+    store.applyPeerRead({ chatId: testChat.id, readerUid: 2 });
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    await Promise.resolve();
+    expect(store.chat(testChat.id).peerLastReadMessageId).toBe(testMessage.id);
   });
 
   it('keeps thread reaction counts independent from the chat scope', () => {

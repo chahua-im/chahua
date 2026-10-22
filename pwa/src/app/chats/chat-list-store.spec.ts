@@ -81,6 +81,58 @@ describe('ChatListStore', () => {
     TestBed.tick();
   }
 
+  it('refreshes a loaded DM preview receipt when the peer reads', async () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    http
+      .expectOne('/_api/chats?limit=50')
+      .flush(structuredClone({ chats: [{ ...wireChat, kind: GroupKind.dm, lastMessage: wireMessage }] }));
+    await settle();
+    events.next({
+      type: ServerWsMessageType.readReceiptChanged,
+      payload: { chatId: testChat.id, readerUid: 2 },
+    });
+    await settle();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: wireMessage.id });
+    await settle();
+    expect(TestBed.inject(ChatStore).chat(testChat.id).peerLastReadMessageId).toBe(testMessage.id);
+  });
+
+  it('handles a chat-wide privacy event when only its thread row is loaded', async () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    http.expectOne('/_api/chats?limit=50').flush({ chats: [] });
+    const release = data.threads(false).activate();
+    const rootId = '9007199254741999';
+    await settle();
+    http.expectOne('/_api/threads?limit=20&archived=false').flush({
+      threads: [
+        {
+          chatId: wireChat.id,
+          chatKind: GroupKind.dm,
+          chatName: 'DM',
+          threadRootMessage: { ...wireMessage, id: rootId, mentions: [] },
+          participants: [],
+          replyCount: 1,
+          lastReplyAt: wireMessage.createdAt,
+          subscribedAt: wireMessage.createdAt,
+          archived: false,
+          unreadCount: 0,
+          peerLastReadMessageId: wireMessage.id,
+        },
+      ],
+    });
+    await settle();
+    expect(data.threads(false).items()[0].peerLastReadMessageId).toBe(testMessage.id);
+    events.next({
+      type: ServerWsMessageType.readReceiptChanged,
+      payload: { chatId: testChat.id, privacyChanged: true },
+    });
+    expect(data.threads(false).items()[0].peerLastReadMessageId).toBeUndefined();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=${rootId}`).flush({ lastReadMessageId: null });
+    await settle();
+    expect(data.threads(false).items()[0].peerLastReadMessageId).toBeNull();
+    release();
+  });
+
   it('derives tab badges from unmuted conversation counts and mentions', async () => {
     TestBed.inject(SessionStore).user.set(testUser);
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [] }));
