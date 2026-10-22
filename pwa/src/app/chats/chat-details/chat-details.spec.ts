@@ -4,7 +4,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { AlertController, IonToast, ModalController } from '@ionic/angular';
-import { archive, archiveOutline, starOutline } from 'ionicons/icons';
+import { archive, archiveOutline, notificationsOutline } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -447,7 +447,7 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     const buttons = () => [...fixture.nativeElement.querySelectorAll('.quick-actions ion-button')] as HTMLElement[];
     expect(buttons().map((button) => button.textContent?.trim())).toEqual(['订阅']);
-    expect(buttons()[0].querySelector('ion-icon')?.icon).toBe(starOutline);
+    expect(buttons()[0].querySelector('ion-icon')?.icon).toBe(notificationsOutline);
     expect(fixture.nativeElement.querySelector('.profile p').textContent.trim()).toBe(`${testChat.name} 中的话题`);
     for (const [method, endpoint, label, icon] of [
       ['PUT', 'subscribe', '归档', archiveOutline],
