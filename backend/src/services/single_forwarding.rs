@@ -643,6 +643,7 @@ mod tests {
                     source_chat_id: -76200,
                     message_ids: selection,
                     client_generated_id: format!("bundle-merged-{source_id}"),
+                    thread_id: None,
                 },
             )
             .await

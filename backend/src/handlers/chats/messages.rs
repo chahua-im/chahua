@@ -664,7 +664,7 @@ async fn post_message(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-/// POST /chats/:chat_id/messages/forward — Merge 2–100 distinct messages into a chat.
+/// POST /chats/:chat_id/messages/forward — Merge 2–100 distinct messages into a chat or thread.
 #[utoipa::path(
     post,
     path = "/forward",
@@ -692,7 +692,7 @@ async fn forward_messages(
     // A retry must still be allowed only by someone who can send to the destination.
     // Source authorization is intentionally deferred until after the idempotency
     // lookup so a lost-response retry does not depend on mutable source content.
-    authorize_message_send(conn, dest_chat_id, None, uid)?;
+    let target = authorize_message_send(conn, dest_chat_id, body.thread_id, uid)?;
 
     diesel::sql_query("BEGIN").execute(conn)?;
     let tx_result: Result<_, AppError> = async {
@@ -700,28 +700,40 @@ async fn forward_messages(
             prepare_forward_message(conn, state.id_gen.as_ref(), uid, dest_chat_id, &body).await?;
         let send_result = send_prepared_message(conn, &state, prepared).await?;
 
-        let receipt_advanced = if let SendMessageOutcome::Created(send_result) = &send_result {
-            crate::services::chat::mark_chat_as_read(
+        let SendMessageOutcome::Created(created) = &send_result else {
+            return Ok((send_result, false, Vec::new()));
+        };
+        let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
+            let thread_state = crate::services::threads::record_thread_send(
                 conn,
-                dest_chat_id,
-                uid,
-                send_result.response.id,
+                &created.response,
+                &created.member_uids,
+                root,
+                true,
+                false,
             )?;
-            crate::services::read_receipts::advance_chat_read_receipt(
-                conn,
-                dest_chat_id,
-                uid,
-                send_result.response.id,
-            )?
+            (
+                thread_state.receipt_advanced,
+                thread_state.subscription_changes,
+            )
         } else {
-            false
+            crate::services::chat::mark_chat_as_read(conn, dest_chat_id, uid, created.response.id)?;
+            (
+                crate::services::read_receipts::advance_chat_read_receipt(
+                    conn,
+                    dest_chat_id,
+                    uid,
+                    created.response.id,
+                )?,
+                Vec::new(),
+            )
         };
 
-        Ok((send_result, receipt_advanced))
+        Ok((send_result, receipt_advanced, subscription_changes))
     }
     .await;
 
-    let (send_result, receipt_advanced) = match tx_result {
+    let (send_result, receipt_advanced, subscription_changes) = match tx_result {
         Ok(result) => {
             diesel::sql_query("COMMIT").execute(conn)?;
             result
@@ -732,14 +744,13 @@ async fn forward_messages(
         }
     };
 
-    let message = match send_result {
-        SendMessageOutcome::Created(send_result) => {
-            let send_result = *send_result;
-            send_result.side_effects.fire(&state);
-            send_result.response
+    let created = match send_result {
+        SendMessageOutcome::Created(created) => *created,
+        SendMessageOutcome::Duplicate(response) => {
+            return Ok((StatusCode::CREATED, Json(*response)))
         }
-        SendMessageOutcome::Duplicate(response) => *response,
     };
+    created.side_effects.fire(&state);
 
     if receipt_advanced {
         crate::services::read_receipts::broadcast_read_receipt_changed_if_dm(
@@ -748,11 +759,31 @@ async fn forward_messages(
             dest_chat_id,
             false,
             Some(uid),
-            None,
+            body.thread_id,
         )?;
     }
+    if let Some(thread_id) = body.thread_id {
+        for changed_uid in subscription_changes {
+            crate::services::threads::broadcast_thread_membership_changed_to_user(
+                conn,
+                &state.ws_registry,
+                changed_uid,
+                dest_chat_id,
+                thread_id,
+            )?;
+        }
+        broadcast_thread_send_updates(
+            conn,
+            &state,
+            dest_chat_id,
+            thread_id,
+            &created.member_uids,
+            uid,
+        )
+        .await;
+    }
 
-    Ok((StatusCode::CREATED, Json(message)))
+    Ok((StatusCode::CREATED, Json(created.response)))
 }
 
 /// Single forwards retain the original message type, with flattened attribution.
@@ -1618,6 +1649,25 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn merged_forward_request_accepts_an_optional_string_thread_id() {
+        let mut json = serde_json::json!({
+            "sourceChatId": "42",
+            "messageIds": ["10", "20"],
+            "clientGeneratedId": "forward-thread-42"
+        });
+        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(body.thread_id, None);
+        json["threadId"] = serde_json::Value::Null;
+        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(body.thread_id, None);
+        json["threadId"] = i64::MAX.to_string().into();
+        let body: ForwardMessagesBody = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(body.thread_id, Some(i64::MAX));
+        json["threadId"] = "invalid".into();
+        assert!(serde_json::from_value::<ForwardMessagesBody>(json).is_err());
     }
 
     #[test]

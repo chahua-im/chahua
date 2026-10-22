@@ -84,6 +84,24 @@ mod tests {
     }
 
     #[test]
+    fn merged_forward_documents_an_optional_string_thread_id() {
+        let document = api_document();
+        let schemas = &document["components"]["schemas"];
+        let merged = &schemas["ForwardMessagesBody"];
+        let thread = &merged["properties"]["threadId"];
+        assert!(!thread.is_null());
+        assert_eq!(
+            thread["type"],
+            schemas["ForwardMessageBody"]["properties"]["threadId"]["type"]
+        );
+        assert!(!merged["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "threadId"));
+    }
+
+    #[test]
     fn list_row_filters_are_documented_as_optional_string_ids() {
         let document = api_document();
         for (path, name) in [("/chats", "chatId"), ("/threads", "rootId")] {

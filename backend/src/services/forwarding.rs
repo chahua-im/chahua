@@ -147,7 +147,7 @@ fn forwarded_wrapper_text(message_count: usize) -> String {
 fn prepared_forward_message(
     chat_id: i64,
     sender_uid: i32,
-    client_generated_id: String,
+    body: &ForwardMessagesBody,
     bundle_id: i64,
     message_count: usize,
     contains_forwarded_messages: bool,
@@ -161,8 +161,8 @@ fn prepared_forward_message(
         message_type: MessageType::Forwarded,
         sticker_id: None,
         reply_to_id: None,
-        reply_root_id: None,
-        client_generated_id,
+        reply_root_id: body.thread_id,
+        client_generated_id: body.client_generated_id.clone(),
         attachment_ids: Vec::new(),
         publish_immediately: true,
         forwarded_bundle_id: Some(bundle_id),
@@ -192,6 +192,7 @@ pub async fn prepare_forward_message(
     if let Some(existing) = existing {
         if existing.sender_uid != uid
             || existing.chat_id != destination_chat_id
+            || existing.reply_root_id != body.thread_id
             || !matches!(existing.message_type, MessageType::Forwarded)
         {
             return Err(AppError::Conflict(FORWARD_REQUEST_CONFLICT));
@@ -212,7 +213,7 @@ pub async fn prepare_forward_message(
         return Ok(prepared_forward_message(
             destination_chat_id,
             uid,
-            body.client_generated_id.clone(),
+            body,
             bundle_id,
             message_count,
             contains_forwarded_messages,
@@ -270,7 +271,7 @@ pub async fn prepare_forward_message(
     Ok(prepared_forward_message(
         destination_chat_id,
         uid,
-        body.client_generated_id.clone(),
+        body,
         bundle_id,
         message_count,
         contains_forwarded_messages,
@@ -413,5 +414,97 @@ mod tests {
             ForwardedBundlePayloadItem::ForwardedBundleRef { bundle_ref },
         ];
         assert_eq!(direct_child_bundle_ids(&items), vec![99]);
+    }
+
+    #[tokio::test]
+    async fn database_merged_forward_preserves_thread_and_rejects_retry_target_changes() {
+        use super::prepare_forward_message;
+        use crate::{
+            dto::messages::ForwardMessagesBody,
+            errors::AppError,
+            schema::{forwarded_bundles, messages},
+            utils::ids,
+        };
+        use diesel::{connection::SimpleConnection, prelude::*};
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).expect("connect to test database");
+        conn.batch_execute(
+            "BEGIN;
+             INSERT INTO groups(id, name) VALUES (-76300, 'merged-source'), (-76310, 'merged-destination');
+             INSERT INTO group_membership(chat_id, uid) VALUES (-76300, 76300), (-76310, 76300);
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message, client_generated_id, created_at)
+             VALUES (-76301, -76300, 76301, 'text', 'first', 'merged-thread-first', NOW()),
+                    (-76302, -76300, 76301, 'text', 'second', 'merged-thread-second', NOW()),
+                    (-76311, -76310, 76301, 'text', 'root', 'merged-thread-root', NOW()),
+                    (-76312, -76310, 76301, 'text', 'other root', 'merged-thread-other-root', NOW());",
+        ).unwrap();
+        let id_gen = ids::new_generator();
+        for (message_id, thread_id) in [(-76313, None), (-76314, Some(-76311))] {
+            let mut body = ForwardMessagesBody {
+                source_chat_id: -76300,
+                message_ids: vec![-76301, -76302],
+                client_generated_id: format!("merged-thread-copy-{message_id}"),
+                thread_id,
+            };
+            let prepared = prepare_forward_message(&mut conn, &id_gen, 76300, -76310, &body)
+                .await
+                .unwrap();
+            assert_eq!(prepared.reply_root_id, thread_id);
+            assert_eq!(prepared.forwarded_preview_total, Some(2));
+            diesel::insert_into(messages::table)
+                .values((
+                    messages::id.eq(message_id),
+                    messages::chat_id.eq(prepared.chat_id),
+                    messages::sender_uid.eq(prepared.sender_uid),
+                    messages::message.eq(&prepared.message),
+                    messages::message_type.eq(&prepared.message_type),
+                    messages::client_generated_id.eq(&prepared.client_generated_id),
+                    messages::created_at.eq(Utc::now()),
+                    messages::reply_root_id.eq(prepared.reply_root_id),
+                    messages::forwarded_bundle_id.eq(prepared.forwarded_bundle_id),
+                ))
+                .execute(&mut conn)
+                .unwrap();
+            let bundle_count = forwarded_bundles::table
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap();
+            body.message_ids.reverse();
+            if thread_id.is_some() {
+                // Lost-response retries keep working after source access is lost.
+                conn.batch_execute(
+                    "UPDATE messages SET deleted_at=NOW() WHERE chat_id=-76300;
+                     DELETE FROM group_membership WHERE chat_id=-76300;",
+                )
+                .unwrap();
+            }
+            let retry = prepare_forward_message(&mut conn, &id_gen, 76300, -76310, &body)
+                .await
+                .unwrap();
+            assert_eq!(retry.reply_root_id, thread_id);
+            assert_eq!(retry.forwarded_bundle_id, prepared.forwarded_bundle_id);
+            for other_thread in [None, Some(-76311), Some(-76312)] {
+                if other_thread == thread_id {
+                    continue;
+                }
+                body.thread_id = other_thread;
+                assert!(matches!(
+                    prepare_forward_message(&mut conn, &id_gen, 76300, -76310, &body).await,
+                    Err(AppError::Conflict(_))
+                ));
+            }
+            assert_eq!(
+                forwarded_bundles::table
+                    .count()
+                    .get_result::<i64>(&mut conn)
+                    .unwrap(),
+                bundle_count
+            );
+        }
+        conn.batch_execute("ROLLBACK").unwrap();
     }
 }
