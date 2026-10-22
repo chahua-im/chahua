@@ -16,6 +16,13 @@ import { ChatStore } from '../chat-store';
 import { ListTab, type ListSelection } from '../list-tabs';
 import { ChatListPage } from './chat-list.page';
 
+const emptyBadges = () => ({
+  messages: { count: 0, mention: false },
+  groups: { count: 0, mention: false },
+  friends: { count: 0, mention: false },
+  threads: { count: 0, mention: false },
+});
+
 beforeAll(() => {
   Element.prototype.scrollTo = vi.fn();
 });
@@ -155,7 +162,7 @@ describe('ChatListPage query lifecycle', () => {
           useValue: {
             unread: { value: signal(undefined), activate: () => () => {} },
             selection: signal({ tab: ListTab.Messages, archived: false, requestHistory: false }),
-            summary: () => undefined,
+            tabBadges: emptyBadges,
             viewUnread: query,
             threadUnread: { value: signal(undefined), activate: () => () => {} },
             chats: () => query,

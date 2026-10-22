@@ -75,6 +75,21 @@ describe('ChatList', () => {
           useValue: {
             selection: signal({ tab: ListTab.Messages, archived: false, requestHistory: false }),
             summary: (view: { key: string }) => summaries()[view.key],
+            tabBadges: (showThreads: boolean) => {
+              const badge = (key: string) => {
+                const summary = summaries()[key];
+                return {
+                  count: summary?.unreadUnmutedConversationCount ?? 0,
+                  mention: !!summary?.unreadUnmutedAttentionCount,
+                };
+              };
+              return {
+                messages: badge(showThreads ? 'messages-with-threads' : 'messages'),
+                groups: badge('groups'),
+                friends: badge('friends'),
+                threads: badge('threads'),
+              };
+            },
             viewUnread: { activate: vi.fn(() => vi.fn()) },
             unread: { value: signal({ unreadChatCount: 2 }), activate: vi.fn(() => vi.fn()) },
             threadUnread: { value: signal({ unreadThreadCount: 3 }), activate: vi.fn(() => vi.fn()) },
@@ -128,19 +143,11 @@ describe('ChatList', () => {
     });
     fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: false, requestHistory: false });
     fixture.detectChanges();
-    expect(fixture.componentInstance['tabMentions']()).toEqual({
-      messages: true,
-      groups: true,
-      friends: false,
-      threads: true,
-    });
-    fixture.componentRef.setInput('selection', { tab: ListTab.Messages, archived: true, requestHistory: false });
-    fixture.detectChanges();
-    expect(fixture.componentInstance['tabMentions']()).toEqual({
-      messages: false,
-      groups: false,
-      friends: false,
-      threads: false,
+    expect(fixture.componentInstance['tabBadges']()).toEqual({
+      messages: { count: 1, mention: true },
+      groups: { count: 1, mention: true },
+      friends: { count: 0, mention: false },
+      threads: { count: 1, mention: true },
     });
   });
 
@@ -177,16 +184,16 @@ describe('ChatList', () => {
         (node as HTMLElement).textContent?.trim(),
       ),
     ).toEqual(['4', '3', '2', '1']);
-    expect(fixture.componentInstance['tabMentions']()).toEqual({
-      messages: false,
-      groups: false,
-      friends: false,
-      threads: false,
-    });
-    expect(fixture.componentInstance['messageUnread']()).toBe(4);
+    expect(Object.values(fixture.componentInstance['tabBadges']()).map((badge) => badge.mention)).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(fixture.componentInstance['tabBadges']().messages.count).toBe(4);
     summaries.update((value) => ({ ...value, groups: { ...value['groups'], unreadUnmutedAttentionCount: 1 } }));
     await fixture.whenStable();
-    expect(fixture.componentInstance['tabMentions']().groups).toBe(true);
+    expect(fixture.componentInstance['tabBadges']().groups.mention).toBe(true);
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment ion-badge')].map((node) =>
         (node as HTMLElement).textContent?.trim(),

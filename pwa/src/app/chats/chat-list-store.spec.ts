@@ -80,6 +80,49 @@ describe('ChatListStore', () => {
     connected.set(true);
     TestBed.tick();
   }
+
+  it('derives tab badges from unmuted conversation counts and mentions', async () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [] }));
+    await settle();
+    const watch = vi.fn();
+    (TestBed.inject(Connection) as unknown as { watchConversationUnread: typeof watch }).watchConversationUnread =
+      watch;
+    const release = data.viewUnread.activate();
+    TestBed.tick();
+    const summary = (key: string, count: number, attention: number) => ({
+      key,
+      unreadMessageCount: 10,
+      unreadUnmutedMessageCount: 5,
+      unreadConversationCount: 6,
+      unreadUnmutedConversationCount: count,
+      unreadAttentionCount: 2,
+      unreadUnmutedAttentionCount: attention,
+    });
+    events.next({
+      type: ServerWsMessageType.conversationUnread,
+      payload: {
+        full: true,
+        requestId: watch.mock.calls.at(-1)![0],
+        summaries: [
+          summary('messages', 3, 0),
+          summary('groups', 0, 1),
+          summary('friends', 2, 0),
+          summary('threads', 1, 0),
+        ],
+        appBadgeCount: 7,
+      },
+    });
+    await settle();
+    expect(data.tabBadges(false)).toEqual({
+      messages: { count: 3, mention: false },
+      groups: { count: 0, mention: true },
+      friends: { count: 2, mention: false },
+      threads: { count: 1, mention: false },
+    });
+    expect(data.tabBadges(true).messages).toEqual({ count: 0, mention: false });
+    release();
+  });
   it('coalesces message and mention notifications and ignores unrelated known edits', async () => {
     vi.spyOn(TestBed.inject(SessionStore), 'user').mockReturnValue(testUser);
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));

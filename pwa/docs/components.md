@@ -196,6 +196,6 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 
 会话标题栏提供搜索与静音入口：搜索弹窗复用 ChatSearch，静音复用 ChatMute，读取 ChatStore 的共享静音状态。
 
-ChatList 的四个 tab 数字消费集合 `unreadUnmutedConversationCount`，有未静音 mention 时由 `@` 替代数字，两者均为零时隐藏。tab `@` 和 PushNotifications 的后台标题仅消费集合 `unreadUnmutedAttentionCount`；原始 attention 不驱动这两处提醒。ChatListContent 使用话题响应的 `chatKind` 决定 mention、作者与头像徽标；父聊天详情仅补充名称和头像，不影响类型判断。ChatListItem 保留静音群聊和归档话题的行内 mention badge，使用 medium 色，选中时仍保持灰色。
+ChatList 的四个 tab 数字消费集合 `unreadUnmutedConversationCount`，有未静音 mention 时由 `@` 替代数字，两者均为零时隐藏。ChatList 与 PushNotifications 的后台标题共用 ChatListStore.tabBadges，其 `@` 仅消费集合 `unreadUnmutedAttentionCount`，原始 attention 不驱动这两处提醒；会话内标题改用该会话的共享读状态。ChatListContent 使用话题响应的 `chatKind` 决定 mention、作者与头像徽标；父聊天详情仅补充名称和头像，不影响类型判断。ChatListItem 保留静音群聊和归档话题的行内 mention badge，使用 medium 色，选中时仍保持灰色。
 
 `conversationUnread` 管理 ChatListStore 的连接级未读订阅、消费者、快照和 requestId；Connection 负责 WS 编解码与发送。系统图标和列表共享订阅，不创建单独的未读 HTTP 查询。

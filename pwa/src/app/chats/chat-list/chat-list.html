@@ -36,9 +36,9 @@
           <ion-segment-button [value]="ListTab.Messages">
             <ion-label>
               {{ 'chats.list.tabs.messages' | transloco }}
-              @if (tabMentions().messages) {
+              @if (tabBadges().messages.mention) {
                 <ion-badge>@</ion-badge>
-              } @else if (messageUnread(); as count) {
+              } @else if (tabBadges().messages.count; as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>
@@ -46,9 +46,9 @@
           <ion-segment-button [value]="ListTab.Groups">
             <ion-label>
               {{ 'chats.list.tabs.groups' | transloco }}
-              @if (tabMentions().groups) {
+              @if (tabBadges().groups.mention) {
                 <ion-badge>@</ion-badge>
-              } @else if (groupUnread(); as count) {
+              } @else if (tabBadges().groups.count; as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>
@@ -56,9 +56,9 @@
           <ion-segment-button [value]="ListTab.Friends">
             <ion-label>
               {{ 'chats.list.tabs.friends' | transloco }}
-              @if (tabMentions().friends) {
+              @if (tabBadges().friends.mention) {
                 <ion-badge>@</ion-badge>
-              } @else if (friendUnread(); as count) {
+              } @else if (tabBadges().friends.count; as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>
@@ -66,9 +66,9 @@
           <ion-segment-button [value]="ListTab.Threads">
             <ion-label>
               {{ 'chats.list.tabs.threads' | transloco }}
-              @if (tabMentions().threads) {
+              @if (tabBadges().threads.mention) {
                 <ion-badge>@</ion-badge>
-              } @else if (threadUnread(); as count) {
+              } @else if (tabBadges().threads.count; as count) {
                 <ion-badge>{{ count }}</ion-badge>
               }
             </ion-label>

@@ -39,7 +39,6 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { conversationView } from '../conversation-views';
 import { ChatListStore } from '../chat-list-store';
 import { AvatarColor, AvatarTextPipe } from '../avatar-text.pipe';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
@@ -91,19 +90,7 @@ export class ChatList {
   private previousTab?: ListTab;
   protected readonly lists = inject(ChatListStore);
   private readonly preferences = inject(Preferences);
-  private summary(tab: ListTab) {
-    return this.lists.summary(conversationView({ ...this.list(), tab }, this.preferences.showThreadsInMessages()));
-  }
-  protected readonly messageUnread = computed(() => this.summary(ListTab.Messages)?.unreadUnmutedConversationCount);
-  protected readonly groupUnread = computed(() => this.summary(ListTab.Groups)?.unreadUnmutedConversationCount);
-  protected readonly friendUnread = computed(() => this.summary(ListTab.Friends)?.unreadUnmutedConversationCount);
-  protected readonly threadUnread = computed(() => this.summary(ListTab.Threads)?.unreadUnmutedConversationCount);
-  protected readonly tabMentions = computed(() => ({
-    messages: !!this.summary(ListTab.Messages)?.unreadUnmutedAttentionCount,
-    groups: !!this.summary(ListTab.Groups)?.unreadUnmutedAttentionCount,
-    friends: !!this.summary(ListTab.Friends)?.unreadUnmutedAttentionCount,
-    threads: !!this.summary(ListTab.Threads)?.unreadUnmutedAttentionCount,
-  }));
+  protected readonly tabBadges = computed(() => this.lists.tabBadges(this.preferences.showThreadsInMessages()));
 
   constructor() {
     effect((onCleanup) => {
