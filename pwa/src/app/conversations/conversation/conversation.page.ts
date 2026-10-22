@@ -71,7 +71,6 @@ import {
   ellipsisVertical,
   informationCircleOutline,
   listOutline,
-  starOutline,
   searchOutline,
   notificationsOutline,
   notificationsOffOutline,
@@ -603,7 +602,11 @@ export class ConversationPage {
     if (!this.threadId()) return undefined;
     const status = this.subscription();
     if (!status?.subscribed)
-      return { kind: ThreadActionKind.Subscribe, icon: starOutline, label: 'conversation.actions.subscribeThread' };
+      return {
+        kind: ThreadActionKind.Subscribe,
+        icon: notificationsOutline,
+        label: 'conversation.actions.subscribeThread',
+      };
     return status.archived
       ? { kind: ThreadActionKind.Unarchive, icon: archive, label: 'conversation.actions.unarchiveThread' }
       : { kind: ThreadActionKind.Archive, icon: archiveOutline, label: 'conversation.actions.archiveThread' };

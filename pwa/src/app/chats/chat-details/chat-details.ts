@@ -49,7 +49,7 @@ import {
   globeOutline,
   banOutline,
   personRemoveOutline,
-  starOutline,
+  notificationsOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { BlocksService } from '../../../generated/endpoints/blocks/blocks.service';
@@ -162,7 +162,7 @@ export class ChatDetails {
   protected readonly icons = {
     archive,
     archiveOutline,
-    starOutline,
+    notificationsOutline,
     exitOutline,
     personRemoveOutline,
     linkOutline,
