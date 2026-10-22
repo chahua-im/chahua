@@ -3684,6 +3684,38 @@ describe('ConversationPage', () => {
     expect(component['isReadByPeer'](testMessage)).toBe(false);
   });
 
+  it('ignores own and unrelated receipt scopes and shares lifecycle requests', async () => {
+    TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
+    fixture.detectChanges();
+    component['invalidateReadReceipt']();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    await fixture.whenStable();
+    events.next({
+      type: ServerWsMessageType.readReceiptChanged,
+      payload: { chatId: testChat.id, readerUid: testUser.uid },
+    });
+    events.next({
+      type: ServerWsMessageType.readReceiptChanged,
+      payload: { chatId: testChat.id, readerUid: 2, threadRootId: encodeId('99') },
+    });
+    http.expectNone(() => true);
+    const entering = enterThread();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({});
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    await entering;
+    events.next({
+      type: ServerWsMessageType.readReceiptChanged,
+      payload: { chatId: testChat.id, readerUid: 2, threadRootId: encodeId('100') },
+    });
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`).flush({ lastReadMessageId: '102' });
+    http.expectNone(`/_api/chats/${wireChat.id}/read-receipt`);
+    await fixture.whenStable();
+    events.next({ type: ServerWsMessageType.readReceiptChanged, payload: { chatId: testChat.id, readerUid: 2 } });
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({ lastReadMessageId: '100' });
+    http.expectNone(`/_api/chats/${wireChat.id}/read-receipt?threadId=100`);
+    await fixture.whenStable();
+  });
+
   it('uses separate DM and thread receipts for the root and replies, without reading another thread', async () => {
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
     fixture.detectChanges();

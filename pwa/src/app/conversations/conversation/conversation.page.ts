@@ -442,6 +442,7 @@ export class ConversationPage {
     computation: (): SnowflakeID | undefined => undefined,
   });
   private receiptRequestVersion = 0;
+  private receiptRequest?: { key: string; again: number };
   protected readonly isReadByPeer = (message: MessageContent) => {
     const threadId = this.threadId();
     const receipt =
@@ -452,36 +453,52 @@ export class ConversationPage {
           : undefined;
     return !!receipt && !!message.id && message.id <= receipt;
   };
-  private async refreshReadReceipt(clear = false) {
+  private async refreshReadReceipt(clear = false, changed = false, mask = 3) {
     const scope = this.receiptScope();
+    const key = this.receiptScopeKey();
+    if (!clear && key && this.receiptRequest?.key === key) {
+      if (changed) this.receiptRequest.again |= mask;
+      return;
+    }
     const version = ++this.receiptRequestVersion;
     if (clear) {
       this.readReceiptId.set(undefined);
       this.rootReadReceiptId.set(undefined);
     }
-    if (!scope || !this.active()) return;
+    if (!scope || !this.active() || !key) return;
+    const request = { key, again: mask };
+    this.receiptRequest = request;
     try {
-      const receipts = await firstValueFrom(
-        forkJoin({
-          scope: this.api.getChatReadReceipt(scope.chatId, scope.threadId ? { threadId: scope.threadId } : undefined),
-          root: scope.threadId ? this.api.getChatReadReceipt(scope.chatId) : of(undefined),
-        }).pipe(takeUntilDestroyed(this.destroyRef)),
-      );
-      const current = this.receiptScope();
-      if (
-        version === this.receiptRequestVersion &&
-        current &&
-        current.chatId === scope.chatId &&
-        current.threadId === scope.threadId &&
-        current.uid === scope.uid &&
-        this.active() &&
-        !this.destroyRef.destroyed
-      ) {
-        this.readReceiptId.set(receipts.scope.lastReadMessageId);
-        this.rootReadReceiptId.set(receipts.root?.lastReadMessageId);
-      }
+      do {
+        const requested = request.again;
+        request.again = 0;
+        const receipts = await firstValueFrom(
+          forkJoin({
+            scope:
+              requested & 1
+                ? this.api.getChatReadReceipt(scope.chatId, scope.threadId ? { threadId: scope.threadId } : undefined)
+                : of(undefined),
+            root: requested & 2 && scope.threadId ? this.api.getChatReadReceipt(scope.chatId) : of(undefined),
+          }).pipe(takeUntilDestroyed(this.destroyRef)),
+        );
+        const current = this.receiptScope();
+        if (
+          version === this.receiptRequestVersion &&
+          current &&
+          current.chatId === scope.chatId &&
+          current.threadId === scope.threadId &&
+          current.uid === scope.uid &&
+          this.active() &&
+          !this.destroyRef.destroyed
+        ) {
+          if (receipts.scope) this.readReceiptId.set(receipts.scope.lastReadMessageId);
+          if (receipts.root) this.rootReadReceiptId.set(receipts.root.lastReadMessageId);
+        }
+      } while (request.again && this.receiptRequest === request && this.active() && key === this.receiptScopeKey());
     } catch {
       // A failed refresh preserves a known authorized receipt; a privacy invalidation already cleared it.
+    } finally {
+      if (this.receiptRequest === request) this.receiptRequest = undefined;
     }
   }
   private invalidateReadReceipt(privacyChanged = false) {
@@ -725,8 +742,14 @@ export class ConversationPage {
       else if (!this.threadId()) void this.chatInfo.scheduleReadState(this.id()).catch(() => {});
     });
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
-      if (event.type === ServerWsMessageType.readReceiptChanged && event.payload.chatId === this.id())
-        this.invalidateReadReceipt(event.payload.privacyChanged === true);
+      if (event.type === ServerWsMessageType.readReceiptChanged && event.payload.chatId === this.id()) {
+        const { readerUid, threadRootId, privacyChanged } = event.payload;
+        if (privacyChanged || readerUid == null) void this.refreshReadReceipt(privacyChanged === true, true);
+        else if (readerUid !== this.session.user()?.uid) {
+          if ((threadRootId ?? undefined) === this.threadId()) void this.refreshReadReceipt(false, true, 1);
+          else if (!threadRootId && this.threadId()) void this.refreshReadReceipt(false, true, 2);
+        }
+      }
       if ('chatId' in event.payload && event.payload.chatId === this.id()) {
         if (event.type === ServerWsMessageType.messageDeleted) this.dismissMentions([event.payload.id]);
         if (event.type === ServerWsMessageType.messagesBulkDeleted) this.dismissMentions(event.payload.messageIds);

@@ -655,6 +655,8 @@ async fn post_message(
             &state.ws_registry,
             chat_id,
             false,
+            Some(uid),
+            None,
         )?;
     }
 
@@ -1006,6 +1008,8 @@ pub(super) async fn post_thread_message(
             &state.ws_registry,
             chat_id,
             false,
+            Some(uid),
+            Some(thread_id),
         )?;
     }
 

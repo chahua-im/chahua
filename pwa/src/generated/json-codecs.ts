@@ -204,6 +204,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   },
   ReadReceiptChangedPayload: {
     chatId: 1,
+    threadRootId: 1,
   },
   ReadReceiptResponse: {
     lastReadMessageId: 1,

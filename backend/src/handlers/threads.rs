@@ -309,6 +309,8 @@ async fn mark_thread_read(
             &state.ws_registry,
             chat_id,
             false,
+            Some(uid),
+            Some(thread_root_id),
         )?;
     }
     state.ws_registry.invalidate_unread(&[uid]);
@@ -427,6 +429,8 @@ async fn mark_thread_read_in_chat(
             &state.ws_registry,
             chat_id,
             false,
+            Some(uid),
+            Some(thread_root_id),
         )?;
     }
     state.ws_registry.invalidate_unread(&[uid]);

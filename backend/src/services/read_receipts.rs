@@ -316,12 +316,16 @@ pub fn broadcast_read_receipt_changed_if_dm(
     registry: &Arc<ConnectionRegistry>,
     chat_id: i64,
     privacy_changed: bool,
+    reader_uid: Option<i32>,
+    thread_root_id: Option<i64>,
 ) -> Result<(), diesel::result::Error> {
     let Some(participants) = dm_participants(conn, chat_id)? else {
         return Ok(());
     };
     let message = Arc::new(ServerWsMessage::ReadReceiptChanged(
         ReadReceiptChangedPayload {
+            reader_uid,
+            thread_root_id,
             chat_id,
             privacy_changed: privacy_changed.then_some(true),
         },
@@ -374,6 +378,8 @@ pub fn broadcast_global_privacy_changed(
     for (chat_id, peer_uid) in dm_chats {
         let message = Arc::new(ServerWsMessage::ReadReceiptChanged(
             ReadReceiptChangedPayload {
+                reader_uid: None,
+                thread_root_id: None,
                 chat_id,
                 privacy_changed: Some(true),
             },
@@ -391,7 +397,7 @@ pub fn broadcast_pair_privacy_changed(
     peer_uid: i32,
 ) -> Result<(), diesel::result::Error> {
     if let Some(chat_id) = dm_chat_id_for_pair(conn, uid, peer_uid)? {
-        broadcast_read_receipt_changed_if_dm(conn, registry, chat_id, true)?;
+        broadcast_read_receipt_changed_if_dm(conn, registry, chat_id, true, None, None)?;
     }
     Ok(())
 }

@@ -15,4 +15,7 @@ import type { SnowflakeID } from './snowflakeID';
 export interface ReadReceiptChangedPayload {
   chatId: SnowflakeID;
   privacyChanged?: boolean;
+  /** Reader whose cursor advanced. Absent for legacy or privacy invalidations. */
+  readerUid?: number;
+  threadRootId?: SnowflakeID;
 }

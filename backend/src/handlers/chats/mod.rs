@@ -445,6 +445,8 @@ async fn mark_as_read(
             &state.ws_registry,
             chat_id,
             false,
+            Some(uid),
+            None,
         )?;
     }
 

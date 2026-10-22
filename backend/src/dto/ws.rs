@@ -253,6 +253,15 @@ pub struct ReadReceiptChangedPayload {
     pub chat_id: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub privacy_changed: Option<bool>,
+    /// Reader whose cursor advanced. Absent for legacy or privacy invalidations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reader_uid: Option<i32>,
+    #[serde(
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub thread_root_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -490,6 +499,8 @@ mod tests {
     fn read_receipt_invalidation_never_serializes_a_cursor() {
         let ordinary = serde_json::to_value(ServerWsMessage::ReadReceiptChanged(
             ReadReceiptChangedPayload {
+                reader_uid: None,
+                thread_root_id: None,
                 chat_id: 9_223_372_036_854_775_807,
                 privacy_changed: None,
             },
@@ -503,6 +514,8 @@ mod tests {
 
         let privacy_changed = serde_json::to_value(ServerWsMessage::ReadReceiptChanged(
             ReadReceiptChangedPayload {
+                reader_uid: None,
+                thread_root_id: None,
                 chat_id: 7,
                 privacy_changed: Some(true),
             },
