@@ -53,7 +53,16 @@ export function placeholderMessage(message: MessageResponse, reason: ForwardPlac
 
 export enum ForwardSelectionError {
   Unavailable = 'messages.forward.unavailable',
+  Stale = 'messages.forward.invalid',
+  TopicUnavailable = 'messages.forward.topicUnavailable',
+  TooMany = 'messages.forward.topicTooMany',
+  LoadFailed = 'messages.forward.topicLoadFailed',
 }
+
+export type ForwardSourcesResult = { sources: readonly ForwardSource[] } | { error: ForwardSelectionError };
+
+/** Reads the current sources when a target is chosen, so a growing topic is sent as it is then. */
+export type ForwardSourcesLoader = () => Promise<ForwardSourcesResult>;
 
 export function canForward(message: MessageContent): boolean {
   return (

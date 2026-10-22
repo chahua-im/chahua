@@ -18,15 +18,15 @@
         [placeholder]="'messages.forward.search' | transloco" />
     </ion-header>
     <ion-content appScrollbars>
-      @if (invalid()) {
-        <p class="ion-padding">{{ 'messages.forward.invalid' | transloco }}</p>
+      @if (failure(); as failure) {
+        <p class="ion-padding">{{ failure | transloco: { max: maxForwardMessages } }}</p>
       }
       @if (loading() && !targets().length) {
         <div class="page-loading"><ion-spinner /></div>
       } @else {
         <ion-list>
           @for (target of targets(); track target.threadId ?? target.chatId) {
-            <ion-item [button]="true" [disabled]="invalid() || submitted()" (click)="select(target)">
+            <ion-item [button]="true" [disabled]="invalid() || submitted() || resolving()" (click)="select(target)">
               <app-chat-avatar slot="start" [entry]="target.avatar" [size]="40" />
               <ion-label>
                 <h3>{{ target.name ?? ('conversation.chat' | transloco) }}</h3>

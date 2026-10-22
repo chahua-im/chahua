@@ -375,6 +375,11 @@
 }
 
 <ng-template #actions>
+  @if (canForwardTopic()) {
+    <ion-button [title]="'messages.forward.action' | transloco" (click)="openTopicForward()">
+      <ion-icon slot="icon-only" [icon]="toolbarIcons.forwardOutline" />
+    </ion-button>
+  }
   <ion-button (click)="search()">
     <ion-icon slot="icon-only" [icon]="toolbarIcons.searchOutline" />
   </ion-button>
@@ -413,6 +418,12 @@
 <ion-popover #actionsMenu side="bottom" alignment="end" [arrow]="false" [dismissOnSelect]="true">
   <ng-template>
     <ion-list class="actions-menu" lines="none">
+      @if (canForwardTopic()) {
+        <ion-item [button]="true" (click)="openTopicForward()">
+          <ion-icon slot="start" [icon]="toolbarIcons.forwardOutline" />
+          <ion-label>{{ 'messages.forward.action' | transloco }}</ion-label>
+        </ion-item>
+      }
       <ion-item [button]="true" (click)="search()">
         <ion-icon slot="start" [icon]="toolbarIcons.searchOutline" />
         <ion-label>{{ 'conversation.actions.search' | transloco }}</ion-label>
@@ -457,6 +468,13 @@
 
 @if (forwardSources().length) {
   <app-forward-picker [messages]="forwardSources()" (forwarded)="cancelSelection()" (closed)="forwardSources.set([])" />
+}
+
+@if (topicForwardOpen()) {
+  <app-forward-picker
+    [load]="loadTopicSources"
+    (forwarded)="topicForwardOpen.set(false)"
+    (closed)="topicForwardOpen.set(false)" />
 }
 
 <ion-alert

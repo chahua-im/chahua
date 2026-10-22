@@ -6,6 +6,7 @@ import {
   forwardSourceMessage,
   ForwardSelectionError,
   MAX_FORWARD_MESSAGES,
+  type ForwardSourcesResult,
 } from '../../messages/forwarding';
 import { userColors } from '../../messages/user-colors';
 import { DOCUMENT, Location, NgTemplateOutlet } from '@angular/common';
@@ -217,6 +218,7 @@ export class ConversationPage {
   }
   protected readonly toolbarIcons = {
     searchOutline,
+    forwardOutline: arrowRedoOutline,
     notificationsOutline,
     notificationsOffOutline,
     chevronBack,
@@ -332,6 +334,7 @@ export class ConversationPage {
   protected readonly selecting = signal(false);
   protected readonly selectedMessages = signal<ReadonlyMap<SnowflakeID | string, SelectedMessage>>(new Map());
   protected readonly forwardSources = signal<readonly SelectedMessage[]>([]);
+  protected readonly topicForwardOpen = signal(false);
   protected readonly selectionLimit = MAX_FORWARD_MESSAGES;
   protected readonly canSelect = (source: SelectedMessage) => {
     const message = forwardSourceMessage(source);
@@ -509,6 +512,40 @@ export class ConversationPage {
           this.loadedThreadRoot())
       : undefined;
   });
+  /** Root plus replies; a root without threadInfo has no live replies. */
+  private readonly topicMessageCount = computed(() => {
+    const rootId = this.threadId();
+    if (!rootId) return undefined;
+    const root = this.threadRoot();
+    if (root && 'threadInfo' in root) return (root.threadInfo?.replyCount ?? 0) + 1;
+    const replies = this.chatInfo.thread(rootId)?.replyCount;
+    if (replies != null) return replies + 1;
+    return root ? 1 : undefined;
+  });
+  protected readonly canForwardTopic = computed(() => {
+    const count = this.topicMessageCount();
+    return count != null && count <= MAX_FORWARD_MESSAGES;
+  });
+  protected openTopicForward() {
+    if (this.canForwardTopic()) this.topicForwardOpen.set(true);
+  }
+  /** Read the topic again when a target is chosen so the merge uses every forwardable message present then. */
+  protected readonly loadTopicSources = async (): Promise<ForwardSourcesResult> => {
+    const threadId = this.threadId();
+    if (!threadId) return { error: ForwardSelectionError.TopicUnavailable };
+    try {
+      const page = await firstValueFrom(
+        this.api
+          .getMessages(this.id(), { threadId, max: MAX_FORWARD_MESSAGES })
+          .pipe(takeUntilDestroyed(this.destroyRef)),
+      );
+      return page.olderCursor
+        ? { error: ForwardSelectionError.TooMany }
+        : { sources: page.messages.filter((message) => this.canSelect(message)) };
+    } catch {
+      return { error: ForwardSelectionError.LoadFailed };
+    }
+  };
   private async loadThreadRoot() {
     const entry = this.entryKey();
     if (!entry.threadId || this.threadRoot()) return;
@@ -1156,6 +1193,7 @@ export class ConversationPage {
     }
     this.cancelSelection();
     this.forwardSources.set([]);
+    this.topicForwardOpen.set(false);
     this.menu()?.reset();
     if (!retainComposer) this.composer()?.reset();
   }
