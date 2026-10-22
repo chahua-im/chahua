@@ -28,6 +28,8 @@ import { Preferences } from '../../settings/preferences';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
 import { ChatListStore, FriendRequestAction, type ChatListError } from '../chat-list-store';
 import { ChatStore, type ChatInfo } from '../chat-store';
+import { MessageDelivery } from '../../messages/message-delivery';
+import { MessageStatus } from '../../messages/message-status/message-status';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { listSelection, ListTab } from '../list-tabs';
 import { ChatListContent } from './chat-list-content';
@@ -697,6 +699,89 @@ describe('ChatListContent', () => {
     expect(conversationRow().nativeElement.querySelector('ion-label p').textContent.trim()).toBe('消息已删除');
   });
 
+  it.each([false, true])('hides delivery status when a draft replaces the preview (thread: %s)', (inThread) => {
+    const own = { ...testMessage, sender: testUser, mentions: [] };
+    if (inThread) {
+      preferences.showThreadsInMessages.set(true);
+      chats.items.set([]);
+      threads.items.set([{ ...thread, chatKind: GroupKind.dm, lastReply: own, peerLastReadMessageId: own.id }]);
+    } else {
+      chats.items.set([{ ...testChat, kind: GroupKind.dm, lastMessage: own, peerLastReadMessageId: own.id }]);
+    }
+    TestBed.inject(DraftStore).save(testChat.id, inThread ? thread.threadRootMessage.id : undefined, 'not sent yet');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('not sent yet');
+    expect(fixture.nativeElement.querySelector('app-message-status')).toBeNull();
+    TestBed.inject(DraftStore).clear(testChat.id, inThread ? thread.threadRootMessage.id : undefined);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-message-status')).not.toBeNull();
+  });
+
+  it('labels delivery only after my own last message and reads the DM receipt', () => {
+    const own = { ...testMessage, sender: testUser, mentions: [] };
+    const dm = {
+      ...testChat,
+      kind: GroupKind.dm,
+      peer: { uid: 2, username: '小花', gender: 0 },
+      lastMessage: own,
+    };
+    chats.items.set([dm]);
+    fixture.detectChanges();
+    const sent = (conversationRow().componentInstance as ChatListItem).entry();
+    expect(sent.delivery).toBe(MessageDelivery.Sent);
+    expect(sent.read).toBeUndefined();
+
+    chats.items.set([{ ...dm, peerLastReadMessageId: own.id }]);
+    fixture.detectChanges();
+    const read = (conversationRow().componentInstance as ChatListItem).entry();
+    expect(read.delivery).toBe(MessageDelivery.Sent);
+    expect(read.read).toBe(true);
+
+    chats.items.set([{ ...dm, lastMessage: { ...own, sender: { uid: 2, name: '小花', gender: 0 } } }]);
+    fixture.detectChanges();
+    expect((conversationRow().componentInstance as ChatListItem).entry().delivery).toBeUndefined();
+
+    outbox.items.set([
+      {
+        chatId: testChat.id,
+        cancelled: () => false,
+        delivery: () => MessageDelivery.Sending,
+        message: () => own,
+      } as unknown as OutgoingMessage,
+    ]);
+    fixture.detectChanges();
+    expect((conversationRow().componentInstance as ChatListItem).entry().delivery).toBe(MessageDelivery.Sending);
+  });
+
+  it.each([false, true])('uses the receipt for a confirmed outbox preview (thread: %s)', (inThread) => {
+    const own = { ...testMessage, sender: testUser, mentions: [], createdAt: '2026-10-23T12:00:00Z' };
+    if (inThread) {
+      preferences.showThreadsInMessages.set(true);
+      chats.items.set([]);
+      threads.items.set([{ ...thread, chatKind: GroupKind.dm, peerLastReadMessageId: own.id }]);
+    } else {
+      chats.items.set([{ ...testChat, kind: GroupKind.dm, peerLastReadMessageId: own.id }]);
+    }
+    const delivery = signal(MessageDelivery.Sent);
+    outbox.items.set([
+      {
+        chatId: testChat.id,
+        threadId: inThread ? thread.threadRootMessage.id : undefined,
+        cancelled: () => false,
+        delivery,
+        message: () => own,
+      } as unknown as OutgoingMessage,
+    ]);
+    fixture.detectChanges();
+    const status = fixture.debugElement.query(By.directive(MessageStatus)).componentInstance as MessageStatus;
+    expect(status.delivery()).toBe(MessageDelivery.Sent);
+    expect(status.read()).toBe(true);
+    delivery.set(MessageDelivery.Sending);
+    fixture.detectChanges();
+    expect(status.delivery()).toBe(MessageDelivery.Sending);
+    expect(status.read()).toBe(false);
+  });
+
   it('returns a reselected conversation to its latest message', () => {
     (conversationRow().componentInstance as ChatListItem).selected.emit();
     expect(navigation.goTo).toHaveBeenCalledWith(testChat.id, { type: ConversationTargetKind.Latest });
@@ -1014,6 +1099,7 @@ describe('ChatListContent', () => {
         chatId: testChat.id,
         threadId: thread.threadRootMessage.id,
         cancelled: () => false,
+        delivery: () => MessageDelivery.Sending,
         message: () => pending,
       } as unknown as OutgoingMessage,
     ]);
@@ -1041,7 +1127,12 @@ describe('ChatListContent', () => {
       message: '刚发出的消息',
     };
     outbox.items.set([
-      { chatId: testChat.id, cancelled: () => false, message: () => pending } as unknown as OutgoingMessage,
+      {
+        chatId: testChat.id,
+        cancelled: () => false,
+        delivery: () => MessageDelivery.Sending,
+        message: () => pending,
+      } as unknown as OutgoingMessage,
     ]);
     fixture.detectChanges();
     const rows = fixture.componentInstance['rows']();

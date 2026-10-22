@@ -6,6 +6,7 @@
 
 use diesel::prelude::*;
 use diesel::PgConnection;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::dto::ws::{ReadReceiptChangedPayload, ServerWsMessage};
@@ -289,6 +290,194 @@ pub fn get_read_receipt(
             .flatten(),
     };
     Ok(receipt)
+}
+
+/// DM chats in `chat_ids` whose peer receipt is visible to `viewer_uid`.
+fn visible_dm_peers(
+    conn: &mut PgConnection,
+    viewer_uid: i32,
+    chat_ids: &[i64],
+) -> Result<HashMap<i64, i32>, diesel::result::Error> {
+    if chat_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = groups::table
+        .filter(groups::id.eq_any(chat_ids))
+        .filter(groups::kind.eq(GroupKind::Dm))
+        .select((groups::id, groups::dm_uid1, groups::dm_uid2))
+        .load::<(i64, Option<i32>, Option<i32>)>(conn)?;
+    let mut peers = HashMap::new();
+    for (chat_id, first, second) in rows {
+        let (Some(first), Some(second)) = (first, second) else {
+            continue;
+        };
+        let peer = if first == viewer_uid {
+            second
+        } else if second == viewer_uid {
+            first
+        } else {
+            continue;
+        };
+        peers.insert(chat_id, peer);
+    }
+    if peers.is_empty() {
+        return Ok(peers);
+    }
+
+    let peer_uids: Vec<i32> = peers
+        .values()
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let friend_rows = friendships::table
+        .filter(
+            friendships::uid1
+                .eq(viewer_uid)
+                .and(friendships::uid2.eq_any(&peer_uids))
+                .or(friendships::uid2
+                    .eq(viewer_uid)
+                    .and(friendships::uid1.eq_any(&peer_uids))),
+        )
+        .select((
+            friendships::uid1,
+            friendships::uid2,
+            friendships::uid1_shares_read_receipts,
+            friendships::uid2_shares_read_receipts,
+        ))
+        .load::<(i32, i32, Option<bool>, Option<bool>)>(conn)?;
+    let friendship_map: HashMap<(i32, i32), (Option<bool>, Option<bool>)> = friend_rows
+        .into_iter()
+        .map(|(uid1, uid2, uid1_override, uid2_override)| {
+            ((uid1, uid2), (uid1_override, uid2_override))
+        })
+        .collect();
+    let blocked_pairs: HashSet<(i32, i32)> = blocks::table
+        .filter(
+            blocks::blocker_uid
+                .eq(viewer_uid)
+                .and(blocks::blocked_uid.eq_any(&peer_uids))
+                .or(blocks::blocker_uid
+                    .eq_any(&peer_uids)
+                    .and(blocks::blocked_uid.eq(viewer_uid))),
+        )
+        .select((blocks::blocker_uid, blocks::blocked_uid))
+        .load::<(i32, i32)>(conn)?
+        .into_iter()
+        .map(|(blocker, blocked)| canonical_pair(blocker, blocked))
+        .collect();
+
+    let mut visibility_uids = peer_uids;
+    visibility_uids.push(viewer_uid);
+    let visibility_map: HashMap<i32, ReadReceiptVisibility> = user_extra::table
+        .filter(user_extra::uid.eq_any(&visibility_uids))
+        .select((user_extra::uid, user_extra::read_receipt_visibility))
+        .load::<(i32, ReadReceiptVisibility)>(conn)?
+        .into_iter()
+        .collect();
+    let viewer_visibility = visibility_map
+        .get(&viewer_uid)
+        .copied()
+        .unwrap_or(ReadReceiptVisibility::Friends);
+    peers.retain(|_, peer| {
+        let pair = canonical_pair(viewer_uid, *peer);
+        let Some((uid1_override, uid2_override)) = friendship_map.get(&pair) else {
+            return false;
+        };
+        let (viewer_override, peer_override) = if pair.0 == viewer_uid {
+            (*uid1_override, *uid2_override)
+        } else {
+            (*uid2_override, *uid1_override)
+        };
+        let peer_visibility = visibility_map
+            .get(peer)
+            .copied()
+            .unwrap_or(ReadReceiptVisibility::Friends);
+        read_receipt_is_visible(
+            true,
+            blocked_pairs.contains(&pair),
+            viewer_visibility,
+            viewer_override,
+            peer_visibility,
+            peer_override,
+        )
+    });
+    Ok(peers)
+}
+
+/// Peer receipts for a page of DM chats, keyed by chat id.
+pub fn visible_chat_receipts(
+    conn: &mut PgConnection,
+    viewer_uid: i32,
+    chat_ids: &[i64],
+) -> Result<HashMap<i64, i64>, diesel::result::Error> {
+    let peers = visible_dm_peers(conn, viewer_uid, chat_ids)?;
+    if peers.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let chat_ids: Vec<i64> = peers.keys().copied().collect();
+    let peer_uids: Vec<i32> = peers
+        .values()
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let rows = group_membership::table
+        .filter(group_membership::chat_id.eq_any(&chat_ids))
+        .filter(group_membership::uid.eq_any(&peer_uids))
+        .select((
+            group_membership::chat_id,
+            group_membership::uid,
+            group_membership::last_read_receipt_message_id,
+        ))
+        .load::<(i64, i32, Option<i64>)>(conn)?;
+    Ok(rows
+        .into_iter()
+        .filter(|(chat_id, uid, _)| peers.get(chat_id) == Some(uid))
+        .filter_map(|(chat_id, _, receipt)| receipt.map(|receipt| (chat_id, receipt)))
+        .collect())
+}
+
+/// Peer receipts for a page of DM thread scopes, keyed by thread root id.
+pub fn visible_thread_receipts(
+    conn: &mut PgConnection,
+    viewer_uid: i32,
+    scopes: &[(i64, i64)],
+) -> Result<HashMap<i64, i64>, diesel::result::Error> {
+    let chat_ids: Vec<i64> = scopes
+        .iter()
+        .map(|(chat_id, _)| *chat_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let peers = visible_dm_peers(conn, viewer_uid, &chat_ids)?;
+    if peers.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let chat_ids: Vec<i64> = peers.keys().copied().collect();
+    let root_ids: Vec<i64> = scopes.iter().map(|(_, root_id)| *root_id).collect();
+    let peer_uids: Vec<i32> = peers
+        .values()
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let rows = thread_user_states::table
+        .filter(thread_user_states::chat_id.eq_any(&chat_ids))
+        .filter(thread_user_states::thread_root_id.eq_any(&root_ids))
+        .filter(thread_user_states::uid.eq_any(&peer_uids))
+        .select((
+            thread_user_states::chat_id,
+            thread_user_states::thread_root_id,
+            thread_user_states::uid,
+            thread_user_states::last_read_receipt_message_id,
+        ))
+        .load::<(i64, i64, i32, Option<i64>)>(conn)?;
+    Ok(rows
+        .into_iter()
+        .filter(|(chat_id, _, uid, _)| peers.get(chat_id) == Some(uid))
+        .filter_map(|(_, root_id, _, receipt)| receipt.map(|receipt| (root_id, receipt)))
+        .collect())
 }
 
 /// Find the persisted DM for a participant pair, including former friendships.

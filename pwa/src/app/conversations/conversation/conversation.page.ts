@@ -666,6 +666,7 @@ export class ConversationPage {
         const requested = request.again;
         request.again = 0;
         this.receiptFresh.update((fresh) => fresh & ~requested);
+        const listVersion = this.chatInfo.snapshot();
         const receipts = await firstValueFrom(
           forkJoin({
             scope:
@@ -685,8 +686,14 @@ export class ConversationPage {
           this.active() &&
           !this.destroyRef.destroyed
         ) {
-          if (receipts.scope) this.readReceiptId.set(receipts.scope.lastReadMessageId);
-          if (receipts.root) this.rootReadReceiptId.set(receipts.root.lastReadMessageId);
+          if (receipts.scope) {
+            this.readReceiptId.set(receipts.scope.lastReadMessageId);
+            this.chatInfo.acceptPeerRead(scope.chatId, scope.threadId, receipts.scope.lastReadMessageId, listVersion);
+          }
+          if (receipts.root) {
+            this.rootReadReceiptId.set(receipts.root.lastReadMessageId);
+            this.chatInfo.acceptPeerRead(scope.chatId, undefined, receipts.root.lastReadMessageId, listVersion);
+          }
           this.receiptFresh.update((fresh) => fresh | requested);
         }
       } while (request.again && this.receiptRequest === request && this.active() && key === this.receiptScopeKey());

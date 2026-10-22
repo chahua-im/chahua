@@ -24,6 +24,10 @@ pub struct ChatListItem {
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]
     pub last_read_message_id: Option<i64>,
+    /// The DM peer's authorized read receipt for this chat scope.
+    #[serde(with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub peer_last_read_message_id: Option<i64>,
     pub last_message: Option<MessagePreview>,
     pub muted_until: Option<DateTime<Utc>>,
     pub archived: bool,

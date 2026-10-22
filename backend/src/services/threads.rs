@@ -18,6 +18,7 @@ use crate::services::media::MediaStore;
 use crate::services::messages::{
     build_message_preview, build_sender, extract_mention_uids, MessagePreviewInput,
 };
+use crate::services::read_receipts;
 use crate::services::user::lookup_user_profiles;
 use crate::services::ws_registry::ConnectionRegistry;
 use std::sync::Arc;
@@ -1089,6 +1090,11 @@ pub fn enrich_thread_list(
     }
 
     // 7. Assemble final response
+    let scopes: Vec<(i64, i64)> = rows
+        .iter()
+        .map(|row| (row.chat_id, row.thread_root_id))
+        .collect();
+    let peer_receipts = read_receipts::visible_thread_receipts(conn, uid, &scopes)?;
     let next_cursor = if has_more {
         rows.last().map(|r| r.last_reply_at.to_rfc3339())
     } else {
@@ -1144,6 +1150,7 @@ pub fn enrich_thread_list(
                 unread_mentions: mention_map.get(&row.thread_root_id).copied().unwrap_or(0),
                 unread_reactions: reaction_map.get(&row.thread_root_id).copied().unwrap_or(0),
                 last_read_message_id: row.last_read_message_id,
+                peer_last_read_message_id: peer_receipts.get(&row.thread_root_id).copied(),
                 subscribed_at: row.subscribed_at,
                 archived: row.archived,
             })

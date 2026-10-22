@@ -14,6 +14,7 @@ import {
   type GroupInfoResponse,
   type MarkChatReadStateResponse,
   type MarkThreadReadResponse,
+  type ReadReceiptChangedPayload,
   type MessagePreview,
   type MessageResponse,
   type ThreadListItem,
@@ -94,6 +95,13 @@ export class ChatStore {
   private readonly readStates = signal(
     new Map<SnowflakeID, { state: MarkChatReadStateResponse; version: number; dirty: boolean }>(),
   );
+  /** Peer receipts backing DM previews in the chat list, keyed by chat or thread root. */
+  private readonly peerReads = signal(new Map<SnowflakeID, SnowflakeID | undefined>());
+  private readonly threadPeerReads = signal(new Map<SnowflakeID, SnowflakeID | undefined>());
+  private readonly peerReadVersions = new Map<SnowflakeID, number>();
+  private readonly threadPeerReadVersions = new Map<SnowflakeID, number>();
+  private readonly peerReadRequests = new Map<SnowflakeID, { again: boolean }>();
+  private readonly receiptPrivacyVersions = new Map<SnowflakeID, number>();
   private readonly readOperations = new Map<SnowflakeID, ChatReadOperation>();
   private readonly threadSummaries = signal(new Map<SnowflakeID, { value: ThreadSummary; version: number }>());
   private readonly threadReads = signal(
@@ -146,6 +154,17 @@ export class ChatStore {
 
   invalidateReadReceiptPrivacy(peerUid?: number) {
     this.receiptPrivacyChanges.next(peerUid);
+    const chatIds = new Set([
+      ...[...this.peerReads().keys()].filter((chatId) => this.get(chatId)?.kind === GroupKind.dm),
+      ...[...this.threadSummaries().values()]
+        .filter(({ value }) => value.chatKind === GroupKind.dm)
+        .map(({ value }) => value.chatId),
+    ]);
+    for (const chatId of chatIds) {
+      const peer = this.get(chatId)?.peer?.uid;
+      // Thread-only list snapshots may not contain the DM peer's profile.
+      if (peerUid == null || peer == null || peer === peerUid) this.applyPeerRead({ chatId, privacyChanged: true });
+    }
   }
 
   private readonly muteTime = signal(Date.now());
@@ -218,6 +237,9 @@ export class ChatStore {
         for (const pins of this.pinScopes.values()) pins.receiveChange(event);
       }
       switch (event.type) {
+        case ServerWsMessageType.readReceiptChanged:
+          if (event.payload.privacyChanged) this.applyPeerRead(event.payload);
+          break;
         case ServerWsMessageType.friendshipRemoved:
           void this.relationships.get(event.payload.actorUid)?.refresh();
           break;
@@ -263,8 +285,73 @@ export class ChatStore {
     });
   }
 
+  /** Chat-list previews request the authorized peer receipt after an invalidation event. */
+  applyPeerRead({ chatId, threadRootId, readerUid, privacyChanged }: ReadReceiptChangedPayload) {
+    if (privacyChanged) {
+      this.receiptPrivacyVersions.set(chatId, ++this.version);
+      if (this.peerReads().has(chatId)) void this.refreshPeerRead(chatId, undefined, true);
+      for (const [rootId, { value }] of this.threadSummaries()) {
+        if (value.chatId === chatId && value.chatKind === GroupKind.dm) void this.refreshPeerRead(chatId, rootId, true);
+      }
+      return;
+    }
+    const kind =
+      this.get(chatId)?.kind ?? (threadRootId ? this.threadSummaries().get(threadRootId)?.value.chatKind : undefined);
+    if (kind !== GroupKind.dm || readerUid === this.session.user()?.uid) return;
+    if (threadRootId && !this.threadSummaries().has(threadRootId)) return;
+    void this.refreshPeerRead(chatId, threadRootId);
+  }
+
+  private async refreshPeerRead(chatId: SnowflakeID, threadId?: SnowflakeID, clear = false) {
+    const key = threadId ?? chatId;
+    const reads = threadId ? this.threadPeerReads : this.peerReads;
+    const versions = threadId ? this.threadPeerReadVersions : this.peerReadVersions;
+    versions.set(key, ++this.version);
+    if (clear) reads.update((entries) => new Map(entries).set(key, undefined));
+    const pending = this.peerReadRequests.get(key);
+    if (pending) {
+      pending.again = true;
+      return;
+    }
+    const request = { again: false };
+    this.peerReadRequests.set(key, request);
+    const uid = this.session.user()?.uid;
+    try {
+      do {
+        request.again = false;
+        const version = versions.get(key);
+        try {
+          const receipt = await this.response(this.api.getChatReadReceipt(chatId, threadId ? { threadId } : undefined));
+          if (this.destroyRef.destroyed || this.session.user()?.uid !== uid) return;
+          if (versions.get(key) === version)
+            reads.update((entries) => new Map(entries).set(key, receipt.lastReadMessageId));
+        } catch {
+          // A failed refresh keeps the last authorized receipt; privacy invalidation already cleared it.
+        }
+      } while (request.again && !this.destroyRef.destroyed && this.session.user()?.uid === uid);
+    } finally {
+      this.peerReadRequests.delete(key);
+    }
+  }
+
   snapshot() {
     return ++this.version;
+  }
+
+  /** Reuse an active conversation's authorized response for already loaded list previews. */
+  acceptPeerRead(
+    chatId: SnowflakeID,
+    threadId: SnowflakeID | undefined,
+    readThrough: SnowflakeID | undefined,
+    version: number,
+  ) {
+    const key = threadId ?? chatId;
+    const reads = threadId ? this.threadPeerReads : this.peerReads;
+    const versions = threadId ? this.threadPeerReadVersions : this.peerReadVersions;
+    if (!reads().has(key) || Math.max(versions.get(key) ?? 0, this.receiptPrivacyVersions.get(chatId) ?? 0) > version)
+      return;
+    versions.set(key, version);
+    reads.update((entries) => new Map(entries).set(key, readThrough));
   }
 
   pins(chatId: SnowflakeID, threadId?: SnowflakeID) {
@@ -333,6 +420,7 @@ export class ChatStore {
       ...this.entries().get(id)!,
       ...this.summaries().get(id)!.value,
       ...this.readStates().get(id)!.state,
+      peerLastReadMessageId: this.peerReads().get(id),
     } as ChatListItem;
   }
 
@@ -373,6 +461,16 @@ export class ChatStore {
     }
     this.summaries.set(summaries);
     this.readStates.set(reads);
+    this.peerReads.update((reads) => {
+      const next = new Map(reads);
+      for (const chat of chats) {
+        if (Math.max(this.peerReadVersions.get(chat.id) ?? 0, this.receiptPrivacyVersions.get(chat.id) ?? 0) > version)
+          continue;
+        next.set(chat.id, chat.peerLastReadMessageId);
+        this.peerReadVersions.set(chat.id, version);
+      }
+      return next;
+    });
   }
 
   private receiveMessage(message: MessageResponse) {
@@ -787,7 +885,12 @@ export class ChatStore {
     if (!summary || summary.replyCount === 0) return undefined;
     const status = this.subscriptions().get(rootId)?.status;
     if (status && !status.subscribed) return undefined;
-    return { ...summary, archived: status?.archived ?? false, ...this.threadReads().get(rootId)!.state };
+    return {
+      ...summary,
+      archived: status?.archived ?? false,
+      ...this.threadReads().get(rootId)!.state,
+      peerLastReadMessageId: this.threadPeerReads().get(rootId),
+    };
   }
 
   acceptThreads(threads: readonly ThreadListItem[], version: number, subscriptionVersion: number) {
@@ -817,6 +920,20 @@ export class ChatStore {
     }
     this.threadSummaries.set(summaries);
     this.threadReads.set(reads);
+    this.threadPeerReads.update((reads) => {
+      const next = new Map(reads);
+      for (const thread of threads) {
+        const rootId = thread.threadRootMessage.id;
+        if (
+          Math.max(this.threadPeerReadVersions.get(rootId) ?? 0, this.receiptPrivacyVersions.get(thread.chatId) ?? 0) >
+          version
+        )
+          continue;
+        next.set(rootId, thread.peerLastReadMessageId);
+        this.threadPeerReadVersions.set(rootId, version);
+      }
+      return next;
+    });
   }
 
   invalidateThreadReads(rootIds?: readonly SnowflakeID[]) {

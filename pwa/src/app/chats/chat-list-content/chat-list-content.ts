@@ -53,6 +53,7 @@ import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ConversationNavigation, ConversationTargetKind } from '../../conversations/conversation-navigation';
 import { DraftStore } from '../../conversations/draft-store';
 import type { MessageContent } from '../../messages/message/message';
+import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageOutbox } from '../../messages/message-outbox';
 import { MarkdownSummary } from '../../messages/message-preview/markdown-summary';
 import { Presence } from '../../presence/presence';
@@ -143,21 +144,42 @@ export class ChatListContent {
   protected readonly session = inject(SessionStore);
   /** Submitted messages keep their row current until the shared summary echoes them. */
   private readonly pendingPreviews = computed(() => {
-    const previews = new Map<SnowflakeID, MessageContent>();
+    const previews = new Map<SnowflakeID, { message: MessageContent; delivery: MessageDelivery }>();
     for (const item of this.outbox.items()) {
       if (item.editId || item.cancelled()) continue;
-      const content = item.message();
+      const message = item.message();
       const key = item.threadId ?? item.chatId;
       const current = previews.get(key);
-      if (!current || current.createdAt < content.createdAt) previews.set(key, content);
+      if (!current || current.message.createdAt < message.createdAt)
+        previews.set(key, { message, delivery: item.delivery() });
     }
     return previews;
   });
+  private previewDelivery(
+    preview: Pick<MessageContent, 'sender' | 'id' | 'isDeleted' | 'messageType'> | undefined,
+    pending: { delivery: MessageDelivery } | undefined,
+    readThrough: SnowflakeID | undefined,
+  ): Pick<ChatListEntry, 'delivery' | 'read'> | undefined {
+    if (
+      !preview ||
+      preview.isDeleted ||
+      preview.messageType === MessageType.system ||
+      preview.sender.uid !== this.session.user()?.uid
+    )
+      return undefined;
+    if (pending && pending.delivery !== MessageDelivery.Sent)
+      return pending.delivery === MessageDelivery.Failed ? undefined : { delivery: MessageDelivery.Sending };
+    return readThrough != null && preview.id != null && preview.id <= readThrough
+      ? { delivery: MessageDelivery.Sent, read: true }
+      : { delivery: MessageDelivery.Sent };
+  }
   protected readonly conversationRows = computed(() => {
     const rows = this.visibleConversations().map((chat) => {
       const last = chat.lastMessage;
       const pending = this.pendingPreviews().get(chat.id);
-      const preview = pending && (!chat.lastMessageAt || pending.createdAt > chat.lastMessageAt) ? pending : last;
+      const pendingPreview =
+        pending && (!chat.lastMessageAt || pending.message.createdAt > chat.lastMessageAt) ? pending : undefined;
+      const preview = pendingPreview?.message ?? last;
       const draft = this.drafts.get(chat.id);
       const muted = this.metadata.isMuted(chat.id);
       return {
@@ -169,12 +191,17 @@ export class ChatListContent {
         sortTime: Math.max(
           Date.parse(chat.lastMessageAt ?? '') || -Infinity,
           draft?.savedAt ?? -Infinity,
-          Date.parse(pending?.createdAt ?? '') || -Infinity,
+          Date.parse(pendingPreview?.message.createdAt ?? '') || -Infinity,
         ),
         muted,
         isDm: chat.kind === GroupKind.dm,
         entry: {
           avatar: chat.kind === GroupKind.dm ? chat.peer?.avatarUrl : chat.avatar,
+          ...this.previewDelivery(
+            draft ? undefined : preview,
+            pendingPreview,
+            chat.kind === GroupKind.dm ? chat.peerLastReadMessageId : undefined,
+          ),
           sender:
             !draft && chat.kind === GroupKind.group && preview && preview.messageType !== MessageType.system
               ? (preview.sender.name ?? String(preview.sender.uid))
@@ -203,7 +230,7 @@ export class ChatListContent {
           key: row.key,
           sortTime: row.sortTime,
           summaryAt: row.chat.lastMessageAt,
-          pendingAt: this.pendingPreviews().get(row.chat.id)?.createdAt,
+          pendingAt: this.pendingPreviews().get(row.chat.id)?.message.createdAt,
           draftAt: row.draft?.savedAt,
           previewAt: row.preview?.createdAt,
           preview: row.preview?.message,
@@ -225,7 +252,8 @@ export class ChatListContent {
         const draft = this.drafts.get(thread.chatId, root.id);
         const last = thread.lastReply;
         const pending = this.pendingPreviews().get(root.id);
-        const preview = pending && pending.createdAt > thread.lastReplyAt ? pending : last;
+        const pendingPreview = pending && pending.message.createdAt > thread.lastReplyAt ? pending : undefined;
+        const preview = pendingPreview?.message ?? last;
         const latestAt = preview?.createdAt ?? thread.lastReplyAt;
         const isDm = thread.chatKind === GroupKind.dm;
         const peer = isDm ? thread.participants.find((user) => user.uid !== this.session.user()?.uid) : undefined;
@@ -237,10 +265,15 @@ export class ChatListContent {
           preview,
           sortTime: Math.max(
             Date.parse(thread.lastReplyAt),
-            Date.parse(pending?.createdAt ?? '') || -Infinity,
+            Date.parse(pendingPreview?.message.createdAt ?? '') || -Infinity,
             draft?.savedAt ?? -Infinity,
           ),
           entry: {
+            ...this.previewDelivery(
+              draft ? undefined : preview,
+              pendingPreview,
+              isDm ? thread.peerLastReadMessageId : undefined,
+            ),
             avatarName: isDm
               ? (chat?.peer?.username ?? peer?.name ?? thread.chatName)
               : (chat?.name ?? thread.chatName),

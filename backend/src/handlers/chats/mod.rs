@@ -325,6 +325,9 @@ async fn get_chats(
         })
         .collect();
     let dm_peer_summaries = build_member_summary_map(conn, &state, &dm_peer_uids)?;
+    let chat_ids: Vec<i64> = items_to_process.iter().map(|row| row.0).collect();
+    let peer_receipts =
+        crate::services::read_receipts::visible_chat_receipts(conn, uid, &chat_ids)?;
 
     let chats: Vec<ChatListItem> = items_to_process
         .into_iter()
@@ -369,6 +372,7 @@ async fn get_chats(
                     unread_mentions,
                     unread_reactions,
                     last_read_message_id,
+                    peer_last_read_message_id: peer_receipts.get(&id).copied(),
                     last_message: mr,
                     muted_until,
                     archived,

@@ -38,6 +38,9 @@
         }
         {{ entry().subtitle }}
         <ng-content select="[slot=preview]"></ng-content>
+        @if (entry().delivery != null) {
+          <app-message-status class="delivery" [delivery]="entry().delivery" [read]="entry().read ?? false" />
+        }
       </p>
     </ion-label>
     @if (
