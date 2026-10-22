@@ -77,18 +77,6 @@ pub struct CreateMessageBody {
     pub attachment_ids: Vec<String>,
 }
 
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ForwardMessagesBody {
-    #[serde(with = "crate::serde_i64_string")]
-    #[schema(value_type = String)]
-    pub source_chat_id: i64,
-    #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
-    #[schema(value_type = Vec<String>)]
-    pub message_ids: Vec<i64>,
-    pub client_generated_id: String,
-}
-
 // ---------------------------------------------------------------------------
 
 // Chat listing endpoints

@@ -64,6 +64,18 @@ pub struct MessageResponse {
     pub forwarded_preview: Option<ForwardedMessagesPreviewResponse>,
 }
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardMessagesBody {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub source_chat_id: i64,
+    #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
+    #[schema(value_type = Vec<String>)]
+    pub message_ids: Vec<i64>,
+    pub client_generated_id: String,
+}
+
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ForwardedMessagesPreviewResponse {
@@ -97,7 +109,32 @@ pub struct ForwardedMessagePreviewResponse {
 pub struct ForwardedMessagesPreviewSnapshot {
     pub total: usize,
     pub contains_forwarded_messages: bool,
-    pub messages: Vec<ForwardedBundlePayloadItem>,
+    pub messages: Vec<ForwardedMessagePreviewSnapshot>,
+}
+
+/// Compact immutable data needed to render a forwarded-bundle preview.
+///
+/// The complete payload keeps durable attachment and sticker metadata. Previews
+/// deliberately retain only display data so bundle summaries do not duplicate
+/// storage keys, file details, favorite state, or reply relationships.
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedMessagePreviewSnapshot {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_message_id: i64,
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub original_chat_id: i64,
+    pub message: Option<String>,
+    pub message_type: MessageType,
+    pub sender_uid: i32,
+    pub original_created_at: DateTime<Utc>,
+    pub attachments: Vec<MessagePreviewAttachment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticker: Option<MessagePreviewSticker>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mention_uids: Vec<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]

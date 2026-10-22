@@ -14,11 +14,10 @@ use crate::{
     },
     errors::AppError,
     models::{
-        Attachment, ForwardedBundle, Group, Media, Message, MessageType, NewSavedMessage,
-        SavedMessage, Sticker,
+        Attachment, Group, Media, Message, MessageType, NewSavedMessage, SavedMessage, Sticker,
     },
     schema::{attachments, group_membership, groups, media, messages, saved_messages, stickers},
-    services::messages::{build_mention_info, extract_mention_uids, load_forwarded_bundle},
+    services::messages::{build_mention_info, extract_mention_uids},
     services::{avatars::AvatarService, media::MediaStore, user::lookup_user_profiles},
     utils::{ids, ids::IdGen, pagination::validate_limit},
 };
@@ -190,12 +189,12 @@ fn load_existing_saved_message(
         .map_err(Into::into)
 }
 
-pub fn load_saved_forwarded_bundle(
+pub fn load_saved_forwarded_bundle_id(
     conn: &mut PgConnection,
     uid: i32,
     saved_message_id: i64,
-) -> Result<ForwardedBundle, AppError> {
-    let bundle_id = saved_messages::table
+) -> Result<i64, AppError> {
+    saved_messages::table
         .filter(
             saved_messages::id
                 .eq(saved_message_id)
@@ -205,9 +204,7 @@ pub fn load_saved_forwarded_bundle(
         .first::<Option<i64>>(conn)
         .optional()?
         .flatten()
-        .ok_or(AppError::NotFound("Forwarded messages not found"))?;
-
-    load_forwarded_bundle(conn, bundle_id)
+        .ok_or(AppError::NotFound("Forwarded messages not found"))
 }
 
 fn load_attachment_snapshots(

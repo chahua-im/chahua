@@ -1,6 +1,6 @@
 # Forwarded messages
 
-Backend design and decisions, updated 2026-09-28. Flutter/PWA presentation is outside this backend change.
+Backend design and decisions, updated 2026-10-21. Flutter/PWA presentation is outside this backend change.
 
 ## Contract
 
@@ -9,6 +9,7 @@ Backend design and decisions, updated 2026-09-28. Flutter/PWA presentation is ou
 - Require `clientGeneratedId` alongside `sourceChatId` and `messageIds`.
 - Repeating a successful operation with the same authenticated sender, destination and canonical source selection returns the original message. Reusing its key for different content returns `409`.
 - Retries do not rebuild snapshots, insert another bundle, advance read state again, or repeat delivery effects.
+- New forwards atomically advance the sender's unread and read-receipt cursors; DM receipt invalidations are broadcast after commit.
 - Forwarding creates a top-level message. Destination threads, captions, and reply targets are not supported.
 - Source membership and normal destination send authorization apply to creation. Blocked/unfriended DMs cannot receive forwards.
 - Each bundle is immutable. Message rows and saved-message rows hold bundle foreign keys.
@@ -46,6 +47,8 @@ sequenceDiagram
 A transaction-scoped operation lock serializes concurrent requests using the same retry key. Existing-message uniqueness remains enforced by the database. The operation-key lock is not a source-content lock.
 Retries still require destination send authorization, but do not require the source message to remain visible or source membership to remain present. Conflict paths roll back the transaction.
 
+`services/forwarding.rs` owns selection validation, retry reconciliation, source authorization, and bundle insertion. The HTTP handler owns transaction boundaries, sending, read-state advancement, and post-commit delivery. Capture batches only attachments, sticker snapshots, and referenced previews; it does not hydrate source timelines or query reactions.
+
 **Accepted tradeoff:** source text and dependent metadata are read separately at ordinary database isolation. Concurrent editing can yield a mixed-version capture. No source locking or repeatable-read redesign is included, per the explicit product decision.
 
 ## Durable snapshots and hydration
@@ -78,7 +81,7 @@ Stored sticker data is not a `MessageStickerResponse`. Public URLs and `isFavori
 
 This applies to both chat and saved-forward detail endpoints. Captured sticker metadata preserves the forwarded content without requiring a live sticker row to reconstruct it. Reply previews use the same captured content rather than fetching the original source message again.
 
-Timeline hydration reads only preview JSON/count/child IDs in a batched query. Full payloads are loaded on explicit detail requests. Preview size is bounded by item count (three), not by serialized byte count.
+Timeline hydration reads only compact preview JSON/count/child IDs in a batched query. Stored previews contain display fields, attachment kinds, and sticker emoji—not storage keys, file details, full sticker metadata, or replies. Full payloads are loaded on explicit detail requests. Child access projects only the authorized root's child IDs before loading the requested target. Preview size is bounded by item count (three), not by serialized byte count. Preview query/deserialization failures are logged explicitly rather than silently treated as missing metadata.
 
 ## Reply contract
 
@@ -129,11 +132,15 @@ IDs are serialized as strings. Detail totals count immediate items, not recursiv
 
 Nothing in this feature has been deployed. The intermediate forwarding migrations are replaced by one final-schema migration:
 
-`backend/migrations/2026-09-23-000001-0000_add_forwarded_bundles`
+`backend/migrations/2026-10-21-000002-0000_add_forwarded_bundles`
 
 It adds the forwarded enum value, bundle table (including child IDs and preview), message bundle reference, and saved-message bundle reference. There is no temporary inline-payload column, conversion/backfill, or deployed-data compatibility path.
 
+The migration sorts after `main`'s `2026-10-21-000001-0000_cleanup_reaction_watermark` migration.
+
 **Local databases that applied the old migrations are not automatically upgraded.** Before switching history, back up any valuable local data and revert the old feature migrations using the old checkout, or recreate a disposable development database. Do not merely remove entries from Diesel's migration ledger: the physical schema must match. Rollback retains the unused PostgreSQL enum value, as PostgreSQL does not support dropping an enum value in place.
+
+The compact preview format is also a clean cutover: earlier local forwarding bundles that stored full payload items as previews are not backfilled. Recreate disposable development data before using this checkout with those bundles; preserve valuable data before any reset.
 
 History cleanup preserves the original feature author separately from integration and subsequent correctness work. Backup branches retain the pre-rewrite history. No remote force-push is part of this change.
 
@@ -169,3 +176,26 @@ History cleanup preserves the original feature author separately from integratio
 - Restarting the isolated API with a new media base URL changed URLs for previously saved sticker snapshots.
 
 Migration schema generation reports the existing Diesel distinction between `Array<Int8>` and generated `Array<Nullable<Int8>>` for `child_bundle_ids`; migration execution/rollback was checked independently using a migration-only config. No local development or shared database was migrated.
+
+### Pre-fix rebase verification (2026-10-21)
+
+- Rebased onto `main`; re-dated the forwarding migration after its latest migration.
+- Disposable PostgreSQL 18: all migrations applied in order; the forwarding migration rolled back and reapplied successfully.
+- `cargo build --locked` and `cargo clippy --locked --all-targets -- -D warnings`: passed.
+- `cargo test --locked`: 289 passed, two OpenAPI contract tests failed. The new chat forwarding routes describe chat IDs as integers and reference the unregistered `uid_header` security scheme.
+- Live isolated API: concurrent retry deduplication, changed-selection conflict, source-membership enforcement, anonymous/outsider read rejection, system/invite/unpublished rejection, text/file/audio/sticker snapshots, internal reply previews, external reply redaction, and per-viewer sticker favorites passed.
+- Live isolated API: saved ownership, reachable/unrelated child checks, nesting-depth rejection, saved root/child access after departure and wrapper deletion, retry after source deletion/departure, and DM retry rejection after unfriending passed.
+- Confirmed a DM read-receipt regression: forwarding advances `last_read_message_id` but leaves `last_read_receipt_message_id` unchanged; an ordinary send advances the receipt cursor.
+- These findings preceded the fixes verified below. No shared or local-development database was migrated; media checks validated generated URLs and metadata, not object downloads or playback.
+
+### Review fixes and verification (2026-10-21)
+
+- DM forwards advance unread and receipt cursors atomically and send post-commit receipt invalidations only on creation. Live WebSocket/API checks observed one receipt event and the expected peer-visible cursor; a retry returned the same message without another event or cursor advancement.
+- All three chat forwarding routes document string chat IDs and bearer JWT authentication. The existing global OpenAPI contract tests and the live API document passed.
+- Capture bypasses timeline hydration; root reads share authorization; child reads fetch root reachability metadata without its payload; previews store compact display data. Forward hydration takes narrow media/avatar dependencies. Inactive debug code, duplicate wrapper-text construction, and obsolete test scaffolding were removed.
+- `cargo test --locked`: 288 passed. `cargo build --locked` and `cargo clippy --locked --all-targets -- -D warnings`: passed.
+- Live isolated PostgreSQL 18/API checks passed: four-way concurrent retries; selection/destination conflicts; unauthorized source and anonymous/outsider read denials; invalid selections and system/invite/unpublished rejection; text, mentions, internal/external replies, ordered/nondeleted file attachments, audio metadata, and per-viewer sticker favorites.
+- Saved root/child access remained valid after source/media soft deletion, wrapper deletion, and chat departure. Wrong saved owner, unrelated child, excessive nesting, deleted live wrapper, ordinary-send forwarded-type spoofing, and DM retry after unfriending were rejected.
+- Query statistics confirmed child access selects only the root's child-ID array before loading target details. A malformed-preview read emitted an error identifying the failing bundle.
+- A single local before/after capture run selected 100 messages with 500,000 reactions: baseline fetched all 500,000 reactor rows and took 1540.6 ms; the fixed request issued no reaction SELECTs and took 89.6 ms. This synthetic sample demonstrates removal of the query amplification, not production throughput or a controlled benchmark.
+- No shared database was modified. Media checks covered metadata/URLs, not object downloads or audio playback.

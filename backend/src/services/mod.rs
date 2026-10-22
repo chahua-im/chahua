@@ -5,6 +5,7 @@ pub mod avatars;
 pub mod background;
 pub mod chat;
 pub mod client_tracking;
+pub mod forwarding;
 pub mod image_processing;
 pub mod invites;
 pub mod media;

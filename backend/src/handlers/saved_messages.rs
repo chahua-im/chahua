@@ -16,7 +16,7 @@ use crate::{
     services::{
         messages::{
             deserialize_forwarded_bundle_payload, forwarded_messages_response_from_items,
-            load_target_forwarded_bundle_from_root,
+            load_forwarded_bundle, load_target_forwarded_bundle_from_root,
         },
         saved_messages as saved_messages_svc,
     },
@@ -180,11 +180,18 @@ async fn get_saved_forwarded_messages(
     mut conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
     let conn = &mut *conn;
-    let bundle = saved_messages_svc::load_saved_forwarded_bundle(conn, uid, saved_message_id)?;
+    let bundle_id =
+        saved_messages_svc::load_saved_forwarded_bundle_id(conn, uid, saved_message_id)?;
+    let bundle = load_forwarded_bundle(conn, bundle_id)?;
     let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
 
     Ok(Json(forwarded_messages_response_from_items(
-        conn, &state, uid, total, items,
+        conn,
+        &state.media,
+        &state.avatars,
+        uid,
+        total,
+        items,
     )))
 }
 
@@ -211,12 +218,18 @@ async fn get_saved_forwarded_bundle_messages(
     mut conn: DbConn,
 ) -> Result<Json<ForwardedMessagesResponse>, AppError> {
     let conn = &mut *conn;
-    let root_bundle = saved_messages_svc::load_saved_forwarded_bundle(conn, uid, saved_message_id)?;
-    let bundle = load_target_forwarded_bundle_from_root(conn, root_bundle, bundle_id)?;
+    let root_bundle_id =
+        saved_messages_svc::load_saved_forwarded_bundle_id(conn, uid, saved_message_id)?;
+    let bundle = load_target_forwarded_bundle_from_root(conn, root_bundle_id, bundle_id)?;
     let (total, items) = deserialize_forwarded_bundle_payload(bundle)?;
 
     Ok(Json(forwarded_messages_response_from_items(
-        conn, &state, uid, total, items,
+        conn,
+        &state.media,
+        &state.avatars,
+        uid,
+        total,
+        items,
     )))
 }
 
