@@ -805,7 +805,7 @@ export class ConversationPage {
   );
   private readonly stateWatchVisible = signal(!document.hidden);
   private reactionSessionEntered = false;
-  private reactionRequest?: { again: boolean };
+  private reactionRequest?: { again: boolean; readThrough?: SnowflakeID };
   private reactionFresh = false;
   private reactionChanged = false;
   private mentionRequest?: { cancel: Subject<void>; promise: Promise<void> };
@@ -937,8 +937,13 @@ export class ConversationPage {
       if (this.active() && this.stateWatchVisible())
         onCleanup(this.chatInfo.watchReadStates([{ chatId: this.id(), threadId: this.threadId() }]));
     });
-    this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId }) => {
-      if (kind !== ChatChangeKind.Attention || chatId !== this.id() || threadId !== this.threadId()) return;
+    this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId, readThrough }) => {
+      if (chatId !== this.id() || (threadId ?? undefined) !== (this.threadId() ?? undefined)) return;
+      if (kind === ChatChangeKind.Read) {
+        if (readThrough != null) this.dismissReadThrough(readThrough);
+        return;
+      }
+      if (kind !== ChatChangeKind.Attention) return;
       this.mentionDirty = true;
       this.mentionChanged = true;
       void this.enterMentionSession();
@@ -1351,16 +1356,21 @@ export class ConversationPage {
     const chatId = this.id();
     const threadId = this.threadId();
     this.reactionSessionEntered = true;
-    const request = { again: false };
+    const request: NonNullable<ConversationPage['reactionRequest']> = { again: false };
     this.reactionRequest = request;
     try {
       do {
         request.again = false;
+        request.readThrough = undefined;
         const response = await firstValueFrom(
           this.api.getChatReactions(chatId, { threadId }).pipe(takeUntilDestroyed(this.destroyRef)),
         );
         if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden) return;
-        this.reactionJumpIds.update((ids) => [...new Set([...ids, ...response.messageIds])].sort((a, b) => b - a));
+        this.reactionJumpIds.update((ids) =>
+          [...new Set([...ids, ...response.messageIds])]
+            .filter((id) => request.readThrough == null || id > request.readThrough)
+            .sort((a, b) => b - a),
+        );
         const unread = await this.ackReactions(entry, chatId, threadId, response.readThrough);
         if (this.reactionRequest !== request || !this.isCurrent(entry)) return;
         if (unread == null) return;
@@ -1434,6 +1444,17 @@ export class ConversationPage {
     this.mentionJumpIds.update((targets) => targets.filter((id) => !this.dismissedMentions.has(id)));
   }
 
+  /** Scrolling advances the shared read cursor; targets at or below it are no longer unread. */
+  private dismissReadThrough(readThrough: SnowflakeID) {
+    // Only discard targets from snapshots already in flight. A later reaction
+    // on an old message is a new notification, even when that message is read.
+    const request = this.reactionRequest;
+    if (request && (request.readThrough == null || readThrough > request.readThrough))
+      request.readThrough = readThrough;
+    this.mentionJumpIds.update((ids) => ids.filter((id) => id > readThrough));
+    this.reactionJumpIds.update((ids) => ids.filter((id) => id > readThrough));
+  }
+
   private enterMentionSession(): Promise<void> {
     if (this.document.hidden || !this.isCurrent()) return Promise.resolve();
     if (this.chatInfo.get(this.id())?.kind === GroupKind.dm) {
@@ -1469,9 +1490,10 @@ export class ConversationPage {
               .pipe(takeUntil(request.cancel), takeUntilDestroyed(this.destroyRef)),
           );
           if (this.mentionRequest !== request || !this.isCurrent(entry) || this.document.hidden) return;
+          const read = this.chatInfo.lastReadMessageId(chatId, threadId);
           this.mentionJumpIds.update((ids) =>
             [...new Set([...ids, ...response.messageIds])]
-              .filter((id) => !this.dismissedMentions.has(id))
+              .filter((id) => (read == null || id > read) && !this.dismissedMentions.has(id))
               .sort((a, b) => b - a),
           );
         } while (this.mentionDirty);

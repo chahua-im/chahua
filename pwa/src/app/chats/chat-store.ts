@@ -529,6 +529,11 @@ export class ChatStore {
     return read && !read.dirty ? read.state : undefined;
   }
 
+  lastReadMessageId(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
+    return read?.state.lastReadMessageId;
+  }
+
   unreadCount(chatId: SnowflakeID, threadId?: SnowflakeID) {
     const read = threadId ? this.threadReads().get(threadId) : this.readStates().get(chatId);
     return read?.state.unreadCount ?? 0;
