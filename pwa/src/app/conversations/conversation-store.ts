@@ -244,6 +244,9 @@ export class ConversationStore {
     this.patch(messageId, (message) => ({
       ...message,
       isDeleted: true,
+      forwardedFrom: undefined,
+      forwardedPreview: undefined,
+      forwardedBundleId: undefined,
       message: undefined,
       attachments: [],
       mentions: [],
@@ -365,6 +368,7 @@ function toMessagePreview(message: MessageResponse): MessagePreview {
   return {
     id: message.id,
     clientGeneratedId: message.clientGeneratedId,
+    forwardedFromName: message.forwardedFrom?.sender.name,
     createdAt: message.createdAt,
     sender: message.sender,
     message: message.message,

@@ -202,6 +202,18 @@ ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使�
 
 本地与确认回声按 clientGeneratedId 保持行身份。已接受但尚未发布的语音继续用本地音频；WS、列表或后续 GET 确认发布后再换服务器附件。此时 GET 的 404 不触发重新创建。
 
+## 转发与聊天记录
+
+`ForwardPicker` 消费 `ChatListStore.chats(false)` 和 `threads(false)`，打开时激活、销毁时释放。两边所有已加载目标按最近活动混排，触底或手动继续加载时补覆盖较浅的可用流；一侧尚未加载或请求失败不遮蔽另一侧，错误只重试对应查询。已有数据在刷新期间保留。搜索为已加载目标的本地过滤，不请求群／用户目录或扫描所有历史。
+
+`ConversationPage` 持有多选消息 Map，分页不清空；已确认消息用服务端 ID、待发消息用 clientGeneratedId 保留对应消息或队列对象引用，消息更新替换对应引用、撤回移除选择。只允许已有服务端 ID 的消息参与勾选；尚未发布的音频使用队列 confirmed() 中的 ID。勾选不检查转发资格，点击转发时校验来源和消息类型；目标选择器固定 MessageResponse 或 OutgoingMessage 引用，提交时读取队列的最新 confirmed()/published()，避免语音发布后仍按旧状态替换。选择器独立监听撤回，使该次选择失效。已提交任务不再读取页面选择状态。批量撤回在确认时固定待处理数组，已确认消息逐条复用 MessageActions.recall 和 DELETE 消息接口；队列项先通过 MessageOutbox.waitForPublication 读取已发布确认或等待对应发布事件，沿用 30 秒请求超时。等待期间不取消队列项或释放上传资源，发布后重新检查选择仍有效才发送 DELETE；仅成功响应计入撤回数量，并走现有实时消息删除合并；已由服务器撤回的所选项跳过，失败项保留。切换会话、退出选择或销毁页面后停止提交后续请求，迟到响应仍可更新原聊天数据，但不得修改新选择的界面状态。
+
+`MessageOutbox.enqueueForward` 固定来源聊天、排序后的消息 ID、目标聊天／话题与 clientGeneratedId；一条调用 `POST /chats/{chatId}/messages/{messageId}/forward`，两条及以上调用 `POST /chats/{chatId}/messages/forward`。两者均传 threadId 和 allowPlaceholders。已知需要占位替换时由目标选择器先确认；只有用户确认后才传 allowPlaceholders: true。待转码语音和合并时超限的卡片仅在本地展示副本中转换为 placeholder，API 始终发送原始 ID，服务端以当前状态生成最终内容。与普通发送共用每会话串行队列及重试，不上传源附件；HTTP／WS 确认复用同一行。转发语音的 HTTP 确认即已发布，不等待普通录音的转码发布阶段。
+
+单条接口重试仍要求所选来源可访问；合并接口成功后的重试可返回已有快照。失败不更换 clientGeneratedId、不重建选择或自动改用另一接口。公共消息 DTO 不含转码状态，已发布的历史音频可能只能由服务端识别；未获占位许可的请求若收到后端明确的待转码或嵌套超限 400，队列弹窗确认，确认后仅补充 allowPlaceholders 并使用原操作 ID 继续提交。取消保留失败任务供显式重试，不自动同意；取消任务或切换账号会关闭该确认并阻止继续提交。其他错误沿用现有失败处理。待发送的来源标签与卡片预览仅为展示，确认后使用服务端内容。单条贴纸与卡片不设置本地来源信息。转发消息的 mentions 只参与显示，不触发客户端提及优先通知或提及状态推断。
+
+`ForwardedRecords` 直接由 IonRouterOutlet 托管，沿用话题页面的导航与分栏；进入时保留来源会话的消息 DOM、滚动位置、草稿和未提交附件，返回复用已知内容。记录页在进入子记录或媒体页时同样保留内容和滚动位置；账号或路由授权范围变化时重置详情，迟到响应不能覆盖新的范围。聊天授权页面在可见时通过 ChatStore.watchReadStates 共享成员权限订阅；根消息删除或聊天权限失效时清除详情并递增请求版本，覆盖中的页面也处理失效事件。重连时重新校验详情，覆盖中的页面延至返回时校验；刷新和临时失败保留已知内容，403／404／410 清除内容。收藏授权页面不受源聊天删除和成员权限事件影响。根消息详情使用 `getForwardedMessages`，子记录使用根消息加 bundleId 的 `getForwardedBundleMessages`；收藏使用对应的 `getSavedForwardedMessages`／`getSavedForwardedBundleMessages`。不可仅凭 bundleId 读取。卡片展示消费附带预览，不为每行请求详情；详情的引用仅使用同一记录中的快照，内嵌语音不进入可跳转源消息的吸顶播放条。Snowflake 编解码涵盖 bundleId、原消息 ID 和内部引用的联合类型。
+
 ## 媒体与语音
 
 上传先读取限制，照片入口检测/压缩后申请签名 URL；文件入口保留原字节。签名 PUT 使用返回头，不携带聊天 token。AttachmentUpload 持有统一总进度（阶段权重见[加载反馈](loading-indicators.md)）、AbortSignal、本地 URL 和成功 ID；重试复用已有任务/ID，释放时取消处理与上传。
@@ -247,3 +259,5 @@ Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内
 私聊回执事件可携带 readerUid 和 threadRootId：自己的读游标不触发对方回执查询，无关话题不查询；话题内主聊天回执变化只读取根范围，回复回执只读取对应话题。重复生命周期共享请求，查询期间新回执变化合并为后续校准；隐私失效立即清除旧值并隔离旧响应。旧事件缺 readerUid 时仍校准当前完整范围。
 
 当前可见列表的已加载行与当前会话通过 ChatStore 共享 `watchConversationStates`，合并最多 512 个唯一范围。完整快照到达后，消息和通知只使状态过期，未读计数及游标由 WS 更新，不再逐条 GET。首次定位尚无完整快照、超限范围及旧服务端保留 HTTP 校准；隐藏页面释放范围，重现或重连取得新快照。requestId 隔离范围、账号和本地写操作前的旧快照；权限撤销清零并移除列表项。协议见[未读 WS 协议](../../backend/docs/conversation-unread-ws.md#逐会话状态)。
+
+`MessagePreview` 按 messageType 判别 placeholder，再用固定枚举将 message 原因代码映射到翻译键；正文复用该预览，收藏和记录 DTO 保留原类型与代码。应用生成的通知使用相同映射，后台 Web Push 保留服务端的回退文案。既有占位消息再次转发不列入待确认替换集合。

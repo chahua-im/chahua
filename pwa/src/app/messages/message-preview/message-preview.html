@@ -1,5 +1,9 @@
 @if (message().isDeleted) {
   <ng-container>{{ 'messages.preview.deleted' | transloco }}</ng-container>
+} @else if (message().messageType === MessageType.placeholder) {
+  {{ placeholderLabel(message().message) | transloco }}
+} @else if (message().messageType === MessageType.forwarded) {
+  {{ 'messages.preview.forwarded' | transloco }}
 } @else if (message().messageType === MessageType.system) {
   @if (message().sender; as sender) {
     @let name = sender.name ?? ('chats.content.userWithUid' | transloco: { uid: sender.uid });

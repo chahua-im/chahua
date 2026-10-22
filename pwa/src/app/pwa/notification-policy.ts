@@ -1,3 +1,4 @@
+import { placeholderLabel } from '../messages/forward-placeholder';
 import {
   GroupKind,
   MessageType,
@@ -18,13 +19,17 @@ export function shouldNotify(
   const replied = directed && message.replyToMessage?.sender.uid === uid;
   if (replied && !message.replyRootId) return true;
   if (chat?.archived) return false;
-  const mentioned = directed && (message.mentions?.some((mention) => mention.uid === uid) ?? false);
+  const mentioned =
+    directed && !message.forwardedFrom && (message.mentions?.some((mention) => mention.uid === uid) ?? false);
   if (message.replyRootId) return mentioned || replied || !!(thread?.subscribed && !thread.archived);
   return mentioned || !(Date.parse(chat?.mutedUntil ?? '') > now);
 }
 
 /** System notifications need plain text, including expanded mentions and media-only messages. */
 export function notificationText(message: MessageResponse, translate: (key: string) => string): string {
+  if (message.isDeleted) return translate('messages.preview.deleted');
+  if (message.messageType === MessageType.placeholder) return translate(placeholderLabel(message.message));
+  if (message.messageType === MessageType.forwarded) return translate('messages.preview.forwarded');
   if (message.messageType === MessageType.invite) return translate('pwa.notification.invite');
   if (message.message?.trim()) {
     return message.message.replace(

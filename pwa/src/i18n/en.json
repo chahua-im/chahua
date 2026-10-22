@@ -359,6 +359,7 @@
   },
   "messages": {
     "preview": {
+      "forwarded": "[Chat history]",
       "deleted": "Message deleted",
       "someone": "Someone",
       "system": {
@@ -452,6 +453,42 @@
     },
     "thread": {
       "replies": "{{ count }} replies"
+    },
+    "selection": {
+      "recallConfirm": "Recall the {{count}} selected messages? Other members will no longer be able to view them.",
+      "recalled": "Recalled {{count}} messages",
+      "recallFailed": "Recalled {{succeeded}} messages; {{failed}} could not be recalled. Please try again."
+    },
+    "forward": {
+      "loadMore": "Load more",
+      "chatsFailed": "Could not load chats. Please retry.",
+      "threadsFailed": "Could not load topics. Please retry.",
+      "recordsUnavailable": "These chat records are no longer available.",
+      "unavailable": "Some selected messages cannot be forwarded. Adjust your selection.",
+      "action": "Forward",
+      "select": "Select",
+      "from": "Forwarded from {{name}}",
+      "unknown": "Unknown",
+      "records": "Chat history",
+      "count": "{{count}} messages",
+      "to": "Forward to",
+      "search": "Search chats and topics",
+      "replies": "{{count}} replies",
+      "empty": "No matching chats or topics",
+      "sending": "Forwarding…",
+      "invalid": "This selection can no longer be forwarded. Close this window and select the messages again.",
+      "selected": "{{count}} / {{max}} selected",
+      "redacted": "[Reply hidden]",
+      "close": "Close",
+      "confirmTitle": "Confirm forwarding",
+      "continue": "Forward anyway",
+      "confirmPendingAudio": "Voice messages still processing will be replaced with [Pending voice message]. They cannot be played and will not be restored later. Continue forwarding?",
+      "confirmNested": "Chat histories nested too deeply will be replaced with [Chat history] and cannot be opened. Continue forwarding?",
+      "confirmBoth": "Voice messages still processing and chat histories nested too deeply will be replaced with [Pending voice message] and [Chat history]. They cannot be played or opened and will not be restored later. Continue forwarding?"
+    },
+    "placeholder": {
+      "pendingAudio": "[Pending voice message]",
+      "unavailable": "[Unavailable message]"
     }
   },
   "stickers": {

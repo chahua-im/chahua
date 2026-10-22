@@ -80,6 +80,7 @@ export function prepareMessageContent(
   mentions: readonly MentionInfo[],
   currentUserUid: number | null | undefined,
   interactive: boolean,
+  profilesEnabled = true,
 ): PreparedMessageContent {
   const extraction = extractMentionWidgets(message);
   const tokens = markdownEngine.parse(extraction.body, {});
@@ -97,7 +98,7 @@ export function prepareMessageContent(
         uid: widget.uid,
         name: names.get(widget.uid) || 'User ' + widget.uid,
         self: currentUserUid != null && widget.uid === currentUserUid,
-        clickable: interactive,
+        clickable: interactive && profilesEnabled,
       };
     },
     renderLink: (href, label): MarkdownNode => {
@@ -138,10 +139,17 @@ export class MessageText {
   readonly text = input('');
   readonly mentions = input<readonly MentionInfo[]>([]);
   readonly interactive = input(true);
+  readonly profilesEnabled = input(true);
   protected readonly currentUserUid = computed(() => this.session.user()?.uid);
   protected readonly parts = computed(() => messageParts(this.text(), this.mentions()));
   protected readonly prepared = computed(() =>
-    prepareMessageContent(this.text(), this.mentions(), this.currentUserUid(), this.interactive()),
+    prepareMessageContent(
+      this.text(),
+      this.mentions(),
+      this.currentUserUid(),
+      this.interactive(),
+      this.profilesEnabled(),
+    ),
   );
   private readonly router = inject(Router);
   private readonly session = inject(SessionStore);

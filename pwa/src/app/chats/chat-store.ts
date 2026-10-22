@@ -198,7 +198,9 @@ export class ChatStore {
       if (event.type === ServerWsMessageType.messageUpdated) {
         const message = event.payload;
         const previous = this.knownMentions.get(message.id)?.mentioned;
-        const next = message.mentions?.some((mention) => mention.uid === this.session.user()?.uid) ?? false;
+        const next =
+          (!message.forwardedFrom && message.mentions?.some((mention) => mention.uid === this.session.user()?.uid)) ??
+          false;
         this.rememberMentions([message]);
         if (
           (previous == null
@@ -490,12 +492,20 @@ export class ChatStore {
     );
   }
 
-  rememberMentions(messages: readonly Pick<MessageResponse, 'id' | 'mentions'>[], version = ++this.version) {
+  rememberMentions(
+    messages: readonly (Pick<MessageResponse, 'id' | 'mentions' | 'forwardedFrom'> &
+      Pick<MessagePreview, 'forwardedFromName'>)[],
+    version = ++this.version,
+  ) {
     for (const message of messages) {
       if ((this.knownMentions.get(message.id)?.version ?? 0) > version) continue;
       this.knownMentions.delete(message.id);
       this.knownMentions.set(message.id, {
-        mentioned: message.mentions?.some((mention) => mention.uid === this.session.user()?.uid) ?? false,
+        mentioned:
+          (!message.forwardedFrom &&
+            !message.forwardedFromName &&
+            message.mentions?.some((mention) => mention.uid === this.session.user()?.uid)) ??
+          false,
         version,
       });
       if (this.knownMentions.size > 256) this.knownMentions.delete(this.knownMentions.keys().next().value!);
@@ -1000,6 +1010,7 @@ function messagePreview(message: MessageResponse): MessagePreview {
   return {
     id: message.id,
     clientGeneratedId: message.clientGeneratedId,
+    forwardedFromName: message.forwardedFrom?.sender.name,
     createdAt: message.createdAt,
     sender: message.sender,
     message: message.message,

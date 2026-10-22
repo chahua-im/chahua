@@ -63,6 +63,12 @@
                       <ion-icon [icon]="actionIcons()[slot.action]"></ion-icon>
                       <span>
                         @switch (slot.action) {
+                          @case (Action.Forward) {
+                            {{ 'messages.forward.action' | transloco }}
+                          }
+                          @case (Action.Select) {
+                            {{ 'messages.forward.select' | transloco }}
+                          }
                           @case (Action.Reply) {
                             {{ 'messages.menu.actions.reply' | transloco }}
                           }
@@ -158,3 +164,7 @@
                     ? ('messages.menu.notice.metadataFailed' | transloco)
                     : ('messages.menu.notice.failed' | transloco)
   "></ion-toast>
+
+@if (forwarding().length) {
+  <app-forward-picker [messages]="forwarding()" (closed)="forwarding.set([])" />
+}

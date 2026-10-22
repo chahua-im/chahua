@@ -16,6 +16,7 @@ export interface MessagePreview {
   attachments: MessagePreviewAttachment[];
   clientGeneratedId: string;
   createdAt: string;
+  forwardedFromName?: string;
   id: SnowflakeID;
   isDeleted: boolean;
   mentions: MentionInfo[];

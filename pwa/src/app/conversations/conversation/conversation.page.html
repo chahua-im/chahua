@@ -159,6 +159,14 @@
           [showAllAvatars]="preferences.showAllAvatars()"
           [showDetails]="showMessageDetails()"
           [message]="row.message"
+          [selecting]="selecting()"
+          [selected]="isSelected(row.message.id, row.key)"
+          [selectable]="
+            !recalling() &&
+            canSelect(row.outgoing ?? row.confirmed!) &&
+            (selectedMessages().size < selectionLimit || isSelected(row.message.id, row.key))
+          "
+          (toggleSelected)="toggleSelection(row.outgoing ?? row.confirmed!)"
           [interactive]="!!row.confirmed && !row.outgoing"
           [outgoingId]="row.outgoing?.clientGeneratedId"
           [delivery]="row.outgoing?.delivery()"
@@ -259,7 +267,42 @@
   }
 </ion-content>
 <ion-footer #composerFooter>
+  @if (selecting()) {
+    <ion-toolbar>
+      <div class="selection-actions">
+        <ion-buttons class="selection-start">
+          <ion-button
+            color="danger"
+            [title]="'messages.menu.actions.recall' | transloco"
+            [disabled]="recalling() || !canRecallSelection()"
+            (click)="recallSelection()">
+            @if (recalling()) {
+              <ion-spinner />
+            } @else {
+              <ion-icon slot="icon-only" [icon]="selectionIcons.recall" />
+            }
+          </ion-button>
+        </ion-buttons>
+        <span class="selection-count">
+          {{ 'messages.forward.count' | transloco: { count: selectedMessages().size } }}
+        </span>
+        <ion-buttons class="selection-end">
+          <ion-button [title]="'common.cancel' | transloco" [disabled]="recalling()" (click)="cancelSelection()">
+            <ion-icon slot="icon-only" [icon]="selectionIcons.cancel" />
+          </ion-button>
+          <ion-button
+            [title]="'messages.forward.action' | transloco"
+            [disabled]="recalling() || !selectedMessages().size"
+            (click)="forwardSelection()">
+            <ion-icon slot="icon-only" [icon]="selectionIcons.forward" />
+          </ion-button>
+        </ion-buttons>
+      </div>
+    </ion-toolbar>
+  }
+
   <app-message-composer
+    [hidden]="selecting()"
     [style.--context-light]="composerContextColors()?.light"
     [style.--context-dark]="composerContextColors()?.dark"
     [relationship]="relationship()"
@@ -292,7 +335,11 @@
           [disabled]="!!pendingNavigation()"
           (click)="goTo({ type: ConversationTargetKind.Message, messageId: message.id })">
           <strong>
-            {{ 'conversation.replyingTo' | transloco: { name: message.sender.name ?? message.sender.uid } }}
+            @if (message.forwardedFrom; as origin) {
+              <app-forwarded-label [name]="origin.sender.name" />
+            } @else {
+              {{ 'conversation.replyingTo' | transloco: { name: message.sender.name ?? message.sender.uid } }}
+            }
           </strong>
           <span><app-message-preview [message]="message" /></span>
         </button>
@@ -394,6 +441,8 @@
 </ion-popover>
 
 <app-message-menu
+  [allowSelect]="true"
+  (select)="beginSelection($event)"
   [messages]="conversation.items()"
   [chatId]="id()"
   [threadId]="threadId()"
@@ -405,3 +454,33 @@
 
 <app-chat-mute />
 <ion-toast #muteError [message]="'conversation.muteFailed' | transloco" [duration]="3000" />
+
+@if (forwardSources().length) {
+  <app-forward-picker [messages]="forwardSources()" (forwarded)="cancelSelection()" (closed)="forwardSources.set([])" />
+}
+
+<ion-alert
+  [isOpen]="!!pendingRecall()"
+  [header]="'messages.menu.confirm.recallTitle' | transloco"
+  [message]="'messages.selection.recallConfirm' | transloco: { count: pendingRecall()?.length ?? 0 }"
+  [buttons]="[
+    { text: ('common.cancel' | transloco), role: 'cancel' },
+    { text: ('common.confirm' | transloco), role: 'confirm' },
+  ]"
+  (didDismiss)="confirmRecallSelection($event)" />
+<ion-toast
+  [isOpen]="!!recallResult()"
+  [duration]="3000"
+  [message]="
+    recallResult()?.failed
+      ? ('messages.selection.recallFailed'
+        | transloco: { succeeded: recallResult()?.succeeded, failed: recallResult()?.failed })
+      : ('messages.selection.recalled' | transloco: { count: recallResult()?.succeeded })
+  "
+  (didDismiss)="recallResult.set(undefined)" />
+
+<ion-toast
+  [isOpen]="!!forwardError()"
+  [message]="forwardError() ? (forwardError()! | transloco) : ''"
+  [duration]="3000"
+  (didDismiss)="forwardError.set(undefined)" />

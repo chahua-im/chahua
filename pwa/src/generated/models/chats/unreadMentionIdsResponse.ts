@@ -8,6 +8,6 @@
 import type { SnowflakeID } from '../snowflakeID';
 
 export interface UnreadMentionIdsResponse {
-  /** Unread mention message ids, newest-first. */
+  /** Unread mention message ids, newest-first. Serialized as strings (JS-safe). */
   messageIds: SnowflakeID[];
 }

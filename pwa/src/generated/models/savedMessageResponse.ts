@@ -17,6 +17,7 @@ export interface SavedMessageResponse {
   attachments: SavedAttachmentSnapshot[];
   canLocateContext: boolean;
   chat: SavedChatSnapshot;
+  forwardedBundleId?: SnowflakeID;
   id: SnowflakeID;
   mentions: MentionInfo[];
   message?: string;

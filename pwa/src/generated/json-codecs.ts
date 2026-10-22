@@ -82,6 +82,43 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   FavoriteStickerListResponse: {
     stickers: ['StickerSummary'],
   },
+  ForwardMessageBody: {
+    sourceChatId: 1,
+    threadId: 1,
+  },
+  ForwardMessagesBody: {
+    messageIds: [1],
+    sourceChatId: 1,
+    threadId: 1,
+  },
+  ForwardedFromInfo: {
+    originalChatId: 1,
+    originalMessageId: 1,
+    originalReplyTo: 'MessagePreview',
+  },
+  ForwardedMessagePreviewResponse: {
+    originalChatId: 1,
+    originalMessageId: 1,
+  },
+  ForwardedMessageResponse: {
+    attachments: ['AttachmentResponse'],
+    forwardedBundleId: 1,
+    forwardedPreview: 'ForwardedMessagesPreviewResponse',
+    originalChatId: 1,
+    originalMessageId: 1,
+    reply: 'ForwardedReplyResponse',
+    sticker: 'MessageStickerResponse',
+  },
+  ForwardedMessagesPreviewResponse: {
+    messages: ['ForwardedMessagePreviewResponse'],
+  },
+  ForwardedMessagesResponse: {
+    messages: ['ForwardedMessageResponse'],
+  },
+  ForwardedReplyResponse: {
+    originalMessageId: 1,
+    preview: 'ForwardedMessagePreviewResponse',
+  },
   FriendRelationshipResponse: {
     dmChatId: 1,
   },
@@ -173,6 +210,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   MessageResponse: {
     attachments: ['AttachmentResponse'],
     chatId: 1,
+    forwardedBundleId: 1,
+    forwardedFrom: 'ForwardedFromInfo',
+    forwardedPreview: 'ForwardedMessagesPreviewResponse',
     id: 1,
     replyRootId: 1,
     replyToMessage: 'MessagePreview',
@@ -239,6 +279,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   SavedMessageResponse: {
     attachments: ['SavedAttachmentSnapshot'],
     chat: 'SavedChatSnapshot',
+    forwardedBundleId: 1,
     id: 1,
     originalChatId: 1,
     originalMessageId: 1,
@@ -384,6 +425,12 @@ export const jsonOperations: JsonOperationCodec[] = [
     response: 'MessageResponse',
   },
   {
+    method: 'POST',
+    path: '/chats/{chat_id}/messages/forward',
+    body: 'ForwardMessagesBody',
+    response: 'MessageResponse',
+  },
+  {
     method: 'GET',
     path: '/chats/{chat_id}/messages/search',
     response: 'SearchMessagesResponse',
@@ -398,6 +445,22 @@ export const jsonOperations: JsonOperationCodec[] = [
     path: '/chats/{chat_id}/messages/{message_id}',
     body: 'UpdateMessageBody',
     response: 'MessageResponse',
+  },
+  {
+    method: 'POST',
+    path: '/chats/{chat_id}/messages/{message_id}/forward',
+    body: 'ForwardMessageBody',
+    response: 'MessageResponse',
+  },
+  {
+    method: 'GET',
+    path: '/chats/{chat_id}/messages/{message_id}/forwarded-bundles/{bundle_id}/messages',
+    response: 'ForwardedMessagesResponse',
+  },
+  {
+    method: 'GET',
+    path: '/chats/{chat_id}/messages/{message_id}/forwarded-messages',
+    response: 'ForwardedMessagesResponse',
   },
   {
     method: 'GET',
@@ -601,6 +664,16 @@ export const jsonOperations: JsonOperationCodec[] = [
     method: 'PUT',
     path: '/saved-messages/{message_id}',
     response: 'SavedMessageResponse',
+  },
+  {
+    method: 'GET',
+    path: '/saved-messages/{saved_message_id}/forwarded-bundles/{bundle_id}/messages',
+    response: 'ForwardedMessagesResponse',
+  },
+  {
+    method: 'GET',
+    path: '/saved-messages/{saved_message_id}/forwarded-messages',
+    response: 'ForwardedMessagesResponse',
   },
   {
     method: 'GET',

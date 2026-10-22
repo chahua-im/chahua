@@ -1,0 +1,45 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button [defaultHref]="backHref()" />
+    </ion-buttons>
+    <ion-title>
+      <div class="conversation-title">
+        <ion-icon class="records-icon" color="primary" [icon]="recordsIcon" />
+        <span class="conversation-name">{{ 'messages.forward.records' | transloco }}</span>
+      </div>
+    </ion-title>
+  </ion-toolbar>
+</ion-header>
+<ion-content appScrollbars>
+  <div class="message-list">
+    @for (row of rows(); track row.message.id) {
+      @if (row.dateBreak) {
+        <p class="message-date">
+          <span>{{ row.message.createdAt | localDate: 'date' }}</span>
+        </p>
+      }
+      @if (row.message.redacted) {
+        <p class="redacted">{{ 'messages.forward.redacted' | transloco }}</p>
+      }
+      <app-message
+        [message]="row.message"
+        [own]="row.message.sender.uid === session.user()?.uid"
+        [first]="row.first"
+        [last]="row.last"
+        [showAllAvatars]="preferences.showAllAvatars()"
+        [record]="true"
+        [canReply]="false"
+        (jump)="jump($event)"
+        (bundleOpened)="child($event)" />
+    }
+  </div>
+  @if (loading() && !data()) {
+    <div class="page-loading"><ion-spinner /></div>
+  }
+  @if (failed()) {
+    <app-load-error
+      [message]="(unavailable() ? 'messages.forward.recordsUnavailable' : 'conversation.loadFailed') | transloco"
+      (retry)="load()" />
+  }
+</ion-content>

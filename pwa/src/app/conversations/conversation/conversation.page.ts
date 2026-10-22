@@ -1,3 +1,12 @@
+import { ForwardPicker } from '../../messages/forward-picker/forward-picker';
+import { ForwardedLabel } from '../../messages/forwarded-label';
+import {
+  canForward,
+  canSelect,
+  forwardSourceMessage,
+  ForwardSelectionError,
+  MAX_FORWARD_MESSAGES,
+} from '../../messages/forwarding';
 import { userColors } from '../../messages/user-colors';
 import { DOCUMENT, Location, NgTemplateOutlet } from '@angular/common';
 import {
@@ -23,6 +32,7 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import {
+  IonAlert,
   IonBadge,
   IonButton,
   IonButtons,
@@ -46,6 +56,9 @@ import {
 import {
   archive,
   archiveOutline,
+  arrowRedoOutline,
+  closeOutline,
+  trashOutline,
   arrowUndoOutline,
   createOutline,
   at,
@@ -67,6 +80,7 @@ import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
 import {
   GroupKind,
+  GroupRole,
   MessageType,
   NotificationType,
   ServerWsMessageType,
@@ -82,6 +96,7 @@ import { ChatDetails } from '../../chats/chat-details/chat-details';
 import { ChatStore, ChatChangeKind } from '../../chats/chat-store';
 import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
+import { MessageActions } from '../../messages/message-actions';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { isVisibleMessage } from '../../messages/message-visibility';
@@ -121,6 +136,8 @@ enum ThreadActionKind {
   Unarchive,
 }
 
+type SelectedMessage = MessageResponse | OutgoingMessage;
+
 type ScrollPosition =
   | { type: PositionKind.Bottom }
   // Unread anchors on the divider captured on entry unless a messageId names the live unread start.
@@ -131,8 +148,8 @@ type ScrollPosition =
 @Component({
   selector: 'app-conversation',
   templateUrl: './conversation.page.html',
-  styleUrl: './conversation.page.scss',
-  providers: [ConversationStore],
+  styleUrls: ['../conversation-header.scss', './conversation.page.scss'],
+  providers: [ConversationStore, MessageActions],
   host: {
     '(dragover)': 'composer()?.dragover($event)',
     '(drop)': 'composer()?.drop($event)',
@@ -140,6 +157,8 @@ type ScrollPosition =
     '(window:pagehide)': 'saveDraft()',
   },
   imports: [
+    ForwardPicker,
+    ForwardedLabel,
     AvatarColor,
     AvatarTextPipe,
     ContentScrollbars,
@@ -158,6 +177,7 @@ type ScrollPosition =
     VoiceBar,
     LoadError,
     NgTemplateOutlet,
+    IonAlert,
     IonBadge,
     IonButton,
     IonButtons,
@@ -269,7 +289,9 @@ export class ConversationPage {
         (row) =>
           row.message.sender.uid === this.session.user()?.uid &&
           !row.message.isDeleted &&
-          row.message.messageType === MessageType.text,
+          row.message.messageType === MessageType.text &&
+          !row.message.forwardedFrom &&
+          !row.outgoing?.forwarding,
       );
     const message = row?.outgoing ?? row?.confirmed;
     if (message) this.startEdit(message);
@@ -296,6 +318,132 @@ export class ConversationPage {
   private readonly router = inject(Router);
   private readonly drafts = inject(DraftStore);
   protected readonly outbox = inject(MessageOutbox);
+  private readonly messageActions = inject(MessageActions);
+  private selectionVersion = 0;
+  protected readonly selectionIcons = { cancel: closeOutline, forward: arrowRedoOutline, recall: trashOutline };
+  protected readonly recalling = signal(false);
+  protected readonly pendingRecall = signal<readonly SelectedMessage[] | undefined>(undefined);
+  protected readonly recallResult = signal<{ succeeded: number; failed: number } | undefined>(undefined);
+  protected readonly canRecallSelection = computed(
+    () =>
+      this.selectedMessages().size > 0 &&
+      [...this.selectedMessages().values()].every((message) => this.canRecallSelectedMessage(message)),
+  );
+  protected readonly selecting = signal(false);
+  protected readonly selectedMessages = signal<ReadonlyMap<SnowflakeID | string, SelectedMessage>>(new Map());
+  protected readonly forwardSources = signal<readonly SelectedMessage[]>([]);
+  protected readonly selectionLimit = MAX_FORWARD_MESSAGES;
+  protected readonly canSelect = (source: SelectedMessage) => {
+    const message = forwardSourceMessage(source);
+    return !!message && canSelect(message);
+  };
+  protected readonly forwardError = signal<ForwardSelectionError | undefined>(undefined);
+  private selectionKey(message: SelectedMessage) {
+    return 'delivery' in message || this.selectedMessages().has(message.clientGeneratedId)
+      ? message.clientGeneratedId
+      : message.id;
+  }
+  protected isSelected(id: SnowflakeID | undefined, clientGeneratedId: string) {
+    return this.selectedMessages().has(clientGeneratedId) || (id != null && this.selectedMessages().has(id));
+  }
+  protected beginSelection(message: SelectedMessage) {
+    if (!this.canSelect(message)) return;
+    this.selectionVersion++;
+    this.recallResult.set(undefined);
+    this.selecting.set(true);
+    this.forwardError.set(undefined);
+    const key = 'delivery' in message ? message.clientGeneratedId : message.id;
+    this.selectedMessages.set(new Map([[key, message]]));
+  }
+  protected toggleSelection(message: SelectedMessage) {
+    if (this.recalling() || !this.canSelect(message)) return;
+    this.forwardError.set(undefined);
+    const key = this.selectionKey(message);
+    this.selectedMessages.update((selected) => {
+      const next = new Map(selected);
+      if (next.has(key)) next.delete(key);
+      else if (next.size < MAX_FORWARD_MESSAGES) next.set(key, message);
+      return next;
+    });
+  }
+  protected cancelSelection() {
+    this.selectionVersion++;
+    this.recalling.set(false);
+    this.pendingRecall.set(undefined);
+    this.recallResult.set(undefined);
+    this.selecting.set(false);
+    this.forwardError.set(undefined);
+    this.selectedMessages.set(new Map());
+  }
+  protected forwardSelection() {
+    if (this.recalling() || !this.selectedMessages().size) return;
+    this.forwardError.set(undefined);
+    const sources = [...this.selectedMessages().values()];
+    if (
+      sources.some((source) => {
+        const message = forwardSourceMessage(source);
+        return !message || !canForward(message);
+      })
+    ) {
+      this.forwardError.set(ForwardSelectionError.Unavailable);
+      return;
+    }
+    this.forwardSources.set(sources);
+  }
+
+  private canRecallSelectedMessage(selected: SelectedMessage) {
+    const message = 'delivery' in selected ? selected.message() : selected;
+    const chat = this.chatInfo.get(this.id());
+    return (
+      !message.isDeleted &&
+      !(chat?.kind === GroupKind.dm && this.relationship()?.canDm === false) &&
+      (chat?.myRole === GroupRole.admin || message.sender.uid === this.session.user()?.uid)
+    );
+  }
+  protected recallSelection() {
+    if (!this.recalling() && this.canRecallSelection()) this.pendingRecall.set([...this.selectedMessages().values()]);
+  }
+  protected async confirmRecallSelection(event: CustomEvent<{ role?: string }>) {
+    const messages = this.pendingRecall();
+    this.pendingRecall.set(undefined);
+    if (event.detail.role !== 'confirm' || !messages || this.recalling()) return;
+    const version = this.selectionVersion;
+    const entry = this.entryKey();
+    const current = () => !this.destroyRef.destroyed && version === this.selectionVersion && entry === this.entryKey();
+    this.recalling.set(true);
+    this.recallResult.set(undefined);
+    let succeeded = 0;
+    let failed = 0;
+    for (const message of messages) {
+      if (!current()) return;
+      const key = this.selectionKey(message);
+      if (!this.selectedMessages().has(key)) continue;
+      if (!this.canRecallSelectedMessage(message)) {
+        failed++;
+        continue;
+      }
+      try {
+        const published = 'delivery' in message ? await this.outbox.waitForPublication(message) : message;
+        if (!current()) return;
+        if (!this.selectedMessages().has(key)) continue;
+        await this.messageActions.recall(published);
+        if (!current()) return;
+        succeeded++;
+        this.selectedMessages.update((selected) => {
+          const next = new Map(selected);
+          next.delete(key);
+          return next;
+        });
+      } catch {
+        if (!current()) return;
+        failed++;
+      }
+    }
+    this.recalling.set(false);
+    if (!this.selectedMessages().size) this.cancelSelection();
+    this.recallResult.set({ succeeded, failed });
+  }
+
   private readonly destroyRef = inject(DestroyRef);
   private readonly changeDetector = inject(ChangeDetectorRef);
   private readonly api = inject(ChatsService);
@@ -347,7 +495,7 @@ export class ConversationPage {
   );
   protected readonly mentionsEnabled = computed(() => this.chatInfo.get(this.id())?.kind === GroupKind.group);
   protected readonly stickyAvatarsEnabled = computed(
-    () => this.showMessageDetails() && !this.preferences.showAllAvatars(),
+    () => !this.selecting() && this.showMessageDetails() && !this.preferences.showAllAvatars(),
   );
   private readonly loadedThreadRoot = linkedSignal({
     source: this.entryKey,
@@ -385,6 +533,10 @@ export class ConversationPage {
 
   /** Mobile follows real history, matching the browser's back gesture. */
   protected back() {
+    if (this.selecting()) {
+      this.cancelSelection();
+      return;
+    }
     if (this.outlet?.canGoBack()) {
       void this.nav.back();
     } else {
@@ -759,6 +911,25 @@ export class ConversationPage {
         }
       }
       if ('chatId' in event.payload && event.payload.chatId === this.id()) {
+        if (
+          event.type === ServerWsMessageType.messageDeleted ||
+          event.type === ServerWsMessageType.messagesBulkDeleted
+        ) {
+          const ids = event.type === ServerWsMessageType.messageDeleted ? [event.payload.id] : event.payload.messageIds;
+          this.selectedMessages.update(
+            (selected) =>
+              new Map(
+                [...selected].filter(([, item]) => {
+                  const message = 'delivery' in item ? item.confirmed() : item;
+                  return !message || !ids.includes(message.id);
+                }),
+              ),
+          );
+        } else if (event.type === ServerWsMessageType.messageUpdated) {
+          const key = this.selectionKey(event.payload);
+          if (this.selectedMessages().has(key))
+            this.selectedMessages.update((selected) => new Map(selected).set(key, event.payload));
+        }
         if (event.type === ServerWsMessageType.messageDeleted) this.dismissMentions([event.payload.id]);
         if (event.type === ServerWsMessageType.messagesBulkDeleted) this.dismissMentions(event.payload.messageIds);
         if (
@@ -942,6 +1113,7 @@ export class ConversationPage {
   private coveredByPage() {
     return (
       this.router.routerState.snapshot.root.firstChild?.data['modal'] ||
+      this.router.routerState.snapshot.root.firstChild?.data['preserveConversation'] ||
       (!this.threadId() && this.router.url.startsWith(`/chats/chat/${decodeId(this.id())}/thread/`))
     );
   }
@@ -961,7 +1133,8 @@ export class ConversationPage {
   }
 
   private leave(retainRange = false) {
-    const retainComposer = retainRange && this.router.routerState.snapshot.root.firstChild?.data['modal'];
+    const data = this.router.routerState.snapshot.root.firstChild?.data;
+    const retainComposer = retainRange && (data?.['modal'] || data?.['preserveConversation']);
     this.saveDraft();
     this.scrolling.reset();
     this.active.set(false);
@@ -981,6 +1154,8 @@ export class ConversationPage {
       this.draft.set('');
       this.replyTo.set(undefined);
     }
+    this.cancelSelection();
+    this.forwardSources.set([]);
     this.menu()?.reset();
     if (!retainComposer) this.composer()?.reset();
   }

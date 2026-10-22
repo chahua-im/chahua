@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AttachmentResponse } from './attachmentResponse';
+import type { ForwardedFromInfo } from './forwardedFromInfo';
+import type { ForwardedMessagesPreviewResponse } from './forwardedMessagesPreviewResponse';
 import type { MentionInfo } from './mentionInfo';
 import type { MessagePreview } from './messagePreview';
 import type { MessageStickerResponse } from './messageStickerResponse';
@@ -20,6 +22,9 @@ export interface MessageResponse {
   chatId: SnowflakeID;
   clientGeneratedId: string;
   createdAt: string;
+  forwardedBundleId?: SnowflakeID;
+  forwardedFrom?: ForwardedFromInfo;
+  forwardedPreview?: ForwardedMessagesPreviewResponse;
   hasAttachments: boolean;
   id: SnowflakeID;
   isDeleted: boolean;

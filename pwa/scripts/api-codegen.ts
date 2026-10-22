@@ -37,6 +37,7 @@ const idFields = new Set([
   'avatarImageId',
   'chatId',
   'destinationChatId',
+  'forwardedBundleId',
   'dmChatId',
   'id',
   'imageId',
@@ -77,6 +78,7 @@ const pathIds = new Set([
   'pack_id',
   'sticker_id',
   'saved_message_id',
+  'bundle_id',
 ]);
 const queryIds: Record<string, string[]> = {
   '/chats': ['after', 'chatId'],
@@ -182,8 +184,19 @@ export function transformApiSchema<T>(document: T): T {
     }
     const variants = clean.oneOf ?? clean.anyOf;
     if (variants?.length === 1) return describe(variants[0]);
-    if (variants?.length) throw new Error('Unexpected non-null schema union in JSON codec');
     const fields: Record<string, JsonCodec> = {};
+    // Tagged reply variants share field codecs; absent fields are ignored by the decoder.
+    for (const branch of variants ?? []) {
+      const descriptor = describe(branch.$ref ? schemas[branch.$ref.split('/').at(-1)!] : branch);
+      if (descriptor === undefined) continue;
+      if (typeof descriptor !== 'object' || Array.isArray(descriptor))
+        throw new Error('Expected object variants in JSON codec');
+      for (const [key, value] of Object.entries(descriptor)) {
+        if (fields[key] !== undefined && JSON.stringify(fields[key]) !== JSON.stringify(value))
+          throw new Error(`Conflicting variant codec for ${key}`);
+        fields[key] = value;
+      }
+    }
     for (const branch of clean.allOf ?? []) {
       const descriptor = describe(branch.$ref ? schemas[branch.$ref.split('/').at(-1)!] : branch);
       if (descriptor && typeof descriptor === 'object' && !Array.isArray(descriptor)) Object.assign(fields, descriptor);

@@ -5,8 +5,10 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { ForwardedMessageResponse } from './forwardedMessageResponse';
 
-export * from './getChatMentionsParams';
-export * from './getChatReactionsParams';
-export * from './unreadMentionIdsResponse';
-export * from './unreadReactionIdsResponse';
+export interface ForwardedMessagesResponse {
+  messages: ForwardedMessageResponse[];
+  /** @minimum 0 */
+  total: number;
+}

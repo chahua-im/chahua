@@ -5,6 +5,7 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+
 export interface UnreadReactionsAckResponse {
   /** Fresh unread-reaction message count after the cursor advance. */
   unreadReactions: number;

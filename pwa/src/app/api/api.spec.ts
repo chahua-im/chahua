@@ -68,6 +68,53 @@ describe('Generated API client', () => {
     http.verify();
   });
 
+  it('encodes forward destinations, thread IDs and nested record replies losslessly', () => {
+    const api = TestBed.inject(ChatsService);
+    const http = TestBed.inject(HttpTestingController);
+    const thread = '9223372036854775806';
+    const bundle = '9223372036854775805';
+    api
+      .forwardMessages(testChat.id, {
+        sourceChatId: testChat.id,
+        messageIds: [testMessage.id, encodeId(bundle)],
+        clientGeneratedId: 'forward-test',
+        threadId: encodeId(thread),
+      })
+      .subscribe();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/forward`);
+    expect(request.request.body).toEqual({
+      sourceChatId: wireChat.id,
+      messageIds: [wireMessage.id, bundle],
+      clientGeneratedId: 'forward-test',
+      threadId: thread,
+    });
+    request.flush(structuredClone(wireMessage));
+    const receive = vi.fn();
+    api.getForwardedBundleMessages(testChat.id, testMessage.id, encodeId(bundle)).subscribe(receive);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forwarded-bundles/${bundle}/messages`).flush({
+      total: 2,
+      messages: [
+        {
+          originalMessageId: wireMessage.id,
+          originalChatId: wireChat.id,
+          forwardedBundleId: bundle,
+          reply: {
+            kind: 'internal',
+            originalMessageId: thread,
+            preview: { originalMessageId: thread, originalChatId: wireChat.id, attachments: [] },
+          },
+        },
+        { originalMessageId: thread, originalChatId: wireChat.id, reply: { kind: 'redacted' } },
+      ],
+    });
+    const messages = receive.mock.calls[0][0].messages;
+    expect(messages[0].forwardedBundleId).toBe(encodeId(bundle));
+    expect(messages[0].reply.originalMessageId).toBe(encodeId(thread));
+    expect(messages[0].reply.preview.originalChatId).toBe(testChat.id);
+    expect(messages[1].reply).toEqual({ kind: 'redacted' });
+    http.verify();
+  });
+
   it('preserves null in nested response fields and preserves explicit cache clears for both clients', async () => {
     const body = () => ({
       messages: [{ ...wireMessage, message: null, sticker: null, replyToMessage: null }],

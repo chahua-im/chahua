@@ -9,6 +9,8 @@ export function savedMessageContent(saved: SavedMessageResponse): MessageContent
     sender: saved.sender,
     createdAt: saved.originalCreatedAt,
     message: saved.message,
+    mentions: saved.mentions,
+    forwardedBundleId: saved.forwardedBundleId,
     messageType: saved.messageType,
     attachments: saved.attachments,
     sticker: sticker

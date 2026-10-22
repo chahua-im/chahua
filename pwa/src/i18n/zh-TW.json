@@ -359,6 +359,7 @@
   },
   "messages": {
     "preview": {
+      "forwarded": "[聊天記錄]",
       "deleted": "訊息已刪除",
       "someone": "有人",
       "system": {
@@ -452,6 +453,42 @@
     },
     "thread": {
       "replies": "{{ count }} 則回覆"
+    },
+    "selection": {
+      "recallConfirm": "確定撤回選取的 {{count}} 則訊息？撤回後，其他成員將無法查看這些訊息。",
+      "recalled": "已撤回 {{count}} 則訊息",
+      "recallFailed": "已撤回 {{succeeded}} 則，{{failed}} 則未能撤回，請重試。"
+    },
+    "forward": {
+      "loadMore": "繼續載入",
+      "chatsFailed": "聊天載入失敗，請重試。",
+      "threadsFailed": "話題載入失敗，請重試。",
+      "recordsUnavailable": "聊天記錄已無法存取。",
+      "unavailable": "所選訊息中包含無法轉發的訊息，請調整選取範圍。",
+      "action": "轉發",
+      "select": "多選",
+      "from": "轉發自 {{name}}",
+      "unknown": "未知使用者",
+      "records": "聊天記錄",
+      "count": "{{count}} 則訊息",
+      "to": "轉發到",
+      "search": "搜尋聊天和話題",
+      "replies": "{{count}} 則回覆",
+      "empty": "沒有符合的聊天或話題",
+      "sending": "正在轉發…",
+      "invalid": "所選訊息已無法轉發，請關閉視窗後重新選擇。",
+      "selected": "已選 {{count}} / {{max}} 則",
+      "redacted": "[引用內容已隱藏]",
+      "close": "關閉",
+      "confirmTitle": "確認轉發",
+      "continue": "繼續轉發",
+      "confirmPendingAudio": "尚未完成轉碼的語音將替換為[待轉碼語音]，無法播放，之後也不會自動恢復。是否繼續轉發？",
+      "confirmNested": "巢狀層級過深的聊天記錄將替換為[聊天記錄]，無法展開。是否繼續轉發？",
+      "confirmBoth": "尚未完成轉碼的語音和巢狀層級過深的聊天記錄將分別替換為[待轉碼語音]和[聊天記錄]，無法播放或展開，之後也不會自動恢復。是否繼續轉發？"
+    },
+    "placeholder": {
+      "pendingAudio": "[待轉碼語音]",
+      "unavailable": "[無法顯示的訊息]"
     }
   },
   "stickers": {

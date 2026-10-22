@@ -6,7 +6,7 @@
     (follow)="followMarkdown($event)" />
 } @else {
   @for (part of parts(); track $index) {
-    @if (!interactive()) {
+    @if (!interactive() || (part.uid && !profilesEnabled())) {
       <ng-container>{{ part.text }}</ng-container>
     } @else if (part.uid) {
       <button
