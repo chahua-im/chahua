@@ -15,17 +15,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import {
-  IonAlert,
-  IonButton,
-  IonIcon,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonPopover,
-  IonTextarea,
-  isPlatform,
-} from '@ionic/angular';
+import { IonAlert, IonButton, IonIcon, IonItem, IonLabel, IonList, IonTextarea, isPlatform } from '@ionic/angular';
 import {
   attachOutline,
   closeOutline,
@@ -87,7 +77,6 @@ enum Panel {
     IonTextarea,
     UploadProgress,
     IonList,
-    IonPopover,
     IonItem,
     IonLabel,
     StickerPicker,
@@ -165,6 +154,59 @@ export class MessageComposer {
   private readonly mentionCache = new Map<string, { at: number; members: MemberResponse[] }>();
   private mentionRange?: { start: number; end: number };
   private readonly mentionInfos = signal(new Map<number, MentionInfo>());
+  private readonly attachmentMenu = viewChild<ElementRef<HTMLDivElement>>('attachmentMenu');
+  private cancelAttachmentPicker?: () => void;
+  protected openAttachments(menu: HTMLDivElement, button: HTMLButtonElement) {
+    this.cancelAttachmentPicker?.();
+    this.panel.set(Panel.None);
+    const rect = button.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.top}px`;
+    // Ionic popovers unconditionally blur the active element before presenting.
+    menu.showPopover();
+  }
+  protected pickAttachment(menu: HTMLDivElement, picker: HTMLInputElement) {
+    this.cancelAttachmentPicker?.();
+    menu.hidePopover();
+    const active = this.host.nativeElement.ownerDocument.activeElement;
+    const closingKeyboard = isPlatform('android') && active?.matches('textarea, input');
+    if (active instanceof HTMLElement) active.blur();
+    if (!closingKeyboard) {
+      picker.click();
+      return;
+    }
+
+    // Android WebView can retain the IME-sized window if another Activity opens
+    // during keyboard dismissal. Let its resize animation finish first.
+    const viewport = window.visualViewport;
+    const started = performance.now();
+    const cleanup = () => {
+      window.clearTimeout(idle);
+      window.clearTimeout(deadline);
+      window.removeEventListener('resize', resized);
+      viewport?.removeEventListener('resize', resized);
+      viewport?.removeEventListener('scroll', resized);
+      this.host.nativeElement.removeEventListener('focusin', cleanup);
+      this.cancelAttachmentPicker = undefined;
+    };
+    const open = () => {
+      cleanup();
+      picker.click();
+    };
+    const resized = () => {
+      window.clearTimeout(idle);
+      idle = window.setTimeout(open, Math.max(150, 400 - (performance.now() - started)));
+    };
+    let idle = window.setTimeout(open, 400);
+    // Stay within Chromium's transient user activation, including missing or
+    // continuous viewport events, so the file chooser still opens from this tap.
+    const deadline = window.setTimeout(open, 1000);
+    window.addEventListener('resize', resized);
+    viewport?.addEventListener('resize', resized);
+    viewport?.addEventListener('scroll', resized);
+    this.host.nativeElement.addEventListener('focusin', cleanup);
+    this.cancelAttachmentPicker = cleanup;
+  }
   protected readonly display = computed(() =>
     displayText(
       this.text(),
@@ -250,6 +292,9 @@ export class MessageComposer {
       .then((input) => input.blur());
   }
   reset() {
+    this.cancelAttachmentPicker?.();
+    const menu = this.attachmentMenu()?.nativeElement;
+    if (menu?.matches(':popover-open')) menu.hidePopover();
     for (const upload of this.uploads()) upload.dispose();
     this.uploads.set([]);
     this.borrowedUploads.set([]);

@@ -771,6 +771,189 @@ describe('Message composer upload ownership', () => {
 });
 
 describe('Message composer keyboard', () => {
+  describe('attachment menu', () => {
+    let fixture: ComponentFixture<MessageComposer>;
+    beforeEach(async () => {
+      fixture = TestBed.createComponent(MessageComposer);
+      fixture.componentRef.setInput('chatId', testChat.id);
+      fixture.detectChanges();
+      await fixture.whenStable();
+    });
+    afterEach(() => {
+      fixture.destroy();
+      vi.restoreAllMocks();
+    });
+
+    it('opens immediately without blurring the composer or focusing the menu', async () => {
+      const input = document.createElement('textarea');
+      fixture.nativeElement.append(input);
+      input.focus();
+      const blur = vi.spyOn(input, 'blur');
+      vi.spyOn(fixture.componentInstance['textarea']()!, 'getInputElement').mockResolvedValue(input);
+      const menu: HTMLDivElement = fixture.nativeElement.querySelector('.attachment-menu');
+      const present = vi.fn();
+      menu.showPopover = present;
+      const button: HTMLButtonElement = fixture.nativeElement.querySelector('.attach-button');
+      const down = new Event('pointerdown', { bubbles: true, cancelable: true });
+      button.dispatchEvent(down);
+      button.click();
+
+      expect(down.defaultPrevented).toBe(true);
+      expect(present).toHaveBeenCalledOnce();
+      await fixture.whenStable();
+      expect(blur).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(input);
+    });
+
+    it.each([
+      ['media', 0],
+      ['files', 1],
+    ] as const)('blurs before opening the %s picker and stays blurred on cancel', async (_kind, index) => {
+      const input = document.createElement('textarea');
+      fixture.nativeElement.append(input);
+      input.focus();
+      vi.spyOn(fixture.componentInstance['textarea']()!, 'getInputElement').mockResolvedValue(input);
+      const menu: HTMLDivElement = fixture.nativeElement.querySelector('.attachment-menu');
+      menu.hidePopover = vi.fn();
+      const picker: HTMLInputElement = fixture.nativeElement.querySelectorAll('input[type="file"]')[index];
+      const focusAtPickerOpen: boolean[] = [];
+      const choose = vi.spyOn(picker, 'click').mockImplementation(() => {
+        focusAtPickerOpen.push(document.activeElement === input);
+      });
+      const item = menu.querySelectorAll('ion-item')[index];
+      item.click();
+
+      // Native pickers can suspend the page before queued microtasks run.
+      expect(choose).toHaveBeenCalledOnce();
+      expect(focusAtPickerOpen).toEqual([false]);
+      expect(menu.hidePopover).toHaveBeenCalledOnce();
+      await fixture.whenStable();
+      expect(document.activeElement).not.toBe(input);
+      picker.dispatchEvent(new Event('cancel', { bubbles: true }));
+      await fixture.whenStable();
+      expect(document.activeElement).not.toBe(input);
+    });
+
+    describe('Android picker window', () => {
+      let originalPlatforms: ReturnType<typeof getPlatforms>;
+      let viewport: EventTarget;
+      let picker: HTMLInputElement;
+      let input: HTMLTextAreaElement;
+      let choose: ReturnType<typeof vi.spyOn>;
+
+      beforeEach(() => {
+        const platforms = getPlatforms();
+        originalPlatforms = [...platforms];
+        platforms.splice(0, platforms.length, 'android', 'mobile');
+        viewport = new EventTarget();
+        vi.stubGlobal('visualViewport', viewport);
+        const menu: HTMLDivElement = fixture.nativeElement.querySelector('.attachment-menu');
+        menu.hidePopover = vi.fn();
+        picker = fixture.nativeElement.querySelector('input[type="file"]');
+        choose = vi.spyOn(picker, 'click').mockImplementation(() => {});
+        input = document.createElement('textarea');
+        fixture.nativeElement.append(input);
+        input.focus();
+        vi.useFakeTimers();
+      });
+      afterEach(() => {
+        fixture.destroy();
+        const platforms = getPlatforms();
+        platforms.splice(0, platforms.length, ...originalPlatforms);
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      });
+      const pick = () => {
+        const menu: HTMLDivElement = fixture.nativeElement.querySelector('.attachment-menu');
+        fixture.componentInstance['pickAttachment'](menu, picker);
+      };
+
+      it('waits for keyboard dismissal and the final WebView resize before opening the picker', () => {
+        pick();
+        expect(document.activeElement).not.toBe(input);
+        expect(choose).not.toHaveBeenCalled();
+        for (let i = 0; i < 6; i++) {
+          vi.advanceTimersByTime(100);
+          // WebView may resize its native window, visual viewport, or pan it.
+          [window, viewport, viewport][i % 3].dispatchEvent(new Event(i % 3 === 2 ? 'scroll' : 'resize'));
+          expect(choose).not.toHaveBeenCalled();
+        }
+        vi.advanceTimersByTime(149);
+        expect(choose).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(choose).toHaveBeenCalledOnce();
+        viewport.dispatchEvent(new Event('resize'));
+        vi.advanceTimersByTime(1000);
+        expect(choose).toHaveBeenCalledOnce();
+      });
+
+      it('keeps a dismissal interval even when WebView reports its resize immediately', () => {
+        pick();
+        viewport.dispatchEvent(new Event('resize'));
+        vi.advanceTimersByTime(399);
+        expect(choose).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(choose).toHaveBeenCalledOnce();
+      });
+
+      it('opens within user activation when WebView emits no resize events', () => {
+        pick();
+        vi.advanceTimersByTime(400);
+        expect(choose).toHaveBeenCalledOnce();
+      });
+
+      it('bounds the wait when viewport events keep arriving', () => {
+        pick();
+        for (let i = 0; i < 9; i++) {
+          vi.advanceTimersByTime(100);
+          viewport.dispatchEvent(new Event('resize'));
+          expect(choose).not.toHaveBeenCalled();
+        }
+        vi.advanceTimersByTime(100);
+        expect(choose).toHaveBeenCalledOnce();
+      });
+
+      it.each(['reset', 'destroy', 'focus', 'reopen'] as const)('cancels a pending picker on %s', (action) => {
+        const remove = vi.spyOn(viewport, 'removeEventListener');
+        pick();
+        if (action === 'reset') fixture.componentInstance.reset();
+        else if (action === 'destroy') fixture.destroy();
+        else if (action === 'focus') input.focus();
+        else {
+          const menu: HTMLDivElement = fixture.nativeElement.querySelector('.attachment-menu');
+          menu.showPopover = vi.fn();
+          fixture.componentInstance['openAttachments'](menu, fixture.nativeElement.querySelector('.attach-button'));
+        }
+        expect(remove).toHaveBeenCalledWith('resize', expect.any(Function));
+        vi.advanceTimersByTime(1000);
+        expect(choose).not.toHaveBeenCalled();
+      });
+
+      it('opens immediately when the composer was already unfocused', () => {
+        input.blur();
+        pick();
+        expect(choose).toHaveBeenCalledOnce();
+        vi.advanceTimersByTime(1000);
+        expect(choose).toHaveBeenCalledOnce();
+      });
+    });
+
+    it('dismisses the open attachment menu when the composer resets', () => {
+      const menu: HTMLDivElement = fixture.nativeElement.querySelector('.attachment-menu');
+      vi.spyOn(menu, 'matches').mockReturnValue(true);
+      menu.hidePopover = vi.fn();
+      fixture.componentInstance.reset();
+      expect(menu.hidePopover).toHaveBeenCalledOnce();
+    });
+
+    it('prevents menu pointer interactions from moving focus before click', () => {
+      const menu: HTMLElement = fixture.nativeElement.querySelector('.attachment-menu');
+      const down = new Event('pointerdown', { bubbles: true, cancelable: true });
+      menu.dispatchEvent(down);
+      expect(down.defaultPrevented).toBe(true);
+    });
+  });
+
   it.each([
     ['desktop', ['desktop'], true],
     ['iOS', ['ios', 'mobile'], false],

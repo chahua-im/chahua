@@ -85,9 +85,11 @@
   <div class="compose-row">
     <button
       type="button"
+      #attachButton
       class="attach-button"
       [disabled]="voiceActive()"
-      (click)="panel.set(Panel.None); blur(); attachmentMenu.present($event)">
+      (pointerdown)="$event.preventDefault()"
+      (click)="openAttachments(attachmentMenu, attachButton)">
       <ion-icon [icon]="icons.attachOutline" />
     </button>
     <div class="input-wrapper" [hidden]="voiceActive()">
@@ -137,26 +139,22 @@
   <app-sticker-picker [embedded]="true" (selected)="sticker($event)" />
 }
 
-<ion-popover
-  #attachmentMenu
-  side="top"
-  alignment="start"
-  [arrow]="false"
-  [dismissOnSelect]="true"
-  style="--width: 160px">
-  <ng-template>
-    <ion-list class="actions-menu" lines="none">
-      <ion-item [button]="true" [detail]="false" (click)="photos.click()">
-        <ion-icon slot="start" [icon]="icons.imageOutline" />
-        <ion-label>{{ 'messages.composer.media' | transloco }}</ion-label>
-      </ion-item>
-      <ion-item [button]="true" [detail]="false" [disabled]="!!editing()" (click)="filesInput.click()">
-        <ion-icon slot="start" [icon]="icons.documentOutline" />
-        <ion-label>{{ 'messages.composer.files' | transloco }}</ion-label>
-      </ion-item>
-    </ion-list>
-  </ng-template>
-</ion-popover>
+<div #attachmentMenu popover="auto" class="attachment-menu" (pointerdown)="$event.preventDefault()">
+  <ion-list class="actions-menu" lines="none">
+    <ion-item [button]="true" [detail]="false" (click)="pickAttachment(attachmentMenu, photos)">
+      <ion-icon slot="start" [icon]="icons.imageOutline" />
+      <ion-label>{{ 'messages.composer.media' | transloco }}</ion-label>
+    </ion-item>
+    <ion-item
+      [button]="true"
+      [detail]="false"
+      [disabled]="!!editing()"
+      (click)="pickAttachment(attachmentMenu, filesInput)">
+      <ion-icon slot="start" [icon]="icons.documentOutline" />
+      <ion-label>{{ 'messages.composer.files' | transloco }}</ion-label>
+    </ion-item>
+  </ion-list>
+</div>
 
 <ion-alert
   [isOpen]="blocked()"
