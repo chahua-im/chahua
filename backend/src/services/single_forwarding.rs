@@ -61,11 +61,14 @@ pub(crate) async fn prepare_single_forward(
 ) -> Result<PreparedSingleForward, AppError> {
     acquire_forward_retry_lock(conn, &body.client_generated_id)?;
     check_source_membership(conn, body.source_chat_id, uid)?;
+    // Edits lock the message before replacing its attachments. Hold the same
+    // lock through copying so both reads see one version of the source.
     let source = messages::table
         .filter(messages::id.eq(source_message_id))
         .filter(messages::chat_id.eq(body.source_chat_id))
         .filter(messages::deleted_at.is_null())
         .filter(messages::is_published.eq(true))
+        .for_update()
         .select(Message::as_select())
         .first::<Message>(conn)
         .optional()?
@@ -169,7 +172,8 @@ fn load_messages(
 }
 
 impl ForwardOrigins {
-    pub(crate) fn load<'a>(
+    /// Lightweight previews only need attribution, without original replies.
+    pub(crate) fn load_attribution<'a>(
         conn: &mut PgConnection,
         sources: impl Iterator<Item = &'a Message>,
     ) -> QueryResult<Self> {
@@ -177,8 +181,19 @@ impl ForwardOrigins {
             .filter(|message| message.deleted_at.is_none())
             .filter_map(|message| message.forwarded_from_message_id)
             .collect();
-        let mut originals = load_messages(conn, &ids)?;
-        let reply_ids = originals
+        Ok(Self {
+            originals: load_messages(conn, &ids)?,
+            replies: HashMap::new(),
+        })
+    }
+
+    pub(crate) fn load<'a>(
+        conn: &mut PgConnection,
+        sources: impl Iterator<Item = &'a Message>,
+    ) -> QueryResult<Self> {
+        let mut origins = Self::load_attribution(conn, sources)?;
+        let reply_ids = origins
+            .originals
             .values()
             .filter_map(|message| message.reply_to_id)
             .collect();
@@ -187,10 +202,13 @@ impl ForwardOrigins {
         let nested_origin_ids = replies
             .values()
             .filter_map(|message| message.forwarded_from_message_id)
-            .filter(|id| !originals.contains_key(id))
+            .filter(|id| !origins.originals.contains_key(id))
             .collect();
-        originals.extend(load_messages(conn, &nested_origin_ids)?);
-        Ok(Self { originals, replies })
+        origins
+            .originals
+            .extend(load_messages(conn, &nested_origin_ids)?);
+        origins.replies = replies;
+        Ok(origins)
     }
 
     pub(crate) fn replies(&self) -> impl Iterator<Item = &Message> {
@@ -273,6 +291,11 @@ impl ForwardOrigins {
 mod tests {
     use super::*;
     use crate::models::TranscodeStatus;
+
+    fn test_id_gen() -> &'static IdGen {
+        static GENERATOR: std::sync::OnceLock<IdGen> = std::sync::OnceLock::new();
+        GENERATOR.get_or_init(ids::new_generator)
+    }
 
     fn message(id: i64) -> Message {
         Message {
@@ -455,14 +478,14 @@ mod tests {
                     (-76003, -76001, 'application/pdf', 'first', 1, NOW(), 'first.pdf', 0, NULL),
                     (-76004, -76001, 'application/pdf', 'deleted', 3, NOW(), 'deleted.pdf', 1, NOW());",
         ).unwrap();
-        let id_gen = ids::new_generator();
+        let id_gen = test_id_gen();
         let body = ForwardMessageBody {
             source_chat_id: -76000,
             client_generated_id: "single-forward-retry-test".into(),
             thread_id: None,
         };
         let PreparedSingleForward::New(prepared) =
-            prepare_single_forward(&mut conn, &id_gen, 76000, -76000, -76001, &body)
+            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body)
                 .await
                 .unwrap()
         else {
@@ -498,11 +521,12 @@ mod tests {
         )
         .unwrap();
         let before = attachments::table
+            .filter(attachments::uploader_uid.eq(Some(76000)))
             .count()
             .get_result::<i64>(&mut conn)
             .unwrap();
         let PreparedSingleForward::Existing(existing) =
-            prepare_single_forward(&mut conn, &id_gen, 76000, -76000, -76001, &body)
+            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body)
                 .await
                 .unwrap()
         else {
@@ -511,6 +535,7 @@ mod tests {
         assert_eq!(existing.id, -76005);
         assert_eq!(
             attachments::table
+                .filter(attachments::uploader_uid.eq(Some(76000)))
                 .count()
                 .get_result::<i64>(&mut conn)
                 .unwrap(),
@@ -519,7 +544,7 @@ mod tests {
         conn.batch_execute("UPDATE messages SET deleted_at=NOW() WHERE id=-76001;")
             .unwrap();
         assert!(matches!(
-            prepare_single_forward(&mut conn, &id_gen, 76000, -76000, -76001, &body,).await,
+            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body,).await,
             Err(AppError::NotFound(_))
         ));
         conn.batch_execute(
@@ -528,9 +553,106 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            prepare_single_forward(&mut conn, &id_gen, 76000, -76000, -76001, &body,).await,
+            prepare_single_forward(&mut conn, id_gen, 76000, -76000, -76001, &body,).await,
             Err(AppError::Forbidden(_))
         ));
+        conn.batch_execute("ROLLBACK").unwrap();
+    }
+
+    #[tokio::test]
+    async fn database_forward_holds_source_lock_until_copy_transaction_ends() {
+        use diesel::connection::SimpleConnection;
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        // Two connections need committed fixtures. Drop this after both
+        // connections, so failed assertions release locks before cleanup.
+        struct Fixture(String);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let mut conn = PgConnection::establish(&self.0).unwrap();
+                conn.batch_execute(
+                    "BEGIN;
+                     DELETE FROM attachments WHERE id IN (-76102, -76103);
+                     DELETE FROM messages WHERE chat_id = -76100;
+                     DELETE FROM group_membership WHERE chat_id = -76100;
+                     DELETE FROM groups WHERE id = -76100;
+                     COMMIT;",
+                )
+                .unwrap();
+            }
+        }
+        let _fixture = Fixture(url.clone());
+        let mut conn = PgConnection::establish(&url).unwrap();
+        let mut editor = PgConnection::establish(&url).unwrap();
+        conn.batch_execute(
+            "BEGIN;
+             INSERT INTO groups(id, name) VALUES (-76100, 'forward-lock-test');
+             INSERT INTO group_membership(chat_id, uid) VALUES (-76100, 76100);
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
+                                  client_generated_id, created_at, has_attachments)
+             VALUES (-76101, -76100, 76100, 'text', 'old caption', 'forward-lock-source', NOW(), true);
+             INSERT INTO attachments(id, message_id, uploader_uid, kind, external_reference,
+                                     size, created_at, file_name)
+             VALUES (-76102, -76101, 76100, 'image/png', 'old.png', 1, NOW(), 'old.png'),
+                    (-76103, NULL, 76100, 'image/png', 'new.png', 1, NOW(), 'new.png');
+             COMMIT;
+             BEGIN;",
+        ).unwrap();
+        let id_gen = test_id_gen();
+        let body = ForwardMessageBody {
+            source_chat_id: -76100,
+            client_generated_id: "forward-lock-copy".into(),
+            thread_id: None,
+        };
+        let PreparedSingleForward::New(prepared) =
+            prepare_single_forward(&mut conn, id_gen, 76100, -76100, -76101, &body)
+                .await
+                .unwrap()
+        else {
+            panic!("expected a new copy");
+        };
+        // Match patch_message's lock-before-replacing-attachments protocol.
+        let edit = "BEGIN;
+                    SET LOCAL lock_timeout = '100ms';
+                    SELECT id FROM messages WHERE id = -76101 FOR UPDATE;
+                    UPDATE messages SET message = 'new caption' WHERE id = -76101;
+                    UPDATE attachments SET message_id = NULL WHERE id = -76102;
+                    UPDATE attachments SET message_id = -76101 WHERE id = -76103;
+                    COMMIT;";
+        let error = editor
+            .batch_execute(edit)
+            .expect_err("edit must wait for the source lock");
+        assert!(error.to_string().contains("lock timeout"), "{error}");
+        editor.batch_execute("ROLLBACK").unwrap();
+        let copied_file = attachments::table
+            .filter(attachments::id.eq(prepared.attachment_ids[0]))
+            .select(attachments::file_name)
+            .first::<String>(&mut conn)
+            .unwrap();
+        assert_eq!(prepared.message.as_deref(), Some("old caption"));
+        assert_eq!(copied_file, "old.png");
+        conn.batch_execute("ROLLBACK").unwrap();
+
+        // After the forwarding transaction ends, the edit succeeds and the
+        // next copy sees the complete new version.
+        editor.batch_execute(edit).unwrap();
+        conn.batch_execute("BEGIN").unwrap();
+        let PreparedSingleForward::New(prepared) =
+            prepare_single_forward(&mut conn, id_gen, 76100, -76100, -76101, &body)
+                .await
+                .unwrap()
+        else {
+            panic!("expected a new copy");
+        };
+        let copied_file = attachments::table
+            .filter(attachments::id.eq(prepared.attachment_ids[0]))
+            .select(attachments::file_name)
+            .first::<String>(&mut conn)
+            .unwrap();
+        assert_eq!(prepared.message.as_deref(), Some("new caption"));
+        assert_eq!(copied_file, "new.png");
         conn.batch_execute("ROLLBACK").unwrap();
     }
 }
