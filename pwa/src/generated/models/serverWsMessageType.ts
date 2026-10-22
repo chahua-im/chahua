@@ -15,6 +15,8 @@ export enum ServerWsMessageType {
   presenceUpdate = 'presenceUpdate',
   presenceSnapshot = 'presenceSnapshot',
   conversationUnread = 'conversationUnread',
+  conversationStates = 'conversationStates',
+  conversationStatesError = 'conversationStatesError',
   conversationUnreadError = 'conversationUnreadError',
   threadUpdate = 'threadUpdate',
   threadMembershipChanged = 'threadMembershipChanged',

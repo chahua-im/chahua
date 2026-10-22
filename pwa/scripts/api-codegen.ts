@@ -185,7 +185,7 @@ export function transformApiSchema<T>(document: T): T {
     if (variants?.length) throw new Error('Unexpected non-null schema union in JSON codec');
     const fields: Record<string, JsonCodec> = {};
     for (const branch of clean.allOf ?? []) {
-      const descriptor = describe(branch);
+      const descriptor = describe(branch.$ref ? schemas[branch.$ref.split('/').at(-1)!] : branch);
       if (descriptor && typeof descriptor === 'object' && !Array.isArray(descriptor)) Object.assign(fields, descriptor);
     }
     for (const [key, property] of Object.entries(clean.properties ?? {})) {

@@ -21,6 +21,8 @@ import {
 } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { SessionStore } from '../session/session-store';
+import { conversationStates } from './conversation-states';
+import type { ConversationRef, ConversationState } from '../../generated/models';
 import { activeQuery } from '../api/query';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { isMessageChange, type MessageChange } from '../messages/message-change';
@@ -46,6 +48,7 @@ export enum ChatChangeKind {
   Read,
   Membership,
   Attention,
+  Removed,
 }
 
 @Service()
@@ -108,6 +111,35 @@ export class ChatStore {
     readThrough?: SnowflakeID;
   }>();
   readonly changes$ = this.changes.asObservable();
+  private readonly stateWatch = conversationStates(this.realtime, this.session, this.destroyRef, (states) =>
+    this.acceptReadStates(states),
+  );
+  watchReadStates(scopes: readonly ConversationRef[]) {
+    return this.stateWatch.watch(scopes);
+  }
+  private acceptReadStates(states: ConversationState[]) {
+    for (const state of states) {
+      const { chatId, threadId, accessible } = state;
+      // HTTP mutations establish their own cursor. Replace the watch after their
+      // response, so a snapshot started before the mutation cannot undo it.
+      if (
+        threadId
+          ? this.readRequests.has(threadId)
+          : this.readOperations.get(chatId)?.read || this.readOperations.get(chatId)?.rewind
+      )
+        continue;
+      if (threadId)
+        this.threadReads.update((reads) =>
+          new Map(reads).set(threadId, { state, version: ++this.version, dirty: false }),
+        );
+      else {
+        const operation = this.readOperations.get(chatId);
+        if (operation) operation.version++;
+        this.applyReadState(chatId, state);
+      }
+      if (!accessible) this.changed(ChatChangeKind.Removed, chatId, threadId);
+    }
+  }
 
   private readonly receiptPrivacyChanges = new Subject<number | undefined>();
   readonly receiptPrivacyChanges$ = this.receiptPrivacyChanges.asObservable();
@@ -468,6 +500,8 @@ export class ChatStore {
   }
 
   scheduleReadState(chatId: SnowflakeID): Promise<MarkChatReadStateResponse> {
+    const cached = this.readStates().get(chatId);
+    if (cached && this.stateWatch.ready({ chatId })) return Promise.resolve(cached.state);
     const pending = this.scheduledReads.get(chatId);
     if (pending) return pending;
     const request = this.response(timer(100))
@@ -509,6 +543,7 @@ export class ChatStore {
 
   /** Apply a chat-level reaction acknowledge response (count for the scope). */
   applyReactionRead(chatId: SnowflakeID, threadId: SnowflakeID | undefined, unreadReactions: number) {
+    if (this.stateWatch.selected({ chatId, threadId })) this.stateWatch.refresh();
     const version = ++this.version;
     if (threadId) {
       const current = this.threadReads().get(threadId);
@@ -594,7 +629,11 @@ export class ChatStore {
         );
         if (this.destroyRef.destroyed) return state;
         // A message or successful read arrived during this request; its count may already be included.
-        if (version !== operation.version) continue;
+        if (version !== operation.version) {
+          const live = this.readStates().get(chatId);
+          if (live && this.stateWatch.ready({ chatId })) return live.state;
+          continue;
+        }
         this.applyReadState(chatId, state);
         return state;
       }
@@ -638,7 +677,8 @@ export class ChatStore {
         }
         if (operation.read !== request) return;
         // Concurrent WebSocket/GET snapshots may straddle this read; reconcile without guessing a delta.
-        if (refreshing || version !== operation.version) state = await this.refreshUnread(chatId);
+        if (this.stateWatch.selected({ chatId })) this.stateWatch.refresh();
+        else if (refreshing || version !== operation.version) state = await this.refreshUnread(chatId);
         request.sent = false;
         if (operation.read !== request || request.messageId <= (state.lastReadMessageId ?? target)) return;
       }
@@ -665,7 +705,8 @@ export class ChatStore {
       if (this.destroyRef.destroyed) return;
       this.applyReadState(chatId, state);
       this.changed(ChatChangeKind.Read, chatId);
-      if (refreshing || version !== operation.version) await this.refreshUnread(chatId);
+      if (this.stateWatch.selected({ chatId })) this.stateWatch.refresh();
+      else if (refreshing || version !== operation.version) await this.refreshUnread(chatId);
     })().finally(() => {
       operation.rewind = undefined;
       this.releaseReadOperation(chatId, operation);
@@ -776,7 +817,8 @@ export class ChatStore {
     const pending = this.threadReadRefreshes.get(rootId);
     if (pending) return pending;
     const cached = this.threadReads().get(rootId);
-    if (cached && !cached.dirty) return Promise.resolve(cached.state);
+    if (cached && (!cached.dirty || this.stateWatch.ready({ chatId, threadId: rootId })))
+      return Promise.resolve(cached.state);
     const request = (async () => {
       while (true) {
         await this.response(timer(100));
@@ -924,7 +966,7 @@ export class ChatStore {
         const version = this.snapshot();
         let state = await this.response(this.threadsApi.markThreadReadInChat(chatId, rootId, { messageId: target }));
         const current = this.threadReads().get(rootId);
-        if (current && current.version > version) {
+        if (!this.stateWatch.selected({ chatId, threadId: rootId }) && current && current.version > version) {
           state =
             !current.dirty && (current.state.lastReadMessageId ?? rootId) >= (state.lastReadMessageId ?? rootId)
               ? current.state
@@ -935,6 +977,7 @@ export class ChatStore {
         this.threadReads.update((states) =>
           new Map(states).set(rootId, { state, version: ++this.version, dirty: false }),
         );
+        if (this.stateWatch.selected({ chatId, threadId: rootId })) this.stateWatch.refresh();
         if (request.messageId <= (state.lastReadMessageId ?? target)) return;
       }
     })()

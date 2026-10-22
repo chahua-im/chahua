@@ -46,6 +46,7 @@ export function mockRealtime({
 } = {}) {
   return {
     connected,
+    watchConversationStates: () => {},
     events$: merge(
       events$,
       messages$.pipe(map((payload): ServerWsMessage => ({ type: ServerWsMessageType.message, payload }))),

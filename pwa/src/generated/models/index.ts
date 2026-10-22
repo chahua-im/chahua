@@ -24,6 +24,8 @@ export * from './messagePreview';
 export * from './conversationCategory';
 export * from './conversationRef';
 export * from './conversationSelector';
+export * from './conversationState';
+export * from './conversationStatesPayload';
 export * from './conversationUnreadErrorPayload';
 export * from './conversationUnreadSummary';
 export * from './conversationUnreadPayload';

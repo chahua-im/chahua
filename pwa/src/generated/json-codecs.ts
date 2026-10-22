@@ -42,6 +42,14 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     exclude: ['ConversationRef'],
     include: ['ConversationRef'],
   },
+  ConversationState: {
+    chatId: 1,
+    threadId: 1,
+    lastReadMessageId: 1,
+  },
+  ConversationStatesPayload: {
+    states: ['ConversationState'],
+  },
   ConversationView: {
     selector: 'ConversationSelector',
   },
@@ -680,6 +688,8 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   presenceUpdate: 0,
   presenceSnapshot: 'PresenceSnapshotPayload',
   conversationUnread: 0,
+  conversationStates: 'ConversationStatesPayload',
+  conversationStatesError: 0,
   conversationUnreadError: 0,
   threadUpdate: 'ThreadUpdatePayload',
   threadMembershipChanged: 'ThreadMembershipChangedPayload',

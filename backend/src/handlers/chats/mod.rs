@@ -838,6 +838,7 @@ async fn acknowledge_chat_reactions(
         body.read_through,
     )?;
 
+    state.ws_registry.invalidate_unread(&[uid]);
     Ok(Json(UnreadReactionsAckResponse { unread_reactions }))
 }
 

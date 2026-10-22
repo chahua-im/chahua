@@ -36,6 +36,7 @@ pub struct ConnectionEntry {
     pub tx: mpsc::Sender<Arc<ServerWsMessage>>,
     /// Sticky, coalescing invalidation independent of the lossy ordinary-event queue.
     pub unread_changed: Arc<tokio::sync::Notify>,
+    pub states_changed: Arc<tokio::sync::Notify>,
     /// Unix timestamp (seconds) when we last received a ping from the client.
     pub last_ping_at: AtomicU64,
     pub app_state: AtomicU8,
@@ -114,6 +115,7 @@ impl ConnectionRegistry {
             client_id,
             tx,
             unread_changed: Arc::new(tokio::sync::Notify::new()),
+            states_changed: Arc::new(tokio::sync::Notify::new()),
             last_ping_at: AtomicU64::new(now),
             app_state: AtomicU8::new(AppPresenceState::Active as u8),
             last_state_at: AtomicU64::new(now),
@@ -144,7 +146,8 @@ impl ConnectionRegistry {
     pub fn broadcast_to_uids(&self, uids: &[i32], message: Arc<ServerWsMessage>) {
         if matches!(
             &*message,
-            ServerWsMessage::Message(_)
+            ServerWsMessage::ReactionUpdated(_)
+                | ServerWsMessage::Message(_)
                 | ServerWsMessage::MessageUpdated(_)
                 | ServerWsMessage::MessageDeleted(_)
                 | ServerWsMessage::MessagesBulkDeleted(_)
@@ -182,6 +185,7 @@ impl ConnectionRegistry {
             if let Some(entries) = self.inner.get(uid) {
                 for entry in entries.iter() {
                     entry.unread_changed.notify_one();
+                    entry.states_changed.notify_one();
                 }
             }
         }
@@ -375,6 +379,14 @@ mod tests {
         )
         .await
         .unwrap();
+        for entry in [&first, &second] {
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                entry.states_changed.notified(),
+            )
+            .await
+            .unwrap();
+        }
         registry.invalidate_unread(&[7]);
         tokio::time::timeout(
             std::time::Duration::from_millis(50),

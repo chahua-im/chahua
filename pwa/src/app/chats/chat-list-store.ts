@@ -111,6 +111,8 @@ export class ChatListStore {
   private readonly chatInfo = inject(ChatStore);
   private readonly destroyRef = inject(DestroyRef);
   private readonly realtime = inject(Connection);
+  private readonly watchActivity = signal(0);
+  private readonly watchVisible = signal(!document.hidden);
   private readonly queries = new Map<boolean, { state: QueryState; handle: ChatQuery }>();
   private readonly resolvedRequests = new Map<SnowflakeID, number>();
   private readonly membershipStates = new Map<SnowflakeID, string>();
@@ -144,6 +146,7 @@ export class ChatListStore {
       void this.invalidateThreads();
     });
     const visible = () => {
+      this.watchVisible.set(!document.hidden);
       if (document.hidden) return;
       for (const { state } of this.queries.values()) {
         if (!state.consumers.size) continue;
@@ -160,6 +163,22 @@ export class ChatListStore {
     };
     document.addEventListener('visibilitychange', visible);
     this.destroyRef.onDestroy(() => document.removeEventListener('visibilitychange', visible));
+    effect((onCleanup) => {
+      this.watchActivity();
+      if (!this.watchVisible()) return;
+      const scopes = [...this.queries.values()].flatMap(({ state }) =>
+        state.consumers.size ? state.ids().map((chatId) => ({ chatId })) : [],
+      );
+      const threads = [this.activeThreads.state, this.archivedThreads.state].flatMap((state) =>
+        state.consumers
+          ? state.ids().flatMap((threadId) => {
+              const thread = this.chatInfo.thread(threadId);
+              return thread ? [{ chatId: thread.chatId, threadId }] : [];
+            })
+          : [],
+      );
+      onCleanup(this.chatInfo.watchReadStates([...scopes, ...threads]));
+    });
     // Live events keep a foregrounded list current; only a dropped socket can have missed rows.
     let wasConnected = this.realtime.connected();
     let dropped = false;
@@ -173,6 +192,14 @@ export class ChatListStore {
       wasConnected = connected;
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId }) => {
+      if (kind === ChatChangeKind.Removed) {
+        if (threadId)
+          for (const { state } of [this.activeThreads, this.archivedThreads])
+            state.ids.update((ids) => ids.filter((id) => id !== threadId));
+        else
+          for (const { state } of this.queries.values()) state.ids.update((ids) => ids.filter((id) => id !== chatId));
+        return;
+      }
       if (kind === ChatChangeKind.Attention) {
         if (threadId) this.refreshThreadRead(threadId);
         else this.queueUnread(chatId);
@@ -285,11 +312,13 @@ export class ChatListStore {
       activate: () => {
         const consumer = Symbol();
         state.consumers.add(consumer);
+        this.watchActivity.update((value) => value + 1);
         if (state.dirty() && !state.requests.has(ListFetch.Load)) void this.fetchQuery(state, ListFetch.Load);
         else this.reconcile(state);
         this.flushRows(state);
         return () => {
           state.consumers.delete(consumer);
+          this.watchActivity.update((value) => value + 1);
           if (!state.consumers.size && state.requests.size) this.cancelQuery(state);
         };
       },
@@ -719,6 +748,7 @@ export class ChatListStore {
 
   private activateThreadQuery(current: ThreadQuery) {
     current.consumers++;
+    this.watchActivity.update((value) => value + 1);
     if (current.dirty) void this.loadThreads(current);
     else this.flushThreadReads(current);
     this.flushRows(current);
@@ -726,6 +756,7 @@ export class ChatListStore {
     return () => {
       if (!active) return;
       active = false;
+      this.watchActivity.update((value) => value + 1);
       if (--current.consumers || !current.request) return;
       this.invalidate(current);
       const pending = current.request;

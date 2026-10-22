@@ -66,6 +66,8 @@ not part of this endpoint unless source code registers them later.
 | `ws_messages_pushed_total` | Counter; `message_type` | Broadcast messages accepted by a WebSocket send buffer. | One series per emitted message type, not per user or connection. |
 | `ws_messages_dropped_total` | Counter; `message_type` | Broadcast messages rejected by a full or closed WebSocket send buffer. | One series per emitted message type, not per user or connection. |
 
+Connection-local unread summaries and conversation-state snapshots are sent directly by the socket task, outside the broadcast queue; they do not increment the broadcast pushed/dropped counters.
+
 ## Presence snapshots
 
 Snapshots include initial watches, periodic refreshes, and refreshes triggered by committed

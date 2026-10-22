@@ -608,6 +608,7 @@ export class ConversationPage {
   protected readonly canJumpMention = computed(
     () => this.active() && this.mentionsEnabled() && this.mentionRemaining() > 0,
   );
+  private readonly stateWatchVisible = signal(!document.hidden);
   private reactionSessionEntered = false;
   private reactionRequest?: { again: boolean };
   private reactionFresh = false;
@@ -727,6 +728,10 @@ export class ConversationPage {
     effect(() => {
       const { threadId } = this.entryKey();
       if (this.active() && threadId && !this.subscription()) untracked(() => void this.loadSubscription());
+    });
+    effect((onCleanup) => {
+      if (this.active() && this.stateWatchVisible())
+        onCleanup(this.chatInfo.watchReadStates([{ chatId: this.id(), threadId: this.threadId() }]));
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId }) => {
       if (kind !== ChatChangeKind.Attention || chatId !== this.id() || threadId !== this.threadId()) return;
@@ -1066,6 +1071,7 @@ export class ConversationPage {
   }
 
   protected visibilityChanged() {
+    this.stateWatchVisible.set(!this.document.hidden);
     if (this.document.hidden) {
       this.saveDraft();
       this.resetMentionSession(true);

@@ -99,6 +99,39 @@ describe('Connection', () => {
         },
       ],
     });
+    realtime.watchConversationStates(9, [{ chatId: testChat.id, threadId: testMessage.id }]);
+    expect(JSON.parse(socket.send.mock.calls.at(-1)![0])).toEqual({
+      type: 'watchConversationStates',
+      requestId: 9,
+      conversations: [{ chatId: wireChat.id, threadId: wireMessage.id }],
+    });
+    const states = vi.fn();
+    realtime.events$.subscribe((event) => {
+      if (event.type === 'conversationStates') states(event.payload);
+    });
+    socket.receive({
+      type: 'conversationStates',
+      payload: {
+        requestId: 9,
+        full: true,
+        states: [
+          {
+            chatId: wireChat.id,
+            threadId: wireMessage.id,
+            lastReadMessageId: wireMessage.id,
+            accessible: true,
+            unreadCount: 0,
+            unreadMentions: 0,
+            unreadReactions: 0,
+          },
+        ],
+      },
+    });
+    expect(states.mock.calls[0][0].states[0]).toMatchObject({
+      chatId: testChat.id,
+      threadId: testMessage.id,
+      lastReadMessageId: testMessage.id,
+    });
     realtime.accept(testMessage);
     socket.receive({ type: 'message', payload: wireMessage });
     socket.receive({

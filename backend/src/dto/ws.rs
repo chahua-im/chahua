@@ -41,6 +41,10 @@ pub enum ClientWsMessage {
         #[serde(default)]
         app_badge: bool,
     },
+    WatchConversationStates {
+        request_id: u32,
+        conversations: Vec<crate::dto::conversations::ConversationRef>,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -90,6 +94,8 @@ pub enum ServerWsMessage {
     PresenceUpdate(PresenceUpdatePayload),
     PresenceSnapshot(PresenceSnapshotPayload),
     ConversationUnread(crate::dto::conversations::ConversationUnreadPayload),
+    ConversationStates(crate::dto::conversations::ConversationStatesPayload),
+    ConversationStatesError(crate::dto::conversations::ConversationUnreadErrorPayload),
     ConversationUnreadError(crate::dto::conversations::ConversationUnreadErrorPayload),
     ThreadUpdate(ThreadUpdatePayload),
     ThreadMembershipChanged(ThreadMembershipChangedPayload),
@@ -121,6 +127,8 @@ impl ServerWsMessage {
             Self::PresenceUpdate(_) => "presenceUpdate",
             Self::PresenceSnapshot(_) => "presenceSnapshot",
             Self::ConversationUnread(_) => "conversationUnread",
+            Self::ConversationStates(_) => "conversationStates",
+            Self::ConversationStatesError(_) => "conversationStatesError",
             Self::ConversationUnreadError(_) => "conversationUnreadError",
             Self::ThreadUpdate(_) => "threadUpdate",
             Self::ThreadMembershipChanged(_) => "threadMembershipChanged",

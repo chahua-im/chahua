@@ -77,3 +77,26 @@ pub struct ConversationUnreadPayload {
 pub struct ConversationUnreadErrorPayload {
     pub request_id: u32,
 }
+
+/// Authorized absolute state for one explicitly watched conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationState {
+    #[serde(flatten)]
+    pub conversation: ConversationRef,
+    pub accessible: bool,
+    #[serde(with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub last_read_message_id: Option<i64>,
+    pub unread_count: i64,
+    pub unread_mentions: i64,
+    pub unread_reactions: i64,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationStatesPayload {
+    pub request_id: u32,
+    pub full: bool,
+    pub states: Vec<ConversationState>,
+}

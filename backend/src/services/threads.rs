@@ -548,7 +548,7 @@ pub fn get_user_threads(
     archived: bool,
     root_id: Option<i64>,
 ) -> Result<Vec<ThreadListRow>, diesel::result::Error> {
-    // Exact root lookups use the existing (thread_root_id, uid) key, without scanning list pages.
+    // Exact root lookups use the existing root and user indexes, without scanning list pages.
     let root_filter = if root_id.is_some() {
         "AND ts.thread_root_id = $5"
     } else {
