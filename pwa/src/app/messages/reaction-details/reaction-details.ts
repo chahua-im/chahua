@@ -18,7 +18,7 @@ import {
 } from '@ionic/angular';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
-import type { ReactionDetailGroup, SnowflakeID } from '../../../generated/models';
+import type { ReactionDetailGroup, ReactionReactor, SnowflakeID } from '../../../generated/models';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 
@@ -55,9 +55,23 @@ export class ReactionDetails {
   protected readonly loading = signal(true);
   protected readonly error = signal(false);
   protected readonly count = computed(() => this.groups().reduce((sum, group) => sum + group.reactors.length, 0));
-  protected readonly visible = computed(() =>
-    this.groups().filter((group) => !this.emoji() || group.emoji === this.emoji()),
-  );
+  protected readonly visible = computed(() => {
+    const reactions = this.groups()
+      .filter((group) => !this.emoji() || group.emoji === this.emoji())
+      .flatMap((group) => group.reactors.map((user) => ({ user, emoji: group.emoji })))
+      // The details endpoint always supplies the global chronological sortIndex.
+      .sort((a, b) => a.user.sortIndex! - b.user.sortIndex!);
+    const users = new Map<number, { user: ReactionReactor; emojis: string[] }>();
+    for (const { user, emoji } of reactions) {
+      const row = users.get(user.uid);
+      if (row) {
+        row.emojis.push(emoji);
+      } else {
+        users.set(user.uid, { user, emojis: [emoji] });
+      }
+    }
+    return [...users.values()];
+  });
   constructor() {
     effect(() => {
       this.chatId();
