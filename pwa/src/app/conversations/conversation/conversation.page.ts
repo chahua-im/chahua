@@ -1,5 +1,6 @@
 import { ForwardPicker } from '../../messages/forward-picker/forward-picker';
 import { ForwardedLabel } from '../../messages/forwarded-label';
+import { ConversationViewportHeader } from '../conversation-viewport-header';
 import {
   canForward,
   canSelect,
@@ -157,6 +158,7 @@ type ScrollPosition =
     '(window:pagehide)': 'saveDraft()',
   },
   imports: [
+    ConversationViewportHeader,
     ForwardPicker,
     ForwardedLabel,
     AvatarColor,
