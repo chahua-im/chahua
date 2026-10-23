@@ -1,0 +1,43 @@
+ion-modal {
+  --height: 90dvh;
+}
+
+@media (min-width: 768px) {
+  ion-modal {
+    --width: 600px;
+    --height: min(600px, calc(100dvh - 48px));
+  }
+
+  ion-modal::part(content) {
+    position: relative;
+    border-radius: var(--border-radius);
+  }
+}
+
+ion-content::part(scroll) {
+  // The picker preserves its visible row when two independently paged streams merge.
+  overflow-anchor: none;
+}
+
+.selection-status {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+}
+
+.selection-status ion-spinner,
+.source-loading ion-spinner {
+  width: 24px;
+  height: 24px;
+}
+
+.source-loading {
+  display: grid;
+  place-items: center;
+  height: 32px;
+}
+
+.manual-paging {
+  visibility: hidden;
+}

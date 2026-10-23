@@ -1,32 +1,47 @@
 <ion-modal
   [isOpen]="open()"
-  [initialBreakpoint]="mobile ? 0.5 : undefined"
-  [breakpoints]="mobile ? [0, 0.5, 0.9] : undefined"
+  [initialBreakpoint]="mobile() ? 0.5 : 1"
+  [breakpoints]="mobile() ? [0, 0.5, 1] : [0, 1]"
+  [handle]="mobile()"
+  [expandToScroll]="false"
+  [canDismiss]="canDismiss"
+  (didPresent)="presented($event)"
+  (willDismiss)="dismissing()"
   (didDismiss)="open.set(false); closed.emit()">
   <ng-template>
     <ion-header>
       <ion-toolbar>
         <ion-title>{{ 'messages.forward.to' | transloco }}</ion-title>
         <ion-buttons slot="end">
-          <ion-button (click)="open.set(false)">{{ 'common.cancel' | transloco }}</ion-button>
+          <ion-button [disabled]="submitted()" (click)="close()">{{ 'common.cancel' | transloco }}</ion-button>
         </ion-buttons>
       </ion-toolbar>
       <ion-searchbar
         [value]="query()"
         (ionInput)="query.set($event.detail.value ?? '')"
+        (ionFocus)="expand()"
         [debounce]="200"
         [placeholder]="'messages.forward.search' | transloco" />
     </ion-header>
-    <ion-content appScrollbars>
+    <ion-content
+      appScrollbars
+      [scrollEvents]="true"
+      (ionScroll)="rememberPosition()"
+      (ionScrollStart)="scrolling.set(true)"
+      (ionScrollEnd)="scrolling.set(false); rememberPosition()">
       @if (failure(); as failure) {
         <p class="ion-padding">{{ failure | transloco: { max: maxForwardMessages } }}</p>
       }
-      @if (loading() && !targets().length) {
+      @if (initialLoading()) {
         <div class="page-loading"><ion-spinner /></div>
       } @else {
         <ion-list>
           @for (target of targets(); track target.threadId ?? target.chatId) {
-            <ion-item [button]="true" [disabled]="invalid() || submitted() || resolving()" (click)="select(target)">
+            <ion-item
+              [button]="true"
+              [disabled]="invalid() || submitted() || resolving()"
+              (pointerdown)="press(target)"
+              (click)="select(target)">
               <app-chat-avatar slot="start" [entry]="target.avatar" [size]="40" />
               <ion-label>
                 <h3>{{ target.name ?? ('conversation.chat' | transloco) }}</h3>
@@ -35,27 +50,53 @@
                   <p>{{ 'messages.forward.replies' | transloco: { count: target.replies } }}</p>
                 }
               </ion-label>
+              <span slot="end" class="selection-status">
+                @if (selected() === (target.threadId ?? target.chatId)) {
+                  <ion-spinner />
+                }
+              </span>
             </ion-item>
           } @empty {
             @if (!failed()) {
-              <p class="ion-padding">{{ 'messages.forward.empty' | transloco }}</p>
+              <p class="ion-padding">
+                {{
+                  (query().trim()
+                    ? incomplete()
+                      ? 'messages.forward.partialEmpty'
+                      : 'messages.forward.empty'
+                    : 'messages.forward.noTargets'
+                  ) | transloco
+                }}
+              </p>
             }
           }
         </ion-list>
       }
-      @if (chats.error()) {
-        <app-load-error compact [message]="'messages.forward.chatsFailed' | transloco" (retry)="chats.refresh()" />
+      <div class="source-loading">
+        @if (pending() && !initialLoading()) {
+          <ion-spinner />
+        }
+      </div>
+      @if (chatsFailed()) {
+        <app-load-error compact [message]="'messages.forward.chatsFailed' | transloco" (retry)="retry(chats)" />
       }
-      @if (threads.error()) {
-        <app-load-error compact [message]="'messages.forward.threadsFailed' | transloco" (retry)="threads.refresh()" />
+      @if (threadsFailed()) {
+        <app-load-error compact [message]="'messages.forward.threadsFailed' | transloco" (retry)="retry(threads)" />
       }
       @if (moreAvailable()) {
         <div class="ion-text-center">
           <ion-button fill="clear" [disabled]="paging()" (click)="more()">
-            {{ 'messages.forward.loadMore' | transloco }}
+            <span class="action-content" [class.busy]="manualPaging()">
+              <span class="action-label">{{ 'messages.forward.loadMore' | transloco }}</span>
+              @if (manualPaging()) {
+                <ion-spinner />
+              }
+            </span>
           </ion-button>
         </div>
-        <ion-infinite-scroll (ionInfinite)="more($event)"><ion-infinite-scroll-content /></ion-infinite-scroll>
+        <ion-infinite-scroll [class.manual-paging]="manualPaging()" (ionInfinite)="more($event)">
+          <ion-infinite-scroll-content />
+        </ion-infinite-scroll>
       }
     </ion-content>
   </ng-template>
