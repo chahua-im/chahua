@@ -17,12 +17,13 @@ ion-label ion-text {
   font-weight: 500;
 }
 
-ion-item:not(.ion-color) .meta > span {
+ion-item:not(.ion-color) .timestamp {
   color: var(--ion-text-color-step-250, #404040);
 }
 
 .meta {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
@@ -61,7 +62,9 @@ ion-item.ion-color app-chat-avatar {
   vertical-align: middle;
 }
 
-.delivery {
-  margin-inline-start: 4px;
-  vertical-align: middle;
+.timestamp {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }

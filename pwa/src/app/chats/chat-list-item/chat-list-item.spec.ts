@@ -54,12 +54,15 @@ describe('ChatListItem', () => {
     expect(fixture.nativeElement.querySelector('ion-item-options')).toBeNull();
   });
 
-  it('renders the shared delivery icon after the message preview', () => {
+  it('keeps delivery before the timestamp and outside the clipped message preview', () => {
     fixture.componentRef.setInput('entry', { ...entry, delivery: MessageDelivery.Sent, read: true });
     fixture.detectChanges();
     const status = fixture.nativeElement.querySelector('app-message-status');
     expect(status).not.toBeNull();
     expect(status.querySelector('ion-icon')).not.toBeNull();
+    expect(status.closest('.meta')).not.toBeNull();
+    expect(status.nextElementSibling.textContent.trim()).not.toBe('');
+    expect(fixture.nativeElement.querySelector('ion-label app-message-status')).toBeNull();
   });
 
   it('renders a mention badge without a numeric unread count', async () => {

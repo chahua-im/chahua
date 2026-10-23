@@ -717,6 +717,42 @@ describe('ChatListContent', () => {
     expect(fixture.nativeElement.querySelector('app-message-status')).not.toBeNull();
   });
 
+  it.each([false, true])(
+    'previews forward drafts and restores the last message on removal (thread: %s)',
+    (inThread) => {
+      const own = { ...testMessage, sender: testUser, mentions: [], message: '已发送的消息' };
+      if (inThread) {
+        preferences.showThreadsInMessages.set(true);
+        chats.items.set([]);
+        threads.items.set([{ ...thread, lastReply: own }]);
+      } else {
+        chats.items.set([{ ...testChat, lastMessage: own }]);
+      }
+      const drafts = TestBed.inject(DraftStore);
+      const threadId = inThread ? thread.threadRootMessage.id : undefined;
+      const preview = () =>
+        fixture.nativeElement.querySelector('app-chat-list-item[data-row-key] ion-label p').textContent;
+      drafts.setForward(testChat.id, threadId, [{ ...testMessage, message: '**待转发内容**' }]);
+      fixture.detectChanges();
+      expect(preview()).toContain('草稿：');
+      expect(preview()).toContain('待转发内容');
+      expect(preview()).not.toContain('已发送的消息');
+      expect(fixture.nativeElement.querySelector('app-message-status')).toBeNull();
+      drafts.setForward(testChat.id, threadId, [testMessage, testMessage]);
+      fixture.detectChanges();
+      expect(preview()).toContain('转发 2 条消息');
+      drafts.save(testChat.id, threadId, '附言');
+      fixture.detectChanges();
+      expect(preview()).toContain('附言');
+      drafts.clear(testChat.id, threadId);
+      drafts.setForward(testChat.id, threadId);
+      fixture.detectChanges();
+      expect(preview()).toContain('已发送的消息');
+      expect(preview()).not.toContain('草稿：');
+      expect(fixture.nativeElement.querySelector('app-message-status')).not.toBeNull();
+    },
+  );
+
   it('labels delivery only after my own last message and reads the DM receipt', () => {
     const own = { ...testMessage, sender: testUser, mentions: [] };
     const dm = {

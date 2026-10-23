@@ -85,7 +85,7 @@ ion-content::part(scroll) {
   gap: 1px;
   flex: 1;
   min-width: 0;
-  height: calc(var(--composer-control-size) - 2px);
+  min-height: calc(var(--composer-control-size) - 2px);
   padding: 0 var(--composer-padding-start);
   border-inline-start: 2px solid var(--context-color);
   border-radius: 6px;
@@ -94,11 +94,13 @@ ion-content::part(scroll) {
   text-align: start;
   font: inherit;
   font-size: max(12px, var(--app-font-micro));
-  line-height: var(--app-line-micro);
+  line-height: normal;
 }
 .reply-description strong,
 .reply-description span {
   display: block;
+  flex-shrink: 0;
+  min-height: var(--app-line-micro);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -215,6 +217,9 @@ ion-title app-message-preview {
   app-message-preview {
     display: block;
     width: 100%;
+    // Font fallback can have taller descenders than the compact line token.
+    line-height: normal;
+    min-height: var(--app-line-compact);
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;

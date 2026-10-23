@@ -130,9 +130,17 @@
                 ">
                 <app-message-preview slot="title" [message]="row.thread.threadRootMessage"></app-message-preview>
                 <span slot="preview">
-                  @if (row.draft; as draft) {
+                  @if (row.draft || row.forward?.length) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
-                    <app-markdown-summary [text]="draft.text" />
+                    @if (row.forward?.length) {
+                      {{ 'messages.forward.pendingCount' | transloco: { count: row.forward!.length } }}
+                      {{ ' ' }}
+                    }
+                    @if (row.draft && row.draft.text.trim()) {
+                      <app-markdown-summary [text]="row.draft!.text" />
+                    } @else if (row.forward?.length === 1) {
+                      <app-message-preview [message]="row.forward![0]" />
+                    }
                   } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {
@@ -185,9 +193,17 @@
                 ]"
                 (selected)="navigation.goTo(row.chat.id, { type: latestTarget })">
                 <span slot="preview">
-                  @if (row.draft; as draft) {
+                  @if (row.draft || row.forward?.length) {
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
-                    <app-markdown-summary [text]="draft.text" />
+                    @if (row.forward?.length) {
+                      {{ 'messages.forward.pendingCount' | transloco: { count: row.forward!.length } }}
+                      {{ ' ' }}
+                    }
+                    @if (row.draft && row.draft.text.trim()) {
+                      <app-markdown-summary [text]="row.draft!.text" />
+                    } @else if (row.forward?.length === 1) {
+                      <app-message-preview [message]="row.forward![0]" />
+                    }
                   } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
                   } @else {
