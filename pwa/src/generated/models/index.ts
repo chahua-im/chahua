@@ -12,7 +12,6 @@ export * from './attachmentResponse';
 export * from './authTokenResponse';
 export * from './userGroupTagInfo';
 export * from './memberSummary';
-export * from './bulkDeletedPayload';
 export * from './chatArchiveStateChangedPayload';
 export * from './user';
 export * from './groupKind';

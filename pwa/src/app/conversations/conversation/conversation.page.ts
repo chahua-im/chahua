@@ -418,6 +418,7 @@ export class ConversationPage {
     this.recallResult.set(undefined);
     let succeeded = 0;
     let failed = 0;
+    const ready: { key: SnowflakeID | string; message: MessageResponse }[] = [];
     for (const message of messages) {
       if (!current()) return;
       const key = this.selectionKey(message);
@@ -430,17 +431,38 @@ export class ConversationPage {
         const published = 'delivery' in message ? await this.outbox.waitForPublication(message) : message;
         if (!current()) return;
         if (!this.selectedMessages().has(key)) continue;
-        await this.messageActions.recall(published);
+        ready.push({ key, message: published });
+      } catch {
         if (!current()) return;
-        succeeded++;
+        failed++;
+      }
+    }
+    if (!current()) return;
+    // Publication waits may have allowed remote deletions or permission changes.
+    const batch = ready.filter(({ key, message }) => {
+      if (!this.selectedMessages().has(key)) return false;
+      if (this.canRecallSelectedMessage(message)) return true;
+      failed++;
+      return false;
+    });
+    if (batch.length) {
+      try {
+        const result = await this.messageActions.recallMany(
+          entry.chatId,
+          batch.map(({ message }) => message.id),
+        );
+        if (!current()) return;
+        const deleted = new Set(result.messageIds);
+        succeeded = batch.filter(({ message }) => deleted.has(message.id)).length;
+        failed += batch.length - succeeded;
         this.selectedMessages.update((selected) => {
           const next = new Map(selected);
-          next.delete(key);
+          for (const { key, message } of batch) if (deleted.has(message.id)) next.delete(key);
           return next;
         });
       } catch {
         if (!current()) return;
-        failed++;
+        failed += batch.length;
       }
     }
     this.recalling.set(false);

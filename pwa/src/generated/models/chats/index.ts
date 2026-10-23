@@ -7,6 +7,8 @@
  */
 
 export * from './acknowledgeReactionsBody';
+export * from './bulkDeletedPayload';
+export * from './bulkDeleteMessagesBody';
 export * from './chatAttachmentKindFilter';
 export * from './chatAttachmentResponse';
 export * from './chatListItem';

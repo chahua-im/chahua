@@ -9,6 +9,14 @@ use crate::{
     models::MessageType,
 };
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkDeleteMessagesBody {
+    #[serde(deserialize_with = "crate::serde_i64_string::vec::deserialize")]
+    #[schema(value_type = Vec<String>, min_items = 1, max_items = 100)]
+    pub message_ids: Vec<i64>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MentionInfo {

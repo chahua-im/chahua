@@ -5,8 +5,8 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
-import type { BulkDeletedPayload } from './bulkDeletedPayload';
 import type { ChatArchiveStateChangedPayload } from './chatArchiveStateChangedPayload';
+import type { BulkDeletedPayload } from './chats/bulkDeletedPayload';
 import type { ConversationStatesPayload } from './conversationStatesPayload';
 import type { ConversationUnreadErrorPayload } from './conversationUnreadErrorPayload';
 import type { ConversationUnreadPayload } from './conversationUnreadPayload';

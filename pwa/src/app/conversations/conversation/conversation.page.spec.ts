@@ -257,6 +257,51 @@ describe('ConversationPage', () => {
     component['cancelSelection']();
   });
 
+  it('recalls multiple selected messages in one request and applies the response without a WebSocket echo', async () => {
+    const second = { ...testMessage, id: encodeId('902'), clientGeneratedId: 'second' };
+    component['beginSelection'](testMessage);
+    component['toggleSelection'](second);
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ messageIds: [wireMessage.id, '902'] });
+    http.expectNone((request) => request.method === 'DELETE');
+    request.flush({ chatId: wireChat.id, messageIds: [wireMessage.id, '902'], complete: true, threadRootIds: [] });
+    await recall;
+    expect(component['recallResult']()).toEqual({ succeeded: 2, failed: 0 });
+    expect(component['selecting']()).toBe(false);
+    expect(component['rows']().some((row) => row.message.id === testMessage.id)).toBe(false);
+  });
+
+  it('preserves the entire selection when a batch is rejected', async () => {
+    component['beginSelection'](testMessage);
+    component['toggleSelection']({ ...testMessage, id: encodeId('902'), clientGeneratedId: 'second' });
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
+      .flush('Forbidden', { status: 403, statusText: 'Forbidden' });
+    await recall;
+    expect(component['recallResult']()).toEqual({ succeeded: 0, failed: 2 });
+    expect(component['selectedMessages']().size).toBe(2);
+  });
+
+  it('does not let a late batch response change a new selection', async () => {
+    component['beginSelection'](testMessage);
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
+    component['cancelSelection']();
+    const second = { ...testMessage, id: encodeId('902'), clientGeneratedId: 'second' };
+    component['beginSelection'](second);
+    request.flush({ chatId: wireChat.id, messageIds: [wireMessage.id], complete: true, threadRootIds: [] });
+    await recall;
+    expect([...component['selectedMessages']().values()]).toEqual([second]);
+    expect(component['recallResult']()).toBeUndefined();
+    expect(component['recalling']()).toBe(false);
+  });
+
   async function acknowledgedSelection(messageType = MessageType.text) {
     const item = TestBed.inject(MessageOutbox).enqueue(testChat.id, undefined, 'queued', {
       messageType,
@@ -275,7 +320,7 @@ describe('ConversationPage', () => {
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
     http
-      .expectOne(`/_api/chats/${wireChat.id}/messages/901`)
+      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
       .flush('Forbidden', { status: 403, statusText: 'Forbidden' });
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 0, failed: 1 });
@@ -285,7 +330,9 @@ describe('ConversationPage', () => {
     component['recallSelection']();
     const retry = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/901`).flush(null, { status: 204, statusText: 'No Content' });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
+      .flush({ chatId: wireChat.id, messageIds: ['901'], complete: true, threadRootIds: [] });
     await retry;
     expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 0 });
     expect(component['selecting']()).toBe(false);
@@ -299,23 +346,60 @@ describe('ConversationPage', () => {
     expect(component['recalling']()).toBe(true);
     expect(component['recallResult']()).toBeUndefined();
     expect(item.cancelled()).toBe(false);
-    http.expectNone((request) => request.method === 'DELETE');
+    http.expectNone((request) => request.url.endsWith('/bulk-delete') || request.method === 'DELETE');
     incoming.next(item.confirmed()!);
     await Promise.resolve();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages/901`).flush(null, { status: 204, statusText: 'No Content' });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`)
+      .flush({ chatId: wireChat.id, messageIds: ['901'], complete: true, threadRootIds: [] });
     await recall;
     expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 0 });
   });
 
-  it('does not issue a late DELETE after leaving a selection that waits for audio publication', async () => {
+  it('does not issue a late bulk recall after leaving a selection that waits for audio publication', async () => {
     const { item } = await acknowledgedSelection(MessageType.audio);
     component['recallSelection']();
     const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
     component['cancelSelection']();
     incoming.next(item.confirmed()!);
     await recall;
-    http.expectNone((request) => request.method === 'DELETE');
+    http.expectNone((request) => request.url.endsWith('/bulk-delete') || request.method === 'DELETE');
     expect(component['recallResult']()).toBeUndefined();
+    expect(item.cancelled()).toBe(false);
+  });
+
+  it('batches published audio with other selected messages and skips remote recalls during the wait', async () => {
+    const { item } = await acknowledgedSelection(MessageType.audio);
+    component['toggleSelection'](testMessage);
+    const other = { ...testMessage, id: encodeId('903'), clientGeneratedId: 'other-selected' };
+    component['toggleSelection'](other);
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    http.expectNone((request) => request.url.endsWith('/bulk-delete'));
+    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...other, isDeleted: true } });
+    incoming.next(item.confirmed()!);
+    await Promise.resolve();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
+    expect(request.request.body).toEqual({ messageIds: ['901', wireMessage.id] });
+    request.flush({ chatId: wireChat.id, messageIds: ['901', wireMessage.id], complete: true, threadRootIds: [] });
+    await recall;
+    expect(component['recallResult']()).toEqual({ succeeded: 2, failed: 0 });
+    expect(component['selecting']()).toBe(false);
+  });
+
+  it('keeps an audio publication failure selected while recalling the ready messages in one batch', async () => {
+    const { item } = await acknowledgedSelection(MessageType.audio);
+    vi.spyOn(TestBed.inject(MessageOutbox), 'waitForPublication').mockRejectedValue(new Error('publication timeout'));
+    component['toggleSelection'](testMessage);
+    component['recallSelection']();
+    const recall = component['confirmRecallSelection'](new CustomEvent('dismiss', { detail: { role: 'confirm' } }));
+    await Promise.resolve();
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/bulk-delete`);
+    expect(request.request.body).toEqual({ messageIds: [wireMessage.id] });
+    request.flush({ chatId: wireChat.id, messageIds: [wireMessage.id], complete: true, threadRootIds: [] });
+    await recall;
+    expect(component['recallResult']()).toEqual({ succeeded: 1, failed: 1 });
+    expect([...component['selectedMessages']().values()]).toEqual([item]);
     expect(item.cancelled()).toBe(false);
   });
 

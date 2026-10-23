@@ -52,6 +52,21 @@ Validate the generated document with:
 cargo test --locked openapi::tests::
 ```
 
+## Bulk message recall
+
+`POST /chats/{chat_id}/messages/bulk-delete` accepts `{ "messageIds": ["123", "124"] }`
+with 1–100 IDs. The caller must belong to a writable chat and must own every
+selected message unless they are a chat admin. Missing, cross-chat, unauthorized,
+or unpublished messages reject the entire batch before any deletion. Duplicate IDs
+are deduplicated; already deleted messages are accepted so retries are idempotent.
+
+A single transaction soft-deletes the messages and attachments, removes mentions,
+reconciles affected thread statistics and the chat preview, and shifts read cursors.
+The response and `messagesBulkDeleted` WebSocket event carry the confirmed IDs,
+`complete: true`, and affected `threadRootIds`. Updated thread roots and thread
+summaries are also broadcast. Search-index removal and unread-cache invalidation
+happen after commit. The existing single-message DELETE endpoint remains available.
+
 ## Conversation collection summaries
 
 Authenticated WebSocket connections subscribe with

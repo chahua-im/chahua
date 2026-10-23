@@ -5,6 +5,7 @@ import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { ServerWsMessageType, type MessageResponse } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { SessionStore } from '../session/session-store';
+import type { SnowflakeID } from '../api/snowflake-id';
 @Injectable()
 export class MessageActions {
   private readonly chatsApi = inject(ChatsService);
@@ -28,6 +29,12 @@ export class MessageActions {
         reactions: [],
       },
     });
+  }
+
+  async recallMany(chatId: SnowflakeID, messageIds: SnowflakeID[]) {
+    const payload = await this.response(this.chatsApi.bulkDeleteMessages(chatId, { messageIds }));
+    this.realtime.acceptChange({ type: ServerWsMessageType.messagesBulkDeleted, payload });
+    return payload;
   }
 
   async toggleReaction(message: MessageResponse, emoji: string): Promise<void> {
