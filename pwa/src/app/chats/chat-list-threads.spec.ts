@@ -18,7 +18,8 @@ import {
 import { Connection, ResyncReason } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
-import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
+import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
+import { SessionStore } from '../session/session-store';
 import { ChatListError, ChatListStore, FriendRequestAction } from './chat-list-store';
 import { ChatStore } from './chat-store';
 
@@ -136,6 +137,57 @@ describe('ChatListStore threads and friend requests', () => {
     http.expectOne(activeThreadsUrl).flush(structuredClone({ threads: [wireThread], nextCursor: 'older' }));
     await settle();
   }
+
+  it.each([true, false])(
+    'recovers thread unread errors from accepted WS state (HTTP fails first: %s)',
+    async (failsFirst) => {
+      TestBed.inject(SessionStore).user.set(testUser);
+      const watch = vi.spyOn(TestBed.inject(Connection), 'watchConversationStates');
+      await startThreads();
+      updatedThread();
+      await flushReads();
+      const unread = http.expectOne(topicUrl + '/read-state');
+      if (failsFirst) {
+        unread.flush('', { status: 503, statusText: 'Unavailable' });
+        await settle();
+        expect(threads.error()).toBe(ChatListError.Unread);
+      }
+      const payload = {
+        requestId: watch.mock.calls.at(-1)![0],
+        full: true,
+        states: [
+          {
+            chatId: testChat.id,
+            threadId: rootId,
+            accessible: true,
+            unreadCount: 1,
+            unreadMentions: 0,
+            unreadReactions: 0,
+          },
+        ],
+      };
+      events.next({
+        type: ServerWsMessageType.conversationStates,
+        payload: { ...payload, requestId: payload.requestId - 1 },
+      });
+      await settle();
+      const metadata = scope.get(ChatStore);
+      expect(metadata.threadReadState(testChat.id, rootId)).toBeUndefined();
+      if (failsFirst) expect(threads.error()).toBe(ChatListError.Unread);
+
+      events.next({ type: ServerWsMessageType.conversationStates, payload });
+      await settle();
+      expect(metadata.unreadCount(testChat.id, rootId)).toBe(1);
+      expect(threads.error()).toBeUndefined();
+      if (!failsFirst) {
+        unread.flush('', { status: 503, statusText: 'Unavailable' });
+        await settle();
+        expect(threads.error()).toBeUndefined();
+      }
+      metadata.invalidateThreadReads([rootId]);
+      expect(threads.error()).toBeUndefined();
+    },
+  );
 
   it('retries a failed thread continuation without rereading the head', async () => {
     await startThreads();
