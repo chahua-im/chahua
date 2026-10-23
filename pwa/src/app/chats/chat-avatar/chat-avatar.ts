@@ -1,4 +1,4 @@
-import { Component, input } from '@angular/core';
+import { Component, computed, input, linkedSignal } from '@angular/core';
 import { IonAvatar, IonIcon } from '@ionic/angular';
 import { chatbubbles } from 'ionicons/icons';
 import { GroupKind, type MessagePreview } from '../../../generated/models';
@@ -26,6 +26,15 @@ export class ChatAvatar {
   readonly entry = input.required<ChatAvatarData>();
   readonly size = input<number>();
   readonly online = input(false);
+  private readonly avatarUrl = computed(() => this.entry().avatar);
+  private readonly badgeUrl = computed(() => this.entry().badgeAvatar);
+  protected readonly avatarLoaded = linkedSignal({ source: this.avatarUrl, computation: () => false });
+  protected readonly badgeLoaded = linkedSignal({ source: this.badgeUrl, computation: () => false });
+
+  protected imageLoaded(src: string, badge = false) {
+    if (src === (badge ? this.entry().badgeAvatar : this.entry().avatar))
+      (badge ? this.badgeLoaded : this.avatarLoaded).set(true);
+  }
 }
 
 export function conversationAvatar(

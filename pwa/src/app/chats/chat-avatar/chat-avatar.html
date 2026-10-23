@@ -1,27 +1,45 @@
 <ion-avatar
-  [class.placeholder]="!entry().avatar"
+  [class.placeholder]="!avatarLoaded()"
   [class.icon-avatar]="!!entry().icon"
-  [avatarColor]="entry().icon || entry().avatar ? null : (entry().avatarName ?? entry().title ?? '')">
+  [avatarColor]="entry().icon || avatarLoaded() ? null : (entry().avatarName ?? entry().title ?? '')">
   @if (entry().icon; as icon) {
     <ion-icon [icon]="icon"></ion-icon>
-  } @else if (entry().avatar; as src) {
-    <img [src]="src" width="48" height="48" decoding="async" />
   } @else {
-    {{ entry().avatarName ?? entry().title | avatarText }}
+    <span [class.image-loaded]="avatarLoaded()">{{ entry().avatarName ?? entry().title | avatarText }}</span>
+    @for (src of [entry().avatar]; track src) {
+      @if (src) {
+        <img
+          [src]="src"
+          [class.loaded]="avatarLoaded()"
+          (load)="imageLoaded(src)"
+          width="48"
+          height="48"
+          decoding="async" />
+      }
+    }
   }
 </ion-avatar>
 @if (entry().badgeIcon || entry().badgeAvatar || entry().badgeName) {
   <ion-avatar
     class="avatar-badge"
-    [class.placeholder]="!entry().badgeAvatar"
+    [class.placeholder]="!badgeLoaded()"
     [class.icon-avatar]="!!entry().badgeIcon"
-    [avatarColor]="entry().badgeIcon || entry().badgeAvatar ? null : (entry().badgeName ?? '')">
+    [avatarColor]="entry().badgeIcon || badgeLoaded() ? null : (entry().badgeName ?? '')">
     @if (entry().badgeIcon; as icon) {
       <ion-icon [icon]="icon"></ion-icon>
-    } @else if (entry().badgeAvatar; as src) {
-      <img [src]="src" width="26" height="26" decoding="async" />
     } @else {
-      {{ entry().badgeName | avatarText }}
+      <span [class.image-loaded]="badgeLoaded()">{{ entry().badgeName | avatarText }}</span>
+      @for (src of [entry().badgeAvatar]; track src) {
+        @if (src) {
+          <img
+            [src]="src"
+            [class.loaded]="badgeLoaded()"
+            (load)="imageLoaded(src, true)"
+            width="26"
+            height="26"
+            decoding="async" />
+        }
+      }
     }
   </ion-avatar>
 }
