@@ -1581,6 +1581,24 @@ async fn bulk_delete_messages(
     social::require_chat_writable(conn, chat_id, uid)?;
     let is_admin = load_requester_group_role(conn, chat_id, uid)? == Some(GroupRole::Admin);
     let deletion = delete_selection(conn, chat_id, uid, is_admin, &ids)?;
+    let payload = BulkDeletedPayload {
+        chat_id: chat_id.to_string(),
+        message_ids: deletion
+            .impact
+            .message_ids
+            .iter()
+            .map(i64::to_string)
+            .collect(),
+        complete: Some(true),
+        thread_root_ids: Some(
+            deletion
+                .impact
+                .thread_root_ids
+                .iter()
+                .map(i64::to_string)
+                .collect(),
+        ),
+    };
 
     state.unread_service.invalidate_chat(chat_id);
     if let Some(search) = &state.message_search {
@@ -1588,9 +1606,7 @@ async fn bulk_delete_messages(
     }
     state.ws_registry.broadcast_to_uids(
         &deletion.member_uids,
-        std::sync::Arc::new(ServerWsMessage::MessagesBulkDeleted(
-            deletion.payload.clone(),
-        )),
+        std::sync::Arc::new(ServerWsMessage::MessagesBulkDeleted(payload.clone())),
     );
     for root in &deletion.roots {
         if let Err(error) = crate::services::threads::broadcast_thread_update_to_uids(
@@ -1614,7 +1630,7 @@ async fn bulk_delete_messages(
             std::sync::Arc::new(ServerWsMessage::MessageUpdated(root)),
         );
     }
-    Ok(Json(deletion.payload))
+    Ok(Json(payload))
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {

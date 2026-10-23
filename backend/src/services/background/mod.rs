@@ -9,12 +9,14 @@ use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
 use futures::future::FutureExt;
-use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::dto::ws::{BulkDeletedPayload, ServerWsMessage};
-use crate::schema::{attachments, group_membership, messages};
+use crate::schema::{group_membership, messages};
+use crate::services::message_deletion::{
+    reconcile_deletions, soft_delete_batch, DeletionImpact, DeletionTarget,
+};
 use crate::services::message_search::MessageSearchService;
 use crate::services::unread::UnreadService;
 use crate::services::ws_registry::ConnectionRegistry;
@@ -187,146 +189,78 @@ fn process_bulk_delete(
     message_search: &Option<Arc<MessageSearchService>>,
     unread_service: &Arc<UnreadService>,
 ) -> Result<(), String> {
-    use crate::schema::attachments::dsl as a_dsl;
     use crate::schema::group_membership::dsl as gm_dsl;
     use crate::schema::messages::dsl;
 
     let conn = &mut db.get().map_err(|e| format!("pool error: {e}"))?;
-
     let map_db = |e: diesel::result::Error| format!("db error: {e}");
 
-    // 1. Collect member UIDs for WS broadcast (once before the loop)
     let member_uids: Vec<i32> = group_membership::table
         .filter(gm_dsl::chat_id.eq(chat_id))
         .select(group_membership::uid)
         .load(conn)
         .map_err(map_db)?;
 
-    // 2. Chunked delete loop
-    let mut total_deleted: usize = 0;
-    let mut thread_clamp: HashMap<i64, Vec<i64>> = HashMap::new();
-    let mut changed_roots = std::collections::HashSet::new();
-    let mut chat_clamp_ids: Vec<i64> = Vec::new();
+    let mut impact = DeletionImpact::default();
     loop {
-        let mut query = messages::table
-            .filter(dsl::chat_id.eq(chat_id))
-            .filter(dsl::sender_uid.eq(target_uid))
-            .filter(dsl::deleted_at.is_null())
-            .into_boxed();
+        // Match recall's ascending lock order when the two paths overlap.
+        // Selection and mutation share a transaction so reconciliation uses
+        // metadata from the locked messages we actually delete.
+        let batch = conn
+            .transaction::<_, diesel::result::Error, _>(|conn| {
+                let query = messages::table
+                    .filter(dsl::chat_id.eq(chat_id))
+                    .filter(dsl::sender_uid.eq(target_uid))
+                    .filter(dsl::deleted_at.is_null())
+                    .select(DeletionTarget::as_select())
+                    .order(dsl::id.asc())
+                    .limit(BATCH_SIZE)
+                    .for_update();
 
-        if let DeleteScope::Last24Hours = scope {
-            let cutoff = Utc::now() - chrono::Duration::hours(24);
-            query = query.filter(dsl::created_at.ge(cutoff));
-        }
-
-        let batch_ids: Vec<i64> = query
-            .select(dsl::id)
-            .order(dsl::id.desc())
-            .limit(BATCH_SIZE)
-            .load(conn)
+                let targets: Vec<DeletionTarget> = match scope {
+                    DeleteScope::All => query.load(conn)?,
+                    DeleteScope::Last24Hours => {
+                        let cutoff = Utc::now() - chrono::Duration::hours(24);
+                        query.filter(dsl::created_at.ge(cutoff)).load(conn)?
+                    }
+                };
+                if targets.is_empty() {
+                    return Ok(DeletionImpact::default());
+                }
+                soft_delete_batch(conn, &targets)
+            })
             .map_err(map_db)?;
-
-        if batch_ids.is_empty() {
+        let batch_len = batch.message_ids.len();
+        if batch_len == 0 {
             break;
         }
 
-        // Partition the batch for read-pointer shifting: top-level messages
-        // with no thread dangle chat-level pointers; replies dangle
-        // thread-level pointers (grouped by thread root). Top-level messages
-        // that still have a thread stay visible in the around window, so their
-        // pointers don't dangle and are skipped.
-        let batch_meta: Vec<(i64, Option<i64>, bool)> = messages::table
-            .filter(dsl::id.eq_any(&batch_ids))
-            .select((dsl::id, dsl::reply_root_id, dsl::has_thread))
-            .load(conn)
-            .map_err(map_db)?;
-        for (id, reply_root_id, has_thread) in batch_meta {
-            if let Some(root_id) = reply_root_id {
-                changed_roots.insert(root_id);
-            } else if has_thread {
-                changed_roots.insert(id);
-            }
-            match reply_root_id {
-                None if !has_thread => chat_clamp_ids.push(id),
-                Some(thread_root_id) => {
-                    thread_clamp.entry(thread_root_id).or_default().push(id);
-                }
-                None => {}
-            }
-        }
-
-        let now = Utc::now();
-
-        // Atomic per batch: soft-delete, mention cleanup, and attachment
-        // soft-delete commit together — a crash between statements would leave
-        // mention rows (counted without checking deleted_at) or live attachments
-        // pointing at soft-deleted messages.
-        conn.transaction::<_, diesel::result::Error, _>(|conn| {
-            diesel::update(messages::table.filter(dsl::id.eq_any(&batch_ids)))
-                .set(dsl::deleted_at.eq(Some(now)))
-                .execute(conn)?;
-
-            {
-                use crate::schema::message_mentions::dsl as mm_dsl;
-                diesel::delete(
-                    mm_dsl::message_mentions.filter(mm_dsl::message_id.eq_any(&batch_ids)),
-                )
-                .execute(conn)?;
-            }
-
-            diesel::update(
-                attachments::table
-                    .filter(a_dsl::message_id.eq_any(&batch_ids))
-                    .filter(a_dsl::deleted_at.is_null()),
-            )
-            .set(a_dsl::deleted_at.eq(Some(now)))
-            .execute(conn)?;
-
-            Ok(())
-        })
-        .map_err(map_db)?;
-
         if let Some(search_service) = message_search {
-            search_service.delete_message_ids_best_effort(batch_ids.clone());
+            search_service.delete_message_ids_best_effort(batch.message_ids.clone());
         }
+        ws_registry.broadcast_to_uids(
+            &member_uids,
+            Arc::new(ServerWsMessage::MessagesBulkDeleted(BulkDeletedPayload {
+                complete: Some(false),
+                thread_root_ids: None,
+                chat_id: chat_id.to_string(),
+                message_ids: batch.message_ids.iter().map(i64::to_string).collect(),
+            })),
+        );
+        impact.merge(batch);
 
-        // Broadcast MessagesBulkDeleted for this batch
-        let ws_msg = Arc::new(ServerWsMessage::MessagesBulkDeleted(BulkDeletedPayload {
-            complete: Some(false),
-            thread_root_ids: None,
-            chat_id: chat_id.to_string(),
-            message_ids: batch_ids.iter().map(|id| id.to_string()).collect(),
-        }));
-        ws_registry.broadcast_to_uids(&member_uids, ws_msg);
-
-        total_deleted += batch_ids.len();
-
-        if (batch_ids.len() as i64) < BATCH_SIZE {
+        if (batch_len as i64) < BATCH_SIZE {
             break;
         }
     }
 
-    // 3. Recalculate last_message_id and thread_meta once after all batches,
-    //    then shift any read pointers anchored on deleted messages.
-    if total_deleted > 0 {
+    if !impact.message_ids.is_empty() {
+        // Deletions have committed; invalidate even if final reconciliation fails.
         unread_service.invalidate_chat(chat_id);
+        conn.transaction(|conn| reconcile_deletions(conn, chat_id, &impact))
+            .map_err(|e| format!("reconcile bulk deletion: {e:?}"))?;
 
-        crate::services::chat::recalculate_group_last_message(conn, chat_id)
-            .map_err(|e| format!("recalculate last message: {e:?}"))?;
-
-        for &thread_root_id in thread_clamp.keys() {
-            if let Err(e) =
-                crate::services::threads::recalculate_thread_meta(conn, chat_id, thread_root_id)
-            {
-                warn!(
-                    chat_id,
-                    thread_root_id,
-                    ?e,
-                    "recalculate thread_meta after bulk delete"
-                );
-                continue;
-            }
-
+        for &thread_root_id in &impact.thread_root_ids {
             if let Err(e) = crate::services::threads::broadcast_thread_update_to_uids(
                 conn,
                 ws_registry,
@@ -343,47 +277,244 @@ fn process_bulk_delete(
             }
         }
 
-        // Shift read pointers anchored on deleted messages. Must run after all
-        // batches are soft-deleted so the clamp subqueries' `deleted_at IS NULL`
-        // filter excludes the full deleted set in one pass.
-        if !chat_clamp_ids.is_empty() {
-            crate::services::chat::shift_chat_read_pointers_on_delete(
-                conn,
-                chat_id,
-                &chat_clamp_ids,
-            )
-            .map_err(map_db)?;
-        }
-        for (&thread_root_id, ids) in &thread_clamp {
-            if let Err(e) = crate::services::threads::shift_thread_read_pointers_on_delete(
-                conn,
-                thread_root_id,
-                ids,
-            ) {
-                warn!(
-                    chat_id,
-                    thread_root_id,
-                    ?e,
-                    "shift thread read pointers after bulk delete"
-                );
-            }
-        }
-
         ws_registry.broadcast_to_uids(
             &member_uids,
             Arc::new(ServerWsMessage::MessagesBulkDeleted(BulkDeletedPayload {
                 chat_id: chat_id.to_string(),
                 message_ids: vec![],
                 complete: Some(true),
-                thread_root_ids: Some(changed_roots.into_iter().map(|id| id.to_string()).collect()),
+                thread_root_ids: Some(impact.thread_root_ids.iter().map(i64::to_string).collect()),
             })),
         );
-
         info!(
             chat_id,
-            target_uid, total_deleted, "Bulk message deletion completed"
+            target_uid,
+            total_deleted = impact.message_ids.len(),
+            "Bulk message deletion completed"
         );
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+    use crate::schema::{attachments, groups, message_mentions, thread_meta, thread_user_states};
+    use crate::services::ws_registry::WsMetrics;
+    use diesel::connection::SimpleConnection;
+
+    #[test]
+    fn database_member_cleanup_merges_batches_and_preserves_scope() {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        // Reuse one rollback-only connection across the worker's transactions.
+        let pool = Pool::builder()
+            .max_size(1)
+            .connection_customizer(Box::new(diesel::r2d2::TestCustomizer))
+            .build(ConnectionManager::<PgConnection>::new(url))
+            .unwrap();
+        pool.get().unwrap().batch_execute(
+            "INSERT INTO groups(id, name) VALUES (88100, 'bulk-cleanup'), (88200, 'other-chat');
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
+                                  client_generated_id, created_at, reply_root_id, has_thread, is_published)
+             VALUES (88099, 88100, 2, 'text', 'previous', 'cleanup-previous', NOW(), NULL, false, true),
+                    (88101, 88100, 2, 'text', 'root', 'cleanup-root', NOW(), NULL, true, true),
+                    (88102, 88100, 1, 'text', 'old', 'cleanup-old', NOW() - INTERVAL '3 days', NULL, false, true),
+                    (88103, 88100, 2, 'text', 'other user', 'cleanup-other-user', NOW(), NULL, false, true),
+                    (88104, 88100, 1, 'text', 'old reply', 'cleanup-old-reply', NOW() - INTERVAL '3 days', 88101, false, true),
+                    (88900, 88100, 1, 'audio', NULL, 'cleanup-pending', NOW(), NULL, false, false),
+                    (88201, 88200, 1, 'text', 'other chat', 'cleanup-other-chat', NOW(), NULL, false, true);
+             UPDATE messages SET deleted_at = NOW() WHERE id = 88101;
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
+                                  client_generated_id, created_at, reply_root_id, is_published)
+             SELECT id, 88100, 1, 'text', 'reply', 'cleanup-reply-' || id, NOW(), 88101, true
+             FROM generate_series(88301, 88803) AS id;
+             UPDATE groups SET last_message_id = 88103, last_message_at = NOW() WHERE id = 88100;
+             INSERT INTO group_membership(chat_id, uid, last_read_message_id)
+             VALUES (88100, 2, 88102), (88100, 3, 88101);
+             INSERT INTO thread_user_states(chat_id, thread_root_id, uid, last_read_message_id)
+             VALUES (88100, 88101, 2, 88803);
+             INSERT INTO thread_meta(chat_id, thread_root_id, reply_count, last_reply_at)
+             VALUES (88100, 88101, 504, NOW());
+             INSERT INTO message_mentions(message_id, mentioned_uid, chat_id)
+             VALUES (88102, 2, 88100), (88803, 2, 88100);
+             INSERT INTO attachments(id, message_id, kind, external_reference, size, created_at)
+             VALUES (88910, 88900, 'audio/webm', 'cleanup-pending', 1, NOW()),
+                    (88911, 88102, 'text/plain', 'cleanup-old', 1, NOW());",
+        ).unwrap();
+        let registry = Arc::new(ConnectionRegistry::new(Arc::new(WsMetrics::new(
+            &prometheus::Registry::new(),
+        ))));
+        let (_connection, mut events) = registry.register(2, "cleanup-test".into());
+        assert!(matches!(
+            &*events.try_recv().unwrap(),
+            ServerWsMessage::PresenceUpdate(_)
+        ));
+        let unread = Arc::new(UnreadService::new());
+
+        process_bulk_delete(
+            88100,
+            1,
+            DeleteScope::Last24Hours,
+            &pool,
+            &registry,
+            &None,
+            &unread,
+        )
+        .unwrap();
+        let mut deleted_ids = BTreeSet::new();
+        let mut batch_sizes = Vec::new();
+        let mut complete = false;
+        let mut updates = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            assert!(!complete, "completion must be the last event");
+            match &*event {
+                ServerWsMessage::MessagesBulkDeleted(payload)
+                    if payload.complete == Some(false) =>
+                {
+                    batch_sizes.push(payload.message_ids.len());
+                    deleted_ids.extend(payload.message_ids.iter().cloned());
+                }
+                ServerWsMessage::MessagesBulkDeleted(payload) => {
+                    assert_eq!(payload.complete, Some(true));
+                    assert!(payload.message_ids.is_empty());
+                    assert_eq!(payload.thread_root_ids, Some(vec!["88101".into()]));
+                    complete = true;
+                }
+                ServerWsMessage::ThreadUpdate(payload) => updates.push(payload.reply_count),
+                _ => panic!("unexpected deletion event"),
+            }
+        }
+        assert!(complete);
+        assert_eq!(batch_sizes, vec![500, 4]);
+        assert_eq!(deleted_ids.len(), 504);
+        assert!(
+            deleted_ids.contains("88900"),
+            "cleanup includes unpublished audio"
+        );
+        assert!(
+            !deleted_ids.contains("88104"),
+            "old replies stay outside the time scope"
+        );
+        assert_eq!(updates, vec![1]);
+        {
+            let conn = &mut *pool.get().unwrap();
+            assert_eq!(
+                thread_meta::table
+                    .find((88100_i64, 88101_i64))
+                    .select(thread_meta::reply_count)
+                    .first::<i64>(conn)
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                thread_user_states::table
+                    .find((88100_i64, 88101_i64, 2))
+                    .select(thread_user_states::last_read_message_id)
+                    .first::<Option<i64>>(conn)
+                    .unwrap(),
+                Some(88104)
+            );
+            assert!(messages::table
+                .find(88101_i64)
+                .select(messages::has_thread)
+                .first::<bool>(conn)
+                .unwrap());
+            assert!(attachments::table
+                .find(88910_i64)
+                .select(attachments::deleted_at)
+                .first::<Option<chrono::DateTime<Utc>>>(conn)
+                .unwrap()
+                .is_some());
+            assert!(attachments::table
+                .find(88911_i64)
+                .select(attachments::deleted_at)
+                .first::<Option<chrono::DateTime<Utc>>>(conn)
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                message_mentions::table
+                    .filter(message_mentions::chat_id.eq(88100))
+                    .select(message_mentions::message_id)
+                    .load::<i64>(conn)
+                    .unwrap(),
+                vec![88102]
+            );
+        }
+
+        process_bulk_delete(88100, 1, DeleteScope::All, &pool, &registry, &None, &unread).unwrap();
+        let mut final_ids = BTreeSet::new();
+        let mut completed = false;
+        while let Ok(event) = events.try_recv() {
+            if let ServerWsMessage::MessagesBulkDeleted(payload) = &*event {
+                final_ids.extend(payload.message_ids.iter().cloned());
+                completed |= payload.complete == Some(true);
+            }
+        }
+        assert!(completed);
+        assert_eq!(final_ids, BTreeSet::from(["88102".into(), "88104".into()]));
+        {
+            let conn = &mut *pool.get().unwrap();
+            let survivors: Vec<i64> = messages::table
+                .filter(messages::chat_id.eq_any([88100, 88200]))
+                .filter(messages::deleted_at.is_null())
+                .order(messages::id.asc())
+                .select(messages::id)
+                .load(conn)
+                .unwrap();
+            assert_eq!(survivors, vec![88099, 88103, 88201]);
+            assert!(!messages::table
+                .find(88101_i64)
+                .select(messages::has_thread)
+                .first::<bool>(conn)
+                .unwrap());
+            assert_eq!(
+                group_membership::table
+                    .filter(group_membership::chat_id.eq(88100))
+                    .select(group_membership::last_read_message_id)
+                    .load::<Option<i64>>(conn)
+                    .unwrap(),
+                vec![Some(88099); 2]
+            );
+            assert_eq!(
+                thread_user_states::table
+                    .find((88100_i64, 88101_i64, 2))
+                    .select(thread_user_states::last_read_message_id)
+                    .first::<Option<i64>>(conn)
+                    .unwrap(),
+                None
+            );
+            assert_eq!(
+                groups::table
+                    .find(88100_i64)
+                    .select(groups::last_message_id)
+                    .first::<Option<i64>>(conn)
+                    .unwrap(),
+                Some(88103)
+            );
+            assert_eq!(
+                thread_meta::table
+                    .filter(thread_meta::chat_id.eq(88100))
+                    .count()
+                    .get_result::<i64>(conn)
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                message_mentions::table
+                    .filter(message_mentions::chat_id.eq(88100))
+                    .count()
+                    .get_result::<i64>(conn)
+                    .unwrap(),
+                0
+            );
+        }
+        process_bulk_delete(88100, 1, DeleteScope::All, &pool, &registry, &None, &unread).unwrap();
+        assert!(events.try_recv().is_err(), "an empty cleanup has no events");
+    }
 }
