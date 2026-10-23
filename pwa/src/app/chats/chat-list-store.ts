@@ -46,11 +46,13 @@ export interface ChatQuery {
   readonly items: Signal<ChatListItem[]>;
   readonly loading: Signal<boolean>;
   readonly error: Signal<ChatListError | undefined>;
+  readonly listError: Signal<ChatListError | undefined>;
   readonly hasMore: Signal<boolean>;
   readonly loadingMore: Signal<boolean>;
   readonly loadedThrough: Signal<number>;
   activate(): () => void;
   refresh(): void;
+  retry(): Promise<void>;
   loadMore(): Promise<void>;
 }
 enum ListFetch {
@@ -65,7 +67,8 @@ interface QueryState {
   loading: WritableSignal<boolean>;
   loadingMore: WritableSignal<boolean>;
   loadedThrough: WritableSignal<number>;
-  error: WritableSignal<ChatListError | undefined>;
+  listError: WritableSignal<ChatListError | undefined>;
+  unreadErrors: WritableSignal<ReadonlySet<SnowflakeID>>;
   dirty: WritableSignal<boolean>;
   consumers: Set<symbol>;
   generation: number;
@@ -93,7 +96,8 @@ function createThreadQuery(archived: boolean) {
     loading: signal(false),
     loadingMore: signal(false),
     loadedThrough: signal(Infinity),
-    error: signal(false),
+    listError: signal<ChatListError | undefined>(undefined),
+    unreadErrors: signal<ReadonlySet<SnowflakeID>>(new Set()),
     dirty: true,
     version: 0,
     consumers: 0,
@@ -313,7 +317,8 @@ export class ChatListStore {
       loading: signal(false),
       loadingMore: signal(false),
       loadedThrough: signal(Infinity),
-      error: signal(undefined),
+      listError: signal(undefined),
+      unreadErrors: signal<ReadonlySet<SnowflakeID>>(new Set()),
       dirty: signal(true),
       consumers: new Set(),
       generation: 0,
@@ -334,7 +339,14 @@ export class ChatListStore {
           .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')),
       ),
       loading: state.loading.asReadonly(),
-      error: state.error.asReadonly(),
+      error: computed(
+        () =>
+          state.listError() ??
+          (state.unreadErrors().size && state.ids().some((id) => state.unreadErrors().has(id))
+            ? ChatListError.Unread
+            : undefined),
+      ),
+      listError: state.listError.asReadonly(),
       hasMore: computed(() => !state.dirty() && !!state.cursor()),
       loadingMore: state.loadingMore.asReadonly(),
       loadedThrough: state.loadedThrough.asReadonly(),
@@ -355,6 +367,13 @@ export class ChatListStore {
         this.chatInfo.invalidateReads(new Set(state.ids()));
         this.invalidateQuery(state);
       },
+      retry: () =>
+        this.fetchQuery(
+          state,
+          state.listError() === ChatListError.More && !state.dirty() && state.cursor()
+            ? ListFetch.More
+            : ListFetch.Load,
+        ),
       loadMore: () => {
         if (!state.consumers.size || state.dirty() || state.loading() || !state.cursor()) return Promise.resolve();
         return this.fetchQuery(state, ListFetch.More);
@@ -380,7 +399,7 @@ export class ChatListStore {
     this.cancelQuery(query);
     query.pendingUnread.clear();
     query.headStale = false;
-    query.error.set(undefined);
+    query.listError.set(undefined);
     if (query.consumers.size && !document.hidden && !this.destroyRef.destroyed)
       void this.fetchQuery(query, ListFetch.Load);
   }
@@ -402,7 +421,7 @@ export class ChatListStore {
     const startRecentVersion = query.recentVersion;
     if (mode === ListFetch.Load) query.loading.set(true);
     if (mode === ListFetch.More) query.loadingMore.set(true);
-    query.error.set(undefined);
+    query.listError.set(undefined);
     const promise = (async () => {
       try {
         while (true) {
@@ -417,6 +436,10 @@ export class ChatListStore {
             const { page, version } = await this.readPage(query, after);
             if (this.destroyRef.destroyed || generation !== query.generation) return;
             this.chatInfo.acceptChats(page.chats, version);
+            this.clearUnreadErrors(
+              query,
+              page.chats.map((chat) => chat.id),
+            );
             query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
             this.applyBoundary(query, page.chats, page.nextCursor);
           }
@@ -424,7 +447,7 @@ export class ChatListStore {
         }
       } catch {
         if (!this.destroyRef.destroyed && generation === query.generation) {
-          query.error.set(
+          query.listError.set(
             mode === ListFetch.Load
               ? ChatListError.Load
               : mode === ListFetch.More
@@ -478,6 +501,10 @@ export class ChatListStore {
       const { page, version } = await this.readPage(query, cursor);
       if (this.destroyRef.destroyed || generation !== query.generation) return false;
       this.chatInfo.acceptChats(page.chats, version);
+      this.clearUnreadErrors(
+        query,
+        page.chats.map((chat) => chat.id),
+      );
       read.push(...page.chats.map((chat) => chat.id));
       query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
       loaded += page.chats.length;
@@ -497,6 +524,10 @@ export class ChatListStore {
       const { page, version } = await this.readPage(query, cursor);
       if (this.destroyRef.destroyed || generation !== query.generation) return false;
       this.chatInfo.acceptChats(page.chats, version);
+      this.clearUnreadErrors(
+        query,
+        page.chats.map((chat) => chat.id),
+      );
       query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
       cursor = page.nextCursor;
       const time = page.chats.at(-1)?.lastMessageAt;
@@ -535,13 +566,33 @@ export class ChatListStore {
     }
   }
 
+  private clearUnreadErrors(query: QueryState | ThreadQuery, ids: readonly SnowflakeID[]) {
+    if (!query.unreadErrors().size) return;
+    query.unreadErrors.update((errors) => {
+      const remaining = new Set(errors);
+      for (const id of ids) {
+        // A list response can be older than a live invalidation and be rejected by ChatStore.
+        // Only an accepted, current read snapshot resolves that scope's unread failure.
+        const thread = 'generation' in query ? undefined : this.chatInfo.thread(id);
+        const fresh =
+          'generation' in query
+            ? this.chatInfo.cachedReadState(id)
+            : thread && this.chatInfo.threadReadState(thread.chatId, id);
+        if (fresh) remaining.delete(id);
+      }
+      return remaining;
+    });
+  }
+
   private async syncHiddenUnread(query: QueryState, chatId: SnowflakeID) {
     try {
       await this.chatInfo.scheduleReadState(chatId);
       query.pendingUnread.delete(chatId);
+      this.clearUnreadErrors(query, [chatId]);
     } catch {
       // Keep it pending: activation retries and only a visible list reports the failure.
-      if (query.consumers.size && !this.destroyRef.destroyed) query.error.set(ChatListError.Unread);
+      if (query.consumers.size && !this.destroyRef.destroyed)
+        query.unreadErrors.update((ids) => new Set(ids).add(chatId));
     }
   }
 
@@ -614,6 +665,10 @@ export class ChatListStore {
             if (query.pendingRows.get(id) !== revision) continue;
             if (dirty()) return;
             this.chatInfo.acceptChats(page.chats, version);
+            this.clearUnreadErrors(
+              query,
+              page.chats.map((chat) => chat.id),
+            );
             query.ids.update((ids) => [
               ...new Set([...ids.filter((value) => value !== id), ...page.chats.map((row) => row.id)]),
             ]);
@@ -624,6 +679,10 @@ export class ChatListStore {
             if (query.pendingRows.get(id) !== revision) continue;
             if (dirty()) return;
             this.chatInfo.acceptThreads(page.threads, version, subscriptionVersion);
+            this.clearUnreadErrors(
+              query,
+              page.threads.map((thread) => thread.threadRootMessage.id),
+            );
             query.ids.update((ids) => [
               ...new Set([
                 ...ids.filter((value) => value !== id),
@@ -634,10 +693,7 @@ export class ChatListStore {
           query.pendingRows.delete(id);
         }
       })()
-        .catch(() => {
-          if ('generation' in query) query.error.set(ChatListError.Recent);
-          else query.error.set(true);
-        })
+        .catch(() => query.listError.set(ChatListError.Recent))
         .finally(() => query.rowRequests.delete(id));
     }
   }
@@ -671,8 +727,11 @@ export class ChatListStore {
       }
       void this.chatInfo
         .getThreadReadState(thread.chatId, id)
-        .then(() => state.pendingReads.delete(id))
-        .catch(() => state.error.set(true));
+        .then(() => {
+          state.pendingReads.delete(id);
+          this.clearUnreadErrors(state, [id]);
+        })
+        .catch(() => state.unreadErrors.update((ids) => new Set(ids).add(id)));
     }
   }
 
@@ -765,7 +824,14 @@ export class ChatListStore {
           }),
         ),
         loading: state.loading.asReadonly(),
-        error: state.error.asReadonly(),
+        error: computed(
+          () =>
+            state.listError() ??
+            (state.unreadErrors().size && state.ids().some((id) => state.unreadErrors().has(id))
+              ? ChatListError.Unread
+              : undefined),
+        ),
+        listError: state.listError.asReadonly(),
         hasMore: computed(() => !!state.cursor()),
         loadingMore: state.loadingMore.asReadonly(),
         activate: () => this.activateThreadQuery(state),
@@ -773,9 +839,16 @@ export class ChatListStore {
           this.invalidate(state);
           return this.loadThreads(state);
         },
+        retry: () =>
+          this.loadThreads(
+            state,
+            state.listError() === ChatListError.More && !state.dirty ? state.cursor() : undefined,
+          ),
         loadMore: () => {
           const cursor = state.cursor();
-          return !cursor || state.request || state.dirty ? Promise.resolve() : this.loadThreads(state, cursor);
+          return (
+            state.request?.promise ?? (!cursor || state.dirty ? Promise.resolve() : this.loadThreads(state, cursor))
+          );
         },
       },
     };
@@ -855,7 +928,7 @@ export class ChatListStore {
     current.version++;
     current.loading.set(!before);
     current.loadingMore.set(!!before);
-    current.error.set(false);
+    current.listError.set(undefined);
     operation.promise = (async () => {
       await Promise.resolve();
       while (!this.destroyRef.destroyed && current.request === operation) {
@@ -896,6 +969,10 @@ export class ChatListStore {
           if (this.destroyRef.destroyed || current.request !== operation) return;
           if (version === current.version) {
             this.chatInfo.acceptThreads(page.threads, readVersion, subscriptionVersion);
+            this.clearUnreadErrors(
+              current,
+              page.threads.map((thread) => thread.threadRootMessage.id),
+            );
             current.ids.update((ids) => [
               ...new Set([
                 ...(before || headOnly ? ids : []),
@@ -914,7 +991,7 @@ export class ChatListStore {
         } catch {
           if (this.destroyRef.destroyed || current.request !== operation) return;
           if (version === current.version) {
-            current.error.set(true);
+            current.listError.set(before ? ChatListError.More : headOnly ? ChatListError.Recent : ChatListError.Load);
             return;
           }
         }

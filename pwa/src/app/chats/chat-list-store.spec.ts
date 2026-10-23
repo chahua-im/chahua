@@ -81,6 +81,89 @@ describe('ChatListStore', () => {
     TestBed.tick();
   }
 
+  it('retries a failed continuation at its cursor while retaining the loaded window', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat], nextCursor: wireChat.id }));
+    await settle();
+    const pending = query.loadMore();
+    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush('', { status: 503, statusText: 'Unavailable' });
+    await pending;
+    expect(query.error()).toBe(ChatListError.More);
+    expect(query.items().map((chat) => chat.id)).toEqual([testChat.id]);
+    const retry = query.retry();
+    expect(query.loadingMore()).toBe(true);
+    expect(query.loading()).toBe(false);
+    http.expectNone('/_api/chats?limit=50');
+    http
+      .expectOne(`/_api/chats?limit=50&after=${wireChat.id}`)
+      .flush(structuredClone({ chats: [{ ...wireChat, id: '111' }] }));
+    await retry;
+    expect(query.items().map((chat) => chat.id)).toEqual([testChat.id, encodeId('111')]);
+    expect(query.error()).toBeUndefined();
+  });
+
+  it.each([
+    { paging: false, unreadFirst: false },
+    { paging: false, unreadFirst: true },
+    { paging: true, unreadFirst: false },
+    { paging: true, unreadFirst: true },
+  ])('keeps list failures recoverable with overlapping unread failures: %j', async ({ paging, unreadFirst }) => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat], nextCursor: wireChat.id }));
+    await settle();
+    const pending = paging ? query.loadMore() : query.refresh();
+    incoming.next(testMessage);
+    await flushReads();
+    const listUrl = paging ? `/_api/chats?limit=50&after=${wireChat.id}` : '/_api/chats?limit=50';
+    const listRequest = http.expectOne(listUrl);
+    const unreadRequest = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`);
+    for (const request of unreadFirst ? [unreadRequest, listRequest] : [listRequest, unreadRequest]) {
+      request.flush('', { status: 503, statusText: 'Unavailable' });
+      await settle();
+    }
+    await pending;
+    const error = paging ? ChatListError.More : ChatListError.Load;
+    expect(query.listError()).toBe(error);
+    expect(query.error()).toBe(error);
+    expect(query.items()).toHaveLength(1);
+
+    const retry = query.retry();
+    if (paging) http.expectNone('/_api/chats?limit=50');
+    http.expectOne(listUrl).flush(structuredClone({ chats: paging ? [] : [wireChat], nextCursor: wireChat.id }));
+    await retry;
+    expect(query.listError()).toBeUndefined();
+    expect(query.hasMore()).toBe(true);
+    // A successful page must not clear an unread failure in an unrelated row.
+    expect(query.error()).toBe(paging ? ChatListError.Unread : undefined);
+    incoming.next(testMessage);
+    await flushReads();
+    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush({ unreadCount: 1 });
+    await settle();
+    expect(query.error()).toBeUndefined();
+    const more = query.loadMore();
+    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush({ chats: [] });
+    await more;
+    expect(query.hasMore()).toBe(false);
+  });
+
+  it('keeps an unread failure when an older list response cannot refresh that read state', async () => {
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    query.refresh();
+    incoming.next(testMessage);
+    await flushReads();
+    http.expectOne(`/_api/chats/${decodeId(testChat.id)}/unread`).flush('', { status: 503, statusText: 'Unavailable' });
+    await settle();
+    expect(query.error()).toBe(ChatListError.Unread);
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
+    expect(query.listError()).toBeUndefined();
+    expect(query.error()).toBe(ChatListError.Unread);
+    query.refresh();
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    expect(query.error()).toBeUndefined();
+  });
+
   it('refreshes a loaded DM preview receipt when the peer reads', async () => {
     TestBed.inject(SessionStore).user.set(testUser);
     http
