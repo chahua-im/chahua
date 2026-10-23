@@ -67,6 +67,14 @@ The response and `messagesBulkDeleted` WebSocket event carry the confirmed IDs,
 summaries are also broadcast. Search-index removal and unread-cache invalidation
 happen after commit. The existing single-message DELETE endpoint remains available.
 
+Multi-selection recall and removed-member cleanup share `soft_delete_batch` and
+`reconcile_deletions` in `services/message_deletion.rs`. The database helpers return
+affected message/thread IDs; callers own transactions, authorization and events.
+Recall validates, deletes and reconciles in one transaction. Member cleanup deletes
+up to 500 messages per transaction, including unpublished messages, and merges the
+affected ranges before reconciling them in a final transaction. Each committed batch
+emits `complete: false`; `complete: true` is sent only after reconciliation succeeds.
+
 ## Conversation collection summaries
 
 Authenticated WebSocket connections subscribe with

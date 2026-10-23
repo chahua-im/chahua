@@ -1,4 +1,4 @@
-//! Atomic deletion of a bounded selection of messages in one chat.
+//! Shared batch deletion and reconciliation for recalls and member cleanup.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -6,7 +6,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 
 use crate::{
-    dto::ws::BulkDeletedPayload,
     errors::AppError,
     models::Message,
     schema::{attachments, group_membership, groups, message_mentions, messages},
@@ -14,9 +13,124 @@ use crate::{
 };
 
 pub struct BulkDeletion {
-    pub payload: BulkDeletedPayload,
+    pub impact: DeletionImpact,
     pub member_uids: Vec<i32>,
     pub roots: Vec<Message>,
+}
+
+/// Only the columns needed for authorization and deletion bookkeeping.
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = messages)]
+pub struct DeletionTarget {
+    pub id: i64,
+    pub sender_uid: i32,
+    pub is_published: bool,
+    reply_root_id: Option<i64>,
+    has_thread: bool,
+}
+
+#[derive(Default)]
+pub struct DeletionImpact {
+    pub message_ids: Vec<i64>,
+    pub thread_root_ids: BTreeSet<i64>,
+    reply_ids: BTreeMap<i64, Vec<i64>>,
+    chat_message_ids: Vec<i64>,
+}
+
+impl DeletionImpact {
+    pub fn merge(&mut self, batch: Self) {
+        self.message_ids.extend(batch.message_ids);
+        self.thread_root_ids.extend(batch.thread_root_ids);
+        self.chat_message_ids.extend(batch.chat_message_ids);
+        for (root_id, ids) in batch.reply_ids {
+            self.reply_ids.entry(root_id).or_default().extend(ids);
+        }
+    }
+}
+
+/// The caller must load and lock targets from one chat in its transaction,
+/// applying the entry point's authorization and publication rules first.
+/// This function neither commits nor publishes events.
+pub fn soft_delete_batch(
+    conn: &mut PgConnection,
+    targets: &[DeletionTarget],
+) -> Result<DeletionImpact, diesel::result::Error> {
+    let mut impact = DeletionImpact::default();
+    for message in targets {
+        impact.message_ids.push(message.id);
+        if let Some(root_id) = message.reply_root_id {
+            impact.thread_root_ids.insert(root_id);
+            impact
+                .reply_ids
+                .entry(root_id)
+                .or_default()
+                .push(message.id);
+        } else {
+            impact.chat_message_ids.push(message.id);
+            if message.has_thread {
+                impact.thread_root_ids.insert(message.id);
+            }
+        }
+    }
+
+    let ids = &impact.message_ids;
+    let now = Utc::now();
+    diesel::update(
+        messages::table
+            .filter(messages::id.eq_any(ids))
+            .filter(messages::deleted_at.is_null()),
+    )
+    .set(messages::deleted_at.eq(now))
+    .execute(conn)?;
+    diesel::delete(message_mentions::table.filter(message_mentions::message_id.eq_any(ids)))
+        .execute(conn)?;
+    diesel::update(
+        attachments::table
+            .filter(attachments::message_id.eq_any(ids))
+            .filter(attachments::deleted_at.is_null()),
+    )
+    .set(attachments::deleted_at.eq(now))
+    .execute(conn)?;
+    Ok(impact)
+}
+
+/// Reconcile once for the complete deleted set, inside the caller's transaction.
+/// Member cleanup merges its committed batches before calling this function.
+pub fn reconcile_deletions(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    impact: &DeletionImpact,
+) -> Result<(), AppError> {
+    for (&root_id, deleted_ids) in &impact.reply_ids {
+        threads::recalculate_thread_meta(conn, chat_id, root_id)?;
+        threads::shift_thread_read_pointers_on_delete(conn, root_id, deleted_ids)?;
+    }
+
+    // Deleting the last reply can hide a previously deleted root outside the
+    // selection. Re-read visibility after recalculating the thread statistics.
+    let chat_ids: Vec<i64> = impact
+        .chat_message_ids
+        .iter()
+        .chain(&impact.thread_root_ids)
+        .copied()
+        .collect();
+    let hidden_chat_ids: Vec<i64> = messages::table
+        .filter(messages::id.eq_any(&chat_ids))
+        .filter(messages::has_thread.eq(false))
+        .filter(messages::deleted_at.is_not_null())
+        .select(messages::id)
+        .load(conn)?;
+    if !hidden_chat_ids.is_empty() {
+        chat::shift_chat_read_pointers_on_delete(conn, chat_id, &hidden_chat_ids)?;
+    }
+    let last_id: Option<i64> = groups::table
+        .find(chat_id)
+        .select(groups::last_message_id)
+        .first(conn)?;
+    if last_id.is_some_and(|id| impact.message_ids.contains(&id)) {
+        chat::recalculate_group_last_message(conn, chat_id)?;
+    }
+    Ok(())
 }
 
 pub fn validate_message_ids(mut ids: Vec<i64>) -> Result<Vec<i64>, AppError> {
@@ -38,12 +152,12 @@ pub fn delete_selection(
     ids: &[i64],
 ) -> Result<BulkDeletion, AppError> {
     conn.transaction(|conn| {
-        let selected: Vec<Message> = messages::table
+        let selected: Vec<DeletionTarget> = messages::table
             .filter(messages::chat_id.eq(chat_id))
             .filter(messages::id.eq_any(ids))
             .order(messages::id.asc())
             .for_update()
-            .select(Message::as_select())
+            .select(DeletionTarget::as_select())
             .load(conn)?;
         if selected.len() != ids.len() {
             return Err(AppError::NotFound("Message not found"));
@@ -55,66 +169,11 @@ pub fn delete_selection(
             return Err(AppError::BadRequest("Cannot delete unpublished message"));
         }
 
-        let mut reply_ids = BTreeMap::<i64, Vec<i64>>::new();
-        let mut root_ids = BTreeSet::new();
-        let mut chat_ids = Vec::new();
-        for message in &selected {
-            if let Some(root_id) = message.reply_root_id {
-                root_ids.insert(root_id);
-                reply_ids.entry(root_id).or_default().push(message.id);
-            } else {
-                chat_ids.push(message.id);
-                if message.has_thread {
-                    root_ids.insert(message.id);
-                }
-            }
-        }
-
-        let now = Utc::now();
-        diesel::update(
-            messages::table
-                .filter(messages::id.eq_any(ids))
-                .filter(messages::deleted_at.is_null()),
-        )
-        .set(messages::deleted_at.eq(now))
-        .execute(conn)?;
-        diesel::delete(message_mentions::table.filter(message_mentions::message_id.eq_any(ids)))
-            .execute(conn)?;
-        diesel::update(
-            attachments::table
-                .filter(attachments::message_id.eq_any(ids))
-                .filter(attachments::deleted_at.is_null()),
-        )
-        .set(attachments::deleted_at.eq(now))
-        .execute(conn)?;
-
-        for (&root_id, deleted_ids) in &reply_ids {
-            threads::recalculate_thread_meta(conn, chat_id, root_id)?;
-            threads::shift_thread_read_pointers_on_delete(conn, root_id, deleted_ids)?;
-        }
-
-        // Re-read has_thread after recalculation: deleting the last reply can
-        // also hide a previously deleted root, even outside this selection.
-        chat_ids.extend(&root_ids);
-        let hidden_chat_ids: Vec<i64> = messages::table
-            .filter(messages::id.eq_any(&chat_ids))
-            .filter(messages::has_thread.eq(false))
-            .filter(messages::deleted_at.is_not_null())
-            .select(messages::id)
-            .load(conn)?;
-        if !hidden_chat_ids.is_empty() {
-            chat::shift_chat_read_pointers_on_delete(conn, chat_id, &hidden_chat_ids)?;
-        }
-        let last_id: Option<i64> = groups::table
-            .find(chat_id)
-            .select(groups::last_message_id)
-            .first(conn)?;
-        if last_id.is_some_and(|id| ids.contains(&id)) {
-            chat::recalculate_group_last_message(conn, chat_id)?;
-        }
+        let impact = soft_delete_batch(conn, &selected)?;
+        reconcile_deletions(conn, chat_id, &impact)?;
 
         let roots = messages::table
-            .filter(messages::id.eq_any(&root_ids))
+            .filter(messages::id.eq_any(&impact.thread_root_ids))
             .select(Message::as_select())
             .load(conn)?;
         let member_uids = group_membership::table
@@ -122,12 +181,7 @@ pub fn delete_selection(
             .select(group_membership::uid)
             .load(conn)?;
         Ok(BulkDeletion {
-            payload: BulkDeletedPayload {
-                chat_id: chat_id.to_string(),
-                message_ids: ids.iter().map(i64::to_string).collect(),
-                complete: Some(true),
-                thread_root_ids: Some(root_ids.iter().map(i64::to_string).collect()),
-            },
+            impact,
             member_uids,
             roots,
         })
@@ -188,6 +242,24 @@ mod tests {
             assert_eq!(messages::table.filter(messages::chat_id.eq(87100))
                 .filter(messages::deleted_at.is_not_null()).count().get_result::<i64>(conn)?, 0);
 
+            // A late reconciliation error must roll back both helpers' writes.
+            conn.batch_execute(
+                "CREATE FUNCTION pg_temp.reject_recall_summary() RETURNS trigger LANGUAGE plpgsql AS $$
+                 BEGIN RAISE EXCEPTION 'injected recall reconciliation failure'; END $$;
+                 CREATE TRIGGER reject_recall_summary BEFORE UPDATE ON groups
+                 FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_recall_summary();",
+            )?;
+            assert!(matches!(delete_selection(conn, 87100, 1, false, &[87103, 87105]), Err(AppError::DbQuery(_))));
+            conn.batch_execute("DROP TRIGGER reject_recall_summary ON groups")?;
+            assert_eq!(messages::table.filter(messages::chat_id.eq(87100))
+                .filter(messages::deleted_at.is_not_null()).count().get_result::<i64>(conn)?, 0);
+            assert_eq!(thread_meta::table.find((87100_i64, 87102_i64))
+                .select(thread_meta::reply_count).first::<i64>(conn)?, 2);
+            assert_eq!(message_mentions::table.filter(message_mentions::chat_id.eq(87100))
+                .count().get_result::<i64>(conn)?, 1);
+            assert!(attachments::table.find(87110_i64).select(attachments::deleted_at)
+                .first::<Option<chrono::DateTime<Utc>>>(conn)?.is_none());
+
             // An ordinary sender can delete their own messages in a batch.
             delete_selection(conn, 87100, 1, false, &[87103, 87105])?;
             assert_eq!(thread_meta::table.find((87100_i64, 87102_i64))
@@ -199,9 +271,8 @@ mod tests {
             // Removing the last reply must also shift readers off the old root.
             let ids = [87103, 87104, 87105];
             let result = delete_selection(conn, 87100, 1, true, &ids)?;
-            assert_eq!(result.payload.message_ids, ids.map(|id| id.to_string()));
-            assert_eq!(result.payload.complete, Some(true));
-            assert_eq!(result.payload.thread_root_ids, Some(vec!["87102".into()]));
+            assert_eq!(result.impact.message_ids, ids);
+            assert_eq!(result.impact.thread_root_ids, BTreeSet::from([87102]));
             assert_eq!(result.member_uids.len(), 2);
             assert!(!result.roots[0].has_thread);
             assert!(result.roots[0].deleted_at.is_some());
@@ -218,7 +289,7 @@ mod tests {
             assert!(attachments::table.find(87110_i64).select(attachments::deleted_at)
                 .first::<Option<chrono::DateTime<Utc>>>(conn)?.is_some());
             let retried = delete_selection(conn, 87100, 1, true, &ids)?;
-            assert_eq!(retried.payload.message_ids, result.payload.message_ids);
+            assert_eq!(retried.impact.message_ids, result.impact.message_ids);
             Ok(())
         });
     }
