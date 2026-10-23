@@ -410,7 +410,7 @@
       "other": "[非文本消息]"
     },
     "menu": {
-      "backToActions": "返回消息操作",
+      "addReaction": "添加表态",
       "actions": {
         "reply": "回复",
         "thread": "话题",
@@ -550,32 +550,7 @@
     "createFailed": "创建贴纸包失败"
   },
   "emojiPicker": {
-    "loadFailed": "表情加载失败，请关闭后重试。",
-    "unsupported": "浏览器不支持彩色表情。",
-    "loading": "正在加载…",
-    "networkError": "表情加载失败，请重新打开重试。",
-    "search": "搜索表情",
-    "skinTone": "选择肤色（当前为 {skinTone}）",
-    "skinTones": {
-      "default": "默认",
-      "light": "浅色",
-      "mediumLight": "较浅",
-      "medium": "中等",
-      "mediumDark": "较深",
-      "dark": "深色"
-    },
-    "categories": {
-      "custom": "自定义",
-      "smileys": "笑脸和表情",
-      "people": "人物和身体",
-      "animals": "动物与自然",
-      "food": "食品饮料",
-      "travel": "旅行和地点",
-      "activities": "活动",
-      "objects": "物品",
-      "symbols": "符号",
-      "flags": "旗帜"
-    }
+    "loadFailed": "表情加载失败，请关闭后重试。"
   },
   "pwa": {
     "notificationPrompt": {
