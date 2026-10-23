@@ -1,4 +1,5 @@
 import type { MarkdownIt, StateBlock, StateInline } from 'markdown-it';
+import { applyChatBlocks } from './chat-blocks';
 
 /** Chat subset: exact double stars for bold, double underscores for italic. */
 const STAR = 0x2a;
@@ -250,6 +251,10 @@ interface BlockRulerInternals {
   __rules__: InternalBlockRule[];
 }
 
+interface InlineRulerInternals {
+  __rules__: { name: string; fn: (state: StateInline, silent: boolean) => boolean }[];
+}
+
 const SPACE = 0x20;
 const TAB = 0x09;
 
@@ -297,6 +302,37 @@ function pipeAwareTextTokenize(state: StateInline, silent: boolean): boolean {
 
 export function applyMarkdownSubset(md: MarkdownIt): void {
   md.disable(DISABLED_RULES, true);
+  applyChatBlocks(md);
+
+  // A chat newline never consumes neighboring spaces or a literal backslash.
+  md.inline.ruler.at('newline', (state, silent) => {
+    if (state.src[state.pos] !== '\n') return false;
+    if (!silent) state.push('softbreak', 'br', 0);
+    state.pos++;
+    return true;
+  });
+  md.inline.ruler.before('escape', 'literalLineBackslash', (state, silent) => {
+    if (state.src[state.pos] !== '\\' || state.src[state.pos + 1] !== '\n') return false;
+    if (!silent) state.pending += '\\';
+    state.pos++;
+    return true;
+  });
+
+  // Reuse code-span matching but keep its source whitespace, including newlines.
+  const inlineRuler = md.inline.ruler as unknown as InlineRulerInternals;
+  const backticks = inlineRuler.__rules__.find((rule) => rule.name === 'backticks')!.fn;
+  md.inline.ruler.at('backticks', (state, silent) => {
+    const start = state.pos;
+    const previousToken = state.tokens.at(-1);
+    const matched = backticks(state, silent);
+    if (matched && !silent) {
+      const token = state.tokens.at(-1);
+      if (token?.type === 'code_inline' && token !== previousToken) {
+        token.content = state.src.slice(start + token.markup.length, state.pos - token.markup.length);
+      }
+    }
+    return matched;
+  });
 
   // Keep the text rule ahead of the spoiler rule (see note above).
   md.inline.ruler.at('text', pipeAwareTextTokenize);

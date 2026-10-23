@@ -110,7 +110,7 @@ describe('prepareMessageContent', () => {
 
 describe('code region mention preservation', () => {
   it.each([
-    ['`hello\n@[uid:7]`', 'hello @[uid:7]'],
+    ['`hello\n@[uid:7]`', 'hello\n@[uid:7]'],
     ['- ```\n  @[uid:7]\n  ```', '@[uid:7]\n'],
     ['```\n```oops\n@[uid:7]\n```', '```oops\n@[uid:7]\n'],
     ['```\n@[uid:7]', '@[uid:7]'],
@@ -124,7 +124,7 @@ describe('code region mention preservation', () => {
   it.each(['\n', '\r\n'])('treats backticks after literal > as inline code with %j line endings', (newline) => {
     const source = ['> ```', '> @[uid:7]', '> ```', '', '**@[uid:7]**'].join(newline);
     const html = toHtml(prepareMessageContent(source, [mention(7, 'Alice')], null, true).nodes!);
-    expect(html).toContain('<p>> <code>> @[uid:7] ></code></p>');
+    expect(html).toContain('<p>> <code>\n> @[uid:7]\n> </code><br></br><br></br>');
     expect(html).not.toContain('<blockquote>');
     expect(html).not.toContain('<pre>');
     expect(html).not.toContain('\uFFF0');

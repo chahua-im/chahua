@@ -143,13 +143,13 @@ describe('renderMarkdownText — blocks', () => {
   it('renders supported blocks and keeps headings and hr literal', () => {
     const html = renderText('# Title\n\n> Quote **bold**\n\n- a\n- b\n\n---\n');
     // Heading and horizontal-rule syntax are out of the allowlist.
-    expect(html).toContain('<p># Title</p>');
+    expect(html).toContain('<p># Title<br><br>');
     expect(html).not.toContain('<h1');
-    expect(html).toContain('<p>&gt; Quote <strong>bold</strong></p>');
+    expect(html).toContain('&gt; Quote <strong>bold</strong></p>');
     // Tight lists must not wrap items in <p>.
     expect(html).toContain('<ul><li>a</li><li>b</li></ul>');
     expect(html).not.toContain('<hr');
-    expect(html).toContain('<p>---</p>');
+    expect(html).toContain('<p>---<br></p>');
   });
 
   it('renders ordered lists and keeps an explicit start attribute', () => {
@@ -181,13 +181,13 @@ describe('renderMarkdownText — blocks', () => {
     expect(html).toContain('indented code');
   });
 
-  it('wraps loose list items in paragraphs', () => {
+  it('preserves the blank line between list items', () => {
     const html = renderText('- first\n\n- second');
-    expect(html).toContain('<li><p>first</p></li>');
+    expect(html).toContain('<li><p>first</p><div class="chat-line-gap"><br></div></li>');
   });
 
-  it('renders multiple paragraphs separately', () => {
-    expect(renderText('one\n\ntwo')).toBe('<p>one</p><p>two</p>');
+  it('keeps blank lines inside a single text region', () => {
+    expect(renderText('one\n\ntwo')).toBe('<p>one<br><br>two</p>');
   });
 });
 
@@ -202,7 +202,7 @@ describe('renderMarkdownPreview — single line', () => {
   });
 
   it('keeps headings literal on one line', () => {
-    expect(renderPreview('# Title\n\nBody')).toBe('# Title Body');
+    expect(renderPreview('# Title\n\nBody')).toBe('# Title  Body');
   });
 
   it('flattens lists with bullets and order markers', () => {
@@ -211,7 +211,7 @@ describe('renderMarkdownPreview — single line', () => {
   });
 
   it('preserves quote markers and flattens code blocks', () => {
-    expect(renderPreview('> quoted\n\nrest')).toBe('&gt; quoted rest');
+    expect(renderPreview('> quoted\n\nrest')).toBe('&gt; quoted  rest');
     expect(renderPreview('```\na\nb\n```')).toBe('<code>a b</code>');
   });
 

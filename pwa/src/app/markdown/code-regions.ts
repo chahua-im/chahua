@@ -26,7 +26,7 @@ export function findCodeRegions(source: string): TextRegion[] {
     if (token.type === 'fence') {
       regions.push({ start, end });
     } else if (token.type === 'inline') {
-      // Backticks may cross soft line breaks, but never paragraph/block boundaries.
+      // Backticks may cross blank lines, but never list-item or fence boundaries.
       let pos = start;
       while (pos < end) {
         if (source[pos] === '\\') {
