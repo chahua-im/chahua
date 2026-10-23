@@ -38,7 +38,7 @@ import { AvatarColor, AvatarTextPipe } from '../../chats/avatar-text.pipe';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { LoadError } from '../../ui/load-error/load-error';
-import { LocalDatePipe } from '../../i18n/local-date.pipe';
+import { MessageDatePipe } from '../message-date.pipe';
 import { Message, type MessageContent } from '../message/message';
 import { messageRows } from '../../conversations/message-rows';
 import { SessionStore } from '../../session/session-store';
@@ -57,7 +57,7 @@ import { VoicePlayback } from '../voice-player/voice-playback';
     ContentScrollbars,
     LoadError,
     TranslocoPipe,
-    LocalDatePipe,
+    MessageDatePipe,
     IonBackButton,
     IonButtons,
     IonContent,

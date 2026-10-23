@@ -63,6 +63,7 @@ describe('SavedMessagesPage', () => {
 
   afterEach(() => {
     http.verify();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -76,6 +77,25 @@ describe('SavedMessagesPage', () => {
     await fixture.whenStable();
     fixture.detectChanges();
   }
+
+  it('labels yesterday using the original send date instead of the save date', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2027, 0, 1, 12));
+    fixture.detectChanges();
+    http.expectOne('/_api/saved-messages?limit=50').flush({
+      savedMessages: [
+        {
+          ...savedSnapshot(),
+          originalCreatedAt: new Date(2026, 11, 31, 14, 30).toISOString(),
+          savedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.saved-source').textContent).toContain('昨天');
+    expect(fixture.nativeElement.querySelector('app-message time').textContent.trim()).toBe('14:30');
+  });
 
   it('paginates immutable saved snapshots and locates the original topic message', async () => {
     await saved();

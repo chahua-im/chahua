@@ -45,7 +45,10 @@ describe('VoiceBar', () => {
     fixture = create();
     fixture.detectChanges();
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 
   function playingPlayer() {
     const player = TestBed.createComponent(VoicePlayer);
@@ -59,6 +62,21 @@ describe('VoiceBar', () => {
 
   it('is hidden while no voice is active', () => {
     expect(fixture.nativeElement.querySelector('.voice-bar')).toBeNull();
+  });
+
+  it('shows yesterday and the local sending time in the voice dock', async () => {
+    const sent = new Date(dock.createdAt);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(sent.getFullYear(), sent.getMonth(), sent.getDate() + 1, 12));
+    playingPlayer();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const time = new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(sent);
+    expect(fixture.nativeElement.querySelector('.voice-date').textContent).toBe(`昨天 ${time}`);
   });
 
   it('renders the active voice and drives playback, speed and dismissal through it', () => {

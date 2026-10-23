@@ -2,7 +2,7 @@
   @for (row of savedRows(); track row.item.id) {
     @let item = row.item;
     <div>
-      <p class="saved-source">{{ item.chat.name }} · {{ item.originalCreatedAt | localDate: 'date' }}</p>
+      <p class="saved-source">{{ item.chat.name }} · {{ item.originalCreatedAt | messageDate }}</p>
       <app-message
         [message]="row.content"
         [savedId]="item.id"
