@@ -188,6 +188,8 @@ mod tests {
     fn notification_preferences_apply_to_main_chats_but_not_subscribed_threads() {
         let (now, mut recipient) = base(ThreadPushState::NotThreadMessage);
         recipient.notification_defaults = NotificationDefaults::default();
+        assert_eq!(should_send_push(&recipient, now), PushDecision::Send);
+        recipient.notification_defaults.group_chats_muted = true;
         assert_eq!(
             should_send_push(&recipient, now),
             PushDecision::Skip(PushSkipReason::GroupMuted)

@@ -26,7 +26,7 @@ pub fn lock_notification_update(uid: i32) -> std::sync::MutexGuard<'static, ()> 
 #[cfg(test)]
 mod integration_tests;
 
-#[derive(Debug, Clone, Copy, Queryable, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Queryable, PartialEq, Eq)]
 pub struct NotificationDefaults {
     pub group_chats_muted: bool,
     pub direct_chats_muted: bool,
@@ -103,7 +103,7 @@ pub fn update_notification_defaults(
         .values((
             user,
             user_extra::mute_group_chats_by_default
-                .eq(patch.mute_group_chats_by_default.unwrap_or(true)),
+                .eq(patch.mute_group_chats_by_default.unwrap_or(false)),
             user_extra::mute_direct_chats_by_default
                 .eq(patch.mute_direct_chats_by_default.unwrap_or(false)),
         ))
@@ -325,15 +325,6 @@ pub fn list_notification_exceptions(
         })
 }
 
-impl Default for NotificationDefaults {
-    fn default() -> Self {
-        Self {
-            group_chats_muted: true,
-            direct_chats_muted: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Queryable, PartialEq, Eq)]
 pub struct ChatNotificationSetting {
     pub muted_until: Option<DateTime<Utc>>,
@@ -460,15 +451,15 @@ mod tests {
     }
 
     #[test]
-    fn new_and_missing_accounts_mute_groups_but_notify_direct_chats() {
+    fn new_and_missing_accounts_notify_both_chat_kinds() {
         let defaults = NotificationDefaults::default();
-        assert!(defaults.group_chats_muted);
+        assert!(!defaults.group_chats_muted);
         assert!(!defaults.direct_chats_muted);
         let inherited = ChatNotificationSetting {
             muted_until: None,
             mute_override: None,
         };
-        assert!(inherited.is_muted(GroupKind::Group, defaults, now()));
+        assert!(!inherited.is_muted(GroupKind::Group, defaults, now()));
         assert!(!inherited.is_muted(GroupKind::Dm, defaults, now()));
     }
 
@@ -642,7 +633,7 @@ mod tests {
                     NotificationDefaults::default(),
                     now() + Duration::seconds(60)
                 ),
-                fallback.mute_override.unwrap_or(true)
+                fallback.mute_override.unwrap_or(false)
             );
         }
         update_chat_notification_setting(
@@ -850,7 +841,7 @@ mod tests {
     }
 
     #[test]
-    fn database_reset_migration_resets_groups_and_preserves_only_unarchived_dm_permanent_mutes() {
+    fn database_migration_backfills_permanent_mutes_without_resetting_account_defaults() {
         use crate::schema::user_extra;
 
         let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
@@ -868,32 +859,52 @@ mod tests {
                 chat_id BIGINT, uid INTEGER, muted_until TIMESTAMPTZ,
                 mute_override BOOLEAN, archived BOOLEAN NOT NULL DEFAULT FALSE,
                 PRIMARY KEY (chat_id, uid));
-             INSERT INTO user_extra VALUES (10,FALSE,FALSE),(20,FALSE,TRUE),(30,TRUE,TRUE);
-             INSERT INTO groups VALUES (1,'group'),(2,'group'),(3,'group'),(4,'group'),(5,'group'),
-                 (10,'dm'),(11,'dm'),(12,'dm'),(13,'dm'),(14,'dm');
-             INSERT INTO group_membership VALUES
-                (1,10,NULL,FALSE,FALSE),
-                (1,20,'9999-12-31 23:59:59+00',TRUE,FALSE),
-                (2,10,'2026-10-24 08:00:00+00',FALSE,FALSE),
-                (3,10,'9999-12-31 23:59:59+00',TRUE,TRUE),
-                (4,10,'2026-10-22 08:00:00+00',TRUE,FALSE),
-                (5,10,NULL,NULL,FALSE),
-                (10,10,'9999-12-31 23:59:59+00',NULL,FALSE),
-                (10,20,NULL,NULL,FALSE),
-                (11,10,'9999-12-31 23:59:59+00',TRUE,TRUE),
-                (11,20,'9999-12-31 23:59:59+00',NULL,TRUE),
-                (12,10,'2026-10-24 08:00:00+00',NULL,FALSE),
-                (13,10,'2026-10-22 08:00:00+00',NULL,FALSE),
-                (14,10,'2026-10-24 08:00:00+00',NULL,TRUE);",
+             INSERT INTO user_extra VALUES (10,FALSE,FALSE),(20,FALSE,TRUE),
+                 (30,TRUE,TRUE),(40,TRUE,FALSE);
+             INSERT INTO groups VALUES (1,'group'),(2,'dm');
+             INSERT INTO group_membership
+             SELECT g.id, (row_number() OVER (PARTITION BY g.id))::INTEGER,
+                 setting.muted_until, setting.mute_override, archive.archived
+             FROM groups g
+             CROSS JOIN (VALUES (FALSE),(TRUE)) archive(archived)
+             CROSS JOIN (VALUES
+                 (NULL::TIMESTAMPTZ,NULL::BOOLEAN),
+                 (NULL::TIMESTAMPTZ,FALSE),
+                 (NULL::TIMESTAMPTZ,TRUE),
+                 ('9999-12-31 23:59:59+00'::TIMESTAMPTZ,NULL::BOOLEAN),
+                 ('9999-12-31 23:59:59+00'::TIMESTAMPTZ,FALSE),
+                 ('9999-12-31 23:59:59+00'::TIMESTAMPTZ,TRUE),
+                 ('2026-10-24 08:00:00+00'::TIMESTAMPTZ,NULL::BOOLEAN),
+                 ('2026-10-24 08:00:00+00'::TIMESTAMPTZ,FALSE),
+                 ('2026-10-24 08:00:00+00'::TIMESTAMPTZ,TRUE),
+                 ('2026-10-22 08:00:00+00'::TIMESTAMPTZ,NULL::BOOLEAN)
+             ) setting(muted_until,mute_override);",
         )
         .unwrap();
-        conn.batch_execute(include_str!(
-            "../../migrations/2026-10-23-092156-0000_reset_chat_notification_defaults/up.sql"
-        ))
-        .unwrap();
-        // Inserts that omit settings and pre-existing users share the same defaults.
+        let memberships = |conn: &mut PgConnection| {
+            group_membership::table
+                .order((group_membership::chat_id, group_membership::uid))
+                .select((
+                    group_membership::chat_id,
+                    group_membership::uid,
+                    (
+                        group_membership::muted_until,
+                        group_membership::mute_override,
+                    ),
+                    group_membership::archived,
+                ))
+                .load::<(i64, i32, ChatNotificationSetting, bool)>(conn)
+                .unwrap()
+        };
+        let before = memberships(&mut conn);
+        let up = include_str!(
+            "../../migrations/2026-10-23-161420-0000_preserve_chat_notification_mutes/up.sql"
+        );
+        conn.batch_execute(up).unwrap();
+        // Preserve existing account choices; the first migration already made
+        // inserts that omit preferences notify by default for both chat kinds.
         diesel::insert_into(user_extra::table)
-            .values(user_extra::uid.eq(40))
+            .values(user_extra::uid.eq(50))
             .execute(&mut conn)
             .unwrap();
         assert_eq!(
@@ -901,90 +912,52 @@ mod tests {
                 .order(user_extra::uid)
                 .select((
                     user_extra::mute_group_chats_by_default,
-                    user_extra::mute_direct_chats_by_default
+                    user_extra::mute_direct_chats_by_default,
                 ))
                 .load::<(bool, bool)>(&mut conn)
                 .unwrap(),
-            vec![(true, false); 4]
+            vec![
+                (false, false),
+                (false, true),
+                (true, true),
+                (true, false),
+                (false, false)
+            ]
         );
-
-        let rows = group_membership::table
-            .order((group_membership::chat_id, group_membership::uid))
-            .select((
-                group_membership::chat_id,
-                group_membership::uid,
-                (
-                    group_membership::muted_until,
-                    group_membership::mute_override,
-                ),
-                group_membership::archived,
-            ))
-            .load::<(i64, i32, ChatNotificationSetting, bool)>(&mut conn)
-            .unwrap();
-        let inherited = ChatNotificationSetting {
-            muted_until: None,
-            mute_override: None,
-        };
-        let defaults = NotificationDefaults::default();
-        assert_eq!(rows.len(), 13);
-        for (chat_id, _, setting, archived) in &rows[..6] {
-            assert_eq!(*setting, inherited);
-            assert!(setting.is_muted(GroupKind::Group, defaults, now()));
-            assert_eq!(*archived, *chat_id == 3);
+        let mut expected = before;
+        for (_, _, setting, _) in &mut expected {
+            if setting.muted_until == Some(super::super::chat::indefinite_mute_until()) {
+                setting.mute_override = Some(true);
+            }
         }
-        assert_eq!(
-            rows[6],
-            (
-                10,
-                10,
-                ChatNotificationSetting {
-                    muted_until: Some(super::super::chat::indefinite_mute_until()),
-                    mute_override: Some(true),
-                },
-                false
-            )
-        );
-        assert_eq!(rows[7], (10, 20, inherited, false));
-        assert_eq!(rows[8], (11, 10, inherited, true));
-        assert_eq!(rows[9], (11, 20, inherited, true));
-        for row in &rows[10..] {
-            let expiry = if row.0 == 13 {
-                now() - Duration::days(1)
+        assert_eq!(expected.len(), 40);
+        assert_eq!(memberships(&mut conn), expected);
+        for (chat_id, _, setting, _) in &expected {
+            let kind = if *chat_id == 1 {
+                GroupKind::Group
             } else {
-                now() + Duration::days(1)
+                GroupKind::Dm
             };
             assert_eq!(
-                row.2,
-                ChatNotificationSetting {
-                    muted_until: Some(expiry),
-                    mute_override: None
-                }
+                setting.is_muted(
+                    kind,
+                    NotificationDefaults::default(),
+                    now() + Duration::days(1)
+                ),
+                setting.mute_override == Some(true)
             );
-            assert_eq!(row.3, row.0 == 14);
-            assert!(!row
-                .2
-                .is_muted(GroupKind::Dm, defaults, now() + Duration::days(1)));
         }
+        conn.batch_execute(up).unwrap();
+        assert_eq!(memberships(&mut conn), expected);
 
-        assert!(rows[6].2.is_muted(GroupKind::Dm, defaults, now()));
-        assert!(!rows[8].2.is_muted(GroupKind::Dm, defaults, now()));
-        // Reject rollback instead of claiming that erased preferences can be reconstructed.
         let rollback_error = conn
             .batch_execute(include_str!(
-                "../../migrations/2026-10-23-092156-0000_reset_chat_notification_defaults/down.sql"
+                "../../migrations/2026-10-23-161420-0000_preserve_chat_notification_mutes/down.sql"
             ))
             .unwrap_err();
-        assert!(rollback_error.to_string().contains("reset is irreversible"));
-        assert_eq!(
-            group_membership::table
-                .find((1_i64, 10_i32))
-                .select((
-                    group_membership::muted_until,
-                    group_membership::mute_override
-                ))
-                .first::<ChatNotificationSetting>(&mut conn)
-                .unwrap(),
-            inherited
-        );
+        assert!(rollback_error
+            .to_string()
+            .contains("backfill is irreversible"));
+        assert_eq!(memberships(&mut conn), expected);
     }
 }

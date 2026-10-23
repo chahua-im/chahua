@@ -52,6 +52,14 @@ describe('notification preferences', () => {
     vi.useRealTimers();
   });
 
+  it('notifies both chat kinds when account defaults are unavailable', () => {
+    session.user.set(undefined);
+    for (const kind of [GroupKind.group, GroupKind.dm]) {
+      store.acceptChats([{ ...testChat, kind, muteOverride: undefined }], store.snapshot());
+      expect(store.isMuted(testChat.id)).toBe(false);
+    }
+  });
+
   it('uses group/DM defaults and changes loaded chats without per-chat HTTP requests', async () => {
     expect(store.isMuted(testChat.id)).toBe(true);
     const save = store.setNotificationDefault(GroupKind.group, false);
