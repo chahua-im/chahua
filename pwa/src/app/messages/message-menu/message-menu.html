@@ -9,10 +9,13 @@
       @if (message(); as message) {
         <div class="menu-surface" (click)="dismissBackdrop($event)">
           @if (choosingEmoji() && serverMessage(); as serverMessage) {
-            <div class="emoji-panel">
-              <button type="button" class="picker-back" (click)="choosingEmoji.set(false)">
-                {{ 'messages.menu.backToActions' | transloco }}
-              </button>
+            <div #emojiPanel class="emoji-panel">
+              <div class="picker-header">
+                <button type="button" class="picker-back" (click)="choosingEmoji.set(false)">
+                  <ion-icon [icon]="icons.chevronBackOutline"></ion-icon>
+                </button>
+                <span>{{ 'messages.menu.addReaction' | transloco }}</span>
+              </div>
               @defer {
                 <app-emoji-picker (chosen)="reactTo(serverMessage, $event)"></app-emoji-picker>
               } @loading (after 100ms) {
@@ -33,7 +36,7 @@
                     </button>
                   }
                   @if (serverMessage.reactions.length < 50) {
-                    <button type="button" (click)="choosingEmoji.set(true)">
+                    <button type="button" (click)="openEmojiPicker($event)">
                       <ion-icon [icon]="icons.addOutline"></ion-icon>
                     </button>
                   }

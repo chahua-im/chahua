@@ -118,7 +118,11 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                               |
 | MessageMenu        | messages、chatId、threadId、canReply → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy、busyMessageId                       |
 | ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                     |
-| EmojiPicker        | chosen 输出；封装第三方选择器的尺寸、中文数据与加载状态                                                                                      |
+| EmojiPicker        | chosen 输出 Unicode 字符串；封装 @nicematic/emoji-picker 的尺寸与中英文语言映射，局部提供 PickerData、PickerSearch、PickerFlags，使用组件自带最近记录服务 |
+
+`picker-emojis.generated.json` 由 `npm run emoji:picker:generate` 从固定版本 `emojibase-data` 生成并提交，包含英文名称、英/简中/繁中搜索关键词、分类和准确的肤色序列。PickerData 与 PickerSearch 通过组件局部 provider 替换库内各自独立的数据源，网格、搜索、肤色浮层使用同一份数据；普通肤色查表转换，混合肤色作为独立条目保持原序列。搜索忽略大小写，空白分隔词取交集，完整表情精确匹配优先并容忍省略 VS16，输出使用与输入校验一致的 Unicode 17 RGI 序列，避免额外 VS16 将相同表态拆成不同键。生成器校验覆盖全部 RGI 序列。数据及索引只随 EmojiPicker 的延迟代码加载，静态索引在模块内复用，每个选择器的查询状态独立。
+
+PickerFlags 禁用第三方组件的全量国旗预加载，保留图片 URL 缓存和浏览器原生图片懒加载；初始化不依赖 `requestIdleCallback`。肤色浮层在渲染后使用原生 `popover="manual"` 进入浏览器顶层，沿用库内视口坐标和选择、关闭事件，避免外层 modal/popover 的 transform 和 overflow 改变定位或裁切；元素销毁时浏览器自动移除顶层浮层。
 
 MessageMenu 的 selection 保存消息标识、原消息元素和点按坐标，从页面数组或 MessageOutbox 解析当前内容。可用操作、排序和翻页页码由消息状态、聊天类型与好友关系派生，页码在 open 和 reset 时归零。确认意图、操作提示、选择表情和弹窗状态属于菜单，busyMessageId 标识正在执行操作的消息；菜单测量完整预览与面板的尺寸，预览保留原横向位置与宽度，面板各自避让左右边缘；高度能容纳时整体竖向定位，超长时把预览正文对齐原元素、面板定位到点按附近；不修改底层列表和滚动位置。
 

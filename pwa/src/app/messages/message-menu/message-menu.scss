@@ -33,10 +33,24 @@
   box-shadow: 0 4px 20px rgba(var(--ion-color-dark-rgb), 0.12);
 }
 
-.picker-back {
+.picker-header {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
   min-height: 44px;
-  padding: 8px 16px;
+  text-align: center;
+  font-size: var(--app-font-body);
+  font-weight: 600;
+}
+.picker-back {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   color: var(--ion-color-primary-shade);
+}
+.picker-back ion-icon {
+  font-size: 22px;
 }
 .panel {
   position: relative;
@@ -107,5 +121,6 @@ button:disabled {
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(350px, calc(100% - 24px));
+  min-height: calc(44px + min(400px, 65dvh));
   overflow: hidden;
 }

@@ -14,7 +14,7 @@
       "installMode": "lazy",
       "updateMode": "prefetch",
       "resources": {
-        "files": ["/emoji/**", "/i18n/**"]
+        "files": ["/i18n/**"]
       }
     }
   ],

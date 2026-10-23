@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
-import { IonModal } from '@ionic/angular';
+import { getPlatforms, IonModal } from '@ionic/angular';
 import { timeOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
 import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
@@ -161,6 +161,50 @@ describe('MessageMenu', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    [500, 200, 500, 208],
+    [1275, 890, 918, 444],
+    [5, 2, 12, 12],
+  ])('places the desktop picker near (%s, %s) within the overlay', (x, y, left, top) => {
+    const platforms = getPlatforms();
+    const original = [...platforms];
+    platforms.splice(0, platforms.length, 'desktop');
+    try {
+      const surface = fixture.nativeElement.querySelector('.menu-surface') as HTMLElement;
+      vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1280, 900));
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(350);
+      vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(444);
+      fixture.nativeElement
+        .querySelector('.reactions button:last-child')
+        .dispatchEvent(new MouseEvent('click', { detail: 1, clientX: x, clientY: y, bubbles: true }));
+      fixture.detectChanges();
+      const panel = fixture.nativeElement.querySelector('.emoji-panel') as HTMLElement;
+      expect(panel.style.left).toBe(`${left}px`);
+      expect(panel.style.top).toBe(`${top}px`);
+      expect(panel.style.transform).toBe('none');
+    } finally {
+      platforms.splice(0, platforms.length, ...original);
+    }
+  });
+
+  it.each(['ios', 'android'] as const)('keeps the picker centered on %s', (platform) => {
+    const platforms = getPlatforms();
+    const original = [...platforms];
+    platforms.splice(0, platforms.length, platform);
+    try {
+      fixture.nativeElement
+        .querySelector('.reactions button:last-child')
+        .dispatchEvent(new MouseEvent('click', { detail: 1, clientX: 100, clientY: 200, bubbles: true }));
+      fixture.detectChanges();
+      const panel = fixture.nativeElement.querySelector('.emoji-panel') as HTMLElement;
+      expect(panel.style.left).toBe('');
+      expect(panel.style.top).toBe('');
+      expect(panel.style.transform).toBe('');
+    } finally {
+      platforms.splice(0, platforms.length, ...original);
+    }
   });
 
   function openQueued(

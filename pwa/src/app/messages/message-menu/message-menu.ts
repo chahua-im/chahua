@@ -15,7 +15,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast } from '@ionic/angular';
+import { createAnimation, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, isPlatform } from '@ionic/angular';
 import {
   addOutline,
   arrowUndoOutline,
@@ -24,6 +24,7 @@ import {
   bookmark,
   bookmarkOutline,
   chatbubblesOutline,
+  chevronBackOutline,
   chevronDown,
   chevronUp,
   copyOutline,
@@ -182,7 +183,7 @@ export class MessageMenu {
     return sender.name ?? String(sender.uid);
   });
   protected readonly Action = MessageAction;
-  protected readonly icons = { addOutline, chevronDown, chevronUp };
+  protected readonly icons = { addOutline, chevronBackOutline, chevronDown, chevronUp };
   protected readonly actionIcons = computed<Record<MessageAction, string>>(() => ({
     [MessageAction.Forward]: arrowRedoOutline,
     [MessageAction.Select]: checkboxOutline,
@@ -198,6 +199,8 @@ export class MessageMenu {
     [MessageAction.Reactions]: peopleOutline,
   }));
   protected readonly choosingEmoji = signal(false);
+  private readonly emojiAnchor = signal<{ x: number; y: number } | undefined>(undefined);
+  private readonly emojiPanel = viewChild<ElementRef<HTMLElement>>('emojiPanel');
   protected readonly placed = signal(false);
   private readonly stack = viewChild<ElementRef<HTMLElement>>('stack');
   private readonly reactionBar = viewChild<ElementRef<HTMLElement>>('reactionBar');
@@ -308,6 +311,28 @@ export class MessageMenu {
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.reset());
+    afterRenderEffect((onCleanup) => {
+      const panel = this.emojiPanel()?.nativeElement;
+      const anchor = this.emojiAnchor();
+      if (!panel || !anchor) return;
+      const surface = panel.parentElement!;
+      const place = () => {
+        const bounds = surface.getBoundingClientRect();
+        const style = getComputedStyle(surface);
+        const left = parseFloat(style.paddingLeft) + 12;
+        const top = parseFloat(style.paddingTop) + 12;
+        const right = bounds.width - parseFloat(style.paddingRight) - 12;
+        const bottom = bounds.height - parseFloat(style.paddingBottom) - 12;
+        panel.style.left = `${Math.max(left, Math.min(anchor.x - bounds.left, right - panel.offsetWidth))}px`;
+        panel.style.top = `${Math.max(top, Math.min(anchor.y - bounds.top + 8, bottom - panel.offsetHeight))}px`;
+        panel.style.transform = 'none';
+      };
+      const observer = new ResizeObserver(place);
+      observer.observe(surface);
+      observer.observe(panel);
+      place();
+      onCleanup(() => observer.disconnect());
+    });
     effect(() => {
       if (this.queued() || !this.serverMessage()) return;
       untracked(() => {
@@ -480,6 +505,18 @@ export class MessageMenu {
 
   protected turnPage() {
     this.page.update((page) => (page === 0 ? 1 : 0));
+  }
+
+  protected openEmojiPicker(event: MouseEvent) {
+    const button = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.emojiAnchor.set(
+      isPlatform('ios') || isPlatform('android')
+        ? undefined
+        : event.detail
+          ? { x: event.clientX, y: event.clientY }
+          : { x: button.x + button.width / 2, y: button.y + button.height / 2 },
+    );
+    this.choosingEmoji.set(true);
   }
 
   open(selection: MessageMenuSelection) {

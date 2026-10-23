@@ -1,5 +1,6 @@
-<emoji-picker
-  [attr.locale]="pickerLocale()"
-  [attr.data-source]="dataSource()"
-  [i18n]="i18n()"
-  (emoji-click)="choose($event)"></emoji-picker>
+<nicematic-picker
+  [locale]="pickerLocale()"
+  [pickerWidth]="350"
+  [pickerHeight]="height()"
+  [cellSize]="36"
+  (emojiSelect)="chosen.emit($event.char)" />

@@ -410,7 +410,7 @@
       "other": "[Attachment]"
     },
     "menu": {
-      "backToActions": "Back to message actions",
+      "addReaction": "Add reaction",
       "actions": {
         "reply": "Reply",
         "thread": "Thread",
@@ -550,32 +550,7 @@
     "createFailed": "Failed to create sticker pack"
   },
   "emojiPicker": {
-    "loadFailed": "Failed to load emojis. Close and try again.",
-    "unsupported": "Your browser doesn't support color emoji.",
-    "loading": "Loading…",
-    "networkError": "Failed to load emojis. Reopen and try again.",
-    "search": "Search emoji",
-    "skinTone": "Choose a skin tone (currently {skinTone})",
-    "skinTones": {
-      "default": "Default",
-      "light": "Light",
-      "mediumLight": "Medium light",
-      "medium": "Medium",
-      "mediumDark": "Medium dark",
-      "dark": "Dark"
-    },
-    "categories": {
-      "custom": "Custom",
-      "smileys": "Smileys & emotion",
-      "people": "People & body",
-      "animals": "Animals & nature",
-      "food": "Food & drink",
-      "travel": "Travel & places",
-      "activities": "Activities",
-      "objects": "Objects",
-      "symbols": "Symbols",
-      "flags": "Flags"
-    }
+    "loadFailed": "Failed to load emojis. Close and try again."
   },
   "pwa": {
     "notificationPrompt": {
