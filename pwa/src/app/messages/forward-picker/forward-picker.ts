@@ -1,5 +1,17 @@
-import { Component, computed, DestroyRef, inject, input, output, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  afterRenderEffect,
+  Component,
+  computed,
+  DestroyRef,
+  effect,
+  inject,
+  input,
+  linkedSignal,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   IonButton,
   IonButtons,
@@ -20,6 +32,7 @@ import {
 } from '@ionic/angular';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { chatbubblesOutline } from 'ionicons/icons';
+import { fromEvent, map } from 'rxjs';
 import { ServerWsMessageType, type MessagePreview as Preview } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import type { SnowflakeID } from '../../api/snowflake-id';
@@ -50,9 +63,17 @@ interface ForwardTarget {
   time: number;
 }
 
+type TargetQuery = ReturnType<ChatListStore['chats']> | ReturnType<ChatListStore['threads']>;
+
 @Component({
   selector: 'app-forward-picker',
   templateUrl: './forward-picker.html',
+  styleUrl: './forward-picker.scss',
+  host: {
+    '(document:pointerup)': 'releasePress()',
+    '(document:pointercancel)': 'releasePress()',
+    '(window:blur)': 'releasePress()',
+  },
   imports: [
     TranslocoPipe,
     ContentScrollbars,
@@ -98,14 +119,50 @@ export class ForwardPicker {
   );
   protected readonly submitted = signal(false);
   protected readonly open = signal(true);
-  protected readonly mobile = !matchMedia('(min-width: 768px)').matches;
-  protected readonly failed = computed(() => !!this.chats.error() || this.threads.error());
-  protected readonly loading = computed(() => this.chats.loading() || this.threads.loading());
-  protected readonly paging = signal(false);
-  protected readonly moreAvailable = computed(
-    () => (!this.chats.error() && this.chats.hasMore()) || (!this.threads.error() && this.threads.hasMore()),
+  private readonly desktop = matchMedia('(min-width: 768px)');
+  protected readonly mobile = toSignal(
+    fromEvent<MediaQueryListEvent>(this.desktop, 'change').pipe(map((event) => !event.matches)),
+    { initialValue: !this.desktop.matches },
   );
-  protected readonly targets = computed(() => {
+  private readonly modal = viewChild(IonModal);
+  private readonly viewport = signal<HTMLElement | undefined>(undefined);
+  private content?: HTMLIonContentElement;
+  private listSize?: ResizeObserver;
+  private observedList?: HTMLElement;
+  private rows: HTMLElement[] = [];
+  private anchors: { element: HTMLElement; offset: number }[] = [];
+  private renderedQuery = '';
+  private pointerRelease?: ReturnType<typeof setTimeout>;
+  protected readonly pressed = signal<SnowflakeID | undefined>(undefined);
+  protected readonly scrolling = signal(false);
+  protected readonly selected = signal<SnowflakeID | undefined>(undefined);
+  protected readonly canDismiss = (_data?: unknown, role?: string) => !this.submitted() || role === 'navigate';
+  protected readonly chatsFailed = computed(() => !!this.chats.listError());
+  protected readonly threadsFailed = computed(() => !!this.threads.listError());
+  protected readonly failed = computed(() => this.chatsFailed() || this.threadsFailed());
+  private readonly retrying = signal(new Set<TargetQuery>());
+  private readonly pageBusy = signal(false);
+  private pageRequest?: Promise<void>;
+  private feedback?: HTMLIonToastElement;
+  protected readonly manualPaging = signal(false);
+  protected readonly paging = computed(() => this.pageBusy() || this.chats.loadingMore() || this.threads.loadingMore());
+  protected readonly moreAvailable = computed(
+    () => (!this.chatsFailed() && this.chats.hasMore()) || (!this.threadsFailed() && this.threads.hasMore()),
+  );
+  protected readonly incomplete = computed(
+    () =>
+      this.moreAvailable() ||
+      this.failed() ||
+      this.chats.loadedThrough() === Infinity ||
+      this.threads.loadedThrough() === Infinity,
+  );
+  protected readonly pending = computed(
+    () =>
+      (this.chats.loading() && this.chats.loadedThrough() === Infinity) ||
+      (this.threads.loading() && this.threads.loadedThrough() === Infinity) ||
+      this.retrying().size > 0,
+  );
+  private readonly allTargets = computed(() => {
     const targets: ForwardTarget[] = [
       ...this.chats.items().map((chat) => ({
         chatId: chat.id,
@@ -123,21 +180,78 @@ export class ForwardPicker {
         time: Date.parse(thread.lastReplyAt),
       })),
     ];
+    return targets.sort((a, b) => b.time - a.time);
+  });
+  protected readonly initialLoading = computed(() => !this.allTargets().length && this.pending());
+  /** During a press keep row positions, but accept current fields and removals immediately. */
+  private readonly ordered = linkedSignal({
+    source: () => ({ targets: this.allTargets(), interacting: this.pressed() != null || this.scrolling() }),
+    computation: ({ targets, interacting }, previous): ForwardTarget[] => {
+      if (!interacting || !previous) return targets;
+      const remaining = new Map(targets.map((target) => [target.threadId ?? target.chatId, target]));
+      const kept = previous.value.flatMap((target) => {
+        const id = target.threadId ?? target.chatId;
+        const current = remaining.get(id);
+        remaining.delete(id);
+        return current ? [current] : [];
+      });
+      return [...kept, ...remaining.values()];
+    },
+  });
+  protected readonly targets = computed(() => {
     const query = this.query().trim().toLocaleLowerCase();
-    return targets
-      .filter(
-        (target) =>
-          !query || `${target.name ?? ''} ${target.preview?.message ?? ''}`.toLocaleLowerCase().includes(query),
-      )
-      .sort((a, b) => b.time - a.time);
+    return this.ordered().filter(
+      (target) => !query || `${target.name ?? ''} ${target.preview?.message ?? ''}`.toLocaleLowerCase().includes(query),
+    );
   });
   constructor() {
     const destroyRef = inject(DestroyRef);
     const releaseChats = this.chats.activate();
     const releaseThreads = this.threads.activate();
     destroyRef.onDestroy(() => {
+      clearTimeout(this.pointerRelease);
+      this.listSize?.disconnect();
+      void this.feedback?.dismiss();
       releaseChats();
       releaseThreads();
+    });
+    effect(() => {
+      // The same sheet instance survives width changes; desktop uses its fully open position.
+      if (!this.mobile() && this.viewport()) void this.modal()?.setCurrentBreakpoint(1);
+    });
+    afterRenderEffect({
+      earlyRead: () => {
+        this.targets();
+        this.failure();
+        this.initialLoading();
+        const viewport = this.viewport();
+        const query = this.query().trim().toLocaleLowerCase();
+        const reset = query !== this.renderedQuery;
+        this.renderedQuery = query;
+        if (!viewport) return undefined;
+        if (reset) return { viewport, top: 0 };
+        const anchor = this.anchors.find((anchor) => anchor.element.isConnected);
+        if (!anchor || viewport.scrollTop === 0) return undefined;
+        const offset =
+          anchor.element.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+        return { viewport, top: viewport.scrollTop + offset - anchor.offset };
+      },
+      write: (update) => {
+        const change = update();
+        if (change) change.viewport.scrollTop = change.top;
+      },
+      read: () => {
+        this.targets();
+        this.query();
+        const list = this.content?.querySelector('ion-list');
+        this.rows = Array.from(list?.querySelectorAll<HTMLElement>('ion-item') ?? []);
+        if (list && list !== this.observedList) {
+          this.listSize?.disconnect();
+          this.observedList = list;
+          this.listSize?.observe(list);
+        }
+        this.rememberPosition();
+      },
     });
     inject(Connection)
       .changes$.pipe(takeUntilDestroyed())
@@ -159,41 +273,132 @@ export class ForwardPicker {
           this.failure.set(ForwardSelectionError.Stale);
       });
   }
-  protected async more(event?: InfiniteScrollCustomEvent) {
-    if (this.paging()) {
-      await event?.target.complete();
-      return;
+  protected async presented(event: Event) {
+    this.content = (event.target as HTMLIonModalElement).querySelector('ion-content')!;
+    const viewport = await this.content.getScrollElement();
+    if (this.destroyRef.destroyed || !this.open()) return;
+    // Ionic hydrates inserted rows after Angular has rendered; preserve the anchor again
+    // when their final height becomes available, without polling or interrupting scrolling.
+    this.listSize = new ResizeObserver(() => {
+      const anchor = this.anchors.find((anchor) => anchor.element.isConnected);
+      if (anchor && viewport.scrollTop > 0) {
+        const offset =
+          anchor.element.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+        viewport.scrollTop += offset - anchor.offset;
+      }
+      this.rememberPosition();
+    });
+    this.viewport.set(viewport);
+    this.rememberPosition();
+  }
+  protected rememberPosition() {
+    const viewport = this.viewport();
+    if (!viewport) return;
+    const bounds = viewport.getBoundingClientRect();
+    // Rows stay in DOM order. Find the visible window without measuring every loaded page,
+    // including when the scrollbar jumps directly to a distant part of the list.
+    let start = 0;
+    let end = this.rows.length;
+    while (start < end) {
+      const middle = (start + end) >>> 1;
+      if (this.rows[middle].getBoundingClientRect().bottom <= bounds.top) start = middle + 1;
+      else end = middle;
     }
-    this.paging.set(true);
+    const anchors: typeof this.anchors = [];
+    const scrollTop = viewport.scrollTop;
+    for (let index = start; index < this.rows.length; index++) {
+      const element = this.rows[index];
+      const row = element.getBoundingClientRect();
+      if (row.top >= bounds.bottom) break;
+      anchors.push({ element, offset: row.top - bounds.top + scrollTop });
+    }
+    this.anchors = anchors;
+  }
+  protected press(target: ForwardTarget) {
+    clearTimeout(this.pointerRelease);
+    this.pressed.set(target.threadId ?? target.chatId);
+  }
+  protected releasePress() {
+    if (this.pressed() == null) return;
+    // Keep the pressed identity through the click dispatched after pointerup.
+    this.pointerRelease = setTimeout(() => this.pressed.set(undefined), 0);
+  }
+  protected expand() {
+    if (this.mobile()) void this.modal()?.setCurrentBreakpoint(1);
+  }
+  protected close() {
+    if (!this.submitted()) {
+      this.open.set(false);
+      void this.feedback?.dismiss();
+    }
+  }
+  protected dismissing() {
+    this.open.set(false);
+    void this.feedback?.dismiss();
+  }
+  protected async retry(query: TargetQuery) {
+    if (this.retrying().has(query)) return;
+    this.retrying.update((queries) => new Set(queries).add(query));
     try {
-      const chatBoundary = this.chats.loadedThrough();
-      const threadBoundary = this.threads.loadedThrough();
-      const chats = !this.chats.error() && this.chats.hasMore();
-      const threads = !this.threads.error() && this.threads.hasMore();
-      await Promise.all([
-        ...(chats && (!threads || chatBoundary >= threadBoundary) ? [this.chats.loadMore()] : []),
-        ...(threads && (!chats || threadBoundary >= chatBoundary) ? [this.threads.loadMore()] : []),
-      ]);
+      await query.retry();
     } finally {
-      this.paging.set(false);
+      this.retrying.update((queries) => {
+        const next = new Set(queries);
+        next.delete(query);
+        return next;
+      });
+    }
+  }
+  protected async more(event?: InfiniteScrollCustomEvent) {
+    try {
+      if (!this.pageRequest) {
+        this.pageBusy.set(true);
+        this.manualPaging.set(!event);
+        const chatBoundary = this.chats.loadedThrough();
+        const threadBoundary = this.threads.loadedThrough();
+        const chats = !this.chatsFailed() && this.chats.hasMore();
+        const threads = !this.threadsFailed() && this.threads.hasMore();
+        this.pageRequest = Promise.all([
+          ...(chats && (!threads || chatBoundary >= threadBoundary) ? [this.chats.loadMore()] : []),
+          ...(threads && (!chats || threadBoundary >= chatBoundary) ? [this.threads.loadMore()] : []),
+        ])
+          .then(() => {})
+          .finally(() => {
+            this.pageRequest = undefined;
+            this.pageBusy.set(false);
+            this.manualPaging.set(false);
+          });
+      }
+      await this.pageRequest;
+    } finally {
       await event?.target.complete();
     }
   }
   protected async select(target: ForwardTarget) {
     if (this.submitted() || this.invalid() || !this.open() || this.resolving()) return;
+    const id = target.threadId ?? target.chatId;
+    if (this.pressed() != null && this.pressed() !== id) return;
+    if (!this.allTargets().some((current) => (current.threadId ?? current.chatId) === id)) return;
+    this.selected.set(id);
+    void this.feedback?.dismiss();
+    this.feedback = undefined;
+    this.failure.set(undefined);
     this.resolving.set(true);
     try {
       const result = await this.resolveSources();
-      if (!this.open() || this.submitted() || this.invalid()) return;
+      if (this.destroyRef.destroyed || !this.open() || this.submitted() || this.invalid()) return;
+      if (!this.allTargets().some((current) => (current.threadId ?? current.chatId) === id)) {
+        await this.report(ForwardSelectionError.NavigationFailed);
+        return;
+      }
       if ('error' in result) {
-        this.failure.set(result.error);
         await this.report(result.error);
         return;
       }
       const selection = result.sources;
       if (!this.forwardable(selection)) {
-        this.failure.set(this.load() ? ForwardSelectionError.TopicUnavailable : ForwardSelectionError.Unavailable);
         if (this.load()) await this.report(ForwardSelectionError.TopicUnavailable);
+        else this.failure.set(ForwardSelectionError.Unavailable);
         return;
       }
       this.failure.set(undefined);
@@ -212,6 +417,7 @@ export class ForwardPicker {
       }
     } finally {
       this.resolving.set(false);
+      this.selected.set(undefined);
     }
   }
   private async resolveSources(): Promise<ForwardSourcesResult> {
@@ -224,11 +430,15 @@ export class ForwardPicker {
     }
   }
   private async report(error: ForwardSelectionError) {
+    if (this.destroyRef.destroyed || !this.open()) return;
     const toast = await this.toasts.create({
       message: this.i18n.translate(error, { max: MAX_FORWARD_MESSAGES }),
       duration: 3000,
     });
-    await toast.present();
+    if (!this.destroyRef.destroyed && this.open()) {
+      this.feedback = toast;
+      await toast.present();
+    } else toast.remove();
   }
   /** Every source needs a server ID and must be allowed in a forward request. */
   private forwardable(selection: readonly ForwardSource[]): boolean {

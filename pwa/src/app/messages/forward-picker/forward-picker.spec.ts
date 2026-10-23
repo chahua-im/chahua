@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ToastController } from '@ionic/angular';
 import { Subject } from 'rxjs';
@@ -7,7 +7,7 @@ import { MessageType, ServerWsMessageType, type ServerWsMessage } from '../../..
 import { Connection } from '../../api/connection';
 import { testChat, testMessage } from '../../api/testing';
 import { encodeId } from '../../api/snowflake-id';
-import { ChatListStore } from '../../chats/chat-list-store';
+import { ChatListError, ChatListStore } from '../../chats/chat-list-store';
 import { ChatStore } from '../../chats/chat-store';
 import { MessageOutbox } from '../message-outbox';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
@@ -18,15 +18,19 @@ import type { OutgoingMessage } from '../message-outbox';
 
 function query<T>(items: T[]) {
   const release = vi.fn();
+  const error = signal<ChatListError | undefined>(undefined);
   return {
     items: signal(items),
     loading: signal(false),
-    error: signal(false),
+    loadingMore: signal(false),
+    error,
+    listError: computed(() => (error() === ChatListError.Unread ? undefined : error())),
     hasMore: signal(false),
     loadedThrough: signal(-Infinity),
     loadMore: vi.fn().mockResolvedValue(undefined),
     activate: vi.fn(() => release),
     refresh: vi.fn(),
+    retry: vi.fn().mockResolvedValue(undefined),
     release,
   };
 }
@@ -35,7 +39,7 @@ describe('ForwardPicker', () => {
   const threadId = encodeId('999');
   const changes = new Subject<ServerWsMessage>();
   beforeEach(() => {
-    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
   });
   afterEach(() => {
     TestBed.resetTestingModule();
@@ -55,7 +59,7 @@ describe('ForwardPicker', () => {
     ]);
     const enqueueForward = vi.fn();
     const prepareForward = vi.fn().mockResolvedValue(true);
-    const toasts = vi.fn().mockResolvedValue({ present: vi.fn() });
+    const toasts = vi.fn().mockResolvedValue({ present: vi.fn(), dismiss: vi.fn(), remove: vi.fn() });
     TestBed.configureTestingModule({
       providers: [
         { provide: ChatListStore, useValue: { chats: () => chats, threads: () => threads } },
@@ -105,11 +109,12 @@ describe('ForwardPicker', () => {
       .mockResolvedValueOnce({ sources: [testMessage] });
     const { picker, prepareForward, toasts } = setup([], load);
     await picker['select'](picker['targets']()[0]);
-    expect(picker['failure']()).toBe(ForwardSelectionError.LoadFailed);
+    expect(picker['failure']()).toBeUndefined();
     expect(picker['invalid']()).toBe(false);
     expect(toasts).toHaveBeenCalledOnce();
     await picker['select'](picker['targets']()[0]);
-    expect(picker['failure']()).toBe(ForwardSelectionError.TooMany);
+    expect(picker['failure']()).toBeUndefined();
+    expect(toasts).toHaveBeenCalledTimes(2);
     expect(prepareForward).not.toHaveBeenCalled();
     await picker['select'](picker['targets']()[0]);
     expect(prepareForward).toHaveBeenCalledOnce();
@@ -184,7 +189,7 @@ describe('ForwardPicker', () => {
     threads.loading.set(true);
     expect(picker['targets']().map((target) => target.chatId)).toEqual([testChat.id]);
     threads.loading.set(false);
-    threads.error.set(true);
+    threads.error.set(ChatListError.Load);
     chats.hasMore.set(true);
     chats.loadedThrough.set(10);
     expect(picker['targets']()).toHaveLength(1);
@@ -207,14 +212,192 @@ describe('ForwardPicker', () => {
     );
     const pending = picker['more']();
     expect(picker['paging']()).toBe(true);
-    await picker['more']();
+    const duplicate = picker['more']();
     expect(chats.loadMore).toHaveBeenCalledOnce();
     chats.items.update((items) => [...items, { ...testChat, id: encodeId('123'), name: 'Older friend' }]);
     chats.hasMore.set(false);
     resolve();
-    await pending;
+    await Promise.all([pending, duplicate]);
     expect(picker['query']()).toBe('Older friend');
     expect(picker['targets']().map((target) => target.name)).toEqual(['Older friend']);
     expect(picker['paging']()).toBe(false);
+  });
+
+  it.each(['close', 'dismissing', 'destroy'] as const)('ignores a late topic result after %s', async (action) => {
+    let resolve!: (result: { sources: readonly ForwardSource[] }) => void;
+    const load = () =>
+      new Promise<{ sources: readonly ForwardSource[] }>((done) => {
+        resolve = done;
+      });
+    const { picker, fixture, prepareForward, toasts } = setup([], load);
+    const target = picker['targets']()[0];
+    const pending = picker['select'](target);
+    expect(picker['selected']()).toBe(target.threadId ?? target.chatId);
+    if (action === 'destroy') fixture.destroy();
+    else picker[action]();
+    resolve({ sources: [testMessage] });
+    await pending;
+    expect(prepareForward).not.toHaveBeenCalled();
+    expect(toasts).not.toHaveBeenCalled();
+  });
+
+  it('does not confuse an empty search during refresh with the initial load', () => {
+    const { picker, chats, threads } = setup();
+    picker['query'].set('not found');
+    chats.loading.set(true);
+    expect(picker['initialLoading']()).toBe(false);
+    expect(picker['pending']()).toBe(false);
+    threads.items.set([]);
+    threads.loadedThrough.set(Infinity);
+    threads.loading.set(true);
+    expect(picker['initialLoading']()).toBe(false);
+    expect(picker['pending']()).toBe(true);
+    expect(picker['incomplete']()).toBe(true);
+    chats.items.set([]);
+    expect(picker['initialLoading']()).toBe(true);
+  });
+
+  it('rejects a destination removed while topic sources are being read', async () => {
+    let resolve!: (result: { sources: readonly ForwardSource[] }) => void;
+    const { picker, chats, threads, prepareForward, toasts } = setup(
+      [],
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = picker['select'](picker['targets']()[0]);
+    chats.items.set([]);
+    threads.items.set([]);
+    resolve({ sources: [testMessage] });
+    await pending;
+    expect(prepareForward).not.toHaveBeenCalled();
+    expect(toasts).toHaveBeenCalledOnce();
+    expect(picker['open']()).toBe(true);
+  });
+
+  it('allows cancellation while reading sources and prevents it during route submission', async () => {
+    const { picker, prepareForward } = setup();
+    let resolve!: (opened: boolean) => void;
+    prepareForward.mockImplementation(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = picker['select'](picker['targets']()[0]);
+    expect(picker['canDismiss']()).toBe(true);
+    await Promise.resolve();
+    expect(picker['canDismiss']()).toBe(false);
+    expect(picker['canDismiss'](undefined, 'navigate')).toBe(true);
+    picker['close']();
+    expect(picker['open']()).toBe(true);
+    resolve(false);
+    await pending;
+    expect(picker['canDismiss']()).toBe(true);
+  });
+
+  it('does not block either target stream on an unread-only error', async () => {
+    const { picker, chats, threads } = setup();
+    chats.error.set(ChatListError.Unread);
+    threads.error.set(ChatListError.Unread);
+    chats.hasMore.set(true);
+    threads.hasMore.set(true);
+    expect(picker['failed']()).toBe(false);
+    expect(picker['moreAvailable']()).toBe(true);
+    await picker['more']();
+    expect(chats.loadMore).toHaveBeenCalledOnce();
+    expect(threads.loadMore).toHaveBeenCalledOnce();
+  });
+
+  it('completes an overlapping infinite event only after the manual page is ready', async () => {
+    const { picker, chats } = setup();
+    chats.hasMore.set(true);
+    let resolve!: () => void;
+    chats.loadMore.mockImplementation(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = picker['more']();
+    const complete = vi.fn();
+    const infinite = picker['more']({ target: { complete } } as unknown as Parameters<(typeof picker)['more']>[0]);
+    expect(picker['manualPaging']()).toBe(true);
+    expect(complete).not.toHaveBeenCalled();
+    resolve();
+    await Promise.all([pending, infinite]);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(chats.loadMore).toHaveBeenCalledOnce();
+    expect(picker['manualPaging']()).toBe(false);
+  });
+
+  it('retains row order during a press while applying removals immediately', () => {
+    const { picker, chats, threads } = setup();
+    const original = picker['targets']().map((target) => target.threadId ?? target.chatId);
+    picker['press'](picker['targets']()[1]);
+    chats.items.update((items) => items.map((chat) => ({ ...chat, lastMessageAt: '2026-12-01T00:00:00Z' })));
+    expect(picker['targets']().map((target) => target.threadId ?? target.chatId)).toEqual(original);
+    picker['pressed'].set(undefined);
+    expect(picker['targets']()[0].threadId).toBeUndefined();
+    picker['press'](picker['targets']()[0]);
+    threads.items.set([]);
+    expect(picker['targets']()).toHaveLength(1);
+    chats.items.set([]);
+    expect(picker['targets']()).toHaveLength(0);
+  });
+
+  it('uses the query retry contract and keeps its pending feedback until completion', async () => {
+    const { picker, chats } = setup();
+    let resolve!: () => void;
+    chats.retry.mockImplementation(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = picker['retry'](chats);
+    await picker['retry'](chats);
+    expect(chats.retry).toHaveBeenCalledOnce();
+    expect(chats.refresh).not.toHaveBeenCalled();
+    expect(picker['pending']()).toBe(true);
+    resolve();
+    await pending;
+    expect(picker['pending']()).toBe(false);
+  });
+
+  it('locates variable-height visible rows with bounded measurements after distant scroll jumps', () => {
+    const { picker } = setup();
+    const viewport = document.createElement('div');
+    vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 300, 400));
+    let offset = 0;
+    const offsets: number[] = [];
+    let measurements = 0;
+    const rows = Array.from({ length: 1000 }, (_, index) => {
+      const element = document.createElement('ion-item');
+      const top = offset;
+      const height = index % 2 ? 72 : 48;
+      offsets.push(top);
+      offset += height;
+      vi.spyOn(element, 'getBoundingClientRect').mockImplementation(() => {
+        measurements++;
+        return new DOMRect(0, 100 + top - viewport.scrollTop, 300, height);
+      });
+      return element;
+    });
+    picker['rows'] = rows;
+    picker['viewport'].set(viewport);
+    for (const first of [0, 800, 20, 999]) {
+      viewport.scrollTop = offsets[first] + 10;
+      measurements = 0;
+      picker['rememberPosition']();
+      const expected = rows.filter((_, index) => index >= first && offsets[index] < viewport.scrollTop + 400);
+      expect(picker['anchors'].map((anchor) => anchor.element)).toEqual(expected);
+      expect(picker['anchors'][0].offset).toBe(offsets[first]);
+      expect(measurements).toBeLessThan(25);
+    }
+    picker['rows'] = [];
+    picker['rememberPosition']();
+    expect(picker['anchors']).toEqual([]);
   });
 });

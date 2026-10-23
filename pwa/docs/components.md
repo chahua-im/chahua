@@ -132,7 +132,7 @@ MessageActions 由菜单和会话页各自提供，复用逐条撤回及表态�
 
 | 组件 | 状态与职责 |
 | --- | --- |
-| ForwardPicker | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用，可选 load 在选择目标时读取当前来源（话题整体转发）；closed 输出；持有搜索、弹窗开关、解析与失效状态；消费共享聊天／话题查询，选择目标后通过 ConversationNavigation 将来源交给 DraftStore 并导航 |
+| ForwardPicker | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用，可选 load 在选择目标时读取当前来源（话题整体转发）；closed 输出；持有搜索、弹窗开关、当前选择、解析与失效状态、分页合并与重试、按压/滚动状态和可见行锚点；消费共享聊天／话题查询，选择目标后通过 ConversationNavigation 将来源交给 DraftStore 并导航。响应式宽度决定断点和外观，同一弹窗保留内容；渲染后缓存 DOM 行顺序，滚动时二分定位并只测量可见行，避免逐帧遍历已加载列表；ResizeObserver 补偿 Ionic 行异步完成布局引起的位置变化 |
 | ForwardedLabel | name 输入；复用转发来源图标与文案，用于气泡、引用和输入栏 |
 | ForwardedCard | preview 输入；只展示标题、前三条摘要与总数，不请求详情 |
 | ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows、Message 和 scrollActivity，视口测量同时派生浮动头像与日期；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件 |
