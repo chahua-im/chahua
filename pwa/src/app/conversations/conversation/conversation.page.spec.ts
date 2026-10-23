@@ -1679,6 +1679,16 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('');
     expect(component['rows']().at(-1)?.outgoing).toBe(item);
     expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button')).not.toBeNull();
+    fixture.nativeElement.querySelector('app-message:last-child .retry-button').click();
+    const retrying = item.operation;
+    fixture.detectChanges();
+    expect(item.delivery()).toBe(MessageDelivery.Sending);
+    expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button')).toBeNull();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages`).flush('', { status: 503, statusText: 'Unavailable' });
+    await retrying;
+    await fixture.whenStable();
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(fixture.nativeElement.querySelector('app-message:last-child .retry-button ion-icon')).not.toBeNull();
   });
 
   it.each(['http', 'websocket'])(

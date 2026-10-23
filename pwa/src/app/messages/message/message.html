@@ -209,7 +209,7 @@
     </div>
     @if (status() === Delivery.Failed && !preview()) {
       <button type="button" class="retry-button" (click)="retry.emit()">
-        {{ 'messages.message.sendFailed' | transloco }}
+        <ion-icon [icon]="retryIcon" />
       </button>
     }
     @if (hasReactions()) {
@@ -219,7 +219,7 @@
         [preview]="!canInteract() || record()"
         (react)="react.emit($event)"></app-message-reactions>
     }
-    @if (canInteract() && !record()) {
+    @if (canInteract() && !record() && status() !== Delivery.Failed) {
       <button type="button" class="reply-button" [disabled]="!canReply()" (click)="reply.emit(message())">
         <ion-icon [icon]="replyIcon"></ion-icon>
       </button>

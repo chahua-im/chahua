@@ -1,12 +1,6 @@
 import { Component, input } from '@angular/core';
 import { IonIcon } from '@ionic/angular';
-import {
-  alertCircleOutline,
-  checkmarkDoneOutline,
-  checkmarkOutline,
-  cloudUploadOutline,
-  timeOutline,
-} from 'ionicons/icons';
+import { checkmarkDoneOutline, checkmarkOutline, cloudUploadOutline, timeOutline } from 'ionicons/icons';
 
 import { MessageDelivery } from '../message-delivery';
 
@@ -23,9 +17,6 @@ import { MessageDelivery } from '../message-delivery';
       }
       @case (Delivery.Sent) {
         <ion-icon [icon]="read() ? icons.checkmarkDoneOutline : icons.checkmarkOutline" />
-      }
-      @case (Delivery.Failed) {
-        <ion-icon [icon]="icons.alertCircleOutline" />
       }
     }
   `,
@@ -51,6 +42,5 @@ export class MessageStatus {
     timeOutline,
     checkmarkOutline,
     checkmarkDoneOutline,
-    alertCircleOutline,
   };
 }

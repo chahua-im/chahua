@@ -24,7 +24,7 @@
     padding-top: 4px;
   }
 
-  > :not(.avatar-slot, .reply-button, .swipe-reply) {
+  > :not(.avatar-slot, .reply-button, .retry-button, .swipe-reply) {
     grid-column: 2;
   }
 }
@@ -206,14 +206,20 @@
 }
 
 .retry-button {
-  display: block;
-  margin: 4px 0 0 auto;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--ion-color-danger);
-  color: var(--ion-color-danger-contrast);
-  font: inherit;
-  font-size: var(--app-font-caption);
+  display: grid;
+  place-items: center;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  margin-inline-end: 4px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ion-color-danger);
+  font-size: 22px;
+  cursor: pointer;
 }
 
 .reply-preview {

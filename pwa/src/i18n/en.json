@@ -448,8 +448,7 @@
       }
     },
     "message": {
-      "edited": "Edited",
-      "sendFailed": "Failed to send. Tap to retry."
+      "edited": "Edited"
     },
     "composer": {
       "tooManyAttachments": "You can add up to 20 attachments per message.",

@@ -139,6 +139,22 @@
         </button>
       </div>
     }
+    @if (!conversation.page() && conversation.loading()) {
+      <div class="message-skeleton">
+        @for (row of [0, 1, 2, 3, 4, 5]; track row) {
+          <div
+            class="message-skeleton-row"
+            [class.sent]="row % 3 === 2"
+            [class.short]="row % 2 === 0"
+            [class.tall]="row % 3 === 0">
+            @if (row % 3 !== 2 && showMessageDetails()) {
+              <span class="skeleton-block message-skeleton-avatar"></span>
+            }
+            <span class="skeleton-block message-skeleton-bubble"></span>
+          </div>
+        }
+      </div>
+    }
     <div class="message-list">
       @for (row of rows(); track row.key; let index = $index) {
         @if (row.dateBreak) {
@@ -205,22 +221,6 @@
             <ion-icon class="pagination-icon" [icon]="downIcon" />
           }
         </button>
-      </div>
-    }
-    @if (!conversation.page() && conversation.loading()) {
-      <div class="message-skeleton">
-        @for (row of [0, 1, 2, 3, 4, 5]; track row) {
-          <div
-            class="message-skeleton-row"
-            [class.sent]="row % 3 === 2"
-            [class.short]="row % 2 === 0"
-            [class.tall]="row % 3 === 0">
-            @if (row % 3 !== 2 && showMessageDetails()) {
-              <span class="skeleton-block message-skeleton-avatar"></span>
-            }
-            <span class="skeleton-block message-skeleton-bubble"></span>
-          </div>
-        }
       </div>
     }
     @if (conversation.error()) {

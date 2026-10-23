@@ -448,8 +448,7 @@
       }
     },
     "message": {
-      "edited": "已編輯",
-      "sendFailed": "傳送失敗，點擊重試"
+      "edited": "已編輯"
     },
     "composer": {
       "tooManyAttachments": "每則訊息最多新增 20 個附件。",

@@ -790,13 +790,14 @@ describe('Message', () => {
     const element: HTMLElement = fixture.nativeElement;
     expect(element.hasAttribute('data-message-id')).toBe(false);
     expect(element.querySelectorAll('time')).toHaveLength(1);
-    expect(fixture.debugElement.query(By.css('app-message-status ion-icon')).componentInstance.icon).toBe(
+    expect(element.querySelector('app-message-status ion-icon')).toBeNull();
+    expect(fixture.debugElement.query(By.css('.retry-button ion-icon')).componentInstance.icon).toBe(
       alertCircleOutline,
     );
     const retry = vi.fn();
     fixture.componentInstance.retry.subscribe(retry);
     const button = element.querySelector<HTMLButtonElement>('.retry-button')!;
-    expect(button.textContent).toContain('发送失败');
+    expect(button.textContent?.trim()).toBe('');
     button.click();
     expect(retry).toHaveBeenCalledExactlyOnceWith(undefined);
     fixture.componentRef.setInput('delivery', MessageDelivery.Sending);
@@ -804,6 +805,9 @@ describe('Message', () => {
     expect(element.querySelector('.retry-button')).toBeNull();
     expect(element.querySelectorAll('app-message-status ion-icon')).toHaveLength(1);
     fixture.componentRef.setInput('delivery', MessageDelivery.Failed);
+    fixture.detectChanges();
+    expect(element.querySelector('.retry-button ion-icon')).not.toBeNull();
+    expect(element.querySelector('app-message-status ion-icon')).toBeNull();
     fixture.componentRef.setInput('preview', true);
     fixture.detectChanges();
     expect(element.querySelector('.retry-button')).toBeNull();
@@ -882,7 +886,10 @@ describe('Message', () => {
     expect(element.querySelector('.upload-overlay app-upload-progress')).not.toBeNull();
     fixture.componentRef.setInput('delivery', MessageDelivery.Failed);
     fixture.detectChanges();
-    expect(icon()).toBe(alertCircleOutline);
+    expect(element.querySelector('app-message-status ion-icon')).toBeNull();
+    expect(fixture.debugElement.query(By.css('.retry-button ion-icon')).componentInstance.icon).toBe(
+      alertCircleOutline,
+    );
     expect(element.querySelector('.upload-overlay app-upload-progress')).not.toBeNull();
     const retry = vi.fn();
     fixture.componentInstance.retry.subscribe(retry);
