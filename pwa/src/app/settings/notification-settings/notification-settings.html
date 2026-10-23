@@ -16,7 +16,7 @@
         [checked]="notifications.enabled() && notifications.permission() === 'granted'"
         [disabled]="!notifications.supported || notifications.busy() || notifications.permission() !== 'granted'"
         (ionChange)="setNotifications($event)">
-        {{ 'settings.menu.notifications' | transloco }}
+        {{ 'notificationPreferences.thisDevice' | transloco }}
       </ion-toggle>
       @if (notifications.busy()) {
         <ion-spinner slot="end" />
@@ -66,6 +66,23 @@
         </ion-button>
       </ion-item>
     }
+  </ion-list>
+  @if (store.defaultsError()) {
+    <ion-list [inset]="true">
+      <ion-item>
+        <ion-note color="danger">{{ 'notificationPreferences.loadFailed' | transloco }}</ion-note>
+        <ion-button slot="end" fill="clear" (click)="store.refreshNotificationDefaults()">
+          {{ 'common.retry' | transloco }}
+        </ion-button>
+      </ion-item>
+    </ion-list>
+  }
+  <ion-list [inset]="true">
+    <ion-list-header>
+      <ion-label color="primary">{{ 'notificationPreferences.chatNotifications' | transloco }}</ion-label>
+    </ion-list-header>
+    <app-notification-category [kind]="Kind.dm" [compact]="true" />
+    <app-notification-category [kind]="Kind.group" [compact]="true" />
   </ion-list>
 </ion-content>
 <ion-toast [message]="'settings.menu.notificationDenied' | transloco" [duration]="2500" />

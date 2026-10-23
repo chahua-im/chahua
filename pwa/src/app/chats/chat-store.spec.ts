@@ -77,6 +77,28 @@ describe('ChatStore', () => {
     http.expectNone(url);
   });
 
+  it('preserves temporary mute while archiving, unarchiving and rolling back a failed archive', async () => {
+    const mutedUntil = new Date(Date.now() + 3600_000).toISOString();
+    store.acceptChats([{ ...testChat, mutedUntil }], store.snapshot());
+    const archiveUrl = `/_api/chats/${wireChat.id}/archive`;
+    const archived = store.setArchived(testChat.id, true);
+    expect(store.chat(testChat.id).archived).toBe(true);
+    expect(store.mutedUntil(testChat.id)).toBe(mutedUntil);
+    http.expectOne(archiveUrl).flush(null);
+    await archived;
+    const unarchived = store.setArchived(testChat.id, false);
+    expect(store.chat(testChat.id).archived).toBe(false);
+    expect(store.mutedUntil(testChat.id)).toBe(mutedUntil);
+    http.expectOne(archiveUrl).flush(null);
+    await unarchived;
+    const failed = store.setArchived(testChat.id, true);
+    const rejection = expect(failed).rejects.toBeDefined();
+    http.expectOne(archiveUrl).flush('failed', { status: 500, statusText: 'Failed' });
+    await rejection;
+    expect(store.chat(testChat.id).archived).toBe(false);
+    expect(store.mutedUntil(testChat.id)).toBe(mutedUntil);
+  });
+
   describe('peer receipt invalidation', () => {
     const receiptUrl = `/_api/chats/${wireChat.id}/read-receipt`;
     const rootId = encodeId('9007199254741999');

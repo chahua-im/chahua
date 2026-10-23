@@ -18,4 +18,6 @@ export * from './groupSelectorScope';
 export * from './listGroupsResponse';
 export * from './muteBody';
 export * from './muteResponse';
+export * from './notificationSettingMode';
 export * from './updateChatBody';
+export * from './updateNotificationSettingRequest';

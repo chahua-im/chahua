@@ -14,14 +14,17 @@ export interface ChatListItem {
   archived: boolean;
   avatar?: string;
   id: SnowflakeID;
+  isMuted: boolean;
   kind: GroupKind;
   lastMessage?: MessagePreview;
   lastMessageAt?: string;
   lastReadMessageId?: SnowflakeID;
+  muteOverride?: boolean;
   mutedUntil?: string;
   name?: string;
   /** The other participant, for DM chats; `None` for regular groups. */
   peer?: MemberSummary;
+  /** The DM peer's authorized read receipt for this chat scope. */
   peerLastReadMessageId?: SnowflakeID;
   unreadCount: number;
   unreadMentions?: number;

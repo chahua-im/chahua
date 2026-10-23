@@ -177,7 +177,7 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 | ChatSearch         | chatId；query、sort、messages、cursor、loading/error                                                                                                    | 聊天消息搜索，点击定位原消息                                    |
 | ChatInvites        | chatId；邀请列表、创建限制、目标用户与操作状态                                                                                                          | InvitesService；DirectorySearch 选择指定用户                    |
 | StartChat          | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                                                                                 | 点击提交才创建或加入；改邀请码会使旧预览不可提交                |
-| ChatMute           | 公开 toggle(chatId)；菜单选择                                                                                                                           | 调用 ChatStore.setMuted，原调用按钮持有等待状态                 |
+| ChatMute           | 公开 toggle(chatId)；根据共享永久偏好筛选临时静音选项，首次展示与菜单打开期间均同步                                                                                                                           | 调用 ChatStore.setNotificationSetting，原调用按钮持有等待状态                 |
 
 ChatDetails 的侧栏、会话信息 modal 和用户资料 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。名称和简介仅在进入编辑时创建各自的 Signal Form 字段草稿，保存只提交对应字段，另一个字段的草稿保持不变；切换会话清空草稿及头像上传进度。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
 
@@ -188,7 +188,10 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | 组件                       | 状态与职责                                                                     |
 | -------------------------- | ------------------------------------------------------------------------------ |
 | Settings                   | 当前用户和更新状态；持有局部更新结果，打开通知、隐私、聊天、贴纸与语言子页 |
-| NotificationSettings       | 通知开关、权限申请按钮、订阅等待和失败重试；进入时 refresh，权限拒绝使用 toast |
+| NotificationSettings       | 本机通知开关、权限申请及重试；私聊／群组 NotificationCategory 摘要行；进入时检查本机订阅，权限拒绝使用 toast |
+| NotificationCategoryPage | 分类通知独立路由页面；标题、返回和 NotificationCategory 详情 |
+| NotificationExceptionPicker | 激活普通／归档聊天查询，搜索已加载聊天，添加与默认相反的永久例外 |
+| NotificationCategory | 紧凑摘要或分类详情；正向通知开关、完整总数、例外分页、添加／移除／确认批量清除；刷新保留内容 |
 | GeneralSettings            | 聊天设置直接编辑 Preferences 的颜色模式、消息字号及三个显示开关，无额外状态副本                       |
 | LanguageSettings           | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog         |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |

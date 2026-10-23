@@ -128,6 +128,55 @@ export class ThreadsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
   /**
+   * @summary DELETE /chats/:chat_id/threads/:thread_root_id/archive — Unarchive a thread subscription.
+   */
+  unarchiveThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  unarchiveThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  unarchiveThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  unarchiveThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/archive`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/archive`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.delete<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/archive`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
+  /**
    * @summary PUT /chats/:chat_id/threads/:thread_root_id/archive — Archive a thread subscription.
    */
   archiveThread<TData = void>(
@@ -173,55 +222,6 @@ export class ThreadsService {
     return this.http.put<TData>(
       `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/archive`,
       undefined,
-      {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'body',
-      },
-    );
-  }
-  /**
-   * @summary DELETE /chats/:chat_id/threads/:thread_root_id/archive — Unarchive a thread subscription.
-   */
-  unarchiveThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientBodyOptions,
-  ): Observable<TData>;
-  unarchiveThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientEventOptions,
-  ): Observable<HttpEvent<TData>>;
-  unarchiveThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  unarchiveThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/archive`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'events',
-        },
-      );
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/archive`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'response',
-        },
-      );
-    }
-    return this.http.delete<TData>(
-      `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/archive`,
       {
         ...(options as Omit<NonNullable<typeof options>, 'observe'>),
         observe: 'body',
@@ -334,6 +334,55 @@ export class ThreadsService {
     );
   }
   /**
+   * @summary DELETE /chats/:chat_id/threads/:thread_root_id/subscribe — Unfollow a thread.
+   */
+  unsubscribeThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  unsubscribeThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  unsubscribeThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  unsubscribeThread<TData = void>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/subscribe`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/subscribe`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.delete<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/subscribe`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
+  /**
    * @summary GET /chats/:chat_id/threads/:thread_root_id/subscribe — Check subscription status.
    */
   getSubscriptionStatus<TData = ThreadSubscriptionStatusResponse>(
@@ -428,55 +477,6 @@ export class ThreadsService {
     return this.http.put<TData>(
       `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/subscribe`,
       undefined,
-      {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'body',
-      },
-    );
-  }
-  /**
-   * @summary DELETE /chats/:chat_id/threads/:thread_root_id/subscribe — Unfollow a thread.
-   */
-  unsubscribeThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientBodyOptions,
-  ): Observable<TData>;
-  unsubscribeThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientEventOptions,
-  ): Observable<HttpEvent<TData>>;
-  unsubscribeThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  unsubscribeThread<TData = void>(
-    chatId: SnowflakeID,
-    threadRootId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/subscribe`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'events',
-        },
-      );
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/subscribe`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'response',
-        },
-      );
-    }
-    return this.http.delete<TData>(
-      `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/subscribe`,
       {
         ...(options as Omit<NonNullable<typeof options>, 'observe'>),
         observe: 'body',

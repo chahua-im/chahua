@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ChatArchiveStateChangedPayload } from './chatArchiveStateChangedPayload';
+import type { ChatNotificationSettingResponse } from './chatNotificationSettingResponse';
 import type { BulkDeletedPayload } from './chats/bulkDeletedPayload';
 import type { ConversationStatesPayload } from './conversationStatesPayload';
 import type { ConversationUnreadErrorPayload } from './conversationUnreadErrorPayload';
@@ -23,6 +24,8 @@ import type { ReadReceiptChangedPayload } from './readReceiptChangedPayload';
 import type { StickerPackOrderUpdatePayload } from './stickerPackOrderUpdatePayload';
 import type { ThreadMembershipChangedPayload } from './threadMembershipChangedPayload';
 import type { ThreadUpdatePayload } from './threadUpdatePayload';
+import type { NotificationExceptionsCleared } from './users/notificationExceptionsCleared';
+import type { NotificationSettingsResponse } from './users/notificationSettingsResponse';
 
 export type ServerWsMessage =
   | {
@@ -80,6 +83,18 @@ export type ServerWsMessage =
   | {
       payload: ChatArchiveStateChangedPayload;
       type: 'chatArchiveStateChanged';
+    }
+  | {
+      payload: NotificationExceptionsCleared;
+      type: 'notificationExceptionsCleared';
+    }
+  | {
+      payload: NotificationSettingsResponse;
+      type: 'notificationSettingsChanged';
+    }
+  | {
+      payload: ChatNotificationSettingResponse;
+      type: 'chatNotificationSettingChanged';
     }
   | {
       payload: ReadReceiptChangedPayload;

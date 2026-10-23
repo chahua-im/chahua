@@ -123,13 +123,15 @@ describe('ChatListContent', () => {
     chats: vi.fn(() => chats),
     markRead: vi.fn().mockResolvedValue(undefined),
     markUnread: vi.fn().mockResolvedValue(undefined),
-    setMuted: vi.fn().mockResolvedValue(undefined),
+    setNotificationSetting: vi.fn().mockResolvedValue(undefined),
     setArchived: vi.fn().mockResolvedValue(undefined),
   };
   const navigation = { goTo: vi.fn() };
   const outbox = { items: signal<OutgoingMessage[]>([]) };
   const chatInfo = signal<ChatInfo | undefined>(undefined);
   const metadata = {
+    chatState: (id: SnowflakeID) => chats.items().find((chat) => chat.id === id),
+    notificationDefaults: session.user,
     isMuted: (id: SnowflakeID) =>
       Date.parse(chats.items().find((chat) => chat.id === id)?.mutedUntil ?? '') > Date.now(),
     get: () => chatInfo(),
@@ -206,7 +208,10 @@ describe('ChatListContent', () => {
     preferences.showThreadsInMessages.set(false);
     vi.spyOn(IonItemSliding.prototype, 'close').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
-    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
+    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({
+      role: 'selected',
+      data: { mode: 'temporarilyMuted', durationSeconds: 3600 },
+    });
     outbox.items.set([]);
     chats.items.set([{ ...testChat, lastMessage }]);
     chats.loading.set(false);
@@ -429,13 +434,16 @@ describe('ChatListContent', () => {
       '/chats/chat/9007199254740993',
     );
     expect(options('start').map((item) => item.nativeElement.textContent.trim())).toEqual(['标为已读']);
-    expect(options('end').map((item) => item.nativeElement.textContent.trim())).toEqual(['静音', '归档']);
+    expect(options('end').map((item) => item.nativeElement.textContent.trim())).toEqual(['通知设置', '归档']);
     options('start')[0].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
     expect(data.markRead).toHaveBeenCalledWith(testChat.id, testMessage.id);
     options('end')[0].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
-    expect(data.setMuted).toHaveBeenCalledWith(testChat.id, true, 3600);
+    expect(data.setNotificationSetting).toHaveBeenCalledWith(testChat.id, {
+      mode: 'temporarilyMuted',
+      durationSeconds: 3600,
+    });
     options('end')[1].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
     expect(data.setArchived).toHaveBeenCalledWith(testChat.id, true);
@@ -443,13 +451,17 @@ describe('ChatListContent', () => {
     chats.items.set([{ ...testChat, lastMessage, unreadCount: 0, mutedUntil: '9999-12-31T23:59:59Z' }]);
     fixture.detectChanges();
     expect(options('start')[0].nativeElement.textContent.trim()).toBe('标为未读');
-    expect(options('end')[0].nativeElement.textContent.trim()).toBe('取消静音');
+    expect(options('end')[0].nativeElement.textContent.trim()).toBe('通知设置');
     options('start')[0].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
     expect(data.markUnread).toHaveBeenCalledWith(testChat.id);
+    vi.mocked(IonActionSheet.prototype.onDidDismiss).mockResolvedValueOnce({
+      role: 'selected',
+      data: { mode: 'alwaysUnmuted' },
+    });
     options('end')[0].triggerEventHandler('click', new Event('click'));
     await fixture.whenStable();
-    expect(data.setMuted).toHaveBeenLastCalledWith(testChat.id, false);
+    expect(data.setNotificationSetting).toHaveBeenLastCalledWith(testChat.id, { mode: 'alwaysUnmuted' });
   });
 
   it('merges topics into Messages by activity and releases them when the preference is disabled', async () => {

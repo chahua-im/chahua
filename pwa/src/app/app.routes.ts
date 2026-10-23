@@ -13,6 +13,8 @@ import { SavedMessagesPage } from './conversations/saved-messages/saved-messages
 import { ChatDetails, DetailView } from './chats/chat-details/chat-details';
 import { ChatSearch } from './chats/chat-search/chat-search';
 import { StartChatKind } from './chats/start-chat/start-chat';
+import { GroupKind } from '../generated/models';
+import { NotificationCategoryPage } from './settings/notification-settings/notification-category-page';
 import { NotificationSettings } from './settings/notification-settings/notification-settings';
 import { Settings } from './settings/settings/settings';
 import { GeneralSettings } from './settings/general-settings/general-settings';
@@ -71,6 +73,16 @@ export const routes: Routes = [
   { path: 'chats/chat/:id/stickers/:packId', component: ChatLink, data: { modal: true } },
   { path: 'settings', component: ChatLink, data: { modal: true, component: Settings } },
   { path: 'settings/notifications', component: ChatLink, data: { modal: true, component: NotificationSettings } },
+  {
+    path: 'settings/notifications/dm',
+    component: ChatLink,
+    data: { modal: true, component: NotificationCategoryPage, props: { kind: GroupKind.dm } },
+  },
+  {
+    path: 'settings/notifications/group',
+    component: ChatLink,
+    data: { modal: true, component: NotificationCategoryPage, props: { kind: GroupKind.group } },
+  },
   { path: 'settings/general', component: ChatLink, data: { modal: true, component: GeneralSettings } },
   { path: 'settings/language', component: ChatLink, data: { modal: true, component: LanguageSettings } },
   {

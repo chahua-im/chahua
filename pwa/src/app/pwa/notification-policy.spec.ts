@@ -20,6 +20,22 @@ const reply = { ...message, replyToMessage: { ...testMessage, mentions: [] } };
 const topic = { ...message, replyRootId: encodeId('9007199254740999') };
 
 describe('notification policy', () => {
+  it('inherits category defaults, honors explicit exceptions and restores them after temporary expiry', () => {
+    expect(shouldNotify(message, 1, { kind: GroupKind.group }, undefined)).toBe(false);
+    expect(shouldNotify(message, 1, { kind: GroupKind.dm }, undefined)).toBe(true);
+    expect(shouldNotify(message, 1, { kind: GroupKind.group, muteOverride: false }, undefined)).toBe(true);
+    expect(shouldNotify(message, 1, { kind: GroupKind.dm, muteOverride: true }, undefined)).toBe(false);
+    const chat = { kind: GroupKind.group, muteOverride: false, mutedUntil: '2026-10-23T00:00:01Z' };
+    expect(shouldNotify(message, 1, chat, undefined, Date.parse('2026-10-23T00:00:00Z'))).toBe(false);
+    expect(shouldNotify(message, 1, chat, undefined, Date.parse(chat.mutedUntil))).toBe(true);
+    expect(
+      shouldNotify(message, 1, { kind: GroupKind.group }, undefined, Date.now(), {
+        muteGroupChatsByDefault: false,
+        muteDirectChatsByDefault: true,
+      }),
+    ).toBe(true);
+  });
+
   it('treats constructed DM mentions and replies like ordinary messages', () => {
     for (const incoming of [message, mention, reply]) {
       expect(shouldNotify(incoming, 1, { kind: GroupKind.dm }, undefined)).toBe(true);
@@ -39,7 +55,7 @@ describe('notification policy', () => {
     expect(shouldNotify(testMessage, 1, undefined, undefined)).toBe(false);
     expect(shouldNotify({ ...message, isDeleted: true }, 1, undefined, undefined)).toBe(false);
     expect(shouldNotify({ ...message, messageType: MessageType.system }, 1, undefined, undefined)).toBe(false);
-    expect(shouldNotify(message, 1, { mutedUntil: '2000-01-01' }, undefined)).toBe(true);
+    expect(shouldNotify(message, 1, { mutedUntil: '2000-01-01', muteOverride: false }, undefined)).toBe(true);
   });
   it('treats forwarded mentions as display metadata and localizes history-card notifications', () => {
     const forwarded = {
@@ -54,7 +70,7 @@ describe('notification policy', () => {
     expect(
       shouldNotify({ ...forwarded, replyRootId: topic.replyRootId }, 1, muted, { subscribed: false, archived: false }),
     ).toBe(false);
-    expect(shouldNotify(forwarded, 1, { kind: GroupKind.group }, undefined)).toBe(true);
+    expect(shouldNotify(forwarded, 1, { kind: GroupKind.group, muteOverride: false }, undefined)).toBe(true);
     expect(
       notificationText({ ...message, messageType: MessageType.forwarded, message: 'Forwarded 2 messages' }, (key) =>
         key === 'messages.preview.forwarded' ? '[聊天记录]' : key,

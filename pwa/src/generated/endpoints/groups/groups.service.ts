@@ -13,6 +13,7 @@ import type { Observable } from 'rxjs';
 import type {
   AvatarUploadUrlRequest,
   AvatarUploadUrlResponse,
+  ChatNotificationSettingResponse,
   CreateChatBody,
   CreateChatResponse,
   GetGroupsParams,
@@ -22,6 +23,7 @@ import type {
   MuteResponse,
   SnowflakeID,
   UpdateChatBody,
+  UpdateNotificationSettingRequest,
 } from '../../models';
 import type { HttpHeaders, HttpResponse as AngularHttpResponse } from '@angular/common/http';
 import { CHAHUA_BASE_URL } from '../chahua.base-url';
@@ -329,6 +331,36 @@ export class GroupsService {
     );
   }
   /**
+   * @summary DELETE /group/:chat_id/mute — Unmute notifications for a chat.
+   */
+  deleteMute<TData = void>(chatId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  deleteMute<TData = void>(chatId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deleteMute<TData = void>(
+    chatId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deleteMute<TData = void>(
+    chatId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/group/${decodeId(chatId)}/mute`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/group/${decodeId(chatId)}/mute`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/group/${decodeId(chatId)}/mute`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  /**
    * @summary PUT /group/:chat_id/mute — Mute notifications for a chat.
    */
   putMute<TData = MuteResponse>(
@@ -368,34 +400,53 @@ export class GroupsService {
       observe: 'body',
     });
   }
-  /**
-   * @summary DELETE /group/:chat_id/mute — Unmute notifications for a chat.
-   */
-  deleteMute<TData = void>(chatId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  deleteMute<TData = void>(chatId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deleteMute<TData = void>(
+  putNotificationSetting<TData = ChatNotificationSettingResponse>(
     chatId: SnowflakeID,
+    updateNotificationSettingRequest: UpdateNotificationSettingRequest,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  putNotificationSetting<TData = ChatNotificationSettingResponse>(
+    chatId: SnowflakeID,
+    updateNotificationSettingRequest: UpdateNotificationSettingRequest,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  putNotificationSetting<TData = ChatNotificationSettingResponse>(
+    chatId: SnowflakeID,
+    updateNotificationSettingRequest: UpdateNotificationSettingRequest,
     options?: HttpClientResponseOptions,
   ): Observable<AngularHttpResponse<TData>>;
-  deleteMute<TData = void>(
+  putNotificationSetting<TData = ChatNotificationSettingResponse>(
     chatId: SnowflakeID,
+    updateNotificationSettingRequest: UpdateNotificationSettingRequest,
     options?: HttpClientObserveOptions,
   ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
     if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/group/${decodeId(chatId)}/mute`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
+      return this.http.put<TData>(
+        `${this.baseUrl}/group/${decodeId(chatId)}/notification-setting`,
+        updateNotificationSettingRequest,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
     }
     if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/group/${decodeId(chatId)}/mute`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
+      return this.http.put<TData>(
+        `${this.baseUrl}/group/${decodeId(chatId)}/notification-setting`,
+        updateNotificationSettingRequest,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
     }
-    return this.http.delete<TData>(`${this.baseUrl}/group/${decodeId(chatId)}/mute`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
+    return this.http.put<TData>(
+      `${this.baseUrl}/group/${decodeId(chatId)}/notification-setting`,
+      updateNotificationSettingRequest,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
   }
 }

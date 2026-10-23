@@ -254,15 +254,21 @@ ChatListStore.viewUnread 使用连接级 `watchConversationUnread` 订阅内置 
 
 `conversationUnread` 首次返回 `full: true`，之后仅发送变化集合的六个绝对计数，归零也发送；未出现的 key 保持原值。appBadgeCount 未出现时保持原值，0 表示清除角标。requestId 隔离订阅，旧回包和首次完整快照前的局部更新被丢弃。重连重新订阅并获取全量；断线及刷新期间保留同账号已有数字，账号变化立即隐藏旧值。`conversationUnreadError` 保留已有数字，后端退避重试并用完整快照恢复，不回退 HTTP 轮询。最后一个消费者退出后取消订阅。协议和后端触发规则见[未读 WS 协议](../../backend/docs/conversation-unread-ws.md)。
 
-ChatMute 提供 1 小时、8 小时、1 天、7 天和永久，调用 `/group/{c}/mute`；永久省略 durationSeconds。一个到期定时器更新标志与计数，取消静音按协议同时取消归档。话题使用自身订阅/归档操作。
+ChatStore 使用 SessionStore 当前账号的两个默认值，集中按「有效临时静音 > 会话 muteOverride > 群聊／私聊默认值」计算静音。列表图标、行内提醒和在线通知共用该规则；服务端 isMuted 是响应时刻的快照，不作为长期缓存。有限静音复用最近到期计时器，到期恢复例外或默认值，不修改已读状态。
+
+ChatMute 的通知菜单调用 `PUT /group/{chatId}/notification-setting`，支持 inherit、alwaysMuted、alwaysUnmuted 和 temporarilyMuted。归档与静音字段分别维护版本；省略字段保留原值，显式 null 清除。保存期间，列表、详情和例外读取不覆盖该操作正在修改的字段；其他字段照常合并。HTTP 返回和失败回滚只修改仍属于该操作的字段，较晚的 WS 或用户选择优先。保存结束推进字段版本，包括归档的 204 响应，拒绝保存期间发起的迟到读取。账号切换立即隔离聊天偏好，旧账号响应不能写入当前账号。
+
+`notificationSettingsChanged` 更新账号默认值，已加载聊天直接重新计算，不逐聊天发请求；`chatNotificationSettingChanged` 合并完整会话偏好。兼容的 `chatArchiveStateChanged` 只合并携带字段。重连通过 `GET /users/me/notification-settings` 校准默认值，聊天沿用列表／详情刷新；详情同时返回当前用户的 archived，在线通知无需预先加载归档列表就能判断归档。健康连接回到前台不重新读取默认值。保存期间的重连读取延后执行，读取期间再次重连会补读，迟到快照不覆盖新选择。服务端集合未读订阅负责角标校准，不增加静音轮询。
+
+NotificationCategory 分别调用 `GET /users/me/notification-exceptions?kind=group|dm`，首页各读取 1 项以取得服务端 totalCount，分类详情以 chat ID 游标加载每页 20 项。下一页只读取该页；偏好事件及重连从第一页校准至已加载深度，重复失效合并且旧响应不落入新列表。刷新与失败保留已有列表；账号变化清除旧列表。恢复默认后刷新对应分类的真实总数，不从已加载聊天推算。默认开关只 PATCH 修改的分类，例外不受默认值变化影响。添加选择器仅在打开时激活 ChatListStore 的普通／归档查询，关闭时释放。删除所有例外调用一次 `DELETE /users/me/notification-exceptions?kind=group|dm`；响应和 `notificationExceptionsCleared` 事件携带实际清除的 chatIds，合并清空这些聊天的 muteOverride、mutedUntil，保留 archived，不逐聊天补请求。列表、例外和批量清除按整批合并聊天状态及字段版本，缓存 Map 每批只复制一次。HTTP 回包只更新操作开始后没有新偏好写入的聊天，较晚的 WS 或本地选择优先，期间读到的旧快照不能恢复已清除例外；同一批 WS 已到达时不重复刷新例外列表。
 
 测试拦截 HTTP、WebSocket 与上传。禁止向生产服写入或测试上传 S3；必须实测写入时使用本地后端及开发数据库。
 
-静音与归档通过 ChatStore 乐观修改共享字段，话题订阅修改已知订阅状态；未知状态在写入后读取。失败只回退版本仍属于本次操作的字段，后到的推送或选择优先。汇总计数由服务端在写入提交后推送更新。SavedMessageList 取消收藏时先移除快照，失败且列表未重置时按原位置恢复。
+静音与归档通过 ChatStore 乐观修改共享字段；归档与取消归档只改变 archived，保留原有通知偏好。兼容的 chatArchiveStateChanged 事件携带实际 mutedUntil，不能把归档视为永久静音或把取消归档视为取消静音。话题订阅修改已知订阅状态；未知状态在写入后读取。失败只回退版本仍属于本次操作的字段，后到的推送或选择优先。汇总计数由服务端在写入提交后推送更新。SavedMessageList 取消收藏时先移除快照，失败且列表未重置时按原位置恢复。
 
 媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。每次路由导航关闭已经存在的 modal、popover、alert 和 action-sheet，Toast 保留自己的生命周期。
 
-会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字和列表标题都使用 `unreadUnmutedConversationCount`，会话内标题使用该会话读状态的未读数。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab badge 与列表标题的 mention 使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题，会话内标题使用该会话读状态的 `unreadMentions`。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天 mutedUntil 或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。
+会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字和列表标题都使用 `unreadUnmutedConversationCount`，会话内标题使用该会话读状态的未读数。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab badge 与列表标题的 mention 使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题，会话内标题使用该会话读状态的 `unreadMentions`。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天有效静音或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。
 
 Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内成功结果；相同同步请求共享进行中的操作，失败可重试，关闭通知清除成功记录。订阅不变时最多每 24 小时在正常同步入口修复一次服务端注册，重新加载应用仍会注册。
 

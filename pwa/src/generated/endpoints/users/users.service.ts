@@ -14,9 +14,15 @@ import type { Observable } from 'rxjs';
 
 import type {
   AuthTokenResponse,
+  ClearExceptionsParams,
+  GetExceptionsParams,
   GetUserSearchParams,
   MeResponse,
+  NotificationExceptionsCleared,
+  NotificationExceptionsResponse,
+  NotificationSettingsResponse,
   SearchUsersResponse,
+  UpdateNotificationSettingsRequest,
   UpdateStickerPackOrderRequest,
 } from '../../models';
 
@@ -181,6 +187,156 @@ export class UsersService {
     }
 
     return this.http.get<TData>(`${this.baseUrl}/users/me`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  clearExceptions<TData = NotificationExceptionsCleared>(
+    params: ClearExceptionsParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+
+    return this.http.delete<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
+    });
+  }
+  getExceptions<TData = NotificationExceptionsResponse>(
+    params: GetExceptionsParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getExceptions<TData = NotificationExceptionsResponse>(
+    params: GetExceptionsParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getExceptions<TData = NotificationExceptionsResponse>(
+    params: GetExceptionsParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getExceptions<TData = NotificationExceptionsResponse>(
+    params: GetExceptionsParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+
+    return this.http.get<TData>(`${this.baseUrl}/users/me/notification-exceptions`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
+    });
+  }
+  getSettings<TData = NotificationSettingsResponse>(options?: HttpClientBodyOptions): Observable<TData>;
+  getSettings<TData = NotificationSettingsResponse>(options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  getSettings<TData = NotificationSettingsResponse>(
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getSettings<TData = NotificationSettingsResponse>(
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/users/me/notification-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/users/me/notification-settings`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+
+    return this.http.get<TData>(`${this.baseUrl}/users/me/notification-settings`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  patchSettings<TData = NotificationSettingsResponse>(
+    updateNotificationSettingsRequest: UpdateNotificationSettingsRequest,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  patchSettings<TData = NotificationSettingsResponse>(
+    updateNotificationSettingsRequest: UpdateNotificationSettingsRequest,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  patchSettings<TData = NotificationSettingsResponse>(
+    updateNotificationSettingsRequest: UpdateNotificationSettingsRequest,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  patchSettings<TData = NotificationSettingsResponse>(
+    updateNotificationSettingsRequest: UpdateNotificationSettingsRequest,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.patch<TData>(
+        `${this.baseUrl}/users/me/notification-settings`,
+        updateNotificationSettingsRequest,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+
+    if (options?.observe === 'response') {
+      return this.http.patch<TData>(
+        `${this.baseUrl}/users/me/notification-settings`,
+        updateNotificationSettingsRequest,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+
+    return this.http.patch<TData>(`${this.baseUrl}/users/me/notification-settings`, updateNotificationSettingsRequest, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

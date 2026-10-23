@@ -192,10 +192,10 @@
       },
       "mute": {
         "title": "静音通知",
-        "oneHour": "1 小时",
-        "eightHours": "8 小时",
-        "oneDay": "1 天",
-        "sevenDays": "7 天",
+        "oneHour": "静音 1 小时",
+        "eightHours": "静音 8 小时",
+        "oneDay": "静音 1 天",
+        "sevenDays": "静音 7 天",
         "forever": "永久"
       }
     },
@@ -628,5 +628,37 @@
   "reactions": {
     "title": "表态",
     "all": "全部 {{ count }}"
+  },
+  "notificationPreferences": {
+    "chatSettings": "通知设置",
+    "thisDevice": "本机通知",
+    "groupChats": "群组",
+    "directChats": "私聊",
+    "inherit": "恢复默认",
+    "alwaysMuted": "始终静音",
+    "alwaysUnmuted": "始终通知",
+    "archived": "已归档",
+    "noExceptions": "暂无例外",
+    "loadFailed": "加载失败，请重试",
+    "saveFailed": "保存失败，请重试",
+    "loadMore": "加载更多",
+    "chatNotifications": "聊天通知",
+    "directTitle": "私聊通知",
+    "groupTitle": "群组通知",
+    "enableDirect": "启用私聊通知",
+    "enableGroups": "启用群组通知",
+    "enabled": "已开启",
+    "disabled": "已关闭",
+    "exceptionCount": "{{count}} 个例外",
+    "addException": "添加例外",
+    "remove": "移除",
+    "clearAll": "删除所有例外",
+    "clearConfirm": "将此分类的所有例外恢复为默认通知设置，同时清除这些聊天的临时静音。归档状态不会改变。",
+    "muted": "已静音",
+    "unmuted": "未静音",
+    "searchChats": "搜索已加载的聊天",
+    "addHint": "选择聊天，设为与当前默认相反的通知状态。添加后可点击例外修改。",
+    "alreadyAdded": "已添加",
+    "noChats": "没有匹配的聊天"
   }
 }

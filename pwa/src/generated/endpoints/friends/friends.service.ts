@@ -444,6 +444,30 @@ export class FriendsService {
       observe: 'body',
     });
   }
+  deleteFriend<TData = void>(uid: number, options?: HttpClientBodyOptions): Observable<TData>;
+  deleteFriend<TData = void>(uid: number, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deleteFriend<TData = void>(uid: number, options?: HttpClientResponseOptions): Observable<AngularHttpResponse<TData>>;
+  deleteFriend<TData = void>(
+    uid: number,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
   /**
    * @summary GET /friends/:uid — The current user's relationship with one profile user.
    */
@@ -476,30 +500,6 @@ export class FriendsService {
       });
     }
     return this.http.get<TData>(`${this.baseUrl}/friends/${uid}`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
-  deleteFriend<TData = void>(uid: number, options?: HttpClientBodyOptions): Observable<TData>;
-  deleteFriend<TData = void>(uid: number, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deleteFriend<TData = void>(uid: number, options?: HttpClientResponseOptions): Observable<AngularHttpResponse<TData>>;
-  deleteFriend<TData = void>(
-    uid: number,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

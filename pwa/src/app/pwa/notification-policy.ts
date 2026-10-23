@@ -1,3 +1,5 @@
+import { notificationMuted } from '../chats/notification-setting';
+import type { NotificationSettingsResponse } from '../../generated/models';
 import { placeholderLabel } from '../messages/forward-placeholder';
 import {
   GroupKind,
@@ -10,9 +12,10 @@ import {
 export function shouldNotify(
   message: MessageResponse,
   uid: number,
-  chat: { kind?: GroupKind; archived?: boolean; mutedUntil?: string } | undefined,
+  chat: { kind?: GroupKind; archived?: boolean; mutedUntil?: string; muteOverride?: boolean } | undefined,
   thread: ThreadSubscriptionStatusResponse | undefined,
   now = Date.now(),
+  defaults?: NotificationSettingsResponse,
 ): boolean {
   if (message.sender.uid === uid || message.isDeleted || message.messageType === MessageType.system) return false;
   const directed = chat?.kind === GroupKind.group;
@@ -22,7 +25,7 @@ export function shouldNotify(
   const mentioned =
     directed && !message.forwardedFrom && (message.mentions?.some((mention) => mention.uid === uid) ?? false);
   if (message.replyRootId) return mentioned || replied || !!(thread?.subscribed && !thread.archived);
-  return mentioned || !(Date.parse(chat?.mutedUntil ?? '') > now);
+  return mentioned || !notificationMuted(chat?.kind, chat, defaults, now);
 }
 
 /** System notifications need plain text, including expanded mentions and media-only messages. */
