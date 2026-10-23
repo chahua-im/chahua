@@ -43,11 +43,10 @@
               (pointerdown)="press(target)"
               (click)="select(target)">
               <app-chat-avatar slot="start" [entry]="target.avatar" [size]="40" />
-              <ion-label>
+              <ion-label class="ion-text-nowrap">
                 <h3>{{ target.name ?? ('conversation.chat' | transloco) }}</h3>
                 @if (target.preview; as preview) {
                   <p><app-message-preview [message]="preview" /></p>
-                  <p>{{ 'messages.forward.replies' | transloco: { count: target.replies } }}</p>
                 }
               </ion-label>
               <span slot="end" class="selection-status">
