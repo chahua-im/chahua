@@ -204,13 +204,19 @@ ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使�
 
 ## 转发与聊天记录
 
-话题整体转发不固定消息快照：目标选择器在选择目标时读取 `GET /chats/{chatId}/messages?threadId={rootId}&max=100`，一次取回话题当前全部消息（含根消息），过滤系统消息和已撤回消息后交给 `MessageOutbox`。响应仍带更早游标表示总数超过 100 条，不提交并提示原因；读取失败提示后保留目标列表可重试。入口由根消息的 `threadInfo.replyCount` 加根消息派生，超过 100 条时隐藏。
+话题整体转发不固定消息快照：目标选择器在选择目标时读取 `GET /chats/{chatId}/messages?threadId={rootId}&max=100`，一次取回话题当前全部消息（含根消息），过滤系统消息和已撤回消息后交给目标会话的转发草稿。响应仍带更早游标表示总数超过 100 条，不提交并提示原因；读取失败提示后保留目标列表可重试。入口由根消息的 `threadInfo.replyCount` 加根消息派生，超过 100 条时隐藏。
 
 `ForwardPicker` 消费 `ChatListStore.chats(false)` 和 `threads(false)`，打开时激活、销毁时释放。两边所有已加载目标按最近活动混排，触底或手动继续加载时补覆盖较浅的可用流；一侧尚未加载或请求失败不遮蔽另一侧，错误只重试对应查询。已有数据在刷新期间保留。搜索为已加载目标的本地过滤，不请求群／用户目录或扫描所有历史。
 
-`ConversationPage` 持有多选消息 Map，分页不清空；已确认消息用服务端 ID、待发消息用 clientGeneratedId 保留对应消息或队列对象引用，消息更新替换对应引用、撤回移除选择。只允许已有服务端 ID 的消息参与勾选；尚未发布的音频使用队列 confirmed() 中的 ID。勾选不检查转发资格，点击转发时校验来源和消息类型；目标选择器固定 MessageResponse 或 OutgoingMessage 引用，提交时读取队列的最新 confirmed()/published()，避免语音发布后仍按旧状态替换。选择器独立监听撤回，使该次选择失效。已提交任务不再读取页面选择状态。批量撤回在确认时固定待处理数组；队列项先通过 MessageOutbox.waitForPublication 读取已发布确认或等待对应发布事件，沿用 30 秒请求超时。等待期间不取消队列项或释放上传资源；收集完成后重新检查选择与权限，通过 MessageActions.recallMany 一次提交 `POST /chats/{chatId}/messages/bulk-delete`，请求体为 `{ messageIds }`（1–100 条）。等待失败项保留，其余可提交项仍按一批处理；已由服务器撤回的所选项跳过。服务端整批校验并事务撤回，已撤回 ID 可重复提交；成功响应返回 `BulkDeletedPayload`，含 `complete: true` 与受影响的 `threadRootIds`，直接合并到现有批量删除事件路径，不等待 WS 回声。仅成功响应中的 ID 计入成功，请求失败时保留未撤回项。切换会话、退出选择或销毁页面后停止提交后续请求，迟到响应仍可更新原聊天数据，但不得修改新选择的界面状态。
+`ForwardPicker` 通过 `ConversationNavigation.prepareForward` 在导航前把队列来源转换为 `confirmed()` 中的服务器消息数据，将选定的 MessageResponse 交给 `DraftStore` 的目标 chatId／threadId 内存槽，再打开目标会话；当前已打开同一路由时直接使用响应式草稿更新预览。导航失败恢复之前的待转发内容，不能覆盖期间新选择或新账号的状态。选择器不调用发送接口、不收集附言、不请求占位替换许可。
 
-`MessageOutbox.enqueueForward` 固定来源聊天、排序后的消息 ID、目标聊天／话题与 clientGeneratedId；一条调用 `POST /chats/{chatId}/messages/{messageId}/forward`，两条及以上调用 `POST /chats/{chatId}/messages/forward`。两者均传 threadId 和 allowPlaceholders。已知需要占位替换时由目标选择器先确认；只有用户确认后才传 allowPlaceholders: true。待转码语音和合并时超限的卡片仅在本地展示副本中转换为 placeholder，API 始终发送原始 ID，服务端以当前状态生成最终内容。与普通发送共用每会话串行队列及重试，不上传源附件；HTTP／WS 确认复用同一行。转发语音的 HTTP 确认即已发布，不等待普通录音的转码发布阶段。
+`DraftStore` 的转发集合与持久化文字草稿分开，只保留 MessageResponse，不引用 OutgoingMessage、上传任务或 File；切换账号清空，不序列化到 localStorage。草稿不订阅源消息的编辑或撤回事件，也不扫描各目标的来源，预览保留选定时的数据。`ConversationPage` 消费当前目标的转发草稿，点击发送直接交给队列，不预读来源或转码状态，由转发接口校验当前权限、撤回状态及占位需求。提交后移除该次转发和对应文字，后续输入不受请求结果影响。回复／编辑状态独立保留，附言不携带旧的回复目标。
+
+`ConversationPage` 持有多选消息 Map，分页不清空；已确认消息用服务端 ID、待发消息用 clientGeneratedId 保留对应消息或队列对象引用，消息更新替换对应引用、撤回移除选择。只允许已有服务端 ID 的消息参与勾选；尚未发布的音频使用队列 confirmed() 中的 ID。勾选不检查转发资格，点击转发时校验来源和消息类型；目标选择器固定 MessageResponse 或 OutgoingMessage 引用，选择目标时读取队列的 confirmed()，进入草稿后不再持有队列项或跟踪 published()。选择器独立监听撤回，使该次选择失效。已提交任务不再读取页面选择状态。批量撤回在确认时固定待处理数组；队列项先通过 MessageOutbox.waitForPublication 读取已发布确认或等待对应发布事件，沿用 30 秒请求超时。等待期间不取消队列项或释放上传资源；收集完成后重新检查选择与权限，通过 MessageActions.recallMany 一次提交 `POST /chats/{chatId}/messages/bulk-delete`，请求体为 `{ messageIds }`（1–100 条）。等待失败项保留，其余可提交项仍按一批处理；已由服务器撤回的所选项跳过。服务端整批校验并事务撤回，已撤回 ID 可重复提交；成功响应返回 `BulkDeletedPayload`，含 `complete: true` 与受影响的 `threadRootIds`，直接合并到现有批量删除事件路径，不等待 WS 回声。仅成功响应中的 ID 计入成功，请求失败时保留未撤回项。切换会话、退出选择或销毁页面后停止提交后续请求，迟到响应仍可更新原聊天数据，但不得修改新选择的界面状态。
+
+`MessageOutbox.enqueueForward` 固定来源聊天、排序后的消息 ID、目标聊天／话题与 clientGeneratedId；一条调用 `POST /chats/{chatId}/messages/{messageId}/forward`，两条及以上调用 `POST /chats/{chatId}/messages/forward`。两者均传 threadId 和 allowPlaceholders。首次请求 allowPlaceholders: false，不根据本地预览转换 placeholder。API 始终发送原始 ID，服务端以当前状态生成最终内容；只有后端报告占位需求且用户确认后，才以 allowPlaceholders: true 重试。与普通发送共用每会话串行队列及重试，不上传源附件；HTTP／WS 确认复用同一行。转发语音的 HTTP 确认即已发布，不等待普通录音的转码发布阶段。
+
+`ConversationPage` 在发送时将输入文字及提及展示快照交给转发任务，`MessageOutbox` 去除首尾空白并保存在本地意图中，不向转发 API 增加字段。收到转发发布的 HTTP 或 WS 确认后，先消费该附言，再通过普通文本发送流程入队到同一 chatId／threadId，使用独立 clientGeneratedId；重复确认不会重复入队。转发失败继续保留附言，撤回任务或切换账号清除未发送附言；附言入队后沿用普通消息的失败与重试。附言与队列一样仅存于当前应用内存。
 
 单条接口重试仍要求所选来源可访问；合并接口成功后的重试可返回已有快照。失败不更换 clientGeneratedId、不重建选择或自动改用另一接口。公共消息 DTO 不含转码状态，已发布的历史音频可能只能由服务端识别；未获占位许可的请求若收到后端明确的待转码或嵌套超限 400，队列弹窗确认，确认后仅补充 allowPlaceholders 并使用原操作 ID 继续提交。取消保留失败任务供显式重试，不自动同意；取消任务或切换账号会关闭该确认并阻止继续提交。其他错误沿用现有失败处理。待发送的来源标签与卡片预览仅为展示，确认后使用服务端内容。单条贴纸与卡片不设置本地来源信息。转发消息的 mentions 只参与显示，不触发客户端提及优先通知或提及状态推断。
 

@@ -116,6 +116,36 @@ describe('Message composer upload ownership', () => {
         : new File(['hello'], 'note.txt', { type: 'text/plain' });
     return composer['addFile'](file, purpose)!;
   }
+
+  it('enables Send for a forward without text and leaves upload ownership untouched', () => {
+    const upload = queuedUpload();
+    composer['uploads'].set([upload]);
+    const forward = vi.fn();
+    composer.forwardSubmitted.subscribe(forward);
+    fixture.componentRef.setInput('forwarding', true);
+    fixture.detectChanges();
+    expect(composer['canSend']()).toBe(true);
+    expect(composer['useVoice']()).toBe(false);
+    expect(fixture.nativeElement.querySelector('.uploads')).toBeNull();
+    composer['submit']();
+    expect(forward).toHaveBeenCalledOnce();
+    expect(submitted).not.toHaveBeenCalled();
+    expect(composer['uploads']()).toEqual([upload]);
+    fixture.componentRef.setInput('forwarding', false);
+    fixture.detectChanges();
+    expect(composer['uploads']()).toEqual([upload]);
+    expect(fixture.nativeElement.querySelector('.uploads')).not.toBeNull();
+  });
+
+  it('keeps an active recording mounted when a forward arrives', () => {
+    const recorder = fixture.nativeElement.querySelector('app-voice-recorder');
+    composer.voiceActive.set(true);
+    fixture.componentRef.setInput('forwarding', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-voice-recorder')).toBe(recorder);
+    expect(composer['canSend']()).toBe(false);
+    expect(fixture.nativeElement.querySelector('.compose-context').hidden).toBe(false);
+  });
   function edit(message: MessageContent = testMessage, uploads: readonly AttachmentUpload[] = []) {
     fixture.componentRef.setInput('editing', message);
     fixture.componentRef.setInput('editingUploads', uploads);

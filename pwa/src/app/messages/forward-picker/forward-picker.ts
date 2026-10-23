@@ -1,7 +1,6 @@
 import { Component, computed, DestroyRef, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  IonAlert,
   IonButton,
   IonButtons,
   IonContent,
@@ -19,7 +18,7 @@ import {
   ToastController,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
-import { TranslocoPipe, TranslocoService, translateSignal } from '@jsverse/transloco';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { chatbubblesOutline } from 'ionicons/icons';
 import { ServerWsMessageType, type MessagePreview as Preview } from '../../../generated/models';
 import { Connection } from '../../api/connection';
@@ -30,18 +29,16 @@ import { ChatAvatar, conversationAvatar, type ChatAvatarData } from '../../chats
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { MessagePreview } from '../message-preview/message-preview';
-import { MessageOutbox } from '../message-outbox';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import {
   canForward,
   forwardSourceMessage,
-  forwardPlaceholders,
   ForwardSelectionError,
   MAX_FORWARD_MESSAGES,
   type ForwardSource,
   type ForwardSourcesLoader,
   type ForwardSourcesResult,
 } from '../forwarding';
-import { ForwardPlaceholder } from '../forward-placeholder';
 
 interface ForwardTarget {
   chatId: SnowflakeID;
@@ -62,7 +59,6 @@ interface ForwardTarget {
     LoadError,
     ChatAvatar,
     MessagePreview,
-    IonAlert,
     IonModal,
     IonHeader,
     IonToolbar,
@@ -84,13 +80,12 @@ export class ForwardPicker {
   /** Replaces the fixed selection with the sources read when a target is chosen. */
   readonly load = input<ForwardSourcesLoader>();
   readonly closed = output<void>();
-  readonly forwarded = output<void>();
   private readonly lists = inject(ChatListStore);
   private readonly metadata = inject(ChatStore);
-  private readonly outbox = inject(MessageOutbox);
+  private readonly navigation = inject(ConversationNavigation);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly toasts = inject(ToastController);
   private readonly i18n = inject(TranslocoService);
-  private readonly sendingLabel = translateSignal('messages.forward.sending');
   protected readonly chats = this.lists.chats(false);
   protected readonly threads = this.lists.threads(false);
   protected readonly query = signal('');
@@ -102,9 +97,6 @@ export class ForwardPicker {
     () => this.failure() === ForwardSelectionError.Stale || this.failure() === ForwardSelectionError.Unavailable,
   );
   protected readonly submitted = signal(false);
-  protected readonly confirmation = signal<
-    { target: ForwardTarget; prompt: string; selection: readonly ForwardSource[] } | undefined
-  >(undefined);
   protected readonly open = signal(true);
   protected readonly mobile = !matchMedia('(min-width: 768px)').matches;
   protected readonly failed = computed(() => !!this.chats.error() || this.threads.error());
@@ -150,7 +142,7 @@ export class ForwardPicker {
     inject(Connection)
       .changes$.pipe(takeUntilDestroyed())
       .subscribe((event) => {
-        const sources = this.confirmation()?.selection ?? this.messages();
+        const sources = this.messages();
         if (event.payload.chatId !== sources[0]?.chatId) return;
         const removed =
           event.type === ServerWsMessageType.messageDeleted
@@ -188,7 +180,7 @@ export class ForwardPicker {
     }
   }
   protected async select(target: ForwardTarget) {
-    if (this.submitted() || this.invalid() || this.confirmation() || !this.open() || this.resolving()) return;
+    if (this.submitted() || this.invalid() || !this.open() || this.resolving()) return;
     this.resolving.set(true);
     try {
       const result = await this.resolveSources();
@@ -205,28 +197,22 @@ export class ForwardPicker {
         return;
       }
       this.failure.set(undefined);
-      const replacements = forwardPlaceholders(selection);
-      if (replacements.size) {
-        const reasons = new Set(replacements.values());
-        const prompt =
-          reasons.size > 1
-            ? 'messages.forward.confirmBoth'
-            : reasons.has(ForwardPlaceholder.PendingAudio)
-              ? 'messages.forward.confirmPendingAudio'
-              : 'messages.forward.confirmNested';
-        this.confirmation.set({ target, prompt, selection });
-        return;
+      this.submitted.set(true);
+      try {
+        const opened = await this.navigation.prepareForward(target.chatId, target.threadId, selection);
+        if (!opened) {
+          this.submitted.set(false);
+          await this.report(ForwardSelectionError.NavigationFailed);
+        } else if (!this.destroyRef.destroyed) {
+          this.open.set(false);
+        }
+      } catch {
+        this.submitted.set(false);
+        await this.report(ForwardSelectionError.NavigationFailed);
       }
-      void this.submit(target, selection, false);
     } finally {
       this.resolving.set(false);
     }
-  }
-  protected confirm(event: CustomEvent<{ role?: string }>) {
-    const confirmation = this.confirmation();
-    this.confirmation.set(undefined);
-    if (confirmation && event.detail.role === 'confirm')
-      void this.submit(confirmation.target, confirmation.selection, true);
   }
   private async resolveSources(): Promise<ForwardSourcesResult> {
     const load = this.load();
@@ -252,25 +238,5 @@ export class ForwardPicker {
       messages.length <= MAX_FORWARD_MESSAGES &&
       messages.every((message) => !!message && canForward(message))
     );
-  }
-  private async submit(target: ForwardTarget, selection: readonly ForwardSource[], allowPlaceholders: boolean) {
-    if (this.submitted() || this.invalid() || !this.open()) return;
-    if (!this.forwardable(selection)) {
-      this.failure.set(this.load() ? ForwardSelectionError.TopicUnavailable : ForwardSelectionError.Unavailable);
-      return;
-    }
-    const sources = selection.flatMap((source) => {
-      const message = forwardSourceMessage(source);
-      return message ? [message] : [];
-    });
-    this.submitted.set(true);
-    this.outbox.enqueueForward(target.chatId, target.threadId, sources, {
-      allowPlaceholders,
-      placeholders: forwardPlaceholders(selection),
-    });
-    this.forwarded.emit();
-    this.open.set(false);
-    const toast = await this.toasts.create({ message: this.sendingLabel(), duration: 2500 });
-    await toast.present();
   }
 }

@@ -40,7 +40,7 @@ import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
 import { ForwardSelectionError, forwardSourceMessage } from '../../messages/forwarding';
-import { MessageOutbox } from '../../messages/message-outbox';
+import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { Message, type MessageContent } from '../../messages/message/message';
 import { SavedMessageStore } from '../../messages/saved-message-store';
 import { StickerFavorites } from '../../messages/sticker-favorites';
@@ -214,6 +214,160 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     expect(component['draft']()).toBe('unfinished draft');
     expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+  });
+
+  it('shows a removable forward preview in the destination without sending or replacing its text', () => {
+    const send = vi.spyOn(component['outbox'], 'enqueueForward');
+    component['draft'].set('existing draft');
+    component['startReply'](testMessage);
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [testMessage]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.forward-context strong').textContent.trim()).toBe(
+      testMessage.sender.name,
+    );
+    expect(fixture.nativeElement.querySelector('.forward-context app-message-preview')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.forward-context').textContent).not.toContain('转发 1 条消息');
+    expect(component['draft']()).toBe('existing draft');
+    expect(send).not.toHaveBeenCalled();
+    (fixture.nativeElement.querySelector('.forward-context .reply-close') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.forward-context')).toBeNull();
+    expect(component['draft']()).toBe('existing draft');
+    expect(component['replyTo']()).toBe(testMessage);
+  });
+
+  it('uses the original sender for a single forwarded message preview', () => {
+    const source = {
+      ...testMessage,
+      forwardedFrom: {
+        sender: { uid: 99, name: '源头作者', gender: 0 },
+        originalChatId: testChat.id,
+        originalMessageId: encodeId('99'),
+      },
+    };
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [source]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.forward-context strong').textContent.trim()).toBe('源头作者');
+  });
+
+  it.each([
+    { uids: [1, 1], title: 'user1' },
+    { uids: [1, 2, 1], title: 'user1和user2' },
+    { uids: [1, 2, 3, 1], title: 'user1和其他2人' },
+    { uids: [1, 2, 3, 4], title: 'user1和其他3人' },
+  ])('summarizes merged participants in message order: $title', ({ uids, title }) => {
+    const sources = uids
+      .map((uid, index) => ({
+        ...testMessage,
+        id: encodeId(String(100 + index)),
+        sender: { uid, name: `user${uid}`, gender: 0 },
+      }))
+      .reverse();
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
+    fixture.detectChanges();
+    const preview = fixture.nativeElement.querySelector('.forward-context');
+    expect(preview.querySelector('strong').textContent.trim()).toBe(title);
+    expect(preview.querySelector('.reply-description > span').textContent.trim()).toBe(`转发 ${uids.length} 条消息`);
+    expect(preview.querySelector('app-message-preview')).toBeNull();
+  });
+
+  it('sends a forward and then the composer text only when Send is clicked', async () => {
+    component['draft'].set('附言');
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [testMessage]);
+    fixture.detectChanges();
+    http.expectNone((request) => request.method === 'POST');
+    (fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement).click();
+    const forward = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forward`);
+    http.expectNone(`/_api/chats/${wireChat.id}/messages`);
+    expect(component['pendingForward']()).toBeUndefined();
+    expect(component['draft']()).toBe('');
+    component['draft'].set('next input');
+    forward.flush({
+      ...wireMessage,
+      id: '9007199254741800',
+      clientGeneratedId: forward.request.body.clientGeneratedId,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const comment = http.expectOne(`/_api/chats/${wireChat.id}/messages`);
+    expect(comment.request.body.message).toBe('附言');
+    comment.flush({
+      ...wireMessage,
+      id: '9007199254741801',
+      message: '附言',
+      clientGeneratedId: comment.request.body.clientGeneratedId,
+    });
+    await fixture.whenStable();
+    expect(component['draft']()).toBe('next input');
+  });
+
+  it('allows sending a merged forward without text', () => {
+    const send = vi.spyOn(component['outbox'], 'enqueueForward').mockReturnValue({} as OutgoingMessage);
+    const sources = [testMessage, { ...testMessage, id: encodeId('100') }];
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(send).toHaveBeenCalledWith(testChat.id, undefined, sources, expect.objectContaining({ comment: '' }));
+    expect(component['pendingForward']()).toBeUndefined();
+  });
+
+  it('temporarily shows the forward composer without overwriting an unfinished edit', () => {
+    component['draft'].set('normal draft');
+    component['startEdit'](testMessage);
+    component['updateDraft']('unfinished edit');
+    fixture.detectChanges();
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, [testMessage]);
+    fixture.detectChanges();
+    expect(component['composer']()?.text()).toBe('normal draft');
+    component['updateDraft']('forward comment');
+    component['escapeComposer']();
+    fixture.detectChanges();
+    expect(component['composer']()?.text()).toBe('unfinished edit');
+    expect(component['draft']()).toBe('forward comment');
+  });
+
+  it('submits nested sources without deciding placeholder replacement from the draft', () => {
+    const send = vi.spyOn(component['outbox'], 'enqueueForward').mockReturnValue({} as OutgoingMessage);
+    const sources = [
+      {
+        ...testMessage,
+        messageType: MessageType.forwarded,
+        forwardedPreview: { total: 2, containsForwardedMessages: true, messages: [] },
+      },
+      { ...testMessage, id: encodeId('100') },
+    ];
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
+    component['draft'].set('附言');
+    fixture.detectChanges();
+    component['sendForward']();
+    expect(send).toHaveBeenCalledExactlyOnceWith(testChat.id, undefined, sources, {
+      comment: '附言',
+      commentMentions: [],
+    });
+    expect(component['pendingForward']()).toBeUndefined();
+  });
+
+  it('keeps the selected preview through source changes and withholds the comment on server rejection', async () => {
+    const sources = [testMessage];
+    TestBed.inject(DraftStore).setForward(testChat.id, undefined, sources);
+    component['draft'].set('附言');
+    events.next({ type: ServerWsMessageType.messageUpdated, payload: { ...testMessage, message: 'edited' } });
+    events.next({ type: ServerWsMessageType.messageDeleted, payload: { ...testMessage, isDeleted: true } });
+    fixture.detectChanges();
+    expect(component['forwardPreview']()).toBe(testMessage);
+    const button = fixture.nativeElement.querySelector('.send-button') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    button.click();
+    const item = TestBed.inject(MessageOutbox).items()[0];
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forward`);
+    expect(request.request.method).toBe('POST');
+    http.expectNone(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
+    request.flush('Source unavailable', { status: 404, statusText: 'Not Found' });
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    http.expectNone(`/_api/chats/${wireChat.id}/messages`);
   });
 
   it('Escape leaves multi-selection without reaching the page-level navigation shortcut', () => {

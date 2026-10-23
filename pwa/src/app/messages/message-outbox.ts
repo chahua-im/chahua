@@ -20,13 +20,13 @@ import {
   type CreateMessageBody,
   type ForwardMessagesBody,
   type MessageResponse,
+  type MentionInfo,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import type { Composition } from './message-composer/message-composer';
-import { forwardPreview, placeholderMessage, showsForwardOrigin } from './forwarding';
-import type { ForwardPlaceholder } from './forward-placeholder';
+import { forwardPreview, showsForwardOrigin } from './forwarding';
 import { MessageDelivery } from './message-delivery';
 import type { MessageContent } from './message/message';
 import { UploadStatus, type AttachmentUpload } from './upload';
@@ -58,6 +58,7 @@ interface Submission {
 }
 interface Intent extends Submission {
   local: MessageContent;
+  forwardComment?: { text: string; mentions?: MentionInfo[] };
 }
 interface Task {
   intent: WritableSignal<Intent>;
@@ -198,22 +199,23 @@ export class MessageOutbox {
     chatId: SnowflakeID,
     threadId: SnowflakeID | undefined,
     sources: readonly MessageResponse[],
-    options: { allowPlaceholders?: boolean; placeholders?: ReadonlyMap<SnowflakeID, ForwardPlaceholder> } = {},
+    options: {
+      comment?: string;
+      commentMentions?: MentionInfo[];
+    } = {},
   ) {
-    const messages = [...sources]
-      .sort((a, b) => a.id - b.id)
-      .map((message) => {
-        const reason = options.allowPlaceholders ? options.placeholders?.get(message.id) : undefined;
-        return reason ? placeholderMessage(message, reason) : message;
-      });
+    const messages = [...sources].sort((a, b) => a.id - b.id);
     const source = messages[0];
     const single = messages.length === 1;
     const clientGeneratedId = crypto.randomUUID();
     return this.add(chatId, threadId, {
+      forwardComment: options.comment?.trim()
+        ? { text: options.comment.trim(), mentions: options.commentMentions }
+        : undefined,
       forward: {
         sourceChatId: source.chatId,
         messageIds: messages.map((message) => message.id),
-        allowPlaceholders: options.allowPlaceholders ?? false,
+        allowPlaceholders: false,
         clientGeneratedId,
         threadId,
       },
@@ -571,8 +573,7 @@ export class MessageOutbox {
     }
   }
 
-  /** Published legacy audio has no transcode status in the public message DTO.
-   * Ask for consent if the server discovers a replacement the picker could not predict. */
+  /** The server checks current source state; replacements require explicit consent. */
   private async confirmForwardFallback(item: OutgoingMessage, submitted: Submission, error: unknown): Promise<boolean> {
     if (!submitted.forward || submitted.forward.allowPlaceholders || errorStatus(error) !== 400) return false;
     const detail = error && typeof error === 'object' && 'error' in error ? error.error : undefined;
@@ -615,6 +616,16 @@ export class MessageOutbox {
     if (item.disposed || !task.create) return;
     this.acknowledge(item, message, task.create, published);
     if (item.cancelled()) void this.delete(item);
+    const comment = task.intent().forwardComment;
+    if (comment && item.published() && !item.cancelled()) {
+      // Consume before enqueueing: HTTP and WS may both acknowledge this forward.
+      task.intent.update((intent) => ({ ...intent, forwardComment: undefined }));
+      this.enqueue(item.chatId, item.threadId, comment.text, {
+        messageType: MessageType.text,
+        attachmentIds: [],
+        mentions: comment.mentions,
+      });
+    }
     this.pump();
   }
 

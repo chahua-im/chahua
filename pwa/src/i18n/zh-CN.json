@@ -488,6 +488,10 @@
       "recallFailed": "已撤回 {{succeeded}} 条，{{failed}} 条未能撤回，请重试。"
     },
     "forward": {
+      "pendingCount": "转发 {{count}} 条消息",
+      "twoParticipants": "{{first}}和{{second}}",
+      "otherParticipants": "{{first}}和其他{{count}}人",
+      "navigationFailed": "无法打开目标会话，请重试。",
       "loadMore": "继续加载",
       "chatsFailed": "聊天加载失败，请重试。",
       "threadsFailed": "话题加载失败，请重试。",
@@ -503,7 +507,6 @@
       "search": "搜索聊天和话题",
       "replies": "{{count}} 条回复",
       "empty": "没有匹配的聊天或话题",
-      "sending": "正在转发…",
       "invalid": "所选消息已无法转发，请关闭窗口后重新选择。",
       "topicUnavailable": "话题中包含无法转发的消息。",
       "topicTooMany": "话题消息超过 {{max}} 条，无法合并转发。",

@@ -105,6 +105,8 @@ export class MessageComposer {
   readonly mentionsEnabled = input(true);
   readonly editing = input<MessageContent>();
   readonly editingUploads = input<readonly AttachmentUpload[]>([]);
+  readonly forwarding = input(false);
+  readonly forwardSubmitted = output<MentionInfo[]>();
   readonly submitted = output<Composition>();
   readonly editLast = output<void>();
   readonly escape = output<void>();
@@ -218,15 +220,21 @@ export class MessageComposer {
   );
   protected readonly canSend = computed(
     () =>
-      !this.error() &&
       !this.voiceActive() &&
-      (!!this.text().trim() || !!this.existing().length || !!this.selectedUploads().length),
+      (this.forwarding() ||
+        (!this.error() && (!!this.text().trim() || !!this.existing().length || !!this.selectedUploads().length))),
   );
   protected readonly visualUploads = computed(() =>
     this.selectedUploads().filter((u) => u.purpose !== AttachmentUploadPurpose.voice),
   );
   protected readonly useVoice = computed(
-    () => !this.editing() && !this.text().trim() && !this.existing().length && !this.selectedUploads().length,
+    () =>
+      this.voiceActive() ||
+      (!this.forwarding() &&
+        !this.editing() &&
+        !this.text().trim() &&
+        !this.existing().length &&
+        !this.selectedUploads().length),
   );
   protected async togglePanel(panel: Panel) {
     this.panel.set(this.panel() === panel ? Panel.None : panel);
@@ -242,6 +250,9 @@ export class MessageComposer {
       this.panel.set(Panel.None);
   }
   constructor() {
+    effect(() => {
+      if (this.forwarding()) this.panel.set(Panel.None);
+    });
     effect(() => {
       this.chatId();
       const message = this.editing();
@@ -344,6 +355,7 @@ export class MessageComposer {
       this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
   }
   private addFile(file: File, purpose: AttachmentUploadPurpose) {
+    if (this.forwarding() && purpose !== AttachmentUploadPurpose.voice) return;
     if (this.selectedUploads().length + this.existing().length >= 20) {
       this.tooMany.set(true);
       return;
@@ -472,6 +484,10 @@ export class MessageComposer {
   }
   protected submit() {
     if (!this.canSend()) return;
+    if (this.forwarding()) {
+      if (this.canWrite()) this.forwardSubmitted.emit(this.mentionSnapshot());
+      return;
+    }
     const uploads = this.selectedUploads();
     if (this.editing()) {
       this.handoff(MessageType.text, uploads);
@@ -484,7 +500,7 @@ export class MessageComposer {
     else this.handoff(MessageType.text, uploads);
   }
   protected sticker(sticker: StickerSummary) {
-    if (!this.canWrite()) return;
+    if (this.forwarding() || !this.canWrite()) return;
     this.panel.set(Panel.None);
     this.submitted.emit({ messageType: MessageType.sticker, attachmentIds: [], sticker });
   }
@@ -527,7 +543,13 @@ export class MessageComposer {
       this.escape.emit();
       return;
     }
-    if (event.key === 'ArrowUp' && !this.text() && !this.editing() && !this.selectedUploads().length) {
+    if (
+      event.key === 'ArrowUp' &&
+      !this.forwarding() &&
+      !this.text() &&
+      !this.editing() &&
+      !this.selectedUploads().length
+    ) {
       event.preventDefault();
       this.editLast.emit();
       return;

@@ -308,14 +308,52 @@
     [relationship]="relationship()"
     [chatId]="id()"
     [mentionsEnabled]="mentionsEnabled()"
-    [text]="editing() ? editText() : draft()"
+    [text]="!pendingForward() && editing() ? editText() : draft()"
     (textChange)="updateDraft($event)"
     [editing]="editing()"
     [editingUploads]="editingUploads()"
+    [forwarding]="!!pendingForward()"
+    (forwardSubmitted)="sendForward($event)"
     (submitted)="sendMessage($event)"
     (editLast)="editLastMessage()"
     (escape)="escapeComposer()">
-    @if (editing(); as edit) {
+    @if (pendingForward(); as sources) {
+      <div class="reply-context forward-context">
+        <ion-icon class="context-icon" [icon]="selectionIcons.forward" />
+        <div class="reply-description">
+          @if (sources.length === 1) {
+            @if (forwardPreview(); as preview) {
+              @let sender = preview.forwardedFrom?.sender ?? preview.sender;
+              <strong>{{ sender.name ?? sender.uid }}</strong>
+              <span><app-message-preview [message]="preview" /></span>
+            }
+          } @else {
+            @let participants = forwardParticipants();
+            @let first = participants[0].name ?? participants[0].uid;
+            <strong>
+              @switch (participants.length) {
+                @case (1) {
+                  {{ first }}
+                }
+                @case (2) {
+                  {{
+                    'messages.forward.twoParticipants'
+                      | transloco: { first, second: participants[1].name ?? participants[1].uid }
+                  }}
+                }
+                @default {
+                  {{ 'messages.forward.otherParticipants' | transloco: { first, count: participants.length - 1 } }}
+                }
+              }
+            </strong>
+            <span>{{ 'messages.forward.pendingCount' | transloco: { count: sources.length } }}</span>
+          }
+        </div>
+        <button type="button" class="reply-close" (click)="cancelForward()">
+          <ion-icon [icon]="closeIcon" />
+        </button>
+      </div>
+    } @else if (editing(); as edit) {
       <div class="reply-context">
         <ion-icon class="context-icon" [icon]="editing() ? editContextIcon : replyContextIcon" />
         <div class="reply-description">
@@ -467,14 +505,11 @@
 <ion-toast #muteError [message]="'conversation.muteFailed' | transloco" [duration]="3000" />
 
 @if (forwardSources().length) {
-  <app-forward-picker [messages]="forwardSources()" (forwarded)="cancelSelection()" (closed)="forwardSources.set([])" />
+  <app-forward-picker [messages]="forwardSources()" (closed)="forwardSources.set([])" />
 }
 
 @if (topicForwardOpen()) {
-  <app-forward-picker
-    [load]="loadTopicSources"
-    (forwarded)="topicForwardOpen.set(false)"
-    (closed)="topicForwardOpen.set(false)" />
+  <app-forward-picker [load]="loadTopicSources" (closed)="topicForwardOpen.set(false)" />
 }
 
 <ion-alert
