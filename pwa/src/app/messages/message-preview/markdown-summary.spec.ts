@@ -59,6 +59,7 @@ describe('MarkdownSummary', () => {
     expect(anchors).toEqual([]);
     expect(element.textContent).toBe('去 链接 看 https://auto.example/a');
     expect(element.textContent).not.toContain('[链接]');
+    expect(element.querySelector('.raw-url')).toBeNull();
   });
 
   it('renders Markdown next to a literal attachment label prefix', () => {

@@ -134,16 +134,19 @@ export function renderInlineTokens(tokens: readonly Token[], options: MarkdownRe
         const href = typeof rawHref === 'string' ? rawHref : null;
         const label = renderInlineTokens(tokens.slice(i + 1, closeIndex), options);
         if (isSafeLinkHref(href)) {
-          const custom = options.renderLink?.(href, label, token);
-          if (custom != null) {
-            out.push(custom);
-          } else {
+          const link: MarkdownNode = options.renderLink?.(href, label, token) ?? {
+            type: 'element',
+            tag: 'a',
+            attrs: { href, target: '_blank', rel: 'noopener noreferrer' },
+            children: label,
+          };
+          if (token.markup === 'linkify' && !options.singleLine && link.type === 'element') {
             out.push({
-              type: 'element',
-              tag: 'a',
-              attrs: { href, target: '_blank', rel: 'noopener noreferrer' },
-              children: label,
+              ...link,
+              attrs: { ...link.attrs, class: [link.attrs?.['class'], 'raw-url'].filter(Boolean).join(' ') },
             });
+          } else {
+            out.push(link);
           }
         } else {
           // Downgrade unsafe / relative hrefs to plain text.

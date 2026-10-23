@@ -106,6 +106,20 @@ describe('prepareMessageContent', () => {
     // Plain multi-paragraph text carries no markup and stays on the legacy path.
     expect(prepareMessageContent('one\n\ntwo', [], null, true).hasBlocks).toBe(false);
   });
+
+  it.each([true, false])('preserves bare URL wrapping with interactive=%s', (interactive) => {
+    vi.stubGlobal('location', new URL('https://chahua.app'));
+    const url = 'https://chahua.app/chats/123?token=abcdefghijklmnopqrstuvwxyz#message';
+    const html = toHtml(prepareMessageContent(`- **${url}**`, [], null, interactive).nodes!);
+    expect(html).toContain('class="raw-url"');
+    expect(html).toContain(`>${url}</${interactive ? 'a' : 'span'}>`);
+    if (interactive) {
+      expect(html).toContain(`href="${url}"`);
+      expect(html).toContain('internal="/chats/123?token=abcdefghijklmnopqrstuvwxyz#message"');
+    } else {
+      expect(html).not.toContain('<a');
+    }
+  });
 });
 
 describe('code region mention preservation', () => {
