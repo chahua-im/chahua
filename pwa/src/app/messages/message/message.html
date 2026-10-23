@@ -85,7 +85,13 @@
       (contextmenu)="showMenu($event, bubble)"
       (pointerdown)="startPress($event, bubble)">
       <div class="bubble-surface">
-        @if (first() && !isSticker() && message().messageType !== Type.forwarded && showDetails()) {
+        @if (
+          first() &&
+          !isSticker() &&
+          message().messageType !== Type.forwarded &&
+          !message().forwardedFrom &&
+          showDetails()
+        ) {
           <app-message-author
             class="sender"
             [sender]="message().sender"
