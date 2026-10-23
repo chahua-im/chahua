@@ -33,19 +33,9 @@ pre {
   margin: 0;
 }
 
-:is(p, ul, ol, pre) + :is(p, ul, ol, pre) {
-  margin-block-start: 6px;
-}
-
 ul,
 ol {
   padding-inline-start: 22px;
-}
-
-li + li,
-li > ul,
-li > ol {
-  margin-block-start: 2px;
 }
 
 a {

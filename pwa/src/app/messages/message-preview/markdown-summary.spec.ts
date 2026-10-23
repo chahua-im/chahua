@@ -93,6 +93,28 @@ describe('MarkdownSummary', () => {
     expect(element.querySelector('em')).toBeNull();
   });
 
+  it.each(['\n', '\r\n', '\r'])('replaces plain-text line breaks %j with spaces', (lineBreak) => {
+    const element = render(`第一行${lineBreak}第二行${lineBreak}@[uid:2]`, [{ uid: 2, username: '小花', gender: 0 }]);
+
+    expect(element.textContent).toBe('第一行 第二行 @小花');
+    expect(element.querySelector('br, p, a, button')).toBeNull();
+  });
+
+  it('keeps formatting across blank lines while replacing each newline with a space', () => {
+    const element = render('__第一段\n\n第二段__');
+
+    expect(element.textContent).toBe('第一段  第二段');
+    expect(element.querySelector('em')?.textContent).toBe('第一段  第二段');
+  });
+
+  it('keeps spaces between lines in Markdown previews', () => {
+    const element = render('**第一行**\n第二行\n\n第三行');
+
+    expect(element.textContent).toBe('第一行 第二行  第三行');
+    expect(element.querySelector('strong')?.textContent).toBe('第一行');
+    expect(element.querySelector('br, p')).toBeNull();
+  });
+
   it('keeps spoilers masked in single-line previews without intercepting the parent click', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     vi.stubGlobal(

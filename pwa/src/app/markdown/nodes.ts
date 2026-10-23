@@ -89,7 +89,8 @@ export function renderInlineTokens(tokens: readonly Token[], options: MarkdownRe
         break;
       }
       case 'code_inline': {
-        out.push({ type: 'element', tag: 'code', children: [{ type: 'text', text: token.content }] });
+        const text = options.singleLine ? token.content.replace(/\n/g, ' ') : token.content;
+        out.push({ type: 'element', tag: 'code', children: [{ type: 'text', text }] });
         i += 1;
         break;
       }
@@ -232,6 +233,16 @@ function renderBlocks(tokens: readonly Token[], options: MarkdownRenderOptions):
   while (i < tokens.length) {
     const token = tokens[i];
     switch (token.type) {
+      case 'chat_gap': {
+        out.push({
+          type: 'element',
+          tag: 'div',
+          attrs: { class: 'chat-line-gap' },
+          children: Array.from(token.content, () => ({ type: 'element', tag: 'br', children: [] })),
+        });
+        i += 1;
+        break;
+      }
       case 'paragraph_open': {
         const closeIndex = findMatchingTokenEnd(tokens, i);
         const content = blockInlineContent(tokens.slice(i + 1, closeIndex), options);

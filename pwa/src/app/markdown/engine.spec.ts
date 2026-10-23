@@ -104,10 +104,10 @@ describe('normalization boundaries', () => {
 
   it('reflows nested pairs without changing their marker types', () => {
     expect(markdownEngine.render('** bold __italic__ end **').trim()).toBe(
-      '<p><strong>bold <em>italic</em> end</strong></p>',
+      '<p> <strong>bold <em>italic</em> end</strong> </p>',
     );
     expect(markdownEngine.render('** bold __ italic __ end **').trim()).toBe(
-      '<p><strong>bold  <em>italic</em>  end</strong></p>',
+      '<p> <strong>bold  <em>italic</em>  end</strong> </p>',
     );
   });
 

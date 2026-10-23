@@ -127,16 +127,23 @@ describe('Message', () => {
     expect(reply).not.toHaveBeenCalled();
   });
 
-  it('renders block-level Markdown bodies without headings and keeps plain text on the legacy path', async () => {
+  it('keeps formatted blank lines inline and reserves block layout for lists and code blocks', async () => {
     const fixture = await render();
     fixture.componentRef.setInput('message', { ...testMessage, message: '# 标题\n\nline two **bold**' });
     fixture.detectChanges();
     const text = fixture.nativeElement.querySelector('.message-text app-message-text') as HTMLElement;
-    expect(text.classList.contains('blocks')).toBe(true);
+    expect(text.classList.contains('blocks')).toBe(false);
     // Headings are out of the subset: '# 标题' renders as literal paragraph text.
     expect(text.querySelector('p')?.textContent).toContain('# 标题');
     expect(text.querySelector('h1')).toBeNull();
     expect(text.querySelector('strong')?.textContent).toBe('bold');
+    expect(text.querySelectorAll('br')).toHaveLength(2);
+
+    fixture.componentRef.setInput('message', { ...testMessage, message: '- first\n\n- second' });
+    fixture.detectChanges();
+    expect(text.classList.contains('blocks')).toBe(true);
+    expect(text.querySelectorAll('li')).toHaveLength(2);
+    expect(text.querySelector('.chat-line-gap')?.querySelectorAll('br')).toHaveLength(1);
 
     fixture.componentRef.setInput('message', { ...testMessage, message: 'plain legacy text' });
     fixture.detectChanges();

@@ -25,16 +25,23 @@ function inlineChildrenOf(inner: readonly Token[]): Token[] {
 
 function previewBlocks(tokens: readonly Token[], options: MarkdownRenderOptions): MarkdownNode[] {
   const parts: MarkdownNode[] = [];
+  let hasContent = false;
 
   const addUnit = (content: MarkdownNode[]): void => {
-    if (parts.length) parts.push({ type: 'text', text: ' ' });
+    if (hasContent) parts.push({ type: 'text', text: ' ' });
     parts.push(...content);
+    hasContent = true;
   };
 
   let i = 0;
   while (i < tokens.length) {
     const token = tokens[i];
     switch (token.type) {
+      case 'chat_gap': {
+        parts.push({ type: 'text', text: ' '.repeat(token.content.length) });
+        i += 1;
+        break;
+      }
       case 'paragraph_open': {
         const closeIndex = findMatchingTokenEnd(tokens, i);
         addUnit(renderInlineTokens(inlineChildrenOf(tokens.slice(i + 1, closeIndex)), options));
@@ -74,9 +81,7 @@ function previewBlocks(tokens: readonly Token[], options: MarkdownRenderOptions)
           }
           const itemEnd = findMatchingTokenEnd(inner, j);
           const itemContent = previewBlocks(inner.slice(j + 1, itemEnd), options);
-          if (parts.length) parts.push({ type: 'text', text: ' ' });
-          parts.push({ type: 'text', text: ordered ? itemNumber + '. ' : '• ' });
-          parts.push(...itemContent);
+          addUnit([{ type: 'text', text: ordered ? itemNumber + '. ' : '• ' }, ...itemContent]);
           itemNumber += 1;
           j = itemEnd + 1;
         }
@@ -85,7 +90,7 @@ function previewBlocks(tokens: readonly Token[], options: MarkdownRenderOptions)
       }
       case 'fence':
       case 'code_block': {
-        const text = token.content.replace(/\s*\n+\s*/g, ' ').trim();
+        const text = token.content.trim().replace(/\n/g, ' ');
         if (text) addUnit([{ type: 'element', tag: 'code', children: [{ type: 'text', text }] }]);
         i += 1;
         break;
