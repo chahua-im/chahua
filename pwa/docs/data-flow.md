@@ -118,7 +118,7 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 | 打开媒体或定位附件            | `GET /chats/{c}/messages/{m}`                                          | 当前消息的媒体集合，或所属话题路由          |
 | 聊天内消息搜索                | `GET /chats/{c}/messages/search`，q、sort、limit、offset               | ChatSearch 局部分页                         |
 | 邀请预览与管理                | `GET /invites/invite?inviteCode=...`、`GET /invites`                   | InviteCard、StartChat、ChatInvites          |
-| 查看完整表态                  | `GET /chats/{c}/messages/{m}/reactions`                                | ReactionDetails；按表情本地过滤             |
+| 查看完整表态                  | `GET /chats/{c}/messages/{m}/reactions`                                | ReactionDetails；用 sortIndex 还原时间顺序并按用户聚合，按表情本地过滤 |
 | 打开贴纸库                    | 收藏、已订阅包、自有包三个 GET                                         | StickerPicker；切包读取该包详情，包列表按用户贴纸包顺序排序 |
 | 打开表情和贴纸设置            | `GET /stickers/packs/mine/owned`、`GET /stickers/packs/mine/subscribed` | StickerSettings 合并展示                                    |
 | 打开贴纸包详情                | `GET /stickers/packs/{id}`                                             | StickerPackDetail                                           |
