@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
+import { ModalController } from '@ionic/angular';
 import { Connection } from '../api/connection';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser } from '../api/testing';
@@ -9,6 +10,7 @@ import { ConversationNavigation } from './conversation-navigation';
 import { DraftStore } from './draft-store';
 
 describe('Forward destination navigation', () => {
+  const modals = { getTop: vi.fn(), dismiss: vi.fn() };
   const router = {
     url: '',
     createUrlTree: (commands: string[]) => commands.join('/'),
@@ -18,9 +20,12 @@ describe('Forward destination navigation', () => {
   beforeEach(() => {
     router.url = '/chats';
     router.navigate.mockReset().mockResolvedValue(true);
+    modals.getTop.mockReset().mockResolvedValue(undefined);
+    modals.dismiss.mockReset().mockResolvedValue(true);
     TestBed.configureTestingModule({
       providers: [
         { provide: Router, useValue: router },
+        { provide: ModalController, useValue: modals },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         { provide: Connection, useValue: mockRealtime() },
       ],
@@ -57,5 +62,40 @@ describe('Forward destination navigation', () => {
       false,
     );
     expect(drafts.forward(testChat.id)).toBe(previous);
+    expect(modals.getTop).not.toHaveBeenCalled();
+    expect(modals.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('keeps the picker until routing succeeds, then dismisses it with the navigation role', async () => {
+    let resolve!: (opened: boolean) => void;
+    router.navigate.mockImplementation(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    modals.getTop.mockResolvedValueOnce({}).mockResolvedValue(undefined);
+    const pending = TestBed.inject(ConversationNavigation).prepareForward(testChat.id, undefined, [testMessage]);
+    expect(modals.getTop).not.toHaveBeenCalled();
+    resolve(true);
+    expect(await pending).toBe(true);
+    expect(modals.dismiss).toHaveBeenCalledExactlyOnceWith(undefined, 'navigate');
+  });
+
+  it('does not restore the old account draft when a pending navigation fails after logout', async () => {
+    const drafts = TestBed.inject(DraftStore);
+    drafts.setForward(testChat.id, undefined, [testMessage]);
+    let resolve!: (opened: boolean) => void;
+    router.navigate.mockImplementation(
+      () =>
+        new Promise<boolean>((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = TestBed.inject(ConversationNavigation).prepareForward(testChat.id, undefined, [testMessage]);
+    TestBed.inject(SessionStore).user.set(undefined);
+    resolve(false);
+    await pending;
+    expect(drafts.forward(testChat.id)).toBeUndefined();
   });
 });

@@ -31,7 +31,9 @@ export class ConversationNavigation {
     this.drafts.setForward(chatId, threadId, selection);
     let opened = false;
     try {
-      opened = await this.open(chatId, threadId);
+      // Keep the picker and its search/scroll state available if routing fails.
+      opened = await this.navigate(chatId, threadId);
+      if (opened) await dismissChatOverlays(this.modals);
       return opened;
     } finally {
       if (!opened && this.drafts.forward(chatId, threadId) === selection)
@@ -41,6 +43,10 @@ export class ConversationNavigation {
 
   async open(chatId: SnowflakeID, threadId?: SnowflakeID, messageId?: SnowflakeID) {
     await dismissChatOverlays(this.modals);
+    return this.navigate(chatId, threadId, messageId);
+  }
+
+  private navigate(chatId: SnowflakeID, threadId?: SnowflakeID, messageId?: SnowflakeID) {
     const commands = ['/chats/chat', decodeId(chatId), ...(threadId ? ['thread', decodeId(threadId)] : [])];
     const extras = messageId ? { fragment: `msg=${decodeId(messageId)}` } : {};
     const url = this.router.serializeUrl(this.router.createUrlTree(commands, extras));

@@ -1,5 +1,5 @@
 import { signal } from '@angular/core';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
 import { DraftStore } from '../conversations/draft-store';
 import { TestBed } from '@angular/core/testing';
@@ -320,7 +320,7 @@ describe('MessageOutbox', () => {
     await item.operation;
     expect(item.published()).toBe(false);
     const navigation = TestBed.inject(ConversationNavigation);
-    vi.spyOn(navigation, 'open').mockResolvedValue(true);
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     await navigation.prepareForward(testChat.id, undefined, [item]);
     const drafts = TestBed.inject(DraftStore);
     expect(drafts.forward(testChat.id)?.[0]).toBe(response);
