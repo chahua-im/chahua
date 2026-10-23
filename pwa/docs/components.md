@@ -74,7 +74,7 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 | ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、ChatListStore、Preferences、AppInstall；控制分类面板与菜单，active 时同步 selection，头像菜单提供收藏、设置与安装入口 |
 | ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数 | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence |
 | ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量 |
-| ChatAvatar         | entry、size、online | 由输入派生头像、占位、话题角标和在线圆点，无请求 |
+| ChatAvatar         | entry、size、online；当前头像和角标图片的加载状态 | 文字占位保持至当前 URL 图片成功加载；同 URL 的 entry 更新保留加载状态，URL 切换才重置并忽略旧事件；失败回退；展示在线圆点，无业务请求 |
 | DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                | GroupsService、UsersService；选择用户或打开资料                                       |
 | ChatLink           | 路由参数；failed                                                                                                     | 解析链接和静态路由配置、按需查询消息/用户；负责详情弹窗与浏览器历史的生命周期         |
 

@@ -8,6 +8,7 @@
 }
 
 ion-avatar {
+  position: relative;
   width: 100%;
   height: 100%;
   display: grid;
@@ -15,6 +16,20 @@ ion-avatar {
   color: var(--ion-color-light-contrast);
   font-weight: 600;
   font-size: round(var(--avatar-size) / 3, 1px);
+}
+
+ion-avatar img {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+
+  &.loaded {
+    visibility: visible;
+  }
+}
+
+.image-loaded {
+  visibility: hidden;
 }
 .placeholder {
   color: var(--ion-color-primary-contrast);
