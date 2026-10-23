@@ -19,7 +19,7 @@ import { Connection, ResyncReason } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, wireChat, wireMessage } from '../api/testing';
-import { ChatListStore, FriendRequestAction } from './chat-list-store';
+import { ChatListError, ChatListStore, FriendRequestAction } from './chat-list-store';
 import { ChatStore } from './chat-store';
 
 const rootId = encodeId('100');
@@ -137,9 +137,64 @@ describe('ChatListStore threads and friend requests', () => {
     await settle();
   }
 
+  it('retries a failed thread continuation without rereading the head', async () => {
+    await startThreads();
+    const pending = threads.loadMore();
+    await settle();
+    http.expectOne(activeThreadsUrl + '&before=older').flush('', { status: 503, statusText: 'Unavailable' });
+    await pending;
+    expect(threads.error()).toBe(ChatListError.More);
+    expect(threads.items()).toHaveLength(1);
+    const retry = threads.retry();
+    await settle();
+    expect(threads.loadingMore()).toBe(true);
+    http.expectNone(activeThreadsUrl);
+    http.expectOne(activeThreadsUrl + '&before=older').flush({ threads: [] });
+    await retry;
+    expect(threads.error()).toBeUndefined();
+    expect(threads.items()).toHaveLength(1);
+    expect(threads.hasMore()).toBe(false);
+  });
+
   function receivedRequest() {
     events.next({ type: ServerWsMessageType.friendRequestReceived, payload: { fromUid: 2 } });
   }
+
+  it.each([false, true])(
+    'keeps a failed thread page retryable when unread also fails (unread first: %s)',
+    async (unreadFirst) => {
+      await startThreads();
+      const paging = threads.loadMore();
+      await settle();
+      updatedThread();
+      await flushReads();
+      const pageRequest = http.expectOne(activeThreadsUrl + '&before=older');
+      const readRequest = http.expectOne(topicUrl + '/read-state');
+      for (const request of unreadFirst ? [readRequest, pageRequest] : [pageRequest, readRequest]) {
+        request.flush('', { status: 503, statusText: 'Unavailable' });
+        await settle();
+      }
+      await paging;
+      expect(threads.listError()).toBe(ChatListError.More);
+      expect(threads.error()).toBe(ChatListError.More);
+      const retry = threads.retry();
+      await settle();
+      http.expectNone(activeThreadsUrl);
+      http.expectOne(activeThreadsUrl + '&before=older').flush({ threads: [], nextCursor: 'tail' });
+      await retry;
+      expect(threads.listError()).toBeUndefined();
+      expect(threads.error()).toBe(ChatListError.Unread);
+      await flushReads();
+      http.expectOne(topicUrl + '/read-state').flush({ unreadCount: 3 });
+      await settle();
+      expect(threads.error()).toBeUndefined();
+      const more = threads.loadMore();
+      await settle();
+      http.expectOne(activeThreadsUrl + '&before=tail').flush({ threads: [] });
+      await more;
+      expect(threads.hasMore()).toBe(false);
+    },
+  );
 
   function updatedThread() {
     events.next({
@@ -747,7 +802,7 @@ describe('ChatListStore threads and friend requests', () => {
     http.expectOne(activeThreadsUrl).flush(structuredClone({ threads: [wireThread] }));
     await paging;
     await settle();
-    expect(query.error()).toBe(false);
+    expect(query.error()).toBeUndefined();
     expect(query.hasMore()).toBe(false);
     returned();
   });
