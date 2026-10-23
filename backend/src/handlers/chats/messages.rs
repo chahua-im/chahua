@@ -12,10 +12,11 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::{
     dto::{
         messages::{
-            ForwardMessageBody, ForwardMessagesBody, ForwardedMessagesResponse,
-            ListMessagesResponse, MessageResponse, SearchMessagesResponse,
+            BulkDeleteMessagesBody, ForwardMessageBody, ForwardMessagesBody,
+            ForwardedMessagesResponse, ListMessagesResponse, MessageResponse,
+            SearchMessagesResponse,
         },
-        ws::{NotificationPayload, NotificationType, ServerWsMessage},
+        ws::{BulkDeletedPayload, NotificationPayload, NotificationType, ServerWsMessage},
     },
     errors::AppError,
     extractors::DbConn,
@@ -1550,10 +1551,77 @@ async fn delete_message(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Delete a selection atomically. Already deleted messages are accepted on retry.
+#[utoipa::path(
+    post,
+    path = "/bulk-delete",
+    tag = "chats",
+    params(("chat_id" = String, Path, description = "Chat ID")),
+    request_body = BulkDeleteMessagesBody,
+    responses(
+        (status = 200, description = "Selection deleted and metadata reconciled", body = BulkDeletedPayload),
+        (status = 400, description = "Invalid selection size or unpublished message"),
+        (status = 403, description = "Chat is not writable or a message cannot be deleted by this user"),
+        (status = 404, description = "A selected message does not belong to this chat"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn bulk_delete_messages(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<BulkDeleteMessagesBody>,
+) -> Result<Json<BulkDeletedPayload>, AppError> {
+    use crate::services::message_deletion::{delete_selection, validate_message_ids};
+
+    let ids = validate_message_ids(body.message_ids)?;
+    let conn = &mut *conn;
+    check_membership(conn, chat_id, uid)?;
+    social::require_chat_writable(conn, chat_id, uid)?;
+    let is_admin = load_requester_group_role(conn, chat_id, uid)? == Some(GroupRole::Admin);
+    let deletion = delete_selection(conn, chat_id, uid, is_admin, &ids)?;
+
+    state.unread_service.invalidate_chat(chat_id);
+    if let Some(search) = &state.message_search {
+        search.delete_message_ids_best_effort(ids);
+    }
+    state.ws_registry.broadcast_to_uids(
+        &deletion.member_uids,
+        std::sync::Arc::new(ServerWsMessage::MessagesBulkDeleted(
+            deletion.payload.clone(),
+        )),
+    );
+    for root in &deletion.roots {
+        if let Err(error) = crate::services::threads::broadcast_thread_update_to_uids(
+            conn,
+            &state.ws_registry,
+            &deletion.member_uids,
+            chat_id,
+            root.id,
+        ) {
+            tracing::warn!(
+                chat_id,
+                root_id = root.id,
+                ?error,
+                "failed to broadcast thread update after bulk deletion"
+            );
+        }
+    }
+    for root in attach_metadata(conn, deletion.roots, &state.media, &state.avatars, uid).await {
+        state.ws_registry.broadcast_to_uids(
+            &deletion.member_uids,
+            std::sync::Arc::new(ServerWsMessage::MessageUpdated(root)),
+        );
+    }
+    Ok(Json(deletion.payload))
+}
+
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_messages, post_message))
         .routes(utoipa_axum::routes!(forward_messages))
+        .routes(utoipa_axum::routes!(bulk_delete_messages))
         .routes(utoipa_axum::routes!(forward_message))
         .routes(utoipa_axum::routes!(get_forwarded_messages))
         .routes(utoipa_axum::routes!(get_forwarded_bundle_messages))

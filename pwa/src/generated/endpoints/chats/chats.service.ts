@@ -12,6 +12,8 @@ import { Injectable, inject } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type {
   AcknowledgeReactionsBody,
+  BulkDeleteMessagesBody,
+  BulkDeletedPayload,
   CreateMessageBody,
   ForwardMessageBody,
   ForwardMessagesBody,
@@ -448,6 +450,58 @@ export class ChatsService {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
+  }
+  /**
+   * @summary Delete a selection atomically. Already deleted messages are accepted on retry.
+   */
+  bulkDeleteMessages<TData = BulkDeletedPayload>(
+    chatId: SnowflakeID,
+    bulkDeleteMessagesBody: BulkDeleteMessagesBody,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  bulkDeleteMessages<TData = BulkDeletedPayload>(
+    chatId: SnowflakeID,
+    bulkDeleteMessagesBody: BulkDeleteMessagesBody,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  bulkDeleteMessages<TData = BulkDeletedPayload>(
+    chatId: SnowflakeID,
+    bulkDeleteMessagesBody: BulkDeleteMessagesBody,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  bulkDeleteMessages<TData = BulkDeletedPayload>(
+    chatId: SnowflakeID,
+    bulkDeleteMessagesBody: BulkDeleteMessagesBody,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.post<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/bulk-delete`,
+        bulkDeleteMessagesBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.post<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/messages/bulk-delete`,
+        bulkDeleteMessagesBody,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.post<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/messages/bulk-delete`,
+      bulkDeleteMessagesBody,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
   }
   /**
    * @summary POST /chats/:chat_id/messages/forward — Merge 2–100 distinct messages into a chat or thread.

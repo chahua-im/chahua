@@ -75,6 +75,22 @@ mod tests {
     }
 
     #[test]
+    fn bulk_deletion_documents_bounded_string_ids_and_a_reconciled_response() {
+        let document = api_document();
+        let ids = &document["components"]["schemas"]["BulkDeleteMessagesBody"]["properties"]
+            ["messageIds"];
+        assert_eq!(ids["minItems"], 1);
+        assert_eq!(ids["maxItems"], 100);
+        assert_eq!(ids["items"]["type"], "string");
+        let operation = &document["paths"]["/chats/{chat_id}/messages/bulk-delete"]["post"];
+        assert_eq!(operation["operationId"], "bulk_delete_messages");
+        assert_eq!(
+            operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/BulkDeletedPayload"
+        );
+    }
+
+    #[test]
     fn merged_forward_selection_documents_its_size_limits() {
         let document = api_document();
         let selection =

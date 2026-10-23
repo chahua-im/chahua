@@ -9,6 +9,7 @@ pub mod forwarding;
 pub mod image_processing;
 pub mod invites;
 pub mod media;
+pub mod message_deletion;
 pub mod message_search;
 pub mod messages;
 pub mod presence;

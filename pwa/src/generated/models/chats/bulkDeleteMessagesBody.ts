@@ -5,12 +5,12 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
-import type { SnowflakeID } from './snowflakeID';
+import type { SnowflakeID } from '../snowflakeID';
 
-export interface BulkDeletedPayload {
-  chatId: SnowflakeID;
-  /** False for intermediate batches; true after metadata and read cursors are reconciled. */
-  complete?: boolean;
+export interface BulkDeleteMessagesBody {
+  /**
+   * @minItems 1
+   * @maxItems 100
+   */
   messageIds: SnowflakeID[];
-  threadRootIds?: SnowflakeID[];
 }

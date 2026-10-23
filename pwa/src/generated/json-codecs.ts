@@ -17,6 +17,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   AvatarUploadUrlResponse: {
     imageId: 1,
   },
+  BulkDeleteMessagesBody: {
+    messageIds: [1],
+  },
   BulkDeletedPayload: {
     chatId: 1,
     messageIds: [1],
@@ -425,6 +428,12 @@ export const jsonOperations: JsonOperationCodec[] = [
     path: '/chats/{chat_id}/messages',
     body: 'CreateMessageBody',
     response: 'MessageResponse',
+  },
+  {
+    method: 'POST',
+    path: '/chats/{chat_id}/messages/bulk-delete',
+    body: 'BulkDeleteMessagesBody',
+    response: 'BulkDeletedPayload',
   },
   {
     method: 'POST',
