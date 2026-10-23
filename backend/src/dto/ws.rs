@@ -100,6 +100,9 @@ pub enum ServerWsMessage {
     ThreadUpdate(ThreadUpdatePayload),
     ThreadMembershipChanged(ThreadMembershipChangedPayload),
     ChatArchiveStateChanged(ChatArchiveStateChangedPayload),
+    NotificationExceptionsCleared(crate::dto::groups::NotificationExceptionsCleared),
+    NotificationSettingsChanged(crate::dto::users::NotificationSettingsResponse),
+    ChatNotificationSettingChanged(crate::dto::groups::ChatNotificationSettingResponse),
     ReadReceiptChanged(ReadReceiptChangedPayload),
     /// Chat-level pin event. Kept stable for already-deployed clients.
     PinAdded(PinUpdatePayload),
@@ -133,6 +136,9 @@ impl ServerWsMessage {
             Self::ThreadUpdate(_) => "threadUpdate",
             Self::ThreadMembershipChanged(_) => "threadMembershipChanged",
             Self::ChatArchiveStateChanged(_) => "chatArchiveStateChanged",
+            Self::NotificationExceptionsCleared(_) => "notificationExceptionsCleared",
+            Self::NotificationSettingsChanged(_) => "notificationSettingsChanged",
+            Self::ChatNotificationSettingChanged(_) => "chatNotificationSettingChanged",
             Self::ReadReceiptChanged(_) => "readReceiptChanged",
             Self::PinAdded(_) => "pinAdded",
             Self::ThreadPinAdded(_) => "threadPinAdded",
@@ -246,7 +252,6 @@ pub struct ChatArchiveStateChangedPayload {
     #[schema(value_type = String)]
     pub chat_id: i64,
     pub archived: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub muted_until: Option<DateTime<Utc>>,
 }
 

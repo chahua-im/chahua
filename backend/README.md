@@ -104,8 +104,9 @@ Each response entry in `summaries` contains the key and:
   capped independently at 1000, for tab badges and the background title's `@` indicator.
   DMs and DM threads contribute zero to both attention counts. Reactions are separate.
 
-Main chats are muted while `mutedUntil` is in the future; expired or absent mute times
-are unmuted. Threads use their own archive state as their mute state, independently
+Main chats are muted while `mutedUntil` is in the future. Otherwise `muteOverride`
+selects explicit mute/notify, or null inherits the account's group/DM default.
+New and missing accounts default to muted groups and unmuted DMs. Threads use their own archive state as their mute state, independently
 of the parent chat's mute or archive state. All three unmuted counts use this rule.
 Message and conversation counts include DMs and DM threads. The unmuted counts reuse
 the same per-conversation counts without additional queries. Chat rows can retain gray mention badges
@@ -125,6 +126,52 @@ counts use `idx_messages_thread_reply_stats`, attention counts use
 queries independently of list pagination. No new tables or indexes are required.
 
 ## PWA notification metadata
+
+### Account and chat notification preferences
+
+`GET /users/me` includes `muteGroupChatsByDefault` and `muteDirectChatsByDefault`.
+`GET /users/me/notification-settings` returns those two fields; `PATCH` updates only
+supplied non-null fields. An empty patch is rejected. Updates preserve unrelated
+user settings and concurrent patches to the other category.
+
+`PUT /group/{chat_id}/notification-setting` requires membership and accepts `mode`:
+`inherit`, `alwaysMuted`, `alwaysUnmuted`, or `temporarilyMuted`. Temporary mute
+requires `durationSeconds` in 1–604800 and preserves the fallback override; other
+modes reject a duration and clear the temporary expiry. The response contains
+`chatId`, `kind`, `archived`, raw `mutedUntil`, nullable `muteOverride`, and effective
+`isMuted`. Chat lists and details also expose the requesting user's `archived`,
+`muteOverride`, and `isMuted`. Details include archive state even when the client
+has not loaded the archived chat list, so online notifications can enforce it.
+Time-sensitive clients should recompute at expiry using the raw preference and
+account defaults rather than retaining `isMuted` indefinitely.
+
+`GET /users/me/notification-exceptions?kind=group|dm&after=<chat-id>&limit=<n>` lists
+explicit overrides from both active and archived memberships, ordered by ascending
+chat ID. The response includes `exceptions`, `nextCursor`, and a `totalCount` for
+the whole category, independent of the cursor. Limit defaults to 100 and is clamped
+to 1–100. Temporary mute alone is not an exception. Each row carries the setting,
+name/avatar, and batch-resolved DM peer metadata. Queries use existing membership
+indexes and never enumerate messages or fetch each chat separately.
+
+Archive/unarchive preserves notification preferences. The legacy DELETE mute endpoint
+still atomically enables notifications and unarchives; legacy PUT mute retains its
+timestamp response and updates the override alongside it. New preference writes
+do not unarchive implicitly.
+
+Committed writes broadcast `notificationSettingsChanged` (the two account defaults)
+or `chatNotificationSettingChanged` (the full chat-setting response) only to that
+account's connected devices, and invalidate its unread subscriptions. Chat writes
+also send the compatible `chatArchiveStateChanged` snapshot with the actual
+`mutedUntil`, including null. Per-account write/broadcast ordering is serialized
+within the server; cross-process delivery has the same limitation as the existing
+WS registry. Clients must reload account defaults and chat preferences on reconnect
+and apply defaults changes locally without settings polling or per-chat refetches.
+
+The one-time migration resets all group preferences, preserves unarchived DM
+permanent mutes as explicit overrides, and clears archive-owned DM permanent mutes.
+Finite DM mutes keep their expiry. The erased historical preferences cannot be
+reconstructed, so that migration rejects rollback. See the staged rollout and
+client compatibility work in [the implementation plan](../docs/notification-preferences-plan.md).
 
 DM Web Push recipients are filtered using ordinary message rules without
 mention/reply exceptions, including DM threads. Ineligible Web Push subscriptions
@@ -431,3 +478,5 @@ all thread-list pages. Existing clients can continue to use only `lastReadMessag
 Chat and thread lists accept optional exact-row filters (`chatId` on `/chats`, `rootId` on `/threads`), retaining membership/subscription and archive filtering. Bulk deletion events mark intermediate batches with `complete: false`; a final event with empty `messageIds`, `complete: true` and `threadRootIds` follows metadata/read-cursor reconciliation. Clients can defer summary reads until that final event while applying message tombstones immediately.
 
 `readReceiptChanged` includes optional `readerUid` and `threadRootId` for ordinary cursor advances. With `readerUid` present, an absent thread identifies the main chat. Privacy invalidations omit the reader and affect all scopes. The event still carries no cursor: authorized HTTP reads enforce current privacy policy.
+
+Notification settings support `DELETE /users/me/notification-exceptions?kind=group|dm` to reset all explicit overrides in one category. The owner-scoped update clears their temporary mutes as well, preserves archive flags and inherited temporary mutes, and returns the exact affected `chatIds`. A single `notificationExceptionsCleared` WebSocket event synchronizes the owner’s devices and invalidates unread summaries. No schema change is needed.

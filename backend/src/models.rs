@@ -525,6 +525,7 @@ pub struct GroupMembership {
     pub muted_until: Option<DateTime<Utc>>,
     pub join_reason: GroupJoinReason,
     pub join_reason_extra: Option<serde_json::Value>,
+    pub mute_override: Option<bool>,
 }
 
 /// For inserting a membership. Use `"member"` and `Utc::now()` for `role` and `joined_at` to match DB defaults.
@@ -884,6 +885,8 @@ pub struct UserExtra {
     pub verification_question: Option<String>,
     pub token_gen: i32,
     pub presence_visibility: PresenceVisibility,
+    pub mute_group_chats_by_default: bool,
+    pub mute_direct_chats_by_default: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]

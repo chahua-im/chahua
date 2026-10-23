@@ -157,6 +157,9 @@ impl ConnectionRegistry {
                 | ServerWsMessage::ThreadUpdate(_)
                 | ServerWsMessage::ThreadMembershipChanged(_)
                 | ServerWsMessage::ChatArchiveStateChanged(_)
+                | ServerWsMessage::NotificationExceptionsCleared(_)
+                | ServerWsMessage::NotificationSettingsChanged(_)
+                | ServerWsMessage::ChatNotificationSettingChanged(_)
                 | ServerWsMessage::FriendRequestResolved(_)
                 | ServerWsMessage::FriendshipRemoved(_)
                 | ServerWsMessage::Notification(_)
@@ -355,6 +358,84 @@ mod tests {
 
     fn registry() -> ConnectionRegistry {
         ConnectionRegistry::new(Arc::new(WsMetrics::new(&prometheus::Registry::new())))
+    }
+
+    #[tokio::test]
+    async fn notification_preferences_reach_only_the_owners_devices_and_refresh_unread() {
+        use crate::dto::{
+            groups::ChatNotificationSettingResponse, users::NotificationSettingsResponse,
+        };
+        let registry = registry();
+        let (first, mut rx1) = registry.register(7, "a".into());
+        let (second, mut rx2) = registry.register(7, "b".into());
+        let (_, mut other) = registry.register(8, "other".into());
+        while rx1.try_recv().is_ok() {}
+        while rx2.try_recv().is_ok() {}
+        while other.try_recv().is_ok() {}
+        registry.broadcast_to_uids(
+            &[7],
+            Arc::new(ServerWsMessage::NotificationSettingsChanged(
+                NotificationSettingsResponse {
+                    mute_group_chats_by_default: true,
+                    mute_direct_chats_by_default: false,
+                },
+            )),
+        );
+        crate::services::notification_preferences::publish_chat_notification_setting(
+            &registry,
+            7,
+            ChatNotificationSettingResponse {
+                chat_id: 42,
+                kind: crate::models::GroupKind::Group,
+                archived: false,
+                muted_until: None,
+                mute_override: Some(false),
+                is_muted: false,
+            },
+        );
+        for rx in [&mut rx1, &mut rx2] {
+            assert!(matches!(
+                &*rx.try_recv().unwrap(),
+                ServerWsMessage::NotificationSettingsChanged(_)
+            ));
+            assert!(matches!(
+                &*rx.try_recv().unwrap(),
+                ServerWsMessage::ChatArchiveStateChanged(_)
+            ));
+            let snapshot = rx.try_recv().unwrap();
+            assert!(
+                matches!(&*snapshot, ServerWsMessage::ChatNotificationSettingChanged(setting) if setting.mute_override == Some(false) && !setting.is_muted)
+            );
+            let value = serde_json::to_value(&*snapshot).unwrap();
+            assert_eq!(value["payload"]["chatId"], "42");
+            assert!(value["payload"]["mutedUntil"].is_null());
+            assert_eq!(value["payload"]["muteOverride"], false);
+        }
+        registry.broadcast_to_uids(
+            &[7],
+            Arc::new(ServerWsMessage::NotificationExceptionsCleared(
+                crate::dto::groups::NotificationExceptionsCleared {
+                    kind: crate::models::GroupKind::Group,
+                    chat_ids: vec!["9007199254740993".into()],
+                },
+            )),
+        );
+        for rx in [&mut rx1, &mut rx2] {
+            let event = rx.try_recv().unwrap();
+            let value = serde_json::to_value(&*event).unwrap();
+            assert_eq!(value["type"], "notificationExceptionsCleared");
+            assert_eq!(value["payload"]["chatIds"][0], "9007199254740993");
+            assert!(rx.try_recv().is_err());
+        }
+        assert!(other.try_recv().is_err());
+        for entry in [first, second] {
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                entry.unread_changed.notified(),
+            )
+            .await
+            .unwrap();
+        }
     }
 
     #[tokio::test]

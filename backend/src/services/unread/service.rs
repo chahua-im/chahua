@@ -10,14 +10,18 @@ use diesel::PgConnection;
 
 use super::chat_index::{ChatUnreadIndex, ChatUnreadMessageSnapshot};
 use crate::constants::{MAX_UNREAD_COUNT, UNREAD_CHAT_INDEX_LOAD_BATCH_SIZE};
-use crate::schema::group_membership;
+use crate::models::GroupKind;
+use crate::schema::{group_membership, groups};
+use crate::services::notification_preferences::{
+    load_notification_defaults, load_notification_defaults_for_users, ChatNotificationSetting,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatUnreadMembership {
     pub chat_id: i64,
     pub last_read_message_id: Option<i64>,
     pub archived: bool,
-    pub muted_until: Option<DateTime<Utc>>,
+    pub is_muted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +30,7 @@ pub struct UserChatUnreadMembership {
     pub chat_id: i64,
     pub last_read_message_id: Option<i64>,
     pub archived: bool,
-    pub muted_until: Option<DateTime<Utc>>,
+    pub is_muted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,7 +199,7 @@ impl UnreadService {
         uid: i32,
     ) -> Result<UnreadSummaryCounts, DieselError> {
         let memberships = Self::load_user_chat_memberships(conn, uid)?;
-        self.count_membership_unread_summary(conn, &memberships, Utc::now())
+        self.count_membership_unread_summary(conn, &memberships)
     }
 
     pub fn count_users_unread_totals(
@@ -204,7 +208,7 @@ impl UnreadService {
         target_uids: &[i32],
     ) -> Result<HashMap<i32, i64>, DieselError> {
         let memberships = Self::load_users_chat_memberships(conn, target_uids)?;
-        self.count_user_membership_unread_totals(conn, target_uids, &memberships, Utc::now())
+        self.count_user_membership_unread_totals(conn, target_uids, &memberships)
     }
 
     /// Per-chat unread @mention counts (main scope, non-thread messages) for a user.
@@ -619,9 +623,8 @@ impl UnreadService {
         &self,
         conn: &mut PgConnection,
         memberships: &[ChatUnreadMembership],
-        now: DateTime<Utc>,
     ) -> Result<UnreadSummaryCounts, DieselError> {
-        self.count_membership_unread_summary_with_loader(memberships, now, |chat_ids| {
+        self.count_membership_unread_summary_with_loader(memberships, |chat_ids| {
             Self::load_chat_unread_snapshots(conn, chat_ids)
         })
     }
@@ -629,7 +632,6 @@ impl UnreadService {
     fn count_membership_unread_summary_with_loader<E>(
         &self,
         memberships: &[ChatUnreadMembership],
-        now: DateTime<Utc>,
         load: impl FnMut(&[i64]) -> Result<Vec<ChatUnreadSnapshot>, E>,
     ) -> Result<UnreadSummaryCounts, E> {
         let counts = self.count_membership_unreads_with_loader(memberships, load)?;
@@ -649,11 +651,7 @@ impl UnreadService {
                 continue;
             }
 
-            if membership
-                .muted_until
-                .map(|muted_until| muted_until > now)
-                .unwrap_or(false)
-            {
+            if membership.is_muted {
                 continue;
             }
 
@@ -676,21 +674,16 @@ impl UnreadService {
         conn: &mut PgConnection,
         target_uids: &[i32],
         memberships: &[UserChatUnreadMembership],
-        now: DateTime<Utc>,
     ) -> Result<HashMap<i32, i64>, DieselError> {
-        self.count_user_membership_unread_totals_with_loader(
-            target_uids,
-            memberships,
-            now,
-            |chat_ids| Self::load_chat_unread_snapshots(conn, chat_ids),
-        )
+        self.count_user_membership_unread_totals_with_loader(target_uids, memberships, |chat_ids| {
+            Self::load_chat_unread_snapshots(conn, chat_ids)
+        })
     }
 
     fn count_user_membership_unread_totals_with_loader<E>(
         &self,
         target_uids: &[i32],
         memberships: &[UserChatUnreadMembership],
-        now: DateTime<Utc>,
         load: impl FnMut(&[i64]) -> Result<Vec<ChatUnreadSnapshot>, E>,
     ) -> Result<HashMap<i32, i64>, E> {
         let mut totals = HashMap::with_capacity(target_uids.len());
@@ -702,12 +695,7 @@ impl UnreadService {
             .iter()
             .filter(|membership| totals.contains_key(&membership.uid))
             .filter(|membership| !membership.archived)
-            .filter(|membership| {
-                membership
-                    .muted_until
-                    .map(|muted_until| muted_until <= now)
-                    .unwrap_or(true)
-            })
+            .filter(|membership| !membership.is_muted)
             .collect::<Vec<_>>();
 
         let chat_ids = counting_memberships
@@ -834,26 +822,30 @@ impl UnreadService {
         conn: &mut PgConnection,
         uid: i32,
     ) -> Result<Vec<ChatUnreadMembership>, DieselError> {
-        use crate::schema::group_membership::dsl as gm_dsl;
-
+        let defaults = load_notification_defaults(conn, uid)?;
+        let now = Utc::now();
         let rows = group_membership::table
-            .filter(gm_dsl::uid.eq(uid))
+            .inner_join(groups::table)
+            .filter(group_membership::uid.eq(uid))
             .select((
-                gm_dsl::chat_id,
-                gm_dsl::last_read_message_id,
-                gm_dsl::archived,
-                gm_dsl::muted_until,
+                group_membership::chat_id,
+                group_membership::last_read_message_id,
+                group_membership::archived,
+                (
+                    group_membership::muted_until,
+                    group_membership::mute_override,
+                ),
+                groups::kind,
             ))
-            .load::<(i64, Option<i64>, bool, Option<DateTime<Utc>>)>(conn)?;
-
+            .load::<(i64, Option<i64>, bool, ChatNotificationSetting, GroupKind)>(conn)?;
         Ok(rows
             .into_iter()
             .map(
-                |(chat_id, last_read_message_id, archived, muted_until)| ChatUnreadMembership {
+                |(chat_id, last_read_message_id, archived, setting, kind)| ChatUnreadMembership {
                     chat_id,
                     last_read_message_id,
                     archived,
-                    muted_until,
+                    is_muted: setting.is_muted(kind, defaults, now),
                 },
             )
             .collect())
@@ -866,30 +858,44 @@ impl UnreadService {
         if target_uids.is_empty() {
             return Ok(Vec::new());
         }
-
-        use crate::schema::group_membership::dsl as gm_dsl;
-
+        let defaults = load_notification_defaults_for_users(conn, target_uids)?;
+        let now = Utc::now();
         let rows = group_membership::table
-            .filter(gm_dsl::uid.eq_any(target_uids))
+            .inner_join(groups::table)
+            .filter(group_membership::uid.eq_any(target_uids))
             .select((
-                gm_dsl::uid,
-                gm_dsl::chat_id,
-                gm_dsl::last_read_message_id,
-                gm_dsl::archived,
-                gm_dsl::muted_until,
+                group_membership::uid,
+                group_membership::chat_id,
+                group_membership::last_read_message_id,
+                group_membership::archived,
+                (
+                    group_membership::muted_until,
+                    group_membership::mute_override,
+                ),
+                groups::kind,
             ))
-            .load::<(i32, i64, Option<i64>, bool, Option<DateTime<Utc>>)>(conn)?;
-
+            .load::<(
+                i32,
+                i64,
+                Option<i64>,
+                bool,
+                ChatNotificationSetting,
+                GroupKind,
+            )>(conn)?;
         Ok(rows
             .into_iter()
             .map(
-                |(uid, chat_id, last_read_message_id, archived, muted_until)| {
+                |(uid, chat_id, last_read_message_id, archived, setting, kind)| {
                     UserChatUnreadMembership {
                         uid,
                         chat_id,
                         last_read_message_id,
                         archived,
-                        muted_until,
+                        is_muted: setting.is_muted(
+                            kind,
+                            defaults.get(&uid).copied().unwrap_or_default(),
+                            now,
+                        ),
                     }
                 },
             )
@@ -973,7 +979,7 @@ mod tests {
             chat_id,
             last_read_message_id,
             archived,
-            muted_until,
+            is_muted: muted_until.is_some_and(|until| until > Utc::now()),
         }
     }
 
@@ -989,7 +995,7 @@ mod tests {
             chat_id,
             last_read_message_id,
             archived,
-            muted_until,
+            is_muted: muted_until.is_some_and(|until| until > Utc::now()),
         }
     }
 
@@ -1173,7 +1179,7 @@ mod tests {
         ];
 
         let summary: Result<_, ()> =
-            service.count_membership_unread_summary_with_loader(&memberships, now, |chat_ids| {
+            service.count_membership_unread_summary_with_loader(&memberships, |chat_ids| {
                 let mut rows = Vec::new();
                 for chat_id in chat_ids {
                     match *chat_id {
@@ -1219,7 +1225,6 @@ mod tests {
             .count_user_membership_unread_totals_with_loader(
                 &[10, 11, 12],
                 &memberships,
-                now,
                 |chat_ids| {
                     calls.borrow_mut().push(chat_ids.to_vec());
                     let mut rows = Vec::new();
@@ -1251,7 +1256,6 @@ mod tests {
     #[test]
     fn multi_user_totals_cap_each_user_independently() {
         let service = UnreadService::new();
-        let now = Utc::now();
         let memberships = vec![
             user_membership(10, 1, Some(0), false, None),
             user_membership(10, 2, Some(0), false, None),
@@ -1259,27 +1263,21 @@ mod tests {
         ];
 
         let totals: Result<std::collections::HashMap<i32, i64>, ()> = service
-            .count_user_membership_unread_totals_with_loader(
-                &[10, 11],
-                &memberships,
-                now,
-                |chat_ids| {
-                    let mut rows = Vec::new();
-                    for chat_id in chat_ids {
-                        match *chat_id {
-                            1 => {
-                                for id in 1..=(MAX_UNREAD_COUNT + 10) {
-                                    rows.push(batch_snapshot(1, id, true));
-                                }
+            .count_user_membership_unread_totals_with_loader(&[10, 11], &memberships, |chat_ids| {
+                let mut rows = Vec::new();
+                for chat_id in chat_ids {
+                    match *chat_id {
+                        1 => {
+                            for id in 1..=(MAX_UNREAD_COUNT + 10) {
+                                rows.push(batch_snapshot(1, id, true));
                             }
-                            2 => rows
-                                .extend([batch_snapshot(2, 1, true), batch_snapshot(2, 2, true)]),
-                            _ => {}
                         }
+                        2 => rows.extend([batch_snapshot(2, 1, true), batch_snapshot(2, 2, true)]),
+                        _ => {}
                     }
-                    Ok(rows)
-                },
-            );
+                }
+                Ok(rows)
+            });
 
         let totals = totals.unwrap();
         assert_eq!(totals.get(&10), Some(&MAX_UNREAD_COUNT));

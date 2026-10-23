@@ -7,6 +7,7 @@ pub mod friends;
 pub mod groups;
 pub mod invites;
 pub mod members;
+mod notification_preferences;
 pub mod pins;
 pub mod push;
 mod saved_messages;

@@ -37,6 +37,23 @@ pub struct MeResponse {
     pub user_group: Option<UserGroupTagInfo>,
     pub sticker_pack_order: Vec<StickerPackOrderItem>,
     pub permissions: Vec<String>,
+    pub mute_group_chats_by_default: bool,
+    pub mute_direct_chats_by_default: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationSettingsResponse {
+    pub mute_group_chats_by_default: bool,
+    pub mute_direct_chats_by_default: bool,
+}
+
+#[derive(Debug, Deserialize, ToSchema, diesel::AsChangeset)]
+#[serde(rename_all = "camelCase")]
+#[diesel(table_name = crate::schema::user_extra)]
+pub struct UpdateNotificationSettingsRequest {
+    pub mute_group_chats_by_default: Option<bool>,
+    pub mute_direct_chats_by_default: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -76,6 +93,8 @@ mod tests {
             }),
             sticker_pack_order: vec![],
             permissions: vec![],
+            mute_group_chats_by_default: true,
+            mute_direct_chats_by_default: false,
         };
 
         let value = serde_json::to_value(response).unwrap();

@@ -180,6 +180,7 @@ diesel::table! {
         archived -> Bool,
         last_reactions_read_at -> Timestamptz,
         last_read_receipt_message_id -> Nullable<Int8>,
+        mute_override -> Nullable<Bool>,
     }
 }
 
@@ -483,6 +484,8 @@ diesel::table! {
         token_gen -> Int4,
         presence_visibility -> PresenceVisibility,
         read_receipt_visibility -> ReadReceiptVisibility,
+        mute_group_chats_by_default -> Bool,
+        mute_direct_chats_by_default -> Bool,
     }
 }
 

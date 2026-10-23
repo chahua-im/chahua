@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use diesel::prelude::*;
 use diesel::PgConnection;
 use diesel::PgTextExpressionMethods;
@@ -23,19 +23,16 @@ use crate::models::{
 };
 use crate::schema::{group_membership, groups, media};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
+use crate::services::notification_preferences::{
+    load_chat_notification_setting, load_notification_defaults, publish_chat_notification_setting,
+    update_chat_notification_setting, ChatNotificationCommand, ChatNotificationSetting,
+};
 use crate::utils::ids;
 use crate::utils::{auth::CurrentUid, pagination::validate_limit};
 use crate::AppState;
 
-/// Maximum mute duration: 7 days in seconds.
-const MAX_MUTE_DURATION_SECS: i64 = 7 * 24 * 3600;
 const MAX_GROUP_AVATAR_BYTES: i64 = 10 * 1024 * 1024;
 const MAX_GROUP_SELECTOR_LIMIT: i64 = 50;
-
-/// Far-future date used for "mute indefinitely".
-fn indefinite_mute_until() -> DateTime<Utc> {
-    crate::services::chat::indefinite_mute_until()
-}
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -184,16 +181,29 @@ pub(super) fn load_group_info(
 
     let my_role = load_requester_group_role(conn, chat_id, requester_uid)?;
 
-    let muted_until: Option<DateTime<Utc>> = group_membership::table
+    let (archived, notification_setting) = group_membership::table
         .filter(
             group_membership::chat_id
                 .eq(chat_id)
                 .and(group_membership::uid.eq(requester_uid)),
         )
-        .select(group_membership::muted_until)
-        .first(conn)
+        .select((
+            group_membership::archived,
+            (
+                group_membership::muted_until,
+                group_membership::mute_override,
+            ),
+        ))
+        .first::<(bool, ChatNotificationSetting)>(conn)
         .optional()?
-        .flatten();
+        .unwrap_or((
+            false,
+            ChatNotificationSetting {
+                muted_until: None,
+                mute_override: None,
+            },
+        ));
+    let defaults = load_notification_defaults(conn, requester_uid)?;
 
     // For a DM, resolve the other participant so the client can render the
     // peer's name/avatar instead of the (empty) group name.
@@ -224,7 +234,10 @@ pub(super) fn load_group_info(
             .map(|image| state.media.public_url(&image.storage_key)),
         visibility: group.visibility,
         created_at: group.created_at,
-        muted_until,
+        archived,
+        muted_until: notification_setting.muted_until,
+        mute_override: notification_setting.mute_override,
+        is_muted: notification_setting.is_muted(group.kind, defaults, Utc::now()),
         my_role,
         kind: group.kind,
         peer,
@@ -629,25 +642,25 @@ async fn put_mute(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+    let _update = crate::services::notification_preferences::lock_notification_update(uid);
 
-    let muted_until = match body.duration_seconds {
-        Some(secs) if secs > 0 && secs <= MAX_MUTE_DURATION_SECS => {
-            Utc::now() + chrono::Duration::seconds(secs)
-        }
-        Some(secs) if secs > MAX_MUTE_DURATION_SECS => {
-            return Err(AppError::BadRequest("Duration exceeds 7 day maximum"));
-        }
-        _ => indefinite_mute_until(),
-    };
+    let setting = conn.transaction::<_, AppError, _>(|conn| {
+        update_chat_notification_setting(
+            conn,
+            chat_id,
+            uid,
+            ChatNotificationCommand::LegacyMute {
+                duration_seconds: body.duration_seconds,
+            },
+            Utc::now(),
+        )?;
+        load_chat_notification_setting(conn, chat_id, uid)
+    })?;
+    let muted_until = setting
+        .muted_until
+        .expect("legacy mute always writes an expiry or permanent timestamp");
 
-    use crate::schema::group_membership::dsl as gm_dsl;
-    diesel::update(
-        group_membership::table.filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(uid))),
-    )
-    .set(gm_dsl::muted_until.eq(muted_until))
-    .execute(conn)?;
-
-    state.ws_registry.invalidate_unread(&[uid]);
+    publish_chat_notification_setting(&state.ws_registry, uid, setting);
     Ok(Json(MuteResponse { muted_until }))
 }
 
@@ -673,19 +686,42 @@ async fn delete_mute(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+    let _update = crate::services::notification_preferences::lock_notification_update(uid);
 
-    use crate::schema::group_membership::dsl as gm_dsl;
-    diesel::update(
-        group_membership::table.filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(uid))),
-    )
-    .set((
-        gm_dsl::muted_until.eq(None::<DateTime<Utc>>),
-        gm_dsl::archived.eq(false),
-    ))
-    .execute(conn)?;
-
-    state.ws_registry.invalidate_unread(&[uid]);
+    let setting = conn.transaction::<_, AppError, _>(|conn| {
+        update_chat_notification_setting(
+            conn,
+            chat_id,
+            uid,
+            ChatNotificationCommand::LegacyUnmuteAndUnarchive,
+            Utc::now(),
+        )?;
+        load_chat_notification_setting(conn, chat_id, uid)
+    })?;
+    publish_chat_notification_setting(&state.ws_registry, uid, setting);
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(put, path = "/{chat_id}/notification-setting", tag = "groups",
+    params(("chat_id" = String, Path, description = "Chat ID")),
+    request_body = crate::dto::groups::UpdateNotificationSettingRequest,
+    responses((status = OK, body = crate::dto::groups::ChatNotificationSettingResponse)), security(("bearer_jwt" = [])))]
+async fn put_notification_setting(
+    State(state): State<AppState>,
+    CurrentUid(uid): CurrentUid,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<crate::dto::groups::UpdateNotificationSettingRequest>,
+) -> Result<Json<crate::dto::groups::ChatNotificationSettingResponse>, AppError> {
+    check_membership(&mut conn, chat_id, uid)?;
+    let _update = crate::services::notification_preferences::lock_notification_update(uid);
+    let command = body.try_into()?;
+    let setting = conn.transaction::<_, AppError, _>(|conn| {
+        update_chat_notification_setting(conn, chat_id, uid, command, Utc::now())?;
+        load_chat_notification_setting(conn, chat_id, uid)
+    })?;
+    publish_chat_notification_setting(&state.ws_registry, uid, setting.clone());
+    Ok(Json(setting))
 }
 
 pub fn router() -> OpenApiRouter<crate::AppState> {
@@ -694,5 +730,6 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(get_group, patch_group))
         .routes(utoipa_axum::routes!(post_avatar_upload_url))
         .routes(utoipa_axum::routes!(put_mute, delete_mute))
+        .routes(utoipa_axum::routes!(put_notification_setting))
         .nest("/{chat_id}/members", crate::handlers::members::router())
 }

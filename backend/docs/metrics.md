@@ -68,6 +68,11 @@ not part of this endpoint unless source code registers them later.
 
 Connection-local unread summaries and conversation-state snapshots are sent directly by the socket task, outside the broadcast queue; they do not increment the broadcast pushed/dropped counters.
 
+Notification preference broadcasts use `message_type=notificationSettingsChanged` and
+`message_type=chatNotificationSettingChanged`, plus `message_type=notificationExceptionsCleared` for a category-wide reset. Chat preference and archive writes also
+emit the compatible `chatArchiveStateChanged` snapshot; each accepted/rejected event
+is counted separately, without user or chat labels.
+
 ## Presence snapshots
 
 Snapshots include initial watches, periodic refreshes, and refreshes triggered by committed

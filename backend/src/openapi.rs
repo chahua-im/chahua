@@ -75,6 +75,43 @@ mod tests {
     }
 
     #[test]
+    fn notification_preferences_document_partial_defaults_and_explicit_chat_modes() {
+        let document = api_document();
+        assert!(document["paths"]["/users/me/notification-settings"]["patch"].is_object());
+        assert!(document["paths"]["/users/me/notification-exceptions"]["get"].is_object());
+        assert!(document["paths"]["/group/{chat_id}/notification-setting"]["put"].is_object());
+        let schemas = &document["components"]["schemas"];
+        assert_eq!(
+            schemas["GroupInfoResponse"]["properties"]["archived"]["type"],
+            "boolean"
+        );
+        assert!(schemas["GroupInfoResponse"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "archived"));
+        assert!(schemas["UpdateNotificationSettingsRequest"]["required"]
+            .as_array()
+            .is_none_or(|fields| fields.is_empty()));
+        assert_eq!(
+            schemas["NotificationSettingMode"]["enum"],
+            serde_json::json!([
+                "inherit",
+                "alwaysMuted",
+                "alwaysUnmuted",
+                "temporarilyMuted"
+            ])
+        );
+        assert_eq!(
+            schemas["ChatNotificationSettingResponse"]["properties"]["chatId"]["type"],
+            "string"
+        );
+        let events = schemas["ServerWsMessage"].to_string();
+        assert!(events.contains("notificationSettingsChanged"));
+        assert!(events.contains("chatNotificationSettingChanged"));
+    }
+
+    #[test]
     fn bulk_deletion_documents_bounded_string_ids_and_a_reconciled_response() {
         let document = api_document();
         let ids = &document["components"]["schemas"]["BulkDeleteMessagesBody"]["properties"]

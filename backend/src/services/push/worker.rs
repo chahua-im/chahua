@@ -1,3 +1,6 @@
+use crate::services::notification_preferences::{
+    load_notification_defaults_for_users, ChatNotificationSetting,
+};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::PgConnection;
@@ -108,7 +111,7 @@ async fn run_push_worker(
 #[derive(Debug)]
 struct RecipientCandidate {
     uid: i32,
-    muted_until: Option<chrono::DateTime<chrono::Utc>>,
+    notification_setting: ChatNotificationSetting,
     chat_archived: bool,
     thread_state: ThreadPushState,
 }
@@ -151,31 +154,33 @@ fn load_recipient_candidates(
     if let Some(thread_root_id) = job.thread_root_id {
         use crate::schema::thread_user_states::dsl as ts_dsl;
 
-        let rows: Vec<(i32, bool, Option<chrono::DateTime<chrono::Utc>>, bool)> =
-            ts_dsl::thread_user_states
-                .inner_join(
-                    group_membership::table.on(gm_dsl::chat_id
-                        .eq(ts_dsl::chat_id)
-                        .and(gm_dsl::uid.eq(ts_dsl::uid))),
-                )
-                .filter(ts_dsl::chat_id.eq(job.chat_id))
-                .filter(ts_dsl::thread_root_id.eq(thread_root_id))
-                .filter(ts_dsl::subscribed.eq(true))
-                .select((
-                    ts_dsl::uid,
-                    ts_dsl::archived,
+        let rows: Vec<(i32, bool, ChatNotificationSetting, bool)> = ts_dsl::thread_user_states
+            .inner_join(
+                group_membership::table.on(gm_dsl::chat_id
+                    .eq(ts_dsl::chat_id)
+                    .and(gm_dsl::uid.eq(ts_dsl::uid))),
+            )
+            .filter(ts_dsl::chat_id.eq(job.chat_id))
+            .filter(ts_dsl::thread_root_id.eq(thread_root_id))
+            .filter(ts_dsl::subscribed.eq(true))
+            .select((
+                ts_dsl::uid,
+                ts_dsl::archived,
+                (
                     group_membership::muted_until,
-                    group_membership::archived,
-                ))
-                .load(conn)
-                .map_err(|e| format!("Failed to load thread subscriber candidates: {:?}", e))?;
+                    group_membership::mute_override,
+                ),
+                group_membership::archived,
+            ))
+            .load(conn)
+            .map_err(|e| format!("Failed to load thread subscriber candidates: {:?}", e))?;
 
-        for (uid, thread_archived, muted_until, chat_archived) in rows {
+        for (uid, thread_archived, notification_setting, chat_archived) in rows {
             candidates.insert(
                 uid,
                 RecipientCandidate {
                     uid,
-                    muted_until,
+                    notification_setting,
                     chat_archived,
                     thread_state: if thread_archived {
                         ThreadPushState::ArchivedSubscription
@@ -187,56 +192,61 @@ fn load_recipient_candidates(
         }
 
         if !job.mentioned_uids.is_empty() || job.reply_target_uid.is_some() {
-            let rows: Vec<(i32, Option<chrono::DateTime<chrono::Utc>>, bool)> =
-                group_membership::table
-                    .filter(gm_dsl::chat_id.eq(job.chat_id))
-                    .filter(
-                        gm_dsl::uid.eq_any(
-                            job.mentioned_uids
-                                .iter()
-                                .copied()
-                                .chain(job.reply_target_uid),
-                        ),
-                    )
-                    .select((
-                        group_membership::uid,
+            let rows: Vec<(i32, ChatNotificationSetting, bool)> = group_membership::table
+                .filter(gm_dsl::chat_id.eq(job.chat_id))
+                .filter(
+                    gm_dsl::uid.eq_any(
+                        job.mentioned_uids
+                            .iter()
+                            .copied()
+                            .chain(job.reply_target_uid),
+                    ),
+                )
+                .select((
+                    group_membership::uid,
+                    (
                         group_membership::muted_until,
-                        group_membership::archived,
-                    ))
-                    .load(conn)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to load directly addressed member candidates: {:?}",
-                            e
-                        )
-                    })?;
+                        group_membership::mute_override,
+                    ),
+                    group_membership::archived,
+                ))
+                .load(conn)
+                .map_err(|e| {
+                    format!(
+                        "Failed to load directly addressed member candidates: {:?}",
+                        e
+                    )
+                })?;
 
-            for (uid, muted_until, chat_archived) in rows {
+            for (uid, notification_setting, chat_archived) in rows {
                 candidates.entry(uid).or_insert(RecipientCandidate {
                     uid,
-                    muted_until,
+                    notification_setting,
                     chat_archived,
                     thread_state: ThreadPushState::NoSubscription,
                 });
             }
         }
     } else {
-        let rows: Vec<(i32, Option<chrono::DateTime<chrono::Utc>>, bool)> = group_membership::table
+        let rows: Vec<(i32, ChatNotificationSetting, bool)> = group_membership::table
             .filter(gm_dsl::chat_id.eq(job.chat_id))
             .select((
                 group_membership::uid,
-                group_membership::muted_until,
+                (
+                    group_membership::muted_until,
+                    group_membership::mute_override,
+                ),
                 group_membership::archived,
             ))
             .load(conn)
             .map_err(|e| format!("Failed to load member candidates: {:?}", e))?;
 
-        for (uid, muted_until, chat_archived) in rows {
+        for (uid, notification_setting, chat_archived) in rows {
             candidates.insert(
                 uid,
                 RecipientCandidate {
                     uid,
-                    muted_until,
+                    notification_setting,
                     chat_archived,
                     thread_state: ThreadPushState::NotThreadMessage,
                 },
@@ -257,12 +267,20 @@ async fn process_push_job(
     let now = chrono::Utc::now();
 
     let candidates = load_recipient_candidates(&mut conn, job)?;
-    let is_dm = crate::schema::groups::table
+    let kind = crate::schema::groups::table
         .find(job.chat_id)
         .select(crate::schema::groups::kind)
         .first::<GroupKind>(&mut conn)
-        .map_err(|e| format!("Failed to load push chat kind: {:?}", e))?
-        == GroupKind::Dm;
+        .map_err(|e| format!("Failed to load push chat kind: {:?}", e))?;
+    let is_dm = kind == GroupKind::Dm;
+    let defaults = load_notification_defaults_for_users(
+        &mut conn,
+        &candidates
+            .iter()
+            .map(|candidate| candidate.uid)
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|e| format!("Failed to load push notification defaults: {e}"))?;
     let mut ordinary_recipients = std::collections::HashSet::new();
 
     let mentioned_uids: std::collections::HashSet<i32> =
@@ -278,7 +296,9 @@ async fn process_push_job(
                 is_mentioned: mentioned_uids.contains(&candidate.uid),
                 is_reply_target: job.reply_target_uid == Some(candidate.uid),
                 chat_archived: candidate.chat_archived,
-                group_muted_until: candidate.muted_until,
+                notification_setting: candidate.notification_setting,
+                chat_kind: kind,
+                notification_defaults: defaults.get(&candidate.uid).copied().unwrap_or_default(),
                 thread_state: candidate.thread_state,
                 has_active_presence,
             };
@@ -544,6 +564,61 @@ static TEST_PANIC_MESSAGE_ID: std::sync::atomic::AtomicI64 =
 #[cfg(test)]
 mod tests {
     use super::{counted_failure_persistence_action, CountedFailurePersistenceAction};
+
+    #[test]
+    fn database_push_candidates_keep_preferences_and_thread_membership_boundaries() {
+        use super::*;
+        use diesel::connection::SimpleConnection;
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.batch_execute("
+            CREATE TEMP TABLE group_membership (chat_id BIGINT, uid INTEGER, muted_until TIMESTAMPTZ, mute_override BOOLEAN, archived BOOLEAN);
+            CREATE TEMP TABLE thread_user_states (chat_id BIGINT, uid INTEGER, thread_root_id BIGINT, subscribed BOOLEAN, archived BOOLEAN);
+            INSERT INTO group_membership VALUES (1,7,NULL,NULL,FALSE),(1,8,NULL,FALSE,FALSE),(1,9,NULL,TRUE,TRUE),(2,10,NULL,FALSE,FALSE);
+            INSERT INTO thread_user_states VALUES (1,7,100,TRUE,FALSE),(1,8,100,FALSE,FALSE);
+        ").unwrap();
+        let mut job = PushJob {
+            chat_id: 1,
+            sender_uid: 1,
+            sender_username: "sender".into(),
+            chat_name: "group".into(),
+            message_preview: crate::services::push::PushMessagePreview {
+                message: None,
+                message_type: crate::models::MessageType::Text,
+                sticker: None,
+                attachments: vec![],
+                is_deleted: false,
+            },
+            body_preview: None,
+            message_id: 101,
+            thread_root_id: None,
+            mentioned_uids: vec![8, 10],
+            reply_target_uid: None,
+        };
+        let candidates = load_recipient_candidates(&mut conn, &job).unwrap();
+        assert_eq!(candidates.len(), 3);
+        let settings = candidates
+            .iter()
+            .map(|c| (c.uid, c.notification_setting.mute_override))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(settings[&7], None);
+        assert_eq!(settings[&8], Some(false));
+        assert_eq!(settings[&9], Some(true));
+        job.thread_root_id = Some(100);
+        let candidates = load_recipient_candidates(&mut conn, &job).unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates.iter().find(|c| c.uid == 7).unwrap().thread_state,
+            ThreadPushState::ActiveSubscription
+        );
+        assert_eq!(
+            candidates.iter().find(|c| c.uid == 8).unwrap().thread_state,
+            ThreadPushState::NoSubscription
+        );
+        assert!(candidates.iter().all(|c| c.uid != 10));
+    }
 
     #[test]
     fn first_counted_delivery_failure_is_recorded() {

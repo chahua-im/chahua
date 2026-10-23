@@ -30,6 +30,8 @@ pub struct ChatListItem {
     pub peer_last_read_message_id: Option<i64>,
     pub last_message: Option<MessagePreview>,
     pub muted_until: Option<DateTime<Utc>>,
+    pub mute_override: Option<bool>,
+    pub is_muted: bool,
     pub archived: bool,
     pub kind: GroupKind,
     /// The other participant, for DM chats; `None` for regular groups.
