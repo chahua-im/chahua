@@ -507,7 +507,6 @@
       "search": "搜尋已載入的聊天和話題",
       "partialEmpty": "已載入的聊天和話題中沒有符合項目",
       "noTargets": "暫無可轉發到的聊天或話題",
-      "replies": "{{count}} 則回覆",
       "empty": "沒有符合的聊天或話題",
       "invalid": "所選訊息已無法轉發，請關閉視窗後重新選擇。",
       "topicUnavailable": "話題中包含無法轉發的訊息。",

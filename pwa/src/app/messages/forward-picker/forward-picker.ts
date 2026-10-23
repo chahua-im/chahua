@@ -31,9 +31,9 @@ import {
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
-import { chatbubblesOutline } from 'ionicons/icons';
+import { chatbubbles } from 'ionicons/icons';
 import { fromEvent, map } from 'rxjs';
-import { ServerWsMessageType, type MessagePreview as Preview } from '../../../generated/models';
+import { GroupKind, ServerWsMessageType, type MessagePreview as Preview } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import type { SnowflakeID } from '../../api/snowflake-id';
 import { ChatListStore } from '../../chats/chat-list-store';
@@ -59,7 +59,6 @@ interface ForwardTarget {
   name?: string;
   avatar: ChatAvatarData;
   preview?: Preview;
-  replies?: number;
   time: number;
 }
 
@@ -170,15 +169,24 @@ export class ForwardPicker {
         avatar: conversationAvatar(this.metadata.get(chat.id)),
         time: Date.parse(chat.lastMessageAt ?? '') || -Infinity,
       })),
-      ...this.threads.items().map((thread) => ({
-        chatId: thread.chatId,
-        threadId: thread.threadRootMessage.id,
-        name: thread.chatName,
-        preview: thread.threadRootMessage,
-        replies: thread.replyCount,
-        avatar: { avatar: thread.chatAvatar, avatarName: thread.chatName, badgeIcon: chatbubblesOutline },
-        time: Date.parse(thread.lastReplyAt),
-      })),
+      ...this.threads.items().map((thread) => {
+        const isDm = thread.chatKind === GroupKind.dm;
+        const root = thread.threadRootMessage;
+        return {
+          chatId: thread.chatId,
+          threadId: root.id,
+          name: thread.chatName,
+          preview: root,
+          avatar: {
+            avatar: thread.chatAvatar,
+            avatarName: thread.chatName,
+            badgeName: !isDm ? (root.sender.name ?? String(root.sender.uid)) : undefined,
+            badgeAvatar: !isDm ? root.sender.avatarUrl : undefined,
+            badgeIcon: isDm ? chatbubbles : undefined,
+          },
+          time: Date.parse(thread.lastReplyAt),
+        };
+      }),
     ];
     return targets.sort((a, b) => b.time - a.time);
   });

@@ -507,7 +507,6 @@
       "search": "搜索已加载的聊天和话题",
       "partialEmpty": "已加载的聊天和话题中没有匹配项",
       "noTargets": "暂无可转发到的聊天或话题",
-      "replies": "{{count}} 条回复",
       "empty": "没有匹配的聊天或话题",
       "invalid": "所选消息已无法转发，请关闭窗口后重新选择。",
       "topicUnavailable": "话题中包含无法转发的消息。",

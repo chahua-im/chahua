@@ -1,9 +1,10 @@
 import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ToastController } from '@ionic/angular';
+import { chatbubbles } from 'ionicons/icons';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
-import { MessageType, ServerWsMessageType, type ServerWsMessage } from '../../../generated/models';
+import { GroupKind, MessageType, ServerWsMessageType, type ServerWsMessage } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { testChat, testMessage } from '../../api/testing';
 import { encodeId } from '../../api/snowflake-id';
@@ -50,6 +51,7 @@ describe('ForwardPicker', () => {
     const threads = query([
       {
         chatId: testChat.id,
+        chatKind: GroupKind.group,
         chatName: 'Topic chat',
         chatAvatar: undefined,
         threadRootMessage: { ...testMessage, id: threadId },
@@ -77,6 +79,36 @@ describe('ForwardPicker', () => {
     fixture.detectChanges();
     return { fixture, picker: fixture.componentInstance, prepareForward, enqueueForward, toasts, chats, threads };
   }
+
+  it.each([
+    { kind: GroupKind.group, name: 'Root author', avatarUrl: '/author.png' },
+    { kind: GroupKind.group, name: 'Root author', avatarUrl: undefined },
+    { kind: GroupKind.group, name: undefined, avatarUrl: undefined },
+    { kind: GroupKind.dm, name: 'Root author', avatarUrl: '/author.png' },
+  ])('uses the chat list topic badge rules: %j', ({ kind, name, avatarUrl }) => {
+    const { picker, threads } = setup();
+    threads.items.update((items) =>
+      items.map((thread) => ({
+        ...thread,
+        chatKind: kind,
+        threadRootMessage: {
+          ...thread.threadRootMessage,
+          sender: { ...thread.threadRootMessage.sender, name, avatarUrl },
+        },
+      })),
+    );
+    const badge = picker['targets']().find((target) => target.threadId === threadId)!.avatar;
+    if (kind === GroupKind.dm) {
+      expect(badge.badgeIcon).toBe(chatbubbles);
+      expect(badge.badgeName).toBeUndefined();
+      expect(badge.badgeAvatar).toBeUndefined();
+    } else {
+      expect(badge.badgeIcon).toBeUndefined();
+      expect(badge.badgeName).toBe(name ?? String(testMessage.sender.uid));
+      expect(badge.badgeAvatar).toBe(avatarUrl);
+    }
+  });
+
   it.each([1, 2])('opens the selected topic with %s sources without sending', async (count) => {
     const sources = Array.from({ length: count }, (_, index) => ({
       ...testMessage,

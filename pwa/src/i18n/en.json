@@ -507,7 +507,6 @@
       "search": "Search loaded chats and topics",
       "partialEmpty": "No matches in the chats and topics loaded so far",
       "noTargets": "No chats or topics available to forward to",
-      "replies": "{{count}} replies",
       "empty": "No matching chats or topics",
       "invalid": "This selection can no longer be forwarded. Close this window and select the messages again.",
       "topicUnavailable": "This topic contains messages that cannot be forwarded.",
