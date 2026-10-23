@@ -256,6 +256,9 @@
 .reply-name,
 .reply-text {
   display: block;
+  // Keep the full font metrics inside the single-line clipping box.
+  line-height: normal;
+  min-height: var(--app-line-compact);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

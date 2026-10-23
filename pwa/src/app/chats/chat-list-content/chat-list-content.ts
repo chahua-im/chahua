@@ -181,12 +181,15 @@ export class ChatListContent {
         pending && (!chat.lastMessageAt || pending.message.createdAt > chat.lastMessageAt) ? pending : undefined;
       const preview = pendingPreview?.message ?? last;
       const draft = this.drafts.get(chat.id);
+      const forward = this.drafts.forward(chat.id);
+      const hasDraft = !!draft || !!forward?.length;
       const muted = this.metadata.isMuted(chat.id);
       return {
         kind: ListRowKind.Chat as const,
         key: chat.id,
         chat,
         draft,
+        forward,
         preview,
         sortTime: Math.max(
           Date.parse(chat.lastMessageAt ?? '') || -Infinity,
@@ -198,12 +201,12 @@ export class ChatListContent {
         entry: {
           avatar: chat.kind === GroupKind.dm ? chat.peer?.avatarUrl : chat.avatar,
           ...this.previewDelivery(
-            draft ? undefined : preview,
+            hasDraft ? undefined : preview,
             pendingPreview,
             chat.kind === GroupKind.dm ? chat.peerLastReadMessageId : undefined,
           ),
           sender:
-            !draft && chat.kind === GroupKind.group && preview && preview.messageType !== MessageType.system
+            !hasDraft && chat.kind === GroupKind.group && preview && preview.messageType !== MessageType.system
               ? (preview.sender.name ?? String(preview.sender.uid))
               : undefined,
           link: ['/chats/chat', decodeId(chat.id)],
@@ -250,6 +253,8 @@ export class ChatListContent {
         const chat = this.metadata.get(thread.chatId);
         const root = thread.threadRootMessage;
         const draft = this.drafts.get(thread.chatId, root.id);
+        const forward = this.drafts.forward(thread.chatId, root.id);
+        const hasDraft = !!draft || !!forward?.length;
         const last = thread.lastReply;
         const pending = this.pendingPreviews().get(root.id);
         const pendingPreview = pending && pending.message.createdAt > thread.lastReplyAt ? pending : undefined;
@@ -262,6 +267,7 @@ export class ChatListContent {
           key: root.id,
           thread,
           draft,
+          forward,
           preview,
           sortTime: Math.max(
             Date.parse(thread.lastReplyAt),
@@ -270,7 +276,7 @@ export class ChatListContent {
           ),
           entry: {
             ...this.previewDelivery(
-              draft ? undefined : preview,
+              hasDraft ? undefined : preview,
               pendingPreview,
               isDm ? thread.peerLastReadMessageId : undefined,
             ),
@@ -282,7 +288,7 @@ export class ChatListContent {
             badgeAvatar: !isDm ? root.sender.avatarUrl : undefined,
             badgeIcon: isDm ? chatbubbles : undefined,
             sender:
-              !draft && !isDm && preview && preview.messageType !== MessageType.system
+              !hasDraft && !isDm && preview && preview.messageType !== MessageType.system
                 ? (preview.sender.name ?? String(preview.sender.uid))
                 : undefined,
             time: draft && draft.savedAt > Date.parse(latestAt) ? new Date(draft.savedAt).toISOString() : latestAt,

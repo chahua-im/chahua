@@ -38,18 +38,26 @@
         }
         {{ entry().subtitle }}
         <ng-content select="[slot=preview]"></ng-content>
-        @if (entry().delivery != null) {
-          <app-message-status class="delivery" [delivery]="entry().delivery" [read]="entry().read ?? false" />
-        }
       </p>
     </ion-label>
     @if (
       !actionsAlwaysVisible() &&
-      (entry().time || entry().unreadCount || entry().unreadMentions || entry().unreadReactions)
+      (entry().delivery != null ||
+        entry().time ||
+        entry().unreadCount ||
+        entry().unreadMentions ||
+        entry().unreadReactions)
     ) {
       <div slot="end" class="meta">
-        @if (entry().time) {
-          <span>{{ entry().time | chatDate }}</span>
+        @if (entry().delivery != null || entry().time) {
+          <div class="timestamp">
+            @if (entry().delivery != null) {
+              <app-message-status [delivery]="entry().delivery" [read]="entry().read ?? false" />
+            }
+            @if (entry().time) {
+              <span>{{ entry().time | chatDate }}</span>
+            }
+          </div>
         }
         <div class="badges">
           @if (entry().unreadMentions) {
