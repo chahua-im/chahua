@@ -88,6 +88,22 @@ fn defaults_patches_preserve_omitted_categories_and_other_user_settings() {
         }
     );
     assert!(!batch.contains_key(&8));
+    // Creating an account by patching only DM settings keeps groups unmuted.
+    assert_eq!(
+        update_notification_defaults(
+            &mut conn,
+            8,
+            &UpdateNotificationSettingsRequest {
+                mute_group_chats_by_default: None,
+                mute_direct_chats_by_default: Some(true),
+            },
+        )
+        .unwrap(),
+        NotificationDefaults {
+            group_chats_muted: false,
+            direct_chats_muted: true,
+        }
+    );
 }
 
 #[test]
@@ -208,7 +224,7 @@ fn account_badges_and_collection_summaries_share_defaults_overrides_and_expiry()
         assert_eq!(collection[0].unread_unmuted_message_count, expected);
         assert_eq!(collection[0].unread_unmuted_conversation_count, expected);
     };
-    check(&mut conn, 2); // Default-muted group, explicit-notify group, ordinary DM.
+    check(&mut conn, 3); // Both groups and ordinary DM notify by default.
     update_notification_defaults(
         &mut conn,
         7,
@@ -304,7 +320,7 @@ fn clearing_exceptions_is_scoped_and_preserves_archive_and_inherited_temporary_m
     assert!(archived.archived);
     assert_eq!(archived.mute_override, None);
     assert_eq!(archived.muted_until, None);
-    assert!(archived.is_muted); // inherits group default
+    assert!(!archived.is_muted); // inherits the unmuted group default
     assert!(load_chat_notification_setting(&mut conn, 1, 7)
         .unwrap()
         .muted_until

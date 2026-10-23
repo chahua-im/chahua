@@ -20,6 +20,6 @@ export function notificationPermanentlyMuted(
     setting?.muteOverride ??
     (kind === GroupKind.dm
       ? (defaults?.muteDirectChatsByDefault ?? false)
-      : (defaults?.muteGroupChatsByDefault ?? true))
+      : (defaults?.muteGroupChatsByDefault ?? false))
   );
 }

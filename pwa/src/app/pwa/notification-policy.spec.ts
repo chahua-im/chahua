@@ -21,7 +21,7 @@ const topic = { ...message, replyRootId: encodeId('9007199254740999') };
 
 describe('notification policy', () => {
   it('inherits category defaults, honors explicit exceptions and restores them after temporary expiry', () => {
-    expect(shouldNotify(message, 1, { kind: GroupKind.group }, undefined)).toBe(false);
+    expect(shouldNotify(message, 1, { kind: GroupKind.group }, undefined)).toBe(true);
     expect(shouldNotify(message, 1, { kind: GroupKind.dm }, undefined)).toBe(true);
     expect(shouldNotify(message, 1, { kind: GroupKind.group, muteOverride: false }, undefined)).toBe(true);
     expect(shouldNotify(message, 1, { kind: GroupKind.dm, muteOverride: true }, undefined)).toBe(false);
