@@ -29,7 +29,7 @@
     <ion-icon class="file-icon" [icon]="icons.documentOutline" />
   }
 </ng-template>
-@if (existing().length || visualUploads().length) {
+@if (!forwarding() && (existing().length || visualUploads().length)) {
   <div class="uploads">
     @for (item of existing(); track item.id) {
       <div class="upload">
@@ -63,13 +63,13 @@
     }
   </div>
 }
-@if (tooMany()) {
+@if (!forwarding() && tooMany()) {
   <p class="ion-padding-horizontal">{{ 'messages.composer.tooManyAttachments' | transloco }}</p>
 }
-@if (unsupported()) {
+@if (!forwarding() && unsupported()) {
   <p class="ion-padding-horizontal">{{ 'messages.composer.editMediaOnly' | transloco }}</p>
 }
-@if (error()) {
+@if (!forwarding() && error()) {
   <p class="ion-padding-horizontal">{{ 'messages.composer.processingFailed' | transloco }}</p>
 }
 <input
@@ -81,13 +81,13 @@
   (change)="files($event, Purpose.media)" />
 <input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
 <div class="bar">
-  <div class="compose-context" [hidden]="voiceActive()"><ng-content /></div>
+  <div class="compose-context" [hidden]="voiceActive() && !forwarding()"><ng-content /></div>
   <div class="compose-row">
     <button
       type="button"
       #attachButton
       class="attach-button"
-      [disabled]="voiceActive()"
+      [disabled]="voiceActive() || forwarding()"
       (pointerdown)="$event.preventDefault()"
       (click)="openAttachments(attachmentMenu, attachButton)">
       <ion-icon [icon]="icons.attachOutline" />
@@ -103,7 +103,7 @@
           (ionFocus)="panel.set(Panel.None)"
           (paste)="paste($event)"
           (keydown)="key($event)" />
-        @if (!editing()) {
+        @if (!editing() && !forwarding()) {
           <button
             type="button"
             class="sticker-button"

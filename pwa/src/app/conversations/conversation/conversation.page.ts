@@ -86,6 +86,7 @@ import {
   NotificationType,
   ServerWsMessageType,
   type MessageResponse,
+  type MentionInfo,
   type PinResponse,
 } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
@@ -281,6 +282,7 @@ export class ConversationPage {
     return target && 'delivery' in target ? untracked(() => target.uploads) : [];
   });
   protected startEdit(message: MessageResponse | OutgoingMessage) {
+    this.cancelForward();
     this.editTarget.set(message);
     this.editText.set(this.editing()?.message ?? '');
     void this.composer()?.setFocus();
@@ -300,7 +302,8 @@ export class ConversationPage {
     if (message) this.startEdit(message);
   }
   protected escapeComposer() {
-    if (this.editing()) {
+    if (this.pendingForward()) this.cancelForward();
+    else if (this.editing()) {
       if (this.editText() === (this.editing()?.message ?? '')) this.cancelEdit();
     } else if (this.replyTo() || this.savedReplyId()) this.cancelReply();
     // Blur so the next Esc reaches the page-level navigation handler.
@@ -320,6 +323,12 @@ export class ConversationPage {
   private readonly chatInfo = inject(ChatStore);
   private readonly router = inject(Router);
   private readonly drafts = inject(DraftStore);
+  protected readonly pendingForward = computed(() => this.drafts.forward(this.id(), this.threadId()));
+  protected readonly forwardPreview = computed(() => this.pendingForward()?.[0]);
+  protected readonly forwardParticipants = computed(() => {
+    const messages = [...(this.pendingForward() ?? [])].sort((a, b) => a.id - b.id);
+    return [...new Map(messages.map((message) => [message.sender.uid, message.sender])).values()];
+  });
   protected readonly outbox = inject(MessageOutbox);
   private readonly messageActions = inject(MessageActions);
   private selectionVersion = 0;
@@ -856,6 +865,7 @@ export class ConversationPage {
     computation: (): MessageResponse | undefined => undefined,
   });
   protected readonly composerContextColors = computed(() => {
+    if (this.pendingForward()) return undefined;
     const sender = this.editing()?.sender ?? this.replyTo()?.sender;
     return sender ? userColors(sender.name ?? String(sender.uid)) : undefined;
   });
@@ -952,6 +962,14 @@ export class ConversationPage {
       const threadId = this.threadId();
       untracked(() => this.activate(id, threadId));
       onCleanup(() => untracked(() => this.saveDraft({ chatId: id, threadId })));
+    });
+    effect(() => {
+      if (this.active() && this.pendingForward()) {
+        untracked(() => {
+          this.cancelSelection();
+          void this.composer()?.setFocus();
+        });
+      }
     });
     effect(() => {
       const replyId = this.reply();
@@ -1771,7 +1789,7 @@ export class ConversationPage {
   }
 
   protected updateDraft(text: string) {
-    (this.editing() ? this.editText : this.draft).set(text);
+    (!this.pendingForward() && this.editing() ? this.editText : this.draft).set(text);
   }
 
   protected saveDraft({ chatId, threadId } = { chatId: this.id(), threadId: this.threadId() }) {
@@ -1782,6 +1800,24 @@ export class ConversationPage {
   protected cancelReply() {
     this.replyTo.set(undefined);
     this.savedReplyId.set(undefined);
+  }
+
+  protected cancelForward() {
+    this.drafts.setForward(this.id(), this.threadId());
+  }
+
+  protected sendForward(mentions: MentionInfo[] = []) {
+    const sources = this.pendingForward();
+    if (!sources || !this.isCurrent()) return;
+    this.outbox.enqueueForward(this.id(), this.threadId(), sources, {
+      comment: this.draft(),
+      commentMentions: mentions,
+    });
+    this.cancelForward();
+    this.draft.set('');
+    this.saveDraft();
+    this.position.set({ type: PositionKind.Bottom });
+    if (!this.conversation.atLatest()) void this.goTo({ type: ConversationTargetKind.Latest });
   }
 
   private async restoreReply(messageId: SnowflakeID) {
@@ -1897,6 +1933,7 @@ export class ConversationPage {
   }
 
   protected startReply(message: MessageResponse) {
+    this.cancelForward();
     this.replyTo.set(message);
     this.savedReplyId.set(undefined);
     if (this.atBottom()) this.position.set({ type: PositionKind.Bottom });

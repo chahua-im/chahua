@@ -488,6 +488,10 @@
       "recallFailed": "Recalled {{succeeded}} messages; {{failed}} could not be recalled. Please try again."
     },
     "forward": {
+      "pendingCount": "Forward {{count}} messages",
+      "twoParticipants": "{{first}} and {{second}}",
+      "otherParticipants": "{{first}} and {{count}} others",
+      "navigationFailed": "Could not open the destination. Please retry.",
       "loadMore": "Load more",
       "chatsFailed": "Could not load chats. Please retry.",
       "threadsFailed": "Could not load topics. Please retry.",
@@ -503,7 +507,6 @@
       "search": "Search chats and topics",
       "replies": "{{count}} replies",
       "empty": "No matching chats or topics",
-      "sending": "Forwarding…",
       "invalid": "This selection can no longer be forwarded. Close this window and select the messages again.",
       "topicUnavailable": "This topic contains messages that cannot be forwarded.",
       "topicTooMany": "This topic has more than {{max}} messages and cannot be forwarded as a chat history.",

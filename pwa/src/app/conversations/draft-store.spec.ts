@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { encodeId } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import { DraftStore } from './draft-store';
+import { testMessage } from '../api/testing';
 
 const chat = encodeId('9007199254741000');
 const thread = encodeId('9007199254741001');
@@ -16,17 +17,39 @@ describe('DraftStore', () => {
       setItem: (key: string, value: string) => storage.set(key, value),
     });
     user.set({ uid: 1 });
-    TestBed.configureTestingModule({ providers: [{ provide: SessionStore, useValue: { user } }] });
+    TestBed.configureTestingModule({
+      providers: [{ provide: SessionStore, useValue: { user } }],
+    });
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps forward selections separate from text, topics and persistent storage', () => {
+    const drafts = TestBed.inject(DraftStore);
+    const sources = [testMessage];
+    drafts.save(chat, undefined, 'existing text', thread);
+    drafts.setForward(chat, undefined, sources);
+    expect(drafts.forward(chat)).toBe(sources);
+    expect(drafts.forward(chat, thread)).toBeUndefined();
+    expect(drafts.get(chat)).toMatchObject({ text: 'existing text', replyTo: '9007199254741001' });
+    expect(window.localStorage.getItem('chahua.drafts.1')).not.toContain('sources');
+    drafts.setForward(chat, undefined);
+    expect(drafts.get(chat)?.text).toBe('existing text');
+    drafts.setForward(chat, undefined, sources);
+    user.set({ uid: 2 });
+    expect(drafts.forward(chat)).toBeUndefined();
+    user.set({ uid: 1 });
+    expect(drafts.forward(chat)).toBeUndefined();
+  });
 
   it('persists separate chat and topic drafts, including the exact reply ID', () => {
     const drafts = TestBed.inject(DraftStore);
     drafts.save(chat, undefined, '主会话');
     drafts.save(chat, thread, '话题', thread);
     TestBed.resetTestingModule();
-    TestBed.configureTestingModule({ providers: [{ provide: SessionStore, useValue: { user } }] });
+    TestBed.configureTestingModule({
+      providers: [{ provide: SessionStore, useValue: { user } }],
+    });
     const restored = TestBed.inject(DraftStore);
     expect(restored.get(chat)?.text).toBe('主会话');
     expect(restored.get(chat, thread)).toMatchObject({ text: '话题', replyTo: '9007199254741001' });

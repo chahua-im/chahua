@@ -488,6 +488,10 @@
       "recallFailed": "已撤回 {{succeeded}} 則，{{failed}} 則未能撤回，請重試。"
     },
     "forward": {
+      "pendingCount": "轉發 {{count}} 則訊息",
+      "twoParticipants": "{{first}}和{{second}}",
+      "otherParticipants": "{{first}}和其他{{count}}人",
+      "navigationFailed": "無法開啟目標會話，請重試。",
       "loadMore": "繼續載入",
       "chatsFailed": "聊天載入失敗，請重試。",
       "threadsFailed": "話題載入失敗，請重試。",
@@ -503,7 +507,6 @@
       "search": "搜尋聊天和話題",
       "replies": "{{count}} 則回覆",
       "empty": "沒有符合的聊天或話題",
-      "sending": "正在轉發…",
       "invalid": "所選訊息已無法轉發，請關閉視窗後重新選擇。",
       "topicUnavailable": "話題中包含無法轉發的訊息。",
       "topicTooMany": "話題訊息超過 {{max}} 則，無法合併轉發。",

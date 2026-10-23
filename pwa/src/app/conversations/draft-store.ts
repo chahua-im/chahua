@@ -1,4 +1,5 @@
 import { computed, inject, linkedSignal, Service } from '@angular/core';
+import type { MessageResponse } from '../../generated/models';
 import { decodeId, type SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 
@@ -12,6 +13,11 @@ export interface Draft {
 export class DraftStore {
   private readonly session = inject(SessionStore);
   private readonly storageKey = computed(() => `chahua.drafts.${this.session.user()?.uid}`);
+  // Forward drafts keep server message data, never upload tasks, and only survive within this session.
+  private readonly forwards = linkedSignal({
+    source: this.storageKey,
+    computation: (): Record<string, readonly MessageResponse[] | undefined> => ({}),
+  });
   private readonly items = linkedSignal({
     source: this.storageKey,
     computation: (key): Record<string, Draft> => {
@@ -22,6 +28,20 @@ export class DraftStore {
       }
     },
   });
+
+  forward(chatId: SnowflakeID, threadId?: SnowflakeID) {
+    return this.forwards()[this.key(chatId, threadId)];
+  }
+
+  setForward(chatId: SnowflakeID, threadId: SnowflakeID | undefined, sources?: readonly MessageResponse[]) {
+    const key = this.key(chatId, threadId);
+    this.forwards.update((items) => {
+      const next = { ...items };
+      if (sources) next[key] = sources;
+      else delete next[key];
+      return next;
+    });
+  }
 
   get(chatId: SnowflakeID, threadId?: SnowflakeID) {
     return this.items()[this.key(chatId, threadId)];
