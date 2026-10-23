@@ -70,6 +70,22 @@ describe('MarkdownBody presentation', () => {
     expect((fixture.nativeElement as HTMLElement).querySelector('.hljs')).toBeNull();
   });
 
+  it('breaks bare URLs more freely while preserving link labels, code and the original address', () => {
+    const url = 'https://example.com/longpathname?token=abcdefghijklmnopqrstuvwxyz&view=full#details';
+    const fixture = render(`看看这个链接：${url}\n[查看文档](${url})\n\`${url}\`\n\n\`\`\`\n${url}\n\`\`\``);
+    const host = fixture.nativeElement as HTMLElement;
+    const [raw, labeled] = host.querySelectorAll('a');
+    expect(getComputedStyle(raw).wordBreak).toBe('break-all');
+    expect(raw.textContent).toBe(url);
+    expect(raw.getAttribute('href')).toBe(url);
+    expect(getComputedStyle(labeled).wordBreak).not.toBe('break-all');
+    expect(labeled.textContent).toBe('查看文档');
+    expect(labeled.getAttribute('href')).toBe(url);
+    expect(host.querySelectorAll('.raw-url')).toHaveLength(1);
+    expect(host.querySelector('code')?.textContent).toBe(url);
+    expect(host.querySelector('pre code')?.textContent).toBe(url + '\n');
+  });
+
   it('reveals a hidden link before allowing navigation', () => {
     const fixture = render('||[secret](https://example.com/secret)||');
     const host = fixture.nativeElement as HTMLElement;

@@ -91,7 +91,7 @@ describe('renderMarkdownText — links and images', () => {
 
   it('renders linkified bare URLs as links', () => {
     expect(renderText('visit https://example.com/x today')).toBe(
-      '<p>visit <a href="https://example.com/x" target="_blank" rel="noopener noreferrer">https://example.com/x</a> today</p>',
+      '<p>visit <a href="https://example.com/x" target="_blank" rel="noopener noreferrer" class="raw-url">https://example.com/x</a> today</p>',
     );
   });
 
