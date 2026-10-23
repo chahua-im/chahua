@@ -1,3 +1,5 @@
+use crate::models::GroupKind;
+use crate::services::notification_preferences::{ChatNotificationSetting, NotificationDefaults};
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +17,9 @@ pub struct PushRecipientContext {
     pub is_mentioned: bool,
     pub is_reply_target: bool,
     pub chat_archived: bool,
-    pub group_muted_until: Option<DateTime<Utc>>,
+    pub notification_setting: ChatNotificationSetting,
+    pub chat_kind: GroupKind,
+    pub notification_defaults: NotificationDefaults,
     pub thread_state: ThreadPushState,
     pub has_active_presence: bool,
 }
@@ -80,7 +84,13 @@ pub fn should_send_push(recipient: &PushRecipientContext, now: DateTime<Utc>) ->
 
     match recipient.thread_state {
         ThreadPushState::NotThreadMessage => {
-            if recipient.is_mentioned || !is_group_muted(recipient.group_muted_until, now) {
+            if recipient.is_mentioned
+                || !recipient.notification_setting.is_muted(
+                    recipient.chat_kind,
+                    recipient.notification_defaults,
+                    now,
+                )
+            {
                 PushDecision::Send
             } else {
                 PushDecision::Skip(PushSkipReason::GroupMuted)
@@ -104,10 +114,6 @@ pub fn should_send_push(recipient: &PushRecipientContext, now: DateTime<Utc>) ->
     }
 }
 
-fn is_group_muted(muted_until: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
-    muted_until.is_some_and(|t| t > now)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,7 +129,15 @@ mod tests {
                 is_mentioned: false,
                 is_reply_target: false,
                 chat_archived: false,
-                group_muted_until: None,
+                notification_setting: ChatNotificationSetting {
+                    muted_until: None,
+                    mute_override: None,
+                },
+                chat_kind: GroupKind::Group,
+                notification_defaults: NotificationDefaults {
+                    group_chats_muted: false,
+                    direct_chats_muted: false,
+                },
                 thread_state,
                 has_active_presence: false,
             },
@@ -142,7 +156,8 @@ mod tests {
                 for muted in [false, true] {
                     let (now, mut ordinary) = base(thread_state);
                     ordinary.chat_archived = archived;
-                    ordinary.group_muted_until = muted.then_some(now + Duration::minutes(5));
+                    ordinary.notification_setting.muted_until =
+                        muted.then_some(now + Duration::minutes(5));
                     for (mention, reply) in [(true, false), (false, true), (true, true)] {
                         let directed = PushRecipientContext {
                             is_mentioned: mention,
@@ -170,9 +185,71 @@ mod tests {
     }
 
     #[test]
+    fn notification_preferences_apply_to_main_chats_but_not_subscribed_threads() {
+        let (now, mut recipient) = base(ThreadPushState::NotThreadMessage);
+        recipient.notification_defaults = NotificationDefaults::default();
+        assert_eq!(
+            should_send_push(&recipient, now),
+            PushDecision::Skip(PushSkipReason::GroupMuted)
+        );
+        recipient.notification_setting.mute_override = Some(false);
+        assert_eq!(should_send_push(&recipient, now), PushDecision::Send);
+        recipient.notification_setting.muted_until = Some(now + Duration::seconds(1));
+        assert_eq!(
+            should_send_push(&recipient, now),
+            PushDecision::Skip(PushSkipReason::GroupMuted)
+        );
+        assert_eq!(
+            should_send_push(&recipient, now + Duration::seconds(1)),
+            PushDecision::Send
+        );
+        recipient.thread_state = ThreadPushState::ActiveSubscription;
+        assert_eq!(should_send_push(&recipient, now), PushDecision::Send);
+        recipient.thread_state = ThreadPushState::NotThreadMessage;
+        recipient.chat_kind = GroupKind::Dm;
+        recipient.notification_setting = ChatNotificationSetting {
+            muted_until: None,
+            mute_override: None,
+        };
+        assert_eq!(
+            should_send_web_push(&recipient, true, now),
+            PushDecision::Send
+        );
+        recipient.notification_setting.mute_override = Some(true);
+        recipient.is_mentioned = true;
+        recipient.is_reply_target = true;
+        assert_eq!(
+            should_send_web_push(&recipient, true, now),
+            PushDecision::Skip(PushSkipReason::GroupMuted)
+        );
+        assert_eq!(should_send_push(&recipient, now), PushDecision::Send); // Existing APNs reply exception.
+    }
+
+    #[test]
+    fn dm_archive_suppresses_notifications_without_a_mute_timestamp() {
+        let (now, mut recipient) = base(ThreadPushState::NotThreadMessage);
+        recipient.chat_archived = true;
+        assert_eq!(
+            should_send_web_push(&recipient, true, now),
+            PushDecision::Skip(PushSkipReason::ChatArchived)
+        );
+        recipient.chat_archived = false;
+        assert_eq!(
+            should_send_web_push(&recipient, true, now),
+            PushDecision::Send
+        );
+        recipient.notification_setting.muted_until =
+            Some(crate::services::chat::indefinite_mute_until());
+        assert_eq!(
+            should_send_web_push(&recipient, true, now),
+            PushDecision::Skip(PushSkipReason::GroupMuted)
+        );
+    }
+
+    #[test]
     fn top_level_group_mute_suppresses_unmentioned_recipient() {
         let (now, mut recipient) = base(ThreadPushState::NotThreadMessage);
-        recipient.group_muted_until = Some(now + Duration::minutes(5));
+        recipient.notification_setting.muted_until = Some(now + Duration::minutes(5));
         assert_eq!(
             should_send_push(&recipient, now),
             PushDecision::Skip(PushSkipReason::GroupMuted)
@@ -182,7 +259,7 @@ mod tests {
     #[test]
     fn top_level_mention_bypasses_group_mute() {
         let (now, mut recipient) = base(ThreadPushState::NotThreadMessage);
-        recipient.group_muted_until = Some(now + Duration::minutes(5));
+        recipient.notification_setting.muted_until = Some(now + Duration::minutes(5));
         recipient.is_mentioned = true;
         assert_eq!(should_send_push(&recipient, now), PushDecision::Send);
     }
@@ -192,7 +269,7 @@ mod tests {
         let (now, mut reply_target) = base(ThreadPushState::NotThreadMessage);
         reply_target.uid = 42;
         reply_target.is_reply_target = true;
-        reply_target.group_muted_until = Some(now + Duration::minutes(5));
+        reply_target.notification_setting.muted_until = Some(now + Duration::minutes(5));
 
         assert_eq!(should_send_push(&reply_target, now), PushDecision::Send);
     }
@@ -227,7 +304,7 @@ mod tests {
     #[test]
     fn active_thread_subscription_ignores_group_mute() {
         let (now, mut recipient) = base(ThreadPushState::ActiveSubscription);
-        recipient.group_muted_until = Some(now + Duration::minutes(5));
+        recipient.notification_setting.muted_until = Some(now + Duration::minutes(5));
         assert_eq!(should_send_push(&recipient, now), PushDecision::Send);
     }
 
@@ -235,7 +312,7 @@ mod tests {
     fn root_author_active_thread_subscription_ignores_group_mute() {
         let (now, mut recipient) = base(ThreadPushState::ActiveSubscription);
         recipient.uid = 42;
-        recipient.group_muted_until = Some(now + Duration::days(1));
+        recipient.notification_setting.muted_until = Some(now + Duration::days(1));
         assert_eq!(should_send_push(&recipient, now), PushDecision::Send);
     }
 

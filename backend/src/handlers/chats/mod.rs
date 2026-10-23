@@ -22,7 +22,6 @@ use crate::{
         },
         messages::MessageResponse,
         read_receipts::ReadReceiptResponse,
-        ws::{ChatArchiveStateChangedPayload, ServerWsMessage},
     },
     errors::AppError,
     extractors::DbConn,
@@ -30,6 +29,10 @@ use crate::{
     services::{
         chat,
         messages::{attach_metadata, message_response_preview},
+        notification_preferences::{
+            load_chat_notification_setting, load_notification_defaults,
+            publish_chat_notification_setting, set_chat_archived, ChatNotificationSetting,
+        },
     },
     utils::{auth::CurrentUid, pagination::validate_limit},
 };
@@ -129,6 +132,8 @@ async fn get_chats(
 
     let limit = validate_limit(q.limit, MAX_CHATS_LIMIT);
     let archived = q.archived.unwrap_or(false);
+    let defaults = load_notification_defaults(conn, uid)?;
+    let now = Utc::now();
 
     let mut base_query = groups::table
         .inner_join(group_membership::table)
@@ -154,7 +159,7 @@ async fn get_chats(
         Option<DateTime<Utc>>,
         Option<i64>,
         Option<crate::models::Message>,
-        Option<DateTime<Utc>>,
+        ChatNotificationSetting,
         bool,
         GroupKind,
         Option<i32>,
@@ -170,7 +175,10 @@ async fn get_chats(
                 groups::last_message_at,
                 group_membership::last_read_message_id,
                 messages_schema::all_columns.nullable(),
-                group_membership::muted_until,
+                (
+                    group_membership::muted_until,
+                    group_membership::mute_override,
+                ),
                 group_membership::archived,
                 groups::kind,
                 groups::dm_uid1,
@@ -211,7 +219,10 @@ async fn get_chats(
                         groups::last_message_at,
                         group_membership::last_read_message_id,
                         messages_schema::all_columns.nullable(),
-                        group_membership::muted_until,
+                        (
+                            group_membership::muted_until,
+                            group_membership::mute_override,
+                        ),
                         group_membership::archived,
                         groups::kind,
                         groups::dm_uid1,
@@ -239,7 +250,10 @@ async fn get_chats(
                         groups::last_message_at,
                         group_membership::last_read_message_id,
                         messages_schema::all_columns.nullable(),
-                        group_membership::muted_until,
+                        (
+                            group_membership::muted_until,
+                            group_membership::mute_override,
+                        ),
                         group_membership::archived,
                         groups::kind,
                         groups::dm_uid1,
@@ -278,16 +292,16 @@ async fn get_chats(
                 _last_message_at,
                 last_read_message_id,
                 _msg,
-                muted_until,
+                setting,
                 archived,
-                _kind,
+                kind,
                 _dm_uid1,
                 _dm_uid2,
             )| crate::services::unread::ChatUnreadMembership {
                 chat_id: *id,
                 last_read_message_id: *last_read_message_id,
                 archived: *archived,
-                muted_until: *muted_until,
+                is_muted: setting.is_muted(*kind, defaults, now),
             },
         )
         .collect::<Vec<_>>();
@@ -339,7 +353,7 @@ async fn get_chats(
                 last_message_at,
                 last_read_message_id,
                 msg,
-                muted_until,
+                setting,
                 archived,
                 kind,
                 dm_uid1,
@@ -374,7 +388,9 @@ async fn get_chats(
                     last_read_message_id,
                     peer_last_read_message_id: peer_receipts.get(&id).copied(),
                     last_message: mr,
-                    muted_until,
+                    muted_until: setting.muted_until,
+                    mute_override: setting.mute_override,
+                    is_muted: setting.is_muted(kind, defaults, now),
                     archived,
                     kind,
                     peer,
@@ -878,7 +894,7 @@ async fn get_unread_count(
     }))
 }
 
-/// PUT /chats/:chat_id/archive — Archive a chat and mute it indefinitely.
+/// PUT /chats/:chat_id/archive — Archive a chat without changing its notification preference.
 #[utoipa::path(
     put,
     path = "/archive",
@@ -900,35 +916,18 @@ async fn archive_chat(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+    let _update = crate::services::notification_preferences::lock_notification_update(uid);
 
-    diesel::update(
-        group_membership::table.filter(
-            group_membership::chat_id
-                .eq(chat_id)
-                .and(group_membership::uid.eq(uid)),
-        ),
-    )
-    .set((
-        group_membership::archived.eq(true),
-        group_membership::muted_until.eq(Some(chat::indefinite_mute_until())),
-    ))
-    .execute(conn)?;
-
-    state.ws_registry.broadcast_to_uids(
-        &[uid],
-        std::sync::Arc::new(ServerWsMessage::ChatArchiveStateChanged(
-            ChatArchiveStateChangedPayload {
-                chat_id,
-                archived: true,
-                muted_until: Some(chat::indefinite_mute_until()),
-            },
-        )),
-    );
+    let setting = conn.transaction::<_, AppError, _>(|conn| {
+        set_chat_archived(conn, chat_id, uid, true)?;
+        load_chat_notification_setting(conn, chat_id, uid)
+    })?;
+    publish_chat_notification_setting(&state.ws_registry, uid, setting);
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// DELETE /chats/:chat_id/archive — Unarchive a chat and unmute it.
+/// DELETE /chats/:chat_id/archive — Unarchive a chat while preserving its notification preference.
 #[utoipa::path(
     delete,
     path = "/archive",
@@ -950,30 +949,13 @@ async fn unarchive_chat(
     let conn = &mut *conn;
 
     check_membership(conn, chat_id, uid)?;
+    let _update = crate::services::notification_preferences::lock_notification_update(uid);
 
-    diesel::update(
-        group_membership::table.filter(
-            group_membership::chat_id
-                .eq(chat_id)
-                .and(group_membership::uid.eq(uid)),
-        ),
-    )
-    .set((
-        group_membership::archived.eq(false),
-        group_membership::muted_until.eq(None::<DateTime<Utc>>),
-    ))
-    .execute(conn)?;
-
-    state.ws_registry.broadcast_to_uids(
-        &[uid],
-        std::sync::Arc::new(ServerWsMessage::ChatArchiveStateChanged(
-            ChatArchiveStateChangedPayload {
-                chat_id,
-                archived: false,
-                muted_until: None,
-            },
-        )),
-    );
+    let setting = conn.transaction::<_, AppError, _>(|conn| {
+        set_chat_archived(conn, chat_id, uid, false)?;
+        load_chat_notification_setting(conn, chat_id, uid)
+    })?;
+    publish_chat_notification_setting(&state.ws_registry, uid, setting);
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

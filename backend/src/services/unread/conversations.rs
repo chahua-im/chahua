@@ -121,13 +121,16 @@ impl UnreadService {
         if views.is_empty() {
             return Ok(Vec::new());
         }
+        let defaults =
+            crate::services::notification_preferences::load_notification_defaults(conn, uid)?;
         let selections = views.iter().map(Selection::new).collect::<Vec<_>>();
         // This UNION reads the user's indexed memberships/subscriptions and joins roots by PK.
         // It never scans message history to discover the collection or trusts caller-supplied IDs.
-        // Match list-row mute semantics: main chats use expiry, threads use their own archive state.
+        // Match list-row mute semantics: main chats use notification preferences, threads use their own archive state.
         let scopes = sql_query(
             "SELECT gm.chat_id, NULL::BIGINT AS thread_id, g.kind = 'dm' AS is_dm,
-                    gm.archived, COALESCE(gm.muted_until > statement_timestamp(), FALSE) AS muted,
+                    gm.archived, (COALESCE(gm.muted_until > statement_timestamp(), FALSE)
+                        OR COALESCE(gm.mute_override, CASE WHEN g.kind = 'dm' THEN $3 ELSE $2 END)) AS muted,
                     gm.last_read_message_id
              FROM group_membership gm JOIN groups g ON g.id = gm.chat_id
              WHERE gm.uid = $1
@@ -140,7 +143,7 @@ impl UnreadService {
              JOIN messages root ON root.id = ts.thread_root_id AND root.chat_id = ts.chat_id
              WHERE ts.uid = $1 AND ts.subscribed = TRUE
                AND root.reply_root_id IS NULL AND root.has_thread = TRUE AND root.is_published = TRUE"
-        ).bind::<Integer, _>(uid).load::<Scope>(conn)?
+        ).bind::<Integer, _>(uid).bind::<Bool, _>(defaults.group_chats_muted).bind::<Bool, _>(defaults.direct_chats_muted).load::<Scope>(conn)?
             .into_iter().filter(|scope| selections.iter().any(|selection| selection.contains(scope))).collect::<Vec<_>>();
 
         let memberships = scopes
@@ -150,7 +153,7 @@ impl UnreadService {
                 chat_id: scope.chat_id,
                 last_read_message_id: scope.last_read_message_id,
                 archived: scope.archived,
-                muted_until: None, // Collection counts describe unread state, including muted conversations.
+                is_muted: false, // Collection counts describe unread state, including muted conversations.
             })
             .collect::<Vec<_>>();
         let main_counts = self.count_membership_unreads(conn, &memberships)?;
@@ -491,6 +494,8 @@ mod tests {
         };
         let mut conn = PgConnection::establish(&url).unwrap();
         conn.batch_execute("
+            CREATE TEMP TABLE user_extra (uid INTEGER PRIMARY KEY, mute_group_chats_by_default BOOLEAN, mute_direct_chats_by_default BOOLEAN);
+            INSERT INTO user_extra VALUES (1, FALSE, FALSE);
             CREATE TEMP TABLE groups (id BIGINT PRIMARY KEY, kind TEXT NOT NULL);
             CREATE TEMP TABLE group_membership (chat_id BIGINT, uid INTEGER, archived BOOLEAN, last_read_message_id BIGINT, muted_until TIMESTAMPTZ, PRIMARY KEY(chat_id, uid));
             CREATE TEMP TABLE messages (id BIGINT PRIMARY KEY, chat_id BIGINT, reply_root_id BIGINT, has_thread BOOLEAN DEFAULT FALSE, is_published BOOLEAN DEFAULT TRUE, deleted_at TIMESTAMPTZ);
@@ -498,6 +503,7 @@ mod tests {
             CREATE TEMP TABLE message_mentions (chat_id BIGINT, thread_root_id BIGINT, message_id BIGINT, mentioned_uid INTEGER, PRIMARY KEY(message_id, mentioned_uid));
             INSERT INTO groups VALUES (1,'group'),(2,'dm'),(3,'group'),(4,'group');
             INSERT INTO group_membership VALUES (1,1,FALSE,12,'9999-01-01'),(2,1,FALSE,20,NULL),(4,1,TRUE,0,NULL);
+            ALTER TABLE group_membership ADD COLUMN mute_override BOOLEAN;
             INSERT INTO messages(id,chat_id,has_thread) VALUES (10,1,TRUE),(12,1,TRUE),(13,1,FALSE),(20,2,TRUE),(21,2,FALSE),(30,3,TRUE),(31,3,FALSE),(40,4,FALSE);
             INSERT INTO messages(id,chat_id,reply_root_id) VALUES (1001,1,10),(1002,1,10),(2001,2,20),(1201,1,12),(3001,3,30);
             INSERT INTO messages(id,chat_id,reply_root_id,is_published) VALUES (1003,1,10,FALSE);

@@ -284,6 +284,15 @@ async fn get_me(
         .first::<UserExtra>(conn)
         .optional()?;
 
+    let notification_defaults = extra
+        .as_ref()
+        .map(
+            |extra| crate::services::notification_preferences::NotificationDefaults {
+                group_chats_muted: extra.mute_group_chats_by_default,
+                direct_chats_muted: extra.mute_direct_chats_by_default,
+            },
+        )
+        .unwrap_or_default();
     let sticker_pack_order = extra
         .and_then(|e| {
             serde_json::from_value::<Vec<StickerPackOrderItem>>(e.sticker_pack_order).ok()
@@ -303,6 +312,8 @@ async fn get_me(
         user_group: profile.and_then(|profile| profile.user_group.clone()),
         sticker_pack_order,
         permissions,
+        mute_group_chats_by_default: notification_defaults.group_chats_muted,
+        mute_direct_chats_by_default: notification_defaults.direct_chats_muted,
     }))
 }
 
@@ -396,6 +407,7 @@ async fn get_auth_token(
 
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
+        .merge(super::notification_preferences::router())
         .routes(routes!(get_me))
         .routes(routes!(get_user_search))
         .routes(routes!(get_auth_token))

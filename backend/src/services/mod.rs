@@ -12,6 +12,7 @@ pub mod media;
 pub mod message_deletion;
 pub mod message_search;
 pub mod messages;
+pub mod notification_preferences;
 pub mod presence;
 pub mod push;
 pub mod reactions;

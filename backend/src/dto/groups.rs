@@ -29,7 +29,10 @@ pub struct GroupInfoResponse {
     pub avatar: Option<String>,
     pub visibility: GroupVisibility,
     pub created_at: DateTime<Utc>,
+    pub archived: bool,
     pub muted_until: Option<DateTime<Utc>>,
+    pub mute_override: Option<bool>,
+    pub is_muted: bool,
     pub my_role: Option<GroupRole>,
     pub kind: GroupKind,
     /// The other participant, for DM chats; `None` for regular groups.
@@ -70,4 +73,60 @@ pub struct AvatarUploadUrlResponse {
 #[serde(rename_all = "camelCase")]
 pub struct MuteResponse {
     pub muted_until: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationSettingMode {
+    Inherit,
+    AlwaysMuted,
+    AlwaysUnmuted,
+    TemporarilyMuted,
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNotificationSettingRequest {
+    pub mode: NotificationSettingMode,
+    pub duration_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatNotificationSettingResponse {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub chat_id: i64,
+    pub kind: GroupKind,
+    pub archived: bool,
+    pub muted_until: Option<DateTime<Utc>>,
+    pub mute_override: Option<bool>,
+    pub is_muted: bool,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationException {
+    #[serde(flatten)]
+    pub setting: ChatNotificationSettingResponse,
+    pub name: String,
+    pub avatar: Option<String>,
+    pub peer: Option<MemberSummary>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationExceptionsResponse {
+    pub exceptions: Vec<NotificationException>,
+    pub total_count: i64,
+    #[serde(with = "crate::serde_i64_string::opt")]
+    #[schema(value_type = Option<String>)]
+    pub next_cursor: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationExceptionsCleared {
+    pub kind: GroupKind,
+    pub chat_ids: Vec<String>,
 }
