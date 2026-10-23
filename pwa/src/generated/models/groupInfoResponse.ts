@@ -12,12 +12,15 @@ import type { MemberSummary } from './memberSummary';
 import type { SnowflakeID } from './snowflakeID';
 
 export interface GroupInfoResponse {
+  archived: boolean;
   avatar?: string;
   avatarImageId?: SnowflakeID;
   createdAt: string;
   description?: string;
   id: SnowflakeID;
+  isMuted: boolean;
   kind: GroupKind;
+  muteOverride?: boolean;
   mutedUntil?: string;
   myRole?: GroupRole;
   name: string;

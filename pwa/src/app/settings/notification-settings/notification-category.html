@@ -1,0 +1,141 @@
+@if (compact()) {
+  <div class="category-summary">
+    <ion-item lines="none" [detail]="false" [routerLink]="['/settings/notifications', kind()]">
+      <ion-icon slot="start" [icon]="kind() === Kind.dm ? personIcon : groupIcon" />
+      <ion-label>
+        <h2>
+          {{
+            (kind() === Kind.dm ? 'notificationPreferences.directChats' : 'notificationPreferences.groupChats')
+              | transloco
+          }}
+        </h2>
+        <p>
+          @if (defaultMuted() != null) {
+            {{ (defaultMuted() ? 'notificationPreferences.disabled' : 'notificationPreferences.enabled') | transloco }}
+          }
+          @if (page(); as result) {
+            · {{ 'notificationPreferences.exceptionCount' | transloco: { count: result.totalCount } }}
+          } @else if (loading()) {
+            <ion-spinner name="dots" />
+          }
+        </p>
+      </ion-label>
+    </ion-item>
+    <ion-toggle
+      [checked]="defaultMuted() === false"
+      [disabled]="!store.notificationDefaults() || store.defaultsSaving()"
+      (ionChange)="setDefault($event)" />
+  </div>
+} @else {
+  <ion-list [inset]="true">
+    <ion-item lines="none">
+      <ion-icon slot="start" [icon]="bellIcon" />
+      <ion-toggle
+        [checked]="defaultMuted() === false"
+        [disabled]="!store.notificationDefaults() || store.defaultsSaving()"
+        (ionChange)="setDefault($event)">
+        {{
+          (kind() === Kind.dm ? 'notificationPreferences.enableDirect' : 'notificationPreferences.enableGroups')
+            | transloco
+        }}
+      </ion-toggle>
+    </ion-item>
+  </ion-list>
+  <ion-list [inset]="true">
+    <ion-item
+      lines="none"
+      [button]="true"
+      [detail]="false"
+      [disabled]="editing() != null || clearing()"
+      (click)="pickerOpen.set(true)">
+      <ion-icon slot="start" color="primary" [icon]="addIcon" />
+      <ion-label color="primary">{{ 'notificationPreferences.addException' | transloco }}</ion-label>
+    </ion-item>
+    @for (row of page()?.exceptions; track row.chatId) {
+      <ion-item
+        lines="none"
+        [button]="true"
+        [detail]="false"
+        [disabled]="editing() != null || clearing()"
+        (click)="edit(row.chatId)">
+        <app-chat-avatar slot="start" [entry]="avatar(row)" [size]="44" />
+        <ion-label>
+          <h3>{{ row.kind === Kind.dm ? (row.peer?.username ?? row.peer?.uid) : row.name }}</h3>
+          <p>
+            {{ (row.muteOverride ? 'notificationPreferences.muted' : 'notificationPreferences.unmuted') | transloco }}
+            @if (row.archived) {
+              · {{ 'notificationPreferences.archived' | transloco }}
+            }
+          </p>
+        </ion-label>
+        <ion-button
+          slot="end"
+          fill="clear"
+          [disabled]="editing() != null || clearing()"
+          (click)="$event.stopPropagation(); edit(row.chatId, true)">
+          <span class="action-content" [class.busy]="editing() === row.chatId">
+            <span class="action-label">{{ 'notificationPreferences.remove' | transloco }}</span>
+            @if (editing() === row.chatId) {
+              <ion-spinner />
+            }
+          </span>
+        </ion-button>
+      </ion-item>
+    }
+    @if (!page() && loading()) {
+      <ion-item lines="none"><ion-spinner /></ion-item>
+    } @else if (page()?.totalCount === 0) {
+      <ion-item lines="none">
+        <ion-note>{{ 'notificationPreferences.noExceptions' | transloco }}</ion-note>
+      </ion-item>
+    }
+    @if (page()?.nextCursor) {
+      <ion-item lines="none">
+        <ion-button fill="clear" [disabled]="loading()" (click)="loadMore()">
+          {{ 'notificationPreferences.loadMore' | transloco }}
+        </ion-button>
+        @if (loading()) {
+          <ion-spinner slot="end" />
+        }
+      </ion-item>
+    }
+    @if (page()?.totalCount) {
+      <ion-item
+        lines="none"
+        [button]="true"
+        [detail]="false"
+        [disabled]="clearing() || editing() != null"
+        (click)="clearAll()">
+        <ion-icon slot="start" color="danger" [icon]="trashIcon" />
+        <ion-label color="danger">{{ 'notificationPreferences.clearAll' | transloco }}</ion-label>
+        @if (clearing()) {
+          <ion-spinner slot="end" />
+        }
+      </ion-item>
+    }
+  </ion-list>
+}
+@if (error()) {
+  <ion-item lines="none">
+    <ion-note color="danger">{{ 'notificationPreferences.loadFailed' | transloco }}</ion-note>
+    <ion-button slot="end" fill="clear" [disabled]="loading()" (click)="refresh()">
+      {{ 'common.retry' | transloco }}
+    </ion-button>
+  </ion-item>
+}
+@if (saveError()) {
+  <ion-item lines="none">
+    <ion-note color="danger">{{ 'notificationPreferences.saveFailed' | transloco }}</ion-note>
+  </ion-item>
+}
+@if (pickerOpen()) {
+  <app-notification-exception-picker [kind]="kind()" (closed)="pickerOpen.set(false)" />
+}
+<ion-alert
+  [header]="'notificationPreferences.clearAll' | transloco"
+  [message]="'notificationPreferences.clearConfirm' | transloco"
+  [buttons]="[
+    { text: ('common.cancel' | transloco), role: 'cancel' },
+    { text: ('notificationPreferences.clearAll' | transloco), role: 'confirm' },
+  ]" />
+<app-chat-mute />

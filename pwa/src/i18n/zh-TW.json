@@ -192,10 +192,10 @@
       },
       "mute": {
         "title": "靜音通知",
-        "oneHour": "1 小時",
-        "eightHours": "8 小時",
-        "oneDay": "1 天",
-        "sevenDays": "7 天",
+        "oneHour": "靜音 1 小時",
+        "eightHours": "靜音 8 小時",
+        "oneDay": "靜音 1 天",
+        "sevenDays": "靜音 7 天",
         "forever": "永久"
       }
     },
@@ -628,5 +628,37 @@
   "reactions": {
     "title": "表態",
     "all": "全部 {{ count }}"
+  },
+  "notificationPreferences": {
+    "chatSettings": "通知設定",
+    "thisDevice": "本機通知",
+    "groupChats": "群組",
+    "directChats": "私聊",
+    "inherit": "恢復預設",
+    "alwaysMuted": "一律靜音",
+    "alwaysUnmuted": "一律通知",
+    "archived": "已封存",
+    "noExceptions": "尚無例外",
+    "loadFailed": "載入失敗，請重試",
+    "saveFailed": "儲存失敗，請重試",
+    "loadMore": "載入更多",
+    "chatNotifications": "聊天通知",
+    "directTitle": "私聊通知",
+    "groupTitle": "群組通知",
+    "enableDirect": "啟用私聊通知",
+    "enableGroups": "啟用群組通知",
+    "enabled": "已開啟",
+    "disabled": "已關閉",
+    "exceptionCount": "{{count}} 個例外",
+    "addException": "新增例外",
+    "remove": "移除",
+    "clearAll": "刪除所有例外",
+    "clearConfirm": "將此分類的所有例外恢復為預設通知設定，同時清除這些聊天的暫時靜音。封存狀態不會改變。",
+    "muted": "已靜音",
+    "unmuted": "未靜音",
+    "searchChats": "搜尋已載入的聊天",
+    "addHint": "選擇聊天，設為與目前預設相反的通知狀態。新增後可點擊例外修改。",
+    "alreadyAdded": "已新增",
+    "noChats": "沒有符合的聊天"
   }
 }

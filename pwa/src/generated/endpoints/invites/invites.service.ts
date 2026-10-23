@@ -238,6 +238,33 @@ export class InvitesService {
       params: filteredParams,
     });
   }
+  deleteInvite<TData = void>(inviteId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  deleteInvite<TData = void>(inviteId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deleteInvite<TData = void>(
+    inviteId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deleteInvite<TData = void>(
+    inviteId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/invites/invite/${decodeId(inviteId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/invites/invite/${decodeId(inviteId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/invites/invite/${decodeId(inviteId)}`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
   getInvite<TData = InviteResponse>(inviteId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
   getInvite<TData = InviteResponse>(
     inviteId: SnowflakeID,
@@ -264,33 +291,6 @@ export class InvitesService {
       });
     }
     return this.http.get<TData>(`${this.baseUrl}/invites/invite/${decodeId(inviteId)}`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
-  deleteInvite<TData = void>(inviteId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  deleteInvite<TData = void>(inviteId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deleteInvite<TData = void>(
-    inviteId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deleteInvite<TData = void>(
-    inviteId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/invites/invite/${decodeId(inviteId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/invites/invite/${decodeId(inviteId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/invites/invite/${decodeId(inviteId)}`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

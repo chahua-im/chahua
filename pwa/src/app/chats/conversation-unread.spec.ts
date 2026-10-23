@@ -11,7 +11,7 @@ import {
   type MeResponse,
   type ServerWsMessage,
 } from '../../generated/models';
-import { Connection } from '../api/connection';
+import { Connection, ResyncReason } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { mockRealtime, testUser } from '../api/testing';
 import { SessionStore } from '../session/session-store';
@@ -36,7 +36,7 @@ describe('conversation unread WebSocket subscription', () => {
   let store: ChatListStore;
   let http: HttpTestingController;
   let events: Subject<ServerWsMessage>;
-  let resync: Subject<void>;
+  let resync: Subject<ResyncReason>;
   let release: () => void;
   const watch = vi.fn<Connection['watchConversationUnread']>();
   const requestId = () => watch.mock.calls.at(-1)![0];
@@ -138,7 +138,7 @@ describe('conversation unread WebSocket subscription', () => {
   });
 
   it('does not resubscribe on healthy foreground resync, but does after reconnection', () => {
-    resync.next();
+    resync.next(ResyncReason.Foreground);
     TestBed.tick();
     expect(watch).toHaveBeenCalledOnce();
     const old = requestId();
@@ -176,7 +176,7 @@ describe('conversation unread WebSocket subscription', () => {
     TestBed.tick();
     expect(watch).toHaveBeenCalledOnce();
     document.dispatchEvent(new Event('visibilitychange'));
-    resync.next();
+    resync.next(ResyncReason.Foreground);
     TestBed.tick();
     expect(watch).toHaveBeenCalledOnce();
     releaseBadge();

@@ -1,0 +1,31 @@
+:host {
+  display: block;
+}
+.category-summary {
+  display: flex;
+  align-items: center;
+  ion-item {
+    flex: 1;
+    min-width: 0;
+    --min-height: 72px;
+  }
+  > ion-toggle {
+    flex: none;
+    margin-inline: 0 16px;
+    padding-inline-start: 20px;
+    border-inline-start: 1px solid var(--ion-color-light-shade);
+  }
+  p {
+    min-height: 20px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  p ion-spinner {
+    width: 24px;
+    height: 16px;
+  }
+}
+ion-icon[slot='start'] {
+  margin-inline-end: 20px;
+}

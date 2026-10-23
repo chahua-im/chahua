@@ -1,6 +1,8 @@
-import { computed, DestroyRef, effect, inject, Service, signal } from '@angular/core';
+import { computed, DestroyRef, effect, inject, linkedSignal, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, timer, type Observable } from 'rxjs';
+import { UsersService } from '../../generated/endpoints/users/users.service';
+import { notificationMuted } from './notification-setting';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
 import { GroupsService } from '../../generated/endpoints/groups/groups.service';
@@ -9,6 +11,11 @@ import { ThreadsService } from '../../generated/endpoints/threads/threads.servic
 import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
+  NotificationSettingMode,
+  type NotificationSettingsResponse,
+  type UpdateNotificationSettingRequest,
+  type NotificationException,
+  type NotificationExceptionsCleared,
   GroupKind,
   type ChatListItem,
   type GroupInfoResponse,
@@ -30,10 +37,10 @@ import { isMessageChange, type MessageChange } from '../messages/message-change'
 import { ChatPins } from './chat-pins';
 
 export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> &
-  Partial<Pick<GroupInfoResponse, 'myRole' | 'description' | 'visibility' | 'mutedUntil'>>;
-type ChatSummary = Pick<ChatListItem, 'lastMessage' | 'lastMessageAt' | 'archived' | 'mutedUntil'>;
-type ChatState = Partial<Pick<ChatListItem, 'archived' | 'mutedUntil'>>;
-const PERMANENT_MUTE = '9999-12-31T23:59:59Z';
+  Partial<Pick<GroupInfoResponse, 'myRole' | 'description' | 'visibility'>>;
+type ChatSummary = Pick<ChatListItem, 'lastMessage' | 'lastMessageAt' | 'archived' | 'mutedUntil' | 'muteOverride'>;
+type ChatState = Partial<Pick<ChatListItem, 'archived' | 'mutedUntil' | 'muteOverride'>>;
+const stateFields = ['archived', 'mutedUntil', 'muteOverride'] as const;
 type ThreadSummary = Omit<
   ThreadListItem,
   'unreadCount' | 'unreadMentions' | 'unreadReactions' | 'lastReadMessageId' | 'archived'
@@ -73,6 +80,36 @@ export class ChatStore {
   }
 
   private readonly api = inject(ChatsService);
+  private readonly usersApi = inject(UsersService);
+  private readonly stateVersions = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, Partial<Record<keyof ChatState, number>>>();
+  });
+  private readonly pendingStateWrites = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, Partial<Record<keyof ChatState, number>>>();
+  });
+  private readonly preferenceChanges = new Subject<GroupKind>();
+  readonly preferenceChanges$ = this.preferenceChanges.asObservable();
+  readonly defaultsError = signal(false);
+  readonly defaultsLoading = signal(false);
+  readonly defaultsSaving = signal(false);
+  readonly notificationDefaults = computed(() => {
+    const user = this.session.user();
+    return (
+      user && {
+        muteGroupChatsByDefault: user.muteGroupChatsByDefault,
+        muteDirectChatsByDefault: user.muteDirectChatsByDefault,
+      }
+    );
+  });
+  private defaultsVersion = 0;
+  private defaultsRequest?: Promise<void>;
+  private defaultsDirty = false;
+  private readonly notificationWriteVersions = new Map<SnowflakeID, number>();
+  private readonly remoteClearVersions = new Map<GroupKind, number>();
+  private readonly remotePreferenceVersions = new Map<SnowflakeID, number>();
+
   private readonly groupsApi = inject(GroupsService);
   private readonly threadsApi = inject(ThreadsService);
   private readonly pinsApi = inject(PinsService);
@@ -83,15 +120,19 @@ export class ChatStore {
   private readonly knownMentions = new Map<SnowflakeID, { mentioned: boolean; version: number }>();
   private readonly scheduledReads = new Map<SnowflakeID, Promise<MarkChatReadStateResponse>>();
   private readonly threadReadRefreshes = new Map<SnowflakeID, Promise<MarkThreadReadResponse>>();
-  private readonly entries = signal(new Map<SnowflakeID, ChatInfo>());
+  private readonly entries = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, ChatInfo>();
+  });
   private readonly fresh = new Set<SnowflakeID>();
   private readonly detailsFresh = new Set<SnowflakeID>();
   private readonly requests = new Map<SnowflakeID, Promise<void>>();
   private revision = 0;
   private version = 0;
-  private readonly summaries = signal(
-    new Map<SnowflakeID, { value: Partial<ChatSummary>; previewVersion: number; stateVersion: number }>(),
-  );
+  private readonly summaries = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, { value: Partial<ChatSummary>; previewVersion: number; stateVersion: number }>();
+  });
   private readonly readStates = signal(
     new Map<SnowflakeID, { state: MarkChatReadStateResponse; version: number; dirty: boolean }>(),
   );
@@ -170,15 +211,100 @@ export class ChatStore {
   private readonly muteTime = signal(Date.now());
 
   mutedUntil(chatId: SnowflakeID) {
-    return (this.chatState(chatId) ?? this.get(chatId))?.mutedUntil;
+    return this.chatState(chatId)?.mutedUntil;
   }
 
   isMuted(chatId: SnowflakeID) {
     this.muteTime();
-    return Date.parse(this.mutedUntil(chatId) ?? '') > Date.now();
+    return notificationMuted(this.get(chatId)?.kind, this.chatState(chatId), this.notificationDefaults());
+  }
+
+  async refreshNotificationDefaults() {
+    if (!this.session.user()) return;
+    this.defaultsDirty = true;
+    if (this.defaultsSaving()) return;
+    if (this.defaultsRequest) return this.defaultsRequest;
+    const uid = this.session.user()?.uid;
+    this.defaultsLoading.set(true);
+    const run = async () => {
+      do {
+        this.defaultsDirty = false;
+        const version = ++this.defaultsVersion;
+        this.defaultsError.set(false);
+        try {
+          const saved = await this.response(this.usersApi.getSettings());
+          if (this.session.user()?.uid !== uid || this.destroyRef.destroyed) return;
+          if (version === this.defaultsVersion && !this.defaultsDirty) this.acceptDefaults(saved);
+        } catch {
+          if (this.session.user()?.uid !== uid || this.destroyRef.destroyed) return;
+          if (version === this.defaultsVersion) this.defaultsError.set(true);
+        }
+      } while (this.defaultsDirty && !this.defaultsSaving());
+    };
+    const request = run().finally(() => {
+      if (this.defaultsRequest === request) {
+        this.defaultsRequest = undefined;
+        this.defaultsLoading.set(false);
+      }
+    });
+    this.defaultsRequest = request;
+    return request;
+  }
+
+  private acceptDefaults(saved: NotificationSettingsResponse) {
+    this.defaultsVersion++;
+    this.session.user.update((user) => user && { ...user, ...saved });
+    this.defaultsError.set(false);
+  }
+
+  async setNotificationDefault(kind: GroupKind, muted: boolean) {
+    const previous = this.notificationDefaults();
+    if (!previous || this.defaultsSaving()) return;
+    const key = kind === GroupKind.dm ? 'muteDirectChatsByDefault' : 'muteGroupChatsByDefault';
+    const uid = this.session.user()?.uid;
+    this.acceptDefaults({ ...previous, [key]: muted });
+    const version = this.defaultsVersion;
+    this.defaultsSaving.set(true);
+    try {
+      const saved = await this.response(this.usersApi.patchSettings({ [key]: muted }));
+      if (this.session.user()?.uid === uid && this.defaultsVersion === version) this.acceptDefaults(saved);
+    } catch (error) {
+      if (this.session.user()?.uid === uid && this.defaultsVersion === version) this.acceptDefaults(previous);
+      throw error;
+    } finally {
+      if (this.session.user()?.uid === uid) {
+        this.defaultsSaving.set(false);
+        if (this.defaultsDirty) void this.refreshNotificationDefaults();
+      }
+    }
+  }
+
+  acceptNotificationExceptions(rows: readonly NotificationException[], version: number) {
+    this.remember(rows.map((row) => ({ ...row, id: row.chatId })));
+    this.applyChatStates(
+      rows.map((row) => [row.chatId, row] as const),
+      version,
+      true,
+    );
   }
 
   constructor() {
+    let account = this.session.user()?.uid;
+    effect(() => {
+      const uid = this.mentionAccount();
+      if (uid === account) return;
+      account = uid;
+      this.defaultsVersion++;
+      this.defaultsRequest = undefined;
+      this.defaultsDirty = false;
+      this.remotePreferenceVersions.clear();
+      this.remoteClearVersions.clear();
+      this.notificationWriteVersions.clear();
+      this.defaultsSaving.set(false);
+      this.defaultsLoading.set(false);
+      this.defaultsError.set(false);
+      this.invalidate();
+    });
     effect((onCleanup) => {
       this.muteTime();
       const now = Date.now();
@@ -208,6 +334,7 @@ export class ChatStore {
       // Group metadata and relationship policy have no complete change stream.
       // Read, subscription and pin state do; retain them on a healthy foreground.
       if (reason === ResyncReason.Foreground && this.realtime.connected()) return;
+      void this.refreshNotificationDefaults();
       this.invalidateReads();
       this.invalidateThreadReads();
       this.invalidateSubscriptions();
@@ -268,6 +395,22 @@ export class ChatStore {
           if (event.payload.status)
             this.setSubscription(event.payload.chatId, event.payload.threadRootId, event.payload.status);
           else this.invalidateSubscriptions(event.payload.threadRootId);
+          break;
+        case ServerWsMessageType.notificationExceptionsCleared: {
+          const version = this.snapshot();
+          this.remoteClearVersions.set(event.payload.kind, version);
+          for (const id of event.payload.chatIds) this.remotePreferenceVersions.set(id, version);
+          this.applyClearedExceptions(event.payload, version);
+          break;
+        }
+        case ServerWsMessageType.notificationSettingsChanged:
+          this.acceptDefaults(event.payload);
+          break;
+        case ServerWsMessageType.chatNotificationSettingChanged:
+          this.remotePreferenceVersions.set(event.payload.chatId, this.snapshot());
+          this.notificationWriteVersions.set(event.payload.chatId, this.snapshot());
+          this.applyChatState(event.payload.chatId, event.payload);
+          this.preferenceChanges.next(event.payload.kind);
           break;
         case ServerWsMessageType.chatArchiveStateChanged:
           this.applyChatState(event.payload.chatId, event.payload);
@@ -394,12 +537,16 @@ export class ChatStore {
       while (!this.destroyRef.destroyed && !this.detailsFresh.has(id)) {
         const revision = this.revision;
         const cached = this.entries().get(id);
+        const version = this.snapshot();
+        const uid = this.session.user()?.uid;
         const chat = await firstValueFrom(this.groupsApi.getGroup(id).pipe(takeUntilDestroyed(this.destroyRef)));
+        if (uid !== this.session.user()?.uid) return;
         if (revision !== this.revision) continue;
         if (this.entries().get(id) === cached) this.remember([chat]);
-        const { myRole, description, visibility, mutedUntil } = chat;
+        const { myRole, description, visibility } = chat;
+        this.applyChatStates([[id, chat]], version, true);
         this.entries.update((entries) =>
-          new Map(entries).set(id, { ...entries.get(id)!, myRole, description, visibility, mutedUntil }),
+          new Map(entries).set(id, { ...entries.get(id)!, myRole, description, visibility }),
         );
         this.detailsFresh.add(id);
       }
@@ -421,6 +568,7 @@ export class ChatStore {
       ...this.summaries().get(id)!.value,
       ...this.readStates().get(id)!.state,
       peerLastReadMessageId: this.peerReads().get(id),
+      isMuted: this.isMuted(id),
     } as ChatListItem;
   }
 
@@ -440,9 +588,6 @@ export class ChatStore {
           ...(!current || current.previewVersion <= version
             ? { lastMessage: chat.lastMessage, lastMessageAt: chat.lastMessageAt }
             : {}),
-          ...(!current || current.stateVersion <= version
-            ? { archived: chat.archived, mutedUntil: chat.mutedUntil }
-            : {}),
         },
         previewVersion: Math.max(current?.previewVersion ?? 0, version),
         stateVersion: Math.max(current?.stateVersion ?? 0, version),
@@ -459,7 +604,12 @@ export class ChatStore {
           dirty: false,
         });
     }
-    this.summaries.set(summaries);
+    this.applyChatStates(
+      chats.map((chat) => [chat.id, chat] as const),
+      version,
+      true,
+      summaries,
+    );
     this.readStates.set(reads);
     this.peerReads.update((reads) => {
       const next = new Map(reads);
@@ -712,15 +862,41 @@ export class ChatStore {
     this.readStates.update((states) => new Map(states).set(chatId, { state, version: ++this.version, dirty: false }));
   }
 
-  private applyChatState(chatId: SnowflakeID, state: ChatState) {
-    const current = this.summaries().get(chatId);
-    this.summaries.update((items) =>
-      new Map(items).set(chatId, {
-        value: { ...current?.value, archived: state.archived ?? current?.value.archived, mutedUntil: state.mutedUntil },
+  private applyChatState(chatId: SnowflakeID, state: ChatState, version = this.snapshot()) {
+    this.applyChatStates([[chatId, state]], version);
+  }
+
+  private applyChatStates(
+    updates: readonly (readonly [SnowflakeID, ChatState])[],
+    version: number,
+    fromRead = false,
+    items = new Map(this.summaries()),
+  ) {
+    if (!updates.length) return;
+    const allVersions = new Map(this.stateVersions());
+    const pending = this.pendingStateWrites();
+    for (const [chatId, state] of updates) {
+      const current = items.get(chatId);
+      const versions = { ...allVersions.get(chatId) };
+      const patch: ChatState = {};
+      for (const key of stateFields) {
+        // A read started during a save can still reflect the state before commit.
+        // Only another write or a server event can supersede the pending fields.
+        if (fromRead && pending.get(chatId)?.[key] != null) continue;
+        if (key in state && (versions[key] ?? 0) <= version) {
+          Object.assign(patch, { [key]: state[key] });
+          versions[key] = version;
+        }
+      }
+      allVersions.set(chatId, versions);
+      items.set(chatId, {
+        value: { ...current?.value, ...patch },
         previewVersion: current?.previewVersion ?? 0,
-        stateVersion: ++this.version,
-      }),
-    );
+        stateVersion: Math.max(current?.stateVersion ?? 0, version),
+      });
+    }
+    this.stateVersions.set(allVersions);
+    this.summaries.set(items);
   }
 
   private changed(kind: ChatChangeKind, chatId: SnowflakeID, threadId?: SnowflakeID, readThrough?: SnowflakeID) {
@@ -845,38 +1021,99 @@ export class ChatStore {
   setArchived(chatId: SnowflakeID, archived: boolean) {
     return this.changeChatState(
       chatId,
-      { archived, mutedUntil: archived ? PERMANENT_MUTE : undefined },
+      { archived },
       archived ? this.api.archiveChat(chatId) : this.api.unarchiveChat(chatId),
     );
   }
   setMuted(chatId: SnowflakeID, muted: boolean, durationSeconds?: number) {
-    const state = muted
-      ? { mutedUntil: durationSeconds ? new Date(Date.now() + durationSeconds * 1000).toISOString() : PERMANENT_MUTE }
-      : { mutedUntil: undefined, archived: false };
-    return this.changeChatState(
-      chatId,
-      state,
-      muted
-        ? this.groupsApi.putMute(chatId, durationSeconds ? { durationSeconds } : {})
-        : this.groupsApi.deleteMute(chatId),
-    );
+    return this.setNotificationSetting(chatId, {
+      mode: muted
+        ? durationSeconds
+          ? NotificationSettingMode.temporarilyMuted
+          : NotificationSettingMode.alwaysMuted
+        : NotificationSettingMode.alwaysUnmuted,
+      ...(durationSeconds ? { durationSeconds } : {}),
+    });
   }
+  async setNotificationSetting(chatId: SnowflakeID, command: UpdateNotificationSettingRequest) {
+    const state: ChatState =
+      command.mode === NotificationSettingMode.temporarilyMuted
+        ? { mutedUntil: new Date(Date.now() + command.durationSeconds! * 1000).toISOString() }
+        : {
+            mutedUntil: undefined,
+            muteOverride:
+              command.mode === NotificationSettingMode.inherit
+                ? undefined
+                : command.mode === NotificationSettingMode.alwaysMuted,
+          };
+    this.notificationWriteVersions.set(chatId, this.snapshot());
+    const revision = this.remotePreferenceVersions.get(chatId);
+    const uid = this.session.user()?.uid;
+    await this.changeChatState(chatId, state, this.groupsApi.putNotificationSetting(chatId, command));
+    const kind = this.get(chatId)?.kind;
+    if (kind && uid === this.session.user()?.uid && revision === this.remotePreferenceVersions.get(chatId))
+      this.preferenceChanges.next(kind);
+  }
+  async clearNotificationExceptions(kind: GroupKind) {
+    const uid = this.session.user()?.uid;
+    const version = this.snapshot();
+    const remote = this.remoteClearVersions.get(kind);
+    const result = await this.response(this.usersApi.clearExceptions({ kind }));
+    if (this.destroyRef.destroyed || uid !== this.session.user()?.uid || remote !== this.remoteClearVersions.get(kind))
+      return;
+    // Reads started during the write can still contain the old preference. Only
+    // a newer preference write/event, rather than such a read, wins over this result.
+    const chatIds = result.chatIds.filter((id) => (this.notificationWriteVersions.get(id) ?? 0) <= version);
+    this.applyClearedExceptions({ ...result, chatIds }, this.snapshot());
+  }
+
+  private applyClearedExceptions(result: NotificationExceptionsCleared, version: number) {
+    for (const id of result.chatIds) this.notificationWriteVersions.set(id, version);
+    this.applyChatStates(
+      result.chatIds.map((id) => [id, { muteOverride: undefined, mutedUntil: undefined }] as const),
+      version,
+    );
+    this.preferenceChanges.next(result.kind);
+  }
+
   private async changeChatState(chatId: SnowflakeID, state: ChatState, request: Observable<ChatState | void>) {
-    const previous = this.chatState(chatId) ?? { archived: false, mutedUntil: this.mutedUntil(chatId) };
-    this.applyChatState(chatId, state);
-    const version = this.summaries().get(chatId)!.stateVersion;
+    const previous = this.chatState(chatId);
+    const uid = this.session.user()?.uid;
+    const version = this.snapshot();
+    const pending = { ...this.pendingStateWrites().get(chatId) };
+    for (const key of stateFields) if (key in state) pending[key] = version;
+    this.pendingStateWrites().set(chatId, pending);
+    this.applyChatState(chatId, state, version);
+    const applyCurrent = (next: ChatState | undefined) => {
+      const patch: ChatState = {};
+      for (const key of stateFields) {
+        if (
+          key in state &&
+          this.pendingStateWrites().get(chatId)?.[key] === version &&
+          this.stateVersions().get(chatId)?.[key] === version
+        )
+          Object.assign(patch, { [key]: next?.[key] });
+      }
+      this.applyChatState(chatId, patch);
+    };
     try {
       const confirmed = await this.response(request);
-      if (this.destroyRef.destroyed) return;
-      if (confirmed && this.summaries().get(chatId)?.stateVersion === version)
-        this.applyChatState(chatId, { ...state, ...confirmed });
+      if (this.destroyRef.destroyed || this.session.user()?.uid !== uid) return;
+      // Advance the version even for 204 responses to reject reads begun mid-save.
+      applyCurrent(confirmed ?? state);
       this.changed(ChatChangeKind.Read, chatId);
       this.changed(ChatChangeKind.Membership, chatId);
     } catch (error) {
-      // A failed older request must not undo a newer choice or server update.
-      if (!this.destroyRef.destroyed && this.summaries().get(chatId)?.stateVersion === version)
-        this.applyChatState(chatId, previous);
+      if (!this.destroyRef.destroyed && this.session.user()?.uid === uid) applyCurrent(previous);
       throw error;
+    } finally {
+      if (this.session.user()?.uid === uid) {
+        const pending = this.pendingStateWrites().get(chatId);
+        if (pending) {
+          for (const key of stateFields) if (pending[key] === version) delete pending[key];
+          if (!Object.keys(pending).length) this.pendingStateWrites().delete(chatId);
+        }
+      }
     }
   }
 

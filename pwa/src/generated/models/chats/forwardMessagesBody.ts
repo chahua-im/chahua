@@ -8,6 +8,8 @@
 import type { SnowflakeID } from '../snowflakeID';
 
 export interface ForwardMessagesBody {
+  /** User confirmed replacing pending audio or excessive nesting with immutable placeholders. */
+  allowPlaceholders?: boolean;
   clientGeneratedId: string;
   /**
    * @minItems 2
@@ -17,6 +19,4 @@ export interface ForwardMessagesBody {
   sourceChatId: SnowflakeID;
   /** Destination thread root; omit to send to the chat timeline. */
   threadId?: SnowflakeID;
-  /** User confirmed replacing pending audio or excessive nesting with immutable placeholders. */
-  allowPlaceholders?: boolean;
 }

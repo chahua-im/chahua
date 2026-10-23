@@ -81,7 +81,10 @@ describe('ConversationPage', () => {
   const dmDetails = signal(true);
   beforeEach(async () => {
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
-    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({ role: 'selected', data: { seconds: 3600 } });
+    vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({
+      role: 'selected',
+      data: { mode: 'temporarilyMuted', durationSeconds: 3600 },
+    });
     resizes = new Map();
     vi.stubGlobal(
       'ResizeObserver',
@@ -753,16 +756,23 @@ describe('ConversationPage', () => {
     const muting = component['toggleMute']();
     await component['toggleMute'](); // A second tap while busy must not submit a duplicate.
     await vi.waitFor(() => {
-      const request = http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/mute` });
-      expect(request.request.body).toEqual({ durationSeconds: 3600 });
+      const request = http.expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/notification-setting` });
+      expect(request.request.body).toEqual({ mode: 'temporarilyMuted', durationSeconds: 3600 });
       request.flush({ mutedUntil: '9999-12-31T23:59:59Z', archived: false });
     });
     await muting;
     expect(component['muted']()).toBe(true);
     expect(TestBed.inject(ChatStore).chatState(testChat.id)?.mutedUntil).toBe('9999-12-31T23:59:59Z');
     events.next({
-      type: ServerWsMessageType.chatArchiveStateChanged,
-      payload: { chatId: testChat.id, archived: false },
+      type: ServerWsMessageType.chatNotificationSettingChanged,
+      payload: {
+        chatId: testChat.id,
+        kind: GroupKind.group,
+        archived: false,
+        mutedUntil: undefined,
+        muteOverride: false,
+        isMuted: false,
+      },
     });
     expect(component['muted']()).toBe(false);
   });
@@ -771,8 +781,16 @@ describe('ConversationPage', () => {
     const store = TestBed.inject(ChatStore);
     store.acceptChats([{ ...testChat, mutedUntil: '9999-12-31T23:59:59Z' }], store.snapshot());
     expect(fixture.componentInstance['muted']()).toBe(true);
+    vi.mocked(IonActionSheet.prototype.onDidDismiss).mockResolvedValueOnce({
+      role: 'selected',
+      data: { mode: 'alwaysUnmuted' },
+    });
     const unmuting = fixture.componentInstance['toggleMute']();
-    http.expectOne({ method: 'DELETE', url: `/_api/group/${wireChat.id}/mute` }).flush(null);
+    await vi.waitFor(() =>
+      http
+        .expectOne({ method: 'PUT', url: `/_api/group/${wireChat.id}/notification-setting` })
+        .flush({ mutedUntil: null, muteOverride: false }),
+    );
     await unmuting;
     expect(fixture.componentInstance['muted']()).toBe(false);
   });
@@ -2745,6 +2763,7 @@ describe('ConversationPage', () => {
     useReactionHttp();
     useMentionHttp();
     resync.next();
+    http.expectOne('/_api/users/me/notification-settings').flush(testUser);
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, myRole: GroupRole.member });
     for (const request of http.match(`/_api/chats/${wireChat.id}/messages/100`)) {
       request.flush({ ...wireMessage, id: '100' });
@@ -2916,6 +2935,7 @@ describe('ConversationPage', () => {
     vi.mocked(data.markRead).mockClear();
 
     resync.next();
+    http.expectOne('/_api/users/me/notification-settings').flush(testUser);
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`).flush({ messages: [] });
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, name: '重连后的群名称' });
     await fixture.whenStable();
@@ -2930,6 +2950,7 @@ describe('ConversationPage', () => {
     const loadSubscription = TestBed.inject(ChatStore).loadSubscription;
     vi.mocked(loadSubscription).mockClear();
     resync.next();
+    http.expectOne('/_api/users/me/notification-settings').flush(testUser);
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=102&threadId=100`).flush({ messages: [] });
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat });
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: false }));

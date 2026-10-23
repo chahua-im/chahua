@@ -5,7 +5,15 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
-import type { AuthTokenResponse, GetUserSearchParams, MeResponse, SearchUsersResponse } from '../../models';
+import type {
+  AuthTokenResponse,
+  GetExceptionsParams,
+  GetUserSearchParams,
+  MeResponse,
+  NotificationExceptionsResponse,
+  NotificationSettingsResponse,
+  SearchUsersResponse,
+} from '../../models';
 
 import { HttpHeaders, httpResource } from '@angular/common/http';
 import type { HttpContext, HttpResourceOptions, HttpResourceRef, HttpResourceRequest } from '@angular/common/http';
@@ -190,6 +198,54 @@ export function getMeResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getExceptionsResource(
+  params: Signal<GetExceptionsParams>,
+  options: OrvalHttpResourceOptions<NotificationExceptionsResponse, unknown> & {
+    defaultValue: NoInfer<NotificationExceptionsResponse>;
+  },
+): HttpResourceRef<NotificationExceptionsResponse>;
+export function getExceptionsResource(
+  params: Signal<GetExceptionsParams>,
+  options?: OrvalHttpResourceOptions<NotificationExceptionsResponse, unknown>,
+): HttpResourceRef<NotificationExceptionsResponse | undefined>;
+export function getExceptionsResource(
+  params: Signal<GetExceptionsParams>,
+  options?: OrvalHttpResourceOptions<NotificationExceptionsResponse, unknown>,
+): HttpResourceRef<NotificationExceptionsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<NotificationExceptionsResponse>(() => {
+    const request = {
+      url: `${baseUrl}/users/me/notification-exceptions`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getSettingsResource(
+  options: OrvalHttpResourceOptions<NotificationSettingsResponse, unknown> & {
+    defaultValue: NoInfer<NotificationSettingsResponse>;
+  },
+): HttpResourceRef<NotificationSettingsResponse>;
+export function getSettingsResource(
+  options?: OrvalHttpResourceOptions<NotificationSettingsResponse, unknown>,
+): HttpResourceRef<NotificationSettingsResponse | undefined>;
+export function getSettingsResource(
+  options?: OrvalHttpResourceOptions<NotificationSettingsResponse, unknown>,
+): HttpResourceRef<NotificationSettingsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<NotificationSettingsResponse>(
+    () => applyOrvalRequestExtension(`${baseUrl}/users/me/notification-settings`, options),
+    options,
+  );
+}
+
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function getUserSearchResource(
   params: Signal<GetUserSearchParams> | undefined,
   options: OrvalHttpResourceOptions<SearchUsersResponse, unknown> & { defaultValue: NoInfer<SearchUsersResponse> },
@@ -214,6 +270,8 @@ export function getUserSearchResource(
 
 export type GetAuthTokenResourceResult = NonNullable<AuthTokenResponse>;
 export type GetMeResourceResult = NonNullable<MeResponse>;
+export type GetExceptionsResourceResult = NonNullable<NotificationExceptionsResponse>;
+export type GetSettingsResourceResult = NonNullable<NotificationSettingsResponse>;
 export type GetUserSearchResourceResult = NonNullable<SearchUsersResponse>;
 
 /**

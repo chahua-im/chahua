@@ -38,6 +38,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     lastReadMessageId: 1,
     peerLastReadMessageId: 1,
   },
+  ChatNotificationSettingResponse: {
+    chatId: 1,
+  },
   ConversationRef: {
     chatId: 1,
     threadId: 1,
@@ -228,6 +231,16 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   MessageStickerResponse: {
     id: 1,
     media: 'MessageStickerMediaResponse',
+  },
+  NotificationException: {
+    chatId: 1,
+  },
+  NotificationExceptionsCleared: {
+    chatIds: [1],
+  },
+  NotificationExceptionsResponse: {
+    exceptions: ['NotificationException'],
+    nextCursor: 1,
   },
   NotificationPayload: {
     chatId: 1,
@@ -624,6 +637,11 @@ export const jsonOperations: JsonOperationCodec[] = [
     response: 'AvatarUploadUrlResponse',
   },
   {
+    method: 'PUT',
+    path: '/group/{chat_id}/notification-setting',
+    response: 'ChatNotificationSettingResponse',
+  },
+  {
     method: 'GET',
     path: '/invites',
     response: 'ListInvitesResponse',
@@ -751,6 +769,19 @@ export const jsonOperations: JsonOperationCodec[] = [
     response: 'MeResponse',
   },
   {
+    method: 'GET',
+    path: '/users/me/notification-exceptions',
+    response: 'NotificationExceptionsResponse',
+    query: {
+      after: 1,
+    },
+  },
+  {
+    method: 'DELETE',
+    path: '/users/me/notification-exceptions',
+    response: 'NotificationExceptionsCleared',
+  },
+  {
     method: 'PUT',
     path: '/users/me/stickerpack-order',
     body: 'UpdateStickerPackOrderRequest',
@@ -778,6 +809,9 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   threadUpdate: 'ThreadUpdatePayload',
   threadMembershipChanged: 'ThreadMembershipChangedPayload',
   chatArchiveStateChanged: 'ChatArchiveStateChangedPayload',
+  notificationExceptionsCleared: 'NotificationExceptionsCleared',
+  notificationSettingsChanged: 0,
+  chatNotificationSettingChanged: 'ChatNotificationSettingResponse',
   readReceiptChanged: 'ReadReceiptChangedPayload',
   pinAdded: 'PinUpdatePayload',
   threadPinAdded: 'PinUpdatePayload',

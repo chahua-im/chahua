@@ -1,0 +1,78 @@
+<ion-modal [isOpen]="open()" (didDismiss)="open.set(false); closed.emit()">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>{{ 'notificationPreferences.addException' | transloco }}</ion-title>
+        <ion-buttons slot="end">
+          <ion-button [disabled]="saving() != null" (click)="open.set(false)">
+            {{ 'common.cancel' | transloco }}
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+      <ion-searchbar
+        [value]="query()"
+        (ionInput)="query.set($event.detail.value ?? '')"
+        [debounce]="200"
+        [placeholder]="'notificationPreferences.searchChats' | transloco" />
+    </ion-header>
+    <ion-content appScrollbars>
+      <p class="ion-padding-horizontal">
+        <ion-note>{{ 'notificationPreferences.addHint' | transloco }}</ion-note>
+      </p>
+      <ion-list>
+        @for (chat of targets(); track chat.id) {
+          @let existing = store.chatState(chat.id)?.muteOverride != null;
+          <ion-item
+            [button]="true"
+            [detail]="false"
+            [disabled]="saving() != null || existing"
+            (click)="select(chat.id)">
+            <app-chat-avatar slot="start" [entry]="avatar(chat)" [size]="44" />
+            <ion-label>
+              <h3>{{ chat.peer?.username ?? chat.name }}</h3>
+              @if (chat.archived) {
+                <p>{{ 'notificationPreferences.archived' | transloco }}</p>
+              }
+            </ion-label>
+            @if (saving() === chat.id) {
+              <ion-spinner slot="end" />
+            } @else if (existing) {
+              <ion-note slot="end">{{ 'notificationPreferences.alreadyAdded' | transloco }}</ion-note>
+            }
+          </ion-item>
+        } @empty {
+          @if (!loading() && !moreAvailable() && !sources[0].error() && !sources[1].error()) {
+            <ion-item lines="none">
+              <ion-note>{{ 'notificationPreferences.noChats' | transloco }}</ion-note>
+            </ion-item>
+          }
+        }
+        @if (loading()) {
+          <ion-item lines="none"><ion-spinner /></ion-item>
+        }
+        @for (source of sources; track $index) {
+          @if (source.error()) {
+            <ion-item lines="none">
+              <ion-note color="danger">{{ 'notificationPreferences.loadFailed' | transloco }}</ion-note>
+              <ion-button slot="end" fill="clear" (click)="source.refresh()">
+                {{ 'common.retry' | transloco }}
+              </ion-button>
+            </ion-item>
+          }
+        }
+        @if (moreAvailable()) {
+          <ion-item lines="none">
+            <ion-button fill="clear" [disabled]="loading()" (click)="more()">
+              {{ 'notificationPreferences.loadMore' | transloco }}
+            </ion-button>
+          </ion-item>
+        }
+        @if (failed()) {
+          <ion-item lines="none">
+            <ion-note color="danger">{{ 'notificationPreferences.saveFailed' | transloco }}</ion-note>
+          </ion-item>
+        }
+      </ion-list>
+    </ion-content>
+  </ng-template>
+</ion-modal>

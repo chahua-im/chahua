@@ -8,6 +8,8 @@ import {
   IonIcon,
   IonItem,
   IonList,
+  IonListHeader,
+  IonLabel,
   IonNote,
   IonSpinner,
   IonTitle,
@@ -19,6 +21,9 @@ import {
 import type { ToggleCustomEvent } from '@ionic/core';
 import { chevronBackOutline, notificationsOutline, refreshOutline } from 'ionicons/icons';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
+import { ChatStore } from '../../chats/chat-store';
+import { GroupKind } from '../../../generated/models';
+import { NotificationCategory } from './notification-category';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 
 @Component({
@@ -26,6 +31,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   templateUrl: './notification-settings.html',
   imports: [
     ContentScrollbars,
+    NotificationCategory,
     TranslocoPipe,
     IonButton,
     IonButtons,
@@ -34,6 +40,8 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
     IonIcon,
     IonItem,
     IonList,
+    IonListHeader,
+    IonLabel,
     IonNote,
     IonSpinner,
     IonTitle,
@@ -44,6 +52,8 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   host: { class: 'ion-page' },
 })
 export class NotificationSettings {
+  protected readonly store = inject(ChatStore);
+  protected readonly Kind = GroupKind;
   protected readonly modals = inject(ModalController);
   protected readonly notifications = inject(PushNotifications);
   protected readonly PushError = PushNotificationError;

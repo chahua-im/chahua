@@ -169,6 +169,33 @@ export class StickersService {
       observe: 'body',
     });
   }
+  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deletePack<TData = void>(
+    packId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deletePack<TData = void>(
+    packId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
   getPack<TData = StickerPackDetailResponse>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
   getPack<TData = StickerPackDetailResponse>(
     packId: SnowflakeID,
@@ -195,33 +222,6 @@ export class StickersService {
       });
     }
     return this.http.get<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
-  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  deletePack<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deletePack<TData = void>(
-    packId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deletePack<TData = void>(
-    packId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
@@ -309,6 +309,52 @@ export class StickersService {
       observe: 'body',
     });
   }
+  deletePackSticker<TData = void>(
+    packId: SnowflakeID,
+    stickerId: SnowflakeID,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  deletePackSticker<TData = void>(
+    packId: SnowflakeID,
+    stickerId: SnowflakeID,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  deletePackSticker<TData = void>(
+    packId: SnowflakeID,
+    stickerId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  deletePackSticker<TData = void>(
+    packId: SnowflakeID,
+    stickerId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(
+        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.delete<TData>(
+      `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
+  }
   putPackSticker<TData = void>(
     packId: SnowflakeID,
     stickerId: SnowflakeID,
@@ -358,51 +404,32 @@ export class StickersService {
       },
     );
   }
-  deletePackSticker<TData = void>(
+  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deleteSubscription<TData = void>(
     packId: SnowflakeID,
-    stickerId: SnowflakeID,
-    options?: HttpClientBodyOptions,
-  ): Observable<TData>;
-  deletePackSticker<TData = void>(
-    packId: SnowflakeID,
-    stickerId: SnowflakeID,
-    options?: HttpClientEventOptions,
-  ): Observable<HttpEvent<TData>>;
-  deletePackSticker<TData = void>(
-    packId: SnowflakeID,
-    stickerId: SnowflakeID,
     options?: HttpClientResponseOptions,
   ): Observable<AngularHttpResponse<TData>>;
-  deletePackSticker<TData = void>(
+  deleteSubscription<TData = void>(
     packId: SnowflakeID,
-    stickerId: SnowflakeID,
     options?: HttpClientObserveOptions,
   ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
     if (options?.observe === 'events') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'events',
-        },
-      );
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
     }
     if (options?.observe === 'response') {
-      return this.http.delete<TData>(
-        `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
-        {
-          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-          observe: 'response',
-        },
-      );
-    }
-    return this.http.delete<TData>(
-      `${this.baseUrl}/stickers/packs/${decodeId(packId)}/stickers/${decodeId(stickerId)}`,
-      {
+      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
         ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'body',
-      },
-    );
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
   }
   putSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
   putSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
@@ -427,33 +454,6 @@ export class StickersService {
       });
     }
     return this.http.put<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, undefined, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
-  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  deleteSubscription<TData = void>(packId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deleteSubscription<TData = void>(
-    packId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  deleteSubscription<TData = void>(
-    packId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/stickers/packs/${decodeId(packId)}/subscription`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
@@ -488,33 +488,6 @@ export class StickersService {
       observe: 'body',
     });
   }
-  putFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
-  putFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  putFavorite<TData = void>(
-    stickerId: SnowflakeID,
-    options?: HttpClientResponseOptions,
-  ): Observable<AngularHttpResponse<TData>>;
-  putFavorite<TData = void>(
-    stickerId: SnowflakeID,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.put<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, undefined, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.put<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, undefined, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.put<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, undefined, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
   deleteFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
   deleteFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
   deleteFavorite<TData = void>(
@@ -538,6 +511,33 @@ export class StickersService {
       });
     }
     return this.http.delete<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  putFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientBodyOptions): Observable<TData>;
+  putFavorite<TData = void>(stickerId: SnowflakeID, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  putFavorite<TData = void>(
+    stickerId: SnowflakeID,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  putFavorite<TData = void>(
+    stickerId: SnowflakeID,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.put<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, undefined, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.put<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, undefined, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.put<TData>(`${this.baseUrl}/stickers/${decodeId(stickerId)}/favorite`, undefined, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

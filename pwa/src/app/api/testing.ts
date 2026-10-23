@@ -6,12 +6,22 @@ import { isMessageChange, type MessageChange, type PinChange } from '../messages
 import { decodeId, encodeId } from './snowflake-id';
 import type { ResyncReason } from './connection';
 
-export const testUser: MeResponse = { uid: 1, username: '测试用户', gender: 0, permissions: [], stickerPackOrder: [] };
+export const testUser: MeResponse = {
+  uid: 1,
+  username: '测试用户',
+  gender: 0,
+  permissions: [],
+  stickerPackOrder: [],
+  muteGroupChatsByDefault: true,
+  muteDirectChatsByDefault: false,
+};
 export const testChat: ChatListItem = {
   id: encodeId('9007199254740993'),
   kind: GroupKind.group,
   name: '测试群',
   archived: false,
+  muteOverride: false,
+  isMuted: false,
   unreadCount: 2,
   unreadMentions: 0,
   unreadReactions: 0,

@@ -17,10 +17,11 @@ export interface ThreadListItem {
   chatKind: GroupKind;
   chatName: string;
   lastReadMessageId?: SnowflakeID;
-  peerLastReadMessageId?: SnowflakeID;
   lastReply?: MessagePreview;
   lastReplyAt: string;
   participants: User[];
+  /** The DM peer's authorized read receipt for this thread scope. */
+  peerLastReadMessageId?: SnowflakeID;
   replyCount: number;
   subscribedAt: string;
   threadRootMessage: MessagePreview;

@@ -35,7 +35,7 @@ describe('online notifications', () => {
   let events: Subject<ServerWsMessage>;
   let reads: Subject<{ chatId: SnowflakeID; threadId?: SnowflakeID; readThrough?: SnowflakeID }>;
   let clicks: Subject<{ notification: { data: object } }>;
-  let state: { archived?: boolean; mutedUntil?: string };
+  let state: { archived?: boolean; mutedUntil?: string; muteOverride?: boolean };
   let subscription: ThreadSubscriptionStatusResponse;
   const commands: {
     type: string;
@@ -71,7 +71,7 @@ describe('online notifications', () => {
     });
     window.localStorage.setItem('chahua.notifications.enabled', 'true');
     commands.length = 0;
-    state = { archived: false };
+    state = { archived: false, muteOverride: false };
     subscription = { subscribed: true, archived: false };
     events = new Subject();
     reads = new Subject();

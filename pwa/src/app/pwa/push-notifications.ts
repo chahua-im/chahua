@@ -228,7 +228,11 @@ export class PushNotifications {
     await this.chats.ensureDetails(message.chatId).catch(() => {});
     const knownChat = this.chats.get(message.chatId);
     const knownState = { ...knownChat, ...this.chats.chatState(message.chatId) };
-    if (message.replyRootId && !knownState.archived && !shouldNotify(message, uid, knownState, undefined))
+    if (
+      message.replyRootId &&
+      !knownState.archived &&
+      !shouldNotify(message, uid, knownState, undefined, Date.now(), this.session.user())
+    )
       await this.chats.loadSubscription(message.chatId, message.replyRootId).catch(() => {});
     const modal = await this.modals.getTop();
     if (
@@ -243,7 +247,7 @@ export class PushNotifications {
     const chat = this.chats.get(message.chatId);
     const state = this.chats.chatState(message.chatId) ?? chat;
     const thread = message.replyRootId ? this.chats.subscription(message.chatId, message.replyRootId) : undefined;
-    if (!shouldNotify(message, uid, { ...state, kind: chat?.kind }, thread)) return;
+    if (!shouldNotify(message, uid, { ...state, kind: chat?.kind }, thread, Date.now(), this.session.user())) return;
     const title =
       (chat?.kind === GroupKind.dm ? chat.peer?.username : chat?.name) ??
       message.sender.name ??

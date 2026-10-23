@@ -43,6 +43,7 @@ const idFields = new Set([
   'imageId',
   'inviteId',
   'lastReadMessageId',
+  'peerLastReadMessageId',
   'messageId',
   'originalChatId',
   'originalMessageId',
@@ -59,11 +60,12 @@ const idFields = new Set([
   'threadRootId',
   'threadId',
 ]);
-const idArrays = new Set(['attachmentIds', 'messageIds', 'threadRootIds']);
+const idArrays = new Set(['attachmentIds', 'chatIds', 'messageIds', 'threadRootIds']);
 const cursorFields: Record<string, string[]> = {
   ListMessagesResponse: ['nextCursor', 'prevCursor', 'olderCursor', 'newerCursor'],
   ListChatAttachmentsResponse: ['olderCursor', 'newerCursor'],
   ListChatsResponse: ['nextCursor'],
+  NotificationExceptionsResponse: ['nextCursor'],
   ListGroupsResponse: ['nextCursor'],
   ListSavedMessagesResponse: ['nextCursor'],
 };
@@ -93,6 +95,7 @@ const queryIds: Record<string, string[]> = {
   '/saved-messages': ['before'],
   '/invites': ['groupId'],
   '/users/search': ['excludeMemberOf'],
+  '/users/me/notification-exceptions': ['after'],
 };
 const nullableCommands = new Set(['UpdateChatBody.avatarImageId', 'PatchInviteBody.expiresAt']);
 const generatedRoot = './src/generated';

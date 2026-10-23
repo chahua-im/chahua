@@ -20,6 +20,7 @@ export * from './mentionInfo';
 export * from './messageType';
 export * from './messagePreviewSticker';
 export * from './messagePreview';
+export * from './chatNotificationSettingResponse';
 export * from './conversationCategory';
 export * from './conversationRef';
 export * from './conversationSelector';

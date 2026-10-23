@@ -192,10 +192,10 @@
       },
       "mute": {
         "title": "Mute notifications",
-        "oneHour": "1 hour",
-        "eightHours": "8 hours",
-        "oneDay": "1 day",
-        "sevenDays": "7 days",
+        "oneHour": "Mute for 1 hour",
+        "eightHours": "Mute for 8 hours",
+        "oneDay": "Mute for 1 day",
+        "sevenDays": "Mute for 7 days",
         "forever": "Forever"
       }
     },
@@ -628,5 +628,37 @@
   "reactions": {
     "title": "Reactions",
     "all": "All {{ count }}"
+  },
+  "notificationPreferences": {
+    "chatSettings": "Notification settings",
+    "thisDevice": "Notifications on this device",
+    "groupChats": "Groups",
+    "directChats": "Private chats",
+    "inherit": "Use default",
+    "alwaysMuted": "Always mute",
+    "alwaysUnmuted": "Always notify",
+    "archived": "Archived",
+    "noExceptions": "No exceptions",
+    "loadFailed": "Could not load. Please retry.",
+    "saveFailed": "Could not save. Please try again.",
+    "loadMore": "Load more",
+    "chatNotifications": "Chat notifications",
+    "directTitle": "Private chat notifications",
+    "groupTitle": "Group notifications",
+    "enableDirect": "Enable private chat notifications",
+    "enableGroups": "Enable group notifications",
+    "enabled": "On",
+    "disabled": "Off",
+    "exceptionCount": "{{count}} exceptions",
+    "addException": "Add exception",
+    "remove": "Remove",
+    "clearAll": "Delete all exceptions",
+    "clearConfirm": "Reset all exceptions in this category to the default notification setting and clear their temporary mutes. Archive status stays unchanged.",
+    "muted": "Muted",
+    "unmuted": "Unmuted",
+    "searchChats": "Search loaded chats",
+    "addHint": "Choose a chat to use the opposite of the current default. Tap an exception to change it later.",
+    "alreadyAdded": "Added",
+    "noChats": "No matching chats"
   }
 }

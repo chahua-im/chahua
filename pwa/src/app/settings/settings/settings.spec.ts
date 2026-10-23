@@ -14,7 +14,8 @@ import {
   type PresenceSettingsResponse,
 } from '../../../generated/models';
 import { jsonInterceptor } from '../../api/json.interceptor';
-import { testUser } from '../../api/testing';
+import { Connection } from '../../api/connection';
+import { mockRealtime, testUser } from '../../api/testing';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { Presence } from '../../presence/presence';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
@@ -94,6 +95,7 @@ describe('Settings', () => {
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
+        { provide: Connection, useValue: mockRealtime() },
         {
           provide: SessionStore,
           useValue: {
@@ -177,6 +179,11 @@ describe('Settings', () => {
     expect(page.querySelector('ion-item[href="/settings/notifications"]')).not.toBeNull();
     await nav.push(NotificationSettings);
     page = (await nav.getActive())!.element!;
+    TestBed.tick();
+    http
+      .expectOne('/_api/users/me/notification-exceptions?kind=group&limit=1')
+      .flush({ exceptions: [], totalCount: 0 });
+    http.expectOne('/_api/users/me/notification-exceptions?kind=dm&limit=1').flush({ exceptions: [], totalCount: 0 });
     await fixture.whenStable();
   }
 
