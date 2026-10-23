@@ -112,7 +112,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | MessageText        | text、mentions、interactive、profilesEnabled；派生文本片段，点击提及才打开资料                                                                                |
 | MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文、系统短语枚举；交互模式下系统用户名链接资料                                  |
 | MessageAttachments | message、overlayTime、outgoing、delivery、read、uploads；派生媒体框、相册布局、时间、发送/已读及上传反馈；局部保留相册初始尺寸、容器宽度、窗口及消息区域尺寸与资源加载失败 |
-| MessageStatus      | delivery、read；把 MessageDelivery 枚举显示为图标，并仅按 ConversationPage 传入的当前 DM 范围授权回执将确认单勾替换为双勾 |
+| MessageStatus      | delivery、read；显示上传、发送中与已确认图标（失败重试由 Message 在气泡左侧显示），并仅按 ConversationPage 传入的当前 DM 范围授权回执将确认单勾替换为双勾 |
 | MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                                        |
 | MessageThread      | info、preview → open                                                                                                                         |
 | InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                               |

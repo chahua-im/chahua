@@ -4,7 +4,7 @@ import { Component, computed, DestroyRef, ElementRef, inject, input, output, sig
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import { IonAvatar, IonIcon, IonSpinner } from '@ionic/angular';
-import { arrowUndoOutline } from 'ionicons/icons';
+import { alertCircleOutline, arrowUndoOutline } from 'ionicons/icons';
 import { ForwardedLabel } from '../forwarded-label';
 import { ForwardedCard } from '../forwarded-card';
 import { showsForwardOrigin } from '../forwarding';
@@ -267,6 +267,7 @@ export class Message<T extends MessageContent = MessageResponse> {
   });
   protected readonly replyColors = computed(() => userColors(this.quoteName()));
   protected readonly replyIcon = arrowUndoOutline;
+  protected readonly retryIcon = alertCircleOutline;
 
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
