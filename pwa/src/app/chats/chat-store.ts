@@ -145,7 +145,7 @@ export class ChatStore {
         if (operation) operation.version++;
         this.applyReadState(chatId, state);
       }
-      if (!accessible) this.changed(ChatChangeKind.Removed, chatId, threadId);
+      this.changed(accessible ? ChatChangeKind.Read : ChatChangeKind.Removed, chatId, threadId);
     }
   }
 

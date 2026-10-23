@@ -217,6 +217,12 @@ export class ChatListStore {
       wasConnected = connected;
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId }) => {
+      if (kind === ChatChangeKind.Read) {
+        if (threadId)
+          for (const { state } of [this.activeThreads, this.archivedThreads]) this.clearUnreadErrors(state, [threadId]);
+        else for (const { state } of this.queries.values()) this.clearUnreadErrors(state, [chatId]);
+        return;
+      }
       if (kind === ChatChangeKind.Removed) {
         if (threadId)
           for (const { state } of [this.activeThreads, this.archivedThreads])
@@ -591,7 +597,7 @@ export class ChatListStore {
       this.clearUnreadErrors(query, [chatId]);
     } catch {
       // Keep it pending: activation retries and only a visible list reports the failure.
-      if (query.consumers.size && !this.destroyRef.destroyed)
+      if (query.consumers.size && !this.destroyRef.destroyed && !this.chatInfo.cachedReadState(chatId))
         query.unreadErrors.update((ids) => new Set(ids).add(chatId));
     }
   }
@@ -731,7 +737,10 @@ export class ChatListStore {
           state.pendingReads.delete(id);
           this.clearUnreadErrors(state, [id]);
         })
-        .catch(() => state.unreadErrors.update((ids) => new Set(ids).add(id)));
+        .catch(() => {
+          if (!this.chatInfo.threadReadState(thread.chatId, id))
+            state.unreadErrors.update((ids) => new Set(ids).add(id));
+        });
     }
   }
 

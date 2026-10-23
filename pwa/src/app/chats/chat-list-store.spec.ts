@@ -81,6 +81,94 @@ describe('ChatListStore', () => {
     TestBed.tick();
   }
 
+  it.each([true, false])('recovers unread errors from accepted WS state (HTTP fails first: %s)', async (failsFirst) => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    const watch = vi.spyOn(messages, 'watchConversationStates');
+    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    await settle();
+    incoming.next(testMessage);
+    await flushReads();
+    const unread = http.expectOne(`/_api/chats/${wireChat.id}/unread`);
+    if (failsFirst) {
+      unread.flush('', { status: 503, statusText: 'Unavailable' });
+      await settle();
+      expect(query.error()).toBe(ChatListError.Unread);
+    }
+    const payload = {
+      requestId: watch.mock.calls.at(-1)![0],
+      full: true,
+      states: [{ chatId: testChat.id, accessible: true, unreadCount: 1, unreadMentions: 0, unreadReactions: 0 }],
+    };
+    events.next({
+      type: ServerWsMessageType.conversationStates,
+      payload: { ...payload, requestId: payload.requestId - 1 },
+    });
+    await settle();
+    expect(data['chatInfo'].cachedReadState(testChat.id)).toBeUndefined();
+    if (failsFirst) expect(query.error()).toBe(ChatListError.Unread);
+
+    events.next({ type: ServerWsMessageType.conversationStates, payload });
+    await settle();
+    expect(data['chatInfo'].cachedReadState(testChat.id)?.unreadCount).toBe(1);
+    expect(query.error()).toBeUndefined();
+    if (!failsFirst) {
+      unread.flush('', { status: 503, statusText: 'Unavailable' });
+      await settle();
+      expect(query.error()).toBeUndefined();
+    }
+    data['chatInfo'].invalidateReads(new Set([testChat.id]));
+    expect(query.error()).toBeUndefined();
+  });
+
+  it('clears only the recovered chat unread error and preserves a failed page', async () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    const watch = vi.spyOn(messages, 'watchConversationStates');
+    const other = encodeId('123');
+    http.expectOne('/_api/chats?limit=50').flush(
+      structuredClone({
+        chats: [wireChat, { ...wireChat, id: '123' }],
+        nextCursor: wireChat.id,
+      }),
+    );
+    await settle();
+    incoming.next(testMessage);
+    incoming.next({ ...testMessage, chatId: other });
+    await flushReads();
+    for (const id of [wireChat.id, '123'])
+      http.expectOne(`/_api/chats/${id}/unread`).flush('', { status: 503, statusText: 'Unavailable' });
+    await settle();
+    const more = query.loadMore();
+    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush('', { status: 503, statusText: 'Unavailable' });
+    await more;
+    const state = { accessible: true, unreadCount: 0, unreadMentions: 0, unreadReactions: 0 };
+    const requestId = watch.mock.calls.at(-1)![0];
+    events.next({
+      type: ServerWsMessageType.conversationStates,
+      payload: {
+        requestId,
+        full: true,
+        states: [{ ...state, chatId: testChat.id }],
+      },
+    });
+    await settle();
+    expect(query.listError()).toBe(ChatListError.More);
+    expect(query.error()).toBe(ChatListError.More);
+    const retry = query.retry();
+    http.expectOne(`/_api/chats?limit=50&after=${wireChat.id}`).flush({ chats: [] });
+    await retry;
+    expect(query.error()).toBe(ChatListError.Unread);
+    events.next({
+      type: ServerWsMessageType.conversationStates,
+      payload: {
+        requestId,
+        full: false,
+        states: [{ ...state, chatId: other }],
+      },
+    });
+    await settle();
+    expect(query.error()).toBeUndefined();
+  });
+
   it('retries a failed continuation at its cursor while retaining the loaded window', async () => {
     http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat], nextCursor: wireChat.id }));
     await settle();
