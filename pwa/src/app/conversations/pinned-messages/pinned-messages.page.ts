@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { LocalDatePipe } from '../../i18n/local-date.pipe';
+import { MessageDatePipe } from '../../messages/message-date.pipe';
 import { Router } from '@angular/router';
 import { IonBackButton, IonButtons, IonContent, IonHeader, IonSpinner, IonTitle, IonToolbar } from '@ionic/angular';
 import type { MessageResponse } from '../../../generated/models';
@@ -36,7 +36,7 @@ import { messageRows } from '../message-rows';
   templateUrl: './pinned-messages.page.html',
   imports: [
     ContentScrollbars,
-    LocalDatePipe,
+    MessageDatePipe,
     TranslocoPipe,
     LoadError,
     IonBackButton,

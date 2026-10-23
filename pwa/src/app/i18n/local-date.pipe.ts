@@ -13,14 +13,14 @@ const options: Record<LocalDateFormat, Intl.DateTimeFormatOptions> = {
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
-function formatter(locale: string, format: LocalDateFormat) {
+export function formatLocalDate(date: Date, locale: string, format: LocalDateFormat): string {
   const key = `${locale}:${format}`;
   let value = formatters.get(key);
   if (!value) {
     value = new Intl.DateTimeFormat(locale, options[format]);
     formatters.set(key, value);
   }
-  return value;
+  return value.format(date);
 }
 
 @Pipe({ name: 'localDate', pure: false })
@@ -31,6 +31,6 @@ export class LocalDatePipe implements PipeTransform {
     if (value == null || value === '') return '';
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '';
-    return formatter(this.localization.locale(), format).format(date);
+    return formatLocalDate(date, this.localization.locale(), format);
   }
 }

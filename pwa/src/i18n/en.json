@@ -383,6 +383,10 @@
     "loadMoreFailed": "Failed to load messages. Try again."
   },
   "messages": {
+    "date": {
+      "today": "Today",
+      "yesterday": "Yesterday"
+    },
     "preview": {
       "forwarded": "[Chat history]",
       "deleted": "Message deleted",

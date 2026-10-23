@@ -111,7 +111,7 @@
     class="floating-date"
     [class.scrolling]="scrolling.moving() && visibleDate()"
     [class.colliding]="dateColliding() || !visibleDate()">
-    {{ visibleDate() | localDate: 'date' }}
+    {{ visibleDate() | messageDate }}
   </span>
   <!-- Keep the default slot stable when pagination adds loading indicators or changes paging controls. -->
   <div #messageContent>
@@ -148,7 +148,7 @@
             [style.visibility]="
               scrolling.moving() && !dateColliding() && hiddenDateKey() === row.key ? 'hidden' : 'visible'
             ">
-            <span>{{ row.message.createdAt | localDate: 'date' }}</span>
+            <span>{{ row.message.createdAt | messageDate }}</span>
           </p>
         }
         @if (firstUnreadId() && row.message.id === firstUnreadId()) {

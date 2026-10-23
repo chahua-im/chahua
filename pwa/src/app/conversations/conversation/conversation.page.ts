@@ -32,7 +32,7 @@ import {
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
-import { LocalDatePipe } from '../../i18n/local-date.pipe';
+import { MessageDatePipe } from '../../messages/message-date.pipe';
 import {
   IonAlert,
   IonBadge,
@@ -164,7 +164,7 @@ type ScrollPosition =
     AvatarColor,
     AvatarTextPipe,
     ContentScrollbars,
-    LocalDatePipe,
+    MessageDatePipe,
     TranslocoPipe,
     GroupPresenceDisplay,
     UserPresenceDisplay,

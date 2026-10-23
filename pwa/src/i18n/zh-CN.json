@@ -383,6 +383,10 @@
     "loadMoreFailed": "加载消息失败，请重试。"
   },
   "messages": {
+    "date": {
+      "today": "今天",
+      "yesterday": "昨天"
+    },
     "preview": {
       "forwarded": "[聊天记录]",
       "deleted": "消息已删除",
