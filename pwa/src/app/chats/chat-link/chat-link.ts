@@ -7,17 +7,11 @@ import { IonButton, IonContent, IonSpinner, ModalController, type ModalOptions }
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { UsersService } from '../../../generated/endpoints/users/users.service';
-import { decodeId, encodeId } from '../../api/snowflake-id';
+import { encodeId } from '../../api/snowflake-id';
 import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { StartChat, StartChatKind } from '../start-chat/start-chat';
 import { ChatDetails } from '../chat-details/chat-details';
-function decodePermalink(encoded: string) {
-  const bytes = Uint8Array.from(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
-  if (bytes.length !== 16) throw new Error('无效消息链接');
-  const view = new DataView(bytes.buffer);
-  return { chatId: encodeId(view.getBigUint64(0).toString()), messageId: encodeId(view.getBigUint64(8).toString()) };
-}
 @Component({
   selector: 'app-chat-link',
   imports: [ContentScrollbars, IonContent, IonSpinner, IonButton, TranslocoPipe],
@@ -67,17 +61,6 @@ export class ChatLink {
     this.failed.set(false);
     const route = this.route.snapshot;
     try {
-      const encoded = route.paramMap.get('encoded');
-      if (encoded) {
-        const { chatId, messageId } = decodePermalink(encoded);
-        const message = await firstValueFrom(this.chats.getMessage(chatId, messageId));
-        if (version !== this.version || !this.isCurrentRoute()) return;
-        await this.router.navigate(
-          ['/chats/chat', decodeId(chatId), ...(message.replyRootId ? ['thread', decodeId(message.replyRootId)] : [])],
-          { replaceUrl: true, fragment: `msg=${decodeId(messageId)}` },
-        );
-        return;
-      }
       let options: ModalOptions;
       const uid = Number(route.paramMap.get('uid') ?? route.queryParamMap.get('uid'));
       if (uid) {

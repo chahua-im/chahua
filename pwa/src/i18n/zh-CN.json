@@ -336,7 +336,8 @@
     },
     "link": {
       "failed": "链接无法打开",
-      "backToMessages": "返回消息"
+      "backToMessages": "返回消息",
+      "messageUnavailable": "消息已撤回或不存在"
     },
     "attachments": {
       "locate": "定位",

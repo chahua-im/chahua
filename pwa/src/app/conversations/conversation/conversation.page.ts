@@ -31,7 +31,14 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { ActivatedRoute, NavigationEnd, Router, RouterLink } from '@angular/router';
+import {
+  ActivatedRoute,
+  NavigationEnd,
+  NavigationSkipped,
+  NavigationSkippedCode,
+  Router,
+  RouterLink,
+} from '@angular/router';
 import { MessageDatePipe } from '../../messages/message-date.pipe';
 import {
   IonAlert,
@@ -1161,6 +1168,15 @@ export class ConversationPage {
       if (this.active()) void this.positionAndRead();
     });
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
+      if (
+        event instanceof NavigationSkipped &&
+        event.code === NavigationSkippedCode.IgnoredSameUrlNavigation &&
+        this.isCurrent()
+      ) {
+        // The URL identifies the destination; each repeated click is still a new positioning request.
+        const messageId = this.message();
+        if (messageId) void this.goTo({ type: ConversationTargetKind.Message, messageId });
+      }
       if (
         event instanceof NavigationEnd &&
         !this.active() &&
