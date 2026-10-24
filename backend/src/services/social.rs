@@ -448,7 +448,10 @@ async fn send_friendship_accepted_message(
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid,
-                message: Some(format!("accepted {peer_username}'s friend request")),
+                message: Some(super::system_messages::with_user(
+                    format!("accepted {peer_username}'s friend request"),
+                    peer_uid,
+                )),
                 message_type: MessageType::System,
                 sticker_id: None,
                 reply_to_id: None,

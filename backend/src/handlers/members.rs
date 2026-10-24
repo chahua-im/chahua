@@ -294,7 +294,10 @@ async fn post_add_member(
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
-                message: Some(format!("added {}", target_username)),
+                message: Some(crate::services::system_messages::with_user(
+                    format!("added {}", target_username),
+                    body.uid,
+                )),
                 message_type: crate::models::MessageType::System,
                 sticker_id: None,
                 reply_to_id: None,
@@ -435,7 +438,13 @@ async fn delete_remove_member(
     state.ws_registry.invalidate_unread(&[target_uid]);
 
     let (sys_sender_uid, sys_msg) = if is_admin_removing_other {
-        (uid, format!("removed {}", target_username))
+        (
+            uid,
+            crate::services::system_messages::with_user(
+                format!("removed {}", target_username),
+                target_uid,
+            ),
+        )
     } else {
         (target_uid, "left the chat".to_string())
     };

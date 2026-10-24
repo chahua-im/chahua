@@ -283,3 +283,7 @@ Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内
 `MessagePreview` 按 messageType 判别 placeholder，再用固定枚举将 message 原因代码映射到翻译键；正文复用该预览，收藏和记录 DTO 保留原类型与代码。应用生成的通知使用相同映射，后台 Web Push 保留服务端的回退文案。既有占位消息再次转发不列入待确认替换集合。
 
 隐私首页独立读取 `GET /blocks`、`GET /friends/me/settings`、`/me/presence-settings` 与 `/me/read-receipt-settings`，不以本地默认值填充未完成或失败的摘要。子页通过 ChatLink 路由打开，返回时重新创建首页并读取最新设置；拉黑列表读取 `GET /blocks`，用户项链接到现有资料页，复用其中的解除拉黑与关系刷新流程。
+
+## 系统消息链接
+
+`MessageResponse` 与 `MessagePreview` 的可选 `systemLinks` 提供目标 `uid` 或 `messageId`。`message` 保留可读协议短语及名字；PWA 对完整短语本地化，再插入作为纯文本渲染的名字和链接，切换语言同步更新。目标 UID 不通过名字搜索；缺少 ID 的旧消息只显示文字。消息链接复用 `/m/` 短链接，点击时由 ChatLink 解析目标消息实际所属聊天／话题并定位，取消置顶后仍指向同一条消息。读取或展示系统通知不额外请求用户和消息。

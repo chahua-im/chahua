@@ -45,6 +45,7 @@ import { Preferences } from '../../settings/preferences';
 import { EmojiPicker } from '../emoji-picker/emoji-picker';
 import { ForwardPicker } from '../forward-picker/forward-picker';
 import { canForward, canSelect, type ForwardSource } from '../forwarding';
+import { messageLink } from '../message-link';
 import { MessageActions } from '../message-actions';
 import { MessageNotice } from '../message-notice';
 import { MessageOutbox, type OutgoingMessage } from '../message-outbox';
@@ -586,15 +587,7 @@ export class MessageMenu {
     const message = this.serverMessage();
     if (!message || (action === MessageAction.Pin && !this.admin())) return;
     if (action === MessageAction.Link) {
-      const bytes = new Uint8Array(16);
-      const view = new DataView(bytes.buffer);
-      view.setBigUint64(0, BigInt(decodeId(this.chatId())));
-      view.setBigUint64(8, BigInt(decodeId(message.id)));
-      const encoded = btoa(String.fromCharCode(...bytes))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-      const text = new URL(`/m/${encoded}`, this.document.baseURI).href;
+      const text = new URL(messageLink(this.chatId(), message.id), this.document.baseURI).href;
       void this.close();
       await this.perform(() => copyText(text), MessageNotice.Copied);
       return;

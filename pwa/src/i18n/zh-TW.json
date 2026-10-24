@@ -394,12 +394,14 @@
       "system": {
         "joined": "加入了群聊",
         "left": "退出了群聊",
-        "added": "邀請了 {{ target }} 加入群聊",
+        "added": "邀請 {{ target }} 加入了群聊",
         "removed": "將 {{ target }} 移出了群聊",
-        "pinned": "置頂了一則訊息",
-        "unpinned": "取消了一則訊息的置頂",
-        "threadPinned": "在話題中置頂了一則訊息",
-        "threadUnpinned": "取消了話題中一則訊息的置頂"
+        "pinned": "置頂了{{ message }}",
+        "unpinned": "取消置頂了{{ message }}",
+        "threadPinned": "在本話題中置頂了{{ message }}",
+        "threadUnpinned": "在話題中取消置頂了{{ message }}",
+        "accepted": "接受了 {{ target }} 的好友申請",
+        "message": "訊息"
       },
       "invite": "[邀請]",
       "image": "[圖片]",

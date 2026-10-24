@@ -14,6 +14,7 @@ import type { MessageStickerResponse } from './messageStickerResponse';
 import type { MessageType } from './messageType';
 import type { ReactionSummary } from './reactionSummary';
 import type { SnowflakeID } from './snowflakeID';
+import type { SystemMessageLinks } from './systemMessageLinks';
 import type { ThreadInfo } from './threadInfo';
 import type { User } from './user';
 
@@ -37,5 +38,6 @@ export interface MessageResponse {
   replyToMessage?: MessagePreview;
   sender: User;
   sticker?: MessageStickerResponse;
+  systemLinks?: SystemMessageLinks;
   threadInfo?: ThreadInfo;
 }
