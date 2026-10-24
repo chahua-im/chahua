@@ -1,0 +1,19 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["9422PL3GFR.app.chahua.chat"],
+        "components": [
+          {
+            "/": "/m/*",
+            "comment": "Open group messages and thread replies in Chahua."
+          },
+          {
+            "/": "/chats/join/*",
+            "comment": "Preview a group invitation in Chahua."
+          }
+        ]
+      }
+    ]
+  }
+}

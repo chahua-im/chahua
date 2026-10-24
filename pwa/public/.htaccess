@@ -1,13 +1,18 @@
 DirectoryIndex index.html
 RewriteEngine On
 
+# Apple's extensionless association resource must be served as JSON.
+<Files "apple-app-site-association">
+    ForceType application/json
+</Files>
+
 # Serve existing files and directories unchanged.
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [END]
 
 # API and missing static resources must never receive the application HTML.
-RewriteRule ^(?:_api(?:/|$)|(?:icon|icon-maskable|emoji|media)/) - [END]
+RewriteRule ^(?:_api(?:/|$)|\.well-known(?:/|$)|(?:icon|icon-maskable|emoji|media)/) - [END]
 RewriteRule \.[^/]+$ - [END]
 
 RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$
