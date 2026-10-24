@@ -114,7 +114,7 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 | 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                               |
 | 全局收藏                      | `GET /saved-messages`，limit=50、before                                | SavedMessageList 快照                       |
 | 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标       |
-| 群资料中的成员标签            | `GET /group/{c}/members`，limit、after                                 | ChatMembers 局部分页                        |
+| 群资料中的成员标签            | `GET /group/{c}/members`，limit、after、q、mode                        | ChatMembers 局部分页                        |
 | 资料中的话题标签              | `GET /chats/{c}/messages?max=50`，before                               | ChatThreads 筛选 threadInfo 根消息          |
 | 资料中的媒体标签              | `GET /chats/{c}/attachments`，kind、limit、before                      | ChatAttachments 局部分页                    |
 | 打开媒体或定位附件            | `GET /chats/{c}/messages/{m}`                                          | 当前消息的媒体集合，或所属话题路由          |
@@ -151,6 +151,10 @@ Mention 跳转列表按当前页面会话保存，首次读取、真实重连及
 ThreadParticipants 优先读取 ChatStore 的话题参与者缓存，并合并 ConversationPage 经侧栏 ChatDetails 传入的已加载话题消息作者；独立话题详情通过消息接口读取根消息；缺少缓存时标明名单仅覆盖已加载范围，不额外读取历史。SavedMessagesPage 通过 SavedMessageList 读取全局收藏快照；进入媒体详情时保留列表与滚动位置；离开收藏及其详情时销毁列表，重新进入时重新读取。
 
 ChatDetails 可由 chatId 或用户资料打开；后者从共享好友关系派生 dmChatId，得到可访问会话后读取详情和当前标签。不为资料另存好友状态。验证方式在点击添加好友后读取，发送前在确认弹窗内收集验证信息；添加、解除好友与拉黑操作完成后刷新共享关系。
+
+ChatMembers 的搜索输入使用 200ms 防抖，沿用 mention 的 `autocomplete` 模式；服务端搜索覆盖整个群，续页携带相同查询词。新查询取消旧读取并重置游标，响应就绪前保留当前列表；清空查询重新读取完整列表。管理请求期间更改查询，待操作完成后读取最新查询，避免旧结果恢复已移除成员或覆盖新身份。切换群或账号清空搜索词及列表。
+
+ChatMembers 的管理权限由 ChatDetails 的当前群身份派生；角色修改调用 `PATCH /group/{c}/members/{uid}`，移除调用 `DELETE /group/{c}/members/{uid}`，成功后仅更新本地对应成员，不重读全部分页。读取与管理请求不并行，切换群或账号后忽略旧操作回包。
 
 资料列表的游标与请求属于各组件，切换标签后释放；有下一页且无错误时挂载 Ionic infinite-scroll，触底请求完成后调用 complete，不用 loading 禁用正在工作的控件；无下一页或错误时移除，重试恢复游标后重新挂载；成员、媒体和搜索首屏不足一屏时 fillScrollViewport 继续补页。ChatThreads 的游标来自原始消息响应，不从筛选结果推算；只由触底触发续页，空话题页不连续扫描历史，结果不限订阅状态。搜索与媒体汇总作用于所属聊天。
 

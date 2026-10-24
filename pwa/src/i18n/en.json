@@ -388,7 +388,14 @@
       "openFailed": "Couldn't open the media file. Try again."
     },
     "members": {
-      "admin": "Admin"
+      "admin": "Admin",
+      "promote": "Make admin",
+      "demote": "Remove admin role",
+      "remove": "Remove from group",
+      "removeTitle": "Remove {{name}} from the group?",
+      "actionFailed": "Operation failed. Please try again.",
+      "search": "Search group members",
+      "noResults": "No matching group members"
     },
     "listItem": {
       "actionFailed": "Something went wrong. Try again."

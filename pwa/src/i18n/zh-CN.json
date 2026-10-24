@@ -388,7 +388,14 @@
       "openFailed": "无法打开媒体，请重试。"
     },
     "members": {
-      "admin": "管理员"
+      "admin": "管理员",
+      "promote": "设为管理员",
+      "demote": "解除管理员",
+      "remove": "移除出群",
+      "removeTitle": "将 {{name}} 移除出群？",
+      "actionFailed": "操作失败，请重试",
+      "search": "搜索群成员",
+      "noResults": "没有找到匹配的群成员"
     },
     "listItem": {
       "actionFailed": "操作失败，请重试"
