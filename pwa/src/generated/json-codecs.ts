@@ -169,6 +169,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     olderCursor: 1,
   },
   ListChatThreadsResponse: {
+    nextCursor: 1,
     threads: ['MessageResponse'],
   },
   ListChatsResponse: {
@@ -220,10 +221,10 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   MeResponse: {
     stickerPackOrder: ['StickerPackOrderItem'],
   },
-  MembershipMessagePolicyChanged: {
+  MemberSpeakingModeResponse: {
     chatId: 1,
   },
-  MemberSpeakingModeResponse: {
+  MembershipMessagePolicyChanged: {
     chatId: 1,
   },
   MessagePreview: {
@@ -556,6 +557,9 @@ export const jsonOperations: JsonOperationCodec[] = [
     method: 'GET',
     path: '/chats/{chat_id}/threads',
     response: 'ListChatThreadsResponse',
+    query: {
+      cursor: 1,
+    },
   },
   {
     method: 'POST',

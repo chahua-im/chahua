@@ -1,6 +1,3 @@
-@if (!complete()) {
-  <p class="ion-padding-horizontal">{{ 'chats.threads.partial' | transloco }}</p>
-}
 <ion-list>
   @for (user of participants(); track user.uid) {
     <ion-item [button]="true" [detail]="false" [routerLink]="['/profile', user.uid]">
@@ -10,7 +7,17 @@
         [entry]="{ avatar: user.avatarUrl, title: user.name ?? user.uid.toString() }" />
       <ion-label>{{ user.name || user.uid }}</ion-label>
     </ion-item>
-  } @empty {
-    <p class="ion-padding ion-text-center">{{ 'chats.threads.noParticipants' | transloco }}</p>
   }
 </ion-list>
+@if (cursor() != null && !error()) {
+  <ion-infinite-scroll threshold="100px" (ionInfinite)="more($event)">
+    <ion-infinite-scroll-content />
+  </ion-infinite-scroll>
+}
+@if (loading() && !loaded()) {
+  <div class="page-loading"><ion-spinner /></div>
+} @else if (error()) {
+  <app-load-error compact [retryable]="retryable()" [message]="'common.loadFailed' | transloco" (retry)="retry()" />
+} @else if (loaded() && !participants().length) {
+  <p class="ion-padding ion-text-center">{{ 'chats.threads.noParticipants' | transloco }}</p>
+}

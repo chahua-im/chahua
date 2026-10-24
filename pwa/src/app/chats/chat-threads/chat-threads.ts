@@ -1,4 +1,5 @@
-import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
@@ -8,9 +9,9 @@ import {
   IonSpinner,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
-import { firstValueFrom } from 'rxjs';
-import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
-import type { MessageResponse, SnowflakeID } from '../../../generated/models';
+import { firstValueFrom, Subject, takeUntil } from 'rxjs';
+import { ThreadsService } from '../../../generated/endpoints/threads/threads.service';
+import { ThreadOrder, type MessageResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { ChatListItem } from '../chat-list-item/chat-list-item';
@@ -34,19 +35,34 @@ export class ChatThreads {
   readonly chatId = input.required<SnowflakeID>();
   protected readonly items = signal<MessageResponse[]>([]);
   protected readonly cursor = signal<SnowflakeID | undefined>(undefined);
+  protected readonly loaded = signal(false);
   protected readonly loading = signal(false);
   protected readonly error = signal(false);
+  protected readonly retryable = signal(true);
   protected readonly opening = signal(false);
   protected readonly openFailed = signal(false);
-  private readonly api = inject(ChatsService);
+  protected retryMore = false;
+  private readonly api = inject(ThreadsService);
   private readonly navigation = inject(ConversationNavigation);
   private readonly destroy = inject(DestroyRef);
+  private readonly cancel = new Subject<void>();
   private version = 0;
 
   constructor() {
-    effect(() => {
+    effect((onCleanup) => {
       this.chatId();
-      void this.load();
+      this.version++;
+      this.items.set([]);
+      this.cursor.set(undefined);
+      this.loaded.set(false);
+      this.retryable.set(true);
+      this.error.set(false);
+      this.loading.set(false);
+      untracked(() => void this.load());
+      onCleanup(() => {
+        this.version++;
+        this.cancel.next();
+      });
     });
   }
 
@@ -58,30 +74,37 @@ export class ChatThreads {
     }
   }
   protected async load(more = false) {
-    if (more && (this.loading() || this.cursor() == null)) return;
+    const cursor = this.cursor();
+    if (more && (this.loading() || cursor == null)) return;
     const version = ++this.version;
-    if (!more) {
-      this.items.set([]);
-      this.cursor.set(undefined);
-    }
     this.loading.set(true);
     this.error.set(false);
+    this.retryMore = more;
+    this.retryable.set(true);
     try {
-      // The protocol has no per-chat topic list; continue through pages of root messages.
       const page = await firstValueFrom(
         this.api
-          .getMessages(this.chatId(), {
-            max: 50,
-            before: more ? this.cursor() : undefined,
+          .getChatThreads(this.chatId(), {
+            limit: 50,
+            cursor: more && cursor != null ? cursor : undefined,
+            order: ThreadOrder.newest,
           })
-          .pipe(takeUntilDestroyed(this.destroy)),
+          .pipe(takeUntil(this.cancel), takeUntilDestroyed(this.destroy)),
       );
       if (version !== this.version || this.destroy.destroyed) return;
-      const topics = page.messages.filter((message) => message.threadInfo).reverse();
-      this.items.update((items) => (more ? [...items, ...topics] : topics));
-      this.cursor.set(page.olderCursor);
-    } catch {
-      if (version === this.version && !this.destroy.destroyed) this.error.set(true);
+      this.items.update((items) => (more ? [...items, ...page.threads] : page.threads));
+      this.cursor.set(page.nextCursor);
+      this.loaded.set(true);
+    } catch (error) {
+      if (version === this.version && !this.destroy.destroyed) {
+        const retryable = !(error instanceof HttpErrorResponse && (error.status === 401 || error.status === 403));
+        if (!retryable) {
+          this.items.set([]);
+          this.cursor.set(undefined);
+        }
+        this.retryable.set(retryable);
+        this.error.set(true);
+      }
     } finally {
       if (version === this.version) this.loading.set(false);
     }

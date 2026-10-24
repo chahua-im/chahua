@@ -5,6 +5,7 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { SnowflakeID } from '../snowflakeID';
 import type { ThreadOrder } from './threadOrder';
 
 export type GetChatThreadsParams = {
@@ -15,7 +16,7 @@ export type GetChatThreadsParams = {
   /**
    * Exclusive root ID cursor from nextCursor; retain the same order
    */
-  cursor?: string;
+  cursor?: SnowflakeID;
   /**
    * Root ID ordering: newest (default) or oldest
    */

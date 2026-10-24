@@ -375,11 +375,9 @@
       "noResults": "No messages found"
     },
     "threads": {
-      "partial": "Only participants from loaded messages are shown.",
       "empty": "No threads yet",
       "title": "Thread",
       "replies": "{{ count }} replies",
-      "emptyRecent": "No recent threads",
       "openFailed": "Couldn't open the thread. Try again.",
       "noParticipants": "No participants yet"
     },

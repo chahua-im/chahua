@@ -18,13 +18,17 @@
     </app-chat-list-item>
   }
 </ion-list>
-@if ((loading() && cursor() == null) || opening()) {
+@if ((loading() && !loaded()) || opening()) {
   <div class="page-loading"><ion-spinner /></div>
 } @else if (error()) {
-  <app-load-error compact [message]="'common.loadFailed' | transloco" (retry)="load(!!cursor())" />
-} @else if (!items().length) {
+  <app-load-error
+    compact
+    [retryable]="retryable()"
+    [message]="'common.loadFailed' | transloco"
+    (retry)="load(retryMore)" />
+} @else if (loaded() && !items().length) {
   <p class="ion-padding ion-text-center">
-    {{ (cursor() ? 'chats.threads.emptyRecent' : 'chats.threads.empty') | transloco }}
+    {{ 'chats.threads.empty' | transloco }}
   </p>
 }
 @if (cursor() != null && !error()) {

@@ -200,9 +200,7 @@ describe('Chat feature requests', () => {
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
-    http
-      .expectOne((req) => req.url.endsWith('/messages'))
-      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
+    http.expectOne((req) => req.url.endsWith('/threads')).flush({ threads: [] });
     await fixture.whenStable();
     const component = fixture.componentInstance;
     const field = component['Field'].Name;
