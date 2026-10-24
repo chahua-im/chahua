@@ -1,6 +1,6 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { inject, isDevMode, Service, signal } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout, type Observable } from 'rxjs';
 import { AuthService } from '../../generated/endpoints/auth/auth.service';
 import { UsersService } from '../../generated/endpoints/users/users.service';
 import type { MeResponse, StickerPackOrderItem, User } from '../../generated/models';
@@ -36,6 +36,10 @@ export class SessionStore {
   }
 
   async initialize() {
+    // One deadline for the whole login attempt; timeout unsubscribes the active
+    // HTTP request so a late response cannot overwrite a subsequent retry.
+    const deadline = new Date(Date.now() + 30000);
+    const request = <T>(response: Observable<T>) => firstValueFrom(response.pipe(timeout({ first: deadline })));
     try {
       // The dev UID lives in per-tab sessionStorage, so every page load mints a
       // fresh dev session instead of reusing the shared stored token; that is
@@ -43,7 +47,7 @@ export class SessionStore {
       // token or CHAHUA_DEV_TOKEN still wins.
       if (isDevMode() && devBackendEnabled() && !this.urlTokenAdopted && !developmentToken()) {
         try {
-          const { token } = await firstValueFrom(
+          const { token } = await request(
             this.auth.postDevSession({ uid: developmentUid() }, { headers: { 'X-Client-Id': developmentClientId() } }),
           );
           this.saveToken(token);
@@ -54,13 +58,11 @@ export class SessionStore {
         }
       }
       if (!this.token()) return;
-      const refreshed = await firstValueFrom(this.auth.postRefresh());
+      const refreshed = await request(this.auth.postRefresh());
       this.saveToken(refreshed.token);
-      const user = await firstValueFrom(this.users.getMe());
+      const user = await request(this.users.getMe());
       // /users/me omits the group tag; the existing UID lookup includes it.
-      const profile = await firstValueFrom(this.users.getUserSearch({ q: String(user.uid), limit: 1 })).catch(
-        () => undefined,
-      );
+      const profile = await request(this.users.getUserSearch({ q: String(user.uid), limit: 1 })).catch(() => undefined);
       this.user.set({ ...user, userGroup: profile?.members.find((member) => member.uid === user.uid)?.userGroup });
     } catch (error) {
       if (error instanceof HttpErrorResponse && error.status === 401) this.logout();

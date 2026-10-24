@@ -292,15 +292,16 @@ describe('App', () => {
     expect(sidebar()).toEqual({ tab: ListTab.Groups, archived: false, requestHistory: false });
   });
 
-  it('shows 418 immediately without a token on landing when not installed', () => {
+  it('guides users without a token to the announcement post without a link', () => {
     history.replaceState(null, '', '/landing');
     session.token.set(undefined);
     try {
       const fixture = TestBed.createComponent(App);
       fixture.detectChanges();
       const element: HTMLElement = fixture.nativeElement;
-      expect(element.querySelector(':scope > h1')?.textContent).toBe("418 I'm a teapot");
-      expect(element.querySelector('ion-app, ion-router-outlet')).toBeNull();
+      expect(element.textContent).toContain('请重新进入茶话');
+      expect(element.textContent).toContain('请前往茶话发布帖重新进入');
+      expect(element.querySelector('ion-button, a, ion-router-outlet')).toBeNull();
       expect(session.restoreToken).toHaveBeenCalledOnce();
       expect(session.initialize).not.toHaveBeenCalled();
       expect(TestBed.inject(PushNotifications).start).not.toHaveBeenCalled();
@@ -329,30 +330,70 @@ describe('App', () => {
     session.initialize.mockRejectedValueOnce(new HttpErrorResponse({ status: 503 }));
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
-    expect(fixture.nativeElement.textContent).toContain('暂时无法登录，请重试。');
+    expect(fixture.nativeElement.textContent).toContain('茶话暂时不可用');
     let finish!: () => void;
     session.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
     const retry = fixture.componentInstance['initialize']();
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.page-loading ion-spinner')).not.toBeNull();
-    expect(fixture.nativeElement.textContent).not.toContain('正在登录');
-    expect(fixture.nativeElement.querySelector('p')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-spinner')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.entry-brand')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.entry-status').textContent.trim()).toBe('');
+    expect(fixture.nativeElement.textContent).not.toContain('茶话暂时不可用');
+    await fixture.componentInstance['initialize']();
+    expect(session.initialize).toHaveBeenCalledTimes(2);
     finish();
     await retry;
     await fixture.whenStable();
-    expect(fixture.nativeElement.textContent).not.toContain("418 I'm a teapot");
-    expect(fixture.nativeElement.querySelector('ion-spinner, p')).toBeNull();
+    expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
   });
 
-  it('shows 418 when rejected authorization clears the token', async () => {
+  it('explains rejected authorization separately from missing credentials', async () => {
     session.initialize.mockImplementationOnce(async () => {
       session.token.set(undefined);
       throw new HttpErrorResponse({ status: 401 });
     });
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
-    expect(fixture.nativeElement.textContent).toContain("418 I'm a teapot");
+    expect(fixture.nativeElement.textContent).toContain('登录状态已失效');
+    expect(fixture.nativeElement.textContent).toContain('请前往茶话发布帖重新进入');
+    expect(fixture.nativeElement.querySelector('ion-button, a')).toBeNull();
     expect(fixture.nativeElement.querySelector('app-chat-list')).toBeNull();
     expect(TestBed.inject(AppUpdates).setInteractive).toHaveBeenLastCalledWith(false);
+  });
+
+  it.each([
+    [0, '暂时无法连接茶话'],
+    [403, '暂时无法进入茶话'],
+    [500, '茶话暂时不可用'],
+  ])('explains initialization failures (%s) and preserves the token', async (status, title) => {
+    session.initialize.mockRejectedValueOnce(new HttpErrorResponse({ status }));
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain(title);
+    expect(fixture.nativeElement.textContent).toContain('重试');
+    expect(fixture.nativeElement.querySelectorAll('.entry-actions ion-button')).toHaveLength(1);
+    expect(fixture.nativeElement.textContent).not.toContain('重新加载');
+    expect(session.token()).toBe('test-token');
+  });
+
+  it('offers reload after a slow connection and clears the timer when login finishes', async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    session.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+    try {
+      const fixture = TestBed.createComponent(App);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).not.toContain('重新加载');
+      await vi.advanceTimersByTimeAsync(10000);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('连接比平时慢');
+      expect(fixture.nativeElement.textContent).toContain('重新加载');
+      finish();
+      await Promise.resolve();
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,10 +1,52 @@
 {
   "app": {
-    "loginFailed": "暂时无法登录，请重试。",
     "updateReady": "新版本已准备好",
     "updateLater": "暂不更新",
     "updateNow": "立即更新",
-    "name": "茶话"
+    "name": "茶话",
+    "entry": {
+      "reload": "重新加载",
+      "loading": {
+        "title": "",
+        "description": ""
+      },
+      "slow": {
+        "title": "连接比平时慢",
+        "description": "仍在尝试连接。可以继续等待，或重新加载整个应用。"
+      },
+      "missing": {
+        "title": "请重新进入茶话",
+        "description": "当前没有登录信息，请前往茶话发布帖重新进入。"
+      },
+      "expired": {
+        "title": "登录状态已失效",
+        "description": "请前往茶话发布帖重新进入。"
+      },
+      "network": {
+        "title": "暂时无法连接茶话",
+        "description": "连接失败或等待超时，请检查网络后重试。"
+      },
+      "server": {
+        "title": "茶话暂时不可用",
+        "description": "服务暂时遇到问题，请稍后重试。"
+      },
+      "failed": {
+        "title": "暂时无法进入茶话",
+        "description": "登录检查未能完成，请重试；如果仍然失败，请前往茶话发布帖查看说明。"
+      },
+      "boot": {
+        "title": "",
+        "description": ""
+      },
+      "bootSlow": {
+        "title": "加载时间较长",
+        "description": "应用尚未完成加载。可以继续等待，或重新加载整个应用。"
+      },
+      "bootFailed": {
+        "title": "应用加载遇到问题",
+        "description": ""
+      }
+    }
   },
   "common": {
     "done": "完成",

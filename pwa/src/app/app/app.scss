@@ -4,6 +4,42 @@ ion-split-pane {
   --side-max-width: 384px;
 }
 
-.login-loading {
-  min-height: 60vh;
+.entry-status {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+}
+
+.entry-status-content {
+  width: 100%;
+  max-width: 360px;
+}
+
+.entry-description {
+  color: var(--ion-color-medium);
+}
+
+.entry-brand {
+  display: block;
+  margin: 0 auto 24px;
+}
+
+.entry-indicator {
+  height: 32px;
+}
+
+.entry-status h1 {
+  font-size: 22px;
+  margin: 20px 0 12px;
+}
+
+.entry-description {
+  min-height: 48px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.entry-actions {
+  min-height: 56px;
+  margin-top: 20px;
 }

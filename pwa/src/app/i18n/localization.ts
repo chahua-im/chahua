@@ -19,6 +19,9 @@ export class Localization {
     try {
       await this.setLocale(this.injector.get(Preferences).selectedLocale());
     } catch {
+      // If both catalogs fail, let the HTML startup screen offer recovery
+      // instead of rendering untranslated keys or an empty application.
+      await firstValueFrom(this.transloco.load(defaultLocale));
       this.setActive(defaultLocale);
     }
   }
