@@ -1,0 +1,2 @@
+DROP INDEX idx_messages_thread_participants;
+DROP INDEX idx_messages_chat_thread_roots;
