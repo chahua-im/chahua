@@ -298,7 +298,7 @@
               @if (threadId(); as rootId) {
                 <app-thread-participants [rootId]="rootId" [root]="threadRoot()" [messages]="messages()" />
               } @else {
-                <app-chat-members [chatId]="chatId" />
+                <app-chat-members [chatId]="chatId" [canManage]="canManage()" />
               }
             }
             @default {

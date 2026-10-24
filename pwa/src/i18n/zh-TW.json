@@ -388,7 +388,14 @@
       "openFailed": "無法開啟媒體，請重試。"
     },
     "members": {
-      "admin": "管理員"
+      "admin": "管理員",
+      "promote": "設為管理員",
+      "demote": "解除管理員",
+      "remove": "移出群組",
+      "removeTitle": "將 {{name}} 移出群組？",
+      "actionFailed": "操作失敗，請重試",
+      "search": "搜尋群組成員",
+      "noResults": "找不到符合的群組成員"
     },
     "listItem": {
       "actionFailed": "操作失敗，請重試"
