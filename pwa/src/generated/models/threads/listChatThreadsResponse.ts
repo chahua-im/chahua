@@ -6,9 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MessageResponse } from '../messageResponse';
+import type { SnowflakeID } from '../snowflakeID';
 
 export interface ListChatThreadsResponse {
   /** Last returned root ID; pass as `cursor` with the same ordering. */
-  nextCursor?: string;
+  nextCursor?: SnowflakeID;
   threads: MessageResponse[];
 }

@@ -216,6 +216,22 @@ describe('Generated API client', () => {
       nextCursor: '2026-09-06T12:00:00Z',
       threads: [],
     });
+    const threadPage = encodeJsonIds(
+      { threads: [message], nextCursor: '9007199254740993' },
+      'ListChatThreadsResponse',
+    ) as { threads: MessageResponse[]; nextCursor: SnowflakeID };
+    expect(threadPage.threads[0].id).toBe(testMessage.id);
+    expect(threadPage.nextCursor).toBe(testChat.id);
+    const decodedPage = decodeJsonIds(threadPage, 'ListChatThreadsResponse') as {
+      threads: { id: string }[];
+      nextCursor: string;
+    };
+    expect(decodedPage.threads[0].id).toBe(wireMessage.id);
+    expect(decodedPage.nextCursor).toBe('9007199254740993');
+    expect(encodeJsonIds({ participants: [], nextCursor: 42 }, 'ListThreadParticipantsResponse')).toEqual({
+      participants: [],
+      nextCursor: 42,
+    });
     expect(encodeJsonIds({ id: 42 }, 'ServiceTokenResponse')).toEqual({ id: 42 });
   });
 

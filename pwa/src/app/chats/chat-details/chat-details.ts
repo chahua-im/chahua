@@ -164,7 +164,6 @@ export class ChatDetails {
   readonly currentConversation = input(false);
   readonly threadId = input<SnowflakeID>();
   readonly threadRoot = input<MessageResponse | MessagePreviewData>();
-  readonly messages = input<readonly MessageResponse[]>([]);
   readonly closed = output<void>();
   protected readonly icons = {
     archive,

@@ -92,7 +92,7 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 下表省略 `/_api`，c/t/m 分别表示聊天、话题根和消息 ID。
 
 | 触发                                 | 接口与参数                                                                                                               | 消费路径                                                                       |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | 激活聊天分类或续页                   | `GET /chats?limit=50`，归档加 archived，续页加 after                                                                     | ChatListStore → ChatStore → ChatListContent                                    |
 | 话题 tab，或消息 tab 开启话题        | `GET /threads?limit=20`，archived 与 before 时间游标                                                                     | ChatListStore → ChatStore → ChatListContent                                    |
 | 消息/好友列表显示请求                | `GET /friends/requests?archived=false`                                                                                   | ChatListStore → ChatListContent                                                |
@@ -117,7 +117,8 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 | 全局收藏                             | `GET /saved-messages`，limit=50、before                                                                                  | SavedMessageList 快照                                                          |
 | 全局目录搜索                         | `GET /group`（joined）和 `/users/search`，300ms 防抖                                                                     | DirectorySearch；群有游标，用户无游标                                          |
 | 群资料中的成员标签                   | `GET /group/{c}/members`，limit、after、q、mode                                                                          | ChatMembers 局部分页                                                           |
-| 资料中的话题标签                     | `GET /chats/{c}/messages?max=50`，before                                                                                 | ChatThreads 筛选 threadInfo 根消息                                             |
+| 资料中的话题标签              | `GET /chats/{c}/threads?limit=50&order=newest`，cursor 根 ID           | ChatThreads 局部分页                        |
+| 话题资料中的成员标签          | `GET /chats/{c}/threads/{t}/participants?limit=100`，cursor 用户 UID   | ThreadParticipants 局部分页                 |
 | 资料中的媒体标签                     | `GET /chats/{c}/attachments`，kind、limit、before                                                                        | ChatAttachments 局部分页                                                       |
 | 打开媒体或定位附件                   | `GET /chats/{c}/messages/{m}`                                                                                            | 当前消息的媒体集合，或所属话题路由                                             |
 | 聊天内消息搜索                       | `GET /chats/{c}/messages/search`，q、sort、limit、offset                                                                 | ChatSearch 局部分页                                                            |
@@ -150,7 +151,7 @@ Mention 跳转列表按当前页面会话保存，首次读取、真实重连及
 
 只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
 
-ThreadParticipants 优先读取 ChatStore 的话题参与者缓存，并合并 ConversationPage 经侧栏 ChatDetails 传入的已加载话题消息作者；独立话题详情通过消息接口读取根消息；缺少缓存时标明名单仅覆盖已加载范围，不额外读取历史。SavedMessagesPage 通过 SavedMessageList 读取全局收藏快照；进入媒体详情时保留列表与滚动位置；离开收藏及其详情时销毁列表，重新进入时重新读取。
+ThreadParticipants 独立读取服务端参与者分页，名单不从 ChatStore 或会话消息推导；ChatDetails 只传 chatId 与 rootId，根消息仍用于信息头部。参与者 UID 游标是普通 number，ChatThreads 的根 ID 游标使用 SnowflakeID 品牌类型，生成客户端在 HTTP 边界无损转换；两者的 null 末页游标原样保留。资料列表不写入订阅、归档或未读缓存。SavedMessagesPage 通过 SavedMessageList 读取全局收藏快照；进入媒体详情时保留列表与滚动位置；离开收藏及其详情时销毁列表，重新进入时重新读取。
 
 ChatDetails 可由 chatId 或用户资料打开；后者从共享好友关系派生 dmChatId，得到可访问会话后读取详情和当前标签。不为资料另存好友状态。验证方式在点击添加好友后读取，发送前在确认弹窗内收集验证信息；添加、解除好友与拉黑操作完成后刷新共享关系。
 
@@ -158,7 +159,7 @@ ChatMembers 的搜索输入使用 200ms 防抖，沿用 mention 的 `autocomplet
 
 ChatMembers 的管理权限由 ChatDetails 的当前群身份派生；角色修改调用 `PATCH /group/{c}/members/{uid}`，移除调用 `DELETE /group/{c}/members/{uid}`，成功后仅更新本地对应成员，不重读全部分页。读取与管理请求不并行，切换群或账号后忽略旧操作回包。
 
-资料列表的游标与请求属于各组件，切换标签后释放；有下一页且无错误时挂载 Ionic infinite-scroll，触底请求完成后调用 complete，不用 loading 禁用正在工作的控件；无下一页或错误时移除，重试恢复游标后重新挂载；成员、媒体和搜索首屏不足一屏时 fillScrollViewport 继续补页。ChatThreads 的游标来自原始消息响应，不从筛选结果推算；只由触底触发续页，空话题页不连续扫描历史，结果不限订阅状态。搜索与媒体汇总作用于所属聊天。
+资料列表的游标与请求属于各组件，切换标签后释放；有下一页且无错误时挂载 Ionic infinite-scroll，触底请求完成后调用 complete，不用 loading 禁用正在工作的控件；无下一页或错误时移除，重试恢复游标后重新挂载；成员（含话题参与者）、媒体和搜索首屏不足一屏时 fillScrollViewport 继续补页。ChatThreads 直接接收服务端的根消息顺序与 nextCursor，只由触底触发续页，不读取普通消息，结果不限订阅状态。ChatThreads 与 ThreadParticipants 刷新同一范围时保留已有行及 DOM，临时失败保留游标并按失败请求的首页或续页方式重试；聊天/话题切换或销毁时取消旧请求，迟到结果不覆盖新范围。服务端确认无权访问或话题不存在时清空对应内容，不显示重试按钮。搜索与媒体汇总作用于所属聊天。
 
 连续消息每页最多 50 条，使用普通 DOM。接近边缘 1.5 个视口时预取，一次一个方向；手指离开且惯性结束后才合并历史，以首条可见消息底部为锚。媒体预留尺寸。浮动日期复用同一滚动状态和可见消息测量。
 

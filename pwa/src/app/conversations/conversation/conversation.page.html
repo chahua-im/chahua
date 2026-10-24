@@ -432,7 +432,6 @@
         [chatId]="chatId"
         [threadId]="threadId()"
         [threadRoot]="threadRoot()"
-        [messages]="threadId() ? conversation.items() : []"
         (closed)="sidebarOpen.set(false)" />
     }
   </aside>

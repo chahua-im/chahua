@@ -375,11 +375,9 @@
       "noResults": "没有找到消息"
     },
     "threads": {
-      "partial": "仅显示已加载消息中的参与者",
       "empty": "暂无话题",
       "title": "话题",
       "replies": "{{ count }} 条回复",
-      "emptyRecent": "暂无近期话题",
       "openFailed": "无法打开话题，请重试。",
       "noParticipants": "暂无参与者信息"
     },

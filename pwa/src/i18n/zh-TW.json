@@ -375,11 +375,9 @@
       "noResults": "找不到訊息"
     },
     "threads": {
-      "partial": "僅顯示已載入訊息中的參與者",
       "empty": "尚無話題",
       "title": "話題",
       "replies": "{{ count }} 則回覆",
-      "emptyRecent": "尚無近期話題",
       "openFailed": "無法開啟話題，請重試。",
       "noParticipants": "尚無參與者資訊"
     },
