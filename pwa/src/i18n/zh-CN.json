@@ -491,6 +491,7 @@
       "recallFailed": "已撤回 {{succeeded}} 条，{{failed}} 条未能撤回，请重试。"
     },
     "forward": {
+      "changeTarget": "更换转发目标",
       "pendingCount": "转发 {{count}} 条消息",
       "twoParticipants": "{{first}}和{{second}}",
       "otherParticipants": "{{first}}和其他{{count}}人",

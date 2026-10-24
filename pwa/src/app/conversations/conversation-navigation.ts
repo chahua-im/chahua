@@ -18,13 +18,24 @@ export type ConversationTarget =
   | { type: ConversationTargetKind.Latest }
   | { type: ConversationTargetKind.Message; messageId: SnowflakeID };
 
+export interface ForwardDraftLocation {
+  chatId: SnowflakeID;
+  threadId?: SnowflakeID;
+}
+
 @Service()
 export class ConversationNavigation {
   private readonly router = inject(Router);
   private readonly modals = inject(ModalController);
   private readonly drafts = inject(DraftStore);
 
-  async prepareForward(chatId: SnowflakeID, threadId: SnowflakeID | undefined, sources: readonly ForwardSource[]) {
+  async prepareForward(
+    chatId: SnowflakeID,
+    threadId: SnowflakeID | undefined,
+    sources: readonly ForwardSource[],
+    moveFrom?: ForwardDraftLocation,
+  ) {
+    if (moveFrom && this.drafts.forward(moveFrom.chatId, moveFrom.threadId) !== sources) return false;
     const previous = this.drafts.forward(chatId, threadId);
     const selection = sources.map(forwardSourceMessage);
     if (!selection.every((message) => message != null)) return false;
@@ -33,7 +44,11 @@ export class ConversationNavigation {
     try {
       // Keep the picker and its search/scroll state available if routing fails.
       opened = await this.navigate(chatId, threadId);
-      if (opened) await dismissChatOverlays(this.modals);
+      if (opened) {
+        if (moveFrom && this.drafts.forward(moveFrom.chatId, moveFrom.threadId) === sources)
+          this.drafts.setForward(moveFrom.chatId, moveFrom.threadId);
+        await dismissChatOverlays(this.modals);
+      }
       return opened;
     } finally {
       if (!opened && this.drafts.forward(chatId, threadId) === selection)

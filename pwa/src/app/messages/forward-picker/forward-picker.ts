@@ -42,7 +42,7 @@ import { ChatAvatar, conversationAvatar, type ChatAvatarData } from '../../chats
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { MessagePreview } from '../message-preview/message-preview';
-import { ConversationNavigation } from '../../conversations/conversation-navigation';
+import { ConversationNavigation, type ForwardDraftLocation } from '../../conversations/conversation-navigation';
 import {
   canForward,
   forwardSourceMessage,
@@ -97,6 +97,8 @@ type TargetQuery = ReturnType<ChatListStore['chats']> | ReturnType<ChatListStore
 })
 export class ForwardPicker {
   readonly messages = input<readonly ForwardSource[]>([]);
+  /** Moves an existing forward draft only after the destination opens successfully. */
+  readonly moveFrom = input<ForwardDraftLocation>();
   /** Replaces the fixed selection with the sources read when a target is chosen. */
   readonly load = input<ForwardSourcesLoader>();
   readonly closed = output<void>();
@@ -412,7 +414,7 @@ export class ForwardPicker {
       this.failure.set(undefined);
       this.submitted.set(true);
       try {
-        const opened = await this.navigation.prepareForward(target.chatId, target.threadId, selection);
+        const opened = await this.navigation.prepareForward(target.chatId, target.threadId, selection, this.moveFrom());
         if (!opened) {
           this.submitted.set(false);
           await this.report(ForwardSelectionError.NavigationFailed);

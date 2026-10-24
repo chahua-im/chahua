@@ -491,6 +491,7 @@
       "recallFailed": "Recalled {{succeeded}} messages; {{failed}} could not be recalled. Please try again."
     },
     "forward": {
+      "changeTarget": "Change forwarding destination",
       "pendingCount": "Forward {{count}} messages",
       "twoParticipants": "{{first}} and {{second}}",
       "otherParticipants": "{{first}} and {{count}} others",

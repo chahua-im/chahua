@@ -129,6 +129,9 @@
   font-size: 28px;
   color: var(--ion-color-primary);
 }
+.attach-button:disabled {
+  color: var(--ion-color-medium);
+}
 .attach-button ion-icon {
   transform: rotate(45deg);
 }

@@ -73,6 +73,8 @@ import {
   informationCircleOutline,
   listOutline,
   searchOutline,
+  returnUpForwardOutline,
+  returnDownBackOutline,
   notificationsOutline,
   notificationsOffOutline,
 } from 'ionicons/icons';
@@ -110,7 +112,12 @@ import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
 import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { Preferences } from '../../settings/preferences';
-import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
+import {
+  ConversationNavigation,
+  ConversationTargetKind,
+  type ConversationTarget,
+  type ForwardDraftLocation,
+} from '../conversation-navigation';
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
 import { messageRows } from '../message-rows';
@@ -332,7 +339,13 @@ export class ConversationPage {
   protected readonly outbox = inject(MessageOutbox);
   private readonly messageActions = inject(MessageActions);
   private selectionVersion = 0;
-  protected readonly selectionIcons = { cancel: closeOutline, forward: arrowRedoOutline, recall: trashOutline };
+  protected readonly selectionIcons = {
+    cancel: closeOutline,
+    forward: arrowRedoOutline,
+    returnForward: returnUpForwardOutline,
+    returnBack: returnDownBackOutline,
+    recall: trashOutline,
+  };
   protected readonly recalling = signal(false);
   protected readonly pendingRecall = signal<readonly SelectedMessage[] | undefined>(undefined);
   protected readonly recallResult = signal<{ succeeded: number; failed: number } | undefined>(undefined);
@@ -345,6 +358,10 @@ export class ConversationPage {
   protected readonly selectedMessages = signal<ReadonlyMap<SnowflakeID | string, SelectedMessage>>(new Map());
   protected readonly forwardSources = signal<readonly SelectedMessage[]>([]);
   protected readonly topicForwardOpen = signal(false);
+  protected readonly forwardMove = linkedSignal({
+    source: () => this.entryKey(),
+    computation: (): (ForwardDraftLocation & { messages: readonly MessageResponse[] }) | undefined => undefined,
+  });
   protected readonly selectionLimit = MAX_FORWARD_MESSAGES;
   protected readonly canSelect = (source: SelectedMessage) => {
     const message = forwardSourceMessage(source);
@@ -1804,6 +1821,11 @@ export class ConversationPage {
 
   protected cancelForward() {
     this.drafts.setForward(this.id(), this.threadId());
+  }
+
+  protected changeForwardTarget() {
+    const messages = this.pendingForward();
+    if (messages) this.forwardMove.set({ chatId: this.id(), threadId: this.threadId(), messages });
   }
 
   protected sendForward(mentions: MentionInfo[] = []) {
