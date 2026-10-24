@@ -5,7 +5,7 @@ slice by slice rather than up front.
 
 ## Problem Statement
 
-wetty-chat currently hard-couples to Discuz: user profiles, groups, avatars, and
+chahua currently hard-couples to Discuz: user profiles, groups, avatars, and
 search are read directly from `discuz.common_member` and the Discuz filesystem,
 and the initial session JWT is minted by an external Discuz/PHP web property
 that shares the backend's signing key.
@@ -21,7 +21,7 @@ Fundamental requirements:
    member/permission classification (Discuz primary group, extension groups,
    admin role) — **not** chat groups/rooms, which are app-owned chat data and
    never involve the provider. Friend relationships are **app-owned** by
-   wetty-chat (decided; earlier drafts considered provider-owned friends), so
+   chahua (decided; earlier drafts considered provider-owned friends), so
    provider synchronization covers user info and profiles only.
 4. **Token flexibility.** Support provider-issued login credentials (e.g. a
    Discuz-signed JWT), self-issued sessions, and generic OIDC-style third-party
@@ -33,7 +33,7 @@ Fundamental requirements:
 Current-state constraints:
 
 - `discuz.common_member` holds ~600k rows; only ~20k users are active in
-  wetty-chat.
+  chahua.
 - Production clients hold long-lived JWTs today; migration must not log
   everyone out.
 - Application tables store raw `i32` UIDs everywhere; rewriting them is out of
@@ -43,9 +43,9 @@ Current-state constraints:
 
 These rules resolve most detailed questions mechanically:
 
-1. **One issuer.** The wetty-chat backend is the sole issuer of tokens its API
+1. **One issuer.** The chahua backend is the sole issuer of tokens its API
    accepts. Every external credential — a Discuz-signed JWT, an OIDC ID token,
-   a password — is an authentication *proof* that is exchanged for a wetty-chat
+   a password — is an authentication *proof* that is exchanged for a chahua
    session. No external party ever holds the session signing key.
 
    This is a target-state invariant. During the legacy migration window the
@@ -119,7 +119,7 @@ replica remains a legitimate optimization for the hottest rows.
 
 ### Stance
 
-wetty-chat deliberately issues **long-lived (non-expiring) session JWTs** so
+chahua deliberately issues **long-lived (non-expiring) session JWTs** so
 users do not have to re-authenticate. This is an explicit, accepted security
 tradeoff. Revocation is handled through a **per-user token generation**:
 
@@ -133,7 +133,7 @@ tradeoff. Revocation is handled through a **per-user token generation**:
 ### Proof exchange
 
 All login methods reduce to `authenticate(proof) → provider subject`, then a
-wetty-chat session issuance:
+chahua session issuance:
 
 | Method | Proof | Notes |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ Existing production tokens (`{uid, cid, gen}`, minted partly by the external
 PHP service with the shared key) continue to validate through a legacy decoder
 for a measured window:
 
-1. Backfill seeds a provider mapping for every existing wetty-chat UID
+1. Backfill seeds a provider mapping for every existing chahua UID
    (prerequisite).
 2. Any time a legacy token hits a refresh-capable endpoint, it is silently
    reissued as a v2 session token — users never see a login screen.
@@ -244,17 +244,17 @@ These are recorded risks, not requirements to design every remaining phase now:
 
 ## Data Ownership
 
-| Data | Owner | Write path | wetty-chat read path |
+| Data | Owner | Write path | chahua read path |
 | --- | --- | --- | --- |
 | Identity, account state | Provider | Provider-internal | Replica |
 | Profile (name, avatar, gender) | Provider | Provider-internal | Replica |
 | User groups / roles (permission classification) | Provider | Provider-internal | Replica (normalized subjects) |
-| Friends (future) | wetty-chat | App | App tables |
-| Sessions, token generation | wetty-chat | App | App tables |
-| Policies, effective permissions | wetty-chat | App | App tables + cached subjects |
-| Chat groups/rooms, membership, moderation | wetty-chat | App | Existing tables |
-| Preferences, activity (`user_extra`) | wetty-chat | App | Existing tables |
-| Group display colors | wetty-chat | App | Overlay keyed by subject ID |
+| Friends (future) | chahua | App | App tables |
+| Sessions, token generation | chahua | App | App tables |
+| Policies, effective permissions | chahua | App | App tables + cached subjects |
+| Chat groups/rooms, membership, moderation | chahua | App | Existing tables |
+| Preferences, activity (`user_extra`) | chahua | App | Existing tables |
+| Group display colors | chahua | App | Overlay keyed by subject ID |
 
 ## Replica and Sync
 
@@ -263,7 +263,7 @@ These are recorded risks, not requirements to design every remaining phase now:
 The replica contains **only tracked users** — those with a
 `(provider_id, subject) → uid` mapping. A mapping is created by first
 successful login, or by the migration backfill (which seeds every UID already
-present in wetty-chat data). The ~600k-row Discuz directory is *not*
+present in chahua data). The ~600k-row Discuz directory is *not*
 replicated; dormant forum accounts enter the system only when they first log
 in, at which point the login path fetches them fresh.
 

@@ -6,7 +6,7 @@ use ferroid::{
 };
 
 define_snowflake_id!(
-    WettyChatId,
+    ChahuaId,
     u64,
     reserved: 1,
     timestamp: 47,
@@ -14,7 +14,7 @@ define_snowflake_id!(
     sequence: 12
 );
 
-pub type IdGen = LockSnowflakeGenerator<WettyChatId, MonotonicClock>;
+pub type IdGen = LockSnowflakeGenerator<ChahuaId, MonotonicClock>;
 
 /// Create a shared snowflake ID generator. Node id from `FERROID_NODE_ID` env or 0.
 pub fn new_generator() -> IdGen {
@@ -42,7 +42,7 @@ pub fn new_generator() -> IdGen {
 
 /// Generate next snowflake id as i64 (for gid, message id, attachment_id).
 pub async fn next_id(gen: &IdGen) -> Result<i64, ferroid::generator::Error> {
-    let id: WettyChatId = gen.try_next_id_async().await?;
+    let id: ChahuaId = gen.try_next_id_async().await?;
     Ok(id.to_raw() as i64)
 }
 
