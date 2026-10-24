@@ -134,10 +134,10 @@
     confirmation()?.action === Action.Recall
       ? recallAuthor()
         ? ('messages.menu.confirm.recallAuthor' | transloco: { name: recallAuthor() })
-        : ('messages.menu.confirm.recall' | transloco)
+        : ((dm() ? 'messages.menu.confirm.recallDm' : 'messages.menu.confirm.recall') | transloco)
       : confirmation()?.pinned
         ? ('messages.menu.confirm.unpin' | transloco)
-        : ('messages.menu.confirm.pin' | transloco)
+        : ((dm() ? 'messages.menu.confirm.pinDm' : 'messages.menu.confirm.pin') | transloco)
   "
   [buttons]="[
     { text: ('common.cancel' | transloco), role: 'cancel' },

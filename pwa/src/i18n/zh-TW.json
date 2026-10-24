@@ -432,7 +432,9 @@
         "pinTitle": "置頂訊息",
         "recallAuthor": "確定要收回 {{ name }} 的這則訊息嗎？",
         "recall": "收回後，其他成員將無法查看這則訊息。",
+        "recallDm": "收回後，對方將無法查看這則訊息。",
         "unpin": "確定取消這則訊息的置頂？",
+        "pinDm": "置頂後，你和對方都能看到這則置頂訊息。",
         "pin": "置頂後，此會話的成員都能看到這則置頂訊息。"
       },
       "notice": {
@@ -484,6 +486,7 @@
     },
     "selection": {
       "recallConfirm": "確定撤回選取的 {{count}} 則訊息？撤回後，其他成員將無法查看這些訊息。",
+      "recallConfirmDm": "確定撤回選取的 {{count}} 則訊息？撤回後，對方將無法查看這些訊息。",
       "recalled": "已撤回 {{count}} 則訊息",
       "recallFailed": "已撤回 {{succeeded}} 則，{{failed}} 則未能撤回，請重試。"
     },

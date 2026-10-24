@@ -432,7 +432,9 @@
         "pinTitle": "置顶消息",
         "recallAuthor": "确定要撤回 {{ name }} 的这条消息吗？",
         "recall": "撤回后，其他成员将无法查看这条消息。",
+        "recallDm": "撤回后，对方将无法查看这条消息。",
         "unpin": "确定取消这条消息的置顶？",
+        "pinDm": "置顶后，你和对方都能看到这条置顶消息。",
         "pin": "置顶后，此会话的成员都能看到这条置顶消息。"
       },
       "notice": {
@@ -484,6 +486,7 @@
     },
     "selection": {
       "recallConfirm": "确定撤回选中的 {{count}} 条消息？撤回后，其他成员将无法查看这些消息。",
+      "recallConfirmDm": "确定撤回选中的 {{count}} 条消息？撤回后，对方将无法查看这些消息。",
       "recalled": "已撤回 {{count}} 条消息",
       "recallFailed": "已撤回 {{succeeded}} 条，{{failed}} 条未能撤回，请重试。"
     },
