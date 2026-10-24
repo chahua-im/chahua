@@ -1,4 +1,4 @@
-# wetty-chat
+# chahua
 
 chahua is a chat application targeting ~20k users / ~2k messages per day.
 

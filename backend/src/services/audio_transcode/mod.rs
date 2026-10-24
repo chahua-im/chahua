@@ -611,8 +611,8 @@ async fn transcode_with_ffmpeg(file_name: &str, source_bytes: Vec<u8>) -> Result
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("bin");
-        let input_path = temp_path("wetty-audio-input", ext);
-        let output_path = temp_path("wetty-audio-output", "ogg");
+        let input_path = temp_path("chahua-audio-input", ext);
+        let output_path = temp_path("chahua-audio-output", "ogg");
 
         std::fs::write(&input_path, &source_bytes)
             .map_err(|err| format!("write temp input: {err}"))?;
