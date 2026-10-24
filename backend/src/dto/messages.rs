@@ -64,9 +64,26 @@ pub struct ForwardMessageBody {
     pub allow_placeholders: bool,
 }
 
+/// Stable destinations for the target named in a system message.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemMessageLinks {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uid: Option<i32>,
+    #[serde(
+        default,
+        with = "crate::serde_i64_string::opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>)]
+    pub message_id: Option<i64>,
+}
+
 #[derive(Debug, Serialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_links: Option<SystemMessageLinks>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forwarded_from: Option<ForwardedFromInfo>,
     #[serde(with = "crate::serde_i64_string")]
@@ -406,6 +423,8 @@ pub struct MessagePreviewAttachment {
 #[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessagePreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_links: Option<SystemMessageLinks>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forwarded_from_name: Option<String>,
     #[serde(with = "crate::serde_i64_string")]

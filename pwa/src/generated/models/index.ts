@@ -19,6 +19,7 @@ export * from './messagePreviewAttachment';
 export * from './mentionInfo';
 export * from './messageType';
 export * from './messagePreviewSticker';
+export * from './systemMessageLinks';
 export * from './messagePreview';
 export * from './chatNotificationSettingResponse';
 export * from './conversationCategory';

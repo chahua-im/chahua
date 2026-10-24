@@ -183,6 +183,23 @@ mod tests {
     }
 
     #[test]
+    fn system_message_links_are_optional_and_preserve_snowflake_ids() {
+        let document = api_document();
+        let schemas = &document["components"]["schemas"];
+        for name in ["MessageResponse", "MessagePreview"] {
+            assert!(schemas[name]["properties"]["systemLinks"].is_object());
+            assert!(!schemas[name]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("systemLinks")));
+        }
+        assert_eq!(
+            schemas["SystemMessageLinks"]["properties"]["messageId"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+    }
+
+    #[test]
     fn api_document_security_requirements_use_registered_schemes() {
         let document = api_document();
         let schemes = document["components"]["securitySchemes"]

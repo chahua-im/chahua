@@ -192,11 +192,13 @@ describe('Generated API client', () => {
       clientGeneratedId: '9223372036854775807',
       sender: { uid: 7, userGroup: { groupId: 3, name: null } },
       sticker: { id: '9223372036854775807', media: { id: '9007199254740993' } },
+      systemLinks: { messageId: '9223372036854775807', uid: 42 },
     };
     const encoded = encodeJsonIds(message, 'MessageResponse') as MessageResponse;
     expect(encoded.id).toBe(testMessage.id);
     expect(encoded.sticker?.id).toBe(encodeId('9223372036854775807'));
     expect(encoded.sticker?.media.id).toBe(testChat.id);
+    expect(encoded.systemLinks).toEqual({ messageId: encodeId('9223372036854775807'), uid: 42 });
     expect(encoded.sender.uid).toBe(7);
     expect(encoded.sender.userGroup?.groupId).toBe(3);
     expect(encoded.sender.userGroup?.name).toBeNull();

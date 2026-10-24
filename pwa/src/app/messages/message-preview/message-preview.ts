@@ -3,25 +3,36 @@ import { TranslocoPipe } from '@jsverse/transloco';
 import { RouterLink } from '@angular/router';
 import { MessageType, type MessageResponse } from '../../../generated/models';
 import { MediaKind, attachmentKind } from '../message-attachments/media-kind';
+import { messageLink } from '../message-link';
 import { placeholderLabel } from '../forward-placeholder';
 import { MarkdownSummary } from './markdown-summary';
 
 type PreviewSource = Pick<MessageResponse, 'message' | 'messageType'> &
-  Partial<Pick<MessageResponse, 'isDeleted' | 'mentions' | 'sender'>> & {
+  Partial<Pick<MessageResponse, 'isDeleted' | 'mentions' | 'sender' | 'systemLinks' | 'chatId'>> & {
     attachments: readonly { kind: string }[];
   };
 
-// These phrases are protocol values, not display text. Member actions append the target's name.
 enum SystemMessageKind {
-  Joined = 'joined the chat',
-  Left = 'left the chat',
-  Added = 'added ',
-  Removed = 'removed ',
-  Pinned = 'pinned a message',
-  Unpinned = 'unpinned a message',
-  ThreadPinned = 'pinned a message in this thread',
-  ThreadUnpinned = 'unpinned a message in this thread',
+  Joined = 'joined',
+  Left = 'left',
+  Added = 'added',
+  Removed = 'removed',
+  Pinned = 'pinned',
+  Unpinned = 'unpinned',
+  ThreadPinned = 'threadPinned',
+  ThreadUnpinned = 'threadUnpinned',
+  Accepted = 'accepted',
 }
+
+// Backend protocol text, including legacy messages without link destinations.
+const systemPhrases = new Map([
+  ['joined the chat', SystemMessageKind.Joined],
+  ['left the chat', SystemMessageKind.Left],
+  ['pinned a message', SystemMessageKind.Pinned],
+  ['unpinned a message', SystemMessageKind.Unpinned],
+  ['pinned a message in this thread', SystemMessageKind.ThreadPinned],
+  ['unpinned a message in this thread', SystemMessageKind.ThreadUnpinned],
+]);
 
 @Component({
   selector: 'app-message-preview',
@@ -46,15 +57,20 @@ export class MessagePreview {
   readonly interactive = input(false);
   protected readonly MessageType = MessageType;
   protected readonly placeholderLabel = placeholderLabel;
-  protected readonly SystemMessageKind = SystemMessageKind;
   protected readonly systemMessage = computed(() => {
     const text = this.message().message ?? '';
-    for (const kind of Object.values(SystemMessageKind)) {
-      const hasTarget = kind === SystemMessageKind.Added || kind === SystemMessageKind.Removed;
-      if (hasTarget ? text.startsWith(kind) : text === kind)
-        return { kind, target: hasTarget ? text.slice(kind.length) : undefined };
+    const kind = systemPhrases.get(text);
+    if (kind) return { kind, target: undefined };
+    for (const kind of [SystemMessageKind.Added, SystemMessageKind.Removed]) {
+      const prefix = kind + ' ';
+      if (text.startsWith(prefix)) return { kind, target: text.slice(prefix.length) };
     }
-    return undefined;
+    const accepted = /^accepted ([\s\S]+)'s friend request$/.exec(text);
+    return accepted ? { kind: SystemMessageKind.Accepted, target: accepted[1] } : undefined;
+  });
+  protected readonly messageRoute = computed(() => {
+    const { chatId, systemLinks } = this.message();
+    return chatId != null && systemLinks?.messageId != null ? messageLink(chatId, systemLinks.messageId) : undefined;
   });
   protected readonly MediaKind = MediaKind;
   protected readonly media = computed(() => [

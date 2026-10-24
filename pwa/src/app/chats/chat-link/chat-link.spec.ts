@@ -1,6 +1,8 @@
+import { wireMessage } from '../../api/testing';
+import { jsonInterceptor } from '../../api/json.interceptor';
 import { Location } from '@angular/common';
 import { provideLocationMocks } from '@angular/common/testing';
-import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter, Router, UrlSegment } from '@angular/router';
@@ -53,9 +55,12 @@ describe('ChatLink route-owned modals', () => {
         provideRouter([
           { path: 'chats', children: [] },
           { path: 'settings', children: [] },
+          { path: 'm/:encoded', children: [] },
+          { path: 'chats/chat/:id', children: [] },
+          { path: 'chats/chat/:id/thread/:threadId', children: [] },
         ]),
         provideLocationMocks(),
-        provideHttpClient(),
+        provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
         { provide: ActivatedRoute, useValue: { snapshot } },
@@ -66,6 +71,25 @@ describe('ChatLink route-owned modals', () => {
     await TestBed.inject(Router).navigateByUrl('/settings');
   });
   afterEach(() => TestBed.inject(HttpTestingController).verify());
+
+  it.each([undefined, '9007199254740995'])(
+    'resolves a system message permalink to the target actual scope (%s)',
+    async (replyRootId) => {
+      const encoded = 'ACAAAAAAAAEAIAAAAAAACw';
+      snapshot.url = [new UrlSegment('m', {}), new UrlSegment(encoded, {})];
+      snapshot.paramMap = convertToParamMap({ encoded });
+      await TestBed.inject(Router).navigateByUrl(`/m/${encoded}`);
+      const page = TestBed.createComponent(ChatLink).componentInstance;
+      const open = page['open']();
+      TestBed.inject(HttpTestingController)
+        .expectOne('/_api/chats/9007199254740993/messages/9007199254741003')
+        .flush({ ...wireMessage, replyRootId });
+      await open;
+      expect(TestBed.inject(Router).url).toBe(
+        '/chats/chat/9007199254740993' + (replyRootId ? '/thread/9007199254740995' : '') + '#msg=9007199254741003',
+      );
+    },
+  );
 
   it('dismisses only its own modal on navigation without triggering another Back', async () => {
     vi.spyOn(TestBed.inject(Router), 'currentNavigation').mockReturnValue({ previousNavigation: {} } as never);

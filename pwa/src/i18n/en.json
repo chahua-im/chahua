@@ -396,10 +396,12 @@
         "left": "left the group",
         "added": "invited {{ target }} to the group",
         "removed": "removed {{ target }} from the group",
-        "pinned": "pinned a message",
-        "unpinned": "unpinned a message",
-        "threadPinned": "pinned a message in the thread",
-        "threadUnpinned": "unpinned a message in the thread"
+        "pinned": "pinned a {{ message }}",
+        "unpinned": "unpinned a {{ message }}",
+        "threadPinned": "pinned a {{ message }} in this thread",
+        "threadUnpinned": "unpinned a {{ message }} in the thread",
+        "accepted": "accepted {{ target }}'s friend request",
+        "message": "message"
       },
       "invite": "[Invite]",
       "image": "[Photo]",

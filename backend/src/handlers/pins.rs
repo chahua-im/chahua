@@ -271,7 +271,16 @@ async fn create_pin_in_scope(
         expires_at: pin.expires_at,
     };
 
-    send_pin_system_message(state, conn, uid, chat_id, scope, PinAction::Pinned).await;
+    send_pin_system_message(
+        state,
+        conn,
+        uid,
+        chat_id,
+        scope,
+        PinAction::Pinned,
+        message_id,
+    )
+    .await;
 
     // Broadcast pin event to all chat members
     let member_uids: Vec<i32> = group_membership::table
@@ -324,7 +333,16 @@ async fn delete_pin_in_scope(
 
     diesel::delete(pinned_messages::table.filter(pinned_messages::id.eq(pin_id))).execute(conn)?;
 
-    send_pin_system_message(state, conn, uid, chat_id, scope, PinAction::Unpinned).await;
+    send_pin_system_message(
+        state,
+        conn,
+        uid,
+        chat_id,
+        scope,
+        PinAction::Unpinned,
+        pin.message_id,
+    )
+    .await;
 
     // Broadcast pin removal
     let member_uids: Vec<i32> = group_membership::table
@@ -371,6 +389,7 @@ async fn send_pin_system_message(
     chat_id: i64,
     scope: PinScope,
     action: PinAction,
+    message_id: i64,
 ) {
     let text = match (scope, action) {
         (PinScope::Chat, PinAction::Pinned) => "pinned a message",
@@ -388,7 +407,9 @@ async fn send_pin_system_message(
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
-                message: Some(text.to_string()),
+                message: Some(crate::services::system_messages::with_message(
+                    text, message_id,
+                )),
                 message_type: MessageType::System,
                 sticker_id: None,
                 reply_to_id: thread_root_id,

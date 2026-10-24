@@ -15,34 +15,37 @@
   } @else {
     <ng-container>{{ 'messages.preview.someone' | transloco }}</ng-container>
   }
-  @switch (systemMessage()?.kind) {
-    @case (SystemMessageKind.Joined) {
-      {{ 'messages.preview.system.joined' | transloco }}
+  @if (systemMessage(); as system) {
+    <ng-container>{{ ' ' }}</ng-container>
+    <!-- Split the translated sentence before inserting names, so names stay literal and word order stays localizable. -->
+    @let parts =
+      ('messages.preview.system.' + system.kind | transloco: { target: '\uFFFC', message: '\uFFFC' }).split('\uFFFC');
+    @for (part of parts; track $index) {
+      @if ($index > 0) {
+        @if (system.target != null) {
+          @if (interactive() && message().systemLinks?.uid != null) {
+            <a
+              [routerLink]="['/profile', message().systemLinks!.uid]"
+              (click)="$event.stopPropagation()"
+              [textContent]="system.target"></a>
+          } @else {
+            <ng-container>{{ system.target }}</ng-container>
+          }
+        } @else {
+          @if (interactive() && message().systemLinks?.messageId != null && messageRoute()) {
+            <a
+              [routerLink]="messageRoute()"
+              (click)="$event.stopPropagation()"
+              [textContent]="'messages.preview.system.message' | transloco"></a>
+          } @else {
+            <ng-container>{{ 'messages.preview.system.message' | transloco }}</ng-container>
+          }
+        }
+      }
+      <ng-container>{{ part }}</ng-container>
     }
-    @case (SystemMessageKind.Left) {
-      {{ 'messages.preview.system.left' | transloco }}
-    }
-    @case (SystemMessageKind.Added) {
-      {{ 'messages.preview.system.added' | transloco: { target: systemMessage()?.target } }}
-    }
-    @case (SystemMessageKind.Removed) {
-      {{ 'messages.preview.system.removed' | transloco: { target: systemMessage()?.target } }}
-    }
-    @case (SystemMessageKind.Pinned) {
-      {{ 'messages.preview.system.pinned' | transloco }}
-    }
-    @case (SystemMessageKind.Unpinned) {
-      {{ 'messages.preview.system.unpinned' | transloco }}
-    }
-    @case (SystemMessageKind.ThreadPinned) {
-      {{ 'messages.preview.system.threadPinned' | transloco }}
-    }
-    @case (SystemMessageKind.ThreadUnpinned) {
-      {{ 'messages.preview.system.threadUnpinned' | transloco }}
-    }
-    @default {
-      {{ message().message }}
-    }
+  } @else {
+    {{ message().message }}
   }
 } @else if (message().messageType === MessageType.invite) {
   <ng-container>{{ 'messages.preview.invite' | transloco }}</ng-container>

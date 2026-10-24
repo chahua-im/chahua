@@ -372,6 +372,7 @@ pub fn message_response_preview(response: MessageResponse) -> MessagePreview {
         client_generated_id: response.client_generated_id,
         created_at: response.created_at,
         sender: response.sender,
+        system_links: response.system_links.filter(|_| !is_deleted),
         message: response.message,
         message_type: response.message_type,
         sticker: response.sticker.and_then(|sticker| {
@@ -458,7 +459,9 @@ pub fn build_message_preview(
     } = input;
     let is_deleted = deleted_at.is_some();
     let sticker_emoji = sticker_id.and_then(|sid| sticker_emoji_map.get(&sid).cloned());
+    let (message, system_links) = super::system_messages::decode(&message_type, message);
     MessagePreview {
+        system_links: system_links.filter(|_| !is_deleted),
         forwarded_from_name: forwarded_from_name.filter(|_| !is_deleted),
         id,
         client_generated_id,
@@ -509,6 +512,7 @@ pub fn redact_deleted_message_response(response: &mut MessageResponse) {
     }
 
     response.message = None;
+    response.system_links = None;
     response.sticker = None;
     response.has_attachments = false;
     response.attachments.clear();
@@ -2527,10 +2531,12 @@ pub async fn attach_metadata(
             &sticker_emojis,
             &message_attachments_map,
         );
+        let (message, system_links) = super::system_messages::decode(&m.message_type, m.message);
         let mut response = MessageResponse {
+            system_links,
             forwarded_from,
             id: m.id,
-            message: if is_deleted { None } else { m.message },
+            message: if is_deleted { None } else { message },
             message_type: m.message_type,
             sticker: m.sticker_id.and_then(|sticker_id| {
                 (!is_deleted)
@@ -3260,6 +3266,7 @@ mod tests {
     #[test]
     fn build_push_preview_bundle_uses_typed_invite_preview() {
         let response = super::MessageResponse {
+            system_links: None,
             forwarded_from: None,
             id: 1,
             message: Some("abc123".to_string()),
@@ -3297,6 +3304,7 @@ mod tests {
     #[test]
     fn serializes_reply_to_message_type_and_camel_case_keys() {
         let reply = MessagePreview {
+            system_links: None,
             forwarded_from_name: None,
             id: 42,
             client_generated_id: "cgid".to_string(),
@@ -3356,6 +3364,10 @@ mod tests {
     #[test]
     fn deleted_message_response_redaction_preserves_metadata_only() {
         let mut response = MessageResponse {
+            system_links: Some(crate::dto::messages::SystemMessageLinks {
+                uid: Some(42),
+                message_id: Some(99),
+            }),
             forwarded_from: None,
             id: 10,
             message: Some("secret root".to_string()),
@@ -3401,11 +3413,47 @@ mod tests {
             Some(2)
         );
         assert_eq!(response.message, None);
+        assert!(response.system_links.is_none());
         assert!(response.sticker.is_none());
         assert!(!response.has_attachments);
         assert!(response.attachments.is_empty());
         assert!(response.reactions.is_empty());
         assert!(response.mentions.is_empty());
+    }
+
+    #[test]
+    fn system_message_previews_decode_storage_and_redact_deleted_links() {
+        for deleted_at in [None, Some(Utc::now())] {
+            let preview = build_message_preview(
+                MessagePreviewInput {
+                    forwarded_from_name: None,
+                    id: 10,
+                    client_generated_id: "system-10".into(),
+                    created_at: Utc::now(),
+                    sender: sender(),
+                    message: Some(crate::services::system_messages::with_user(
+                        "added 小花".into(),
+                        42,
+                    )),
+                    message_type: MessageType::System,
+                    sticker_id: None,
+                    attachments: vec![],
+                    deleted_at,
+                    mention_source: None,
+                    mention_uids: None,
+                },
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+            );
+            if deleted_at.is_some() {
+                assert!(preview.message.is_none());
+                assert!(preview.system_links.is_none());
+            } else {
+                assert_eq!(preview.message.as_deref(), Some("added 小花"));
+                assert_eq!(preview.system_links.unwrap().uid, Some(42));
+            }
+        }
     }
 
     #[test]

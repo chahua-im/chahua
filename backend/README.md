@@ -52,6 +52,21 @@ Validate the generated document with:
 cargo test --locked openapi::tests::
 ```
 
+## System message links
+
+New member invitations/removals and accepted friend requests retain the target UID;
+pin/unpin announcements retain the affected message ID. These system messages store
+`{ "text": "...", "links": { "uid": 42 } }` or a decimal-string `messageId` in the
+existing message body. No schema migration or historical backfill is required.
+Shared response and preview builders expose the readable `text` as `message` and
+optional destinations as `systemLinks`, so existing clients keep their readable
+text. Deleted messages redact both fields. Legacy system strings remain supported;
+ordinary user messages are never decoded as system payloads.
+
+These links do not create reply relationships, mention notifications or push jobs.
+Thread pin notifications retain their existing thread scope independently of the
+linked message ID. Message IDs use the API's decimal-string Snowflake encoding.
+
 ## Bulk message recall
 
 `POST /chats/{chat_id}/messages/bulk-delete` accepts `{ "messageIds": ["123", "124"] }`

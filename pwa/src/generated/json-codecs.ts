@@ -213,6 +213,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   },
   MessagePreview: {
     id: 1,
+    systemLinks: 'SystemMessageLinks',
   },
   MessageResponse: {
     attachments: ['AttachmentResponse'],
@@ -224,6 +225,7 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     replyRootId: 1,
     replyToMessage: 'MessagePreview',
     sticker: 'MessageStickerResponse',
+    systemLinks: 'SystemMessageLinks',
   },
   MessageStickerMediaResponse: {
     id: 1,
@@ -352,6 +354,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   },
   StickersStickerMediaResponse: {
     id: 1,
+  },
+  SystemMessageLinks: {
+    messageId: 1,
   },
   ThreadListItem: {
     chatId: 1,
