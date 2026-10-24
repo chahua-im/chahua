@@ -1,0 +1,10 @@
+[jobs.dev]
+command = ["cargo", "run", "--locked", "--manifest-path", "../backend/Cargo.toml"]
+workdir = "../runspace"
+watch = ["migrations", "Cargo.lock"]
+need_stdout = true
+allow_warnings = true
+background = false
+on_change_strategy = "kill_then_restart"
+# Cargo waits for its child; stop that child before starting the next server.
+kill = ["pkill", "-TERM", "-P"]

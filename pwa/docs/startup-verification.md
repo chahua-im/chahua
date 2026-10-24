@@ -3,10 +3,10 @@
 在 `pwa` 目录运行：
 
 ```sh
-npm run preview:startup
+npm run preview:startup-failures
 ```
 
-默认监听 `0.0.0.0:14310`。本机打开 `http://localhost:14310`，局域网设备打开启动日志中的 `LAN` 地址（`http://电脑的局域网IP:14310`），点击场景即可查看实际生产构建中的页面。端口被占用时会显示说明，可先停止已有服务，或用 `PORT=14311 npm run preview:startup` 换端口。仅需本机访问时可用 `HOST=127.0.0.1 npm run preview:startup`。
+默认监听 `0.0.0.0:14310`。本机打开 `http://localhost:14310`，局域网设备打开启动日志中的 `LAN` 地址（`http://电脑的局域网IP:14310`），点击场景即可查看实际生产构建中的页面。端口被占用时会显示说明，可先停止已有服务，或用 `PORT=14311 npm run preview:startup-failures` 换端口。仅需本机访问时可用 `HOST=127.0.0.1 npm run preview:startup-failures`。
 
 模拟服务支持局域网访问，全部 API 由本地处理，不代理真实后端。它在该预览源写入虚构凭证和中文语言偏好，并关闭通知提示；应用构建中没有模拟入口。Service Worker 缓存和版本更新在模拟服务中禁用。需要更改代码后查看结果时，停止服务并重新执行命令以重新构建。
 

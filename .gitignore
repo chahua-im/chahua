@@ -11,11 +11,9 @@
 .cursor
 .env
 
-# Local runspace configuration and generated seed progress
-/runspace
-!/runsapce/dev.mjs
-!/runspace/docker-compose.yml
-!/runspace/seed.py
+# Local runspace configuration
+/runspace/.env*
+/runspace/__pycache__/
 /reference
 /ci-deploy/
 .geminiignore

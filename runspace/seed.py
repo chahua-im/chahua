@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -68,6 +69,7 @@ class ApiError(SeedError):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-url", default=DEFAULT_API_URL, help=f"Local backend URL (default: {DEFAULT_API_URL})")
+    parser.add_argument("--state-file", type=Path, required=True, help="Shared fixture progress file")
     return parser.parse_args()
 
 
@@ -192,7 +194,7 @@ def compose_psql(sql: str) -> str:
     runspace = repository / "runspace"
     compose_file = runspace / "docker-compose.yml"
     command = [
-        "docker", "compose", "--project-directory", str(runspace), "-f", str(compose_file),
+        "docker", "compose", "--env-file", os.environ["RUNSPACE_SHARED_ENV"], "-f", str(compose_file),
         "exec", "-T", "postgres", "psql", "-v", "ON_ERROR_STOP=1", "-U", "wetty_chat", "-d", "wetty_chat", "-Atq",
     ]
     try:
@@ -533,7 +535,7 @@ def main() -> int:
     try:
         api_url = validate_api_url(args.api_url)
         compose_psql(bootstrap_sql())
-        state_path = Path(__file__).resolve().parent / "seed-state.json"
+        state_path = args.state_file
         state = load_state(state_path, database_identity())
         client = ApiClient(api_url)
         ensure_groups(client, state, state_path)

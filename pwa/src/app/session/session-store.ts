@@ -133,9 +133,10 @@ export class SessionStore {
     if (token) window.localStorage.setItem(TOKEN_KEY, token);
     else window.localStorage.removeItem(TOKEN_KEY);
     // Safari copies cookies into a newly installed PWA, but not localStorage.
-    document.cookie = `${TOKEN_KEY}=${token ?? ''}; Path=/; Max-Age=${token ? 400 * 24 * 60 * 60 : 0}; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
+    // Cookies ignore ports, so development cookies need an origin-specific name.
+    document.cookie = `${cookieKey(TOKEN_KEY)}=${token ?? ''}; Path=/; Max-Age=${token ? 400 * 24 * 60 * 60 : 0}; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
     window.localStorage.removeItem(LEGACY_TOKEN_KEY);
-    document.cookie = `${LEGACY_TOKEN_KEY}=; Path=/; Max-Age=0`;
+    document.cookie = `${cookieKey(LEGACY_TOKEN_KEY)}=; Path=/; Max-Age=0`;
   }
 }
 
@@ -162,13 +163,17 @@ function developmentClientId() {
   return clientId;
 }
 
+function cookieKey(key: string) {
+  return isDevMode() ? `${key}_${encodeURIComponent(window.location.origin)}` : key;
+}
+
 function storedToken(key: string) {
   return (
     window.localStorage.getItem(key) ??
     document.cookie
       .split('; ')
-      .find((cookie) => cookie.startsWith(`${key}=`))
-      ?.slice(key.length + 1)
+      .find((cookie) => cookie.startsWith(`${cookieKey(key)}=`))
+      ?.slice(cookieKey(key).length + 1)
   );
 }
 
