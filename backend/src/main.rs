@@ -142,7 +142,6 @@ async fn main() {
             ws_registry.clone(),
             metrics.background.clone(),
             message_search.clone(),
-            unread_service.clone(),
         ),
         message_search,
         auth_token_service: Arc::new(services::auth_token::AuthTokenService::new(

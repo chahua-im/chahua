@@ -1474,13 +1474,6 @@ async fn delete_message(
         search_service.delete_message_best_effort(message_id);
     }
 
-    // Update unread count if the message is not in a thread
-    if deleted_message.reply_root_id.is_none() {
-        state
-            .unread_service
-            .observe_top_level_message_counted(chat_id, message_id, false);
-    }
-
     let response = attach_metadata(
         conn,
         vec![deleted_message],
@@ -1600,7 +1593,6 @@ async fn bulk_delete_messages(
         ),
     };
 
-    state.unread_service.invalidate_chat(chat_id);
     if let Some(search) = &state.message_search {
         search.delete_message_ids_best_effort(ids);
     }

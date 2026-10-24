@@ -33,6 +33,35 @@ The server applies pending embedded Diesel migrations at startup in version orde
 New migrations must sort after the latest migration on `main`; preserve dependency
 order when re-dating an unmerged branch's migrations.
 
+The `idx_messages_unread_visible` index is built concurrently, outside a migration
+transaction. Normal database reads and writes remain available during the build,
+but the API still waits for pending migrations. On large production tables, apply
+the index migration before restarting the API to keep that one-time build out of
+the restart's readiness window.
+
+## Unread counting
+
+Main-chat unread counts come directly from PostgreSQL, not a process-local message
+history index. Each probe counts at most 1000 published, non-deleted, top-level
+messages newer than the membership's read cursor. An absent cursor includes all
+eligible messages, up to the same cap. Deletion and delayed publication are reflected
+by subsequent reads without cache maintenance.
+
+`idx_messages_unread_visible` indexes `(chat_id, id DESC)` with the same visibility
+predicate, so probes can seek past the cursor and stop at the cap without scanning
+excluded message history. Batched requests and push badge totals deduplicate
+`(chat_id, read cursor)` pairs and execute their bounded probes in one database
+statement. Counts are aggregated independently for each user, preserving archive
+and mute rules. Collection summaries use the same main-chat counting path.
+
+The affected chat-list, read-state and unread-summary handlers acquire connections
+and execute database work on Tokio's blocking pool. WebSocket unread snapshots and
+push unread calculations also run on the blocking pool. No full chat history is
+retained in application memory for unread counting.
+
+Database-backed unread regressions run when `WETTY_TEST_DATABASE_URL` points to a
+migrated local PostgreSQL database. Their fixtures are rolled back.
+
 ## Metrics
 
 Prometheus endpoint behavior and the complete metric catalog are in
@@ -79,8 +108,8 @@ A single transaction soft-deletes the messages and attachments, removes mentions
 reconciles affected thread statistics and the chat preview, and shifts read cursors.
 The response and `messagesBulkDeleted` WebSocket event carry the confirmed IDs,
 `complete: true`, and affected `threadRootIds`. Updated thread roots and thread
-summaries are also broadcast. Search-index removal and unread-cache invalidation
-happen after commit. The existing single-message DELETE endpoint remains available.
+summaries are also broadcast. Search-index removal happens after commit. The
+existing single-message DELETE endpoint remains available.
 
 Multi-selection recall and removed-member cleanup share `soft_delete_batch` and
 `reconcile_deletions` in `services/message_deletion.rs`. The database helpers return
@@ -135,10 +164,10 @@ cursors belong to conversations, not views. Existing unread endpoints retain the
 legacy meanings for other clients and the global system badge.
 
 The service resolves authorized scopes once, counts each selected scope once, then
-aggregates all views. Main counts reuse `UnreadService`'s shared chat index; thread
-counts use `idx_messages_thread_reply_stats`, attention counts use
+aggregates all views. Main counts use [bounded unread probes](#unread-counting);
+thread counts use `idx_messages_thread_reply_stats`, attention counts use
 `message_mentions_unread_idx`. LATERAL range seeks and per-scope caps bound message
-queries independently of list pagination. No new tables or indexes are required.
+queries independently of list pagination.
 
 ## PWA notification metadata
 
