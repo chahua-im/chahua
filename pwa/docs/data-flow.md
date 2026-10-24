@@ -212,6 +212,8 @@ ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使�
 
 `ForwardPicker` 通过 `ConversationNavigation.prepareForward` 在导航前把队列来源转换为 `confirmed()` 中的服务器消息数据，将选定的 MessageResponse 交给 `DraftStore` 的目标 chatId／threadId 内存槽，再打开目标会话；当前已打开同一路由时直接使用响应式草稿更新预览。转发导航成功后才关闭弹层，失败保留选择器并恢复之前的待转发内容，不能覆盖期间新选择或新账号的状态。来源读取完成时重新检查选择器生命周期、来源失效和目标仍在当前集合中；关闭动画开始后的结果不再触发导航。选择器不调用发送接口、不收集附言、不请求占位替换许可。
 
+更换转发目标时，`ConversationPage` 固定当前转发消息数组与原 chatId／threadId，交给 `ForwardPicker.moveFrom` 和 `messages`。`prepareForward` 校验原槽仍持有同一选择，导航成功后仅清除仍属于该次选择的原槽；同目标选择不会清除新写入的预览，导航失败恢复目标原有选择。页面销毁或复用到其他聊天不影响已提交的移动；附言和其他文字草稿不参与移动，仍保留在各自聊天中。
+
 `DraftStore` 的转发集合与持久化文字草稿分开，只保留 MessageResponse，不引用 OutgoingMessage、上传任务或 File；切换账号清空，不序列化到 localStorage。草稿不订阅源消息的编辑或撤回事件，也不扫描各目标的来源，预览保留选定时的数据。`ConversationPage` 消费当前目标的转发草稿，点击发送直接交给队列，不预读来源或转码状态，由转发接口校验当前权限、撤回状态及占位需求。提交后移除该次转发和对应文字，后续输入不受请求结果影响。回复／编辑状态独立保留，附言不携带旧的回复目标。
 
 `ConversationPage` 持有多选消息 Map，分页不清空；已确认消息用服务端 ID、待发消息用 clientGeneratedId 保留对应消息或队列对象引用，消息更新替换对应引用、撤回移除选择。只允许已有服务端 ID 的消息参与勾选；尚未发布的音频使用队列 confirmed() 中的 ID。勾选不检查转发资格，点击转发时校验来源和消息类型；目标选择器固定 MessageResponse 或 OutgoingMessage 引用，选择目标时读取队列的 confirmed()，进入草稿后不再持有队列项或跟踪 published()。选择器独立监听撤回，使该次选择失效。已提交任务不再读取页面选择状态。批量撤回在确认时固定待处理数组；队列项先通过 MessageOutbox.waitForPublication 读取已发布确认或等待对应发布事件，沿用 30 秒请求超时。等待期间不取消队列项或释放上传资源；收集完成后重新检查选择与权限，通过 MessageActions.recallMany 一次提交 `POST /chats/{chatId}/messages/bulk-delete`，请求体为 `{ messageIds }`（1–100 条）。等待失败项保留，其余可提交项仍按一批处理；已由服务器撤回的所选项跳过。服务端整批校验并事务撤回，已撤回 ID 可重复提交；成功响应返回 `BulkDeletedPayload`，含 `complete: true` 与受影响的 `threadRootIds`，直接合并到现有批量删除事件路径，不等待 WS 回声。仅成功响应中的 ID 计入成功，请求失败时保留未撤回项。切换会话、退出选择或销毁页面后停止提交后续请求，迟到响应仍可更新原聊天数据，但不得修改新选择的界面状态。

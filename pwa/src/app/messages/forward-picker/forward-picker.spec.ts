@@ -118,7 +118,7 @@ describe('ForwardPicker', () => {
     const topic = picker['targets']().find((target) => target.threadId === threadId)!;
     await picker['select'](topic);
     await picker['select'](topic);
-    expect(prepareForward).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, sources);
+    expect(prepareForward).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, sources, undefined);
     expect(enqueueForward).not.toHaveBeenCalled();
     fixture.destroy();
     expect(chats.release).toHaveBeenCalledOnce();
@@ -130,8 +130,24 @@ describe('ForwardPicker', () => {
     const { picker, prepareForward, enqueueForward } = setup([], load);
     await picker['select'](picker['targets']()[0]);
     expect(load).toHaveBeenCalledOnce();
-    expect(prepareForward).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, selection);
+    expect(prepareForward).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, selection, undefined);
     expect(enqueueForward).not.toHaveBeenCalled();
+  });
+  it('passes the original draft location and full selection when changing destination', async () => {
+    const sources = [testMessage, { ...testMessage, id: encodeId('100') }];
+    const { picker, fixture, prepareForward, enqueueForward } = setup(sources);
+    const origin = { chatId: encodeId('222'), threadId: encodeId('333') };
+    fixture.componentRef.setInput('moveFrom', origin);
+    await picker['select'](picker['targets']()[0]);
+    expect(prepareForward).toHaveBeenCalledExactlyOnceWith(testChat.id, threadId, sources, origin);
+    expect(enqueueForward).not.toHaveBeenCalled();
+  });
+  it('does not move a draft after the destination picker is cancelled', async () => {
+    const { picker, fixture, prepareForward } = setup([testMessage]);
+    fixture.componentRef.setInput('moveFrom', { chatId: encodeId('222') });
+    picker['dismissing']();
+    await picker['select'](picker['targets']()[0]);
+    expect(prepareForward).not.toHaveBeenCalled();
   });
   it('reports a failed or oversized topic read and leaves another target choice possible', async () => {
     const load = vi
@@ -167,7 +183,7 @@ describe('ForwardPicker', () => {
     const sources = [nested, { ...testMessage, id: encodeId('100') }];
     const { picker, prepareForward, enqueueForward } = setup(sources);
     await picker['select'](picker['targets']()[0]);
-    expect(prepareForward).toHaveBeenCalledWith(testChat.id, threadId, sources);
+    expect(prepareForward).toHaveBeenCalledWith(testChat.id, threadId, sources, undefined);
     expect(enqueueForward).not.toHaveBeenCalled();
   });
   it('keeps the live audio source while preparing its destination', async () => {

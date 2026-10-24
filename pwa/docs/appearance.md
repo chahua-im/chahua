@@ -39,6 +39,12 @@ iOS 根布局保留 Ionic 默认 body 样式，不根据 VisualViewport 的 resi
 
 资料区横排操作使用 Ionic clear 按钮与主题色浅底：普通操作背景为 primary 的 8%，hover/focused 为 12%，按下为 16%；破坏性操作使用 danger 的 10%/14%/18%。悬停时图标及文字变为对应 shade 色，颜色过渡为 160ms；侧栏与详情弹窗共用。
 
+输入框上方的编辑、转发与回复预览条共用关闭按钮样式：图标使用 `--ion-text-color-step-250` 中性色，随明暗主题变化；悬停和按下时使用正文色图标，分别显示正文色 8% 和 14% 的圆角底色，颜色过渡为 160ms。
+
+输入栏附件按钮可用时使用 primary 色；转发或录音期间禁用时使用 medium 灰色，并保留输入栏按钮统一的禁用透明度。
+
+预览条左侧的编辑与回复图标仅表示当前状态，不可点击；统一使用 medium 灰色和 0.45 透明度，与禁用的附件按钮一致。转发预览左侧为可点击的更换目标按钮，使用 primary 色主转发箭头，右下角叠放 12px 衔尾双箭头角标；角标由 return-up-forward-outline 与 return-down-back-outline 组成，分别向上、向下偏移图标高度的 12.5%，两箭头之间保留空隙，悬停提示“更换转发目标”；点击区域与关闭按钮等大，并共用悬停和按下底色。
+
 消息的手机正文参考 TG iOS，桌面采用 14px 正文以兼顾密度和中文阅读。其组织方式参考 [Signal 桌面字体](https://github.com/signalapp/Signal-Desktop/blob/aee156c662c64dc6cbe5e363325565f5cbd7203a/stylesheets/_mixins.scss)和 [Discord 字号与密度的区分](https://support.discord.com/hc/en-us/articles/207260127-How-to-Change-Discord-Color-Themes-and-Customize-Appearance-Settings)。聊天设置提供五档消息字号，默认保持上述平台字号；字号使用独立分区标题，标题旁显示当前字号或系统默认；滑块下方的双向消息气泡即时预览所选字号与行高，预览区域最小高度 260px；仅消息气泡文字及其行高随选择变化，头像、控件和列表密度保持不变。
 
 布局不统一取整：百分比宽度、文字测量和滚动锚点保留浏览器精度。Ionic 细分隔线及发送图标的视觉偏移允许小数 CSS px。

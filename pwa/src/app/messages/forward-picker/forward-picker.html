@@ -11,7 +11,7 @@
   <ng-template>
     <ion-header>
       <ion-toolbar>
-        <ion-title>{{ 'messages.forward.to' | transloco }}</ion-title>
+        <ion-title>{{ (moveFrom() ? 'messages.forward.changeTarget' : 'messages.forward.to') | transloco }}</ion-title>
         <ion-buttons slot="end">
           <ion-button [disabled]="submitted()" (click)="close()">{{ 'common.cancel' | transloco }}</ion-button>
         </ion-buttons>

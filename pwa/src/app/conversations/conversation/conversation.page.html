@@ -319,7 +319,17 @@
     (escape)="escapeComposer()">
     @if (pendingForward(); as sources) {
       <div class="reply-context forward-context">
-        <ion-icon class="context-icon" [icon]="selectionIcons.forward" />
+        <button
+          type="button"
+          class="forward-target-button"
+          [title]="'messages.forward.changeTarget' | transloco"
+          (click)="changeForwardTarget()">
+          <ion-icon [icon]="selectionIcons.forward" />
+          <span class="forward-target-icon">
+            <ion-icon class="forward-target-upper" [icon]="selectionIcons.returnForward" />
+            <ion-icon class="forward-target-lower" [icon]="selectionIcons.returnBack" />
+          </span>
+        </button>
         <div class="reply-description">
           @if (sources.length === 1) {
             @if (forwardPreview(); as preview) {
@@ -510,6 +520,10 @@
 
 @if (topicForwardOpen()) {
   <app-forward-picker [load]="loadTopicSources" (closed)="topicForwardOpen.set(false)" />
+}
+
+@if (forwardMove(); as move) {
+  <app-forward-picker [messages]="move.messages" [moveFrom]="move" (closed)="forwardMove.set(undefined)" />
 }
 
 <ion-alert

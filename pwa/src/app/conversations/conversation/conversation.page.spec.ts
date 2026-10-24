@@ -36,6 +36,8 @@ import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
 import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
+import { ChatListStore } from '../../chats/chat-list-store';
+import { ForwardPicker } from '../../messages/forward-picker/forward-picker';
 import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
@@ -251,6 +253,70 @@ describe('ConversationPage', () => {
     TestBed.inject(DraftStore).setForward(testChat.id, undefined, [source]);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.forward-context strong').textContent.trim()).toBe('源头作者');
+  });
+
+  it('opens the destination picker from the forward icon and keeps the draft when cancelled', () => {
+    const lists = TestBed.inject(ChatListStore);
+    vi.spyOn(lists.chats(false), 'activate').mockReturnValue(() => {});
+    vi.spyOn(lists.threads(false), 'activate').mockReturnValue(() => {});
+    const sources = [testMessage, { ...testMessage, id: encodeId('100') }];
+    const drafts = TestBed.inject(DraftStore);
+    drafts.setForward(testChat.id, undefined, sources);
+    component['draft'].set('existing text');
+    const send = vi.spyOn(component['outbox'], 'enqueueForward');
+    fixture.detectChanges();
+
+    const button: HTMLButtonElement = fixture.nativeElement.querySelector('.forward-target-button');
+    expect(button.title).toBe('更换转发目标');
+    expect(button.querySelectorAll('.forward-target-icon ion-icon')).toHaveLength(2);
+    button.click();
+    fixture.detectChanges();
+    const picker = fixture.debugElement.query(By.directive(ForwardPicker)).componentInstance as ForwardPicker;
+    expect(picker.messages()).toBe(sources);
+    expect(picker.moveFrom()).toMatchObject({ chatId: testChat.id, threadId: undefined });
+    picker.closed.emit();
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(ForwardPicker))).toBeNull();
+    expect(drafts.forward(testChat.id)).toBe(sources);
+    expect(component['draft']()).toBe('existing text');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('keeps the comment in the original input and saves it there after moving a forward', async () => {
+    const drafts = TestBed.inject(DraftStore);
+    const sources = [testMessage];
+    const target = encodeId('222');
+    drafts.setForward(testChat.id, undefined, sources);
+    component['draft'].set('comment to move');
+    component['changeForwardTarget']();
+    const origin = component['forwardMove']()!;
+    component['forwardMove'].set(undefined);
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    await TestBed.inject(ConversationNavigation).prepareForward(target, undefined, sources, origin);
+    expect(component['draft']()).toBe('comment to move');
+    component['saveDraft']();
+    expect(drafts.get(testChat.id)?.text).toBe('comment to move');
+    expect(drafts.get(target)).toBeUndefined();
+  });
+
+  it('preserves the retained destination input when moving a forward from another chat', async () => {
+    const drafts = TestBed.inject(DraftStore);
+    component['draft'].set('unsaved destination text');
+    const origin = encodeId('222');
+    drafts.save(origin, undefined, 'comment');
+    expect(component['draft']()).toBe('unsaved destination text');
+    component['saveDraft']();
+    const sources = [testMessage];
+    drafts.setForward(origin, undefined, sources);
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    await TestBed.inject(ConversationNavigation).prepareForward(testChat.id, undefined, sources, { chatId: origin });
+    fixture.detectChanges();
+    expect(component['draft']()).toBe('unsaved destination text');
+    expect(fixture.debugElement.query(By.directive(IonTextarea)).componentInstance.value).toBe(
+      'unsaved destination text',
+    );
+    component['saveDraft']();
+    expect(drafts.get(testChat.id)?.text).toBe('unsaved destination text');
   });
 
   it.each([

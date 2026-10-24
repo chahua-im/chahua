@@ -75,6 +75,7 @@ ion-content::part(scroll) {
 .context-icon {
   justify-self: center;
   color: var(--ion-color-medium);
+  opacity: 0.45;
   font-size: 22px;
   pointer-events: none;
 }
@@ -109,15 +110,59 @@ ion-content::part(scroll) {
   color: var(--context-color);
   font-weight: 500;
 }
-.reply-close {
+.reply-close,
+.forward-target-button {
   display: grid;
   place-items: center;
   flex-shrink: 0;
   width: var(--composer-control-size);
   height: calc(var(--composer-control-size) - 2px);
   background: none;
-  color: var(--ion-color-medium);
+  border-radius: 8px;
+  color: var(--ion-text-color-step-250);
   font-size: 22px;
+  transition:
+    background-color 160ms,
+    color 160ms;
+}
+@media (hover: hover) {
+  .reply-close:hover,
+  .forward-target-button:hover {
+    background: color-mix(in srgb, var(--ion-text-color) 8%, transparent);
+  }
+  .reply-close:hover {
+    color: var(--ion-text-color);
+  }
+}
+.reply-close:active,
+.forward-target-button:active {
+  background: color-mix(in srgb, var(--ion-text-color) 14%, transparent);
+}
+.reply-close:active {
+  color: var(--ion-text-color);
+}
+.forward-target-button {
+  position: relative;
+  color: var(--ion-color-primary);
+}
+.forward-target-icon {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  padding: 1px;
+  border-radius: 50%;
+  background: var(--ion-background-color);
+  font-size: 12px;
+}
+.forward-target-icon ion-icon {
+  grid-area: 1 / 1;
+}
+.forward-target-upper {
+  transform: translateY(-12.5%);
+}
+.forward-target-lower {
+  transform: translateY(12.5%);
 }
 
 ion-title app-message-preview {

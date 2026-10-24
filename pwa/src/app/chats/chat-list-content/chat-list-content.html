@@ -134,12 +134,8 @@
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
                     @if (row.forward?.length) {
                       {{ 'messages.forward.pendingCount' | transloco: { count: row.forward!.length } }}
-                      {{ ' ' }}
-                    }
-                    @if (row.draft && row.draft.text.trim()) {
+                    } @else if (row.draft && row.draft.text.trim()) {
                       <app-markdown-summary [text]="row.draft!.text" />
-                    } @else if (row.forward?.length === 1) {
-                      <app-message-preview [message]="row.forward![0]" />
                     }
                   } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
@@ -197,12 +193,8 @@
                     <ion-text color="danger">{{ 'chats.content.draft' | transloco }}</ion-text>
                     @if (row.forward?.length) {
                       {{ 'messages.forward.pendingCount' | transloco: { count: row.forward!.length } }}
-                      {{ ' ' }}
-                    }
-                    @if (row.draft && row.draft.text.trim()) {
+                    } @else if (row.draft && row.draft.text.trim()) {
                       <app-markdown-summary [text]="row.draft!.text" />
-                    } @else if (row.forward?.length === 1) {
-                      <app-message-preview [message]="row.forward![0]" />
                     }
                   } @else if (row.preview; as last) {
                     <app-message-preview [message]="last"></app-message-preview>
