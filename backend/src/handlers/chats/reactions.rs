@@ -53,6 +53,11 @@ fn broadcast_reaction_update(
         .filter(message_reactions::message_id.eq(message_id))
         .group_by(message_reactions::emoji)
         .select((message_reactions::emoji, diesel::dsl::count_star()))
+        .order((
+            diesel::dsl::count_star().desc(),
+            diesel::dsl::min(message_reactions::created_at).asc(),
+            message_reactions::emoji.asc(),
+        ))
         .load(conn)
         .unwrap_or_default();
 
