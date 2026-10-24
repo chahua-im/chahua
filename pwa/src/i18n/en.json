@@ -432,7 +432,9 @@
         "pinTitle": "Pin message",
         "recallAuthor": "Recall this message from {{ name }}?",
         "recall": "Other members will no longer be able to see this message.",
+        "recallDm": "The other person will no longer be able to see this message.",
         "unpin": "Unpin this message?",
+        "pinDm": "After pinning, you and the other person will see this pinned message.",
         "pin": "After pinning, all members of this conversation will see it."
       },
       "notice": {
@@ -484,6 +486,7 @@
     },
     "selection": {
       "recallConfirm": "Recall the {{count}} selected messages? Other members will no longer be able to view them.",
+      "recallConfirmDm": "Recall the {{count}} selected messages? The other person will no longer be able to view them.",
       "recalled": "Recalled {{count}} messages",
       "recallFailed": "Recalled {{succeeded}} messages; {{failed}} could not be recalled. Please try again."
     },

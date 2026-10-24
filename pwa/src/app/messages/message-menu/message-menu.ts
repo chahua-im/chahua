@@ -138,7 +138,7 @@ export class MessageMenu {
   );
   private readonly chat = computed(() => this.chatInfo.get(this.chatId()));
   protected readonly admin = computed(() => this.chat()?.myRole === GroupRole.admin);
-  private readonly dm = computed(() => this.chat()?.kind === GroupKind.dm);
+  protected readonly dm = computed(() => this.chat()?.kind === GroupKind.dm);
   /** A DM whose friendship ended keeps its history readable but accepts no writes. */
   private readonly readOnly = computed(() => {
     const uid = this.chat()?.peer?.uid;

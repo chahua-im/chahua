@@ -515,7 +515,10 @@
 <ion-alert
   [isOpen]="!!pendingRecall()"
   [header]="'messages.menu.confirm.recallTitle' | transloco"
-  [message]="'messages.selection.recallConfirm' | transloco: { count: pendingRecall()?.length ?? 0 }"
+  [message]="
+    (chatTitle().isDm ? 'messages.selection.recallConfirmDm' : 'messages.selection.recallConfirm')
+      | transloco: { count: pendingRecall()?.length ?? 0 }
+  "
   [buttons]="[
     { text: ('common.cancel' | transloco), role: 'cancel' },
     { text: ('common.confirm' | transloco), role: 'confirm' },
