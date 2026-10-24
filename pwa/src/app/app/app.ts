@@ -1,30 +1,48 @@
-import { DOCUMENT } from '@angular/common';
-import { afterRenderEffect, Component, computed, inject, isDevMode, linkedSignal, signal } from '@angular/core';
+import { DOCUMENT, NgOptimizedImage } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import {
+  afterRenderEffect,
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  isDevMode,
+  linkedSignal,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, NavigationStart, Router } from '@angular/router';
 import {
   IonApp,
+  IonButton,
   IonContent,
-  IonHeader,
   IonMenu,
   IonRouterOutlet,
   IonSpinner,
   IonSplitPane,
-  IonToolbar,
   IonToast,
   iosTransitionAnimation,
   isPlatform,
 } from '@ionic/angular';
 import { translateSignal, TranslocoPipe } from '@jsverse/transloco';
-import { filter, map } from 'rxjs';
+import { filter, map, TimeoutError } from 'rxjs';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
-import { LoadError } from '../ui/load-error/load-error';
 import { PushNotifications } from '../pwa/push-notifications';
 import { NotificationPrompt } from '../pwa/notification-prompt/notification-prompt';
 import { AppUpdates } from '../pwa/app-updates';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
+
+enum EntryState {
+  Loading = 'loading',
+  Slow = 'slow',
+  Missing = 'missing',
+  Expired = 'expired',
+  Network = 'network',
+  Server = 'server',
+  Failed = 'failed',
+}
 
 @Component({
   selector: 'app-root',
@@ -35,17 +53,16 @@ import { SessionStore } from '../session/session-store';
     '(document:keydown)': 'escapeKey($event)',
   },
   imports: [
+    NgOptimizedImage,
     ContentScrollbars,
     IonApp,
+    IonButton,
     IonContent,
-    IonHeader,
     IonMenu,
     IonRouterOutlet,
     IonSpinner,
     IonSplitPane,
-    IonToolbar,
     IonToast,
-    LoadError,
     ChatList,
     NotificationPrompt,
     TranslocoPipe,
@@ -79,8 +96,15 @@ export class App {
   });
   protected readonly browserTransition = signal(false);
   protected readonly session = inject(SessionStore);
-  protected readonly loading = signal(true);
-  protected readonly error = signal(false);
+  protected readonly loading = signal(false);
+  private readonly slow = signal(false);
+  private readonly error = signal<EntryState | undefined>(undefined);
+  protected readonly entryState = computed(() =>
+    this.loading() ? (this.slow() ? EntryState.Slow : EntryState.Loading) : (this.error() ?? EntryState.Missing),
+  );
+  protected readonly needsLogin = computed(() => [EntryState.Missing, EntryState.Expired].includes(this.entryState()));
+  protected readonly EntryState = EntryState;
+  private slowTimer?: ReturnType<typeof setTimeout>;
   protected readonly updates = inject(AppUpdates);
   protected readonly updateReady = translateSignal('app.updateReady');
   private readonly updateLater = translateSignal('app.updateLater');
@@ -92,6 +116,7 @@ export class App {
   protected readonly splitPaneVisible = signal(false);
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.slowTimer));
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event instanceof NavigationStart) {
         // Snapshot existing overlays so a newly opened page cannot be dismissed by an older transition.
@@ -144,14 +169,26 @@ export class App {
   }
 
   protected async initialize() {
+    if (this.loading()) return;
     this.loading.set(true);
-    this.error.set(false);
+    this.slow.set(false);
+    this.error.set(undefined);
+    this.slowTimer = setTimeout(() => this.slow.set(true), 10000);
     try {
       await this.session.initialize();
       if (this.session.user()) this.notifications.start();
-    } catch {
-      this.error.set(true);
+    } catch (error) {
+      this.error.set(
+        error instanceof TimeoutError || (error instanceof HttpErrorResponse && error.status === 0)
+          ? EntryState.Network
+          : error instanceof HttpErrorResponse && error.status === 401
+            ? EntryState.Expired
+            : error instanceof HttpErrorResponse && error.status >= 500
+              ? EntryState.Server
+              : EntryState.Failed,
+      );
     } finally {
+      clearTimeout(this.slowTimer);
       this.loading.set(false);
     }
   }

@@ -1,10 +1,52 @@
 {
   "app": {
-    "loginFailed": "Unable to sign in. Please try again.",
     "updateReady": "A new version is ready",
     "updateLater": "Not now",
     "updateNow": "Update now",
-    "name": "Chahua"
+    "name": "Chahua",
+    "entry": {
+      "reload": "Reload",
+      "loading": {
+        "title": "",
+        "description": ""
+      },
+      "slow": {
+        "title": "Connecting is taking longer",
+        "description": "We are still trying to connect. You can wait or reload the entire app."
+      },
+      "missing": {
+        "title": "Please open Chahua again",
+        "description": "There is no sign-in information. Please enter Chahua again from its announcement post."
+      },
+      "expired": {
+        "title": "Your sign-in is no longer valid",
+        "description": "Please enter Chahua again from its announcement post."
+      },
+      "network": {
+        "title": "Unable to connect to Chahua",
+        "description": "The connection failed or timed out. Check your connection and try again."
+      },
+      "server": {
+        "title": "Chahua is temporarily unavailable",
+        "description": "The service is having trouble. Please try again later."
+      },
+      "failed": {
+        "title": "Unable to open Chahua",
+        "description": "We could not check your sign-in. Try again, or check the Chahua announcement post if the problem continues."
+      },
+      "boot": {
+        "title": "",
+        "description": ""
+      },
+      "bootSlow": {
+        "title": "Loading is taking longer",
+        "description": "The app has not finished loading. You can wait or reload the entire app."
+      },
+      "bootFailed": {
+        "title": "Unable to load the app",
+        "description": ""
+      }
+    }
   },
   "common": {
     "done": "Done",

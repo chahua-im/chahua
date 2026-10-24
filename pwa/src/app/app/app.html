@@ -1,43 +1,51 @@
-@if (!session.token()) {
-  <h1>418 I'm a teapot</h1>
-} @else {
-  <ion-app>
-    @if (landingPage()) {
-      <ion-router-outlet [swipeGesture]="false" />
-    } @else if (session.user()) {
-      <ion-split-pane when="md" contentId="main" (ionSplitPaneVisible)="splitPaneVisible.set($event.detail.visible)">
-        <ion-menu contentId="main" [swipeGesture]="false">
-          @if (splitPaneVisible()) {
-            <app-chat-list [sidebar]="true" [selection]="sidebarSelection()" (openList)="sidebarSelection.set($event)"></app-chat-list>
-          }
-        </ion-menu>
-        <!-- Browser history owns the edge swipe; a second gesture would overlap Safari's transition. -->
-        <ion-router-outlet
-          #outlet
-          id="main"
-          [animated]="!splitPaneVisible()"
-          [swipeGesture]="false"
-          (stackWillChange)="prepareTransition(outlet)"></ion-router-outlet>
-      </ion-split-pane>
-      <app-notification-prompt />
-    } @else {
-      @if (loading()) {
-        <ion-header>
-          <ion-toolbar></ion-toolbar>
-        </ion-header>
-      }
-      <ion-content appScrollbars class="ion-text-center" [class.ion-padding]="!loading()">
-        @if (loading()) {
-          <div class="page-loading login-loading"><ion-spinner /></div>
-        } @else if (error()) {
-          <app-load-error [message]="'app.loginFailed' | transloco" (retry)="initialize()" />
+<ion-app>
+  @if (landingPage() && session.token()) {
+    <ion-router-outlet [swipeGesture]="false" />
+  } @else if (session.user()) {
+    <ion-split-pane when="md" contentId="main" (ionSplitPaneVisible)="splitPaneVisible.set($event.detail.visible)">
+      <ion-menu contentId="main" [swipeGesture]="false">
+        @if (splitPaneVisible()) {
+          <app-chat-list
+            [sidebar]="true"
+            [selection]="sidebarSelection()"
+            (openList)="sidebarSelection.set($event)"></app-chat-list>
         }
-      </ion-content>
-    }
-    <ion-toast
-      [isOpen]="updates.promptOpen()"
-      [message]="updateReady()"
-      [buttons]="updateButtons()"
-      (didDismiss)="updates.dismiss()" />
-  </ion-app>
-}
+      </ion-menu>
+      <!-- Browser history owns the edge swipe; a second gesture would overlap Safari's transition. -->
+      <ion-router-outlet
+        #outlet
+        id="main"
+        [animated]="!splitPaneVisible()"
+        [swipeGesture]="false"
+        (stackWillChange)="prepareTransition(outlet)"></ion-router-outlet>
+    </ion-split-pane>
+    <app-notification-prompt />
+  } @else {
+    <ion-content appScrollbars>
+      <section class="entry-status ion-text-center ion-padding">
+        <div class="entry-status-content">
+          <img class="entry-brand" ngSrc="icon/pwa-192x192.png" width="72" height="72" priority />
+          <div class="entry-indicator">
+            @if (loading()) {
+              <ion-spinner />
+            }
+          </div>
+          <h1>{{ 'app.entry.' + entryState() + '.title' | transloco }}</h1>
+          <p class="entry-description">{{ 'app.entry.' + entryState() + '.description' | transloco }}</p>
+          <div class="entry-actions">
+            @if (!loading() && !needsLogin()) {
+              <ion-button (click)="initialize()">{{ 'common.retry' | transloco }}</ion-button>
+            } @else if (entryState() === EntryState.Slow) {
+              <ion-button (click)="updates.reload()">{{ 'app.entry.reload' | transloco }}</ion-button>
+            }
+          </div>
+        </div>
+      </section>
+    </ion-content>
+  }
+  <ion-toast
+    [isOpen]="updates.promptOpen()"
+    [message]="updateReady()"
+    [buttons]="updateButtons()"
+    (didDismiss)="updates.dismiss()" />
+</ion-app>

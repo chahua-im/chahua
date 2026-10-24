@@ -69,4 +69,10 @@ bootstrapApplication(App, {
     }),
     provideRouter(routes, withComponentInputBinding()),
   ],
-});
+}).then(
+  () => window.chahuaStartup?.finish(),
+  (error: unknown) => {
+    window.chahuaStartup?.fail();
+    console.error('Unable to start Chahua', error);
+  },
+);

@@ -150,6 +150,52 @@ describe('SessionStore', () => {
     expect(session.token()).toBe('refreshed-token');
   });
 
+  it('cancels a timed-out request, retains credentials, and permits a clean retry', async () => {
+    vi.useFakeTimers();
+    try {
+      session.restoreToken();
+      const login = session.initialize();
+      const rejection = expect(login).rejects.toMatchObject({ name: 'TimeoutError' });
+      const stalled = http.expectOne('/_api/auth/refresh');
+      await vi.advanceTimersByTimeAsync(30000);
+      await rejection;
+      expect(stalled.cancelled).toBe(true);
+      expect(session.token()).toBe('test-link-token');
+      expect(session.user()).toBeUndefined();
+
+      const retry = session.initialize();
+      http.expectOne('/_api/auth/refresh').flush({ token: 'retry-token' });
+      await Promise.resolve();
+      http.expectOne('/_api/users/me').flush(testUser);
+      await profile();
+      await retry;
+      expect(session.user()).toEqual(testUser);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shares the login deadline across requests and tolerates an optional lookup timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      session.restoreToken();
+      const login = session.initialize();
+      const refresh = http.expectOne('/_api/auth/refresh');
+      await vi.advanceTimersByTimeAsync(20000);
+      refresh.flush({ token: 'refreshed-token' });
+      await Promise.resolve();
+      http.expectOne('/_api/users/me').flush(testUser);
+      await Promise.resolve();
+      const optional = http.expectOne(`/_api/users/search?q=${testUser.uid}&limit=1`);
+      await vi.advanceTimersByTimeAsync(10000);
+      await login;
+      expect(optional.cancelled).toBe(true);
+      expect(session.user()).toEqual(testUser);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('learns current own identity from HTTP replies while leaving saved snapshots and other users alone', async () => {
     const group = { groupId: 3, name: '三水' };
     session.user.set({ ...testUser, userGroup: group });

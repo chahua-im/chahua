@@ -15,7 +15,7 @@ describe('Localization requests', () => {
     vi.clearAllMocks();
     TestBed.configureTestingModule({
       providers: [
-        { provide: Preferences, useValue: { setLocale } },
+        { provide: Preferences, useValue: { setLocale, selectedLocale: () => 'zh-TW' } },
         {
           provide: TranslocoService,
           useValue: {
@@ -49,5 +49,29 @@ describe('Localization requests', () => {
     expect(await first).toBe(false);
     expect(service.locale()).toBe('zh-TW');
     expect(setLocale).toHaveBeenCalledExactlyOnceWith('zh-TW');
+  });
+
+  it('loads the fallback catalog before completing startup', async () => {
+    const service = TestBed.inject(Localization);
+    const pending = service.initialize();
+    traditional.error(new Error('catalog unavailable'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(setActiveLang).not.toHaveBeenCalled();
+    english.next({});
+    await pending;
+    expect(setActiveLang).toHaveBeenCalledExactlyOnceWith('en');
+  });
+
+  it('rejects startup if no catalog can load so the HTML recovery screen remains visible', async () => {
+    const service = TestBed.inject(Localization);
+    const pending = service.initialize();
+    const rejection = expect(pending).rejects.toThrow('fallback unavailable');
+    traditional.error(new Error('catalog unavailable'));
+    await Promise.resolve();
+    await Promise.resolve();
+    english.error(new Error('fallback unavailable'));
+    await rejection;
+    expect(setActiveLang).not.toHaveBeenCalled();
   });
 });

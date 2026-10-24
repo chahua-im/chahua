@@ -1,10 +1,52 @@
 {
   "app": {
-    "loginFailed": "暫時無法登入，請重試。",
     "updateReady": "新版本已準備好",
     "updateLater": "暫不更新",
     "updateNow": "立即更新",
-    "name": "茶話"
+    "name": "茶話",
+    "entry": {
+      "reload": "重新載入",
+      "loading": {
+        "title": "",
+        "description": ""
+      },
+      "slow": {
+        "title": "連線比平時慢",
+        "description": "仍在嘗試連線。可以繼續等待，或重新載入整個應用程式。"
+      },
+      "missing": {
+        "title": "請重新進入茶話",
+        "description": "目前沒有登入資訊，請前往茶話發布帖重新進入。"
+      },
+      "expired": {
+        "title": "登入狀態已失效",
+        "description": "請前往茶話發布帖重新進入。"
+      },
+      "network": {
+        "title": "暫時無法連線至茶話",
+        "description": "連線失敗或等待逾時，請檢查網路後重試。"
+      },
+      "server": {
+        "title": "茶話暫時無法使用",
+        "description": "服務暫時遇到問題，請稍後重試。"
+      },
+      "failed": {
+        "title": "暫時無法進入茶話",
+        "description": "登入檢查未能完成，請重試；如果仍然失敗，請前往茶話發布帖查看說明。"
+      },
+      "boot": {
+        "title": "",
+        "description": ""
+      },
+      "bootSlow": {
+        "title": "載入時間較長",
+        "description": "應用程式尚未完成載入。可以繼續等待，或重新載入整個應用程式。"
+      },
+      "bootFailed": {
+        "title": "應用程式載入遇到問題",
+        "description": ""
+      }
+    }
   },
   "common": {
     "done": "完成",

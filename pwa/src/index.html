@@ -175,6 +175,69 @@
         justify-items: center;
         background: var(--ion-toolbar-background, light-dark(#f7f7f7, #0d0d0d));
         color: var(--ion-text-color, light-dark(#000, #fff));
+        z-index: 99999;
+        padding: 24px;
+        text-align: center;
+        font:
+          16px system-ui,
+          sans-serif;
+        box-sizing: border-box;
+      }
+      .startup-loading [hidden] {
+        display: none;
+      }
+      .startup-brand {
+        display: block;
+        margin: 0 0 24px;
+      }
+      .startup-indicator {
+        height: 32px;
+      }
+      .startup-loading h1 {
+        font-size: 22px;
+        margin: 20px 0 12px;
+      }
+      .startup-description {
+        max-width: 360px;
+        min-height: 48px;
+        margin: 0;
+        line-height: 1.6;
+        opacity: 0.65;
+      }
+      .startup-actions {
+        min-height: 56px;
+        margin-top: 20px;
+      }
+      .startup-actions button {
+        /* Match the application's Ionic iOS solid button without requiring its bundle. */
+        appearance: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        min-height: 3.1em;
+        margin: 4px 2px;
+        padding: 13px 1em;
+        border: 0;
+        border-radius: 14px;
+        font-family: var(--ion-font-family, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Roboto, sans-serif);
+        font-size: var(--app-font-body, 0.875rem);
+        font-weight: 500;
+        line-height: 1;
+        letter-spacing: 0;
+        -webkit-font-smoothing: antialiased;
+        color: var(--ion-color-primary-contrast, #fff);
+        background: var(--ion-color-primary, #2b7acd);
+        transition: background-color 100ms linear;
+        cursor: pointer;
+      }
+      @media (any-hover: hover) {
+        .startup-actions button:hover {
+          background: var(--ion-color-primary-tint, #4087d2);
+        }
+      }
+      .startup-actions button:active {
+        background: var(--ion-color-primary-shade, #266bb4);
       }
       .startup-spinner {
         display: inline-block;
@@ -212,14 +275,107 @@
   </head>
 
   <body>
-    <app-root>
-      <div class="startup-loading">
+    <div id="startup-screen" class="startup-loading">
+      <img class="startup-brand" src="icon/pwa-192x192.png" width="72" height="72" fetchpriority="high" />
+      <div class="startup-indicator">
         <span class="startup-spinner">
           <svg viewBox="24 24 48 48">
             <circle cx="48" cy="48" r="20" />
           </svg>
         </span>
       </div>
-    </app-root>
+      <h1 id="startup-title"></h1>
+      <p id="startup-description" class="startup-description"></p>
+      <div class="startup-actions"><button id="startup-reload" type="button" hidden></button></div>
+    </div>
+    <app-root></app-root>
+    <script id="startup-copy" type="application/json">
+      {
+        "en": {
+          "reload": "Reload",
+          "boot": { "title": "", "description": "" },
+          "bootSlow": {
+            "title": "Loading is taking longer",
+            "description": "The app has not finished loading. You can wait or reload the entire app."
+          },
+          "bootFailed": { "title": "Unable to load the app", "description": "" }
+        },
+        "zh-CN": {
+          "reload": "重新加载",
+          "boot": { "title": "", "description": "" },
+          "bootSlow": {
+            "title": "加载时间较长",
+            "description": "应用尚未完成加载。可以继续等待，或重新加载整个应用。"
+          },
+          "bootFailed": { "title": "应用加载遇到问题", "description": "" }
+        },
+        "zh-TW": {
+          "reload": "重新載入",
+          "boot": { "title": "", "description": "" },
+          "bootSlow": {
+            "title": "載入時間較長",
+            "description": "應用程式尚未完成載入。可以繼續等待，或重新載入整個應用程式。"
+          },
+          "bootFailed": { "title": "應用程式載入遇到問題", "description": "" }
+        }
+      }
+    </script>
+    <script id="startup-recovery">
+      (() => {
+        const screen = document.getElementById('startup-screen');
+        const catalogs = JSON.parse(document.getElementById('startup-copy').textContent);
+        let saved;
+        try {
+          saved = localStorage.getItem('chahua.preferences.locale');
+        } catch {}
+        const languages = catalogs[saved] ? [saved] : navigator.languages;
+        let locale = 'en';
+        for (const language of languages) {
+          if (/^zh(?:-|$)/i.test(language)) {
+            locale = /(?:hant|tw|hk|mo)/i.test(language) ? 'zh-TW' : 'zh-CN';
+            break;
+          }
+          if (/^en(?:-|$)/i.test(language)) break;
+        }
+        const copy = catalogs[locale];
+        const title = document.getElementById('startup-title');
+        const description = document.getElementById('startup-description');
+        const reload = document.getElementById('startup-reload');
+        reload.textContent = copy.reload;
+        reload.onclick = () => location.reload();
+        function show(state) {
+          title.textContent = copy[state].title;
+          description.textContent = copy[state].description;
+          reload.hidden = state === 'boot';
+        }
+        show('boot');
+        let finished = false;
+        const timer = setTimeout(() => show('bootSlow'), 10000);
+        function stopListening() {
+          clearTimeout(timer);
+          window.removeEventListener('error', onError, true);
+          window.removeEventListener('unhandledrejection', fail);
+        }
+        function fail() {
+          if (finished) return;
+          stopListening();
+          screen.querySelector('.startup-spinner').hidden = true;
+          show('bootFailed');
+        }
+        function onError(event) {
+          if (event.target instanceof HTMLScriptElement || event.error) fail();
+        }
+        window.addEventListener('error', onError, true);
+        window.addEventListener('unhandledrejection', fail);
+        window.chahuaStartup = {
+          fail,
+          finish() {
+            finished = true;
+            stopListening();
+            screen.remove();
+          },
+        };
+      })();
+    </script>
   </body>
 </html>
