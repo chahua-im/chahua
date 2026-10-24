@@ -2315,6 +2315,12 @@ pub async fn attach_metadata(
                 message_reactions::emoji,
                 diesel::dsl::count_star(),
             ))
+            .order((
+                message_reactions::message_id.asc(),
+                diesel::dsl::count_star().desc(),
+                diesel::dsl::min(message_reactions::created_at).asc(),
+                message_reactions::emoji.asc(),
+            ))
             .load(conn)
             .unwrap_or_default();
 
