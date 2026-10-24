@@ -39,7 +39,7 @@ Auth uses JWTs (`src/utils/auth.rs`), with authorization policy in `src/services
 
 Run backend work from `backend/`:
 
-- `cargo run` starts the API on port 3000 (binds `0.0.0.0:3000`, overridable via `APP_ADDR`). A separate Prometheus metrics server binds port 3001 (`METRICS_ADDR`).
+- For local development, run `node runspace/dev.mjs dev` from the repository root, or `node runspace/dev.mjs backend` for only the backend. These load shared infrastructure settings and worktree-specific ports, and use bacon to rebuild/restart on changes. See `docs/local-setup.md` at the repository root.
 - `cargo build` verifies the Rust backend compiles.
 - `cargo test` runs the test suite (inline `#[test]`/`#[tokio::test]` modules).
 - `cargo clippy` checks lint issues before review.

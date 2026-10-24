@@ -1,180 +1,151 @@
-# Local development setup
+# Local development
 
-Run PostgreSQL, Meilisearch, and RustFS in Docker, with the Rust backend and Angular/Ionic PWA on the host. The checkout-local `runspace` provides initialization, representative fake data, and launch commands without changing `backend/.env` or `pwa/.env.local`.
+All Git worktrees share PostgreSQL, Meilisearch, RustFS, development keys, and seed progress in one Docker Compose project. Each worktree runs its own Rust backend and Angular PWA, with separate ports and build outputs.
 
 ## Prerequisites
 
-- Docker Engine / Docker Desktop with Docker Compose v2 or newer, running and accessible without `sudo`.
-- A current stable Rust toolchain and native backend build dependencies.
-- Node.js matching [`pwa/.nvmrc`](../pwa/.nvmrc), and npm.
-- Python 3.10 or newer; the seeder uses only the standard library.
-- FFmpeg for audio/voice transcoding when exercising those attachment paths.
+- Docker with Compose, accessible to your user without `sudo`.
+- Rust and native backend dependencies. On Debian/Ubuntu: `sudo apt install build-essential pkg-config libssl-dev libpq-dev`. On macOS: Xcode command line tools and `brew install pkg-config openssl@3 libpq`.
+- Node.js matching `pwa/.nvmrc`, npm, and Python 3.10+ for seeding.
+- Bacon for backend rebuild/restart: `cargo install --locked bacon`.
+- FFmpeg when testing audio/voice transcoding.
 
-On Debian / Ubuntu, install native backend dependencies with:
+The launcher supports Linux and macOS and requires `pkill` to stop Cargo's child during rebuilds. Host PostgreSQL, S3 tools, and Diesel CLI are not required. Frontend-only online development needs Git, Node.js, and npm; it does not need Docker or Rust.
 
-```bash
-sudo apt install build-essential pkg-config libssl-dev libpq-dev
-```
+## Start development
 
-On macOS:
+Run launcher commands from the current worktree's repository root.
 
-```bash
-xcode-select --install
-brew install pkg-config openssl@3 libpq
-```
-
-If OpenSSL is not found on Apple Silicon, expose its pkg-config directory before building:
-
-```bash
-export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-```
-
-Neither a host PostgreSQL installation, `psql`, Diesel CLI, nor an S3 CLI is required. Initialization uses the database container's `psql`, the backend's embedded migrations, and a one-shot AWS CLI container for bucket configuration.
-
-## Initialize
-
-From the repository root:
+For a fresh local environment with test data:
 
 ```bash
 node runspace/dev.mjs init
+node runspace/dev.mjs dev
 ```
 
-Initialization:
+`init` creates configuration and shared services, configures the bucket, temporarily runs the backend to apply migrations, and seeds fixtures. It requires this worktree's backend to be stopped. To prepare a fresh environment **without fixtures**, use `up` instead of `init`, then run `dev`.
 
-1. Creates ignored `runspace/.env` if absent, with local endpoints, checkout-specific Compose project identity, and generated JWT, service-token, VAPID, and Meilisearch keys. Existing configuration and keys are retained.
-2. Starts PostgreSQL 18, Meilisearch, and RustFS with persistent, project-scoped named volumes and loopback-only host ports.
-3. Waits for the services and creates a public-download local S3 bucket, including upload CORS configuration. Uploads still require signed requests.
-4. Builds the debug backend on the host and starts it temporarily. The backend applies the normal embedded migrations.
-5. Seeds identities and administrator permissions through SQL, then creates chat content through the real APIs so message search, membership events, thread metadata, and unread state follow normal backend behavior.
-6. Stops the temporary backend, leaving dependency containers running.
-
-The temporary backend's output is in ignored `runspace/backend-init.log`. If initialization fails, correct the reported problem and run the same command again. Stop any backend already using this runspace's API or metrics port first; initialization does not attach to an unknown existing process.
-
-The generated credentials and arbitrary-UID development authentication are for local use only. Do not deploy this configuration or expose these services publicly. No production backend, database, object store, or APNs key is needed.
-
-### Default addresses
-
-| Service | Address |
-| --- | --- |
-| PWA | http://localhost:14300 |
-| Backend API | http://127.0.0.1:13000 |
-| Backend metrics | http://127.0.0.1:13001/metrics |
-| PostgreSQL | 127.0.0.1:15432 |
-| Meilisearch | http://127.0.0.1:17700 |
-| RustFS S3 endpoint | http://127.0.0.1:19000 |
-| RustFS console | http://127.0.0.1:19001 |
-
-PostgreSQL uses database/user `wetty_chat` and password `local-chat-password`. RustFS uses access key and secret `rustfsadmin`; the bucket is `chahua-local`. The generated Meilisearch master key is in `runspace/.env`.
-
-These ports differ from the original checkout's standard ports. The Compose project name includes a hash of the checkout path, so its containers, network, and volumes do not reuse the original checkout's resources. Another copy using this same runspace workflow needs different host ports as well: edit its generated `.env`, keeping port settings, endpoint URLs, listen addresses, and CORS origins consistent.
-
-## Run backend and PWA
-
-In one terminal, from the repository root:
+For daily use or an existing shared database:
 
 ```bash
-node runspace/dev.mjs backend
+node runspace/dev.mjs dev
 ```
 
-This builds the backend and runs the host binary with the runspace configuration. Ctrl+C stops it; Docker dependencies remain running.
+`dev` starts shared services and both application processes without seeding. Backend startup applies pending migrations. Bacon rebuilds/restarts after changes to Rust sources, manifests, `Cargo.lock`, `build.rs`, and migrations; fixing a compilation error and saving resumes the backend. Angular handles frontend hot reload.
 
-In another terminal:
+The launcher prints the frontend URL and labels backend/frontend logs. Ctrl+C stops the application processes and their descendants; shared Docker services keep running. Stop those separately with `node runspace/dev.mjs infra-stop`.
+
+Frontend dependencies are installed with `npm ci` when Angular CLI is absent. After switching branches or changing dependency files, run `(cd pwa && npm ci)` to synchronize installed dependencies with the lockfile.
+
+## Commands
+
+| Command (`node runspace/dev.mjs …`) | Behavior                                                                                                    |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `init`                              | Prepare shared services, apply migrations, and seed/resume fixtures                                         |
+| `dev`                               | Start shared services, backend watcher, and frontend                                                        |
+| `backend`                           | Start only the backend watcher; shared services must already be running                                     |
+| `pwa`                               | Start only the frontend; its local backend must be started separately                                       |
+| `pwa --online`                      | Start an HTTPS frontend targeting production; no local backend or shared services required                  |
+| `up`                                | Create missing configuration and start shared services/configure the bucket, without migrations or fixtures |
+| `infra-stop`                        | Stop shared services for **all worktrees**, retaining data                                                  |
+| `seed`                              | Seed/resume fixtures; shared services and this worktree's backend must be running                           |
+| `reindex`                           | Apply pending migrations and rebuild the shared search index; PostgreSQL and Meilisearch must be running    |
+| `compose …`                         | Run Compose with the shared project/configuration, e.g. `compose ps` or `compose logs postgres`             |
+
+In `pwa/`, `npm start` and `npm run dev` invoke `pwa`; `npm run dev:online` invokes `pwa --online`. These start **only the frontend**. Online mode connects to production and must not be used for write tests.
+
+## Worktrees and configuration
+
+Once shared services have been initialized, a new worktree needs no additional `init`:
 
 ```bash
-node runspace/dev.mjs pwa
+git worktree add ../chahua-feature -b feature
+cd ../chahua-feature
+node runspace/dev.mjs dev
 ```
 
-The PWA launcher installs dependencies with `npm ci` if Angular CLI is absent, and starts the existing dev launcher with this runspace's API target and PWA port. If the checkout already has `node_modules` but its dependencies have changed, synchronize them first:
+Each worktree keeps its own `backend/target` and `pwa/node_modules`. Removing a linked worktree does not remove shared Docker data. Database writes, migrations, and search-index changes affect every worktree. This setup does not synchronize backend caches or WebSocket connections across processes; connect test browsers to the same backend for real-time interactions.
+
+| File                                        | Scope and creation                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `<git-common-dir>/runspace/.env`            | Shared service settings and credentials; created by `init` or `up`. Required for local mode, optional for `pwa --online` |
+| `runspace/.env`                             | This worktree's four application ports; automatically created if absent                                                  |
+| `<git-common-dir>/runspace/seed-state.json` | Shared fixture progress, written by seeding                                                                              |
+| `pwa/.env.local`                            | Optional `CHAHUA_DEV_TOKEN` preset; not required for startup                                                             |
+
+Locate the Git common directory with `git rev-parse --path-format=absolute --git-common-dir`. Shared files live outside the tracked tree; worktree env files are ignored. Keep credentials out of commits. The launcher supplies backend configuration through the process environment; a separate `backend/.env` is unnecessary. Production frontend builds do not load these development env files.
+
+The worktree port file contains values allocated starting from:
+
+```dotenv
+API_PORT=13000
+METRICS_PORT=13001
+PWA_PORT=14300
+ONLINE_PWA_PORT=14301
+```
+
+Automatic allocation avoids listening ports and ports saved by other registered worktrees, including stopped ones. Saved assignments persist. Missing, invalid, or duplicate ports within the worktree/shared configuration are rejected with the file and field names; a port occupied by a running process is also an error. Edit this file to change persistent application ports, then restart the affected processes. Backend addresses, local proxy targets, and localhost CORS origins derive from these values.
+
+Shared service defaults are loopback-only:
+
+| Service        | Host endpoint            |
+| -------------- | ------------------------ |
+| PostgreSQL     | `127.0.0.1:15432`        |
+| Meilisearch    | `http://127.0.0.1:17700` |
+| RustFS API     | `http://127.0.0.1:19000` |
+| RustFS console | `http://127.0.0.1:19001` |
+
+If changing a shared service port, update both its `*_PORT` setting and corresponding URLs in the shared env file, then run `up` and restart affected application processes. For example, `POSTGRES_PORT` and the port in `DATABASE_URL` must match.
+
+## Port overrides and LAN HTTPS
+
+All frontend modes bind to `127.0.0.1` by default and are accessible only from this machine; pass `--host 0.0.0.0` to allow LAN access.
+
+`dev`, `pwa`, and `pwa --online` accept `--port 14443` or `--port=14443` to override the frontend port for that invocation. This does not change backend ports or rewrite saved assignments. A missing worktree env file is still created with automatically allocated defaults. Occupied ports and overrides matching backend/shared-service ports are rejected.
+
+Additional Angular serve options are forwarded:
 
 ```bash
-(cd pwa && npm ci)
+node runspace/dev.mjs dev --port 14443 --host 0.0.0.0 --ssl \
+  --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem
 ```
 
-Open http://localhost:14300. HTTP and WebSocket traffic use the PWA's development proxy to the local backend. This launcher does not load `pwa/.env.local` or use a preset `CHAHUA_DEV_TOKEN`; a fresh browser session automatically obtains a development session for UID 1. Existing browser login state still takes precedence, as described in the [PWA README](../pwa/README.md).
+Local mode requires `--ssl`; online mode enables HTTPS by default. In `pwa/`, the equivalent frontend-only command is `npm run dev -- --port 14443 --host 0.0.0.0 --ssl --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem`. The certificate must cover the accessed hostname/IP and be trusted by the device.
 
-Do not substitute `npm start`: that command targets production. Plain `npm run dev` uses the standard backend/PWA ports rather than the isolated runspace ports; use the launcher above for this stack.
+`dev --port …` also updates the backend's localhost CORS origins for that run. Frontend-only commands cannot update an already-running backend. The launcher selects the proxy target: neither the shell's `API_PROXY_TARGET` nor `--proxy-config` can override it.
 
-### IDE / direct Cargo workflow
+This exposes the frontend only. RustFS remains bound to loopback, and default media/upload URLs use `127.0.0.1`. LAN media tests need a storage endpoint reachable from the device over trusted HTTPS, with matching `S3_ENDPOINT_URL` and `S3_BASE_URL` settings; changing the frontend host alone does not provide this.
 
-Use `runspace` as the backend working directory so its `.env` is loaded instead of `backend/.env`:
+## Test data and development tools
 
-```bash
-cd runspace
-cargo run --manifest-path ../backend/Cargo.toml
-```
+`init`/`seed` create 100 users (UIDs 1–100), four groups, three DMs, messages, threads, reactions, and mixed read states. UID 1 is the development administrator. Search for `seed-search-lantern` to exercise search. Fixture progress is shared and tied to the PostgreSQL cluster; removing the state file can duplicate seeded content. Do not run seeding just to configure a new worktree.
 
-For an IDE, use the same working directory and the `backend/Cargo.toml` manifest / `wetty-chat-backend` executable. No backend container is involved.
-
-## Seeded data
-
-The initial fixture set contains:
-
-- 100 fake users, UIDs 1–100, with deterministic names, profiles, and three user-group tags. All email addresses use `example.test`.
-- UID 1 (`Avery Chen 001`) with the global administrator policy. Other users remain ordinary members.
-- Four public groups: **Town Square** (100 members), **Project Aurora** (25), **Book Club** (30), and **Weekend Plans** (16).
-- Three friendship-backed DMs: users 1–2, 1–3, and 4–5.
-- 219 text messages, including four thread roots with four text replies each; normal membership and friendship events bring the initial message total to 389.
-- Reactions and mixed chat/thread read states. UID 1 starts with read group history and unread DMs; other users have unread group history.
-
-Search for `seed-search-lantern` to exercise message search.
-
-To switch the PWA's development identity, use its browser console:
+Local frontend development obtains a session for UID 1 when no existing token or development preset takes precedence. To switch a tab's development identity:
 
 ```javascript
 sessionStorage.setItem('uid', '7');
 location.reload();
 ```
 
-For manually authenticated API calls:
+In `pwa/`:
+
+- `npm run api:generate` reads the current worktree's `API_PORT` and requires that backend to be running. `OPENAPI_URL` overrides it with a schema URL or local file and does not require runspace configuration.
+- `npm run preview:startup-failures` builds and previews simulated startup failures without a real backend. See [startup failure verification](../pwa/docs/startup-verification.md).
+- Build and test commands are documented in the [PWA README](../pwa/README.md).
+
+## Troubleshooting and launcher checks
+
+- **Missing shared configuration:** run `init` for fixtures or `up` without fixtures. A missing worktree port file is created automatically.
+- **Busy port:** stop the conflicting process, use `--port` for a temporary frontend port, or change the saved assignment.
+- **Missing bacon / Docker permission denied:** check the prerequisites and executable PATH; use a session with Docker access.
+- **Interrupted initialization:** fix the cause and rerun `init`; backend output is in `runspace/backend-init.log`. Remove a reported stale lock directory only after confirming its owning command is no longer running.
+- **Frontend dependency errors:** run `(cd pwa && npm ci)`.
+- **Development login returns 404:** use local mode and check `ENABLE_DEBUG_AUTH=true` in shared configuration, then restart the backend.
+
+Launcher regression checks use temporary Git worktrees and local test servers, without writes to the application's database or S3:
 
 ```bash
-curl -sS http://127.0.0.1:13000/auth/dev-session \
-  -H 'Content-Type: application/json' \
-  -H 'X-Client-Id: local-dev-client' \
-  -d '{"uid":1}'
+node --test runspace/dev.test.mjs
+# Also exercise real bacon with a temporary Rust server:
+RUNSPACE_TEST_BACON="$(command -v bacon)" node --test runspace/dev.test.mjs
 ```
-
-Use the returned token as `Authorization: Bearer <token>`.
-
-### Repeated initialization
-
-`init` is additive, not a reset. It retains generated keys and records fixture progress in ignored `runspace/seed-state.json`, tied to the PostgreSQL cluster identity. Repeating initialization does not duplicate seeded messages or reset completed fixtures' read states, edited descriptions, or user-created conversations. Do not delete the progress file to refresh data.
-
-With the backend already running, seed or resume fixture creation without starting another backend:
-
-```bash
-node runspace/dev.mjs seed
-```
-
-## Day-to-day container management
-
-From the repository root:
-
-```bash
-node runspace/dev.mjs up       # Start dependencies and ensure the bucket is configured
-node runspace/dev.mjs stop     # Stop dependencies, retaining all data
-
-docker compose -f runspace/docker-compose.yml ps
-docker compose -f runspace/docker-compose.yml logs postgres
-```
-
-Stop host backend/PWA processes separately with Ctrl+C.
-
-For a deliberately clean environment, first stop those host processes. The following command **permanently deletes this runspace project's database, search index, and uploaded files**:
-
-```bash
-docker compose -f runspace/docker-compose.yml down -v
-node runspace/dev.mjs init
-```
-
-The new PostgreSQL cluster identity causes the seeder to create fresh fixtures. Keys in `runspace/.env` are retained. Do not run `down -v` when you want to preserve development data.
-
-## Troubleshooting
-
-- **Port occupied:** stop the conflicting process or consistently change the relevant ports and URLs in `runspace/.env`. The initializer refuses to start over an existing API or metrics listener.
-- **Backend build fails:** check Rust and native build prerequisites above. Initialization does not install a host toolchain.
-- **Initialization fails after starting the backend:** inspect `runspace/backend-init.log`; rerun `init` after fixing the cause.
-- **Development session returns 404:** use this runspace's launcher/configuration; it enables local debug authentication. Do not enable arbitrary-UID authentication on a production service.
-- **Unknown user / missing groups:** confirm the frontend targets port 13000 and that initialization completed; inspect browser login state before assuming UID 1 is active.
-- **PWA module-resolution errors:** run `(cd pwa && npm ci)` to align installed dependencies with the lockfile.
-- **Uploads fail:** check RustFS health, use this runspace's `S3_ENDPOINT_URL` and `S3_BASE_URL`, and rerun `node runspace/dev.mjs up` to ensure bucket policy and CORS are configured.

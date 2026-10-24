@@ -9,15 +9,16 @@ chahua is a chat application targeting ~20k users / ~2k messages per day.
 
 ## Local development
 
-Initialize a checkout-local database, search, object storage, and fake chat data, then run the backend and PWA on the host:
+All worktrees share local PostgreSQL, Meilisearch, and RustFS. Each worktree runs its own backend and PWA on automatically assigned, persistent ports:
 
 ```bash
 node runspace/dev.mjs init
-node runspace/dev.mjs backend  # One terminal
-node runspace/dev.mjs pwa      # Another terminal; http://localhost:14300
+node runspace/dev.mjs dev     # Backend auto-restart + frontend hot reload
 ```
 
-Prerequisites, isolated ports, seed identities, and container management: [docs/local-setup.md](docs/local-setup.md).
+Install the backend watcher once with `cargo install --locked bacon`. The launcher prints this worktree's URL. Ctrl+C stops its frontend and backend, retaining shared services and data.
+
+Prerequisites, worktrees, configuration, and container management: [docs/local-setup.md](docs/local-setup.md).
 
 ## Formatting and hooks
 

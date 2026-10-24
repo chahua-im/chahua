@@ -16,13 +16,15 @@
 
 ```bash
 npm ci
-npm run dev              # localhost:4300，本地后端
-npm run dev:online       # localhost:4200，生产后端
-npm start                # localhost:4200，同 npm run dev:online
+npm run dev              # 当前 worktree 的本地后端，端口由 runspace 分配
+npm run dev:online       # 生产后端，使用独立的 HTTPS 前端端口
+npm start                # 同 npm run dev
 npm run build
 npm test -- --watch=false
 npm run test:pwa
 ```
+
+以上开发命令统一转发到仓库的 runspace。首次配置、前后端一起启动、worktree 与共享服务管理见[本地开发](../docs/local-setup.md)。`npm run dev:online` 不要求启动本地后端或 Docker。
 
 安装指引位于 `/landing`；已安装应用从该入口直接进入聊天。
 
@@ -30,9 +32,9 @@ npm run test:pwa
 
 选择器数据由固定版本 `emojibase-data` 生成，执行 `npm run emoji:picker:generate` 并提交 `picker-emojis.generated.json` 与 `public/emoji-data-LICENSE.txt`。数据与 Unicode 17 的输入校验保持一致；升级时同时复核数据覆盖和 `emoji:generate` 使用的 Unicode 版本。数据服务接入及搜索规则见[组件文档](docs/components.md)。
 
-开发模式自动注册仅处理通知的 Service Worker，支持通知权限、Web Push 和通知点击跳转，不缓存页面、JS、CSS 或 API，不影响热更新；“检查更新”在开发模式保持禁用。局域网测试需要浏览器信任的 HTTPS 证书，可沿用 `npm run dev:online -- --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem`；证书必须包含访问 IP，测试设备需信任签发证书的根 CA。生产构建继续使用 Angular 的资源缓存与更新机制。
+开发模式自动注册仅处理通知的 Service Worker，支持通知权限、Web Push 和通知点击跳转，不缓存页面、JS、CSS 或 API，不影响热更新；“检查更新”在开发模式保持禁用。局域网测试需要浏览器信任的 HTTPS 证书，可沿用 `npm run dev:online -- --host 0.0.0.0 --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem`；证书必须包含访问 IP，测试设备需信任签发证书的根 CA。生产构建继续使用 Angular 的资源缓存与更新机制。
 
-`npm start` 使用 `http://localhost:4200`，`npm run dev:online` 使用 `https://localhost:4200`，`npm run dev` 使用 `https://localhost:4300`；两者源不同，可各自保留登录状态。默认 `npm run build` 生成同源构建，部署目录为 `dist/app/browser`。`npm run dev` 使用 `proxy.conf.dev.mjs` 代理到 `API_PROXY_TARGET`（默认 `http://localhost:3000`），并去掉 `/_api` 前缀，HTTP 与 WebSocket 均生效；该变量可在命令前或 `.env.local` 中设置。`npm run dev:online` 将目标设为 `https://chahui.app/_api`，`npm start` 仍使用 `proxy.conf.json` 代理到生产。HTTP 与 WebSocket 的基地址见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。
+`npm start` 和 `npm run dev` 使用当前 worktree 的本地 HTTP 端口；`npm run dev:online` 使用另一个 HTTPS 端口。开发模式的登录 Cookie 按完整 origin（协议、主机、端口）命名，与 localStorage 一起隔离不同 worktree 和本地/线上模式；不读取旧的无作用域登录 Cookie。生产构建仍使用原有 Cookie，支持安装 PWA 时继承登录。默认端口保存在 `runspace/.env`，启动时打印访问地址；`npm run dev -- --port 14443` 可临时覆盖前端端口，不修改配置文件，`dev:online` 同样支持。runspace 统一选择代理目标，`proxy.conf.dev.mjs` 同时代理 HTTP 和 WebSocket，并去掉 `/_api` 前缀；本地模式指向当前 worktree 后端，线上模式指向 `https://chahui.app/_api`。不再从 shell 或 `.env.local` 读取 `API_PROXY_TARGET`。默认 `npm run build` 生成同源构建，部署目录为 `dist/app/browser`。HTTP 与 WebSocket 的基地址见[身份、协议与入口](docs/data-flow.md#身份协议与入口)。
 
 `npm run build:prod` 生成跨域生产构建，部署目录为 `dist/prod/browser`。编译后的 JS、CSS 和延迟加载模块从 `https://chahui.app/` 加载；HTML、manifest、图标、表情数据和 Service Worker 保留在页面源。构建脚本同步改写 `ngsw.json` 中的编译资源 URL 与哈希表键，保留内容校验；不要用单独的 `ng build --configuration production,prod` 替代完整脚本。
 
@@ -50,7 +52,7 @@ Apache 部署需一并上传构建目录中的 `.htaccess`，启用 `mod_rewrite
 
 修改前以[需求与边界](docs/requirements.md)为准；需求记录产品行为，其他文档分别描述尺寸、组件所有权与请求时机，避免同一规则多处维护。回归测试随实现放置，关键覆盖包括分页范围、导航生命周期、滚动锚点、队列顺序/撤回、媒体取消和通知去重。
 
-单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身。测试拦截 HTTP、WebSocket 和上传，禁止生产写入与 S3 测试上传等约定见[代码约定](AGENTS.md)；必须实测写入时使用本地后端与开发数据库，并用 `npm run dev` 代理到本地后端，后端不在 `http://localhost:3000` 时设置 `API_PROXY_TARGET`（如 `API_PROXY_TARGET=http://<内网后端主机>:3000 npm run dev`）。`npm start` 不读取该变量。本地前端地址本身不意味着后端也是本地。
+单元测试使用 `src/test-providers.ts` 的 HTTP 与弹窗替身。测试拦截 HTTP、WebSocket 和上传，禁止生产写入与 S3 测试上传等约定见[代码约定](AGENTS.md)；必须实测写入时，使用 `node runspace/dev.mjs dev` 启动本地前后端。`npm run dev:online` 连接生产，不能用于写入测试。
 
 ## CI 与发布
 
@@ -80,10 +82,10 @@ filter: 'pwa/chahua-prod.zip,pwa-artifact-metadata.json'
 npm run api:generate
 ```
 
-Orval 默认读取 `http://127.0.0.1:3000/api-docs/openapi.json`。环境变量 `OPENAPI_URL` 可以指定其他规格 URL 或本地文件。
+Orval 默认读取当前 worktree 的 `runspace/.env` 中的 `API_PORT`，访问对应本地后端的 `/api-docs/openapi.json`；请先启动该后端。环境变量 `OPENAPI_URL` 优先级更高，可以指定其他规格 URL 或本地文件，无需本地 runspace 配置。
 
 `src/generated/endpoints/` 包含按标签生成的 HttpClient 服务与 resource，`src/generated/models/` 包含模型，共用模型位于 models 根目录。`scripts/api-codegen.ts` 负责契约转换、Snowflake 类型和 JSON 编解码元数据。生成文件随仓库保存，修改来源是 OpenAPI 与生成配置；普通构建无需运行后端。
 
 应用中的业务 ID 使用 `SnowflakeID` 品牌类型，路由和协议边界负责精确转换；用户 UID、计数和日期游标保留各自类型。数值 ID 编码是性能选择，普通 UID 不参与编码。可选字段在 TypeScript 中声明为 `field?: T`，运行时的 `null` 原样保留，使用可选链、空值合并等自然消费。`UpdateChatBody.avatarImageId` 与 `PatchInviteBody.expiresAt` 显式声明请求 `null`，用于清除字段。
 
-启动前错误页面可通过 `npm run preview:startup` 在本地逐项模拟，具体步骤见[启动页面手动验证](docs/startup-verification.md)。
+启动前错误页面可通过 `npm run preview:startup-failures` 在本地逐项模拟，具体步骤见[启动页面手动验证](docs/startup-verification.md)。

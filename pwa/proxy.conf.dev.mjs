@@ -1,4 +1,5 @@
-const target = process.env.API_PROXY_TARGET ?? 'http://localhost:3000';
+const target = process.env.API_PROXY_TARGET;
+if (!target) throw new Error('Start the PWA through node runspace/dev.mjs pwa or npm start.');
 
 const rewrite = (path) => path.replace(/^\/_api/, '');
 

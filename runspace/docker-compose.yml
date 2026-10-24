@@ -42,23 +42,23 @@ services:
     volumes:
       - rustfs_data:/data
   storage-init:
-    image: public.ecr.aws/aws-cli/aws-cli:latest
+    image: minio/mc:latest
     profiles: ["init"]
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: ${AWS_REGION}
-      AWS_EC2_METADATA_DISABLED: "true"
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        endpoint=http://rustfs:9000
-        aws --endpoint-url "$$endpoint" s3api head-bucket --bucket "$$S3_BUCKET_NAME" 2>/dev/null ||
-          aws --endpoint-url "$$endpoint" s3api create-bucket --bucket "$$S3_BUCKET_NAME"
-        policy='{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::'"$$S3_BUCKET_NAME"'/*"}]}'
-        aws --endpoint-url "$$endpoint" s3api put-bucket-policy --bucket "$$S3_BUCKET_NAME" --policy "$$policy"
-        aws --endpoint-url "$$endpoint" s3api put-bucket-cors --bucket "$$S3_BUCKET_NAME" --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"]}]}'
+        mc alias set local http://rustfs:9000 "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY"
+        mc mb --ignore-existing --region "$$AWS_DEFAULT_REGION" "local/$$S3_BUCKET_NAME"
+        mc anonymous set download "local/$$S3_BUCKET_NAME"
+        cat > /tmp/cors.xml <<'XML'
+        <CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>
+        XML
+        mc cors set "local/$$S3_BUCKET_NAME" /tmp/cors.xml
 
 volumes:
   postgres_data:

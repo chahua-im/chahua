@@ -126,7 +126,7 @@ const server = createServer(async (req, res) => {
 server.on('error', (error) => {
   console.error(
     error.code === 'EADDRINUSE'
-      ? `端口 ${port} 已被占用，请停止已有预览服务，或使用 PORT=${port + 1} npm run preview:startup。`
+      ? `端口 ${port} 已被占用，请停止已有预览服务，或使用 PORT=${port + 1} npm run preview:startup-failures。`
       : `预览服务启动失败：${error.message}`,
   );
   process.exitCode = 1;

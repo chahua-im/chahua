@@ -10,12 +10,13 @@ import { testUser } from '../api/testing';
 import { SessionStore } from './session-store';
 
 const TOKEN_KEY = 'jwt_token';
+const COOKIE_KEY = `${TOKEN_KEY}_${encodeURIComponent(window.location.origin)}`;
 
 describe('SessionStore', () => {
   let session: SessionStore;
   let http: HttpTestingController;
   beforeEach(() => {
-    document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0`;
+    document.cookie = `${COOKIE_KEY}=; Path=/; Max-Age=0`;
     sessionStorage.clear();
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -35,7 +36,12 @@ describe('SessionStore', () => {
     http = TestBed.inject(HttpTestingController);
   });
   afterEach(() => {
-    document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0`;
+    for (const cookie of document.cookie.split('; ')) {
+      const key = cookie.split('=')[0];
+      if (key.startsWith(TOKEN_KEY) || key.startsWith('chahua.auth.token')) {
+        document.cookie = `${key}=; Path=/; Max-Age=0`;
+      }
+    }
     sessionStorage.clear();
     http.verify();
     vi.unstubAllGlobals();
@@ -49,12 +55,49 @@ describe('SessionStore', () => {
     request.flush({ members: [{ uid: testUser.uid, userGroup }], excluded: [] });
   }
 
+  it('does not adopt shared or other-origin development cookies when targeting production', async () => {
+    vi.stubGlobal('CHAHUA_DEV_BACKEND', false);
+    history.replaceState(null, '', '/chats');
+    document.cookie = `${TOKEN_KEY}=unscoped-local-token; Path=/`;
+    document.cookie = 'chahua.auth.token=legacy-local-token; Path=/';
+    const otherPort = new URL(window.location.origin);
+    otherPort.port = otherPort.port === '24443' ? '24444' : '24443';
+    const otherProtocol = new URL(window.location.origin);
+    otherProtocol.protocol = otherProtocol.protocol === 'http:' ? 'https:' : 'http:';
+    for (const origin of [otherPort.origin, otherProtocol.origin]) {
+      document.cookie = `${TOKEN_KEY}_${encodeURIComponent(origin)}=other-origin-token; Path=/`;
+    }
+    const cookies = document.cookie;
+    session.restoreToken();
+    await session.initialize();
+    expect(session.token()).toBeUndefined();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    http.expectNone(() => true);
+    session.logout();
+    expect(document.cookie).toBe(cookies);
+  });
+
+  it('keeps production cookie restoration and logout compatible with installed PWAs', () => {
+    vi.stubGlobal('ngDevMode', false);
+    history.replaceState(null, '', '/chats');
+    document.cookie = `${TOKEN_KEY}=installed-pwa-token; Path=/`;
+    document.cookie = `${COOKIE_KEY}=development-token; Path=/`;
+    session.restoreToken();
+    expect(session.token()).toBe('installed-pwa-token');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('installed-pwa-token');
+    expect(document.cookie).toContain(`${TOKEN_KEY}=installed-pwa-token`);
+    session.logout();
+    expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    expect(document.cookie).toContain(`${COOKIE_KEY}=development-token`);
+    http.expectNone(() => true);
+  });
+
   it('saves a landing token synchronously without requests and preserves the other URL fields', () => {
     history.replaceState(null, '', '/landing?token=landing-token&example=preserved#install');
     expect(session.restoreToken()).toBeUndefined();
     expect(session.token()).toBe('landing-token');
     expect(localStorage.getItem(TOKEN_KEY)).toBe('landing-token');
-    expect(document.cookie).toContain(`${TOKEN_KEY}=landing-token`);
+    expect(document.cookie).toContain(`${COOKIE_KEY}=landing-token`);
     expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
     expect(session.user()).toBeUndefined();
     http.expectNone(() => true);
@@ -78,7 +121,7 @@ describe('SessionStore', () => {
     await login;
     expect(session.user()).toEqual({ ...testUser, userGroup });
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe('test-refreshed-token');
-    expect(document.cookie).toContain(`${TOKEN_KEY}=test-refreshed-token`);
+    expect(document.cookie).toContain(`${COOKIE_KEY}=test-refreshed-token`);
     TestBed.inject(HttpClient).get('/assets/example.json').subscribe();
     const asset = http.expectOne('/assets/example.json');
     expect(asset.request.headers.has('Authorization')).toBe(false);
@@ -98,13 +141,13 @@ describe('SessionStore', () => {
       vi.stubGlobal('CHAHUA_DEV_TOKEN', 'development-token');
       history.replaceState(null, '', urlToken ? `/?token=${urlToken}` : '/chats');
       if (storedToken) localStorage.setItem(TOKEN_KEY, storedToken);
-      if (cookieToken) document.cookie = `${TOKEN_KEY}=${cookieToken}; Path=/`;
+      if (cookieToken) document.cookie = `${COOKIE_KEY}=${cookieToken}; Path=/`;
       session.restoreToken();
       const startup = session.initialize();
       const refresh = http.expectOne('/_api/auth/refresh');
       expect(refresh.request.headers.get('Authorization')).toBe(`Bearer ${expected}`);
       expect(localStorage.getItem(TOKEN_KEY)).toBe(expected);
-      expect(document.cookie).toContain(`${TOKEN_KEY}=${expected}`);
+      expect(document.cookie).toContain(`${COOKIE_KEY}=${expected}`);
       refresh.flush({ token: 'refreshed-token' });
       await Promise.resolve();
       http.expectOne('/_api/users/me').flush(testUser);
@@ -112,7 +155,7 @@ describe('SessionStore', () => {
       await startup;
       expect(session.user()).toEqual(testUser);
       expect(localStorage.getItem(TOKEN_KEY)).toBe('refreshed-token');
-      expect(document.cookie).toContain(`${TOKEN_KEY}=refreshed-token`);
+      expect(document.cookie).toContain(`${COOKIE_KEY}=refreshed-token`);
     },
   );
 
@@ -123,14 +166,14 @@ describe('SessionStore', () => {
     await expect(login).rejects.toMatchObject({ status: 503 });
     expect(session.token()).toBe('test-link-token');
     expect(localStorage.getItem(TOKEN_KEY)).toBe('test-link-token');
-    expect(document.cookie).toContain(`${TOKEN_KEY}=test-link-token`);
+    expect(document.cookie).toContain(`${COOKIE_KEY}=test-link-token`);
     login = session.initialize();
     http.expectOne('/_api/auth/refresh').flush('', { status: 401, statusText: 'Unauthorized' });
     await expect(login).rejects.toMatchObject({ status: 401 });
     expect(session.token()).toBeUndefined();
     expect(session.user()).toBeUndefined();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    expect(document.cookie).not.toContain(`${COOKIE_KEY}=`);
     session.restoreToken();
     expect(session.token()).toBeUndefined();
   });
@@ -322,7 +365,7 @@ describe('SessionStore', () => {
     expect(session.token()).toBeUndefined();
     expect(session.user()).toBeUndefined();
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(document.cookie).not.toContain(`${TOKEN_KEY}=`);
+    expect(document.cookie).not.toContain(`${COOKIE_KEY}=`);
     session.restoreToken();
     expect(session.token()).toBeUndefined();
   });
