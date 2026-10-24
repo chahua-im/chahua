@@ -174,25 +174,11 @@ pub struct PendingSideEffects {
     pub broadcast_uids: Vec<i32>,
     pub push_job: Option<PushJob>,
     pub notifications: Vec<(i32, std::sync::Arc<ServerWsMessage>)>,
-    pub unread_event: Option<TopLevelUnreadCacheEvent>,
-}
-
-pub struct TopLevelUnreadCacheEvent {
-    pub chat_id: i64,
-    pub message_id: i64,
-    pub countable: bool,
 }
 
 impl PendingSideEffects {
     /// Fire WS broadcast and push notification. Call after transaction commit.
     pub fn fire(self, state: &AppState) {
-        if let Some(event) = self.unread_event {
-            state.unread_service.observe_top_level_message(
-                event.chat_id,
-                event.message_id,
-                event.countable,
-            );
-        }
         state
             .ws_registry
             .broadcast_to_uids(&self.broadcast_uids, self.ws_msg);
@@ -1481,14 +1467,6 @@ pub fn build_message_side_effects(
         broadcast_uids: member_uids,
         push_job,
         notifications,
-        unread_event: response
-            .reply_root_id
-            .is_none()
-            .then_some(TopLevelUnreadCacheEvent {
-                chat_id,
-                message_id: response.id,
-                countable: true,
-            }),
     })
 }
 
@@ -2035,13 +2013,6 @@ pub async fn send_prepared_message(
                 broadcast_uids: Vec::new(),
                 push_job: None,
                 notifications: Vec::new(),
-                unread_event: prepared.reply_root_id.is_none().then_some(
-                    TopLevelUnreadCacheEvent {
-                        chat_id: prepared.chat_id,
-                        message_id: response.id,
-                        countable: false,
-                    },
-                ),
             },
         )
     };

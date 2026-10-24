@@ -18,7 +18,6 @@ use crate::services::message_deletion::{
     reconcile_deletions, soft_delete_batch, DeletionImpact, DeletionTarget,
 };
 use crate::services::message_search::MessageSearchService;
-use crate::services::unread::UnreadService;
 use crate::services::ws_registry::ConnectionRegistry;
 
 const CHANNEL_BUFFER: usize = 64;
@@ -69,14 +68,13 @@ impl BackgroundService {
         ws_registry: Arc<ConnectionRegistry>,
         metrics: Arc<BackgroundMetrics>,
         message_search: Option<Arc<MessageSearchService>>,
-        unread_service: Arc<UnreadService>,
     ) -> Arc<Self> {
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER);
 
         let service = Arc::new(Self { job_tx: tx });
 
         tokio::spawn(async move {
-            supervise_worker(rx, db, ws_registry, metrics, message_search, unread_service).await;
+            supervise_worker(rx, db, ws_registry, metrics, message_search).await;
         });
 
         service
@@ -101,7 +99,6 @@ async fn supervise_worker(
     ws_registry: Arc<ConnectionRegistry>,
     metrics: Arc<BackgroundMetrics>,
     message_search: Option<Arc<MessageSearchService>>,
-    unread_service: Arc<UnreadService>,
 ) {
     loop {
         let worker_result = std::panic::AssertUnwindSafe(run_worker(
@@ -110,7 +107,6 @@ async fn supervise_worker(
             &ws_registry,
             &metrics,
             &message_search,
-            &unread_service,
         ))
         .catch_unwind()
         .await;
@@ -140,7 +136,6 @@ async fn run_worker(
     ws_registry: &Arc<ConnectionRegistry>,
     metrics: &Arc<BackgroundMetrics>,
     message_search: &Option<Arc<MessageSearchService>>,
-    unread_service: &Arc<UnreadService>,
 ) {
     while let Some(job) = rx.recv().await {
         let job_kind = job.kind();
@@ -158,7 +153,6 @@ async fn run_worker(
                 db,
                 ws_registry,
                 message_search,
-                unread_service,
             ),
         };
 
@@ -187,7 +181,6 @@ fn process_bulk_delete(
     db: &Pool<ConnectionManager<PgConnection>>,
     ws_registry: &Arc<ConnectionRegistry>,
     message_search: &Option<Arc<MessageSearchService>>,
-    unread_service: &Arc<UnreadService>,
 ) -> Result<(), String> {
     use crate::schema::group_membership::dsl as gm_dsl;
     use crate::schema::messages::dsl;
@@ -255,8 +248,6 @@ fn process_bulk_delete(
     }
 
     if !impact.message_ids.is_empty() {
-        // Deletions have committed; invalidate even if final reconciliation fails.
-        unread_service.invalidate_chat(chat_id);
         conn.transaction(|conn| reconcile_deletions(conn, chat_id, &impact))
             .map_err(|e| format!("reconcile bulk deletion: {e:?}"))?;
 
@@ -355,18 +346,8 @@ mod tests {
             &*events.try_recv().unwrap(),
             ServerWsMessage::PresenceUpdate(_)
         ));
-        let unread = Arc::new(UnreadService::new());
 
-        process_bulk_delete(
-            88100,
-            1,
-            DeleteScope::Last24Hours,
-            &pool,
-            &registry,
-            &None,
-            &unread,
-        )
-        .unwrap();
+        process_bulk_delete(88100, 1, DeleteScope::Last24Hours, &pool, &registry, &None).unwrap();
         let mut deleted_ids = BTreeSet::new();
         let mut batch_sizes = Vec::new();
         let mut complete = false;
@@ -447,7 +428,7 @@ mod tests {
             );
         }
 
-        process_bulk_delete(88100, 1, DeleteScope::All, &pool, &registry, &None, &unread).unwrap();
+        process_bulk_delete(88100, 1, DeleteScope::All, &pool, &registry, &None).unwrap();
         let mut final_ids = BTreeSet::new();
         let mut completed = false;
         while let Ok(event) = events.try_recv() {
@@ -514,7 +495,7 @@ mod tests {
                 0
             );
         }
-        process_bulk_delete(88100, 1, DeleteScope::All, &pool, &registry, &None, &unread).unwrap();
+        process_bulk_delete(88100, 1, DeleteScope::All, &pool, &registry, &None).unwrap();
         assert!(events.try_recv().is_err(), "an empty cleanup has no events");
     }
 }

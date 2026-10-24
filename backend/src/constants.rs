@@ -1,2 +1,1 @@
 pub const MAX_UNREAD_COUNT: i64 = 1000;
-pub const UNREAD_CHAT_INDEX_LOAD_BATCH_SIZE: usize = 256;

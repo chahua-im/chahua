@@ -37,6 +37,8 @@ The launcher prints the frontend URL and labels backend/frontend logs. Ctrl+C st
 
 Frontend dependencies are installed with `npm ci` when Angular CLI is absent. After switching branches or changing dependency files, run `(cd pwa && npm ci)` to synchronize installed dependencies with the lockfile.
 
+To verify the backend without starting shared services, run `cargo build` and `cargo test` from `backend/`. Database-backed tests require `WETTY_TEST_DATABASE_URL` pointing to a migrated development database; they skip when it is unset.
+
 ## Commands
 
 | Command (`node runspace/dev.mjs …`) | Behavior                                                                                                    |

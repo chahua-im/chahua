@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY idx_messages_unread_visible;

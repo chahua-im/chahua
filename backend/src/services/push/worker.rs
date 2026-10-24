@@ -80,10 +80,17 @@ async fn run_push_worker(
         #[cfg(test)]
         maybe_panic_for_test(&job);
 
-        let conn = match db.get() {
-            Ok(c) => c,
-            Err(e) => {
-                error!("Push worker: failed to get DB connection: {:?}", e);
+        let pool = db.clone();
+        let conn = match tokio::task::spawn_blocking(move || {
+            pool.get().map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        {
+            Ok(conn) => conn,
+            Err(error) => {
+                error!("Push worker: failed to get DB connection: {error}");
                 service
                     .metrics
                     .record_job("failure", started_at.elapsed().as_secs_f64());
@@ -367,13 +374,20 @@ async fn process_push_job(
             .filter_map(|s| seen.insert(s.user_id).then_some(s.user_id))
             .collect()
     };
-    let unread_counts = service
-        .unread_service
-        .count_users_unread_totals(&mut conn, &sub_uids)
-        .unwrap_or_else(|e| {
-            warn!("Failed to load unread counts for push job: {:?}", e);
-            std::collections::HashMap::new()
-        });
+    let unread_service = service.unread_service.clone();
+    let (mut conn, unread_counts) = tokio::task::spawn_blocking(move || {
+        let counts = unread_service.count_users_unread_totals(&mut conn, &sub_uids);
+        (conn, counts)
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(?error, "push unread count task failed");
+        "Push unread count task failed".to_string()
+    })?;
+    let unread_counts = unread_counts.unwrap_or_else(|error| {
+        warn!("Failed to load unread counts for push job: {error}");
+        std::collections::HashMap::new()
+    });
 
     // 4. Send concurrently with bounded parallelism.
     let delivery_results: Vec<DeliveryAttemptResult> = stream::iter(subs)
