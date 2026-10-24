@@ -1,3 +1,4 @@
+import { Location } from '@angular/common';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { jsonInterceptor } from '../../api/json.interceptor';
@@ -13,7 +14,7 @@ import { ServerWsMessageType, type ServerWsMessage } from '../../../generated/mo
 import { Subject } from 'rxjs';
 import { SessionStore } from '../../session/session-store';
 import { By } from '@angular/platform-browser';
-import { IonContent } from '@ionic/angular';
+import { IonContent, IonRouterOutlet, NavController } from '@ionic/angular';
 import { signal } from '@angular/core';
 import { Preferences } from '../../settings/preferences';
 import { Message } from '../message/message';
@@ -57,6 +58,7 @@ describe('ForwardedRecords', () => {
         { provide: Preferences, useValue: { showAllAvatars: signal(false), showDmDetails: signal(false) } },
         { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
         { provide: ChatStore, useValue: { changes$: changes, watchReadStates } },
+        { provide: IonRouterOutlet, useValue: { canGoBack: vi.fn(() => true), pop: vi.fn() } },
       ],
     });
     TestBed.inject(SessionStore).user.set(testUser);
@@ -65,6 +67,60 @@ describe('ForwardedRecords', () => {
     TestBed.resetTestingModule();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  describe.each([
+    {
+      name: 'chat records',
+      inputs: { id: wireChat.id, messageId: wireMessage.id },
+      endpoint: `/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forwarded-messages`,
+      fallback: `/chats/chat/${wireChat.id}#msg=${wireMessage.id}`,
+    },
+    {
+      name: 'chat child records',
+      inputs: { id: wireChat.id, messageId: wireMessage.id, bundleId: '456' },
+      endpoint: `/_api/chats/${wireChat.id}/messages/${wireMessage.id}/forwarded-bundles/456/messages`,
+      fallback: `/chats/chat/${wireChat.id}/message/${wireMessage.id}/forwarded`,
+    },
+    {
+      name: 'saved records',
+      inputs: { savedId: '123' },
+      endpoint: '/_api/saved-messages/123/forwarded-messages',
+      fallback: '/chats/saved',
+    },
+    {
+      name: 'saved child records',
+      inputs: { savedId: '123', bundleId: '456' },
+      endpoint: '/_api/saved-messages/123/forwarded-bundles/456/messages',
+      fallback: '/chats/saved/123/forwarded',
+    },
+  ])('$name header navigation', ({ inputs, endpoint, fallback }) => {
+    it.each([true, false])(
+      'uses real history when available and replaces the fallback otherwise (history: %s)',
+      async (canGoBack) => {
+        const outlet = TestBed.inject(IonRouterOutlet);
+        vi.mocked(outlet.canGoBack).mockReturnValue(canGoBack);
+        const back = vi.spyOn(TestBed.inject(Location), 'back').mockImplementation(() => {});
+        const navigate = vi.spyOn(TestBed.inject(NavController), 'navigateBack').mockResolvedValue(true);
+        const fixture = TestBed.createComponent(ForwardedRecords);
+        for (const [key, value] of Object.entries(inputs)) fixture.componentRef.setInput(key, value);
+        fixture.detectChanges();
+        const http = TestBed.inject(HttpTestingController);
+        http.expectOne(endpoint).flush({ total: 1, messages: [record] });
+        await fixture.whenStable();
+        const button = fixture.nativeElement.querySelector('ion-header ion-buttons > *') as HTMLElement;
+        button.click();
+        if (canGoBack) {
+          expect(back).toHaveBeenCalledOnce();
+          expect(navigate).not.toHaveBeenCalled();
+        } else {
+          expect(back).not.toHaveBeenCalled();
+          expect(navigate).toHaveBeenCalledWith(fallback, { replaceUrl: true });
+        }
+        expect(outlet.pop).not.toHaveBeenCalled();
+        http.verify();
+      },
+    );
   });
 
   it('renders captured internal replies, redacted external replies and navigates only within the authorized root', async () => {
@@ -311,7 +367,7 @@ describe('ForwardedRecords', () => {
     ]);
     const element = fixture.nativeElement as HTMLElement;
     expect(element.querySelectorAll('.message-date')).toHaveLength(1);
-    expect(element.querySelector('ion-back-button')).not.toBeNull();
+    expect(element.querySelector('ion-header ion-buttons[slot="start"] ion-button')).not.toBeNull();
     expect(element.querySelector('app-message-composer, .reply-button, button.mention')).toBeNull();
     expect(element.querySelector('a[href="https://example.com"]')).not.toBeNull();
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
