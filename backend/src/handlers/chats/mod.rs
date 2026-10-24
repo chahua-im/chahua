@@ -1041,6 +1041,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
                 .routes(utoipa_axum::routes!(get_chat_reactions))
                 .routes(utoipa_axum::routes!(acknowledge_chat_reactions))
                 .routes(utoipa_axum::routes!(self::messages::post_thread_message))
+                .routes(utoipa_axum::routes!(super::threads::get_chat_threads))
                 .nest("/threads/{thread_root_id}", super::threads::thread_router())
                 .nest("/saved-messages", self::saved_messages::router())
                 .nest("/pins", super::pins::router()),

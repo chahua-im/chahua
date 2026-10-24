@@ -81,6 +81,34 @@ Validate the generated document with:
 cargo test --locked openapi::tests::
 ```
 
+## Thread browsing
+
+Both browse endpoints require bearer authentication and current chat membership;
+thread subscription is not required. They do not create subscriptions or read state.
+
+| Endpoint | Query parameters | Response |
+| --- | --- | --- |
+| `GET /chats/{chat_id}/threads` | `limit` defaults to 20 and is clamped to 1–100; `order=newest\|oldest` defaults to `newest`; optional `cursor` is a decimal-string root message ID | `{ threads: MessageResponse[], nextCursor: string \| null }` |
+| `GET /chats/{chat_id}/threads/{thread_root_id}/participants` | `limit` defaults to 100 and is clamped to 1–100; optional `cursor` is an integer user UID | `{ participants: User[], nextCursor: number \| null }` |
+
+Threads are ordered strictly by root message ID, not by latest reply activity.
+Root messages include the normal message metadata and `threadInfo.replyCount`.
+Only published top-level messages with `has_thread` qualify. Recalled roots remain
+listed while their threads have surviving replies; normal message redaction applies.
+This chat-wide list is independent of the subscription/archive filters and
+latest-reply ordering used by `GET /threads`.
+
+Participants are the root author and distinct authors of published, non-deleted
+replies, ordered by ascending UID. Subscribers without messages are not participants.
+The root author remains included when the root is recalled, matching inbox previews.
+A reply ID, an unpublished/non-thread root, a missing root, or a root in another
+chat returns 404; nonmembers receive 403 before thread lookup.
+
+Pass `nextCursor` as the next request's `cursor`, preserving `order` for thread
+pages. Cursors are exclusive; `nextCursor: null` marks the final page. The
+`idx_messages_chat_thread_roots` and `idx_messages_thread_participants` partial
+indexes support the corresponding root-ID and distinct-author range queries.
+
 ## System message links
 
 New member invitations/removals and accepted friend requests retain the target UID;

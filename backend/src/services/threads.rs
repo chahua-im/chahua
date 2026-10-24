@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel::query_dsl::positional_order_dsl::PositionalOrderDsl;
 use diesel::sql_query;
 use diesel::PgConnection;
 use std::collections::HashMap;
@@ -391,6 +392,70 @@ pub fn get_thread_subscriber_uids(
                 .and(thread_user_states::subscribed.eq(true)),
         )
         .select(thread_user_states::uid)
+        .load(conn)
+}
+
+/// Seek thread roots using the partial (chat_id, id) browse index.
+/// Deleted roots remain visible while they have surviving replies, as in the inbox.
+pub fn get_chat_threads(
+    conn: &mut PgConnection,
+    chat_id: i64,
+    cursor: Option<i64>,
+    order: crate::dto::threads::ThreadOrder,
+    limit: i64,
+) -> QueryResult<Vec<Message>> {
+    use crate::dto::threads::ThreadOrder;
+
+    let mut query = messages::table
+        .filter(messages::chat_id.eq(chat_id))
+        .filter(messages::reply_root_id.is_null())
+        .filter(messages::has_thread.eq(true))
+        .filter(messages::is_published.eq(true))
+        .into_boxed();
+    if let Some(cursor) = cursor {
+        query = match order {
+            ThreadOrder::Oldest => query.filter(messages::id.gt(cursor)),
+            ThreadOrder::Newest => query.filter(messages::id.lt(cursor)),
+        };
+    }
+    query = match order {
+        ThreadOrder::Oldest => query.order(messages::id.asc()),
+        ThreadOrder::Newest => query.order(messages::id.desc()),
+    };
+    query.limit(limit).select(Message::as_select()).load(conn)
+}
+
+/// Participants are authors, not subscribers. Match the inbox definition:
+/// root author plus authors of surviving published replies, deduplicated by UID.
+pub fn get_thread_participant_uids(
+    conn: &mut PgConnection,
+    thread_root_id: i64,
+    cursor: Option<i32>,
+    limit: i64,
+) -> QueryResult<Vec<i32>> {
+    let mut replies = messages::table
+        .filter(messages::reply_root_id.eq(thread_root_id))
+        .filter(messages::deleted_at.is_null())
+        .filter(messages::is_published.eq(true))
+        .into_boxed();
+    let mut root = messages::table
+        .filter(messages::id.eq(thread_root_id))
+        .filter(messages::reply_root_id.is_null())
+        .filter(messages::has_thread.eq(true))
+        .filter(messages::is_published.eq(true))
+        .into_boxed();
+    if let Some(cursor) = cursor {
+        replies = replies.filter(messages::sender_uid.gt(cursor));
+        root = root.filter(messages::sender_uid.gt(cursor));
+    }
+    replies
+        .select(messages::sender_uid)
+        .distinct()
+        .order(messages::sender_uid.asc())
+        .limit(limit)
+        .union(root.select(messages::sender_uid))
+        .positional_order_by(1)
+        .limit(limit)
         .load(conn)
 }
 
@@ -1207,6 +1272,76 @@ mod tests {
     use crate::dto::messages::MessagePreviewAttachment;
     use crate::models::Attachment;
     use chrono::Utc;
+
+    #[test]
+    fn thread_browse_keysets_filter_and_deduplicate_authors() {
+        use super::*;
+        use crate::dto::threads::ThreadOrder;
+        use diesel::connection::SimpleConnection;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        let result = conn.transaction::<(), diesel::result::Error, _>(|conn| {
+            conn.batch_execute(
+                "INSERT INTO groups(id, name) VALUES (9876730000, 'thread-browse'), (9876740000, 'other');
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, client_generated_id,
+                                      created_at, has_thread, is_published, deleted_at)
+                 SELECT 9876730000 + n, 9876730000, 1, 'text', 'browse-root-' || n,
+                        NOW(), n <> 5, n <> 4, CASE WHEN n = 3 THEN NOW() END
+                 FROM generate_series(1, 5) n;
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, client_generated_id,
+                                      created_at, has_thread)
+                 VALUES (9876740001, 9876740000, 200, 'text', 'browse-other-root', NOW(), TRUE);
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, client_generated_id,
+                                      created_at, reply_root_id)
+                 SELECT 9876731000 + n, 9876730000, n, 'text', 'browse-reply-' || n,
+                        NOW(), 9876730001 FROM generate_series(1, 105) n;
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, client_generated_id,
+                                      created_at, reply_root_id, deleted_at, is_published)
+                 VALUES (9876732000, 9876730000, 50, 'text', 'browse-duplicate', NOW(), 9876730001, NULL, TRUE),
+                        (9876732001, 9876730000, 106, 'text', 'browse-deleted', NOW(), 9876730001, NOW(), TRUE),
+                        (9876732002, 9876730000, 107, 'text', 'browse-unpublished', NOW(), 9876730001, NULL, FALSE);
+                 INSERT INTO thread_user_states(chat_id, thread_root_id, uid, subscribed)
+                 VALUES (9876730000, 9876730001, 108, TRUE);"
+            )?;
+            let ids = |rows: Vec<Message>| rows.into_iter().map(|m| m.id).collect::<Vec<_>>();
+            assert_eq!(
+                ids(get_chat_threads(conn, 9876730000, None, ThreadOrder::Newest, 2)?),
+                vec![9876730003, 9876730002]
+            );
+            assert_eq!(
+                ids(get_chat_threads(conn, 9876730000, Some(9876730002), ThreadOrder::Newest, 2)?),
+                vec![9876730001]
+            );
+            assert_eq!(
+                ids(get_chat_threads(conn, 9876730000, None, ThreadOrder::Oldest, 2)?),
+                vec![9876730001, 9876730002]
+            );
+            assert_eq!(
+                ids(get_chat_threads(conn, 9876730000, Some(9876730002), ThreadOrder::Oldest, 2)?),
+                vec![9876730003]
+            );
+            assert_eq!(
+                get_thread_participant_uids(conn, 9876730001, None, 100)?,
+                (1..=100).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                get_thread_participant_uids(conn, 9876730001, Some(100), 100)?,
+                vec![101, 102, 103, 104, 105]
+            );
+            assert!(get_thread_participant_uids(conn, 9876730001, Some(105), 100)?.is_empty());
+            // Deleted roots retain their author, matching the existing inbox contract.
+            assert_eq!(get_thread_participant_uids(conn, 9876730003, None, 100)?, vec![1]);
+            Err(diesel::result::Error::RollbackTransaction)
+        });
+        assert!(matches!(
+            result,
+            Err(diesel::result::Error::RollbackTransaction)
+        ));
+    }
 
     fn attachment(id: i64, message_id: i64, kind: &str, order: i16) -> Attachment {
         Attachment {

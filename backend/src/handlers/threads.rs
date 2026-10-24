@@ -9,7 +9,8 @@ use utoipa_axum::router::OpenApiRouter;
 
 use crate::{
     dto::threads::{
-        ListThreadsResponse, MarkThreadReadResponse, ThreadReadStateResponse,
+        ListChatThreadsResponse, ListThreadParticipantsResponse, ListThreadsResponse,
+        MarkThreadReadResponse, ThreadOrder, ThreadReadStateResponse,
         ThreadSubscriptionStatusResponse, UnreadThreadCountResponse,
     },
     errors::AppError,
@@ -101,6 +102,136 @@ async fn get_threads(
     )?;
 
     Ok(Json(response))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ListChatThreadsQuery {
+    limit: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_i64_string::opt::deserialize"
+    )]
+    cursor: Option<i64>,
+    #[serde(default)]
+    order: ThreadOrder,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct ChatThreadsPath {
+    chat_id: i64,
+}
+
+/// List all published threads in a chat, independently of subscriptions.
+#[utoipa::path(
+    get,
+    path = "/threads",
+    tag = "threads",
+    params(
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("limit" = Option<i64>, Query, description = "Page size, default 20, clamped to 1–100"),
+        ("cursor" = Option<String>, Query, description = "Exclusive root ID cursor from nextCursor; retain the same order"),
+        ("order" = Option<ThreadOrder>, Query, description = "Root ID ordering: newest (default) or oldest"),
+    ),
+    responses(
+        (status = OK, body = ListChatThreadsResponse),
+        (status = FORBIDDEN, description = "Not a chat member"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+pub(super) async fn get_chat_threads(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatThreadsPath { chat_id }): Path<ChatThreadsPath>,
+    mut conn: DbConn,
+    Query(query): Query<ListChatThreadsQuery>,
+) -> Result<Json<ListChatThreadsResponse>, AppError> {
+    check_membership(&mut conn, chat_id, uid)?;
+    let limit = validate_limit(query.limit.or(Some(20)), 100);
+    let mut roots =
+        thread_svc::get_chat_threads(&mut conn, chat_id, query.cursor, query.order, limit + 1)?;
+    let has_more = roots.len() as i64 > limit;
+    roots.truncate(limit as usize);
+    let next_cursor = has_more.then(|| roots.last().unwrap().id.to_string());
+    let threads = crate::services::messages::attach_metadata(
+        &mut conn,
+        roots,
+        &state.media,
+        &state.avatars,
+        uid,
+    )
+    .await;
+    Ok(Json(ListChatThreadsResponse {
+        threads,
+        next_cursor,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct ListThreadParticipantsQuery {
+    limit: Option<i64>,
+    cursor: Option<i32>,
+}
+
+/// List root/reply authors in ascending UID order, not thread subscribers.
+#[utoipa::path(
+    get,
+    path = "/participants",
+    tag = "threads",
+    params(
+        ("chat_id" = String, Path, description = "Chat ID"),
+        ("thread_root_id" = String, Path, description = "Thread root message ID"),
+        ("limit" = Option<i64>, Query, description = "Page size, default 100, clamped to 1–100"),
+        ("cursor" = Option<i32>, Query, description = "Exclusive UID cursor from nextCursor"),
+    ),
+    responses(
+        (status = OK, body = ListThreadParticipantsResponse),
+        (status = FORBIDDEN, description = "Not a chat member"),
+        (status = NOT_FOUND, description = "No published thread at this root in this chat"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn get_thread_participants(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ThreadSubscribePath {
+        chat_id,
+        thread_root_id,
+    }): Path<ThreadSubscribePath>,
+    mut conn: DbConn,
+    Query(query): Query<ListThreadParticipantsQuery>,
+) -> Result<Json<ListThreadParticipantsResponse>, AppError> {
+    authorize_thread_in_chat(&mut conn, chat_id, thread_root_id, uid)?;
+    let exists = diesel::select(diesel::dsl::exists(
+        messages::table
+            .filter(messages::id.eq(thread_root_id))
+            .filter(messages::has_thread.eq(true))
+            .filter(messages::is_published.eq(true)),
+    ))
+    .get_result::<bool>(&mut *conn)?;
+    if !exists {
+        return Err(AppError::NotFound("Thread root message not found"));
+    }
+    let limit = validate_limit(query.limit, 100);
+    let mut uids = thread_svc::get_thread_participant_uids(
+        &mut conn,
+        thread_root_id,
+        query.cursor,
+        limit + 1,
+    )?;
+    let has_more = uids.len() as i64 > limit;
+    uids.truncate(limit as usize);
+    let next_cursor = has_more.then(|| *uids.last().unwrap());
+    let profiles = crate::services::user::lookup_user_profiles(&mut conn, &uids)?;
+    let avatars = state.avatars.lookup(&uids);
+    let participants = uids
+        .into_iter()
+        .map(|uid| crate::services::messages::build_sender(uid, &avatars, &profiles))
+        .collect();
+    Ok(Json(ListThreadParticipantsResponse {
+        participants,
+        next_cursor,
+    }))
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
@@ -723,6 +854,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
 /// cohesive subtree rather than composing individual thread features.
 pub fn thread_router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
+        .routes(utoipa_axum::routes!(get_thread_participants))
         .nest(
             "/subscribe",
             OpenApiRouter::new().routes(utoipa_axum::routes!(

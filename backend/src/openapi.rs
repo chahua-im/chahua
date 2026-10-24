@@ -1,5 +1,6 @@
 use crate::dto::attachments::ChatAttachmentKindFilter;
 use crate::dto::conversations::ConversationView;
+use crate::dto::threads::ThreadOrder;
 use crate::dto::ws::{
     ChatArchiveStateChangedPayload, FriendRequestReceivedPayload, FriendRequestResolvedPayload,
     FriendshipRemovedPayload, GroupPresenceResponse, PinUpdatePayload, PresenceSnapshotPayload,
@@ -27,6 +28,7 @@ use utoipa::OpenApi;
             GroupSearchMode,
             GroupSelectorScope,
             UserSearchMode,
+            ThreadOrder,
             ServerWsMessage,
             ReactionUpdatePayload,
             PresenceUpdatePayload,

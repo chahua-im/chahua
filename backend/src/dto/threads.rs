@@ -41,6 +41,30 @@ pub struct ListThreadsResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Default, Clone, Copy, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadOrder {
+    Oldest,
+    #[default]
+    Newest,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListChatThreadsResponse {
+    pub threads: Vec<crate::dto::messages::MessageResponse>,
+    /// Last returned root ID; pass as `cursor` with the same ordering.
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListThreadParticipantsResponse {
+    pub participants: Vec<User>,
+    /// Last returned UID; pass as `cursor` to continue in ascending UID order.
+    pub next_cursor: Option<i32>,
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MarkThreadReadResponse {
