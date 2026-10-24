@@ -76,7 +76,7 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 | ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量 |
 | ChatAvatar         | entry、size、online；当前头像和角标图片的加载状态 | 文字占位保持至当前 URL 图片成功加载；同 URL 的 entry 更新保留加载状态，URL 切换才重置并忽略旧事件；失败回退；展示在线圆点，无业务请求 |
 | DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                | GroupsService、UsersService；选择用户或打开资料                                       |
-| ChatLink           | 路由参数；failed                                                                                                     | 解析链接和静态路由配置、按需查询消息/用户；负责详情弹窗与浏览器历史的生命周期         |
+| ChatLink           | 路由参数；failed                                                                                                     | 解析静态路由配置、按需查询用户／话题；负责详情弹窗与浏览器历史的生命周期（消息短链接由路由守卫解析）         |
 
 ChatListPage 在 ionViewWillEnter 中先同步检测缓存视图，再激活列表查询，使 pop 动画使用已更新的本地行；ionViewDidLeave 同步释放子查询消费者。
 

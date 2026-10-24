@@ -4,6 +4,7 @@ import { MediaViewer } from './messages/media-viewer/media-viewer';
 import { inject } from '@angular/core';
 import { RedirectCommand, Router, type CanMatchFn, type Routes } from '@angular/router';
 import { isPlatform } from '@ionic/angular';
+import { openMessageLink } from './chats/chat-link/message-link.guard';
 import { ChatLink } from './chats/chat-link/chat-link';
 import { ChatListPage } from './chats/chat-list-page/chat-list.page';
 import { isListTab, ListTab } from './chats/list-tabs';
@@ -39,7 +40,7 @@ export const routes: Routes = [
         isPlatform('pwa') ? new RedirectCommand(inject(Router).createUrlTree(['/chats']), { replaceUrl: true }) : true,
     ],
   },
-  { path: 'm/:encoded', component: ChatLink, data: { modal: true } },
+  { path: 'm/:encoded', canActivate: [openMessageLink], children: [] },
   { path: 'media', component: ChatLink, data: { modal: true, component: MediaViewer, media: true } },
   {
     path: 'chats/chat/:id/message/:messageId/reactions',

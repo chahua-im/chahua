@@ -336,7 +336,8 @@
     },
     "link": {
       "failed": "This link can't be opened.",
-      "backToMessages": "Back to messages"
+      "backToMessages": "Back to messages",
+      "messageUnavailable": "This message was deleted or no longer exists"
     },
     "attachments": {
       "locate": "Locate",

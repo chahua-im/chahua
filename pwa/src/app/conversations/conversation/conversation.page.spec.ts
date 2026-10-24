@@ -3465,6 +3465,57 @@ describe('ConversationPage', () => {
     http.expectNone(`/_api/chats/${wireChat.id}/messages?max=50&around=100&threadId=100`);
   });
 
+  it.each(['hash', 'query'])(
+    'repositions on every repeated %s message link without replacing the page',
+    async (kind) => {
+      const router = TestBed.inject(Router);
+      router.resetConfig([{ path: 'chats/chat/:id', children: [] }]);
+      const jump = vi
+        .spyOn(component as unknown as { goTo: (typeof component)['goTo'] }, 'goTo')
+        .mockResolvedValue(undefined);
+      const suffix = kind === 'hash' ? `#msg=${wireMessage.id}` : `?message=${wireMessage.id}`;
+      const url = `/chats/chat/${wireChat.id}${suffix}`;
+      fixture.componentRef.setInput('message', wireMessage.id);
+      await router.navigateByUrl(url);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      jump.mockClear();
+      component['draft'].set('未发送的内容');
+      const row = fixture.nativeElement.querySelector('app-message');
+      for (let count = 1; count <= 2; count++) {
+        expect(await router.navigateByUrl(url)).toBe(false);
+        expect(jump).toHaveBeenCalledTimes(count);
+        expect(jump).toHaveBeenLastCalledWith({ type: ConversationTargetKind.Message, messageId: testMessage.id });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
+        expect(component['draft']()).toBe('未发送的内容');
+        expect(router.url).toBe(url);
+      }
+      http.expectNone(() => true);
+    },
+  );
+
+  it.each(['inactive', 'other conversation', 'no message target'])(
+    'does not repeat message positioning for %s',
+    async (condition) => {
+      const router = TestBed.inject(Router);
+      router.resetConfig([{ path: 'chats/chat/:id', children: [] }]);
+      const jump = vi
+        .spyOn(component as unknown as { goTo: (typeof component)['goTo'] }, 'goTo')
+        .mockResolvedValue(undefined);
+      const url = `/chats/chat/${wireChat.id}` + (condition === 'no message target' ? '' : `#msg=${wireMessage.id}`);
+      if (condition !== 'no message target') fixture.componentRef.setInput('message', wireMessage.id);
+      await router.navigateByUrl(url);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      if (condition === 'inactive') component['active'].set(false);
+      if (condition === 'other conversation') vi.mocked(router.isActive).mockReturnValue(false);
+      jump.mockClear();
+      await router.navigateByUrl(url);
+      expect(jump).not.toHaveBeenCalled();
+    },
+  );
+
   it('locates a message from a shared query URL without falling back to the read boundary', async () => {
     const animate = vi.fn();
     Object.defineProperty(Element.prototype, 'animate', { value: animate, configurable: true });
