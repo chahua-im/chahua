@@ -16,7 +16,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
-  IonBackButton,
+  IonButton,
   IonButtons,
   IonContent,
   IonHeader,
@@ -24,9 +24,11 @@ import {
   IonTitle,
   IonToolbar,
   IonSpinner,
+  IonRouterOutlet,
+  NavController,
 } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { documentTextOutline } from 'ionicons/icons';
+import { chevronBack, documentTextOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { SavedMessagesService } from '../../../generated/endpoints/saved-messages/saved-messages.service';
@@ -58,7 +60,7 @@ import { VoicePlayback } from '../voice-player/voice-playback';
     LoadError,
     TranslocoPipe,
     MessageDatePipe,
-    IonBackButton,
+    IonButton,
     IonButtons,
     IonContent,
     IonHeader,
@@ -98,6 +100,7 @@ export class ForwardedRecords {
   protected readonly stickyRow = signal<number | undefined>(undefined);
   protected readonly stickyOffset = signal(0);
   protected readonly recordsIcon = documentTextOutline;
+  protected readonly backIcon = chevronBack;
   readonly chatId = input<SnowflakeID | undefined, string | undefined>(undefined, {
     alias: 'id',
     transform: (id) => (id ? encodeId(id) : undefined),
@@ -114,6 +117,8 @@ export class ForwardedRecords {
   private readonly chats = inject(ChatsService);
   private readonly saved = inject(SavedMessagesService);
   private readonly router = inject(Router);
+  private readonly nav = inject(NavController);
+  private readonly outlet = inject(IonRouterOutlet, { optional: true });
   protected readonly session = inject(SessionStore);
   protected readonly preferences = inject(Preferences);
   private readonly playback = inject(VoicePlayback);
@@ -164,6 +169,14 @@ export class ForwardedRecords {
       ? '/chats/saved'
       : `/chats/chat/${decodeId(this.chatId()!)}#msg=${decodeId(this.messageId()!)}`;
   });
+  protected back() {
+    // Follow browser history; outlet.pop() navigates to another URL and adds a history entry.
+    if (this.outlet?.canGoBack()) {
+      this.nav.back();
+    } else {
+      void this.nav.navigateBack(this.backHref(), { replaceUrl: true });
+    }
+  }
   constructor() {
     afterNextRender(() => void this.observeResize());
     afterRenderEffect(() => {

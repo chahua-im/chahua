@@ -61,6 +61,13 @@ export class ChatListPage {
     const url = ['/chats', selection.tab];
     if (selection.archived) url.push('archived');
     if (selection.requestHistory) url.push('archived-requests');
+    if (
+      !this.selection().archived &&
+      !this.selection().requestHistory &&
+      !selection.archived &&
+      !selection.requestHistory
+    )
+      return this.router.navigate(url, { replaceUrl: true });
     return this.selection().archived || this.selection().requestHistory
       ? this.nav.navigateBack(url)
       : this.nav.navigateForward(url);

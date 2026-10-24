@@ -1,7 +1,9 @@
 <ion-header>
   <ion-toolbar>
     <ion-buttons slot="start">
-      <ion-back-button [defaultHref]="backHref()" />
+      <ion-button (click)="back()">
+        <ion-icon slot="icon-only" [icon]="backIcon" />
+      </ion-button>
     </ion-buttons>
     <ion-title>
       <div class="conversation-title">

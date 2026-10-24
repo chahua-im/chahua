@@ -1,8 +1,11 @@
+import { Location, PlatformLocation } from '@angular/common';
+import { MockPlatformLocation } from '@angular/common/testing';
 import { Component, input, output, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, provideRouter, Router, withComponentInputBinding } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, provideRouter, Router, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { beforeAll, afterAll, vi } from 'vitest';
+import { filter, firstValueFrom } from 'rxjs';
 import { Connection } from '../../api/connection';
 import { mockRealtime } from '../../api/testing';
 import { routes } from '../../app.routes';
@@ -39,7 +42,70 @@ class ListStub {
   readonly openList = output<ListSelection>();
 }
 
+@Component({ template: '' })
+class NavigationStub {}
+
 describe('ChatListPage', () => {
+  it('replaces repeated tab switches while preserving the selected tab when returning from a conversation', async () => {
+    await TestBed.configureTestingModule({
+      providers: [
+        { provide: PlatformLocation, useClass: MockPlatformLocation },
+        provideRouter([
+          { path: 'before', component: NavigationStub },
+          { path: 'chats/chat/:id', component: NavigationStub },
+          ...routes,
+        ]),
+      ],
+    })
+      .overrideComponent(ChatListPage, { set: { template: '' } })
+      .compileComponents();
+    const harness = await RouterTestingHarness.create('/before');
+    const page = await harness.navigateByUrl('/chats', ChatListPage);
+    const location = TestBed.inject(Location);
+    const push = vi.spyOn(location, 'go');
+    const router = TestBed.inject(Router);
+    router.setUpLocationChangeListener();
+    try {
+      for (const tab of [ListTab.Groups, ListTab.Friends, ListTab.Threads, ListTab.Messages, ListTab.Groups]) {
+        await page['openList']({ tab, archived: false, requestHistory: false });
+        expect(router.url).toBe(`/chats/${tab}`);
+        expect(page['selection']().tab).toBe(tab);
+      }
+      expect(push).not.toHaveBeenCalled();
+      await router.navigateByUrl('/chats/chat/123');
+      for (const url of ['/chats/groups', '/before']) {
+        const navigated = firstValueFrom(router.events.pipe(filter((event) => event instanceof NavigationEnd)));
+        location.back();
+        await navigated;
+        expect(router.url).toBe(url);
+      }
+    } finally {
+      push.mockRestore();
+    }
+  });
+
+  it.each([
+    { tab: ListTab.Groups, archived: true, requestHistory: false, suffix: 'archived' },
+    { tab: ListTab.Friends, archived: false, requestHistory: true, suffix: 'archived-requests' },
+  ])('keeps $suffix as a separate history entry', async ({ suffix, ...selection }) => {
+    await TestBed.configureTestingModule({
+      providers: [provideRouter(routes), { provide: PlatformLocation, useClass: MockPlatformLocation }],
+    })
+      .overrideComponent(ChatListPage, { set: { template: '' } })
+      .compileComponents();
+    const harness = await RouterTestingHarness.create();
+    const url = `/chats/${selection.tab}`;
+    const page = await harness.navigateByUrl(url, ChatListPage);
+    const router = TestBed.inject(Router);
+    router.setUpLocationChangeListener();
+    await page['openList'](selection);
+    expect(router.url).toBe(`${url}/${suffix}`);
+    const navigated = firstValueFrom(router.events.pipe(filter((event) => event instanceof NavigationEnd)));
+    TestBed.inject(Location).back();
+    await navigated;
+    expect(router.url).toBe(url);
+  });
+
   it('renders cached local changes synchronously before reactivating queries', async () => {
     await TestBed.configureTestingModule({ imports: [ChatListPage] })
       .overrideComponent(ChatListPage, { remove: { imports: [ChatList] }, add: { imports: [ListStub] } })
