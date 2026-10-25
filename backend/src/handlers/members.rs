@@ -281,7 +281,6 @@ async fn post_add_member(
         .values(&new_membership)
         .execute(conn)?;
 
-    state.ws_registry.invalidate_unread(&[body.uid]);
     let target_username = profile
         .and_then(|p| p.username.clone())
         .unwrap_or_else(|| "Someone".to_string());
@@ -317,6 +316,8 @@ async fn post_add_member(
         let send_result = *send_result;
         send_result.side_effects.fire(&state);
     }
+
+    crate::services::chat::publish_membership_changed(&state.ws_registry, body.uid, chat_id);
 
     let avatar_url = state
         .avatars

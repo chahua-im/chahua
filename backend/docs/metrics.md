@@ -75,6 +75,8 @@ is counted separately, without user or chat labels.
 
 Group membership-message policy broadcasts use `message_type=membershipMessagePolicyChanged`, carrying only the chat ID to invalidate cached policies after policy or role changes. They also invalidate unread watches; no user or chat labels are added.
 
+Successful member additions and invite redemptions use `message_type=chatMembershipChanged`, carrying only the chat ID to the joining user's connections. These events invalidate that user's unread watches independently of system-message visibility; no user or chat labels are added.
+
 ## Presence snapshots
 
 Snapshots include initial watches, periodic refreshes, and refreshes triggered by committed

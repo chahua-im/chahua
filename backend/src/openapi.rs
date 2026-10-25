@@ -77,6 +77,23 @@ mod tests {
     }
 
     #[test]
+    fn chat_membership_event_contract() {
+        let document = api_document();
+        let schemas = &document["components"]["schemas"];
+        assert_eq!(
+            schemas["ChatMembershipChangedPayload"]["properties"]["chatId"]["type"],
+            "string"
+        );
+        assert!(schemas["ServerWsMessage"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| {
+                event["properties"]["type"]["enum"] == serde_json::json!(["chatMembershipChanged"])
+            }));
+    }
+
+    #[test]
     fn system_kind_contract() {
         let document = api_document();
         let kinds = document["components"]["schemas"]["SystemMessageKind"]["enum"]

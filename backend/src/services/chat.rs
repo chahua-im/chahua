@@ -6,6 +6,20 @@ use crate::errors::AppError;
 use crate::schema::{group_membership, groups, messages as messages_schema};
 use crate::services::unread::UnreadService;
 
+/// Call after membership commits, even when its system announcement is hidden or fails.
+pub fn publish_membership_changed(
+    registry: &super::ws_registry::ConnectionRegistry,
+    uid: i32,
+    chat_id: i64,
+) {
+    registry.broadcast_to_uids(
+        &[uid],
+        std::sync::Arc::new(crate::dto::ws::ServerWsMessage::ChatMembershipChanged(
+            crate::dto::ws::ChatMembershipChangedPayload { chat_id },
+        )),
+    );
+}
+
 pub fn indefinite_mute_until() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("9999-12-31T23:59:59Z")
         .expect("valid indefinite mute timestamp")
