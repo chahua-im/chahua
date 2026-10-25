@@ -203,8 +203,16 @@
           (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
           (openThread)="openThread($event)"></app-message>
       } @empty {
-        @if (conversation.page()) {
-          <p class="ion-text-center">{{ 'conversation.empty' | transloco }}</p>
+        @if (
+          conversation.page() &&
+          !conversation.loading() &&
+          !conversation.error() &&
+          !conversation.page()?.olderCursor &&
+          !conversation.page()?.newerCursor
+        ) {
+          <p class="ion-text-center">
+            {{ (hideMembershipMessages() ? 'conversation.emptyVisible' : 'conversation.empty') | transloco }}
+          </p>
         }
       }
     </div>

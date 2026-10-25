@@ -131,7 +131,9 @@
       "fontLarge": "大",
       "fontPreviewIncoming": "這是聊天訊息的預覽，拖動滑桿試試不同的字級。",
       "fontPreviewOutgoing": "選擇一個閱讀起來舒服的大小。",
-      "fontDefault": "系統預設"
+      "fontDefault": "系統預設",
+      "showMembershipMessages": "顯示群成員進出群訊息",
+      "saveFailed": "儲存失敗，請重試。"
     },
     "language": {
       "title": "語言",
@@ -349,7 +351,12 @@
       "verificationMessage": "傳送驗證訊息",
       "verificationPlaceholder": "驗證訊息",
       "blockTitle": "封鎖使用者",
-      "unblockTitle": "解除封鎖"
+      "unblockTitle": "解除封鎖",
+      "membershipMessages": "成員變動訊息",
+      "membershipMembers": "全體成員可見",
+      "membershipAdmins": "僅管理員可見",
+      "membershipNobody": "所有人不可見",
+      "membershipNote": "適用於歷史和新的進退群訊息。有查看權限時，仍遵循個人的顯示偏好。"
     },
     "directory": {
       "groups": "群聊",
@@ -419,6 +426,7 @@
     "threadLoadFailed": "話題狀態載入失敗，請重試。",
     "threadUpdateFailed": "話題更新失敗，請重試。",
     "empty": "尚無訊息",
+    "emptyVisible": "尚無可顯示的訊息",
     "missing": "這則訊息已刪除或無法查看。",
     "loadFailed": "訊息載入失敗，請重試。",
     "editing": "編輯訊息",

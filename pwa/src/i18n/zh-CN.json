@@ -131,7 +131,9 @@
       "fontLarge": "大",
       "fontPreviewIncoming": "这是聊天消息的预览，拖动滑块试试不同的字号。",
       "fontPreviewOutgoing": "选择一个阅读起来舒服的大小。",
-      "fontDefault": "系统默认"
+      "fontDefault": "系统默认",
+      "showMembershipMessages": "显示群成员进出群消息",
+      "saveFailed": "保存失败，请重试。"
     },
     "language": {
       "title": "语言",
@@ -349,7 +351,12 @@
       "verificationMessage": "发送验证信息",
       "verificationPlaceholder": "验证信息",
       "blockTitle": "拉黑用户",
-      "unblockTitle": "解除拉黑"
+      "unblockTitle": "解除拉黑",
+      "membershipMessages": "成员变动消息",
+      "membershipMembers": "全体成员可见",
+      "membershipAdmins": "仅管理员可见",
+      "membershipNobody": "所有人不可见",
+      "membershipNote": "适用于历史和新的进退群消息。有查看权限时，仍遵循个人的显示偏好。"
     },
     "directory": {
       "groups": "群聊",
@@ -419,6 +426,7 @@
     "threadLoadFailed": "话题状态加载失败，请重试。",
     "threadUpdateFailed": "话题更新失败，请重试。",
     "empty": "暂无消息",
+    "emptyVisible": "暂无可显示的消息",
     "missing": "这条消息已删除或无法查看。",
     "loadFailed": "消息加载失败，请重试。",
     "editing": "编辑消息",

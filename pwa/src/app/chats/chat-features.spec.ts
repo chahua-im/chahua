@@ -35,6 +35,7 @@ describe('Chat feature requests', () => {
       return query;
     },
     get: vi.fn(),
+    membershipPolicy: () => testChat.membershipMessagePolicy,
     isMuted: () => false,
     mutedUntil: () => undefined,
     chatState: vi.fn(),
@@ -49,7 +50,15 @@ describe('Chat feature requests', () => {
         provideChahuaBaseUrl('/_api'),
         { provide: ChatListStore, useValue: lists },
         { provide: ChatStore, useValue: store },
-        { provide: SessionStore, useValue: { user: signal(testUser), token: signal(undefined) } },
+        {
+          provide: SessionStore,
+          useValue: {
+            requireChatSettings: SessionStore.prototype.requireChatSettings,
+            acceptChatSettings: SessionStore.prototype.acceptChatSettings,
+            user: signal(testUser),
+            token: signal(undefined),
+          },
+        },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -65,11 +74,13 @@ describe('Chat feature requests', () => {
     vi.spyOn(content, 'getScrollElement').mockResolvedValue(scroll);
     fixture.componentInstance['query'].set('消息');
     fixture.detectChanges();
-    http.expectOne((req) => req.url.endsWith('/messages/search')).flush({ messages: [], nextOffset: 40 });
+    http
+      .expectOne((req) => req.url.endsWith('/messages/search'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [], nextOffset: 40 });
     await vi.waitFor(() => {
       fixture.detectChanges();
       const next = http.expectOne((req) => req.params.get('offset') === '40');
-      next.flush({ messages: [] });
+      next.flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     });
     await fixture.whenStable();
     http.expectNone((req) => req.url.endsWith('/messages/search'));
@@ -189,7 +200,9 @@ describe('Chat feature requests', () => {
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await fixture.whenStable();
     const component = fixture.componentInstance;
     const field = component['Field'].Name;

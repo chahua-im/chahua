@@ -96,14 +96,7 @@ describe('Settings', () => {
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
         { provide: Connection, useValue: mockRealtime() },
-        {
-          provide: SessionStore,
-          useValue: {
-            user: signal({ ...testUser, avatarUrl: '/avatar.jpg' }),
-            devUid: () => 1,
-            switchDevUid: () => {},
-          },
-        },
+        SessionStore,
         { provide: ModalController, useValue: { dismiss } },
         { provide: PushNotifications, useValue: notifications },
         { provide: AppUpdates, useValue: updates },
@@ -120,6 +113,9 @@ describe('Settings', () => {
         },
       ],
     });
+    TestBed.inject(SessionStore).user.set({ ...testUser, avatarUrl: '/avatar.jpg' });
+    vi.spyOn(TestBed.inject(SessionStore), 'devUid').mockReturnValue(1);
+    vi.spyOn(TestBed.inject(SessionStore), 'switchDevUid').mockImplementation(() => {});
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(SettingsHost);
     fixture.detectChanges();
@@ -231,7 +227,7 @@ describe('Settings', () => {
     http.expectNone(presenceEndpoint);
   });
 
-  it('links to general settings and persists preferences across page visits', async () => {
+  it('keeps chat preferences on the chat settings page and preserves saved choices', async () => {
     await openPage('聊天设置');
     expect(page.querySelector('ion-title')!.textContent).toBe('聊天设置');
     expect(page.textContent).not.toContain('语言');
@@ -249,6 +245,8 @@ describe('Settings', () => {
     expect(preview.style.getPropertyValue('--preview-line-height')).toBe('');
     const toggles = Array.from(page.querySelectorAll('ion-toggle'));
     expect(toggles[2].checked).toBe(true);
+    expect(toggles).toHaveLength(4);
+    expect(toggles[3].textContent).toContain('显示群成员进出群消息');
     toggles[0].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
     toggles[1].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
     toggles[2].dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
@@ -272,6 +270,52 @@ describe('Settings', () => {
     )!;
     done.click();
     expect(dismiss).toHaveBeenCalledOnce();
+    dismiss.mockClear();
+    await back();
+    TestBed.inject(SessionStore).user.update((user) => user && { ...user, showMembershipMessages: false });
+    await openPage('聊天设置');
+    expect(page.querySelector('ion-title')!.textContent).toBe('聊天设置');
+    expect(page.querySelectorAll('ion-toggle')).toHaveLength(4);
+    const membership = page.querySelectorAll('ion-toggle')[3];
+    expect(membership.textContent).toContain('显示群成员进出群消息');
+    expect(membership.checked).toBe(false);
+    membership.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: true } }));
+    await fixture.whenStable();
+    expect(membership.disabled).toBe(true);
+    expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(false);
+    const save = http.expectOne('/_api/users/me/chat-settings');
+    expect(save.request.method).toBe('PUT');
+    expect(save.request.body).toEqual({ showMembershipMessages: true });
+    save.flush({ showMembershipMessages: true });
+    await fixture.whenStable();
+    expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(true);
+    expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBeNull();
+    await back();
+    await openPage('聊天设置');
+    expect(page.querySelectorAll('ion-toggle')[3].checked).toBe(true);
+  });
+
+  it('restores the saved membership choice on failure and allows retrying the toggle', async () => {
+    await openPage('聊天设置');
+    const toggle = page.querySelectorAll('ion-toggle')[3];
+    toggle.checked = false;
+    toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
+    await fixture.whenStable();
+    expect(toggle.disabled).toBe(true);
+    expect(page.querySelector('ion-spinner')).not.toBeNull();
+    http.expectOne('/_api/users/me/chat-settings').flush('', { status: 503, statusText: 'Unavailable' });
+    await vi.waitFor(() => expect(toggle.checked).toBe(true));
+    await fixture.whenStable();
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(false);
+    expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(true);
+    expect(page.textContent).toContain('保存失败，请重试。');
+    toggle.dispatchEvent(new CustomEvent('ionChange', { detail: { checked: false } }));
+    http.expectOne('/_api/users/me/chat-settings').flush({ showMembershipMessages: false });
+    await fixture.whenStable();
+    expect(toggle.checked).toBe(false);
+    expect(TestBed.inject(Preferences).showMembershipMessages()).toBe(false);
+    expect(page.textContent).not.toContain('保存失败，请重试。');
   });
 
   it('switches and persists the color mode from general settings', async () => {
@@ -425,6 +469,7 @@ describe('Settings', () => {
         item.textContent?.trim(),
       ),
     ).toEqual(['消息通知', '隐私', '聊天设置', '表情和贴纸', '语言']);
+    expect(page.querySelector('ion-item[href="/settings/experimental"]')).toBeNull();
     expect(page.querySelector('ion-toggle')).toBeNull();
     expect(notifications.refresh).not.toHaveBeenCalled();
     notifications.permission.set('default');

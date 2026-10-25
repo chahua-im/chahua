@@ -27,7 +27,7 @@ import {
   eyeOutline,
   notificationsOutline,
   refreshOutline,
-  settingsOutline,
+  chatbubblesOutline,
 } from 'ionicons/icons';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -72,7 +72,7 @@ export class Settings {
     const locale = this.preferences.selectedLocale();
     return locale ? localeLabels[locale] : this.autoLabel();
   });
-  protected readonly generalIcon = settingsOutline;
+  protected readonly generalIcon = chatbubblesOutline;
 
   protected readonly presenceIcon = eyeOutline;
   protected readonly stickerIcon = happyOutline;

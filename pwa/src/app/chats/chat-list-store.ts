@@ -13,7 +13,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subject, takeUntil, timer, type Observable } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
-import { SessionStore } from '../session/session-store';
+import { ChatSettingsChanged, SessionStore } from '../session/session-store';
 import { conversationUnread } from './conversation-unread';
 import { conversationView } from './conversation-views';
 import { ListTab, type ListSelection } from './list-tabs';
@@ -21,8 +21,10 @@ import { ThreadsService } from '../../generated/endpoints/threads/threads.servic
 import {
   FriendRequestStatus,
   GroupKind,
+  MessageType,
   NotificationType,
   ServerWsMessageType,
+  SystemMessageKind,
   type ChatListItem,
   type ConversationUnreadSummary,
   type ConversationView,
@@ -62,6 +64,7 @@ enum ListFetch {
 }
 interface QueryState {
   archived: boolean;
+  showMembershipMessages: boolean;
   ids: WritableSignal<SnowflakeID[]>;
   cursor: WritableSignal<SnowflakeID | undefined>;
   loading: WritableSignal<boolean>;
@@ -204,6 +207,10 @@ export class ChatListStore {
       );
       onCleanup(this.chatInfo.watchReadStates([...scopes, ...threads]));
     });
+    effect(() => {
+      const show = this.session.user()?.showMembershipMessages ?? true;
+      untracked(() => this.syncChatSettings(show));
+    });
     // Live events keep a foregrounded list current; only a dropped socket can have missed rows.
     let wasConnected = this.realtime.connected();
     let dropped = false;
@@ -217,6 +224,10 @@ export class ChatListStore {
       wasConnected = connected;
     });
     this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId, threadId }) => {
+      if (kind === ChatChangeKind.MembershipMessagePolicy) {
+        this.refreshChats();
+        return;
+      }
       if (kind === ChatChangeKind.Read) {
         if (threadId)
           for (const { state } of [this.activeThreads, this.archivedThreads]) this.clearUnreadErrors(state, [threadId]);
@@ -315,9 +326,19 @@ export class ChatListStore {
     return this.queries.get(archived)!.handle;
   }
 
+  private settingsVisibility = this.session.user()?.showMembershipMessages ?? true;
+
+  private syncChatSettings(show = this.session.user()?.showMembershipMessages ?? true) {
+    if (show === this.settingsVisibility) return false;
+    this.settingsVisibility = show;
+    this.refreshChats();
+    return true;
+  }
+
   private createQuery(archived: boolean): { state: QueryState; handle: ChatQuery } {
     const state: QueryState = {
       archived,
+      showMembershipMessages: this.session.user()?.showMembershipMessages ?? true,
       ids: signal([]),
       cursor: signal(undefined),
       loading: signal(false),
@@ -439,9 +460,9 @@ export class ChatListStore {
           } else if (mode === ListFetch.Recent) {
             if (!(await this.readRecent(query, generation))) return;
           } else {
-            const { page, version } = await this.readPage(query, after);
+            const { page, version, policyGeneration } = await this.readPage(query, after);
             if (this.destroyRef.destroyed || generation !== query.generation) return;
-            this.chatInfo.acceptChats(page.chats, version);
+            this.chatInfo.acceptChats(page.chats, version, policyGeneration);
             this.clearUnreadErrors(
               query,
               page.chats.map((chat) => chat.id),
@@ -451,8 +472,12 @@ export class ChatListStore {
           }
           if (mode !== ListFetch.Recent || recentVersion === query.recentVersion) return;
         }
-      } catch {
+      } catch (error) {
         if (!this.destroyRef.destroyed && generation === query.generation) {
+          if (error instanceof ChatSettingsChanged) {
+            if (!this.syncChatSettings()) this.invalidateQuery(query);
+            return;
+          }
           query.listError.set(
             mode === ListFetch.Load
               ? ChatListError.Load
@@ -483,9 +508,11 @@ export class ChatListStore {
     return promise;
   }
 
-  private readPage(query: QueryState, cursor?: SnowflakeID) {
+  private readPage(query: QueryState, cursor?: SnowflakeID, show = query.showMembershipMessages) {
     // Snapshot before the request so live previews received meanwhile keep their version.
     const version = this.chatInfo.snapshot();
+    const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
+    const user = this.session.user();
     return firstValueFrom(
       this.api
         .getChats({
@@ -494,30 +521,46 @@ export class ChatListStore {
           ...(cursor ? { after: cursor } : {}),
         })
         .pipe(takeUntil(query.cancel), takeUntilDestroyed(this.destroyRef)),
-    ).then((page) => ({ page, version }));
+    ).then((page) => {
+      this.session.requireChatSettings(page.chatSettings, user);
+      if (
+        page.chatSettings.showMembershipMessages !== show ||
+        policyGeneration !== this.chatInfo.membershipPolicyRequestGeneration()
+      )
+        throw new ChatSettingsChanged();
+      return { page, version, policyGeneration };
+    });
   }
 
   /** Applies each page before reading the next, up to the depth already loaded or the tail. */
   private async readFromHead(query: QueryState, generation: number) {
     const depth = query.ids().length;
+    const show = this.session.user()?.showMembershipMessages ?? true;
+    const filterChanged = query.showMembershipMessages !== show;
+    const pages: Awaited<ReturnType<ChatListStore['readPage']>>[] = [];
     const read: SnowflakeID[] = [];
-    let loaded = 0;
-    let cursor: SnowflakeID | undefined;
-    do {
-      const { page, version } = await this.readPage(query, cursor);
-      if (this.destroyRef.destroyed || generation !== query.generation) return false;
-      this.chatInfo.acceptChats(page.chats, version);
+    const apply = ({ page, version, policyGeneration }: Awaited<ReturnType<ChatListStore['readPage']>>) => {
+      this.chatInfo.acceptChats(page.chats, version, policyGeneration);
       this.clearUnreadErrors(
         query,
         page.chats.map((chat) => chat.id),
       );
-      read.push(...page.chats.map((chat) => chat.id));
       query.ids.update((ids) => [...new Set([...ids, ...page.chats.map((chat) => chat.id)])]);
-      loaded += page.chats.length;
-      cursor = page.nextCursor;
       this.applyBoundary(query, page.chats, page.nextCursor);
+    };
+    let loaded = 0;
+    let cursor: SnowflakeID | undefined;
+    do {
+      const result = await this.readPage(query, cursor, show);
+      if (this.destroyRef.destroyed || generation !== query.generation) return false;
+      if (filterChanged) pages.push(result);
+      else apply(result);
+      read.push(...result.page.chats.map((chat) => chat.id));
+      loaded += result.page.chats.length;
+      cursor = result.page.nextCursor;
     } while (cursor && loaded < depth);
-    // Replace membership only after the refreshed window is complete.
+    for (const page of pages) apply(page);
+    query.showMembershipMessages = show;
     query.ids.set([...new Set(read)]);
     return true;
   }
@@ -527,9 +570,9 @@ export class ChatListStore {
     const boundary = query.loadedThrough();
     let cursor: SnowflakeID | undefined;
     do {
-      const { page, version } = await this.readPage(query, cursor);
+      const { page, version, policyGeneration } = await this.readPage(query, cursor);
       if (this.destroyRef.destroyed || generation !== query.generation) return false;
-      this.chatInfo.acceptChats(page.chats, version);
+      this.chatInfo.acceptChats(page.chats, version, policyGeneration);
       this.clearUnreadErrors(
         query,
         page.chats.map((chat) => chat.id),
@@ -551,8 +594,20 @@ export class ChatListStore {
 
   private receiveMessage(message: MessageResponse) {
     if (message.replyRootId) return;
+    const uid = this.session.user()?.uid;
+    // Joining changes list membership even when the announcement is hidden.
+    if (
+      uid != null &&
+      message.messageType === MessageType.system &&
+      ((message.systemKind === SystemMessageKind.member_joined && message.sender.uid === uid) ||
+        (message.systemKind === SystemMessageKind.member_added && message.systemLinks?.uid === uid))
+    ) {
+      this.queueRow(message.chatId);
+      return;
+    }
     const active = [...this.queries.values()].map(({ state }) => state).filter((query) => query.consumers.size);
-    if (active.length) this.queueUnread(message.chatId);
+    this.queueUnread(message.chatId);
+    if (!this.chatInfo.isChatMessageVisible(message)) return;
     for (const query of active) {
       if (!query.ids().includes(message.chatId)) {
         query.recentVersion++;
@@ -665,12 +720,33 @@ export class ChatListStore {
         while (!this.destroyRef.destroyed && visible() && query.pendingRows.has(id)) {
           const revision = query.pendingRows.get(id);
           const version = this.chatInfo.snapshot();
+          const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
           const subscriptionVersion = this.chatInfo.subscriptionSnapshot();
+          const user = this.session.user();
+          const visibility = user?.showMembershipMessages ?? true;
           if ('generation' in query) {
-            const page = await this.response(this.api.getChats({ limit: 1, chatId: id, archived: query.archived }));
-            if (query.pendingRows.get(id) !== revision) continue;
+            const page = await this.response(
+              this.api.getChats({
+                limit: 1,
+                chatId: id,
+                archived: query.archived,
+              }),
+            );
+            try {
+              this.session.requireChatSettings(page.chatSettings, user);
+            } catch (error) {
+              if (!(error instanceof ChatSettingsChanged)) throw error;
+              if (!this.syncChatSettings()) this.invalidateQuery(query);
+              return;
+            }
+            if (
+              policyGeneration !== this.chatInfo.membershipPolicyRequestGeneration() ||
+              query.pendingRows.get(id) !== revision ||
+              visibility !== (this.session.user()?.showMembershipMessages ?? true)
+            )
+              continue;
             if (dirty()) return;
-            this.chatInfo.acceptChats(page.chats, version);
+            this.chatInfo.acceptChats(page.chats, version, policyGeneration);
             this.clearUnreadErrors(
               query,
               page.chats.map((chat) => chat.id),
@@ -682,7 +758,11 @@ export class ChatListStore {
             const page = await this.response(
               this.threadsApi.getThreads({ limit: 1, rootId: id, archived: query.archived }),
             );
-            if (query.pendingRows.get(id) !== revision) continue;
+            if (
+              query.pendingRows.get(id) !== revision ||
+              visibility !== (this.session.user()?.showMembershipMessages ?? true)
+            )
+              continue;
             if (dirty()) return;
             this.chatInfo.acceptThreads(page.threads, version, subscriptionVersion);
             this.clearUnreadErrors(

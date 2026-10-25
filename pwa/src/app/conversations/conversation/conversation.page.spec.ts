@@ -1,3 +1,4 @@
+import { SystemMessageKind } from '../../../generated/models';
 import { Location } from '@angular/common';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -81,6 +82,7 @@ describe('ConversationPage', () => {
   let resizes: Map<Element, () => void>;
   const avatars = signal(false);
   const dmDetails = signal(true);
+  const membershipMessages = signal(true);
   beforeEach(async () => {
     vi.spyOn(IonActionSheet.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonActionSheet.prototype, 'onDidDismiss').mockResolvedValue({
@@ -115,6 +117,7 @@ describe('ConversationPage', () => {
     vi.spyOn(IonModal.prototype, 'isOpen', 'set').mockImplementation(() => {});
     avatars.set(false);
     dmDetails.set(true);
+    membershipMessages.set(true);
     incoming = new Subject<MessageResponse>();
     events = new Subject<ServerWsMessage>();
     resync = new Subject<ResyncReason | void>();
@@ -127,10 +130,17 @@ describe('ConversationPage', () => {
         provideRouter([]),
         { provide: IonRouterOutlet, useValue: { canGoBack: vi.fn().mockReturnValue(true) } },
         { provide: Connection, useValue: mockRealtime({ messages$: incoming, events$: events, resync$: resync }) },
-        { provide: SessionStore, useValue: { user: signal(testUser) } },
+        {
+          provide: SessionStore,
+          useValue: {
+            requireChatSettings: SessionStore.prototype.requireChatSettings,
+            acceptChatSettings: SessionStore.prototype.acceptChatSettings,
+            user: signal(testUser),
+          },
+        },
         {
           provide: Preferences,
-          useValue: { showAllAvatars: avatars, showDmDetails: dmDetails },
+          useValue: { showAllAvatars: avatars, showDmDetails: dmDetails, showMembershipMessages: membershipMessages },
         },
         provideHttpClient(withInterceptors([jsonInterceptor])),
         provideHttpClientTesting(),
@@ -187,9 +197,11 @@ describe('ConversationPage', () => {
     http = TestBed.inject(HttpTestingController);
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
-      .flush({ messages: [{ ...wireMessage }], olderCursor: wireMessage.id });
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage }],
+      olderCursor: wireMessage.id,
+    });
     await fixture.whenStable();
     fixture.detectChanges();
   });
@@ -650,7 +662,11 @@ describe('ConversationPage', () => {
     const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
     expect(fixture.nativeElement.querySelector('.message-skeleton')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.message-skeleton-avatar')).toBeNull();
-    request.flush({ messages: [{ ...wireMessage }], olderCursor: wireMessage.id });
+    request.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage }],
+      olderCursor: wireMessage.id,
+    });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.message-skeleton')).toBeNull();
@@ -708,6 +724,7 @@ describe('ConversationPage', () => {
       );
     const first = component['loadTopicSources']();
     request().flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100', clientGeneratedId: 'root-100' },
         { ...wireMessage, id: '101', clientGeneratedId: 'reply-101', replyRootId: '100' },
@@ -734,7 +751,7 @@ describe('ConversationPage', () => {
     ]);
 
     const oversized = component['loadTopicSources']();
-    request().flush({ messages: [], olderCursor: '99' });
+    request().flush({ chatSettings: { showMembershipMessages: true }, messages: [], olderCursor: '99' });
     expect(await oversized).toEqual({ error: ForwardSelectionError.TooMany });
 
     const failed = component['loadTopicSources']();
@@ -939,6 +956,7 @@ describe('ConversationPage', () => {
         `/_api/chats/${wireChat.id}/messages?max=50&around=${read.lastReadMessageId ?? rootId}&threadId=${rootId}`,
       )
       .flush({
+        chatSettings: { showMembershipMessages: true },
         messages: [
           { ...wireMessage, id: rootId, clientGeneratedId: `root-${rootId}` },
           {
@@ -979,6 +997,7 @@ describe('ConversationPage', () => {
         `/_api/chats/${wireChat.id}/messages?max=50${threadId ? `&around=101&threadId=${decodeId(threadId)}` : ''}`,
       )
       .flush({
+        chatSettings: { showMembershipMessages: true },
         messages: [{ ...wireMessage, ...(threadId ? { replyRootId: decodeId(threadId) } : {}) }],
         olderCursor: wireMessage.id,
       });
@@ -1053,9 +1072,11 @@ describe('ConversationPage', () => {
     const loading = component['loadPage'](PageDirection.Older);
     await Promise.resolve();
     const older = { ...testMessage, id: encodeId('9007199254741001'), message: '更早的消息' };
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`)
-      .flush({ messages: [{ ...wireMessage, id: decodeId(older.id), message: older.message }], olderCursor: null });
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: decodeId(older.id), message: older.message }],
+      olderCursor: null,
+    });
     await loading;
     expect(component['conversation'].items().map((message) => message.id)).toEqual([older.id, testMessage.id]);
   });
@@ -1068,7 +1089,7 @@ describe('ConversationPage', () => {
     await Promise.resolve();
     http
       .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`)
-      .flush({ messages: [{ ...wireMessage, id: '100' }] });
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id: '100' }] });
     await Promise.resolve();
     content.dispatchEvent(new Event('touchend'));
     await Promise.resolve();
@@ -1090,7 +1111,7 @@ describe('ConversationPage', () => {
     await Promise.resolve();
     http
       .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`)
-      .flush({ messages: [{ ...wireMessage, id: '100' }] });
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id: '100' }] });
     await fixture.whenStable();
     expect(component['conversation'].items()).toHaveLength(2);
   });
@@ -1405,6 +1426,7 @@ describe('ConversationPage', () => {
     await fixture.whenStable();
     expect(component['showDownButton']()).toBe(false);
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       olderCursor: wireMessage.id,
       ...(hasNewer ? { newerCursor: wireMessage.id } : {}),
@@ -1480,6 +1502,7 @@ describe('ConversationPage', () => {
     try {
       const opening = component['conversation'].open(encodeId('200'));
       http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=200`).flush({
+        chatSettings: { showMembershipMessages: true },
         messages: [100, 200, 300].map((id) => ({ ...wireMessage, id: String(id) })),
       });
       await opening;
@@ -1522,7 +1545,7 @@ describe('ConversationPage', () => {
     const retrying = component['navigateDown']();
     http
       .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`)
-      .flush({ messages: [{ ...wireMessage, id: '299' }] });
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id: '299' }] });
     await retrying;
     expect(component['returnMessageIds']()).toEqual([]);
     expect(component['conversation'].error()).toBe(ConversationError.Missing);
@@ -1548,6 +1571,7 @@ describe('ConversationPage', () => {
   async function openUnreadHistory() {
     const opening = component['conversation'].open(encodeId('100'));
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [100, 101, 102].map((id) => ({
         ...wireMessage,
         id: String(id),
@@ -1592,7 +1616,9 @@ describe('ConversationPage', () => {
     mockUnreadStartAt(100);
     const navigating = component['navigateDown']();
     await vi.waitFor(() =>
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [{ ...wireMessage }] }),
+      http
+        .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+        .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage }] }),
     );
     await navigating;
     expect(component['conversation'].page()?.messages).toEqual([testMessage]);
@@ -1607,7 +1633,9 @@ describe('ConversationPage', () => {
     expect(component['unreadStartId']()).toBeUndefined();
     const navigating = component['navigateDown']();
     await vi.waitFor(() =>
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [{ ...wireMessage }] }),
+      http
+        .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+        .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage }] }),
     );
     await navigating;
     expect(component['conversation'].page()?.messages).toEqual([testMessage]);
@@ -1621,9 +1649,10 @@ describe('ConversationPage', () => {
     component['returnMessageIds'].set([encodeId('300')]);
     const navigating = component['navigateDown']();
     await vi.waitFor(() =>
-      http
-        .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`)
-        .flush({ messages: [{ ...wireMessage, id: '300' }] }),
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=300`).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [{ ...wireMessage, id: '300' }],
+      }),
     );
     await navigating;
     expect(component['returnMessageIds']()).toEqual([]);
@@ -1659,7 +1688,11 @@ describe('ConversationPage', () => {
       await Promise.resolve();
       http
         .expectOne((req) => req.url.endsWith('/messages') && req.params.has('before'))
-        .flush({ messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older-100' }], olderCursor: '100' });
+        .flush({
+          chatSettings: { showMembershipMessages: true },
+          messages: [{ ...wireMessage, id: '100', clientGeneratedId: 'older-100' }],
+          olderCursor: '100',
+        });
       await loading;
       await fixture.whenStable();
       expect(message.querySelector('.sender')).toBeNull();
@@ -1688,7 +1721,11 @@ describe('ConversationPage', () => {
     expect(button.querySelector('ion-spinner')).not.toBeNull();
     expect([...content.children]).toEqual(children);
     expect(scroll.scrollTop).toBe(50);
-    request.flush({ messages: [{ ...wireMessage, id: '9007199254741001' }], olderCursor: '9007199254741001' });
+    request.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: '9007199254741001' }],
+      olderCursor: '9007199254741001',
+    });
     await loading;
     await fixture.whenStable();
     expect([...content.children]).toEqual(children);
@@ -1762,7 +1799,9 @@ describe('ConversationPage', () => {
     fixture.detectChanges();
     http.expectOne('/_api/group/9007199254740995').flush({ ...wireChat, id: '9007199254740995' });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    http.expectOne('/_api/chats/9007199254740995/messages?max=50').flush({ messages: [], olderCursor: null });
+    http
+      .expectOne('/_api/chats/9007199254740995/messages?max=50')
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [], olderCursor: null });
     await Promise.resolve();
     fixture.detectChanges();
     expect(oldPage.cancelled).toBe(true);
@@ -1799,6 +1838,7 @@ describe('ConversationPage', () => {
     expect(component['draft']()).toBe('群里的草稿');
     expect(fixture.nativeElement.querySelector('.message-skeleton')).toBeNull();
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         {
           ...wireMessage,
@@ -1941,7 +1981,9 @@ describe('ConversationPage', () => {
       for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
         req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     await fixture.whenStable();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [structuredClone(wireMessage)] });
     await fixture.whenStable();
     expect(component['draft']()).toBe('保留草稿');
     const sending = component['sendMessage']();
@@ -1968,7 +2010,9 @@ describe('ConversationPage', () => {
         req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     await fixture.whenStable();
     const replyRequest = http.expectOne(`/_api/chats/${wireChat.id}/messages/${wireMessage.id}`);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [structuredClone(wireMessage)] });
     component['updateDraft']('继续编辑');
     expect(drafts.get(testChat.id)?.replyTo).toBe(wireMessage.id);
     component['cancelReply']();
@@ -2208,7 +2252,11 @@ describe('ConversationPage', () => {
     component['position'].set(undefined);
     incoming.next(live);
     incoming.next(live);
-    olderRequest.flush({ messages: [{ ...wireMessage, id: '9007199254741001' }], olderCursor: null });
+    olderRequest.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: '9007199254741001' }],
+      olderCursor: null,
+    });
     await loading;
     expect(component['conversation'].items().map((message) => message.id)).toEqual([
       encodeId('9007199254741001'),
@@ -2220,8 +2268,522 @@ describe('ConversationPage', () => {
     scroll.scrollTop = 120;
     component['atBottom'].set(true);
     incoming.next({ ...live, id: encodeId('9007199254741009') });
+    await fixture.whenStable();
     await component['positionAndRead']();
     expect(scroll.scrollTop).toBe(800);
+  });
+
+  it('hides every membership action from history and live messages, reloading visibility without replacing known message nodes', async () => {
+    const actions = [
+      [SystemMessageKind.member_joined, 'joined the chat'],
+      [SystemMessageKind.member_left, 'left the chat'],
+      [SystemMessageKind.member_added, 'added 小花'],
+      [SystemMessageKind.member_removed, 'removed 小花'],
+    ] as const;
+    const loading = component['conversation'].load(PageDirection.Older);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: actions.map(([systemKind, message], index) => ({
+        ...wireMessage,
+        id: String(100 + index),
+        clientGeneratedId: `membership-${index}`,
+        messageType: MessageType.system,
+        systemKind,
+        message,
+        createdAt: '2026-09-04T12:00:00Z',
+      })),
+    });
+    await loading;
+    await fixture.whenStable();
+    expect(component['rows']()).toHaveLength(5);
+    const originalHistory = component['conversation'].items();
+    const original = fixture.nativeElement.querySelector(`[data-message-id="${wireMessage.id}"]`);
+    membershipMessages.set(false);
+    await fixture.whenStable();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage }] });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(1);
+    expect(fixture.nativeElement.querySelectorAll('.message-date')).toHaveLength(1);
+    expect(fixture.nativeElement.querySelector(`[data-message-id="${wireMessage.id}"]`)).toBe(original);
+    const hiddenLive = actions.map(([systemKind, message], index) => ({
+      ...testMessage,
+      id: encodeId(String(9007199254741010n + BigInt(index))),
+      clientGeneratedId: `live-membership-${index}`,
+      messageType: MessageType.system,
+      systemKind,
+      message,
+      systemLinks: { uid: 42 },
+    }));
+    hiddenLive.forEach((message) => incoming.next(message));
+    incoming.next({
+      ...testMessage,
+      id: encodeId('9007199254741020'),
+      clientGeneratedId: 'normal',
+      message: 'joined the chat',
+    });
+    await fixture.whenStable();
+    expect(component['rows']()).toHaveLength(2);
+    expect(component['rows']().map(({ first, last, dateBreak }) => ({ first, last, dateBreak }))).toEqual([
+      { first: true, last: false, dateBreak: true },
+      { first: false, last: true, dateBreak: false },
+    ]);
+    const retained = [
+      'pinned a message',
+      'unpinned a message',
+      'pinned a message in this thread',
+      'unpinned a message in this thread',
+      "accepted 小花's friend request",
+      'unknown action',
+    ];
+    retained.forEach((message, index) =>
+      incoming.next({
+        ...testMessage,
+        id: encodeId(String(9007199254741030n + BigInt(index))),
+        clientGeneratedId: `retained-${index}`,
+        messageType: MessageType.system,
+        message,
+      }),
+    );
+    await fixture.whenStable();
+    expect(component['rows']()).toHaveLength(8);
+    const history = [...originalHistory.slice(0, -1), ...hiddenLive, ...component['conversation'].items()].map(
+      (message) => ({
+        ...wireMessage,
+        ...message,
+        id: decodeId(message.id),
+        chatId: wireChat.id,
+      }),
+    );
+    membershipMessages.set(true);
+    await fixture.whenStable();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: history });
+    await fixture.whenStable();
+    expect(component['rows']()).toHaveLength(16);
+    http.expectNone(() => true);
+    membershipMessages.set(false);
+    TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm }]);
+    await fixture.whenStable();
+    http.expectOne(`/_api/chats/${wireChat.id}/read-receipt`).flush({});
+    expect(component['rows']()).toHaveLength(16);
+    http.expectNone(() => true);
+  });
+
+  it('rebuilds the visible range when a continuation discovers settings from another device', async () => {
+    const session = TestBed.inject(SessionStore);
+    vi.spyOn(TestBed.inject(Preferences), 'showMembershipMessages').mockImplementation(
+      () => session.user()?.showMembershipMessages ?? true,
+    );
+    membershipMessages.set(false);
+    await fixture.whenStable();
+    const previous = component['conversation'].items();
+    const loading = component['conversation'].load(PageDirection.Older);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+      chatSettings: { showMembershipMessages: false },
+      messages: [{ ...wireMessage, id: '50' }],
+    });
+    await loading;
+    await fixture.whenStable();
+    expect(component['conversation'].items()).toEqual(previous);
+    const request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`);
+    request.flush({ chatSettings: { showMembershipMessages: false }, messages: [{ ...wireMessage }] });
+    await fixture.whenStable();
+    expect(component['conversation'].hideMembershipMessages).toBe(true);
+    expect(component['conversation'].items()).toEqual(previous);
+  });
+
+  it('confirms only the visible message after its bubble is fully visible', async () => {
+    membershipMessages.set(false);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    Object.defineProperties(scroll, {
+      clientHeight: { value: 200, configurable: true },
+      scrollHeight: { value: 220, configurable: true },
+    });
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    const opening = component['conversation'].open(undefined, false, true);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: '100' }],
+    });
+    await opening;
+    await fixture.whenStable();
+    const element = fixture.nativeElement.querySelector('app-message') as HTMLElement;
+    const rect = vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 220));
+    component.ionViewDidEnter();
+    await component['positionAndRead']();
+    const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
+    markRead.mockClear();
+    await component['trackScroll']();
+    expect(markRead).not.toHaveBeenCalled();
+    rect.mockReturnValue(new DOMRect(0, -20, 300, 220));
+    scroll.scrollTop = 20;
+    await component['trackScroll']();
+    expect(markRead).toHaveBeenLastCalledWith(testChat.id, encodeId('100'));
+  });
+
+  it('shows a confirmed filtered empty state without advancing a read cursor', async () => {
+    membershipMessages.set(false);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    const opening = component['conversation'].open(undefined, false, true);
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
+    await opening;
+    await fixture.whenStable();
+    component.ionViewDidEnter();
+    await component['positionAndRead']();
+    expect(fixture.nativeElement.textContent).toContain('暂无可显示的消息');
+    expect(fixture.nativeElement.querySelector('.pagination-control')).toBeNull();
+    expect(TestBed.inject(ChatStore).markRead).not.toHaveBeenCalled();
+    http.expectNone(() => true);
+  });
+
+  it('does not send read confirmations for hidden targets or hidden live events', async () => {
+    membershipMessages.set(false);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    Object.defineProperty(scroll, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(scroll, 'scrollHeight', { value: 800, configurable: true });
+    const loading = component['conversation'].open(encodeId('101'), false, true);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        {
+          ...wireMessage,
+          id: '101',
+          messageType: MessageType.system,
+          systemKind: SystemMessageKind.member_joined,
+          message: 'joined the chat',
+        },
+      ],
+    });
+    await loading;
+    await fixture.whenStable();
+    component.ionViewDidEnter();
+    component['position'].set(undefined);
+    const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
+    markRead.mockClear();
+    scroll.scrollTop = 0;
+    await component['trackScroll']();
+    expect(markRead).not.toHaveBeenCalled();
+    scroll.scrollTop = 600;
+    await component['trackScroll']();
+    expect(component['rows']()).toEqual([]);
+    expect(markRead).not.toHaveBeenCalled();
+    incoming.next({
+      ...testMessage,
+      id: encodeId('102'),
+      messageType: MessageType.system,
+      systemKind: SystemMessageKind.member_left,
+      message: 'left the chat',
+    });
+    await fixture.whenStable();
+    expect(markRead).not.toHaveBeenCalled();
+    markRead.mockClear();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    await component['trackScroll']();
+    expect(markRead).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'does not skip an unread visible message before a hidden tail (deleted tail: %s)',
+    async (deletedTail) => {
+      membershipMessages.set(false);
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+      Object.defineProperties(scroll, {
+        clientHeight: { value: 200, configurable: true },
+        scrollHeight: { value: 220, configurable: true },
+      });
+      vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+      const loading = component['conversation'].open(encodeId('100'), false, true);
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [
+          { ...wireMessage, id: '100', clientGeneratedId: 'visible' },
+          {
+            ...wireMessage,
+            id: '101',
+            clientGeneratedId: 'hidden',
+            messageType: MessageType.system,
+            systemKind: SystemMessageKind.member_left,
+            message: 'left the chat',
+          },
+          ...(deletedTail
+            ? [{ ...wireMessage, id: '102', clientGeneratedId: 'deleted', isDeleted: true, message: null }]
+            : []),
+        ],
+      });
+      await loading;
+      await fixture.whenStable();
+      const element = fixture.nativeElement.querySelector('app-message') as HTMLElement;
+      const rect = vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 220));
+      component.ionViewDidEnter();
+      await component['positionAndRead']();
+      const markRead = vi.mocked(TestBed.inject(ChatStore).markRead);
+      markRead.mockClear();
+      scroll.scrollTop = 0;
+      await component['trackScroll']();
+      expect(markRead).not.toHaveBeenCalled();
+      rect.mockReturnValue(new DOMRect(0, -20, 300, 220));
+      scroll.scrollTop = 20;
+      await component['trackScroll']();
+      expect(markRead).toHaveBeenLastCalledWith(testChat.id, encodeId('100'));
+    },
+  );
+
+  it.each([false, true])(
+    'locates a visible neighbour of a hidden membership link (following neighbour: %s)',
+    async (following) => {
+      membershipMessages.set(false);
+      const navigating = component['goTo']({ type: ConversationTargetKind.Message, messageId: encodeId('101') });
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [
+          { ...wireMessage, id: '100', clientGeneratedId: 'before' },
+          {
+            ...wireMessage,
+            id: '101',
+            clientGeneratedId: 'hidden',
+            messageType: MessageType.system,
+            systemKind: SystemMessageKind.member_joined,
+            message: 'joined the chat',
+          },
+          ...(following ? [{ ...wireMessage, id: '102', clientGeneratedId: 'after' }] : []),
+        ],
+      });
+      await navigating;
+      expect(component['position']()).toMatchObject({ messageId: encodeId(following ? '102' : '100') });
+      expect(component['rows']().some(({ message }) => message.id === encodeId('101'))).toBe(false);
+    },
+  );
+
+  it.each([
+    { neighbours: ['100', '103'], anchor: '103', retry: false },
+    { neighbours: ['100'], anchor: '100', retry: false },
+    { neighbours: [], anchor: undefined, retry: false },
+    { neighbours: ['100', '103'], anchor: '103', retry: true },
+  ])(
+    'retains an all-membership historical location when hiding events ($anchor, retry: $retry)',
+    async ({ neighbours, anchor, retry }) => {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+      Object.defineProperties(scroll, {
+        clientHeight: { value: 200, configurable: true },
+        scrollHeight: { value: 1000, configurable: true },
+      });
+      vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+      const history = ['101', '102'].map((id) => ({
+        ...wireMessage,
+        id,
+        clientGeneratedId: `membership-${id}`,
+        messageType: MessageType.system,
+        systemKind: SystemMessageKind.member_joined,
+        message: 'joined the chat',
+      }));
+      const loading = component['conversation'].open(encodeId('101'));
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: history,
+        olderCursor: '101',
+        newerCursor: '102',
+      });
+      await loading;
+      await fixture.whenStable();
+      const elements = [...fixture.nativeElement.querySelectorAll('app-message')] as HTMLElement[];
+      elements.forEach((element, index) =>
+        vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, index * 50, 300, 50)),
+      );
+      component.ionViewDidEnter();
+      await component['positionAndRead']();
+      scroll.scrollTop = 500;
+      await component['trackScroll']();
+      component['leave'](true);
+      membershipMessages.set(false);
+      await fixture.whenStable();
+      const reopening = vi.spyOn(component['conversation'], 'open');
+      component['active'].set(true);
+      await fixture.whenStable();
+      let request = http.expectOne((request) => request.url.endsWith('/messages'));
+      const around = request.request.params.get('around');
+      if (retry) {
+        request.flush('offline', { status: 503, statusText: 'Unavailable' });
+        await fixture.whenStable();
+        component.ionViewDidEnter();
+        await component['positionAndRead']();
+        component['retryAction']();
+        request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`);
+      }
+      const position = vi.spyOn(component['position'], 'set');
+      request.flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [
+          history[0],
+          ...neighbours.map((id) => ({ ...wireMessage, id, clientGeneratedId: `visible-${id}` })),
+        ].sort((a, b) => Number(a.id) - Number(b.id)),
+      });
+      await reopening.mock.results.at(-1)!.value;
+      await fixture.whenStable();
+      expect(around).toBe('101');
+      expect(component['rows']().map((row) => decodeId(row.message.id!))).toEqual(neighbours);
+      if (anchor) {
+        expect(position).toHaveBeenCalledWith(expect.objectContaining({ messageId: encodeId(anchor), offset: 50 }));
+      } else {
+        expect(scroll.scrollTop).toBe(scroll.scrollHeight);
+      }
+      http.expectNone(() => true);
+    },
+  );
+
+  it('preserves the reading anchor when membership visibility changes under settings', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    Object.defineProperties(scroll, {
+      clientHeight: { value: 200, configurable: true },
+      scrollHeight: { value: 1000, configurable: true },
+    });
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
+    const loading = component['conversation'].open(encodeId('100'));
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        { ...wireMessage, id: '100', clientGeneratedId: 'before' },
+        {
+          ...wireMessage,
+          id: '101',
+          clientGeneratedId: 'hidden',
+          messageType: MessageType.system,
+          systemKind: SystemMessageKind.member_joined,
+          message: 'joined the chat',
+        },
+        { ...wireMessage, id: '102', clientGeneratedId: 'anchor' },
+      ],
+    });
+    await loading;
+    await fixture.whenStable();
+    const history = component['conversation']
+      .items()
+      .map((message) => ({ ...wireMessage, ...message, id: decodeId(message.id), chatId: wireChat.id }));
+    const elements = [...fixture.nativeElement.querySelectorAll('app-message')] as HTMLElement[];
+    vi.spyOn(elements[0], 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(0, 300 - scroll.scrollTop, 300, 100),
+    );
+    vi.spyOn(elements[1], 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(0, 400 - scroll.scrollTop, 300, 40),
+    );
+    vi.spyOn(elements[2], 'getBoundingClientRect').mockImplementation(
+      () => new DOMRect(0, (membershipMessages() ? 480 : 440) - scroll.scrollTop, 300, 100),
+    );
+    component.ionViewDidEnter();
+    await component['positionAndRead']();
+    scroll.scrollTop = 500;
+    await component['trackScroll']();
+    component['leave'](true);
+    membershipMessages.set(false);
+    await fixture.whenStable();
+    component['active'].set(true);
+    await fixture.whenStable();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=102`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: history.filter((message) => message.id !== '101').map((message) => ({ ...message })),
+    });
+    await fixture.whenStable();
+    component.ionViewDidEnter();
+    await component['positionAndRead']();
+    expect(scroll.scrollTop).toBe(460);
+    expect(fixture.nativeElement.querySelector('[data-message-id="102"]')).toBe(elements[2]);
+    component['leave'](true);
+    membershipMessages.set(true);
+    await fixture.whenStable();
+    component['active'].set(true);
+    await fixture.whenStable();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=102`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: history });
+    await fixture.whenStable();
+    component.ionViewDidEnter();
+    await component['positionAndRead']();
+    expect(scroll.scrollTop).toBe(500);
+  });
+
+  it('hides membership messages before delayed group metadata arrives on direct entry', async () => {
+    membershipMessages.set(false);
+    const chatId = '9007199254740995';
+    fixture.componentRef.setInput('id', chatId);
+    fixture.detectChanges();
+    const metadata = http.expectOne(`/_api/group/${chatId}`);
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${chatId}/messages?max=50`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        {
+          ...wireMessage,
+          chatId,
+          messageType: MessageType.system,
+          systemKind: SystemMessageKind.member_joined,
+          message: 'joined the chat',
+        },
+      ],
+    });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(0);
+    metadata.flush({ ...wireChat, id: chatId });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelectorAll('app-message')).toHaveLength(0);
+  });
+
+  it('keeps both pagination cursors when an entire page consists of hidden membership messages', async () => {
+    membershipMessages.set(false);
+    const opening = component['conversation'].open(encodeId('101'), false, true);
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        {
+          ...wireMessage,
+          id: '101',
+          messageType: MessageType.system,
+          systemKind: SystemMessageKind.member_joined,
+          message: 'joined the chat',
+        },
+      ],
+      olderCursor: '101',
+      newerCursor: '101',
+    });
+    await opening;
+    await fixture.whenStable();
+    expect(component['rows']()).toEqual([]);
+    expect(fixture.nativeElement.querySelectorAll('.pagination-control')).toHaveLength(2);
+    expect(fixture.nativeElement.textContent).not.toContain('暂无可显示的消息');
+    const hiddenPage = component['loadPage'](PageDirection.Newer);
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=101`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [
+        {
+          ...wireMessage,
+          id: '102',
+          messageType: MessageType.system,
+          systemKind: SystemMessageKind.member_left,
+          message: 'left the chat',
+        },
+      ],
+      newerCursor: '102',
+    });
+    await hiddenPage;
+    await fixture.whenStable();
+    expect(component['rows']()).toEqual([]);
+    expect(component['conversation'].page()?.olderCursor).toBe(encodeId('101'));
+    expect(component['conversation'].page()?.newerCursor).toBe(encodeId('102'));
+    const visiblePage = component['loadPage'](PageDirection.Newer);
+    await Promise.resolve();
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=102`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: '103', clientGeneratedId: 'visible' }],
+    });
+    await visiblePage;
+    await fixture.whenStable();
+    expect(component['rows']().map(({ message }) => message.id)).toEqual([encodeId('103')]);
+    expect(component['conversation'].items()).toHaveLength(3);
+    expect(component['conversation'].atLatest()).toBe(true);
   });
 
   it('renders grouping flags from the loaded and live message range', async () => {
@@ -2299,6 +2861,7 @@ describe('ConversationPage', () => {
       for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
         req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100' },
         { ...wireMessage, id: '101', sender: otherSender },
@@ -2318,9 +2881,11 @@ describe('ConversationPage', () => {
     expect(component['entryReadId']()).toBe(encodeId('100'));
     expect(fixture.nativeElement.querySelector('.unread-separator')).not.toBeNull();
     TestBed.inject(ConversationNavigation).goTo(testChat.id, { type: ConversationTargetKind.Latest });
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
-      .flush({ messages: [{ ...wireMessage }], olderCursor: wireMessage.id });
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage }],
+      olderCursor: wireMessage.id,
+    });
     await fixture.whenStable();
     expect(component['conversation'].items()).toEqual([testMessage]);
   });
@@ -2341,6 +2906,7 @@ describe('ConversationPage', () => {
       for (const req of http.match(`/_api/chats/${wireChat.id}/messages/${decodeId(component.threadId()!)}`))
         req.flush({ ...wireMessage, id: decodeId(component.threadId()!) });
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100' },
         { ...wireMessage, id: '101', sender: otherSender },
@@ -2460,6 +3026,7 @@ describe('ConversationPage', () => {
   it('does not pin a historical range to the bottom on resize and releases observation on destroy', async () => {
     const opening = component['conversation'].open(encodeId('100'));
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
       newerCursor: wireMessage.id,
     });
@@ -2884,6 +3451,7 @@ describe('ConversationPage', () => {
     vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
     const opening = component['conversation'].open(encodeId('101'));
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [100, 101, 102].map((id) => ({ ...wireMessage, id: String(id) })),
     });
     await opening;
@@ -3002,7 +3570,9 @@ describe('ConversationPage', () => {
 
     resync.next();
     http.expectOne('/_api/users/me/notification-settings').flush(testUser);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`).flush({ messages: [] });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=${wireMessage.id}`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, name: '重连后的群名称' });
     await fixture.whenStable();
     expect(data.getReadState).toHaveBeenCalledOnce();
@@ -3017,7 +3587,9 @@ describe('ConversationPage', () => {
     vi.mocked(loadSubscription).mockClear();
     resync.next();
     http.expectOne('/_api/users/me/notification-settings').flush(testUser);
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=102&threadId=100`).flush({ messages: [] });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&after=102&threadId=100`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat });
     subscriptions.update((statuses) => new Map(statuses).set(encodeId('100'), { subscribed: true, archived: false }));
     await fixture.whenStable();
@@ -3040,9 +3612,11 @@ describe('ConversationPage', () => {
     await component['loadPage'](PageDirection.Newer);
     component['retry']();
     await Promise.resolve();
-    http
-      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`)
-      .flush({ messages: [{ ...wireMessage, id: '9007199254741001' }], olderCursor: null });
+    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...wireMessage, id: '9007199254741001' }],
+      olderCursor: null,
+    });
     await fixture.whenStable();
     expect(component['conversation'].items()).toHaveLength(2);
     expect(component['conversation'].error()).toBeUndefined();
@@ -3118,7 +3692,7 @@ describe('ConversationPage', () => {
     TestBed.inject(ConversationNavigation).goTo(testChat.id, { type: ConversationTargetKind.Latest });
     expect(open).not.toHaveBeenCalled();
     TestBed.inject(ConversationNavigation).goTo(testChat.id, { type: ConversationTargetKind.Latest }, encodeId('100'));
-    expect(open).toHaveBeenCalledWith(undefined, false);
+    expect(open).toHaveBeenCalledWith(undefined, false, false);
   });
 
   it('fetches the topic read boundary once its cached list snapshot is stale', async () => {
@@ -3129,6 +3703,7 @@ describe('ConversationPage', () => {
     for (const req of http.match(`/_api/chats/${wireChat.id}/messages/100`)) req.flush({ ...wireMessage, id: '100' });
     http.expectNone(`/_api/chats/${wireChat.id}/threads/100/read-state`);
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=100&threadId=100`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100' },
         { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
@@ -3147,6 +3722,7 @@ describe('ConversationPage', () => {
       .flush({ lastReadMessageId: '101', unreadCount: 1 });
     await new Promise((resolve) => setTimeout(resolve, 0));
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=101&threadId=100`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '101', replyRootId: '100', sender: otherSender },
         { ...wireMessage, id: '102', replyRootId: '100', sender: otherSender },
@@ -3438,7 +4014,9 @@ describe('ConversationPage', () => {
     component = fixture.componentInstance;
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [structuredClone(wireMessage)] });
     await fixture.whenStable();
     fixture.detectChanges();
     await fixture.whenStable();
@@ -3522,9 +4100,9 @@ describe('ConversationPage', () => {
     const id = '9007199254741999';
     fixture.componentRef.setInput('message', id);
     fixture.detectChanges();
-    http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=${id}`).flush({
-      messages: [{ ...wireMessage, id }],
-    });
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=${id}`)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...wireMessage, id }] });
     await fixture.whenStable();
     expect(component['conversation'].items()[0].id).toBe(encodeId(id));
     expect(component['conversation'].error()).toBeUndefined();
@@ -3574,7 +4152,10 @@ describe('ConversationPage', () => {
       component['retry']();
       request = http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&around=${id}`);
     }
-    request.flush({ messages: [{ ...structuredClone(wireMessage), id, message: '原会话最新内容' }] });
+    request.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [{ ...structuredClone(wireMessage), id, message: '原会话最新内容' }],
+    });
     await vi.waitFor(() => expect(component['replyTo']()).toMatchObject({ id: encodeId(id) }));
     await fixture.whenStable();
     expect(component['replyTo']()).toBe(component['conversation'].items()[0]);
@@ -3612,6 +4193,7 @@ describe('ConversationPage', () => {
       },
     });
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50&before=${wireMessage.id}`).flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         {
           ...wireMessage,
@@ -4177,6 +4759,7 @@ describe('ConversationPage', () => {
       fixture.componentRef.setInput('id', decodeId(otherChatId));
       fixture.detectChanges();
       http.expectOne(`/_api/chats/${decodeId(otherChatId)}/messages?max=50`).flush({
+        chatSettings: { showMembershipMessages: true },
         messages: [{ ...otherMessage, id: decodeId(otherMessage.id), chatId: decodeId(otherChatId) }],
       });
       await fixture.whenStable();
@@ -4206,7 +4789,10 @@ describe('ConversationPage', () => {
       fixture.componentRef.setInput('id', wireChat.id);
       fixture.detectChanges();
       // A stale initial GET must not erase a confirmation retained by the shared outbox.
-      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({ messages: [structuredClone(wireMessage)] });
+      http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [structuredClone(wireMessage)],
+      });
       await fixture.whenStable();
       fixture.detectChanges();
       await fixture.whenStable();

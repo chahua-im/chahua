@@ -96,10 +96,17 @@ describe('ChatList', () => {
             threads: () => ({ items: signal([]) }),
           },
         },
-        { provide: Preferences, useValue: { showThreadsInMessages: signal(true) } },
+        { provide: Preferences, useValue: { showThreadsInMessages: signal(true), showMembershipMessages: () => true } },
         provideRouter([{ path: 'chats/chat/:id', children: [] }]),
         { provide: Connection, useValue: mockRealtime() },
-        { provide: SessionStore, useValue: { user: signal(testUser) } },
+        {
+          provide: SessionStore,
+          useValue: {
+            requireChatSettings: SessionStore.prototype.requireChatSettings,
+            acceptChatSettings: SessionStore.prototype.acceptChatSettings,
+            user: signal(testUser),
+          },
+        },
       ],
     })
       .overrideComponent(ChatList, {

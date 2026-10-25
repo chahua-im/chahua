@@ -5,10 +5,12 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { ChatSettings } from '../chatSettings';
 import type { SnowflakeID } from '../snowflakeID';
 import type { ChatListItem } from './chatListItem';
 
 export interface ListChatsResponse {
+  chatSettings: ChatSettings;
   chats: ChatListItem[];
   nextCursor?: SnowflakeID;
 }

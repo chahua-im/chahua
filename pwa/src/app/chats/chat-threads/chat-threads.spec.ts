@@ -41,6 +41,7 @@ describe('ChatThreads', () => {
     const request = http.expectOne((req) => req.url === path);
     expect(request.request.params.get('max')).toBe('50');
     request.flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         { ...wireMessage, id: '100' },
         { ...topic, id: '101', isDeleted: true, message: undefined },
@@ -65,7 +66,13 @@ describe('ChatThreads', () => {
     const content = document.createElement('ion-content');
     content.getScrollElement = () => Promise.resolve(scroll);
     vi.spyOn(fixture.nativeElement, 'closest').mockReturnValue(content);
-    http.expectOne((req) => req.url === path).flush({ messages: [{ ...wireMessage }], olderCursor: '100' });
+    http
+      .expectOne((req) => req.url === path)
+      .flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [{ ...wireMessage }],
+        olderCursor: '100',
+      });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('暂无近期话题');
@@ -77,7 +84,7 @@ describe('ChatThreads', () => {
     fixture.nativeElement.querySelector('ion-infinite-scroll').dispatchEvent(new CustomEvent('ionInfinite'));
     const request = http.expectOne((req) => req.url === path);
     expect(request.request.params.get('before')).toBe('100');
-    request.flush({ messages: [{ ...topic, id: '99' }] });
+    request.flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...topic, id: '99' }] });
     await fixture.whenStable();
     expect(complete).toHaveBeenCalledOnce();
     expect(fixture.componentInstance['items']()).toHaveLength(1);
@@ -87,7 +94,13 @@ describe('ChatThreads', () => {
 
   it('keeps loaded topics and the cursor after a failed continuation', async () => {
     const fixture = open();
-    http.expectOne((req) => req.url === path).flush({ messages: [{ ...topic }], olderCursor: '100' });
+    http
+      .expectOne((req) => req.url === path)
+      .flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [{ ...topic }],
+        olderCursor: '100',
+      });
     await fixture.whenStable();
     const component = fixture.componentInstance;
     const next = component['load'](true);
@@ -97,7 +110,9 @@ describe('ChatThreads', () => {
     expect(component['cursor']()).toBe(encodeId('100'));
     expect(component['error']()).toBe(true);
     const retry = component['load'](true);
-    http.expectOne((req) => req.url === path).flush({ messages: [{ ...topic, id: '99' }] });
+    http
+      .expectOne((req) => req.url === path)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...topic, id: '99' }] });
     await retry;
     expect(component['items']()).toHaveLength(2);
     expect(component['error']()).toBe(false);
@@ -108,8 +123,10 @@ describe('ChatThreads', () => {
     const previous = http.expectOne((req) => req.url === path);
     fixture.componentRef.setInput('chatId', encodeId('200'));
     fixture.detectChanges();
-    http.expectOne((req) => req.url === '/_api/chats/200/messages').flush({ messages: [{ ...topic, chatId: '200' }] });
-    previous.flush({ messages: [{ ...topic }] });
+    http
+      .expectOne((req) => req.url === '/_api/chats/200/messages')
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...topic, chatId: '200' }] });
+    previous.flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...topic }] });
     await fixture.whenStable();
     expect(fixture.componentInstance['items']()[0].chatId).toBe(encodeId('200'));
     const request = fixture.componentInstance['load']();
@@ -121,7 +138,9 @@ describe('ChatThreads', () => {
 
   it('opens the selected topic after dismissing the information modal', async () => {
     const fixture = open();
-    http.expectOne((req) => req.url === path).flush({ messages: [{ ...topic }] });
+    http
+      .expectOne((req) => req.url === path)
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [{ ...topic }] });
     await fixture.whenStable();
     modals.getTop.mockResolvedValueOnce({});
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);

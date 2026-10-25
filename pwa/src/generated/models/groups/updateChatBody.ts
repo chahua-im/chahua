@@ -6,11 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GroupVisibility } from '../groupVisibility';
+import type { MembershipMessageVisibility } from '../membershipMessageVisibility';
 import type { SnowflakeID } from '../snowflakeID';
 
 export interface UpdateChatBody {
   avatarImageId?: null | SnowflakeID;
   description?: string;
+  membershipMessageVisibility?: MembershipMessageVisibility;
   name?: string;
   visibility?: GroupVisibility;
 }

@@ -85,6 +85,7 @@ export const routes: Routes = [
     data: { modal: true, component: NotificationCategoryPage, props: { kind: GroupKind.group } },
   },
   { path: 'settings/general', component: ChatLink, data: { modal: true, component: GeneralSettings } },
+  { path: 'settings/experimental', redirectTo: 'settings/general', pathMatch: 'full' },
   { path: 'settings/language', component: ChatLink, data: { modal: true, component: LanguageSettings } },
   {
     path: 'settings/friend-verification',

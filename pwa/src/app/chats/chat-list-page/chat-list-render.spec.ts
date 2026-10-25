@@ -50,8 +50,22 @@ it('flushes the real cached list hierarchy before returning, without activating 
         { provide: Connection, useValue: mockRealtime() },
         { provide: PushNotifications, useValue: {} },
         { provide: MessageOutbox, useValue: { items: signal([]) } },
-        { provide: SessionStore, useValue: { user: signal(testUser) } },
-        { provide: Preferences, useValue: { showThreadsInMessages: signal(false), showAllAvatars: signal(false) } },
+        {
+          provide: SessionStore,
+          useValue: {
+            requireChatSettings: SessionStore.prototype.requireChatSettings,
+            acceptChatSettings: SessionStore.prototype.acceptChatSettings,
+            user: signal(testUser),
+          },
+        },
+        {
+          provide: Preferences,
+          useValue: {
+            showThreadsInMessages: signal(false),
+            showMembershipMessages: () => true,
+            showAllAvatars: signal(false),
+          },
+        },
         { provide: ChatStore, useValue: { isMuted: () => false } },
         {
           provide: ChatListStore,

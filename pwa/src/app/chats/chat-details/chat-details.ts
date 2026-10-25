@@ -1,3 +1,4 @@
+import { MembershipMessageVisibility } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import {
   afterNextRender,
@@ -88,6 +89,7 @@ import { ChatThreads } from '../chat-threads/chat-threads';
 import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { dismissChatOverlays } from '../dismiss-chat-overlays';
 enum DetailAction {
+  MembershipVisibility,
   Thread,
   Name,
   Description,
@@ -239,6 +241,38 @@ export class ChatDetails {
     computation: () => false,
   });
   protected readonly Action = DetailAction;
+  protected readonly MembershipVisibility = MembershipMessageVisibility;
+  protected readonly membershipVisibility = linkedSignal(() => {
+    const id = this.id();
+    return id ? this.store.membershipPolicy(id)?.visibility : undefined;
+  });
+
+  protected async saveMembershipVisibility(value: unknown) {
+    if (
+      !this.canManage() ||
+      this.busy() ||
+      !Object.values(MembershipMessageVisibility).includes(value as MembershipMessageVisibility)
+    )
+      return;
+    const visibility = value as MembershipMessageVisibility;
+    if (visibility === this.membershipVisibility()) return;
+    const chatId = this.id()!;
+    const scope = this.scope();
+    const account = this.session.user()?.uid;
+    const previous = this.membershipVisibility();
+    this.membershipVisibility.set(visibility);
+    await this.perform(
+      DetailAction.MembershipVisibility,
+      async () => {
+        await firstValueFrom(this.api.patchGroup(chatId, { membershipMessageVisibility: visibility }));
+        if (account === this.session.user()?.uid) await this.store.refreshMembershipPolicy(chatId);
+      },
+      true,
+    );
+    if (account === this.session.user()?.uid && this.isCurrent(scope))
+      this.membershipVisibility.set(this.store.membershipPolicy(chatId)?.visibility ?? previous);
+  }
+
   private readonly scope = computed(() => ({
     chatId: this.chatId(),
     threadId: this.threadId(),

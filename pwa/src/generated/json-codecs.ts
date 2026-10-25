@@ -214,6 +214,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   MeResponse: {
     stickerPackOrder: ['StickerPackOrderItem'],
   },
+  MembershipMessagePolicyChanged: {
+    chatId: 1,
+  },
   MessagePreview: {
     id: 1,
     systemLinks: 'SystemMessageLinks',
@@ -808,6 +811,7 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
 ];
 export const wsPayloadCodecs: Record<string, JsonCodec> = {
+  membershipMessagePolicyChanged: 'MembershipMessagePolicyChanged',
   message: 'MessageResponse',
   messageUpdated: 'MessageResponse',
   messageDeleted: 'MessageResponse',

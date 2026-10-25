@@ -54,7 +54,14 @@ describe('explicit conversation state watches', () => {
           provide: Connection,
           useValue: { ...mockRealtime({ events$: events, connected }), watchConversationStates: watch },
         },
-        { provide: SessionStore, useValue: { user } },
+        {
+          provide: SessionStore,
+          useValue: {
+            requireChatSettings: SessionStore.prototype.requireChatSettings,
+            acceptChatSettings: SessionStore.prototype.acceptChatSettings,
+            user,
+          },
+        },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -110,7 +117,9 @@ describe('explicit conversation state watches', () => {
     const lists = TestBed.inject(ChatListStore);
     const query = lists.chats(false);
     query.activate();
-    http.expectOne('/_api/chats?limit=50').flush(structuredClone({ chats: [wireChat] }));
+    http
+      .expectOne('/_api/chats?limit=50')
+      .flush(structuredClone({ chatSettings: { showMembershipMessages: true }, chats: [wireChat] }));
     await settle();
     publish([row(2)]);
     events.next({

@@ -8,6 +8,7 @@
 import type { GroupKind } from './groupKind';
 import type { GroupRole } from './groupRole';
 import type { GroupVisibility } from './groupVisibility';
+import type { MembershipMessagePolicy } from './membershipMessagePolicy';
 import type { MemberSummary } from './memberSummary';
 import type { SnowflakeID } from './snowflakeID';
 
@@ -20,6 +21,7 @@ export interface GroupInfoResponse {
   id: SnowflakeID;
   isMuted: boolean;
   kind: GroupKind;
+  membershipMessagePolicy: MembershipMessagePolicy;
   muteOverride?: boolean;
   mutedUntil?: string;
   myRole?: GroupRole;

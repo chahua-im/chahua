@@ -46,7 +46,7 @@
         <span class="ion-text-wrap">{{ 'settings.general.showAllAvatars' | transloco }}</span>
       </ion-toggle>
     </ion-item>
-    <ion-item lines="none">
+    <ion-item>
       <ion-icon slot="start" [icon]="dmDetailsIcon" color="primary"></ion-icon>
       <ion-toggle
         [checked]="preferences.showDmDetails()"
@@ -54,6 +54,23 @@
         <span class="ion-text-wrap">{{ 'settings.general.showDmDetails' | transloco }}</span>
       </ion-toggle>
     </ion-item>
+    <ion-item lines="none">
+      <ion-icon slot="start" [icon]="membershipIcon" color="primary" />
+      <ion-toggle
+        [checked]="preferences.showMembershipMessages()"
+        [disabled]="saving() || !session.user()"
+        (ionChange)="saveMembershipMessages($event)">
+        <span class="ion-text-wrap">{{ 'settings.general.showMembershipMessages' | transloco }}</span>
+      </ion-toggle>
+      @if (saving()) {
+        <ion-spinner slot="end" />
+      }
+    </ion-item>
+    @if (saveError()) {
+      <ion-item lines="none">
+        <ion-label class="ion-text-wrap" color="danger">{{ 'settings.general.saveFailed' | transloco }}</ion-label>
+      </ion-item>
+    }
   </ion-list>
   <ion-list [inset]="true">
     <ion-list-header>

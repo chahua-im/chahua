@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GroupKind } from '../groupKind';
+import type { MembershipMessagePolicy } from '../membershipMessagePolicy';
 import type { MemberSummary } from '../memberSummary';
 import type { MessagePreview } from '../messagePreview';
 import type { SnowflakeID } from '../snowflakeID';
@@ -19,6 +20,7 @@ export interface ChatListItem {
   lastMessage?: MessagePreview;
   lastMessageAt?: string;
   lastReadMessageId?: SnowflakeID;
+  membershipMessagePolicy: MembershipMessagePolicy;
   muteOverride?: boolean;
   mutedUntil?: string;
   name?: string;

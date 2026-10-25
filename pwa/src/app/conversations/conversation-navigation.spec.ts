@@ -31,7 +31,14 @@ describe('Forward destination navigation', () => {
       providers: [
         { provide: Router, useValue: router },
         { provide: ModalController, useValue: modals },
-        { provide: SessionStore, useValue: { user: signal(testUser) } },
+        {
+          provide: SessionStore,
+          useValue: {
+            requireChatSettings: SessionStore.prototype.requireChatSettings,
+            acceptChatSettings: SessionStore.prototype.acceptChatSettings,
+            user: signal(testUser),
+          },
+        },
         { provide: Connection, useValue: mockRealtime() },
       ],
     });

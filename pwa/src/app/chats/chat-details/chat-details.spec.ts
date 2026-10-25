@@ -10,6 +10,7 @@ import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import {
   FriendPresenceOverride,
+  MembershipMessageVisibility,
   GroupKind,
   GroupRole,
   ServerWsMessageType,
@@ -59,11 +60,66 @@ describe('ChatDetails', () => {
     http.expectOne(`/_api/group/${wireChat.id}`).flush(chat);
     await Promise.resolve();
     fixture.detectChanges();
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await fixture.whenStable();
     fixture.detectChanges();
     return fixture;
   }
+
+  it('saves group visibility, disables changes while saving and restores the saved option after a failure', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    const save = component['saveMembershipVisibility'](MembershipMessageVisibility.admins);
+    fixture.detectChanges();
+    const selector = fixture.nativeElement.querySelector('ion-select');
+    expect(selector.disabled).toBe(true);
+    const request = http.expectOne(`/_api/group/${wireChat.id}`);
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({ membershipMessageVisibility: 'admins' });
+    request.flush({
+      ...wireChat,
+      myRole: GroupRole.admin,
+      membershipMessagePolicy: { visibility: 'admins', canView: true },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({
+      ...wireChat,
+      myRole: GroupRole.admin,
+      membershipMessagePolicy: { visibility: 'admins', canView: true },
+    });
+    await save;
+    fixture.detectChanges();
+    expect(component['membershipVisibility']()).toBe(MembershipMessageVisibility.admins);
+    const failing = component['saveMembershipVisibility'](MembershipMessageVisibility.nobody);
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({}, { status: 500, statusText: 'Failed' });
+    await failing;
+    fixture.detectChanges();
+    expect(selector.value).toBe(MembershipMessageVisibility.admins);
+    expect(selector.disabled).toBe(false);
+  });
+
+  it('keeps a newer policy received while a failed save is pending', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    const saving = component['saveMembershipVisibility'](MembershipMessageVisibility.admins);
+    TestBed.inject(ChatStore).acceptMembershipPolicy(testChat.id, {
+      visibility: MembershipMessageVisibility.nobody,
+      canView: false,
+    });
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({}, { status: 500, statusText: 'Failed' });
+    await saving;
+    expect(component['membershipVisibility']()).toBe(MembershipMessageVisibility.nobody);
+  });
+
+  it('shows the group policy without allowing ordinary members to change it', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.member });
+    expect(fixture.nativeElement.querySelector('ion-select').disabled).toBe(true);
+    await fixture.componentInstance['saveMembershipVisibility'](MembershipMessageVisibility.nobody);
+    http.expectNone((request) => request.method === 'PATCH');
+  });
 
   it('keeps search and mute out of the profile and places invites before leaving', async () => {
     const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
@@ -101,7 +157,10 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     http
       .expectOne((req) => req.url === `/_api/chats/${wireChat.id}/messages`)
-      .flush({ messages: [{ ...wireMessage, threadInfo: { replyCount: 2 } }] });
+      .flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [{ ...wireMessage, threadInfo: { replyCount: 2 } }],
+      });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-chat-threads').textContent).toContain('测试消息');
@@ -127,7 +186,9 @@ describe('ChatDetails', () => {
     expect(fixture.componentInstance['chat']()).toBe(store.get(testChat.id));
     expect(fixture.componentInstance['busy']()).toBe(false);
     expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).toBeNull();
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     details.flush({ ...wireChat, description: '群介绍' });
     await fixture.whenStable();
     fixture.detectChanges();
@@ -142,7 +203,9 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.profile h2').textContent.trim()).toBe(testChat.name);
     http.expectNone(`/_api/group/${wireChat.id}`);
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await fixture.whenStable();
     fixture.detectChanges();
   });
@@ -152,7 +215,9 @@ describe('ChatDetails', () => {
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     http.expectOne(`/_api/group/${wireChat.id}`).flush({}, { status: 503, statusText: 'Unavailable' });
     await vi.waitFor(() => expect(fixture.componentInstance['error']()).toBe(true));
     await fixture.whenStable();
@@ -177,7 +242,9 @@ describe('ChatDetails', () => {
     await Promise.resolve();
     const relationship = http.expectOne('/_api/friends/2');
     expect(fixture.nativeElement.querySelector('.profile h2').textContent.trim()).toBe('朋友');
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     details.flush({ ...wireChat, kind: GroupKind.dm, peer });
     await vi.waitFor(() => expect(fixture.componentInstance['chat']()?.kind).toBe(GroupKind.dm));
     fixture.detectChanges();
@@ -210,7 +277,9 @@ describe('ChatDetails', () => {
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).not.toBeNull();
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     http
       .expectOne(`/_api/group/${wireChat.id}`)
       .flush({ ...wireChat, kind: GroupKind.dm, peer: { uid: 2, username: '朋友', gender: 0 } });
@@ -258,14 +327,18 @@ describe('ChatDetails', () => {
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     const previous = http.expectOne(`/_api/group/${wireChat.id}`);
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     const nextId = encodeId('9007199254741993');
     fixture.componentRef.setInput('chatId', nextId);
     fixture.detectChanges();
     http.expectOne(`/_api/group/${decodeId(nextId)}`).flush({ ...wireChat, id: decodeId(nextId), name: '当前群' });
     await Promise.resolve();
     fixture.detectChanges();
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     previous.flush({ ...wireChat });
     await fixture.whenStable();
     fixture.detectChanges();
@@ -389,7 +462,9 @@ describe('ChatDetails', () => {
     http
       .expectOne(`/_api/group/${decodeId(nextId)}`)
       .flush({ ...wireChat, id: decodeId(nextId), name: '当前群', myRole: GroupRole.admin });
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await fixture.whenStable();
     component['edit'](field);
     expect(component['busy']()).toBe(false);
@@ -503,7 +578,9 @@ describe('ChatDetails', () => {
     http.expectOne('/_api/friends/2/read-receipt-settings').flush({ override: 'inherit' });
     await Promise.resolve();
     fixture.detectChanges();
-    http.expectOne((req) => req.url.endsWith('/messages')).flush({ messages: [] });
+    http
+      .expectOne((req) => req.url.endsWith('/messages'))
+      .flush({ chatSettings: { showMembershipMessages: true }, messages: [] });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('解除好友');
