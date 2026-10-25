@@ -200,10 +200,11 @@ fn process_bulk_delete(
         // Selection and mutation share a transaction so reconciliation uses
         // metadata from the locked messages we actually delete.
         let batch = conn
-            .transaction::<_, diesel::result::Error, _>(|conn| {
+            .transaction::<_, crate::errors::AppError, _>(|conn| {
                 let query = messages::table
                     .filter(dsl::chat_id.eq(chat_id))
                     .filter(dsl::sender_uid.eq(target_uid))
+                    .filter(dsl::message_type.ne(crate::models::MessageType::System))
                     .filter(dsl::deleted_at.is_null())
                     .select(DeletionTarget::as_select())
                     .order(dsl::id.asc())
@@ -222,7 +223,7 @@ fn process_bulk_delete(
                 }
                 soft_delete_batch(conn, &targets)
             })
-            .map_err(map_db)?;
+            .map_err(|e| format!("message deletion error: {e:?}"))?;
         let batch_len = batch.message_ids.len();
         if batch_len == 0 {
             break;
@@ -321,6 +322,10 @@ mod tests {
                     (88900, 88100, 1, 'audio', NULL, 'cleanup-pending', NOW(), NULL, false, false),
                     (88201, 88200, 1, 'text', 'other chat', 'cleanup-other-chat', NOW(), NULL, false, true);
              UPDATE messages SET deleted_at = NOW() WHERE id = 88101;
+             INSERT INTO messages(id, chat_id, sender_uid, message_type, system_kind,
+                                  client_generated_id, created_at, is_published)
+             VALUES (88097, 88100, 1, 'system', 'unknown', 'cleanup-system-old', NOW() - INTERVAL '3 days', true),
+                    (88098, 88100, 1, 'system', 'member_joined', 'cleanup-system-recent', NOW(), true);
              INSERT INTO messages(id, chat_id, sender_uid, message_type, message,
                                   client_generated_id, created_at, reply_root_id, is_published)
              SELECT id, 88100, 1, 'text', 'reply', 'cleanup-reply-' || id, NOW(), 88101, true
@@ -374,6 +379,10 @@ mod tests {
         assert!(complete);
         assert_eq!(batch_sizes, vec![500, 4]);
         assert_eq!(deleted_ids.len(), 504);
+        assert!(
+            !deleted_ids.contains("88098"),
+            "system events are not broadcast as deleted"
+        );
         assert!(
             deleted_ids.contains("88900"),
             "cleanup includes unpublished audio"
@@ -448,7 +457,7 @@ mod tests {
                 .select(messages::id)
                 .load(conn)
                 .unwrap();
-            assert_eq!(survivors, vec![88099, 88103, 88201]);
+            assert_eq!(survivors, vec![88097, 88098, 88099, 88103, 88201]);
             assert!(!messages::table
                 .find(88101_i64)
                 .select(messages::has_thread)
