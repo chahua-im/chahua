@@ -11,7 +11,11 @@ import type { HttpContext, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type {
+  GetChatThreadsParams,
+  GetThreadParticipantsParams,
   GetThreadsParams,
+  ListChatThreadsResponse,
+  ListThreadParticipantsResponse,
   ListThreadsResponse,
   MarkThreadReadBody,
   MarkThreadReadResponse,
@@ -128,6 +132,50 @@ export class ThreadsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
   /**
+   * @summary List all published threads in a chat, independently of subscriptions.
+   */
+  getChatThreads<TData = ListChatThreadsResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatThreadsParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getChatThreads<TData = ListChatThreadsResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatThreadsParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getChatThreads<TData = ListChatThreadsResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatThreadsParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getChatThreads<TData = ListChatThreadsResponse>(
+    chatId: SnowflakeID,
+    params?: GetChatThreadsParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/threads`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/threads`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/chats/${decodeId(chatId)}/threads`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
+    });
+  }
+  /**
    * @summary DELETE /chats/:chat_id/threads/:thread_root_id/archive — Unarchive a thread subscription.
    */
   unarchiveThread<TData = void>(
@@ -225,6 +273,63 @@ export class ThreadsService {
       {
         ...(options as Omit<NonNullable<typeof options>, 'observe'>),
         observe: 'body',
+      },
+    );
+  }
+  /**
+   * @summary List root/reply authors in ascending UID order, not thread subscribers.
+   */
+  getThreadParticipants<TData = ListThreadParticipantsResponse>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    params?: GetThreadParticipantsParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getThreadParticipants<TData = ListThreadParticipantsResponse>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    params?: GetThreadParticipantsParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getThreadParticipants<TData = ListThreadParticipantsResponse>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    params?: GetThreadParticipantsParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getThreadParticipants<TData = ListThreadParticipantsResponse>(
+    chatId: SnowflakeID,
+    threadRootId: SnowflakeID,
+    params?: GetThreadParticipantsParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/participants`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+          params: filteredParams,
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(
+        `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/participants`,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+          params: filteredParams,
+        },
+      );
+    }
+    return this.http.get<TData>(
+      `${this.baseUrl}/chats/${decodeId(chatId)}/threads/${decodeId(threadRootId)}/participants`,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+        params: filteredParams,
       },
     );
   }
