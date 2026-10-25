@@ -74,6 +74,10 @@ pub mod sql_types {
     pub struct SystemMessageKind;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "speaking_mode"))]
+    pub struct SpeakingMode;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "transcode_status"))]
     pub struct TranscodeStatus;
 }
@@ -175,6 +179,7 @@ diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::GroupRole;
     use super::sql_types::GroupJoinReason;
+    use super::sql_types::SpeakingMode;
 
     group_membership (chat_id, uid) {
         chat_id -> Int8,
@@ -189,6 +194,7 @@ diesel::table! {
         last_reactions_read_at -> Timestamptz,
         last_read_receipt_message_id -> Nullable<Int8>,
         mute_override -> Nullable<Bool>,
+        speaking_mode -> SpeakingMode,
     }
 }
 
@@ -196,6 +202,7 @@ diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::GroupVisibility;
     use super::sql_types::GroupKind;
+    use super::sql_types::SpeakingMode;
 
     use super::sql_types::MembershipMessageVisibility;
 
@@ -213,6 +220,7 @@ diesel::table! {
         dm_uid1 -> Nullable<Int4>,
         dm_uid2 -> Nullable<Int4>,
         membership_message_visibility -> MembershipMessageVisibility,
+        speaking_mode -> SpeakingMode,
     }
 }
 

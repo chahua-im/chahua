@@ -140,12 +140,20 @@ pub async fn create_invite(
     })?;
 
     let now = Utc::now();
-    let mut inserted = None;
+    insert_invite_with_codes(conn, id, now, input, generate_invite_code)
+}
 
+fn insert_invite_with_codes(
+    conn: &mut PgConnection,
+    id: i64,
+    now: DateTime<Utc>,
+    input: NewInviteInput,
+    mut next_code: impl FnMut() -> String,
+) -> Result<Invite, AppError> {
     for _ in 0..8 {
         let new_invite = NewInvite {
             id,
-            code: generate_invite_code(),
+            code: next_code(),
             chat_id: input.chat_id,
             invite_type: input.invite_type.clone(),
             creator_uid: input.creator_uid,
@@ -159,14 +167,14 @@ pub async fn create_invite(
 
         match diesel::insert_into(invites::table)
             .values(&new_invite)
+            .on_conflict(invites::code)
+            .do_nothing()
             .returning(Invite::as_returning())
             .get_result::<Invite>(conn)
+            .optional()
         {
-            Ok(invite) => {
-                inserted = Some(invite);
-                break;
-            }
-            Err(error) if is_unique_violation(&error) => continue,
+            Ok(Some(invite)) => return Ok(invite),
+            Ok(None) => continue,
             Err(error) => {
                 tracing::error!("insert invite: {:?}", error);
                 return Err(AppError::Internal("Failed to create invite"));
@@ -174,10 +182,8 @@ pub async fn create_invite(
         }
     }
 
-    inserted.ok_or_else(|| {
-        tracing::error!("failed to generate unique invite code after retries");
-        AppError::Internal("Failed to create invite")
-    })
+    tracing::error!("failed to generate unique invite code after retries");
+    Err(AppError::Internal("Failed to create invite"))
 }
 
 fn generate_invite_code() -> String {
@@ -196,18 +202,93 @@ fn generate_invite_code() -> String {
     code
 }
 
-fn is_unique_violation(error: &diesel::result::Error) -> bool {
-    matches!(
-        error,
-        diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _)
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{targeted_invite_is_reusable, validate_invite_is_active};
+    use super::*;
     use crate::models::{Invite, InviteType};
+    use crate::utils::transaction::AsyncTransaction;
     use chrono::{Duration, TimeZone, Utc};
+    use diesel::connection::SimpleConnection;
+
+    fn fixture() -> Option<PgConnection> {
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return None;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.batch_execute(
+            "CREATE TEMP TABLE invites (LIKE public.invites INCLUDING ALL);
+             INSERT INTO invites (id, code, chat_id, invite_type)
+                 VALUES (1, 'collision', 10, 'generic');",
+        )
+        .unwrap();
+        Some(conn)
+    }
+
+    fn generic_input() -> NewInviteInput {
+        NewInviteInput {
+            chat_id: 10,
+            invite_type: InviteType::Generic,
+            creator_uid: None,
+            target_uid: None,
+            required_chat_id: None,
+            expires_at: None,
+        }
+    }
+
+    #[test]
+    fn database_code_collision_retries_without_aborting_the_send_transaction() {
+        let Some(mut conn) = fixture() else { return };
+        let mut tx = AsyncTransaction::begin(&mut conn).unwrap();
+        let mut codes = ["collision", "fresh-code"].into_iter();
+        let result =
+            insert_invite_with_codes(tx.connection(), 2, Utc::now(), generic_input(), || {
+                codes.next().unwrap().into()
+            });
+        let invite = tx.finish(result).unwrap();
+        assert_eq!(invite.code, "fresh-code");
+        assert_eq!(
+            invites::table.count().get_result::<i64>(&mut conn).unwrap(),
+            2
+        );
+
+        // Exhausting code retries is bounded and leaves SQL usable for rollback.
+        let mut attempts = 0;
+        let mut tx = AsyncTransaction::begin(&mut conn).unwrap();
+        let result =
+            insert_invite_with_codes(tx.connection(), 3, Utc::now(), generic_input(), || {
+                attempts += 1;
+                "collision".into()
+            });
+        assert!(result.is_err());
+        assert_eq!(attempts, 8);
+        assert_eq!(
+            invites::table
+                .count()
+                .get_result::<i64>(tx.connection())
+                .unwrap(),
+            2
+        );
+        assert!(tx.finish(result).is_err());
+    }
+
+    #[test]
+    fn database_non_code_unique_violation_is_not_retried() {
+        let Some(mut conn) = fixture() else { return };
+        let mut attempts = 0;
+        let mut tx = AsyncTransaction::begin(&mut conn).unwrap();
+        let result =
+            insert_invite_with_codes(tx.connection(), 1, Utc::now(), generic_input(), || {
+                attempts += 1;
+                "fresh-code".into()
+            });
+        assert!(tx.finish(result).is_err());
+        assert_eq!(attempts, 1);
+        assert_eq!(
+            invites::table.count().get_result::<i64>(&mut conn).unwrap(),
+            1
+        );
+    }
 
     fn invite(invite_type: InviteType) -> Invite {
         Invite {

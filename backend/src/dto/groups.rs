@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 
 use crate::dto::users::MemberSummary;
-use crate::models::{GroupKind, GroupRole, GroupVisibility};
+use crate::models::{GroupKind, GroupRole, GroupVisibility, SpeakingMode};
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +35,9 @@ pub struct GroupInfoResponse {
     pub mute_override: Option<bool>,
     pub is_muted: bool,
     pub my_role: Option<GroupRole>,
+    pub speaking_mode: SpeakingMode,
+    pub my_speaking_mode: Option<SpeakingMode>,
+    pub effective_speaking_mode: Option<SpeakingMode>,
     pub kind: GroupKind,
     /// The other participant, for DM chats; `None` for regular groups.
     pub peer: Option<MemberSummary>,

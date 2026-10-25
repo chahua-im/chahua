@@ -14,6 +14,7 @@ pub mod push;
 pub mod read_receipts;
 pub mod saved_messages;
 pub mod service_tokens;
+pub mod speaking;
 pub mod stickers;
 pub mod threads;
 pub mod users;

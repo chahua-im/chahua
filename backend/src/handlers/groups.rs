@@ -182,7 +182,7 @@ pub(super) fn load_group_info(
 
     let my_role = load_requester_group_role(conn, chat_id, requester_uid)?;
 
-    let (archived, notification_setting) = group_membership::table
+    let (archived, notification_setting, my_speaking_mode) = group_membership::table
         .filter(
             group_membership::chat_id
                 .eq(chat_id)
@@ -194,8 +194,13 @@ pub(super) fn load_group_info(
                 group_membership::muted_until,
                 group_membership::mute_override,
             ),
+            group_membership::speaking_mode.nullable(),
         ))
-        .first::<(bool, ChatNotificationSetting)>(conn)
+        .first::<(
+            bool,
+            ChatNotificationSetting,
+            Option<crate::models::SpeakingMode>,
+        )>(conn)
         .optional()?
         .unwrap_or((
             false,
@@ -203,6 +208,7 @@ pub(super) fn load_group_info(
                 muted_until: None,
                 mute_override: None,
             },
+            None,
         ));
     let defaults = load_notification_defaults(conn, requester_uid)?;
 
@@ -244,6 +250,11 @@ pub(super) fn load_group_info(
             can_view: group.kind == GroupKind::Dm
                 || group.membership_message_visibility.allows(my_role.as_ref()),
         },
+        speaking_mode: group.speaking_mode,
+        my_speaking_mode,
+        effective_speaking_mode: my_role.as_ref().zip(my_speaking_mode).map(|(role, mode)| {
+            crate::services::speaking::effective_mode(role, group.speaking_mode, mode)
+        }),
         my_role,
         kind: group.kind,
         peer,
@@ -744,6 +755,32 @@ async fn put_notification_setting(
     Ok(Json(setting))
 }
 
+#[utoipa::path(
+    put,
+    path = "/{chat_id}/speaking-mode",
+    tag = "groups",
+    params(("chat_id" = String, Path, description = "Chat ID")),
+    request_body = crate::dto::speaking::UpdateSpeakingModeRequest,
+    responses(
+        (status = OK, body = crate::dto::speaking::GroupSpeakingModeResponse),
+        (status = FORBIDDEN, description = "Group admin required"),
+        (status = BAD_REQUEST, description = "Not supported in DM chats"),
+    ),
+    security(("bearer_jwt" = [])),
+)]
+async fn put_speaking_mode(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(ChatIdPath { chat_id }): Path<ChatIdPath>,
+    mut conn: DbConn,
+    Json(body): Json<crate::dto::speaking::UpdateSpeakingModeRequest>,
+) -> Result<Json<crate::dto::speaking::GroupSpeakingModeResponse>, AppError> {
+    let updated =
+        crate::services::speaking::update_group_mode(&mut conn, chat_id, uid, body.speaking_mode)?;
+    crate::services::speaking::broadcast_group_mode(&mut conn, &state.ws_registry, chat_id)?;
+    Ok(Json(updated))
+}
+
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .routes(utoipa_axum::routes!(get_groups, post_group))
@@ -751,5 +788,6 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(post_avatar_upload_url))
         .routes(utoipa_axum::routes!(put_mute, delete_mute))
         .routes(utoipa_axum::routes!(put_notification_setting))
+        .routes(utoipa_axum::routes!(put_speaking_mode))
         .nest("/{chat_id}/members", crate::handlers::members::router())
 }

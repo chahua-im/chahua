@@ -25,8 +25,8 @@ use crate::{
     },
     errors::AppError,
     models::{
-        Attachment, ForwardPlaceholder, ForwardedBundle, GroupKind, Media, MentionKind, Message,
-        MessageMention, MessageType, NewMessage, Sticker, TranscodeStatus,
+        Attachment, ForwardPlaceholder, ForwardedBundle, GroupKind, GroupRole, Media, MentionKind,
+        Message, MessageMention, MessageType, NewMessage, SpeakingMode, Sticker, TranscodeStatus,
     },
     schema::{
         attachments, forwarded_bundles, group_membership, groups, media, message_mentions,
@@ -35,6 +35,7 @@ use crate::{
     services::{
         push::{PushJob, PushMessagePreview, PushMessagePreviewSticker},
         social::{self, DmSendAuthorizationError},
+        speaking::{self, SpeakingAction},
         user::{lookup_user_profiles, UserProfile},
     },
     utils::ids,
@@ -112,6 +113,7 @@ pub enum MessageSendAuthorizationError {
     ThreadRootNotFound,
     ThreadRootNotText,
     InvalidDmParticipants,
+    SpeakingRestricted(SpeakingMode),
     DirectMessage(DmSendAuthorizationError),
     Database(diesel::result::Error),
 }
@@ -145,6 +147,9 @@ impl From<MessageSendAuthorizationError> for AppError {
                 // dm_uid (e.g. a zombie membership); that is a forbidden
                 // participant, not a server fault.
                 AppError::Forbidden("Not a participant of this chat")
+            }
+            MessageSendAuthorizationError::SpeakingRestricted(mode) => {
+                AppError::SpeakingRestricted(mode)
             }
             MessageSendAuthorizationError::DirectMessage(error) => AppError::from(error),
             MessageSendAuthorizationError::Database(error) => AppError::from(error),
@@ -1756,7 +1761,8 @@ pub fn validate_message(
 }
 
 /// Authorize a user-originated message send and return its validated target
-/// context. System messages intentionally bypass this boundary because some
+/// context. Call inside the write transaction, before any other write locks.
+/// System messages intentionally bypass this boundary because some
 /// lifecycle events are recorded after the actor's membership is removed.
 pub fn authorize_message_send(
     conn: &mut PgConnection,
@@ -1764,24 +1770,26 @@ pub fn authorize_message_send(
     thread_id: Option<i64>,
     uid: i32,
 ) -> Result<AuthorizedMessageTarget, MessageSendAuthorizationError> {
-    let is_member = group_membership::table
-        .filter(
-            group_membership::chat_id
-                .eq(chat_id)
-                .and(group_membership::uid.eq(uid)),
-        )
-        .select(group_membership::uid)
-        .first::<i32>(conn)
-        .optional()?
-        .is_some();
-    if !is_member {
-        return Err(MessageSendAuthorizationError::NotChatMember);
-    }
-
-    let (kind, dm_uid1, dm_uid2) = groups::table
-        .filter(groups::id.eq(chat_id))
-        .select((groups::kind, groups::dm_uid1, groups::dm_uid2))
-        .first::<(GroupKind, Option<i32>, Option<i32>)>(conn)
+    speaking::lock_chat(conn, chat_id, false)?;
+    let (kind, dm_uid1, dm_uid2, group_mode, role, member_mode) = groups::table
+        .inner_join(group_membership::table)
+        .filter(groups::id.eq(chat_id).and(group_membership::uid.eq(uid)))
+        .select((
+            groups::kind,
+            groups::dm_uid1,
+            groups::dm_uid2,
+            groups::speaking_mode,
+            group_membership::role,
+            group_membership::speaking_mode,
+        ))
+        .first::<(
+            GroupKind,
+            Option<i32>,
+            Option<i32>,
+            SpeakingMode,
+            GroupRole,
+            SpeakingMode,
+        )>(conn)
         .optional()?
         .ok_or(MessageSendAuthorizationError::NotChatMember)?;
 
@@ -1801,6 +1809,7 @@ pub fn authorize_message_send(
                     messages_schema::id
                         .eq(thread_id)
                         .and(messages_schema::chat_id.eq(chat_id))
+                        .and(messages_schema::reply_root_id.is_null())
                         .and(messages_schema::is_published.eq(true))
                         .and(
                             messages_schema::deleted_at
@@ -1820,6 +1829,15 @@ pub fn authorize_message_send(
         })
         .transpose()?;
 
+    let action = match &thread_root {
+        None => SpeakingAction::ChatMessage,
+        Some(root) if root.has_thread => SpeakingAction::ThreadReply,
+        Some(_) => SpeakingAction::CreateThread,
+    };
+    let mode = speaking::effective_mode(&role, group_mode, member_mode);
+    if kind == GroupKind::Group && !speaking::allows(mode, action) {
+        return Err(MessageSendAuthorizationError::SpeakingRestricted(mode));
+    }
     Ok(AuthorizedMessageTarget { thread_root })
 }
 

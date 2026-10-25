@@ -30,6 +30,7 @@ use utoipa::OpenApi;
             UserSearchMode,
             ThreadOrder,
             ServerWsMessage,
+            crate::dto::speaking::SpeakingRestrictedResponse,
             ReactionUpdatePayload,
             PresenceUpdatePayload,
             PresenceSnapshotPayload,
@@ -74,6 +75,28 @@ mod tests {
         let mut document = ApiDoc::openapi();
         document.merge(crate::handlers::api_router().into_openapi());
         serde_json::to_value(document).unwrap()
+    }
+
+    #[test]
+    fn speaking_modes_document_admin_endpoints_and_camel_case_states() {
+        let document = api_document();
+        assert!(document["paths"]["/group/{chat_id}/speaking-mode"]["put"].is_object());
+        assert!(
+            document["paths"]["/group/{chat_id}/members/{uid}/speaking-mode"]["put"].is_object()
+        );
+        let schemas = &document["components"]["schemas"];
+        assert_eq!(
+            schemas["SpeakingMode"]["enum"],
+            serde_json::json!(["unrestricted", "threadsOnly", "repliesOnly", "readOnly"])
+        );
+        for field in ["speakingMode", "mySpeakingMode", "effectiveSpeakingMode"] {
+            assert!(schemas["GroupInfoResponse"]["properties"][field].is_object());
+        }
+        assert!(schemas["MemberResponse"]["properties"]["speakingMode"].is_object());
+        assert!(
+            schemas["SpeakingRestrictedResponse"]["properties"]["effectiveSpeakingMode"]
+                .is_object()
+        );
     }
 
     #[test]

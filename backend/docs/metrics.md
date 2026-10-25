@@ -77,6 +77,11 @@ Group membership-message policy broadcasts use `message_type=membershipMessagePo
 
 Successful member additions and invite redemptions use `message_type=chatMembershipChanged`, carrying only the chat ID to the joining user's connections. These events invalidate that user's unread watches independently of system-message visibility; no user or chat labels are added.
 
+Speaking restriction broadcasts use `message_type=groupSpeakingModeChanged` for
+group-wide settings and `message_type=memberSpeakingModeChanged` for personal
+settings and role changes. They carry the updated state; unlike notification
+preferences, they do not invalidate unread counts.
+
 ## Presence snapshots
 
 Snapshots include initial watches, periodic refreshes, and refreshes triggered by committed

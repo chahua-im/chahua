@@ -105,6 +105,8 @@ pub enum ServerWsMessage {
     NotificationExceptionsCleared(crate::dto::groups::NotificationExceptionsCleared),
     NotificationSettingsChanged(crate::dto::users::NotificationSettingsResponse),
     ChatNotificationSettingChanged(crate::dto::groups::ChatNotificationSettingResponse),
+    GroupSpeakingModeChanged(crate::dto::speaking::GroupSpeakingModeResponse),
+    MemberSpeakingModeChanged(crate::dto::speaking::MemberSpeakingModeResponse),
     ReadReceiptChanged(ReadReceiptChangedPayload),
     /// Chat-level pin event. Kept stable for already-deployed clients.
     PinAdded(PinUpdatePayload),
@@ -143,6 +145,8 @@ impl ServerWsMessage {
             Self::NotificationExceptionsCleared(_) => "notificationExceptionsCleared",
             Self::NotificationSettingsChanged(_) => "notificationSettingsChanged",
             Self::ChatNotificationSettingChanged(_) => "chatNotificationSettingChanged",
+            Self::GroupSpeakingModeChanged(_) => "groupSpeakingModeChanged",
+            Self::MemberSpeakingModeChanged(_) => "memberSpeakingModeChanged",
             Self::ReadReceiptChanged(_) => "readReceiptChanged",
             Self::PinAdded(_) => "pinAdded",
             Self::ThreadPinAdded(_) => "threadPinAdded",

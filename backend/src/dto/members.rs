@@ -1,13 +1,17 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::{dto::users::UserGroupTagInfo, models::GroupRole};
+use crate::{
+    dto::users::UserGroupTagInfo,
+    models::{GroupRole, SpeakingMode},
+};
 
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberResponse {
     pub uid: i32,
     pub role: GroupRole,
+    pub speaking_mode: SpeakingMode,
     pub joined_at: DateTime<Utc>,
     pub username: Option<String>,
     pub avatar_url: Option<String>,

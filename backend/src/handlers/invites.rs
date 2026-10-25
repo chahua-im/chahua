@@ -1,3 +1,4 @@
+use crate::utils::transaction::AsyncTransaction;
 use axum::{
     extract::{Json, Path, Query, State},
     http::StatusCode,
@@ -330,55 +331,64 @@ async fn post_send_invite_message(
     let conn = &mut *conn;
 
     require_admin_role(conn, body.source_chat_id, uid)?;
-    authorize_message_send(conn, body.destination_chat_id, None, uid)?;
+    let (invite, send_result) = {
+        let mut transaction = AsyncTransaction::begin(conn)?;
+        let conn = transaction.connection();
+        let result = async {
+            authorize_message_send(conn, body.destination_chat_id, None, uid)?;
 
-    let now = Utc::now();
-    let invite = if let Some(invite_id) = body.invite_id {
-        let invite = load_invite_by_id(conn, invite_id)?;
-        require_admin_role(conn, invite.chat_id, uid)?;
-        if invite.chat_id != body.source_chat_id {
-            return Err(AppError::BadRequest(
-                "Invite does not belong to source chat",
-            ));
+            let now = Utc::now();
+            let invite = if let Some(invite_id) = body.invite_id {
+                let invite = load_invite_by_id(conn, invite_id)?;
+                require_admin_role(conn, invite.chat_id, uid)?;
+                if invite.chat_id != body.source_chat_id {
+                    return Err(AppError::BadRequest(
+                        "Invite does not belong to source chat",
+                    ));
+                }
+                if !validate_invite_is_active(&invite, now) {
+                    return Err(AppError::BadRequest("Invite is no longer active"));
+                }
+                invite
+            } else {
+                invite_service::create_generic_invite(
+                    conn,
+                    state.id_gen.as_ref(),
+                    body.source_chat_id,
+                    uid,
+                    body.expires_at,
+                )
+                .await?
+            };
+
+            let send_result = send_prepared_message(
+                conn,
+                &state,
+                PreparedMessageSend {
+                    system_kind: None,
+                    forwarded_from_message_id: None,
+                    chat_id: body.destination_chat_id,
+                    sender_uid: uid,
+                    message: Some(invite.code.clone()),
+                    message_type: MessageType::Invite,
+                    sticker_id: None,
+                    reply_to_id: None,
+                    reply_root_id: None,
+                    client_generated_id: body.client_generated_id,
+                    attachment_ids: vec![],
+                    publish_immediately: true,
+                    forwarded_bundle_id: None,
+                    forwarded_preview_total: None,
+                    forwarded_preview_contains_forwarded_messages: None,
+                    forwarded_preview_items: None,
+                },
+            )
+            .await?;
+            Ok((invite, send_result))
         }
-        if !validate_invite_is_active(&invite, now) {
-            return Err(AppError::BadRequest("Invite is no longer active"));
-        }
-        invite
-    } else {
-        invite_service::create_generic_invite(
-            conn,
-            state.id_gen.as_ref(),
-            body.source_chat_id,
-            uid,
-            body.expires_at,
-        )
-        .await?
+        .await;
+        transaction.finish(result)?
     };
-
-    let send_result = send_prepared_message(
-        conn,
-        &state,
-        PreparedMessageSend {
-            system_kind: None,
-            forwarded_from_message_id: None,
-            chat_id: body.destination_chat_id,
-            sender_uid: uid,
-            message: Some(invite.code.clone()),
-            message_type: MessageType::Invite,
-            sticker_id: None,
-            reply_to_id: None,
-            reply_root_id: None,
-            client_generated_id: body.client_generated_id,
-            attachment_ids: vec![],
-            publish_immediately: true,
-            forwarded_bundle_id: None,
-            forwarded_preview_total: None,
-            forwarded_preview_contains_forwarded_messages: None,
-            forwarded_preview_items: None,
-        },
-    )
-    .await?;
     let message = match send_result {
         SendMessageOutcome::Created(send_result) => {
             let send_result = *send_result;

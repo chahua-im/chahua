@@ -22,6 +22,7 @@ pub mod saved_messages;
 pub mod service_tokens;
 pub mod single_forwarding;
 pub mod social;
+pub mod speaking;
 pub mod system_messages;
 pub mod threads;
 pub mod token_generation;

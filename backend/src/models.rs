@@ -125,6 +125,31 @@ pub enum GroupRole {
     Admin,
 }
 
+/// Ordered from least to most restrictive; group and member limits compose by max.
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::SpeakingMode"]
+#[serde(rename_all = "camelCase")]
+pub enum SpeakingMode {
+    #[default]
+    Unrestricted,
+    ThreadsOnly,
+    RepliesOnly,
+    ReadOnly,
+}
+
 #[derive(
     diesel_derive_enum::DbEnum,
     Debug,
@@ -361,6 +386,7 @@ pub struct Group {
     /// Canonical max uid of the DM pair; `None` for non-DM groups.
     pub dm_uid2: Option<i32>,
     pub membership_message_visibility: MembershipMessageVisibility,
+    pub speaking_mode: SpeakingMode,
 }
 
 /// For inserting a group. Set `id` and `created_at` (e.g. `Utc::now()`) when not relying on DB defaults.
@@ -592,6 +618,7 @@ pub struct GroupMembership {
     pub join_reason: GroupJoinReason,
     pub join_reason_extra: Option<serde_json::Value>,
     pub mute_override: Option<bool>,
+    pub speaking_mode: SpeakingMode,
 }
 
 /// For inserting a membership. Use `"member"` and `Utc::now()` for `role` and `joined_at` to match DB defaults.

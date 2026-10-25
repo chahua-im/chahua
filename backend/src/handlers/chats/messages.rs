@@ -1,3 +1,4 @@
+use crate::utils::transaction::AsyncTransaction;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -627,64 +628,61 @@ async fn post_message(
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
     let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfMessageSend)?;
-    authorize_message_send(conn, chat_id, None, uid)?;
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
 
     // Keep message creation and read-position advancement atomic.
-    diesel::sql_query("BEGIN").execute(conn)?;
-
     let publish_immediately = !matches!(body.message_type, MessageType::Audio);
-    let tx_result: Result<_, AppError> = async {
-        let send_result = send_prepared_message(
-            conn,
-            &state,
-            PreparedMessageSend {
-                system_kind: None,
-                forwarded_from_message_id: None,
-                chat_id,
-                sender_uid: uid,
-                message: body.message,
-                message_type: body.message_type,
-                sticker_id: body.sticker_id,
-                reply_to_id: body.reply_to_id,
-                reply_root_id: None,
-                client_generated_id: body.client_generated_id,
-                attachment_ids,
-                publish_immediately,
-                forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
-            },
-        )
-        .await?;
-
-        let receipt_advanced = if let SendMessageOutcome::Created(send_result) = &send_result {
-            crate::services::chat::mark_chat_as_read(conn, chat_id, uid, send_result.response.id)?;
-            crate::services::read_receipts::advance_chat_read_receipt(
+    let (send_result, receipt_advanced) = {
+        let mut transaction = AsyncTransaction::begin(conn)?;
+        let conn = transaction.connection();
+        let result = async {
+            authorize_message_send(conn, chat_id, None, uid)?;
+            let send_result = send_prepared_message(
                 conn,
-                chat_id,
-                uid,
-                send_result.response.id,
-            )?
-        } else {
-            false
-        };
+                &state,
+                PreparedMessageSend {
+                    system_kind: None,
+                    forwarded_from_message_id: None,
+                    chat_id,
+                    sender_uid: uid,
+                    message: body.message,
+                    message_type: body.message_type,
+                    sticker_id: body.sticker_id,
+                    reply_to_id: body.reply_to_id,
+                    reply_root_id: None,
+                    client_generated_id: body.client_generated_id,
+                    attachment_ids,
+                    publish_immediately,
+                    forwarded_bundle_id: None,
+                    forwarded_preview_total: None,
+                    forwarded_preview_contains_forwarded_messages: None,
+                    forwarded_preview_items: None,
+                },
+            )
+            .await?;
 
-        Ok((send_result, receipt_advanced))
-    }
-    .await;
+            let receipt_advanced = if let SendMessageOutcome::Created(send_result) = &send_result {
+                crate::services::chat::mark_chat_as_read(
+                    conn,
+                    chat_id,
+                    uid,
+                    send_result.response.id,
+                )?;
+                crate::services::read_receipts::advance_chat_read_receipt(
+                    conn,
+                    chat_id,
+                    uid,
+                    send_result.response.id,
+                )?
+            } else {
+                false
+            };
 
-    let (send_result, receipt_advanced) = match tx_result {
-        Ok(send_result) => {
-            diesel::sql_query("COMMIT").execute(conn)?;
-            send_result
+            Ok((send_result, receipt_advanced))
         }
-        Err(err) => {
-            let _ = diesel::sql_query("ROLLBACK").execute(conn);
-            return Err(err);
-        }
+        .await;
+        transaction.finish(result)?
     };
 
     state.ws_registry.invalidate_unread(&[uid]);
@@ -742,59 +740,57 @@ async fn forward_messages(
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
 
-    // A retry must still be allowed only by someone who can send to the destination.
-    // Source authorization is intentionally deferred until after the idempotency
-    // lookup so a lost-response retry does not depend on mutable source content.
-    let target = authorize_message_send(conn, dest_chat_id, body.thread_id, uid)?;
+    let (send_result, receipt_advanced, subscription_changes) = {
+        let mut transaction = AsyncTransaction::begin(conn)?;
+        let conn = transaction.connection();
+        let result = async {
+            // Retries still require permission to send to the destination. Source
+            // authorization follows idempotency lookup, so lost-response retries
+            // do not depend on mutable source content.
+            let target = authorize_message_send(conn, dest_chat_id, body.thread_id, uid)?;
+            let prepared =
+                prepare_forward_message(conn, state.id_gen.as_ref(), uid, dest_chat_id, &body)
+                    .await?;
+            let send_result = send_prepared_message(conn, &state, prepared).await?;
 
-    diesel::sql_query("BEGIN").execute(conn)?;
-    let tx_result: Result<_, AppError> = async {
-        let prepared =
-            prepare_forward_message(conn, state.id_gen.as_ref(), uid, dest_chat_id, &body).await?;
-        let send_result = send_prepared_message(conn, &state, prepared).await?;
-
-        let SendMessageOutcome::Created(created) = &send_result else {
-            return Ok((send_result, false, Vec::new()));
-        };
-        let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
-            let thread_state = crate::services::threads::record_thread_send(
-                conn,
-                &created.response,
-                &created.member_uids,
-                root,
-                true,
-                false,
-            )?;
-            (
-                thread_state.receipt_advanced,
-                thread_state.subscription_changes,
-            )
-        } else {
-            crate::services::chat::mark_chat_as_read(conn, dest_chat_id, uid, created.response.id)?;
-            (
-                crate::services::read_receipts::advance_chat_read_receipt(
+            let SendMessageOutcome::Created(created) = &send_result else {
+                return Ok((send_result, false, Vec::new()));
+            };
+            let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
+                let thread_state = crate::services::threads::record_thread_send(
+                    conn,
+                    &created.response,
+                    &created.member_uids,
+                    root,
+                    true,
+                    false,
+                )?;
+                (
+                    thread_state.receipt_advanced,
+                    thread_state.subscription_changes,
+                )
+            } else {
+                crate::services::chat::mark_chat_as_read(
                     conn,
                     dest_chat_id,
                     uid,
                     created.response.id,
-                )?,
-                Vec::new(),
-            )
-        };
+                )?;
+                (
+                    crate::services::read_receipts::advance_chat_read_receipt(
+                        conn,
+                        dest_chat_id,
+                        uid,
+                        created.response.id,
+                    )?,
+                    Vec::new(),
+                )
+            };
 
-        Ok((send_result, receipt_advanced, subscription_changes))
-    }
-    .await;
-
-    let (send_result, receipt_advanced, subscription_changes) = match tx_result {
-        Ok(result) => {
-            diesel::sql_query("COMMIT").execute(conn)?;
-            result
+            Ok((send_result, receipt_advanced, subscription_changes))
         }
-        Err(err) => {
-            let _ = diesel::sql_query("ROLLBACK").execute(conn);
-            return Err(err);
-        }
+        .await;
+        transaction.finish(result)?
     };
 
     let created = match send_result {
@@ -863,70 +859,70 @@ async fn forward_message(
     Json(body): Json<ForwardMessageBody>,
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
-    let target = authorize_message_send(conn, chat_id, body.thread_id, uid)?;
-    diesel::sql_query("BEGIN").execute(conn)?;
-    let tx_result: Result<_, AppError> = async {
-        let prepared =
-            prepare_single_forward(conn, state.id_gen.as_ref(), uid, chat_id, message_id, &body)
-                .await?;
-        let send_result = match prepared {
-            PreparedSingleForward::Existing(existing) => {
-                let response =
-                    attach_metadata(conn, vec![*existing], &state.media, &state.avatars, uid)
-                        .await
-                        .into_iter()
-                        .next()
-                        .ok_or(AppError::Internal("Failed to build message response"))?;
-                return Ok((
-                    SendMessageOutcome::Duplicate(Box::new(response)),
-                    false,
-                    Vec::new(),
-                ));
-            }
-            PreparedSingleForward::New(prepared) => {
-                send_prepared_message(conn, &state, *prepared).await?
-            }
-        };
-        let SendMessageOutcome::Created(created) = &send_result else {
-            return Ok((send_result, false, Vec::new()));
-        };
-        let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
-            let thread_state = crate::services::threads::record_thread_send(
+    let (send_result, receipt_advanced, subscription_changes) = {
+        let mut transaction = AsyncTransaction::begin(conn)?;
+        let conn = transaction.connection();
+        let result = async {
+            let target = authorize_message_send(conn, chat_id, body.thread_id, uid)?;
+            let prepared = prepare_single_forward(
                 conn,
-                &created.response,
-                &created.member_uids,
-                root,
-                true,
-                false,
-            )?;
-            (
-                thread_state.receipt_advanced,
-                thread_state.subscription_changes,
+                state.id_gen.as_ref(),
+                uid,
+                chat_id,
+                message_id,
+                &body,
             )
-        } else {
-            crate::services::chat::mark_chat_as_read(conn, chat_id, uid, created.response.id)?;
-            (
-                crate::services::read_receipts::advance_chat_read_receipt(
+            .await?;
+            let send_result = match prepared {
+                PreparedSingleForward::Existing(existing) => {
+                    let response =
+                        attach_metadata(conn, vec![*existing], &state.media, &state.avatars, uid)
+                            .await
+                            .into_iter()
+                            .next()
+                            .ok_or(AppError::Internal("Failed to build message response"))?;
+                    return Ok((
+                        SendMessageOutcome::Duplicate(Box::new(response)),
+                        false,
+                        Vec::new(),
+                    ));
+                }
+                PreparedSingleForward::New(prepared) => {
+                    send_prepared_message(conn, &state, *prepared).await?
+                }
+            };
+            let SendMessageOutcome::Created(created) = &send_result else {
+                return Ok((send_result, false, Vec::new()));
+            };
+            let (receipt_advanced, subscription_changes) = if let Some(root) = &target.thread_root {
+                let thread_state = crate::services::threads::record_thread_send(
                     conn,
-                    chat_id,
-                    uid,
-                    created.response.id,
-                )?,
-                Vec::new(),
-            )
-        };
-        Ok((send_result, receipt_advanced, subscription_changes))
-    }
-    .await;
-    let (send_result, receipt_advanced, subscription_changes) = match tx_result {
-        Ok(result) => {
-            diesel::sql_query("COMMIT").execute(conn)?;
-            result
+                    &created.response,
+                    &created.member_uids,
+                    root,
+                    true,
+                    false,
+                )?;
+                (
+                    thread_state.receipt_advanced,
+                    thread_state.subscription_changes,
+                )
+            } else {
+                crate::services::chat::mark_chat_as_read(conn, chat_id, uid, created.response.id)?;
+                (
+                    crate::services::read_receipts::advance_chat_read_receipt(
+                        conn,
+                        chat_id,
+                        uid,
+                        created.response.id,
+                    )?,
+                    Vec::new(),
+                )
+            };
+            Ok((send_result, receipt_advanced, subscription_changes))
         }
-        Err(error) => {
-            let _ = diesel::sql_query("ROLLBACK").execute(conn);
-            return Err(error);
-        }
+        .await;
+        transaction.finish(result)?
     };
     let created = match send_result {
         SendMessageOutcome::Created(created) => *created,
@@ -1070,74 +1066,66 @@ pub(super) async fn post_thread_message(
 ) -> Result<impl IntoResponse, AppError> {
     let conn = &mut *conn;
 
-    let root_msg = authorize_message_send(conn, chat_id, Some(thread_id), uid)?
-        .thread_root
-        .ok_or(AppError::Internal(
-            "Thread authorization did not return a thread root",
-        ))?;
     validate_client_message_type(&body.message_type)?;
     let attachment_ids = parse_attachment_ids(&body.attachment_ids)?;
 
     // Begin transaction: message insert + thread_meta + subscriptions are atomic.
-    // send_prepared_message is async so we use raw BEGIN/COMMIT.
-    diesel::sql_query("BEGIN").execute(conn)?;
-
     let publish_immediately = !matches!(body.message_type, MessageType::Audio);
-    let tx_result: Result<_, AppError> = async {
-        let send_result = send_prepared_message(
-            conn,
-            &state,
-            PreparedMessageSend {
-                system_kind: None,
-                forwarded_from_message_id: None,
-                chat_id,
-                sender_uid: uid,
-                message: body.message,
-                message_type: body.message_type,
-                sticker_id: body.sticker_id,
-                reply_to_id: body.reply_to_id,
-                reply_root_id: Some(thread_id),
-                client_generated_id: body.client_generated_id,
-                attachment_ids,
-                publish_immediately,
-                forwarded_bundle_id: None,
-                forwarded_preview_total: None,
-                forwarded_preview_contains_forwarded_messages: None,
-                forwarded_preview_items: None,
-            },
-        )
-        .await?;
-        let send_result = match send_result {
-            SendMessageOutcome::Created(send_result) => *send_result,
-            SendMessageOutcome::Duplicate(response) => {
-                return Ok((SendMessageOutcome::Duplicate(response), false, Vec::new()));
-            }
-        };
-        let thread_state = crate::services::threads::record_thread_send(
-            conn,
-            &send_result.response,
-            &send_result.member_uids,
-            &root_msg,
-            publish_immediately,
-            true,
-        )?;
-        Ok((
-            SendMessageOutcome::Created(Box::new(send_result)),
-            thread_state.receipt_advanced,
-            thread_state.subscription_changes,
-        ))
-    }
-    .await;
+    let (send_result, receipt_advanced, subscription_changes) = {
+        let mut transaction = AsyncTransaction::begin(conn)?;
+        let conn = transaction.connection();
+        let result = async {
+            let root_msg = authorize_message_send(conn, chat_id, Some(thread_id), uid)?
+                .thread_root
+                .ok_or(AppError::Internal(
+                    "Thread authorization did not return a thread root",
+                ))?;
 
-    let (send_result, receipt_advanced, subscription_changes) = match tx_result {
-        Ok(data) => {
-            diesel::sql_query("COMMIT").execute(conn)?;
-            data
+            let send_result = send_prepared_message(
+                conn,
+                &state,
+                PreparedMessageSend {
+                    system_kind: None,
+                    forwarded_from_message_id: None,
+                    chat_id,
+                    sender_uid: uid,
+                    message: body.message,
+                    message_type: body.message_type,
+                    sticker_id: body.sticker_id,
+                    reply_to_id: body.reply_to_id,
+                    reply_root_id: Some(thread_id),
+                    client_generated_id: body.client_generated_id,
+                    attachment_ids,
+                    publish_immediately,
+                    forwarded_bundle_id: None,
+                    forwarded_preview_total: None,
+                    forwarded_preview_contains_forwarded_messages: None,
+                    forwarded_preview_items: None,
+                },
+            )
+            .await?;
+            let send_result = match send_result {
+                SendMessageOutcome::Created(send_result) => *send_result,
+                SendMessageOutcome::Duplicate(response) => {
+                    return Ok((SendMessageOutcome::Duplicate(response), false, Vec::new()));
+                }
+            };
+            let thread_state = crate::services::threads::record_thread_send(
+                conn,
+                &send_result.response,
+                &send_result.member_uids,
+                &root_msg,
+                publish_immediately,
+                true,
+            )?;
+            Ok((
+                SendMessageOutcome::Created(Box::new(send_result)),
+                thread_state.receipt_advanced,
+                thread_state.subscription_changes,
+            ))
         }
-        Err(e) => {
-            let _ = diesel::sql_query("ROLLBACK").execute(conn);
-            return Err(e);
-        }
+        .await;
+        transaction.finish(result)?
     };
 
     let send_result = match send_result {
@@ -1264,6 +1252,8 @@ async fn patch_message(
     let now = Utc::now();
     let (updated_message, added_mention_uids) = conn.transaction::<_, AppError, _>(|conn| {
         use crate::schema::attachments::dsl as a_dsl;
+        use crate::services::speaking;
+        speaking::lock_chat(conn, chat_id, false)?;
         let message: Message = messages::table
             .filter(dsl::id.eq(message_id).and(dsl::chat_id.eq(chat_id)))
             .for_update()
@@ -1299,6 +1289,8 @@ async fn patch_message(
         if !matches!(message.message_type, MessageType::Text) {
             return Err(AppError::BadRequest("This message type cannot be edited"));
         }
+
+        speaking::require_edit(conn, &message, uid)?;
 
         let requested = attachments::table
             .filter(a_dsl::id.eq_any(&attachment_ids))

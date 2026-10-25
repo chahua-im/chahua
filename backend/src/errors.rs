@@ -21,6 +21,8 @@ pub enum AppError {
     Unauthorized(&'static str),
     /// 403 Forbidden with a static message.
     Forbidden(&'static str),
+    /// A user-originated send or edit is disallowed by the current group/member mode.
+    SpeakingRestricted(crate::models::SpeakingMode),
     /// 404 Not Found with a static message.
     NotFound(&'static str),
     /// 409 Conflict with a static message.
@@ -82,6 +84,14 @@ impl IntoResponse for AppError {
             AppError::PayloadTooLarge(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg).into_response(),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg).into_response(),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg).into_response(),
+            AppError::SpeakingRestricted(mode) => (
+                StatusCode::FORBIDDEN,
+                axum::Json(crate::dto::speaking::SpeakingRestrictedResponse {
+                    code: "speakingRestricted",
+                    effective_speaking_mode: mode,
+                }),
+            )
+                .into_response(),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg).into_response(),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg).into_response(),
             AppError::Gone(msg) => (StatusCode::GONE, msg).into_response(),
