@@ -139,68 +139,83 @@ describe('ChatListStore', () => {
 
   it.each(
     [true, false].flatMap((show) =>
-      [SystemMessageKind.member_added, SystemMessageKind.member_joined].map((kind) => ({ show, kind })),
+      Object.values(MembershipMessageVisibility).flatMap((visibility) =>
+        [SystemMessageKind.member_added, SystemMessageKind.member_joined].map((kind) => ({ show, kind, visibility })),
+      ),
     ),
-  )('discovers the current user joining a group ($kind, show announcements: $show)', async ({ show, kind }) => {
-    const session = TestBed.inject(SessionStore);
-    session.user.set(testUser);
-    const current = { ...wireChat, lastMessage: wireMessage, lastMessageAt: wireMessage.createdAt };
-    http.expectOne('/_api/chats?limit=50').flush(
-      structuredClone({
-        chatSettings: { showMembershipMessages: true },
-        chats: [current],
-        nextCursor: wireChat.id,
-      }),
-    );
-    await settle();
-    if (!show) {
-      session.acceptChatSettings({ showMembershipMessages: false }, testUser.uid);
-      await settle();
+  )(
+    'discovers the current user joining a group ($kind, preference: $show, policy: $visibility)',
+    async ({ show, kind, visibility }) => {
+      const session = TestBed.inject(SessionStore);
+      session.user.set(testUser);
+      const current = { ...wireChat, lastMessage: wireMessage, lastMessageAt: wireMessage.createdAt };
       http.expectOne('/_api/chats?limit=50').flush(
         structuredClone({
-          chatSettings: { showMembershipMessages: false },
+          chatSettings: { showMembershipMessages: true },
           chats: [current],
           nextCursor: wireChat.id,
         }),
       );
       await settle();
-    }
-    const boundary = query.loadedThrough();
-    const chatId = '9007199254740994';
-    const announcement = {
-      ...testMessage,
-      chatId: encodeId(chatId),
-      createdAt: '2026-10-25T10:00:00Z',
-      messageType: MessageType.system,
-      systemKind: kind,
-      sender: { ...testMessage.sender, uid: kind === SystemMessageKind.member_joined ? testUser.uid : 2 },
-      systemLinks: kind === SystemMessageKind.member_added ? { uid: testUser.uid } : undefined,
-    };
-    incoming.next(announcement);
-    await settle();
-    http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${chatId}`).flush({
-      chatSettings: { showMembershipMessages: show },
-      chats: [
-        {
-          ...wireChat,
-          id: chatId,
-          lastMessage: show ? { ...announcement, id: wireMessage.id, chatId } : null,
-          lastMessageAt: show ? announcement.createdAt : null,
-        },
-      ],
-    });
-    await settle();
-    expect(query.items().map((chat) => decodeId(chat.id))).toEqual(
-      show ? [chatId, wireChat.id] : [wireChat.id, chatId],
-    );
-    if (!show) expect(query.items()[1].lastMessage).toBeNull();
-    expect(query.hasMore()).toBe(true);
-    expect(query.loadedThrough()).toBe(boundary);
-    http.expectNone(() => true);
-  });
+      if (!show) {
+        session.acceptChatSettings({ showMembershipMessages: false }, testUser.uid);
+        await settle();
+        http.expectOne('/_api/chats?limit=50').flush(
+          structuredClone({
+            chatSettings: { showMembershipMessages: false },
+            chats: [current],
+            nextCursor: wireChat.id,
+          }),
+        );
+        await settle();
+      }
+      const boundary = query.loadedThrough();
+      const chatId = '9007199254740994';
+      const announcement = {
+        ...testMessage,
+        chatId: encodeId(chatId),
+        createdAt: '2026-10-25T10:00:00Z',
+        messageType: MessageType.system,
+        systemKind: kind,
+        sender: { ...testMessage.sender, uid: kind === SystemMessageKind.member_joined ? testUser.uid : 2 },
+        systemLinks: kind === SystemMessageKind.member_added ? { uid: testUser.uid } : undefined,
+      };
+      const canView = visibility === MembershipMessageVisibility.members;
+      const visible = show && canView;
+      // Restricted groups do not deliver a system announcement to the new member.
+      if (canView) incoming.next(announcement);
+      await settle();
+      http.expectNone(() => true);
+      events.next({ type: ServerWsMessageType.chatMembershipChanged, payload: { chatId: encodeId(chatId) } });
+      await settle();
+      http.expectOne(`/_api/chats?limit=1&archived=false&chatId=${chatId}`).flush({
+        chatSettings: { showMembershipMessages: show },
+        chats: [
+          {
+            ...wireChat,
+            id: chatId,
+            membershipMessagePolicy: { visibility, canView },
+            lastMessage: visible ? { ...announcement, id: wireMessage.id, chatId } : null,
+            lastMessageAt: visible ? announcement.createdAt : null,
+          },
+        ],
+      });
+      await settle();
+      // A late copy of the announcement must not fetch the same row again.
+      if (canView) incoming.next(announcement);
+      await settle();
+      expect(query.items().map((chat) => decodeId(chat.id))).toEqual(
+        visible ? [chatId, wireChat.id] : [wireChat.id, chatId],
+      );
+      if (!visible) expect(query.items()[1].lastMessage).toBeNull();
+      expect(query.hasMore()).toBe(true);
+      expect(query.loadedThrough()).toBe(boundary);
+      http.expectNone(() => true);
+    },
+  );
 
   it.each(['inactive', 'background', 'loading'])(
-    'defers a hidden self-join until the list is ready (%s)',
+    'defers a membership event without an announcement until the list is ready (%s)',
     async (state) => {
       const session = TestBed.inject(SessionStore);
       const initial = http.expectOne('/_api/chats?limit=50');
@@ -214,12 +229,9 @@ describe('ChatListStore', () => {
       }
       const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(state === 'background');
       if (state === 'inactive') releaseQuery();
-      incoming.next({
-        ...testMessage,
-        messageType: MessageType.system,
-        systemKind: SystemMessageKind.member_added,
-        systemLinks: { uid: testUser.uid },
-        sender: { ...testMessage.sender, uid: 2 },
+      events.next({
+        type: ServerWsMessageType.chatMembershipChanged,
+        payload: { chatId: testChat.id },
       });
       await settle();
       http.expectNone(() => true);

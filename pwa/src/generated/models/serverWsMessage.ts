@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ChatArchiveStateChangedPayload } from './chatArchiveStateChangedPayload';
+import type { ChatMembershipChangedPayload } from './chatMembershipChangedPayload';
 import type { ChatNotificationSettingResponse } from './chatNotificationSettingResponse';
 import type { BulkDeletedPayload } from './chats/bulkDeletedPayload';
 import type { ConversationStatesPayload } from './conversationStatesPayload';
@@ -29,6 +30,10 @@ import type { NotificationExceptionsCleared } from './users/notificationExceptio
 import type { NotificationSettingsResponse } from './users/notificationSettingsResponse';
 
 export type ServerWsMessage =
+  | {
+      payload: ChatMembershipChangedPayload;
+      type: 'chatMembershipChanged';
+    }
   | {
       payload: MembershipMessagePolicyChanged;
       type: 'membershipMessagePolicyChanged';

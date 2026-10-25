@@ -38,6 +38,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     lastReadMessageId: 1,
     peerLastReadMessageId: 1,
   },
+  ChatMembershipChangedPayload: {
+    chatId: 1,
+  },
   ChatNotificationSettingResponse: {
     chatId: 1,
   },
@@ -811,6 +814,7 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
 ];
 export const wsPayloadCodecs: Record<string, JsonCodec> = {
+  chatMembershipChanged: 'ChatMembershipChangedPayload',
   membershipMessagePolicyChanged: 'MembershipMessagePolicyChanged',
   message: 'MessageResponse',
   messageUpdated: 'MessageResponse',

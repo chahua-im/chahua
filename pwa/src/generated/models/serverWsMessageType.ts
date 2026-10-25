@@ -7,6 +7,7 @@
  */
 
 export enum ServerWsMessageType {
+  chatMembershipChanged = 'chatMembershipChanged',
   membershipMessagePolicyChanged = 'membershipMessagePolicyChanged',
   message = 'message',
   messageUpdated = 'messageUpdated',
