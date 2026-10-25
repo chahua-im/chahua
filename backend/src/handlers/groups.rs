@@ -97,6 +97,7 @@ pub(super) struct UpdateChatBody {
     #[schema(value_type = Option<String>)]
     avatar_image_id: Option<Option<i64>>,
     visibility: Option<GroupVisibility>,
+    membership_message_visibility: Option<crate::models::MembershipMessageVisibility>,
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
@@ -238,6 +239,11 @@ pub(super) fn load_group_info(
         muted_until: notification_setting.muted_until,
         mute_override: notification_setting.mute_override,
         is_muted: notification_setting.is_muted(group.kind, defaults, Utc::now()),
+        membership_message_policy: crate::dto::groups::MembershipMessagePolicy {
+            visibility: group.membership_message_visibility,
+            can_view: group.kind == GroupKind::Dm
+                || group.membership_message_visibility.allows(my_role.as_ref()),
+        },
         my_role,
         kind: group.kind,
         peer,
@@ -566,6 +572,12 @@ async fn patch_group(
         .optional()?
         .ok_or(AppError::NotFound("Chat not found"))?;
 
+    if body.membership_message_visibility.is_some() && current_group.kind != GroupKind::Group {
+        return Err(AppError::BadRequest(
+            "Membership message visibility is only available for groups",
+        ));
+    }
+
     if let Some(Some(image_id)) = body.avatar_image_id {
         let owned_image_exists = media::table
             .filter(
@@ -592,6 +604,11 @@ async fn patch_group(
         || changeset.visibility.is_some();
 
     conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        if let Some(visibility) = body.membership_message_visibility {
+            diesel::update(groups::table.find(chat_id))
+                .set(groups::membership_message_visibility.eq(visibility))
+                .execute(conn)?;
+        }
         if has_metadata_changes {
             diesel::update(groups::table.filter(groups_dsl::id.eq(chat_id)))
                 .set(&changeset)
@@ -615,6 +632,9 @@ async fn patch_group(
         Ok(())
     })?;
 
+    if body.membership_message_visibility.is_some() {
+        crate::services::system_messages::broadcast_policy(conn, &state.ws_registry, chat_id)?;
+    }
     Ok(Json(load_group_info(conn, &state, chat_id, uid)?))
 }
 

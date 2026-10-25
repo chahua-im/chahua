@@ -8,11 +8,14 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::auth::AuthTokenResponse;
-use crate::dto::users::{MeResponse, MemberSummary, SearchUsersResponse, StickerPackOrderItem};
+use crate::dto::users::{
+    ChatSettings, MeResponse, MemberSummary, SearchUsersResponse, StickerPackOrderItem,
+    UpdateChatSettings,
+};
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
-use crate::models::{FriendAddVerificationMode, NewUserExtra, UserExtra};
+use crate::models::{NewUserExtra, UserExtra};
 use crate::schema::{group_membership, sticker_packs, user_extra, user_sticker_pack_subscriptions};
 use crate::services::authz::{Action as AuthzAction, Resource as AuthzResource};
 use crate::services::user::{lookup_user_profiles, search_user_uids_by_prefix};
@@ -130,13 +133,8 @@ async fn put_stickerpack_order(
         let now = chrono::Utc::now().naive_utc();
         diesel::insert_into(user_extra::table)
             .values(NewUserExtra {
-                uid,
-                first_seen_at: now,
-                last_seen_at: now,
                 sticker_pack_order: order_json.clone(),
-                verification_mode: FriendAddVerificationMode::Direct,
-                verification_question: None,
-                presence_visibility: crate::models::PresenceVisibility::Everyone,
+                ..NewUserExtra::new(uid, now)
             })
             .execute(conn)?;
     }
@@ -293,6 +291,9 @@ async fn get_me(
             },
         )
         .unwrap_or_default();
+    let show_membership_messages = extra
+        .as_ref()
+        .is_none_or(|extra| extra.show_membership_messages);
     let sticker_pack_order = extra
         .and_then(|e| {
             serde_json::from_value::<Vec<StickerPackOrderItem>>(e.sticker_pack_order).ok()
@@ -314,7 +315,24 @@ async fn get_me(
         permissions,
         mute_group_chats_by_default: notification_defaults.group_chats_muted,
         mute_direct_chats_by_default: notification_defaults.direct_chats_muted,
+        show_membership_messages,
     }))
+}
+
+#[utoipa::path(
+    put, path = "/me/chat-settings", tag = "users", request_body = UpdateChatSettings,
+    responses((status = 200, description = "Saved account chat settings", body = ChatSettings)),
+    security(("bearer_jwt" = []))
+)]
+async fn put_chat_settings(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Json(settings): Json<UpdateChatSettings>,
+) -> Result<Json<ChatSettings>, AppError> {
+    let settings = crate::services::user::save_chat_settings(&mut conn, uid, settings)?;
+    state.ws_registry.invalidate_unread(&[uid]);
+    Ok(Json(settings))
 }
 
 /// GET /users/search — Search global users for targeted invites.
@@ -409,6 +427,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
         .merge(super::notification_preferences::router())
         .routes(routes!(get_me))
+        .routes(routes!(put_chat_settings))
         .routes(routes!(get_user_search))
         .routes(routes!(get_auth_token))
         .routes(routes!(put_stickerpack_order))

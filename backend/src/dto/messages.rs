@@ -83,6 +83,8 @@ pub struct SystemMessageLinks {
 #[serde(rename_all = "camelCase")]
 pub struct MessageResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_kind: Option<crate::models::SystemMessageKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_links: Option<SystemMessageLinks>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forwarded_from: Option<ForwardedFromInfo>,
@@ -342,6 +344,8 @@ pub struct ForwardedMessageResponse {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListMessagesResponse {
+    pub membership_message_policy: crate::dto::groups::MembershipMessagePolicy,
+    pub chat_settings: crate::dto::users::ChatSettings,
     pub messages: Vec<MessageResponse>,
     /// Deprecated: use `older_cursor` / `olderCursor` instead.
     ///
@@ -424,6 +428,8 @@ pub struct MessagePreviewAttachment {
 #[serde(rename_all = "camelCase")]
 pub struct MessagePreview {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_kind: Option<crate::models::SystemMessageKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_links: Option<SystemMessageLinks>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forwarded_from_name: Option<String>,
@@ -478,6 +484,13 @@ mod tests {
     #[test]
     fn list_messages_response_serializes_directional_cursor_aliases() {
         let response = ListMessagesResponse {
+            membership_message_policy: crate::dto::groups::MembershipMessagePolicy {
+                visibility: crate::models::MembershipMessageVisibility::Members,
+                can_view: true,
+            },
+            chat_settings: crate::dto::users::ChatSettings {
+                show_membership_messages: true,
+            },
             messages: vec![],
             next_cursor: Some(10),
             prev_cursor: Some(20),
@@ -490,6 +503,8 @@ mod tests {
         assert_eq!(
             value,
             json!({
+                "chatSettings": {"showMembershipMessages": true},
+                "membershipMessagePolicy": {"visibility": "members", "canView": true},
                 "messages": [],
                 "nextCursor": "10",
                 "prevCursor": "20",

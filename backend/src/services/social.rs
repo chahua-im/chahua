@@ -445,6 +445,7 @@ async fn send_friendship_accepted_message(
             conn,
             state,
             PreparedMessageSend {
+                system_kind: Some(crate::models::SystemMessageKind::FriendRequestAccepted),
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid,
@@ -585,13 +586,8 @@ pub fn update_presence_settings(
     let now = Utc::now().naive_utc();
     diesel::insert_into(user_extra::table)
         .values(NewUserExtra {
-            uid,
-            first_seen_at: now,
-            last_seen_at: now,
-            sticker_pack_order: serde_json::json!([]),
-            verification_mode: FriendAddVerificationMode::Direct,
-            verification_question: None,
             presence_visibility: visibility,
+            ..NewUserExtra::new(uid, now)
         })
         .on_conflict(user_extra::uid)
         .do_update()
@@ -624,15 +620,7 @@ pub fn update_read_receipt_settings(
 ) -> Result<ReadReceiptVisibility, AppError> {
     let now = Utc::now().naive_utc();
     diesel::insert_into(user_extra::table)
-        .values(NewUserExtra {
-            uid,
-            first_seen_at: now,
-            last_seen_at: now,
-            sticker_pack_order: serde_json::json!([]),
-            verification_mode: FriendAddVerificationMode::Direct,
-            verification_question: None,
-            presence_visibility: PresenceVisibility::Everyone,
-        })
+        .values(NewUserExtra::new(uid, now))
         .on_conflict(user_extra::uid)
         .do_update()
         .set(user_extra::read_receipt_visibility.eq(visibility))
@@ -826,13 +814,9 @@ pub fn upsert_friend_settings(
 
     let now = Utc::now().naive_utc();
     let row = NewUserExtra {
-        uid,
-        first_seen_at: now,
-        last_seen_at: now,
-        sticker_pack_order: serde_json::json!([]),
         verification_mode: mode,
         verification_question: trimmed_question.clone(),
-        presence_visibility: PresenceVisibility::Everyone,
+        ..NewUserExtra::new(uid, now)
     };
     let result = diesel::insert_into(user_extra::table)
         .values(&row)

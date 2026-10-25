@@ -101,6 +101,7 @@ pub(crate) async fn prepare_single_forward(
 
     if let Some(reason) = source_placeholder(&source, body.allow_placeholders)? {
         return Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
+            system_kind: None,
             chat_id: destination_chat_id,
             sender_uid: uid,
             message: Some(reason.as_str().to_owned()),
@@ -153,6 +154,7 @@ pub(crate) async fn prepare_single_forward(
             .execute(conn)?;
     }
     Ok(PreparedSingleForward::New(Box::new(PreparedMessageSend {
+        system_kind: None,
         chat_id: destination_chat_id,
         sender_uid: uid,
         message: source.message,
@@ -222,7 +224,9 @@ impl ForwardOrigins {
             .filter_map(|message| message.reply_to_id)
             .collect();
         let mut replies = load_messages(conn, &reply_ids)?;
-        replies.retain(|_, message| message.is_published);
+        replies.retain(|_, message| {
+            message.is_published && !message.system_kind.is_some_and(|kind| kind.is_membership())
+        });
         let nested_origin_ids = replies
             .values()
             .filter_map(|message| message.forwarded_from_message_id)
@@ -284,6 +288,7 @@ impl ForwardOrigins {
             .map(|reply| {
                 Box::new(build_message_preview(
                     MessagePreviewInput {
+                        system_kind: reply.system_kind,
                         forwarded_from_name: self.name_for(reply, profiles),
                         id: reply.id,
                         client_generated_id: reply.client_generated_id.clone(),
@@ -323,6 +328,7 @@ mod tests {
 
     fn message(id: i64) -> Message {
         Message {
+            system_kind: None,
             id,
             message: Some("hello @[uid:9]".into()),
             message_type: MessageType::Text,

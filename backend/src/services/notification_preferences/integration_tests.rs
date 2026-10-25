@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::FriendAddVerificationMode;
 use diesel::connection::SimpleConnection;
 
 fn connection() -> Option<PgConnection> {
@@ -7,10 +8,10 @@ fn connection() -> Option<PgConnection> {
     conn.batch_execute("
         CREATE TEMP TABLE user_extra (LIKE public.user_extra INCLUDING ALL);
         CREATE TEMP TABLE groups (id BIGINT PRIMARY KEY, name TEXT NOT NULL, kind group_kind NOT NULL,
-            avatar_image_id BIGINT, dm_uid1 INTEGER, dm_uid2 INTEGER);
+            avatar_image_id BIGINT, dm_uid1 INTEGER, dm_uid2 INTEGER, membership_message_visibility membership_message_visibility NOT NULL DEFAULT 'members');
         CREATE TEMP TABLE media (id BIGINT PRIMARY KEY, storage_key TEXT, deleted_at TIMESTAMPTZ);
         CREATE TEMP TABLE group_membership (chat_id BIGINT, uid INTEGER, archived BOOLEAN NOT NULL DEFAULT FALSE,
-            muted_until TIMESTAMPTZ, mute_override BOOLEAN, last_read_message_id BIGINT, PRIMARY KEY(chat_id, uid));
+            muted_until TIMESTAMPTZ, mute_override BOOLEAN, last_read_message_id BIGINT, role group_role NOT NULL DEFAULT 'member', PRIMARY KEY(chat_id, uid));
         CREATE TEMP TABLE messages (id BIGINT PRIMARY KEY, chat_id BIGINT, reply_root_id BIGINT,
             deleted_at TIMESTAMPTZ, is_published BOOLEAN DEFAULT TRUE, has_thread BOOLEAN DEFAULT FALSE);
         CREATE TEMP TABLE thread_user_states (chat_id BIGINT, uid INTEGER, thread_root_id BIGINT,

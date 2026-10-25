@@ -86,6 +86,7 @@ pub struct BulkDeletedPayload {
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum ServerWsMessage {
+    MembershipMessagePolicyChanged(crate::dto::groups::MembershipMessagePolicyChanged),
     Message(MessageResponse),
     MessageUpdated(MessageResponse),
     MessageDeleted(MessageResponse),
@@ -122,6 +123,7 @@ pub enum ServerWsMessage {
 impl ServerWsMessage {
     pub fn message_type(&self) -> &'static str {
         match self {
+            Self::MembershipMessagePolicyChanged(_) => "membershipMessagePolicyChanged",
             Self::Message(_) => "message",
             Self::MessageUpdated(_) => "messageUpdated",
             Self::MessageDeleted(_) => "messageDeleted",

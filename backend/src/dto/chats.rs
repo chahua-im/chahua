@@ -8,6 +8,7 @@ use crate::models::GroupKind;
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatListItem {
+    pub membership_message_policy: crate::dto::groups::MembershipMessagePolicy,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
@@ -41,6 +42,7 @@ pub struct ChatListItem {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ListChatsResponse {
+    pub chat_settings: crate::dto::users::ChatSettings,
     pub chats: Vec<ChatListItem>,
     #[serde(with = "crate::serde_i64_string::opt")]
     #[schema(value_type = Option<String>)]

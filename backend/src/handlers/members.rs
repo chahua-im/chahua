@@ -291,6 +291,7 @@ async fn post_add_member(
             conn,
             &state,
             crate::services::messages::PreparedMessageSend {
+                system_kind: Some(crate::models::SystemMessageKind::MemberAdded),
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
@@ -437,8 +438,9 @@ async fn delete_remove_member(
 
     state.ws_registry.invalidate_unread(&[target_uid]);
 
-    let (sys_sender_uid, sys_msg) = if is_admin_removing_other {
+    let (system_kind, sys_sender_uid, sys_msg) = if is_admin_removing_other {
         (
+            crate::models::SystemMessageKind::MemberRemoved,
             uid,
             crate::services::system_messages::with_user(
                 format!("removed {}", target_username),
@@ -446,7 +448,11 @@ async fn delete_remove_member(
             ),
         )
     } else {
-        (target_uid, "left the chat".to_string())
+        (
+            crate::models::SystemMessageKind::MemberLeft,
+            target_uid,
+            "left the chat".to_string(),
+        )
     };
 
     if let Ok(crate::services::messages::SendMessageOutcome::Created(send_result)) =
@@ -454,6 +460,7 @@ async fn delete_remove_member(
             conn,
             &state,
             crate::services::messages::PreparedMessageSend {
+                system_kind: Some(system_kind),
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: sys_sender_uid,
@@ -557,12 +564,12 @@ async fn patch_member(
         return Err(AppError::NotFound("Member not found"));
     }
 
-    // Update role
     diesel::update(
         group_membership::table.filter(gm_dsl::chat_id.eq(chat_id).and(gm_dsl::uid.eq(target_uid))),
     )
     .set(gm_dsl::role.eq(&body.role))
     .execute(conn)?;
+    crate::services::system_messages::broadcast_policy(conn, &state.ws_registry, chat_id)?;
 
     // Get updated member info
     let (role, joined_at): (GroupRole, DateTime<Utc>) = group_membership::table

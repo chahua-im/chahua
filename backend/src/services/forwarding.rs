@@ -180,6 +180,7 @@ fn prepared_forward_message(
     preview_items: Vec<crate::dto::messages::ForwardedMessagePreviewSnapshot>,
 ) -> PreparedMessageSend {
     PreparedMessageSend {
+        system_kind: None,
         forwarded_from_message_id: None,
         chat_id,
         sender_uid,

@@ -149,6 +149,9 @@ async fn get_reaction_details(
     // Reactions are not exposed for deleted messages (even thread-root placeholders).
     let _message: Message = messages::table
         .filter(messages::id.eq(message_id))
+        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+        ))
         .filter(messages::chat_id.eq(chat_id))
         .filter(messages::deleted_at.is_null())
         .filter(messages::is_published.eq(true))
@@ -236,6 +239,9 @@ async fn put_reaction(
     // Verify message exists and belongs to this chat
     let message: Message = messages::table
         .filter(messages::id.eq(message_id))
+        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+        ))
         .filter(messages::chat_id.eq(chat_id))
         .filter(messages::deleted_at.is_null())
         .filter(messages::is_published.eq(true))
@@ -297,6 +303,9 @@ async fn delete_reaction(
     // Verify message exists and is not deleted (no reaction removal on deleted messages)
     let message: Message = messages::table
         .filter(messages::id.eq(message_id))
+        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+        ))
         .filter(messages::chat_id.eq(chat_id))
         .filter(messages::deleted_at.is_null())
         .filter(messages::is_published.eq(true))

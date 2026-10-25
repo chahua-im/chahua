@@ -360,6 +360,7 @@ async fn post_send_invite_message(
         conn,
         &state,
         PreparedMessageSend {
+            system_kind: None,
             forwarded_from_message_id: None,
             chat_id: body.destination_chat_id,
             sender_uid: uid,
@@ -722,6 +723,7 @@ async fn post_redeem_invite(
             conn,
             &state,
             crate::services::messages::PreparedMessageSend {
+                system_kind: Some(crate::models::SystemMessageKind::MemberJoined),
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,

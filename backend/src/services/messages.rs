@@ -87,6 +87,7 @@ pub fn extract_mention_uids(text: &str) -> Vec<i32> {
 
 #[derive(Clone)]
 pub struct PreparedMessageSend {
+    pub system_kind: Option<crate::models::SystemMessageKind>,
     pub forwarded_from_message_id: Option<i64>,
     pub chat_id: i64,
     pub sender_uid: i32,
@@ -258,6 +259,12 @@ fn validate_reply_target(
         return Err(AppError::NotFound("Reply target message not found"));
     };
 
+    if reply_msg
+        .system_kind
+        .is_some_and(|kind| kind.is_membership())
+    {
+        return Err(AppError::BadRequest("Cannot reply to membership messages"));
+    }
     let matches_thread_context = match thread_id {
         Some(thread_id) => reply_msg.id == thread_id || reply_msg.reply_root_id == Some(thread_id),
         None => reply_msg.reply_root_id.is_none(),
@@ -350,6 +357,7 @@ pub fn build_sender(
 pub fn message_response_preview(response: MessageResponse) -> MessagePreview {
     let is_deleted = response.is_deleted;
     MessagePreview {
+        system_kind: response.system_kind,
         forwarded_from_name: response
             .forwarded_from
             .and_then(|origin| origin.sender.name)
@@ -409,6 +417,7 @@ pub(crate) fn attachment_previews(
 }
 
 pub struct MessagePreviewInput {
+    pub system_kind: Option<crate::models::SystemMessageKind>,
     pub forwarded_from_name: Option<String>,
     pub id: i64,
     pub client_generated_id: String,
@@ -430,6 +439,7 @@ pub fn build_message_preview(
     user_profiles: &std::collections::HashMap<i32, UserProfile>,
 ) -> MessagePreview {
     let MessagePreviewInput {
+        system_kind,
         forwarded_from_name,
         id,
         client_generated_id,
@@ -447,6 +457,7 @@ pub fn build_message_preview(
     let sticker_emoji = sticker_id.and_then(|sid| sticker_emoji_map.get(&sid).cloned());
     let (message, system_links) = super::system_messages::decode(&message_type, message);
     MessagePreview {
+        system_kind,
         system_links: system_links.filter(|_| !is_deleted),
         forwarded_from_name: forwarded_from_name.filter(|_| !is_deleted),
         id,
@@ -1464,7 +1475,19 @@ pub fn build_message_side_effects(
 
     Ok(PendingSideEffects {
         ws_msg,
-        broadcast_uids: member_uids,
+        broadcast_uids: if response
+            .system_kind
+            .is_some_and(|kind| kind.is_membership())
+        {
+            group_membership::table
+                .inner_join(groups::table)
+                .filter(groups::id.eq(chat_id))
+                .filter(super::system_messages::membership_allowed())
+                .select(group_membership::uid)
+                .load(conn)?
+        } else {
+            member_uids
+        },
         push_job,
         notifications,
     })
@@ -1855,6 +1878,7 @@ pub async fn send_prepared_message(
     };
 
     let new_msg = NewMessage {
+        system_kind: prepared.system_kind,
         forwarded_from_message_id: prepared.forwarded_from_message_id,
         id,
         message: stored_message.clone(),
@@ -2081,6 +2105,7 @@ fn validate_idempotent_message_payload(
         && existing.sender_uid == prepared.sender_uid
         && existing.message.as_deref() == stored_message
         && existing.message_type == prepared.message_type
+        && existing.system_kind == prepared.system_kind
         && existing.sticker_id == prepared.sticker_id
         && existing.reply_to_id == prepared.reply_to_id
         && existing.reply_root_id == prepared.reply_root_id
@@ -2124,6 +2149,12 @@ pub async fn attach_metadata(
 
     let mut reply_messages_map = load_reply_messages(conn, &reply_ids).unwrap_or_default();
     reply_messages_map.retain(|reply_id, reply_msg| {
+        if reply_msg
+            .system_kind
+            .is_some_and(|kind| kind.is_membership())
+        {
+            return false;
+        }
         reply_target_contexts.get(reply_id).is_some_and(|contexts| {
             contexts.iter().any(|(chat_id, thread_id)| {
                 reply_msg.chat_id == *chat_id
@@ -2440,6 +2471,7 @@ pub async fn attach_metadata(
 
                 let preview = build_message_preview(
                     MessagePreviewInput {
+                        system_kind: reply_msg.system_kind,
                         forwarded_from_name: forward_origins.name_for(reply_msg, &user_profiles),
                         id: reply_msg.id,
                         client_generated_id: reply_msg.client_generated_id.clone(),
@@ -2504,6 +2536,7 @@ pub async fn attach_metadata(
         );
         let (message, system_links) = super::system_messages::decode(&m.message_type, m.message);
         let mut response = MessageResponse {
+            system_kind: m.system_kind,
             system_links,
             forwarded_from,
             id: m.id,
@@ -2684,6 +2717,7 @@ mod tests {
 
     fn message(id: i64, patch: impl FnOnce(&mut Message)) -> Message {
         let mut message = Message {
+            system_kind: None,
             forwarded_from_message_id: None,
             id,
             message: Some(format!("message {id}")),
@@ -3098,6 +3132,36 @@ mod tests {
     }
 
     #[test]
+    fn idempotent_system_message_payload_compares_event_identity() {
+        use crate::models::SystemMessageKind;
+        let existing = Message {
+            message_type: MessageType::System,
+            system_kind: Some(SystemMessageKind::MemberJoined),
+            ..test_message()
+        };
+        let mut prepared = PreparedMessageSend {
+            message_type: MessageType::System,
+            system_kind: existing.system_kind,
+            ..test_prepared_message()
+        };
+        assert!(super::validate_idempotent_message_payload(
+            &existing,
+            &prepared,
+            Some("hello"),
+            &[10, 11]
+        )
+        .is_ok());
+        prepared.system_kind = Some(SystemMessageKind::MemberLeft);
+        assert!(super::validate_idempotent_message_payload(
+            &existing,
+            &prepared,
+            Some("hello"),
+            &[10, 11]
+        )
+        .is_err());
+    }
+
+    #[test]
     fn idempotent_message_payload_rejects_different_text() {
         let existing = test_message();
         let prepared = PreparedMessageSend {
@@ -3192,6 +3256,7 @@ mod tests {
 
     fn test_message() -> Message {
         Message {
+            system_kind: None,
             forwarded_from_message_id: None,
             id: 1,
             message: Some("hello".to_string()),
@@ -3216,6 +3281,7 @@ mod tests {
 
     fn test_prepared_message() -> PreparedMessageSend {
         PreparedMessageSend {
+            system_kind: None,
             forwarded_from_message_id: None,
             chat_id: 42,
             forwarded_bundle_id: None,
@@ -3237,6 +3303,7 @@ mod tests {
     #[test]
     fn build_push_preview_bundle_uses_typed_invite_preview() {
         let response = super::MessageResponse {
+            system_kind: None,
             system_links: None,
             forwarded_from: None,
             id: 1,
@@ -3275,6 +3342,7 @@ mod tests {
     #[test]
     fn serializes_reply_to_message_type_and_camel_case_keys() {
         let reply = MessagePreview {
+            system_kind: None,
             system_links: None,
             forwarded_from_name: None,
             id: 42,
@@ -3335,6 +3403,7 @@ mod tests {
     #[test]
     fn deleted_message_response_redaction_preserves_metadata_only() {
         let mut response = MessageResponse {
+            system_kind: None,
             system_links: Some(crate::dto::messages::SystemMessageLinks {
                 uid: Some(42),
                 message_id: Some(99),
@@ -3397,6 +3466,7 @@ mod tests {
         for deleted_at in [None, Some(Utc::now())] {
             let preview = build_message_preview(
                 MessagePreviewInput {
+                    system_kind: Some(crate::models::SystemMessageKind::MemberAdded),
                     forwarded_from_name: None,
                     id: 10,
                     client_generated_id: "system-10".into(),
@@ -3417,6 +3487,14 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
             );
+            assert_eq!(
+                preview.system_kind,
+                Some(crate::models::SystemMessageKind::MemberAdded)
+            );
+            assert_eq!(
+                serde_json::to_value(&preview).unwrap()["systemKind"],
+                "member_added"
+            );
             if deleted_at.is_some() {
                 assert!(preview.message.is_none());
                 assert!(preview.system_links.is_none());
@@ -3432,6 +3510,7 @@ mod tests {
         let sticker_map = HashMap::from([(42, "🙂".to_string())]);
         let preview = build_message_preview(
             MessagePreviewInput {
+                system_kind: None,
                 forwarded_from_name: None,
                 id: 10,
                 client_generated_id: "client-10".to_string(),

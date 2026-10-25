@@ -50,9 +50,13 @@ by subsequent reads without cache maintenance.
 `idx_messages_unread_visible` indexes `(chat_id, id DESC)` with the same visibility
 predicate, so probes can seek past the cursor and stop at the cap without scanning
 excluded message history. Batched requests and push badge totals deduplicate
-`(chat_id, read cursor)` pairs and execute their bounded probes in one database
-statement. Counts are aggregated independently for each user, preserving archive
+`(chat_id, read cursor, membership visibility)` keys. Each visibility group
+uses one statement so hidden-member probes can use `idx_messages_non_membership_top_level`. Counts are aggregated independently for each user, preserving archive
 and mute rules. Collection summaries use the same main-chat counting path.
+
+Conversation-state WebSocket snapshots load memberships and chat kinds in one
+query, read the account visibility preference once, and batch main-chat unread
+probes by visibility. Thread counting retains its own scope rules.
 
 The affected chat-list, read-state and unread-summary handlers acquire connections
 and execute database work on Tokio's blocking pool. WebSocket unread snapshots and
@@ -109,12 +113,41 @@ pages. Cursors are exclusive; `nextCursor: null` marks the final page. The
 `idx_messages_chat_thread_roots` and `idx_messages_thread_participants` partial
 indexes support the corresponding root-ID and distinct-author range queries.
 
-## System message links
+## System message types and links
+
+`messages.system_kind` uses the `system_message_kind` enum. The check constraint
+requires a non-null kind for `message_type = 'system'` and NULL for other message
+types. Event producers explicitly set one of:
+
+- `member_joined`, `member_left`, `member_added`, `member_removed`
+- `message_pinned`, `message_unpinned`, `thread_message_pinned`, `thread_message_unpinned`
+- `friend_request_accepted`
+
+`unknown` preserves unrecognized historical system events. HTTP responses,
+WebSocket messages, reply previews and chat summaries expose the optional
+`systemKind` field. Deletion redacts body/link content but retains event identity.
+The filtered main-chat query and `idx_messages_non_membership_top_level` exclude
+the four membership kinds by enum comparison; unknown events remain visible.
+There is no runtime database text classifier or separate membership flag.
+
+The `classify_system_messages` migration backfills legacy text/linked JSON without
+changing bodies and creates the partial index directly. Its decoder exists only
+during the migration. Deploy this schema with the updated backend: stop old backend
+writers before migration, then start the new backend and deploy the PWA. Old
+backends cannot write system messages under the new constraint. This transactional
+migration updates historical system rows and builds an index; schedule it for a
+maintenance window based on the actual database size. Rollback removes the partial
+index, constraint, kind column and enum type.
+
+Verify migration, constraints and filtered query behavior against a local database
+with `WETTY_TEST_DATABASE_URL=... cargo test services::system_messages::tests -- --nocapture --test-threads=1`.
+The migration test executes up/down SQL inside a rollback-only transaction; it
+must not run against production.
 
 New member invitations/removals and accepted friend requests retain the target UID;
 pin/unpin announcements retain the affected message ID. These system messages store
 `{ "text": "...", "links": { "uid": 42 } }` or a decimal-string `messageId` in the
-existing message body. No schema migration or historical backfill is required.
+existing message body. Link destinations are independent of the event kind.
 Shared response and preview builders expose the readable `text` as `message` and
 optional destinations as `systemLinks`, so existing clients keep their readable
 text. Deleted messages redact both fields. Legacy system strings remain supported;
@@ -123,6 +156,55 @@ ordinary user messages are never decoded as system payloads.
 These links do not create reply relationships, mention notifications or push jobs.
 Thread pin notifications retain their existing thread scope independently of the
 linked message ID. Message IDs use the API's decimal-string Snowflake encoding.
+
+## Visible chat activity
+
+`GET /chats` and `GET /chats/{chat_id}/messages` always use the authenticated
+account's `showMembershipMessages` preference. Filtering applies to group main
+timelines, not DMs or threads. `system_messages::hides_membership_messages`
+centralizes the scope policy for message reads, unread counts and read cursors.
+Single-chat reads load the chat kind and account settings together; batched
+counts reuse their loaded settings and kinds without per-row preference queries.
+The membership query uses its partial index.
+Both responses include `chatSettings` (`showMembershipMessages`) from the same
+preference snapshot used by the query. Settings use the last successfully
+committed database write, without persistent version counters or conflict errors.
+Clients learn other-device changes on normal reads and restart pagination when
+the effective filter changes, preserving allowed content until replacement succeeds.
+Local request generations and account guards discard invalidated responses.
+
+Groups also store `membership_message_visibility`: `members` (default), `admins`,
+or `nobody`. Group admins change it through `PATCH /group/{chatId}`. Group details,
+chat list items and message pages expose `membershipMessagePolicy` with `visibility`
+and the requesting user's `canView`. Group permissions apply to every membership
+message read, including direct lookup and around-target or thread queries, as well
+as message and deletion broadcasts. The account preference can further hide allowed
+messages. Membership messages cannot be replied to, pinned or reacted to; legacy
+reply previews redact them. Batch queries reuse group and membership joins.
+
+Policy or role updates send `membershipMessagePolicyChanged` with only `chatId`
+and invalidate unread watches. Clients invalidate cached details and coalesce
+reads of the current policy, without relying on notification order. Once a current
+response confirms restricted access, cached membership content is removed. Normal
+reads after reconnect or a refresh failure reconcile state without extra polling.
+
+Chat lists return one `lastMessage`. Its timestamp supplies `lastMessageAt`,
+ordering and cursor boundaries. Chats without a visible message sort last; chat
+ID descending breaks equal timestamps. Message lookup happens before chat
+pagination, using indexed lookups over the current user's joined chats. Hidden
+events do not promote a chat. Hidden membership events do not contribute to
+main-chat unread counts, collection summaries or push badge totals. Updating the
+preference invalidates the account's unread WebSocket watches.
+
+Read confirmations carry the last message the user actually saw. For a group
+with membership events hidden, the server advances over subsequent hidden events
+up to the next visible message, using one database statement snapshot. It never
+skips an unread ordinary or unknown system message. The stored cursor remains
+monotonic; DMs and threads retain their own rules. Mark-as-unread chooses the
+previous visible message. There is no separate read-through field in list or
+message responses. Reconnection uses the last loaded message ID and terminates
+when the server reports no newer page, including empty filtered responses.
+
 
 ## Bulk message recall
 
