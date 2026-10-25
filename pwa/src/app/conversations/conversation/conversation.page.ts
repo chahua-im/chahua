@@ -97,6 +97,7 @@ import {
   type MessageResponse,
   type MentionInfo,
   type PinResponse,
+  type ThreadUpdatePayload,
 } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
@@ -109,6 +110,7 @@ import { MessageComposer, type Composition } from '../../messages/message-compos
 import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { MessageActions } from '../../messages/message-actions';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
+import { SpeakingAction } from '../../chats/speaking';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
 import { isMembershipMessage } from '../../messages/system-message';
 import { isVisibleMessage } from '../../messages/message-visibility';
@@ -297,6 +299,11 @@ export class ConversationPage {
     return target && 'delivery' in target ? untracked(() => target.uploads) : [];
   });
   protected startEdit(message: MessageResponse | OutgoingMessage) {
+    const content = 'delivery' in message ? message.message() : message;
+    if (
+      !this.chatInfo.canSpeak(this.id(), content.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
+    )
+      return;
     this.cancelForward();
     this.editTarget.set(message);
     this.editText.set(this.editing()?.message ?? '');
@@ -561,11 +568,12 @@ export class ConversationPage {
     source: this.entryKey,
     computation: (): MessageResponse | undefined => undefined,
   });
+  private threadRootUpdate?: ThreadUpdatePayload;
   protected readonly threadRoot = computed(() => {
     const rootId = this.threadId();
     return rootId
       ? (this.conversation.items().find((message) => message.id === rootId) ??
-          this.chatInfo.thread(rootId)?.threadRootMessage ??
+          this.chatInfo.threadSummary(rootId)?.threadRootMessage ??
           this.loadedThreadRoot())
       : undefined;
   });
@@ -575,9 +583,28 @@ export class ConversationPage {
     if (!rootId) return undefined;
     const root = this.threadRoot();
     if (root && 'threadInfo' in root) return (root.threadInfo?.replyCount ?? 0) + 1;
-    const replies = this.chatInfo.thread(rootId)?.replyCount;
+    const replies = this.chatInfo.threadSummary(rootId)?.replyCount;
     if (replies != null) return replies + 1;
     return root ? 1 : undefined;
+  });
+  protected readonly canSendMessage = computed(() => {
+    const threadId = this.threadId();
+    const root = this.threadRoot();
+    const existing =
+      root && 'threadInfo' in root
+        ? !!root.threadInfo
+        : !!(threadId && this.chatInfo.threadSummary(threadId)?.replyCount);
+    return this.chatInfo.canSpeak(
+      this.id(),
+      !threadId ? SpeakingAction.ChatMessage : existing ? SpeakingAction.ThreadReply : SpeakingAction.CreateThread,
+    );
+  });
+  protected readonly speakingRestriction = computed(() => {
+    const editing = !this.pendingForward() && this.editing();
+    const allowed = editing
+      ? this.chatInfo.canSpeak(this.id(), editing.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage)
+      : this.canSendMessage();
+    return allowed ? undefined : this.chatInfo.speakingMode(this.id());
   });
   protected readonly canForwardTopic = computed(() => {
     const count = this.topicMessageCount();
@@ -606,11 +633,19 @@ export class ConversationPage {
   private async loadThreadRoot() {
     const entry = this.entryKey();
     if (!entry.threadId || this.threadRoot()) return;
+    const previousUpdate = this.threadRootUpdate;
     try {
       const root = await firstValueFrom(
         this.api.getMessage(entry.chatId, entry.threadId).pipe(takeUntilDestroyed(this.destroyRef)),
       );
-      if (this.isCurrent(entry)) this.loadedThreadRoot.set(root);
+      if (this.isCurrent(entry) && !this.loadedThreadRoot()) {
+        const update = this.threadRootUpdate;
+        this.loadedThreadRoot.set(
+          update && update !== previousUpdate
+            ? { ...root, threadInfo: update.replyCount > 0 ? { replyCount: update.replyCount } : undefined }
+            : root,
+        );
+      }
     } catch {
       /* The conversation can remain usable when the root is unavailable. */
     }
@@ -1085,6 +1120,15 @@ export class ConversationPage {
         (event.payload.threadRootId ?? null) === (this.threadId() ?? null)
       )
         this.invalidateReactions();
+      if (
+        event.type === ServerWsMessageType.threadUpdate &&
+        event.payload.chatId === this.id() &&
+        event.payload.threadRootId === this.threadId()
+      ) {
+        this.threadRootUpdate = event.payload;
+        const threadInfo = event.payload.replyCount > 0 ? { replyCount: event.payload.replyCount } : undefined;
+        this.loadedThreadRoot.update((root) => root && { ...root, threadInfo });
+      }
       if (!this.isCurrent()) return;
       if (event.type === ServerWsMessageType.messageUpdated && event.payload.id === this.threadId())
         this.loadedThreadRoot.set(event.payload);
@@ -1125,8 +1169,7 @@ export class ConversationPage {
           if (this.threadError()) void this.loadSubscription();
           const missingReceipts = 3 & ~this.receiptFresh();
           if (missingReceipts) void this.refreshReadReceipt(false, false, missingReceipts);
-          void this.chatInfo
-            .ensure(this.id())
+          void this.loadChatInfo()
             .catch(() => {})
             .then(() => {
               if (this.isCurrent(entry)) void this.trackScroll();
@@ -1232,7 +1275,7 @@ export class ConversationPage {
     this.entryReadId.set(undefined);
     this.atBottom.set(false);
     this.position.set(undefined);
-    void this.chatInfo.ensure(id).catch(() => {});
+    void this.loadChatInfo().catch(() => {});
     if (!this.message() && !this.reply()) void this.goTo({ type: ConversationTargetKind.Resume });
   }
 
@@ -1926,7 +1969,7 @@ export class ConversationPage {
 
   protected sendForward(mentions: MentionInfo[] = []) {
     const sources = this.pendingForward();
-    if (!sources || !this.isCurrent()) return;
+    if (!sources || !this.isCurrent() || !this.canSendMessage()) return;
     this.outbox.enqueueForward(this.id(), this.threadId(), sources, {
       comment: this.draft(),
       commentMentions: mentions,
@@ -1957,6 +2000,7 @@ export class ConversationPage {
   }
 
   protected async sendMessage(composition: Composition = { messageType: MessageType.text, attachmentIds: [] }) {
+    if (this.speakingRestriction()) return;
     const target = this.editTarget();
     const text = (target ? this.editText() : this.draft()).trim();
     if (!text && !composition.attachmentIds.length && !composition.uploads?.length && !composition.sticker) return;
@@ -1986,9 +2030,14 @@ export class ConversationPage {
     return item.operation;
   }
 
+  private loadChatInfo() {
+    const id = this.id();
+    return this.chatInfo.get(id)?.kind === GroupKind.dm ? this.chatInfo.ensure(id) : this.chatInfo.ensureDetails(id);
+  }
+
   private async refreshConversationMetadata() {
     await Promise.all([
-      this.chatInfo.ensure(this.id()),
+      this.loadChatInfo(),
       this.loadThreadRoot(),
       this.threadId() ? this.loadSubscription() : this.chatInfo.getReadState(this.id()),
     ]);
@@ -2051,6 +2100,7 @@ export class ConversationPage {
   }
 
   protected startReply(message: MessageResponse) {
+    if (!this.canSendMessage()) return;
     this.cancelForward();
     this.replyTo.set(message);
     this.savedReplyId.set(undefined);

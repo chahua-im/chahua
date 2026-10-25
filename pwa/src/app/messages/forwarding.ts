@@ -23,6 +23,7 @@ export enum ForwardSelectionError {
   TooMany = 'messages.forward.topicTooMany',
   LoadFailed = 'messages.forward.topicLoadFailed',
   NavigationFailed = 'messages.forward.navigationFailed',
+  Restricted = 'speaking.destinationRestricted',
 }
 
 export type ForwardSourcesResult = { sources: readonly ForwardSource[] } | { error: ForwardSelectionError };

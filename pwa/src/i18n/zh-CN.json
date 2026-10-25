@@ -724,5 +724,23 @@
     "addHint": "选择聊天，设为与当前默认相反的通知状态。添加后可点击例外修改。",
     "alreadyAdded": "已添加",
     "noChats": "没有匹配的聊天"
+  },
+  "speaking": {
+    "groupTitle": "全群发言权限",
+    "memberTitle": "个人发言限制",
+    "adminNote": "管理员不受发言限制。群权限与个人限制取更严格的一项。",
+    "memberNote": "不限制个人发言时仍遵循群权限。设为管理员会清除个人限制。",
+    "destinationRestricted": "你目前不能向此会话发送消息，请选择其他群聊或话题。",
+    "modes": {
+      "unrestricted": "不限制发言",
+      "threadsOnly": "仅限话题内发言",
+      "repliesOnly": "仅回复已有话题",
+      "readOnly": "禁止发言"
+    },
+    "blocked": {
+      "threadsOnly": "仅能在话题内发言，不能发送或编辑群主聊天消息。",
+      "repliesOnly": "仅能回复已有话题，不能在群主聊天发言或创建话题。",
+      "readOnly": "当前禁止发言，无法发送或编辑消息。"
+    }
   }
 }

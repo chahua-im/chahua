@@ -224,6 +224,28 @@
             </ion-button>
           }
         </div>
+        @if (!threadId() && chat()?.kind === Kind.group && chat()?.speakingMode; as mode) {
+          <ion-item>
+            @if (canManage()) {
+              <app-speaking-mode-select
+                [label]="'speaking.groupTitle' | transloco"
+                [value]="speakingMode()"
+                [disabled]="busy()"
+                (valueChange)="saveSpeakingMode($event)" />
+              @if (pending() === Action.Speaking) {
+                <ion-spinner slot="end" />
+              }
+            } @else {
+              <ion-label>{{ 'speaking.groupTitle' | transloco }}</ion-label>
+              <ion-note slot="end">{{ 'speaking.modes.' + mode | transloco }}</ion-note>
+            }
+          </ion-item>
+          @if (canManage()) {
+            <ion-item lines="none">
+              <ion-note class="ion-text-wrap">{{ 'speaking.adminNote' | transloco }}</ion-note>
+            </ion-item>
+          }
+        }
         @if (otherUser() && relationship()?.isFriend) {
           <ion-item class="presence-settings">
             <ion-select

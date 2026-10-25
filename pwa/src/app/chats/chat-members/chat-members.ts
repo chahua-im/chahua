@@ -33,7 +33,16 @@ import {
 import { firstValueFrom, Subject, takeUntil } from 'rxjs';
 import { ellipsisVertical } from 'ionicons/icons';
 import { MembersService } from '../../../generated/endpoints/members/members.service';
-import { GroupRole, UserSearchMode, type MemberResponse, type SnowflakeID } from '../../../generated/models';
+import {
+  GroupRole,
+  SpeakingMode,
+  UserSearchMode,
+  type MemberResponse,
+  type SnowflakeID,
+} from '../../../generated/models';
+import { Connection, ResyncReason } from '../../api/connection';
+import { ChatStore } from '../chat-store';
+import { SpeakingModeSelect } from '../speaking-mode-select';
 import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { LoadError } from '../../ui/load-error/load-error';
 import { SessionStore } from '../../session/session-store';
@@ -57,12 +66,16 @@ import { SessionStore } from '../../session/session-store';
     IonLabel,
     IonSpinner,
     TranslocoPipe,
+    SpeakingModeSelect,
   ],
 })
 export class ChatMembers {
   readonly chatId = input.required<SnowflakeID>();
   readonly canManage = input(false);
   protected readonly Role = GroupRole;
+  protected readonly Mode = SpeakingMode;
+  private readonly store = inject(ChatStore);
+  private readonly realtime = inject(Connection);
   protected readonly moreIcon = ellipsisVertical;
   private readonly session = inject(SessionStore);
   protected readonly currentUid = computed(() => this.session.user()?.uid);
@@ -89,12 +102,36 @@ export class ChatMembers {
     return undefined;
   });
   private version = 0;
+  private memberRevision = 0;
+  private refreshPending = false;
+  private readonly memberUpdates = linkedSignal(() => {
+    this.scope();
+    return new Map<number, { role: GroupRole; speakingMode: SpeakingMode; revision: number }>();
+  });
   protected readonly members = linkedSignal({ source: this.scope, computation: (): MemberResponse[] => [] });
   protected readonly cursor = linkedSignal({ source: this.scope, computation: (): number | undefined => undefined });
   protected readonly loading = signal(false);
   protected readonly error = signal(false);
   protected readonly busy = computed(() => this.loading() || this.pending() != null);
   constructor() {
+    this.store.memberSpeakingChanges$.pipe(takeUntilDestroyed()).subscribe((state) => {
+      if (state.chatId !== this.chatId()) return;
+      this.memberUpdates().set(state.uid, {
+        role: state.role,
+        speakingMode: state.speakingMode,
+        revision: ++this.memberRevision,
+      });
+      this.members.update((members) =>
+        members.map((member) =>
+          member.uid === state.uid ? { ...member, role: state.role, speakingMode: state.speakingMode } : member,
+        ),
+      );
+    });
+    this.realtime.resync$.pipe(takeUntilDestroyed()).subscribe((reason) => {
+      if (reason === ResyncReason.Foreground && this.realtime.connected()) return;
+      if (this.pending() != null) this.refreshPending = true;
+      else void this.load(false, true);
+    });
     fillScrollViewport(this.busy, this.error, this.cursor, () => this.load(true));
     effect(() => {
       const search = this.search();
@@ -113,6 +150,32 @@ export class ChatMembers {
   }
   protected changeRole(member: MemberResponse) {
     return this.perform(member, member.role === GroupRole.admin ? GroupRole.member : GroupRole.admin);
+  }
+  protected async changeSpeakingMode(member: MemberResponse, mode: SpeakingMode | undefined) {
+    if (!mode || member.role === GroupRole.admin || this.busy() || !this.canManage()) return;
+    const scope = this.scope();
+    this.pending.set(member.uid);
+    void this.menu().dismiss();
+    try {
+      await this.store.setMemberSpeakingMode(scope.chatId, member.uid, mode);
+    } catch {
+      if (this.isCurrent(scope)) void this.failure().present();
+    } finally {
+      if (this.isCurrent(scope)) this.finishOperation();
+    }
+  }
+  private finishOperation() {
+    this.pending.set(undefined);
+    if (this.refreshPending) {
+      this.refreshPending = false;
+      void this.load(false, true);
+    }
+  }
+  private latestMember(member: MemberResponse, revision: number): MemberResponse {
+    const latest = this.memberUpdates().get(member.uid);
+    return latest && latest.revision > revision
+      ? { ...member, role: latest.role, speakingMode: latest.speakingMode }
+      : member;
   }
   protected async remove(member: MemberResponse) {
     const scope = this.scope();
@@ -133,6 +196,7 @@ export class ChatMembers {
   private async perform(member: MemberResponse, role?: GroupRole) {
     if (this.busy() || !this.canManage() || member.uid === this.currentUid()) return;
     const scope = this.scope();
+    const revision = this.memberRevision;
     this.pending.set(member.uid);
     void this.menu().dismiss();
     try {
@@ -141,7 +205,9 @@ export class ChatMembers {
           this.api.patchMember(scope.chatId, member.uid, { role }).pipe(takeUntilDestroyed(this.destroy)),
         );
         if (this.isCurrent(scope))
-          this.members.update((items) => items.map((item) => (item.uid === updated.uid ? updated : item)));
+          this.members.update((items) =>
+            items.map((item) => (item.uid === updated.uid ? this.latestMember(updated, revision) : item)),
+          );
       } else {
         await firstValueFrom(
           this.api.deleteRemoveMember(scope.chatId, member.uid).pipe(takeUntilDestroyed(this.destroy)),
@@ -151,7 +217,7 @@ export class ChatMembers {
     } catch {
       if (this.isCurrent(scope)) void this.failure().present();
     } finally {
-      if (this.isCurrent(scope)) this.pending.set(undefined);
+      if (this.isCurrent(scope)) this.finishOperation();
     }
   }
   protected async more(event: InfiniteScrollCustomEvent) {
@@ -161,10 +227,12 @@ export class ChatMembers {
       await event.target.complete();
     }
   }
-  protected async load(more = false) {
+  protected async load(more = false, refresh = false) {
     if (this.pending() != null) return;
     if (more && (this.loading() || this.cursor() == null)) return;
     const version = ++this.version;
+    const revision = this.memberRevision;
+    const targetCount = refresh ? this.members().length : 0;
     const search = this.search();
     this.requestedSearch = search;
     this.cancelLoad.next();
@@ -174,19 +242,26 @@ export class ChatMembers {
     this.loading.set(true);
     this.error.set(false);
     try {
-      const page = await firstValueFrom(
-        this.api
-          .getMembers(search.scope.chatId, {
-            limit: 40,
-            q: search.q || undefined,
-            mode: UserSearchMode.autocomplete,
-            after: more ? this.cursor() : undefined,
-          })
-          .pipe(takeUntil(this.cancelLoad), takeUntilDestroyed(this.destroy)),
-      );
-      if (version !== this.version || search !== this.search()) return;
-      this.members.update((items) => (more ? [...items, ...page.members] : page.members));
-      this.cursor.set(page.nextCursor);
+      const loaded: MemberResponse[] = [];
+      let cursor = more ? this.cursor() : undefined;
+      do {
+        const page = await firstValueFrom(
+          this.api
+            .getMembers(search.scope.chatId, {
+              limit: 40,
+              q: search.q || undefined,
+              mode: UserSearchMode.autocomplete,
+              after: cursor,
+            })
+            .pipe(takeUntil(this.cancelLoad), takeUntilDestroyed(this.destroy)),
+        );
+        if (version !== this.version || search !== this.search()) return;
+        loaded.push(...page.members);
+        cursor = page.nextCursor;
+      } while (cursor != null && loaded.length < targetCount);
+      const members = loaded.map((member) => this.latestMember(member, revision));
+      this.members.update((items) => (more ? [...items, ...members] : members));
+      this.cursor.set(cursor);
     } catch {
       if (version === this.version) this.error.set(true);
     } finally {

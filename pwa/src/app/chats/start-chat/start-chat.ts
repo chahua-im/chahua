@@ -19,10 +19,12 @@ import {
 import { firstValueFrom } from 'rxjs';
 import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
 import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
-import { type InvitePreviewResponse } from '../../../generated/models';
+import { type InvitePreviewResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { ChatListStore } from '../chat-list-store';
+import { ChatStore } from '../chat-store';
+import { SessionStore } from '../../session/session-store';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { inviteCode, inviteStatus, InviteStatus } from '../invite';
 export enum StartChatKind {
@@ -69,6 +71,8 @@ export class StartChat {
   private readonly invites = inject(InvitesService);
   private readonly navigation = inject(ConversationNavigation);
   private readonly lists = inject(ChatListStore);
+  private readonly store = inject(ChatStore);
+  private readonly session = inject(SessionStore);
   protected readonly values = signal({ name: '', code: '' });
   protected readonly fields = form(this.values);
   protected readonly query = signal('');
@@ -108,17 +112,26 @@ export class StartChat {
   );
   protected async submit() {
     if (this.busy() || (this.kind() === StartChatKind.Join && !this.previewValid())) return;
+    const uid = this.session.user()?.uid;
+    const version = this.store.snapshot();
+    const alreadyMember = this.preview()?.alreadyMember;
     this.pending.set(StartChatAction.Submit);
     this.error.set(false);
     try {
-      const chat =
-        this.kind() === StartChatKind.Create
-          ? await firstValueFrom(this.groups.postGroup({ name: this.values().name.trim() }))
-          : this.preview()?.alreadyMember
-            ? this.preview()!.chat
-            : (await firstValueFrom(this.invites.postRedeemInvite({ code: inviteCode(this.values().code) }))).chat;
+      let chatId: SnowflakeID;
+      if (this.kind() === StartChatKind.Create) {
+        chatId = (await firstValueFrom(this.groups.postGroup({ name: this.values().name.trim() }))).id;
+      } else {
+        const chat = alreadyMember
+          ? this.preview()!.chat
+          : (await firstValueFrom(this.invites.postRedeemInvite({ code: inviteCode(this.values().code) }))).chat;
+        if (uid !== this.session.user()?.uid) return;
+        if (!alreadyMember) this.store.acceptJoinedChat(chat, version);
+        chatId = chat.id;
+      }
+      if (uid !== this.session.user()?.uid) return;
       this.lists.refreshChats();
-      await this.navigation.open(chat.id);
+      await this.navigation.open(chatId);
     } catch {
       this.error.set(true);
     } finally {

@@ -6,12 +6,17 @@ import { notificationMuted } from './notification-setting';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
 import { GroupsService } from '../../generated/endpoints/groups/groups.service';
+import { MembersService } from '../../generated/endpoints/members/members.service';
+import { allowsSpeaking, effectiveSpeakingMode, SpeakingAction } from './speaking';
 import { PinsService } from '../../generated/endpoints/pins/pins.service';
 import { ThreadsService } from '../../generated/endpoints/threads/threads.service';
 import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
   type MembershipMessagePolicy,
+  SpeakingMode,
+  type GroupSpeakingModeResponse,
+  type MemberSpeakingModeResponse,
   NotificationSettingMode,
   type NotificationSettingsResponse,
   type UpdateNotificationSettingRequest,
@@ -39,7 +44,13 @@ import { isMembershipMessage } from '../messages/system-message';
 import { ChatPins } from './chat-pins';
 
 export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> &
-  Partial<Pick<GroupInfoResponse, 'myRole' | 'description' | 'visibility'>>;
+  Partial<
+    Pick<
+      GroupInfoResponse,
+      'myRole' | 'description' | 'visibility' | 'speakingMode' | 'mySpeakingMode' | 'effectiveSpeakingMode'
+    >
+  >;
+type SpeakingState = Pick<ChatInfo, 'myRole' | 'speakingMode' | 'mySpeakingMode' | 'effectiveSpeakingMode'>;
 type ChatSummary = Pick<ChatListItem, 'lastMessage' | 'lastMessageAt' | 'archived' | 'mutedUntil' | 'muteOverride'>;
 type ChatState = Partial<Pick<ChatListItem, 'archived' | 'mutedUntil' | 'muteOverride'>>;
 const stateFields = ['archived', 'mutedUntil', 'muteOverride'] as const;
@@ -158,6 +169,21 @@ export class ChatStore {
   }
 
   private readonly groupsApi = inject(GroupsService);
+  private readonly membersApi = inject(MembersService);
+  private readonly speakingStates = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, { value: SpeakingState; groupVersion: number; memberVersion: number }>();
+  });
+  private readonly memberSpeakingChanges = new Subject<MemberSpeakingModeResponse>();
+  readonly memberSpeakingChanges$ = this.memberSpeakingChanges.asObservable();
+  private readonly memberSpeakingVersions = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<string, number>();
+  });
+  private readonly pendingSpeakingWrites = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, number>();
+  });
   private readonly threadsApi = inject(ThreadsService);
   private readonly pinsApi = inject(PinsService);
   private readonly destroyRef = inject(DestroyRef);
@@ -415,6 +441,12 @@ export class ChatStore {
           // Notifications carry no setting snapshot. Failed reads remain stale and retry on normal access.
           void this.refreshMembershipPolicy(event.payload.chatId).catch(() => {});
           break;
+        case ServerWsMessageType.groupSpeakingModeChanged:
+          this.acceptGroupSpeakingMode(event.payload);
+          break;
+        case ServerWsMessageType.memberSpeakingModeChanged:
+          this.acceptMemberSpeakingMode(event.payload);
+          break;
         case ServerWsMessageType.readReceiptChanged:
           if (event.payload.privacyChanged) this.applyPeerRead(event.payload);
           break;
@@ -558,7 +590,73 @@ export class ChatStore {
     return pins;
   }
   get(id: SnowflakeID): ChatInfo | undefined {
-    return this.entries().get(id);
+    const info = this.entries().get(id);
+    const speaking = this.speakingStates().get(id)?.value;
+    return info && speaking ? { ...info, ...speaking } : info;
+  }
+  speakingMode(chatId: SnowflakeID) {
+    return this.speakingStates().get(chatId)?.value.effectiveSpeakingMode;
+  }
+  canSpeak(chatId: SnowflakeID, action: SpeakingAction) {
+    return this.get(chatId)?.kind === GroupKind.dm || allowsSpeaking(this.speakingMode(chatId), action);
+  }
+  private applySpeakingState(chatId: SnowflakeID, patch: SpeakingState, version = this.snapshot(), fromRead = false) {
+    const previous = this.speakingStates().get(chatId);
+    const value = { ...previous?.value };
+    let groupVersion = previous?.groupVersion ?? 0;
+    let memberVersion = previous?.memberVersion ?? 0;
+    if ('speakingMode' in patch && version >= groupVersion && !(fromRead && this.pendingSpeakingWrites().has(chatId))) {
+      value.speakingMode = patch.speakingMode;
+      groupVersion = version;
+    }
+    if ('myRole' in patch && version >= memberVersion) {
+      value.myRole = patch.myRole;
+      value.mySpeakingMode = patch.mySpeakingMode;
+      memberVersion = version;
+    }
+    value.effectiveSpeakingMode = effectiveSpeakingMode(value.myRole, value.speakingMode, value.mySpeakingMode);
+    this.speakingStates.update((states) => new Map(states).set(chatId, { value, groupVersion, memberVersion }));
+  }
+  private acceptGroupSpeakingMode(state: GroupSpeakingModeResponse, version = this.snapshot()) {
+    this.applySpeakingState(state.chatId, { speakingMode: state.speakingMode }, version);
+  }
+  private acceptMemberSpeakingMode(state: MemberSpeakingModeResponse, version = this.snapshot()) {
+    const key = `${state.chatId}/${state.uid}`;
+    if ((this.memberSpeakingVersions().get(key) ?? 0) > version) return;
+    this.memberSpeakingVersions().set(key, version);
+    this.applySpeakingState(
+      state.chatId,
+      {
+        speakingMode: state.groupSpeakingMode,
+        ...(state.uid === this.session.user()?.uid ? { myRole: state.role, mySpeakingMode: state.speakingMode } : {}),
+      },
+      version,
+    );
+    this.memberSpeakingChanges.next(state);
+  }
+  async setSpeakingMode(chatId: SnowflakeID, speakingMode: SpeakingMode) {
+    const uid = this.session.user()?.uid;
+    const version = this.snapshot();
+    this.pendingSpeakingWrites().set(chatId, version);
+    try {
+      const state = await this.response(this.groupsApi.putSpeakingMode(chatId, { speakingMode }));
+      if (uid !== this.session.user()?.uid) return;
+      const current = this.speakingStates().get(chatId);
+      // A WS snapshot is authoritative even if this HTTP response arrives later.
+      this.acceptGroupSpeakingMode(
+        current && current.groupVersion > version ? { chatId, speakingMode: current.value.speakingMode! } : state,
+      );
+    } finally {
+      if (this.pendingSpeakingWrites().get(chatId) === version) this.pendingSpeakingWrites().delete(chatId);
+    }
+  }
+  async setMemberSpeakingMode(chatId: SnowflakeID, uid: number, speakingMode: SpeakingMode) {
+    const account = this.session.user()?.uid;
+    const version = this.snapshot();
+    const state = await this.response(this.membersApi.putMemberSpeakingMode(chatId, uid, { speakingMode }));
+    if (account === this.session.user()?.uid) {
+      this.acceptMemberSpeakingMode(state, version);
+    }
   }
   remember(chats: readonly (ChatInfo & { id: SnowflakeID; membershipMessagePolicy?: MembershipMessagePolicy })[]) {
     if (!chats.length) return;
@@ -581,6 +679,19 @@ export class ChatStore {
     if (this.fresh.has(id)) return Promise.resolve();
     return this.ensureDetails(id);
   }
+  acceptJoinedChat(chat: GroupInfoResponse, version: number) {
+    this.remember([chat]);
+    this.applyDetails(chat, version);
+  }
+  private applyDetails(chat: GroupInfoResponse, version: number) {
+    const { id, myRole, description, visibility } = chat;
+    this.applySpeakingState(id, chat, version, true);
+    this.applyChatStates([[id, chat]], version, true);
+    this.entries.update((entries) =>
+      new Map(entries).set(id, { ...entries.get(id)!, myRole, description, visibility }),
+    );
+    this.detailsFresh.add(id);
+  }
   ensureDetails(id: SnowflakeID): Promise<void> {
     if (this.detailsFresh.has(id)) return Promise.resolve();
     const pending = this.requests.get(id);
@@ -596,12 +707,7 @@ export class ChatStore {
         if (revision !== this.revision) continue;
         if (this.entries().get(id) === cached) this.remember([chat]);
         if (!this.acceptMembershipPolicy(id, chat.membershipMessagePolicy)) continue;
-        const { myRole, description, visibility } = chat;
-        this.applyChatStates([[id, chat]], version, true);
-        this.entries.update((entries) =>
-          new Map(entries).set(id, { ...entries.get(id)!, myRole, description, visibility }),
-        );
-        this.detailsFresh.add(id);
+        this.applyDetails(chat, version);
       }
     })().finally(() => this.requests.delete(id));
     this.requests.set(id, request);
@@ -1196,8 +1302,13 @@ export class ChatStore {
     }
   }
 
+  /** Known thread content, independent of whether it belongs in the subscribed list. */
+  threadSummary(rootId: SnowflakeID) {
+    return this.threadSummaries().get(rootId)?.value;
+  }
+
   thread(rootId: SnowflakeID): ThreadListItem | undefined {
-    const summary = this.threadSummaries().get(rootId)?.value;
+    const summary = this.threadSummary(rootId);
     if (!summary || summary.replyCount === 0) return undefined;
     const status = this.subscriptions().get(rootId)?.status;
     if (status && !status.subscribed) return undefined;

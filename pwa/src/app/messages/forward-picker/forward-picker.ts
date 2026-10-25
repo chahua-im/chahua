@@ -38,6 +38,7 @@ import { Connection } from '../../api/connection';
 import type { SnowflakeID } from '../../api/snowflake-id';
 import { ChatListStore } from '../../chats/chat-list-store';
 import { ChatStore } from '../../chats/chat-store';
+import { SpeakingAction } from '../../chats/speaking';
 import { ChatAvatar, conversationAvatar, type ChatAvatarData } from '../../chats/chat-avatar/chat-avatar';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -55,6 +56,7 @@ import {
 
 interface ForwardTarget {
   chatId: SnowflakeID;
+  kind: GroupKind;
   threadId?: SnowflakeID;
   name?: string;
   avatar: ChatAvatarData;
@@ -167,6 +169,7 @@ export class ForwardPicker {
     const targets: ForwardTarget[] = [
       ...this.chats.items().map((chat) => ({
         chatId: chat.id,
+        kind: chat.kind,
         name: chat.peer?.username ?? chat.name,
         avatar: conversationAvatar(this.metadata.get(chat.id)),
         time: Date.parse(chat.lastMessageAt ?? '') || -Infinity,
@@ -176,6 +179,7 @@ export class ForwardPicker {
         const root = thread.threadRootMessage;
         return {
           chatId: thread.chatId,
+          kind: thread.chatKind,
           threadId: root.id,
           name: thread.chatName,
           preview: root,
@@ -395,6 +399,22 @@ export class ForwardPicker {
     this.failure.set(undefined);
     this.resolving.set(true);
     try {
+      try {
+        if (target.kind !== GroupKind.dm) await this.metadata.ensureDetails(target.chatId);
+      } catch {
+        await this.report(ForwardSelectionError.NavigationFailed);
+        return;
+      }
+      if (this.destroyRef.destroyed || !this.open()) return;
+      if (
+        !this.metadata.canSpeak(
+          target.chatId,
+          target.threadId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+        )
+      ) {
+        await this.report(ForwardSelectionError.Restricted);
+        return;
+      }
       const result = await this.resolveSources();
       if (this.destroyRef.destroyed || !this.open() || this.submitted() || this.invalid()) return;
       if (!this.allTargets().some((current) => (current.threadId ?? current.chatId) === id)) {

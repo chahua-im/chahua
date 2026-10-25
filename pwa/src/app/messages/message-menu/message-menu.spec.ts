@@ -5,9 +5,10 @@ import { provideRouter } from '@angular/router';
 import { getPlatforms, IonModal } from '@ionic/angular';
 import { timeOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
-import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
+import { GroupKind, GroupRole, MessageType, SpeakingMode, type MessageResponse } from '../../../generated/models';
 import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../../api/testing';
+import { allowsSpeaking, SpeakingAction } from '../../chats/speaking';
 import { ChatStore } from '../../chats/chat-store';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
@@ -33,6 +34,7 @@ describe('MessageMenu', () => {
   const pinned = signal(false);
   const kind = signal(GroupKind.group);
   const canDm = signal(true);
+  const mode = signal(SpeakingMode.unrestricted);
   const conversation = {
     items: messages,
     loading: signal(false),
@@ -99,6 +101,7 @@ describe('MessageMenu', () => {
     pinned.set(false);
     kind.set(GroupKind.group);
     canDm.set(true);
+    mode.set(SpeakingMode.unrestricted);
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -128,6 +131,8 @@ describe('MessageMenu', () => {
           provide: ChatStore,
           useValue: {
             pins: () => conversation,
+            canSpeak: (_id: SnowflakeID, action: SpeakingAction) =>
+              kind() === GroupKind.dm || admin() || allowsSpeaking(mode(), action),
             get: () => ({
               kind: kind(),
               myRole: admin() ? GroupRole.admin : GroupRole.member,
@@ -161,6 +166,26 @@ describe('MessageMenu', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('limits editing by original location while retaining reactions and recall', () => {
+    TestBed.inject(SessionStore).user.set(testUser);
+    menu['selection'].set({ ...selection(), own: true });
+    mode.set(SpeakingMode.threadsOnly);
+    expect(menu['canEdit']()).toBe(false);
+    expect(menu['canThread']()).toBe(true);
+    expect(menu['canReact']()).toBe(true);
+    expect(menu['canRecall']()).toBe(true);
+    mode.set(SpeakingMode.repliesOnly);
+    expect(menu['canThread']()).toBe(false);
+    setMessages([{ ...testMessage, replyRootId: encodeId('100') }]);
+    expect(menu['canEdit']()).toBe(true);
+    mode.set(SpeakingMode.readOnly);
+    expect(menu['canEdit']()).toBe(false);
+    expect(menu['canReact']()).toBe(true);
+    expect(menu['canRecall']()).toBe(true);
+    admin.set(true);
+    expect(menu['canEdit']()).toBe(true);
   });
 
   it.each([

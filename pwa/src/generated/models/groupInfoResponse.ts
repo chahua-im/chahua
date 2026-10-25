@@ -11,6 +11,7 @@ import type { GroupVisibility } from './groupVisibility';
 import type { MembershipMessagePolicy } from './membershipMessagePolicy';
 import type { MemberSummary } from './memberSummary';
 import type { SnowflakeID } from './snowflakeID';
+import type { SpeakingMode } from './speakingMode';
 
 export interface GroupInfoResponse {
   archived: boolean;
@@ -18,6 +19,7 @@ export interface GroupInfoResponse {
   avatarImageId?: SnowflakeID;
   createdAt: string;
   description?: string;
+  effectiveSpeakingMode?: SpeakingMode;
   id: SnowflakeID;
   isMuted: boolean;
   kind: GroupKind;
@@ -25,8 +27,10 @@ export interface GroupInfoResponse {
   muteOverride?: boolean;
   mutedUntil?: string;
   myRole?: GroupRole;
+  mySpeakingMode?: SpeakingMode;
   name: string;
   /** The other participant, for DM chats; `None` for regular groups. */
   peer?: MemberSummary;
+  speakingMode: SpeakingMode;
   visibility: GroupVisibility;
 }

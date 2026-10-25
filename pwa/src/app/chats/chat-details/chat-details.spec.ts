@@ -13,6 +13,7 @@ import {
   MembershipMessageVisibility,
   GroupKind,
   GroupRole,
+  SpeakingMode,
   ServerWsMessageType,
   type ServerWsMessage,
 } from '../../../generated/models';
@@ -52,7 +53,12 @@ describe('ChatDetails', () => {
   afterEach(() => http.verify());
 
   async function open(
-    chat: typeof wireChat & { mutedUntil?: string; myRole?: GroupRole; description?: string } = { ...wireChat },
+    chat: typeof wireChat & {
+      mutedUntil?: string;
+      myRole?: GroupRole;
+      description?: string;
+      speakingMode?: SpeakingMode;
+    } = { ...wireChat },
   ) {
     const fixture = TestBed.createComponent(ChatDetails);
     fixture.componentRef.setInput('chatId', testChat.id);
@@ -119,6 +125,37 @@ describe('ChatDetails', () => {
     expect(fixture.nativeElement.querySelector('ion-select').disabled).toBe(true);
     await fixture.componentInstance['saveMembershipVisibility'](MembershipMessageVisibility.nobody);
     http.expectNone((request) => request.method === 'PATCH');
+  });
+
+  it('saves group restrictions, restores failed selections and removes management on live demotion', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin, speakingMode: SpeakingMode.unrestricted });
+    const component = fixture.componentInstance;
+    expect(fixture.nativeElement.querySelector('app-speaking-mode-select')).not.toBeNull();
+    const saving = component['saveSpeakingMode'](SpeakingMode.readOnly);
+    const request = http.expectOne(`/_api/group/${wireChat.id}/speaking-mode`);
+    expect(request.request.body).toEqual({ speakingMode: 'readOnly' });
+    request.flush({ chatId: wireChat.id, speakingMode: 'readOnly' });
+    await saving;
+    expect(component['speakingMode']()).toBe(SpeakingMode.readOnly);
+    const failed = component['saveSpeakingMode'](SpeakingMode.unrestricted);
+    http.expectOne(`/_api/group/${wireChat.id}/speaking-mode`).flush({}, { status: 403, statusText: 'Forbidden' });
+    await failed;
+    expect(component['speakingMode']()).toBe(SpeakingMode.readOnly);
+    events.next({
+      type: ServerWsMessageType.memberSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        uid: testUser.uid,
+        role: GroupRole.member,
+        speakingMode: SpeakingMode.unrestricted,
+        groupSpeakingMode: SpeakingMode.readOnly,
+        effectiveSpeakingMode: SpeakingMode.readOnly,
+      },
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-speaking-mode-select')).toBeNull();
+    await component['saveSpeakingMode'](SpeakingMode.unrestricted);
+    http.expectNone((req) => req.method === 'PUT');
   });
 
   it('keeps search and mute out of the profile and places invites before leaving', async () => {

@@ -129,9 +129,6 @@
   font-size: 28px;
   color: var(--ion-color-primary);
 }
-.attach-button:disabled {
-  color: var(--ion-color-medium);
-}
 .attach-button ion-icon {
   transform: rotate(45deg);
 }
@@ -142,6 +139,10 @@
 }
 .sticker-button.selected {
   color: var(--ion-color-primary);
+}
+.attach-button:disabled,
+.sticker-button:disabled {
+  color: var(--ion-color-medium);
 }
 .input-wrapper {
   display: flex;
@@ -181,6 +182,10 @@ ion-textarea {
 }
 .send-button ion-icon {
   transform: translateX(1.5px);
+}
+.send-button:disabled {
+  background: var(--ion-color-medium);
+  color: var(--ion-color-medium-contrast);
 }
 button:disabled {
   opacity: 0.45;

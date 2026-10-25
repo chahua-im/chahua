@@ -28,6 +28,7 @@ import {
   MessageType,
   NotificationType,
   ServerWsMessageType,
+  SpeakingMode,
   type MessageResponse,
   type ServerWsMessage,
   type ThreadSubscriptionStatusResponse,
@@ -197,6 +198,9 @@ describe('ConversationPage', () => {
     http = TestBed.inject(HttpTestingController);
     fixture.componentRef.setInput('id', wireChat.id);
     fixture.detectChanges();
+    http
+      .expectOne(`/_api/group/${wireChat.id}`)
+      .flush({ ...wireChat, myRole: GroupRole.member, speakingMode: 'unrestricted', mySpeakingMode: 'unrestricted' });
     http.expectOne(`/_api/chats/${wireChat.id}/messages?max=50`).flush({
       chatSettings: { showMembershipMessages: true },
       messages: [{ ...wireMessage }],
@@ -210,6 +214,183 @@ describe('ConversationPage', () => {
     vi.restoreAllMocks();
     TestBed.inject(VoicePlayback).active.set(undefined);
     http.verify();
+  });
+
+  it('applies live restrictions without replacing the composer or draft, and resumes after restoration', async () => {
+    component['updateDraft']('保留草稿');
+    fixture.detectChanges();
+    const composer = fixture.nativeElement.querySelector('app-message-composer');
+    const row = fixture.nativeElement.querySelector('app-message');
+    events.next({
+      type: ServerWsMessageType.groupSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        speakingMode: SpeakingMode.readOnly,
+      },
+    });
+    fixture.detectChanges();
+    expect(component['composer']()!.restriction()).toBe(SpeakingMode.readOnly);
+    expect(fixture.nativeElement.querySelector('app-message-composer')).toBe(composer);
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(row);
+    expect(component['draft']()).toBe('保留草稿');
+    await component['sendMessage']();
+    http.expectNone((req) => req.method === 'POST');
+    events.next({
+      type: ServerWsMessageType.groupSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        speakingMode: SpeakingMode.unrestricted,
+      },
+    });
+    expect(component['speakingRestriction']()).toBeUndefined();
+    expect(component['draft']()).toBe('保留草稿');
+  });
+
+  it('distinguishes new threads, existing replies and editing the root under replies-only restrictions', () => {
+    events.next({
+      type: ServerWsMessageType.groupSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        speakingMode: SpeakingMode.repliesOnly,
+      },
+    });
+    expect(component['canSendMessage']()).toBe(false);
+    fixture.componentRef.setInput('threadId', wireMessage.id);
+    expect(component['canSendMessage']()).toBe(false);
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, threadInfo: { replyCount: 1 } },
+    });
+    expect(component['canSendMessage']()).toBe(true);
+    component['editTarget'].set(testMessage);
+    expect(component['speakingRestriction']()).toBe(SpeakingMode.repliesOnly);
+    component['editTarget'].set({ ...testMessage, replyRootId: testMessage.id });
+    expect(component['speakingRestriction']()).toBeUndefined();
+    events.next({
+      type: ServerWsMessageType.groupSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        speakingMode: SpeakingMode.readOnly,
+      },
+    });
+    expect(component['speakingRestriction']()).toBe(SpeakingMode.readOnly);
+  });
+
+  it('keeps replies-only permission after unsubscribing, but revokes it when the thread loses its replies', async () => {
+    const store = TestBed.inject(ChatStore);
+    const rootId = encodeId('100');
+    const thread = {
+      chatId: testChat.id,
+      chatKind: testChat.kind,
+      chatName: '测试群',
+      threadRootMessage: { ...testMessage, id: rootId, mentions: [] },
+      participants: [],
+      replyCount: 100,
+      subscribedAt: testMessage.createdAt,
+      lastReplyAt: testMessage.createdAt,
+      archived: false,
+      unreadCount: 0,
+    };
+    store.acceptThreads([thread], store.snapshot(), store.subscriptionSnapshot());
+    fixture.componentRef.setInput('threadId', '100');
+    // The root is outside the loaded message window; its preview comes from the thread list.
+    component['conversation'].reset(testChat.id, rootId);
+    events.next({
+      type: ServerWsMessageType.groupSpeakingModeChanged,
+      payload: { chatId: testChat.id, speakingMode: SpeakingMode.repliesOnly },
+    });
+    await component['loadThreadRoot']();
+    expect(component['loadedThreadRoot']()).toBeUndefined();
+    expect(component['canSendMessage']()).toBe(true);
+    const root = component['threadRoot']();
+    events.next({
+      type: ServerWsMessageType.threadMembershipChanged,
+      payload: { chatId: testChat.id, threadRootId: rootId, status: { subscribed: false, archived: false } },
+    });
+    expect(store.thread(rootId)).toBeUndefined();
+    expect(component['threadRoot']()).toBe(root);
+    expect(component['topicMessageCount']()).toBe(101);
+    expect(component['canSendMessage']()).toBe(true);
+    expect(component['speakingRestriction']()).toBeUndefined();
+
+    const readVersion = store.snapshot();
+    const subscriptionVersion = store.subscriptionSnapshot();
+    events.next({
+      type: ServerWsMessageType.threadUpdate,
+      payload: { chatId: testChat.id, threadRootId: rootId, replyCount: 0, lastReplyAt: testMessage.createdAt },
+    });
+    expect(component['canSendMessage']()).toBe(false);
+    expect(component['topicMessageCount']()).toBe(1);
+    store.acceptThreads([thread], readVersion, subscriptionVersion);
+    expect(component['canSendMessage']()).toBe(false);
+    http.expectNone(() => true);
+  });
+
+  it.each([false, true])(
+    'updates a separately fetched root when replies disappear (during read: %s)',
+    async (duringRead) => {
+      const rootId = encodeId('100');
+      fixture.componentRef.setInput('threadId', '100');
+      component['conversation'].reset(testChat.id, rootId);
+      component['draft'].set('保留草稿');
+      events.next({
+        type: ServerWsMessageType.groupSpeakingModeChanged,
+        payload: { chatId: testChat.id, speakingMode: SpeakingMode.repliesOnly },
+      });
+      const loading = component['loadThreadRoot']();
+      const read = http.expectOne(`/_api/chats/${wireChat.id}/messages/100`);
+      const update = (replyCount: number) =>
+        events.next({
+          type: ServerWsMessageType.threadUpdate,
+          payload: { chatId: testChat.id, threadRootId: rootId, replyCount, lastReplyAt: testMessage.createdAt },
+        });
+      if (duringRead) update(0);
+      read.flush({ ...wireMessage, id: '100', threadInfo: { replyCount: 1 } });
+      await loading;
+      if (!duringRead) {
+        expect(component['canSendMessage']()).toBe(true);
+        update(0);
+      }
+      expect(component['canSendMessage']()).toBe(false);
+      expect(component['topicMessageCount']()).toBe(1);
+      expect(component['threadRoot']()?.message).toBe(testMessage.message);
+      expect(component['draft']()).toBe('保留草稿');
+      update(1);
+      expect(component['canSendMessage']()).toBe(true);
+      http.expectNone(() => true);
+    },
+  );
+
+  it('keeps a live root edit when its earlier detail response arrives late', async () => {
+    const rootId = encodeId('100');
+    fixture.componentRef.setInput('threadId', '100');
+    component['conversation'].reset(testChat.id, rootId);
+    const loading = component['loadThreadRoot']();
+    events.next({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...testMessage, id: rootId, message: '新内容', threadInfo: { replyCount: 2 } },
+    });
+    http.expectOne(`/_api/chats/${wireChat.id}/messages/100`).flush({
+      ...wireMessage,
+      id: '100',
+      threadInfo: { replyCount: 1 },
+    });
+    await loading;
+    expect(component['threadRoot']()?.message).toBe('新内容');
+    expect(component['topicMessageCount']()).toBe(3);
+  });
+
+  it('uses list-cached DM information without fetching group permissions, but still loads group details', async () => {
+    const store = TestBed.inject(ChatStore);
+    store.invalidate();
+    store.remember([{ ...testChat, kind: GroupKind.dm }]);
+    await component['loadChatInfo']();
+    http.expectNone(`/_api/group/${wireChat.id}`);
+    store.remember([testChat]);
+    const loading = component['loadChatInfo']();
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, speakingMode: SpeakingMode.readOnly });
+    await loading;
+    expect(component['canSendMessage']()).toBe(false);
   });
 
   it('retains draft and message nodes while selecting, enforces 100 items, and freezes the submitted selection', () => {
@@ -1735,6 +1916,7 @@ describe('ConversationPage', () => {
   });
 
   it('confirms unpin in the normal message menu before removing it', async () => {
+    TestBed.inject(ChatStore).invalidate();
     const details = TestBed.inject(ChatStore).ensureDetails(testChat.id);
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.admin });
     const pinId = encodeId('200');
@@ -1773,6 +1955,7 @@ describe('ConversationPage', () => {
   });
 
   it('blocks pin actions when membership no longer permits them', async () => {
+    TestBed.inject(ChatStore).invalidate();
     const details = TestBed.inject(ChatStore).ensureDetails(testChat.id);
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.member });
     await details;
@@ -4342,6 +4525,7 @@ describe('ConversationPage', () => {
   });
 
   it('resolves an ID-only menu selection against the latest message', async () => {
+    TestBed.inject(ChatStore).invalidate();
     const details = TestBed.inject(ChatStore).ensureDetails(testChat.id);
     http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...structuredClone(wireChat), myRole: GroupRole.member });
     await details;
@@ -4758,6 +4942,7 @@ describe('ConversationPage', () => {
       }
       fixture.componentRef.setInput('id', decodeId(otherChatId));
       fixture.detectChanges();
+      http.expectOne(`/_api/group/${decodeId(otherChatId)}`).flush({ ...wireChat, id: decodeId(otherChatId) });
       http.expectOne(`/_api/chats/${decodeId(otherChatId)}/messages?max=50`).flush({
         chatSettings: { showMembershipMessages: true },
         messages: [{ ...otherMessage, id: decodeId(otherMessage.id), chatId: decodeId(otherChatId) }],

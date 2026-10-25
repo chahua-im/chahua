@@ -10,7 +10,12 @@
         slot="start"
         [size]="40"
         [entry]="{ avatar: member.avatarUrl, title: member.username ?? member.uid.toString() }" />
-      <ion-label>{{ member.username || member.uid }}</ion-label>
+      <ion-label>
+        {{ member.username || member.uid }}
+        @if (member.role !== Role.admin && member.speakingMode && member.speakingMode !== Mode.unrestricted) {
+          <p>{{ 'speaking.modes.' + member.speakingMode | transloco }}</p>
+        }
+      </ion-label>
       @if (member.role === Role.admin) {
         <ion-note slot="end">{{ 'chats.members.admin' | transloco }}</ion-note>
       }
@@ -31,6 +36,18 @@
     @if (canManage()) {
       @if (selected(); as member) {
         <ion-list>
+          @if (member.role !== Role.admin) {
+            <ion-item>
+              <app-speaking-mode-select
+                [label]="'speaking.memberTitle' | transloco"
+                [value]="member.speakingMode"
+                [disabled]="busy()"
+                (valueChange)="changeSpeakingMode(member, $event)" />
+            </ion-item>
+            <ion-item lines="none">
+              <ion-note class="ion-text-wrap">{{ 'speaking.memberNote' | transloco }}</ion-note>
+            </ion-item>
+          }
           <ion-item [button]="true" [detail]="false" [disabled]="busy()" (click)="changeRole(member)">
             <ion-label>
               {{ (member.role === Role.admin ? 'chats.members.demote' : 'chats.members.promote') | transloco }}

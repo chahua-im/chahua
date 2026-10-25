@@ -193,7 +193,7 @@
           [read]="row.message.sender.uid === session.user()?.uid && isReadByPeer(row.message)"
           [first]="row.first"
           [last]="row.last"
-          [canReply]="!editing()"
+          [canReply]="!editing() && canSendMessage()"
           [jumpingTo]="jumpingTo()"
           [jumpDisabled]="!!pendingNavigation()"
           [canOpenThread]="!threadId()"
@@ -202,6 +202,11 @@
           (react)="row.confirmed && menu()?.reactTo(row.confirmed, $event)"
           (jump)="goTo({ type: ConversationTargetKind.Message, messageId: $event }, false, row.message.id)"
           (openThread)="openThread($event)"></app-message>
+        @if (row.outgoing?.speakingRestriction?.(); as mode) {
+          <p class="speaking-error ion-padding-horizontal ion-text-right">
+            {{ 'speaking.blocked.' + mode | transloco }}
+          </p>
+        }
       } @empty {
         @if (
           conversation.page() &&
@@ -314,6 +319,7 @@
     [style.--context-light]="composerContextColors()?.light"
     [style.--context-dark]="composerContextColors()?.dark"
     [relationship]="relationship()"
+    [restriction]="speakingRestriction()"
     [chatId]="id()"
     [mentionsEnabled]="mentionsEnabled()"
     [text]="!pendingForward() && editing() ? editText() : draft()"
@@ -513,7 +519,7 @@
   [messages]="conversation.items()"
   [chatId]="id()"
   [threadId]="threadId()"
-  [canReply]="!editing()"
+  [canReply]="!editing() && canSendMessage()"
   (reply)="startReply($event)"
   (edit)="startEdit($event)"
   (editQueued)="startEdit($event)"

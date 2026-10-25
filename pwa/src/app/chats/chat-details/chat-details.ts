@@ -1,5 +1,6 @@
 import { MembershipMessageVisibility } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
+import { Connection } from '../../api/connection';
 import {
   afterNextRender,
   Component,
@@ -65,6 +66,7 @@ import {
   type MemberSummary,
   GroupKind,
   GroupRole,
+  SpeakingMode,
   type MessagePreview as MessagePreviewData,
   type MessageResponse,
   type SnowflakeID,
@@ -85,6 +87,7 @@ import { ChatInvites } from '../chat-invites/chat-invites';
 import { ChatListStore } from '../chat-list-store';
 import { ChatMembers } from '../chat-members/chat-members';
 import { ChatStore } from '../chat-store';
+import { SpeakingModeSelect } from '../speaking-mode-select';
 import { ChatThreads } from '../chat-threads/chat-threads';
 import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { dismissChatOverlays } from '../dismiss-chat-overlays';
@@ -99,6 +102,7 @@ enum DetailAction {
   Presence,
   ReadReceipt,
   Block,
+  Speaking,
 }
 
 enum GroupField {
@@ -148,6 +152,7 @@ export enum DetailView {
     ChatInvites,
     ChatAttachments,
     TranslocoPipe,
+    SpeakingModeSelect,
   ],
   host: { class: 'ion-page' },
 })
@@ -213,6 +218,14 @@ export class ChatDetails {
   private readonly transloco = inject(TranslocoService);
   private readonly injector = inject(Injector);
   protected readonly chat = computed(() => (this.id() ? this.store.get(this.id()!) : undefined));
+  protected readonly speakingMode = linkedSignal(() => this.chat()?.speakingMode);
+  protected async saveSpeakingMode(mode: SpeakingMode | undefined) {
+    if (!mode || !this.canManage() || this.busy()) return;
+    const scope = this.scope();
+    this.speakingMode.set(mode);
+    await this.perform(DetailAction.Speaking, () => this.store.setSpeakingMode(this.id()!, mode), true);
+    if (this.isCurrent(scope)) this.speakingMode.set(this.chat()?.speakingMode);
+  }
   protected readonly loading = signal(false);
   protected readonly PresenceOverride = FriendPresenceOverride;
   protected readonly presenceOverride = linkedSignal({
@@ -326,6 +339,9 @@ export class ChatDetails {
   protected readonly fields = form(this.edits);
   protected readonly avatarProgress = linkedSignal({ source: this.scope, computation: () => 0 });
   constructor() {
+    inject(Connection)
+      .resync$.pipe(takeUntilDestroyed())
+      .subscribe(() => void this.load());
     effect((onCleanup) => {
       const query = this.relationshipQuery();
       if (query) onCleanup(query.activate());

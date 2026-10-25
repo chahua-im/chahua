@@ -40,6 +40,7 @@ import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../.
 import { copyText } from '../../api/clipboard';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
+import { SpeakingAction } from '../../chats/speaking';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
 import { EmojiPicker } from '../emoji-picker/emoji-picker';
@@ -224,7 +225,8 @@ export class MessageMenu {
       !this.threadId() &&
       !message.isDeleted &&
       message.messageType === MessageType.text &&
-      !message.threadInfo
+      !message.threadInfo &&
+      this.chatInfo.canSpeak(this.chatId(), SpeakingAction.CreateThread)
     );
   });
   protected readonly canCopy = computed(() => {
@@ -257,6 +259,10 @@ export class MessageMenu {
       message.messageType === MessageType.text &&
       !message.forwardedFrom &&
       !this.queued()?.forwarding &&
+      this.chatInfo.canSpeak(
+        this.chatId(),
+        message.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+      ) &&
       (!!this.queued() || message.sender.uid === this.session.user()?.uid)
     );
   });
@@ -615,13 +621,19 @@ export class MessageMenu {
         break;
       }
       case MessageAction.Edit:
-        this.edit.emit(message);
+        if (
+          this.chatInfo.canSpeak(
+            this.chatId(),
+            message.replyRootId ? SpeakingAction.ThreadReply : SpeakingAction.ChatMessage,
+          )
+        )
+          this.edit.emit(message);
         break;
       case MessageAction.Reply:
         if (this.canReply()) this.reply.emit(message);
         break;
       case MessageAction.Thread:
-        this.openThread.emit(message.id);
+        if (this.chatInfo.canSpeak(this.chatId(), SpeakingAction.CreateThread)) this.openThread.emit(message.id);
         break;
       case MessageAction.Pin:
       case MessageAction.Recall:

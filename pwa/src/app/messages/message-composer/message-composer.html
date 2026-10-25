@@ -1,4 +1,4 @@
-@if (suggestions().length) {
+@if (suggestions().length && !restriction()) {
   <ion-list class="mentions">
     @for (member of suggestions(); track member.uid; let i = $index) {
       <ion-item
@@ -81,13 +81,16 @@
   (change)="files($event, Purpose.media)" />
 <input #filesInput type="file" multiple hidden (change)="files($event, Purpose.file)" />
 <div class="bar">
+  @if (voiceActive() && restriction(); as mode) {
+    <p class="ion-padding-horizontal">{{ 'speaking.blocked.' + mode | transloco }}</p>
+  }
   <div class="compose-context" [hidden]="voiceActive() && !forwarding()"><ng-content /></div>
   <div class="compose-row">
     <button
       type="button"
       #attachButton
       class="attach-button"
-      [disabled]="voiceActive() || forwarding()"
+      [disabled]="voiceActive() || forwarding() || !!restriction()"
       (pointerdown)="$event.preventDefault()"
       (click)="openAttachments(attachmentMenu, attachButton)">
       <ion-icon [icon]="icons.attachOutline" />
@@ -95,10 +98,13 @@
     <div class="input-wrapper" [hidden]="voiceActive()">
       <div class="input-row">
         <ion-textarea
-          [placeholder]="'messages.composer.placeholder' | transloco"
+          [disabled]="!!restriction()"
+          [placeholder]="
+            (restriction() ? 'speaking.blocked.' + restriction() : 'messages.composer.placeholder') | transloco
+          "
           [autoGrow]="true"
           [rows]="1"
-          [value]="display().text"
+          [value]="restriction() ? '' : display().text"
           (ionInput)="changed($event.detail.value || '', $event.detail.event)"
           (ionFocus)="panel.set(Panel.None)"
           (paste)="paste($event)"
@@ -107,6 +113,7 @@
           <button
             type="button"
             class="sticker-button"
+            [disabled]="!!restriction()"
             [attr.title]="windows ? 'Emoji: Win + .' : macOS ? 'Emoji: fn + E' : null"
             [class.selected]="panel() === Panel.Stickers"
             (click)="togglePanel(Panel.Stickers)">
@@ -117,6 +124,7 @@
     </div>
     @if (useVoice()) {
       <app-voice-recorder
+        [disabled]="!!restriction()"
         [(active)]="voiceActive"
         (activeChange)="$event && panel.set(Panel.None)"
         (submitted)="sendVoice($event)"
@@ -135,7 +143,7 @@
     }
   </div>
 </div>
-@if (panel() === Panel.Stickers) {
+@if (panel() === Panel.Stickers && !restriction()) {
   <app-sticker-picker [embedded]="true" (selected)="sticker($event)" />
 }
 

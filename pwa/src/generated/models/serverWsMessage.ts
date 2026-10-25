@@ -16,6 +16,8 @@ import type { FriendRequestReceivedPayload } from './friendRequestReceivedPayloa
 import type { FriendRequestResolvedPayload } from './friendRequestResolvedPayload';
 import type { FriendshipRemovedPayload } from './friendshipRemovedPayload';
 import type { MembershipMessagePolicyChanged } from './membershipMessagePolicyChanged';
+import type { GroupSpeakingModeResponse } from './groups/groupSpeakingModeResponse';
+import type { MemberSpeakingModeResponse } from './members/memberSpeakingModeResponse';
 import type { MessageResponse } from './messageResponse';
 import type { NotificationPayload } from './notificationPayload';
 import type { PinUpdatePayload } from './pinUpdatePayload';
@@ -105,6 +107,14 @@ export type ServerWsMessage =
   | {
       payload: ChatNotificationSettingResponse;
       type: 'chatNotificationSettingChanged';
+    }
+  | {
+      payload: GroupSpeakingModeResponse;
+      type: 'groupSpeakingModeChanged';
+    }
+  | {
+      payload: MemberSpeakingModeResponse;
+      type: 'memberSpeakingModeChanged';
     }
   | {
       payload: ReadReceiptChangedPayload;

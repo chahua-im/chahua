@@ -15,6 +15,7 @@ export * from './getGroupsParams';
 export * from './groupSearchMode';
 export * from './groupSelectorItem';
 export * from './groupSelectorScope';
+export * from './groupSpeakingModeResponse';
 export * from './listGroupsResponse';
 export * from './muteBody';
 export * from './muteResponse';

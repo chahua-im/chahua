@@ -154,3 +154,6 @@
     <ion-button fill="clear" (click)="load()">{{ 'chats.invites.refresh' | transloco }}</ion-button>
   </p>
 }
+@if (restriction(); as mode) {
+  <p class="ion-padding">{{ 'speaking.blocked.' + mode | transloco }}</p>
+}

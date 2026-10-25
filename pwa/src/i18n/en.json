@@ -724,5 +724,23 @@
     "addHint": "Choose a chat to use the opposite of the current default. Tap an exception to change it later.",
     "alreadyAdded": "Added",
     "noChats": "No matching chats"
+  },
+  "speaking": {
+    "groupTitle": "Group speaking permissions",
+    "memberTitle": "Member speaking restriction",
+    "adminNote": "Administrators are exempt. The stricter group or member restriction applies.",
+    "memberNote": "Unrestricted members still follow group permissions. Promotion to administrator clears personal restrictions.",
+    "destinationRestricted": "You cannot send messages to this conversation right now. Choose another group or thread.",
+    "modes": {
+      "unrestricted": "Unrestricted",
+      "threadsOnly": "Threads only",
+      "repliesOnly": "Existing thread replies only",
+      "readOnly": "Read only"
+    },
+    "blocked": {
+      "threadsOnly": "You can post in threads, but cannot send or edit main-chat messages.",
+      "repliesOnly": "You can only reply to existing threads, without posting in the main chat or starting threads.",
+      "readOnly": "You cannot send or edit messages with your current speaking permissions."
+    }
   }
 }

@@ -16,8 +16,10 @@ import type {
   GetMembersParams,
   ListMembersResponse,
   MemberResponse,
+  MemberSpeakingModeResponse,
   SnowflakeID,
   UpdateMemberBody,
+  UpdateSpeakingModeRequest,
 } from '../../models';
 import type { HttpHeaders, HttpResponse as AngularHttpResponse } from '@angular/common/http';
 import { CHAHUA_BASE_URL } from '../chahua.base-url';
@@ -301,5 +303,58 @@ export class MembersService {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
+  }
+  putMemberSpeakingMode<TData = MemberSpeakingModeResponse>(
+    chatId: SnowflakeID,
+    uid: number,
+    updateSpeakingModeRequest: UpdateSpeakingModeRequest,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  putMemberSpeakingMode<TData = MemberSpeakingModeResponse>(
+    chatId: SnowflakeID,
+    uid: number,
+    updateSpeakingModeRequest: UpdateSpeakingModeRequest,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  putMemberSpeakingMode<TData = MemberSpeakingModeResponse>(
+    chatId: SnowflakeID,
+    uid: number,
+    updateSpeakingModeRequest: UpdateSpeakingModeRequest,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  putMemberSpeakingMode<TData = MemberSpeakingModeResponse>(
+    chatId: SnowflakeID,
+    uid: number,
+    updateSpeakingModeRequest: UpdateSpeakingModeRequest,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.put<TData>(
+        `${this.baseUrl}/group/${decodeId(chatId)}/members/${uid}/speaking-mode`,
+        updateSpeakingModeRequest,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'events',
+        },
+      );
+    }
+    if (options?.observe === 'response') {
+      return this.http.put<TData>(
+        `${this.baseUrl}/group/${decodeId(chatId)}/members/${uid}/speaking-mode`,
+        updateSpeakingModeRequest,
+        {
+          ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+          observe: 'response',
+        },
+      );
+    }
+    return this.http.put<TData>(
+      `${this.baseUrl}/group/${decodeId(chatId)}/members/${uid}/speaking-mode`,
+      updateSpeakingModeRequest,
+      {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'body',
+      },
+    );
   }
 }

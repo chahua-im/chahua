@@ -151,8 +151,8 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 | 组件            | 输入、输出与局部字段                                                                                           | 所有权                                                                                                  |
 | --------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| MessageComposer | chatId、text model、editing、editingUploads、relationship、mentionsEnabled；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面             |
-| VoiceRecorder   | active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                | 设备资源和未发送录音属于组件，离开时释放                                                                |
+| MessageComposer | chatId、text model、editing、editingUploads、relationship、mentionsEnabled、restriction；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面             |
+| VoiceRecorder   | disabled、active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                | 设备资源和未发送录音属于组件，离开时释放                                                                |
 | UploadProgress  | value（0–1）                                                                                                   | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                                   |
 | VoicePlayer     | src、dock；playing、loading、failed、elapsed、duration、波形状态                                               | 挂载时创建 Audio 和 WaveSurfer 并读取波形；同一时间播放一条；带 dock 的消息语音把播放状态交给吸顶播放条，销毁时由 VoicePlayback 接管音频继续播放 |
 | VoiceBar        | 无输入，读取 VoicePlayback；toggle/dismiss/speed 经活跃语音执行，locate 经 ConversationNavigation 打开消息所属会话 | 只负责呈现吸顶播放条，挂在主栏 header 底部：会话页、聊天列表移动端页与桌面空态页各挂一个，桌面侧栏列表实例不挂 |
@@ -171,7 +171,7 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/readReceiptOverride 及其 loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人在线状态和已读回执覆盖值，Presence 失效个人状态 |
 | ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                          | 从聊天消息页提取话题根，点击导航                                |
-| ChatMembers        | chatId、canManage；query、members、cursor、loading/error、selectedUid、pending                                                                           | MembersService；行点击打开资料，管理员可管理其他成员，权限来自 ChatDetails |
+| ChatMembers        | chatId、canManage；query、members、cursor、loading/error、selectedUid、pending、成员实时更新版本                                                                           | MembersService、ChatStore；行点击打开资料，管理员可管理其他成员身份与个人发言权限，权限来自 ChatDetails |
 | ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                            | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料 |
 | ChatAttachments    | chatId、kind；items、cursor、loading/error、打开/定位状态                                                                                               | 列表归组件，打开原消息媒体或定位上下文                          |
 | ChatSearch         | chatId；query、sort、messages、cursor、loading/error                                                                                                    | 聊天消息搜索，点击定位原消息                                    |
@@ -217,3 +217,5 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 ChatList 的四个 tab 数字消费集合 `unreadUnmutedConversationCount`，有未静音 mention 时由 `@` 替代数字，两者均为零时隐藏。ChatList 与 PushNotifications 的后台标题共用 ChatListStore.tabBadges，其 `@` 仅消费集合 `unreadUnmutedAttentionCount`，原始 attention 不驱动这两处提醒；会话内标题改用该会话的共享读状态。ChatListContent 使用话题响应的 `chatKind` 决定 mention、作者与头像徽标；父聊天详情仅补充名称和头像，不影响类型判断。ChatListItem 保留静音群聊和归档话题的行内 mention badge，使用 medium 色，选中时仍保持灰色。
 
 `conversationUnread` 管理 ChatListStore 的连接级未读订阅、消费者、快照和 requestId；Connection 负责 WS 编解码与发送。系统图标和列表共享订阅，不创建单独的未读 HTTP 查询。
+
+SpeakingModeSelect 由 ChatDetails 与 ChatMembers 复用，输入 label、disabled，value model 为 SpeakingMode；Ionic 选择框只负责选择，调用方持有保存状态和错误。群模式与有效发言权限由 ChatStore 共享，ConversationPage 将当前操作的 restriction 传给 MessageComposer；VoiceRecorder 接收 disabled，限制生效时保留尚未发送的录音。

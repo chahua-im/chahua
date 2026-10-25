@@ -16,6 +16,7 @@ import { filter, firstValueFrom, from, fromEvent, merge, Subject, takeUntil, tim
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import {
   MessageType,
+  type SpeakingMode,
   ServerWsMessageType,
   type CreateMessageBody,
   type ForwardMessagesBody,
@@ -23,6 +24,7 @@ import {
   type MentionInfo,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
+import { speakingErrorMode } from '../chats/speaking';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { SessionStore } from '../session/session-store';
 import type { Composition } from './message-composer/message-composer';
@@ -46,6 +48,7 @@ export interface OutgoingMessage {
   readonly cancelled: Signal<boolean>;
   readonly body: CreateMessageBody;
   readonly forwarding?: boolean;
+  readonly speakingRestriction?: WritableSignal<SpeakingMode | undefined>;
   operation?: Promise<void>;
   disposed: boolean;
 }
@@ -367,6 +370,7 @@ export class MessageOutbox {
       threadId,
       editId: original?.id,
       forwarding: !!initial.forward,
+      speakingRestriction: signal<SpeakingMode | undefined>(undefined),
       get body() {
         return intent().body;
       },
@@ -420,6 +424,7 @@ export class MessageOutbox {
     task.retryable = true;
     if (item.cancelled()) return this.delete(item);
     if (item.operation) return item.operation;
+    item.speakingRestriction?.set(undefined);
     if (this.needsSend(item)) item.delivery.set(MessageDelivery.Sending);
     this.pump();
     return item.operation ?? Promise.resolve();
@@ -565,6 +570,7 @@ export class MessageOutbox {
       }
       if (!this.needsSend(item)) return;
       item.delivery.set(MessageDelivery.Failed);
+      item.speakingRestriction?.set(speakingErrorMode(error));
       task.retryable = task.retryable && retryable(error);
       this.schedule(item);
     } finally {

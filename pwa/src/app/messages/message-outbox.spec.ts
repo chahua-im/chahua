@@ -1,4 +1,5 @@
 import { signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { provideRouter, Router } from '@angular/router';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
 import { DraftStore } from '../conversations/draft-store';
@@ -10,6 +11,7 @@ import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import {
   AttachmentUploadPurpose,
   MessageType,
+  SpeakingMode,
   ServerWsMessageType,
   type MessageResponse,
   type ServerWsMessage,
@@ -83,6 +85,25 @@ describe('MessageOutbox', () => {
     TestBed.resetTestingModule();
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+  it('keeps speaking-restricted messages failed without reconnect retries and preserves their retry identity', async () => {
+    const item = outbox.enqueue(testChat.id, undefined, '保留消息', text);
+    const clientGeneratedId = item.clientGeneratedId;
+    replies[0].error(
+      new HttpErrorResponse({ status: 403, error: { code: 'speakingRestricted', effectiveSpeakingMode: 'readOnly' } }),
+    );
+    await item.operation;
+    expect(item.delivery()).toBe(MessageDelivery.Failed);
+    expect(item.speakingRestriction?.()).toBe(SpeakingMode.readOnly);
+    expect(item.message().message).toBe('保留消息');
+    resync.next();
+    expect(api.postMessage).toHaveBeenCalledTimes(1);
+    const retry = outbox.retry(item);
+    expect(api.postMessage).toHaveBeenCalledTimes(2);
+    expect(item.clientGeneratedId).toBe(clientGeneratedId);
+    replies[1].next({ ...testMessage, clientGeneratedId });
+    await retry;
+    expect(item.speakingRestriction?.()).toBeUndefined();
   });
   it('sends a single selection to a thread through the single endpoint and confirms forwarded audio immediately', async () => {
     const threadId = encodeId('9007199254741888');

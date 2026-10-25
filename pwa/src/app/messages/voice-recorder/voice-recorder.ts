@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, model, output, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, input, model, output, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { IonAlert, IonIcon, IonSpinner } from '@ionic/angular';
 import { arrowUp, micOffOutline, micOutline, send, trash } from 'ionicons/icons';
@@ -29,6 +29,7 @@ enum Failure {
   host: { '[class.active]': 'active()' },
 })
 export class VoiceRecorder {
+  readonly disabled = input(false);
   readonly active = model(false);
   readonly submitted = output<File>();
   readonly discarded = output();
@@ -76,6 +77,7 @@ export class VoiceRecorder {
   }
 
   protected start(event: PointerEvent) {
+    if (this.disabled()) return;
     if (!event.isPrimary || event.button !== 0 || this.active() || !this.mimeType) return;
     event.preventDefault();
     this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
@@ -149,7 +151,7 @@ export class VoiceRecorder {
         });
         this.url.set(URL.createObjectURL(this.file));
         this.phase.set(Phase.Recorded);
-        if (this.sendOnStop) this.submitted.emit(this.file);
+        if (this.sendOnStop && !this.disabled()) this.submitted.emit(this.file);
       };
       recorder.start();
       this.phase.set(Phase.Recording);
@@ -162,7 +164,7 @@ export class VoiceRecorder {
     }
   }
   protected send() {
-    if (this.file) this.submitted.emit(this.file);
+    if (this.file && !this.disabled()) this.submitted.emit(this.file);
   }
   reset() {
     this.version++;

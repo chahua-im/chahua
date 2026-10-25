@@ -65,7 +65,14 @@ describe('ForwardPicker', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: ChatListStore, useValue: { chats: () => chats, threads: () => threads } },
-        { provide: ChatStore, useValue: { get: () => testChat } },
+        {
+          provide: ChatStore,
+          useValue: {
+            get: () => testChat,
+            ensureDetails: vi.fn().mockResolvedValue(undefined),
+            canSpeak: vi.fn().mockReturnValue(true),
+          },
+        },
         { provide: MessageOutbox, useValue: { enqueueForward } },
         { provide: ConversationNavigation, useValue: { prepareForward } },
         { provide: Connection, useValue: { changes$: changes } },
@@ -79,6 +86,29 @@ describe('ForwardPicker', () => {
     fixture.detectChanges();
     return { fixture, picker: fixture.componentInstance, prepareForward, enqueueForward, toasts, chats, threads };
   }
+  it('checks only the chosen destination and leaves the picker open when sending is restricted', async () => {
+    const { picker, prepareForward, toasts } = setup();
+    const metadata = TestBed.inject(ChatStore);
+    vi.mocked(metadata.canSpeak).mockReturnValue(false);
+    const target = picker['targets']()[0];
+    await picker['select'](target);
+    expect(metadata.ensureDetails).toHaveBeenCalledExactlyOnceWith(target.chatId);
+    expect(prepareForward).not.toHaveBeenCalled();
+    expect(picker['open']()).toBe(true);
+    expect(toasts).toHaveBeenCalledWith(expect.objectContaining({ message: ForwardSelectionError.Restricted }));
+  });
+
+  it.each([false, true])('skips group detail requests for a known DM destination (thread: %s)', async (thread) => {
+    const { picker, chats, threads, prepareForward } = setup();
+    chats.items.update((items) => items.map((chat) => ({ ...chat, kind: GroupKind.dm })));
+    threads.items.update((items) => items.map((item) => ({ ...item, chatKind: GroupKind.dm })));
+    const metadata = TestBed.inject(ChatStore);
+    vi.mocked(metadata.ensureDetails).mockRejectedValue(new Error('Details unavailable'));
+    const target = picker['targets']().find((target) => !!target.threadId === thread)!;
+    await picker['select'](target);
+    expect(metadata.ensureDetails).not.toHaveBeenCalled();
+    expect(prepareForward).toHaveBeenCalledExactlyOnceWith(target.chatId, target.threadId, [testMessage], undefined);
+  });
 
   it.each([
     { kind: GroupKind.group, name: 'Root author', avatarUrl: '/author.png' },
@@ -281,6 +311,7 @@ describe('ForwardPicker', () => {
     const target = picker['targets']()[0];
     const pending = picker['select'](target);
     expect(picker['selected']()).toBe(target.threadId ?? target.chatId);
+    await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
     if (action === 'destroy') fixture.destroy();
     else picker[action]();
     resolve({ sources: [testMessage] });
@@ -315,6 +346,7 @@ describe('ForwardPicker', () => {
         }),
     );
     const pending = picker['select'](picker['targets']()[0]);
+    await Promise.resolve();
     chats.items.set([]);
     threads.items.set([]);
     resolve({ sources: [testMessage] });
@@ -334,7 +366,9 @@ describe('ForwardPicker', () => {
         }),
     );
     const pending = picker['select'](picker['targets']()[0]);
+    await Promise.resolve();
     expect(picker['canDismiss']()).toBe(true);
+    await Promise.resolve();
     await Promise.resolve();
     expect(picker['canDismiss']()).toBe(false);
     expect(picker['canDismiss'](undefined, 'navigate')).toBe(true);

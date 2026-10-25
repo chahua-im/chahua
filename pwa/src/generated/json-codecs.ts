@@ -151,6 +151,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
   GroupSelectorItem: {
     id: 1,
   },
+  GroupSpeakingModeResponse: {
+    chatId: 1,
+  },
   InvitePreviewResponse: {
     chat: 'GroupInfoResponse',
     invite: 'InviteResponse',
@@ -218,6 +221,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     stickerPackOrder: ['StickerPackOrderItem'],
   },
   MembershipMessagePolicyChanged: {
+    chatId: 1,
+  },
+  MemberSpeakingModeResponse: {
     chatId: 1,
   },
   MessagePreview: {
@@ -657,8 +663,18 @@ export const jsonOperations: JsonOperationCodec[] = [
   },
   {
     method: 'PUT',
+    path: '/group/{chat_id}/members/{uid}/speaking-mode',
+    response: 'MemberSpeakingModeResponse',
+  },
+  {
+    method: 'PUT',
     path: '/group/{chat_id}/notification-setting',
     response: 'ChatNotificationSettingResponse',
+  },
+  {
+    method: 'PUT',
+    path: '/group/{chat_id}/speaking-mode',
+    response: 'GroupSpeakingModeResponse',
   },
   {
     method: 'GET',
@@ -833,6 +849,8 @@ export const wsPayloadCodecs: Record<string, JsonCodec> = {
   notificationExceptionsCleared: 'NotificationExceptionsCleared',
   notificationSettingsChanged: 0,
   chatNotificationSettingChanged: 'ChatNotificationSettingResponse',
+  groupSpeakingModeChanged: 'GroupSpeakingModeResponse',
+  memberSpeakingModeChanged: 'MemberSpeakingModeResponse',
   readReceiptChanged: 'ReadReceiptChangedPayload',
   pinAdded: 'PinUpdatePayload',
   threadPinAdded: 'PinUpdatePayload',

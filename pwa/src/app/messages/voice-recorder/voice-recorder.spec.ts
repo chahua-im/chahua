@@ -82,6 +82,20 @@ describe('Voice recording gesture', () => {
     vi.advanceTimersByTime(800);
     return result;
   }
+  it('retains a recording when speaking is revoked during the gesture and allows sending after restoration', async () => {
+    const { fixture, pointer, selected } = await recording();
+    fixture.componentRef.setInput('disabled', true);
+    fixture.detectChanges();
+    pointer('pointerup', 150, 50);
+    fixture.componentInstance['send']();
+    expect(selected).not.toHaveBeenCalled();
+    expect(fixture.componentInstance['url']()).toBe('blob:recording');
+    expect(stop).toHaveBeenCalled();
+    fixture.componentRef.setInput('disabled', false);
+    fixture.componentInstance['send']();
+    expect(selected).toHaveBeenCalledOnce();
+  });
+
   it('shows the supported icon before and during the first permission request', () => {
     const { fixture, button, pointer, selected } = render();
     expect(button.disabled).toBe(false);

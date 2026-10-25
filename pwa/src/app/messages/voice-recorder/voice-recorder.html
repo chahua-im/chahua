@@ -19,7 +19,7 @@
 }
 <div class="action-slot">
   @if (phase() === Phase.Recorded) {
-    <button type="button" class="round send" (click)="send()">
+    <button type="button" class="round send" [disabled]="disabled()" (click)="send()">
       <ion-icon [icon]="icons.send" />
     </button>
   } @else {
@@ -33,6 +33,7 @@
       <button
         type="button"
         class="round microphone"
+        [disabled]="disabled() && !active()"
         (click)="!available && failure.set(Failure.Unsupported)"
         (pointerdown)="start($event)"
         (pointermove)="move($event)"

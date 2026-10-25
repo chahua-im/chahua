@@ -3,24 +3,43 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { AlertController, IonPopover, IonToast } from '@ionic/angular';
+import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import { GroupRole, type MemberResponse } from '../../../generated/models';
+import {
+  GroupRole,
+  SpeakingMode,
+  ServerWsMessageType,
+  type ServerWsMessage,
+  type MemberResponse,
+} from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
-import { testChat, testUser, wireChat } from '../../api/testing';
+import { mockRealtime, testChat, testUser, wireChat } from '../../api/testing';
+import { Connection } from '../../api/connection';
 import { SessionStore } from '../../session/session-store';
 import { ChatMembers } from './chat-members';
 
-const member: MemberResponse = { uid: 2, username: '成员甲', gender: 0, role: GroupRole.member, joinedAt: '' };
+const member: MemberResponse = {
+  uid: 2,
+  username: '成员甲',
+  gender: 0,
+  role: GroupRole.member,
+  joinedAt: '',
+  speakingMode: SpeakingMode.unrestricted,
+};
 const admin: MemberResponse = { ...member, uid: 3, username: '管理员乙', role: GroupRole.admin };
 const self: MemberResponse = { ...admin, uid: testUser.uid, username: testUser.username };
 const url = `/_api/group/${wireChat.id}/members`;
 
 describe('ChatMembers management', () => {
   let http: HttpTestingController;
+  let events: Subject<ServerWsMessage>;
+  let resync: Subject<void>;
   const alert = { present: vi.fn(), onDidDismiss: vi.fn() };
 
   beforeEach(() => {
+    events = new Subject();
+    resync = new Subject();
     alert.onDidDismiss.mockReset().mockResolvedValue({ role: 'confirm' });
     vi.spyOn(IonPopover.prototype, 'present').mockResolvedValue();
     vi.spyOn(IonPopover.prototype, 'dismiss').mockResolvedValue(true);
@@ -28,6 +47,7 @@ describe('ChatMembers management', () => {
     TestBed.configureTestingModule({
       providers: [
         provideChahuaBaseUrl('/_api'),
+        { provide: Connection, useValue: mockRealtime({ events$: events, resync$: resync }) },
         { provide: SessionStore, useValue: { user: signal(testUser) } },
         { provide: AlertController, useValue: { create: vi.fn().mockResolvedValue(alert) } },
       ],
@@ -53,6 +73,68 @@ describe('ChatMembers management', () => {
       .dispatchEvent(new CustomEvent('ionInput', { detail: { value: query } }));
     fixture.detectChanges();
   }
+
+  it('applies member restrictions and protects live updates from delayed searches and saves', async () => {
+    const fixture = await open();
+    const component = fixture.componentInstance;
+    search(fixture, '成员');
+    const read = http.expectOne((req) => req.url === url);
+    events.next({
+      type: ServerWsMessageType.memberSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        uid: member.uid,
+        role: GroupRole.member,
+        speakingMode: SpeakingMode.readOnly,
+        groupSpeakingMode: SpeakingMode.unrestricted,
+        effectiveSpeakingMode: SpeakingMode.readOnly,
+      },
+    });
+    read.flush({ members: [member] });
+    await fixture.whenStable();
+    expect(component['members']()[0].speakingMode).toBe(SpeakingMode.readOnly);
+    const saving = component['changeSpeakingMode'](component['members']()[0], SpeakingMode.unrestricted);
+    const request = http.expectOne(`${url}/${member.uid}/speaking-mode`);
+    events.next({
+      type: ServerWsMessageType.memberSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        uid: member.uid,
+        role: GroupRole.member,
+        speakingMode: SpeakingMode.repliesOnly,
+        groupSpeakingMode: SpeakingMode.unrestricted,
+        effectiveSpeakingMode: SpeakingMode.repliesOnly,
+      },
+    });
+    request.flush({
+      chatId: testChat.id,
+      uid: member.uid,
+      role: GroupRole.member,
+      speakingMode: SpeakingMode.unrestricted,
+      groupSpeakingMode: SpeakingMode.unrestricted,
+      effectiveSpeakingMode: SpeakingMode.unrestricted,
+    });
+    await saving;
+    expect(component['members']()[0].speakingMode).toBe(SpeakingMode.repliesOnly);
+  });
+
+  it('refreshes loaded members on reconnect without clearing rows and rejects administrator restrictions', async () => {
+    const fixture = await open();
+    const component = fixture.componentInstance;
+    const row = fixture.nativeElement.querySelectorAll('ion-list > ion-item')[1];
+    await component['changeSpeakingMode'](admin, SpeakingMode.readOnly);
+    http.expectNone((req) => req.method === 'PUT');
+    resync.next();
+    http.expectOne('/_api/users/me/notification-settings').flush({});
+    const refresh = http.expectOne((req) => req.url === url);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('ion-list > ion-item')[1]).toBe(row);
+    refresh.flush({ members: [self, { ...member, speakingMode: SpeakingMode.readOnly }, admin] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('ion-list > ion-item')[1]).toBe(row);
+    expect(row.textContent).toContain('禁止发言');
+  });
 
   it('searches all group members like mentions and keeps rows until the response arrives', async () => {
     const fixture = await open();

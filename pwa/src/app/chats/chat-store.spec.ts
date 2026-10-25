@@ -447,6 +447,7 @@ describe('ChatStore', () => {
       avatar: undefined,
       peer: undefined,
       myRole: GroupRole.admin,
+      effectiveSpeakingMode: 'unrestricted',
       description: response.description,
       visibility: response.visibility,
       mutedUntil: undefined,

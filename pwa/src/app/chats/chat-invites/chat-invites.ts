@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
@@ -21,6 +21,7 @@ import {
   GroupSearchMode,
   GroupSelectorScope,
   InviteType,
+  type SpeakingMode,
   type GroupSelectorItem,
   type InviteResponse,
   type SnowflakeID,
@@ -28,6 +29,8 @@ import {
 import { copyText } from '../../api/clipboard';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { inviteStatus, InviteStatus } from '../invite';
+import { ChatStore } from '../chat-store';
+import { SpeakingAction, speakingErrorMode } from '../speaking';
 
 enum InviteAction {
   Create,
@@ -56,6 +59,9 @@ enum InviteAction {
 export class ChatInvites {
   readonly chatId = input.required<SnowflakeID>();
   private readonly api = inject(InvitesService);
+  private readonly store = inject(ChatStore);
+  private readonly destroy = inject(DestroyRef);
+  protected readonly restriction = signal<SpeakingMode | undefined>(undefined);
   private readonly groupsApi = inject(GroupsService);
   private readonly alerts = inject(AlertController);
   private readonly transloco = inject(TranslocoService);
@@ -181,20 +187,30 @@ export class ChatInvites {
   }
   protected async share(invite: InviteResponse) {
     const destination = this.destination();
+    const sourceChatId = this.chatId();
     if (!destination || this.busy()) return;
     this.pending.set({ action: InviteAction.Share, id: invite.id });
     this.error.set(false);
+    this.restriction.set(undefined);
     try {
+      await this.store.ensureDetails(destination);
+      if (this.destroy.destroyed || this.chatId() !== sourceChatId) return;
+      if (!this.store.canSpeak(destination, SpeakingAction.ChatMessage)) {
+        this.restriction.set(this.store.speakingMode(destination));
+        return;
+      }
       await firstValueFrom(
         this.api.postSendInviteMessage({
-          sourceChatId: this.chatId(),
+          sourceChatId,
           inviteId: invite.id,
           destinationChatId: destination,
           clientGeneratedId: crypto.randomUUID(),
         }),
       );
-    } catch {
-      this.error.set(true);
+    } catch (error) {
+      const mode = speakingErrorMode(error);
+      if (mode) this.restriction.set(mode);
+      else this.error.set(true);
     } finally {
       this.pending.set(undefined);
     }

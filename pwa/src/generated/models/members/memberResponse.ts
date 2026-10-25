@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GroupRole } from '../groupRole';
+import type { SpeakingMode } from '../speakingMode';
 import type { UserGroupTagInfo } from '../userGroupTagInfo';
 
 export interface MemberResponse {
@@ -13,6 +14,7 @@ export interface MemberResponse {
   gender: number;
   joinedAt: string;
   role: GroupRole;
+  speakingMode: SpeakingMode;
   uid: number;
   userGroup?: UserGroupTagInfo;
   username?: string;

@@ -26,6 +26,8 @@ export enum ServerWsMessageType {
   notificationExceptionsCleared = 'notificationExceptionsCleared',
   notificationSettingsChanged = 'notificationSettingsChanged',
   chatNotificationSettingChanged = 'chatNotificationSettingChanged',
+  groupSpeakingModeChanged = 'groupSpeakingModeChanged',
+  memberSpeakingModeChanged = 'memberSpeakingModeChanged',
   readReceiptChanged = 'readReceiptChanged',
   pinAdded = 'pinAdded',
   threadPinAdded = 'threadPinAdded',

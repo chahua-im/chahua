@@ -11,5 +11,6 @@ export * from './deleteRemoveMemberParams';
 export * from './getMembersParams';
 export * from './listMembersResponse';
 export * from './memberResponse';
+export * from './memberSpeakingModeResponse';
 export * from './updateMemberBody';
 export * from './userSearchMode';

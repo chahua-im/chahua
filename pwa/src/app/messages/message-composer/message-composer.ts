@@ -33,6 +33,7 @@ import type { FriendRelationshipResponse } from '../../../generated/models';
 import {
   AttachmentUploadPurpose,
   MessageType,
+  type SpeakingMode,
   UserSearchMode,
   type AttachmentResponse,
   type MemberResponse,
@@ -95,8 +96,10 @@ enum Panel {
 export class MessageComposer {
   readonly text = model('');
   readonly relationship = input<FriendRelationshipResponse>();
+  readonly restriction = input<SpeakingMode>();
   protected readonly blocked = signal(false);
   private canWrite() {
+    if (this.restriction()) return false;
     const allowed = this.relationship()?.canDm !== false;
     this.blocked.set(!allowed);
     return allowed;
@@ -159,6 +162,7 @@ export class MessageComposer {
   private readonly attachmentMenu = viewChild<ElementRef<HTMLDivElement>>('attachmentMenu');
   private cancelAttachmentPicker?: () => void;
   protected openAttachments(menu: HTMLDivElement, button: HTMLButtonElement) {
+    if (this.restriction()) return;
     this.cancelAttachmentPicker?.();
     this.panel.set(Panel.None);
     const rect = button.getBoundingClientRect();
@@ -168,6 +172,7 @@ export class MessageComposer {
     menu.showPopover();
   }
   protected pickAttachment(menu: HTMLDivElement, picker: HTMLInputElement) {
+    if (this.restriction()) return;
     this.cancelAttachmentPicker?.();
     menu.hidePopover();
     const active = this.host.nativeElement.ownerDocument.activeElement;
@@ -220,6 +225,7 @@ export class MessageComposer {
   );
   protected readonly canSend = computed(
     () =>
+      !this.restriction() &&
       !this.voiceActive() &&
       (this.forwarding() ||
         (!this.error() && (!!this.text().trim() || !!this.existing().length || !!this.selectedUploads().length))),
@@ -237,6 +243,7 @@ export class MessageComposer {
         !this.selectedUploads().length),
   );
   protected async togglePanel(panel: Panel) {
+    if (this.restriction()) return;
     this.panel.set(this.panel() === panel ? Panel.None : panel);
     if (this.panel() !== Panel.None) (await this.textarea()?.getInputElement())?.blur();
   }
@@ -355,6 +362,7 @@ export class MessageComposer {
       this.addFile(file, mayBeMediaFile(file) ? AttachmentUploadPurpose.media : AttachmentUploadPurpose.file);
   }
   private addFile(file: File, purpose: AttachmentUploadPurpose) {
+    if (this.restriction()) return;
     if (this.forwarding() && purpose !== AttachmentUploadPurpose.voice) return;
     if (this.selectedUploads().length + this.existing().length >= 20) {
       this.tooMany.set(true);

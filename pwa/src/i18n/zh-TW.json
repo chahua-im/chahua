@@ -724,5 +724,23 @@
     "addHint": "選擇聊天，設為與目前預設相反的通知狀態。新增後可點擊例外修改。",
     "alreadyAdded": "已新增",
     "noChats": "沒有符合的聊天"
+  },
+  "speaking": {
+    "groupTitle": "全群發言權限",
+    "memberTitle": "個人發言限制",
+    "adminNote": "管理員不受發言限制。群組權限與個人限制取較嚴格的一項。",
+    "memberNote": "不限制個人發言時仍遵循群組權限。設為管理員會清除個人限制。",
+    "destinationRestricted": "你目前不能向此對話傳送訊息，請選擇其他群組或話題。",
+    "modes": {
+      "unrestricted": "不限制發言",
+      "threadsOnly": "僅限話題內發言",
+      "repliesOnly": "僅回覆已有話題",
+      "readOnly": "禁止發言"
+    },
+    "blocked": {
+      "threadsOnly": "僅能在話題內發言，不能傳送或編輯群組主聊天訊息。",
+      "repliesOnly": "僅能回覆已有話題，不能在群組主聊天發言或建立話題。",
+      "readOnly": "目前禁止發言，無法傳送或編輯訊息。"
+    }
   }
 }

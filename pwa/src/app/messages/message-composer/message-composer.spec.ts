@@ -9,6 +9,7 @@ import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-u
 import {
   AttachmentUploadPurpose,
   GroupRole,
+  SpeakingMode,
   MessageType,
   type AttachmentResponse,
   type MentionInfo,
@@ -677,6 +678,7 @@ describe('Message composer upload ownership', () => {
       gender: 1,
       username: '当前昵称很长',
       role: GroupRole.member,
+      speakingMode: SpeakingMode.unrestricted,
       joinedAt: testMessage.createdAt,
     };
     const input = await composer['textarea']()!.getInputElement();
@@ -782,8 +784,59 @@ describe('Message composer upload ownership', () => {
     composer['submit']();
     expect(submitted).toHaveBeenCalledOnce();
   });
+  it.each([
+    [SpeakingMode.readOnly, '当前禁止发言'],
+    [SpeakingMode.threadsOnly, '仅能在话题内发言'],
+    [SpeakingMode.repliesOnly, '仅能回复已有话题'],
+  ])('disables composition and retains drafts and attachments under %s', (mode, reason) => {
+    const textarea = fixture.nativeElement.querySelector('ion-textarea');
+    const microphone = fixture.nativeElement.querySelector('.microphone');
+    expect(microphone.disabled).toBe(false);
+    fixture.componentRef.setInput('restriction', mode);
+    fixture.detectChanges();
+    expect(microphone.disabled).toBe(true);
+    expect(textarea.disabled).toBe(true);
+    expect(textarea.placeholder).toContain(reason);
+    expect(fixture.nativeElement.querySelector('.attach-button').disabled).toBe(true);
+    expect(fixture.nativeElement.querySelector('.sticker-button').disabled).toBe(true);
+    fixture.componentRef.setInput('restriction', undefined);
+    fixture.detectChanges();
+    expect(microphone.disabled).toBe(false);
+    composer.text.set('限制解除后发送');
+    composer['existing'].set([existing]);
+    fixture.componentRef.setInput('restriction', mode);
+    fixture.detectChanges();
+    composer['submit']();
+    composer['files'](
+      { target: { files: [new File(['x'], 'blocked.txt')], value: '' } } as unknown as Event,
+      AttachmentUploadPurpose.file,
+    );
+    expect(submitted).not.toHaveBeenCalled();
+    expect(composer.text()).toBe('限制解除后发送');
+    expect(composer['existing']()).toEqual([existing]);
+    expect(composer['selectedUploads']()).toHaveLength(0);
+    expect(fixture.nativeElement.querySelector('ion-textarea')).toBe(textarea);
+    expect(textarea.value).toBe('');
+    expect(textarea.placeholder).toContain(reason);
+    expect(fixture.nativeElement.querySelector('.send-button').disabled).toBe(true);
+    fixture.componentRef.setInput('restriction', undefined);
+    fixture.detectChanges();
+    expect(textarea.disabled).toBe(false);
+    expect(textarea.value).toBe('限制解除后发送');
+    expect(fixture.nativeElement.querySelector('.attach-button').disabled).toBe(false);
+    expect(fixture.nativeElement.querySelector('.sticker-button').disabled).toBe(false);
+    composer['submit']();
+    expect(submitted).toHaveBeenCalledOnce();
+  });
   it('selects mention candidates before Enter can send and leaves IME composition alone', async () => {
-    const first = { uid: 2, username: '甲', gender: 0, role: GroupRole.member, joinedAt: '' };
+    const first = {
+      uid: 2,
+      username: '甲',
+      gender: 0,
+      role: GroupRole.member,
+      speakingMode: SpeakingMode.unrestricted,
+      joinedAt: '',
+    };
     const second = { ...first, uid: 3, username: '乙' };
     composer['suggestions'].set([first, second]);
     const mention = vi
