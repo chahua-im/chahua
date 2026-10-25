@@ -7,7 +7,11 @@ import { decodeId } from '../../../app/api/snowflake-id';
  * OpenAPI spec version: 0.1.0
  */
 import type {
+  GetChatThreadsParams,
+  GetThreadParticipantsParams,
   GetThreadsParams,
+  ListChatThreadsResponse,
+  ListThreadParticipantsResponse,
   ListThreadsResponse,
   SnowflakeID,
   ThreadReadStateResponse,
@@ -152,6 +156,67 @@ function filterParams(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getChatThreadsResource(
+  chatId: Signal<SnowflakeID>,
+  params: Signal<GetChatThreadsParams> | undefined,
+  options: OrvalHttpResourceOptions<ListChatThreadsResponse, unknown> & {
+    defaultValue: NoInfer<ListChatThreadsResponse>;
+  },
+): HttpResourceRef<ListChatThreadsResponse>;
+export function getChatThreadsResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatThreadsParams>,
+  options?: OrvalHttpResourceOptions<ListChatThreadsResponse, unknown>,
+): HttpResourceRef<ListChatThreadsResponse | undefined>;
+export function getChatThreadsResource(
+  chatId: Signal<SnowflakeID>,
+  params?: Signal<GetChatThreadsParams>,
+  options?: OrvalHttpResourceOptions<ListChatThreadsResponse, unknown>,
+): HttpResourceRef<ListChatThreadsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<ListChatThreadsResponse>(() => {
+    const request = {
+      url: `${baseUrl}/chats/${decodeId(chatId())}/threads`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
+export function getThreadParticipantsResource(
+  chatId: Signal<SnowflakeID>,
+  threadRootId: Signal<SnowflakeID>,
+  params: Signal<GetThreadParticipantsParams> | undefined,
+  options: OrvalHttpResourceOptions<ListThreadParticipantsResponse, unknown> & {
+    defaultValue: NoInfer<ListThreadParticipantsResponse>;
+  },
+): HttpResourceRef<ListThreadParticipantsResponse>;
+export function getThreadParticipantsResource(
+  chatId: Signal<SnowflakeID>,
+  threadRootId: Signal<SnowflakeID>,
+  params?: Signal<GetThreadParticipantsParams>,
+  options?: OrvalHttpResourceOptions<ListThreadParticipantsResponse, unknown>,
+): HttpResourceRef<ListThreadParticipantsResponse | undefined>;
+export function getThreadParticipantsResource(
+  chatId: Signal<SnowflakeID>,
+  threadRootId: Signal<SnowflakeID>,
+  params?: Signal<GetThreadParticipantsParams>,
+  options?: OrvalHttpResourceOptions<ListThreadParticipantsResponse, unknown>,
+): HttpResourceRef<ListThreadParticipantsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<ListThreadParticipantsResponse>(() => {
+    const request = {
+      url: `${baseUrl}/chats/${decodeId(chatId())}/threads/${decodeId(threadRootId())}/participants`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function getThreadReadStateInChatResource(
   chatId: Signal<SnowflakeID>,
   threadRootId: Signal<SnowflakeID>,
@@ -248,6 +313,8 @@ export function getThreadReadStateResource(
     options,
   );
 }
+export type GetChatThreadsResourceResult = NonNullable<ListChatThreadsResponse>;
+export type GetThreadParticipantsResourceResult = NonNullable<ListThreadParticipantsResponse>;
 export type GetThreadReadStateInChatResourceResult = NonNullable<ThreadReadStateResponse>;
 export type GetThreadsResourceResult = NonNullable<ListThreadsResponse>;
 export type GetUnreadThreadCountResourceResult = NonNullable<UnreadThreadCountResponse>;

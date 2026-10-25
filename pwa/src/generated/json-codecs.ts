@@ -162,6 +162,9 @@ export const jsonSchemas: Record<string, JsonCodec> = {
     newerCursor: 1,
     olderCursor: 1,
   },
+  ListChatThreadsResponse: {
+    threads: ['MessageResponse'],
+  },
   ListChatsResponse: {
     chats: ['ChatListItem'],
     nextCursor: 1,
@@ -536,6 +539,11 @@ export const jsonOperations: JsonOperationCodec[] = [
     query: {
       before: 1,
     },
+  },
+  {
+    method: 'GET',
+    path: '/chats/{chat_id}/threads',
+    response: 'ListChatThreadsResponse',
   },
   {
     method: 'POST',
