@@ -86,6 +86,7 @@ pub struct BulkDeletedPayload {
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum ServerWsMessage {
+    ChatMembershipChanged(ChatMembershipChangedPayload),
     MembershipMessagePolicyChanged(crate::dto::groups::MembershipMessagePolicyChanged),
     Message(MessageResponse),
     MessageUpdated(MessageResponse),
@@ -123,6 +124,7 @@ pub enum ServerWsMessage {
 impl ServerWsMessage {
     pub fn message_type(&self) -> &'static str {
         match self {
+            Self::ChatMembershipChanged(_) => "chatMembershipChanged",
             Self::MembershipMessagePolicyChanged(_) => "membershipMessagePolicyChanged",
             Self::Message(_) => "message",
             Self::MessageUpdated(_) => "messageUpdated",
@@ -153,6 +155,15 @@ impl ServerWsMessage {
             Self::Notification(_) => "notification",
         }
     }
+}
+
+/// Invalidate the recipient's chat-list row after joining, independently of system messages.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMembershipChangedPayload {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub chat_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]

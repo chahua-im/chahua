@@ -159,6 +159,14 @@ linked message ID. Message IDs use the API's decimal-string Snowflake encoding.
 
 ## Visible chat activity
 
+Successful admin member additions and invite redemptions send
+`chatMembershipChanged` with `{ "chatId": "..." }` to all online connections of
+the joining user. This event is sent after membership commits, independently of
+whether the system announcement is visible or successfully created. It invalidates
+that user's unread watches and lets clients reconcile only the affected chat-list
+row. It carries no message content and creates no push notification. Rejected or
+duplicate joins emit no event; reconnecting clients reload their lists normally.
+
 `GET /chats` and `GET /chats/{chat_id}/messages` always use the authenticated
 account's `showMembershipMessages` preference. Filtering applies to group main
 timelines, not DMs or threads. `system_messages::hides_membership_messages`

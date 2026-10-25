@@ -156,6 +156,7 @@ impl ConnectionRegistry {
                 | ServerWsMessage::MessagesBulkDeleted(_)
                 | ServerWsMessage::ThreadUpdate(_)
                 | ServerWsMessage::ThreadMembershipChanged(_)
+                | ServerWsMessage::ChatMembershipChanged(_)
                 | ServerWsMessage::ChatArchiveStateChanged(_)
                 | ServerWsMessage::NotificationExceptionsCleared(_)
                 | ServerWsMessage::NotificationSettingsChanged(_)
@@ -358,6 +359,40 @@ mod tests {
 
     fn registry() -> ConnectionRegistry {
         ConnectionRegistry::new(Arc::new(WsMetrics::new(&prometheus::Registry::new())))
+    }
+
+    #[tokio::test]
+    async fn chat_membership_event_reaches_only_the_members_devices_without_a_message() {
+        let registry = registry();
+        let (first, mut first_rx) = registry.register(7, "first".into());
+        let (second, mut second_rx) = registry.register(7, "second".into());
+        let (_, mut other_rx) = registry.register(8, "other".into());
+        for rx in [&mut first_rx, &mut second_rx, &mut other_rx] {
+            while rx.try_recv().is_ok() {}
+        }
+
+        crate::services::chat::publish_membership_changed(&registry, 7, 9_007_199_254_740_993);
+
+        for rx in [&mut first_rx, &mut second_rx] {
+            let event = rx.try_recv().unwrap();
+            assert_eq!(event.message_type(), "chatMembershipChanged");
+            assert_eq!(
+                serde_json::to_value(&*event).unwrap(),
+                serde_json::json!({
+                    "type": "chatMembershipChanged",
+                    "payload": { "chatId": "9007199254740993" }
+                })
+            );
+            assert!(rx.try_recv().is_err());
+        }
+        assert!(other_rx.try_recv().is_err());
+        for entry in [first, second] {
+            for changed in [&entry.unread_changed, &entry.states_changed] {
+                tokio::time::timeout(std::time::Duration::from_millis(50), changed.notified())
+                    .await
+                    .unwrap();
+            }
+        }
     }
 
     #[tokio::test]

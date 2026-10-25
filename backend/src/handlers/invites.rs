@@ -747,7 +747,7 @@ async fn post_redeem_invite(
         send_result.side_effects.fire(&state);
     }
 
-    state.ws_registry.invalidate_unread(&[uid]);
+    crate::services::chat::publish_membership_changed(&state.ws_registry, uid, chat_id);
     let chat = load_group_info(conn, &state, chat_id, uid)?;
     Ok(Json(RedeemInviteResponse { chat }))
 }

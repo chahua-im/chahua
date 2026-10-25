@@ -148,6 +148,11 @@ mod tests {
                     let ServerWsMessage::MembershipMessagePolicyChanged(payload) = &*event else { panic!("expected policy event") };
                     assert_eq!(payload.chat_id, chat_id);
                 }
+                // Joining must still reach the new member when announcements are denied.
+                super::super::chat::publish_membership_changed(&registry, member, chat_id);
+                let event = member_rx.try_recv().unwrap();
+                assert!(matches!(&*event, ServerWsMessage::ChatMembershipChanged(payload) if payload.chat_id == chat_id));
+                assert!(admin_rx.try_recv().is_err());
             }
             // A personal preference can hide an allowed message, never grant access.
             diesel::update(groups::table.find(chat_id)).set(groups::membership_message_visibility.eq(Visibility::Members)).execute(conn)?;
