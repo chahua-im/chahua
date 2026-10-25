@@ -259,6 +259,9 @@ export class ChatListStore {
         this.receiveThreadChange(event);
       }
       switch (event.type) {
+        case ServerWsMessageType.chatMembershipChanged:
+          this.queueRow(event.payload.chatId);
+          break;
         case ServerWsMessageType.message:
           this.receiveMessage(event.payload);
           if (event.payload.replyRootId) {
@@ -595,14 +598,13 @@ export class ChatListStore {
   private receiveMessage(message: MessageResponse) {
     if (message.replyRootId) return;
     const uid = this.session.user()?.uid;
-    // Joining changes list membership even when the announcement is hidden.
+    // The dedicated membership event reconciles this row, including hidden announcements.
     if (
       uid != null &&
       message.messageType === MessageType.system &&
       ((message.systemKind === SystemMessageKind.member_joined && message.sender.uid === uid) ||
         (message.systemKind === SystemMessageKind.member_added && message.systemLinks?.uid === uid))
     ) {
-      this.queueRow(message.chatId);
       return;
     }
     const active = [...this.queries.values()].map(({ state }) => state).filter((query) => query.consumers.size);

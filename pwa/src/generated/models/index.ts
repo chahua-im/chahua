@@ -24,6 +24,7 @@ export * from './systemMessageLinks';
 export * from './messagePreview';
 export * from './membershipMessageVisibility';
 export * from './membershipMessagePolicy';
+export * from './chatMembershipChangedPayload';
 export * from './chatNotificationSettingResponse';
 export * from './chatSettings';
 export * from './conversationCategory';

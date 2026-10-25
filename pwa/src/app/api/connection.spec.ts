@@ -152,6 +152,12 @@ describe('Connection', () => {
       type: 'messagesBulkDeleted',
       payload: { chatId: testChat.id, messageIds: [testMessage.id] },
     });
+    socket.receive({ type: 'chatMembershipChanged', payload: { chatId: wireChat.id } });
+    expect(events).toHaveBeenLastCalledWith({
+      type: 'chatMembershipChanged',
+      payload: { chatId: testChat.id },
+    });
+    expect(message).toHaveBeenCalledTimes(2);
     socket.receive({
       type: 'chatArchiveStateChanged',
       payload: { chatId: wireChat.id, archived: false, mutedUntil: null },
