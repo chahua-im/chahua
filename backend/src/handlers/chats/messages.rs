@@ -1433,6 +1433,7 @@ async fn patch_message(
     ),
     responses(
         (status = 204, description = "Message deleted"),
+        (status = 400, description = "System or unpublished message cannot be deleted"),
     ),
     security(("bearer_jwt" = [])),
 )]
@@ -1473,6 +1474,7 @@ async fn delete_message(
         }
     }
 
+    crate::services::message_deletion::validate_deletable_message_type(&message.message_type)?;
     if message.deleted_at.is_some() {
         return Err(AppError::Gone("Message already deleted"));
     }
@@ -1623,7 +1625,7 @@ async fn delete_message(
     request_body = BulkDeleteMessagesBody,
     responses(
         (status = 200, description = "Selection deleted and metadata reconciled", body = BulkDeletedPayload),
-        (status = 400, description = "Invalid selection size or unpublished message"),
+        (status = 400, description = "Invalid selection size, system message or unpublished message"),
         (status = 403, description = "Chat is not writable or a message cannot be deleted by this user"),
         (status = 404, description = "A selected message does not belong to this chat"),
     ),

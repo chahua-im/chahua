@@ -7,7 +7,7 @@ use diesel::prelude::*;
 
 use crate::{
     errors::AppError,
-    models::Message,
+    models::{Message, MessageType},
     schema::{attachments, group_membership, groups, message_mentions, messages},
     services::{chat, threads},
 };
@@ -25,6 +25,7 @@ pub struct DeletionTarget {
     pub id: i64,
     pub sender_uid: i32,
     pub is_published: bool,
+    message_type: MessageType,
     reply_root_id: Option<i64>,
     has_thread: bool,
 }
@@ -48,13 +49,24 @@ impl DeletionImpact {
     }
 }
 
+pub fn validate_deletable_message_type(message_type: &MessageType) -> Result<(), AppError> {
+    if matches!(message_type, MessageType::System) {
+        return Err(AppError::BadRequest("Cannot delete system message"));
+    }
+    Ok(())
+}
+
 /// The caller must load and lock targets from one chat in its transaction,
 /// applying the entry point's authorization and publication rules first.
 /// This function neither commits nor publishes events.
 pub fn soft_delete_batch(
     conn: &mut PgConnection,
     targets: &[DeletionTarget],
-) -> Result<DeletionImpact, diesel::result::Error> {
+) -> Result<DeletionImpact, AppError> {
+    // Validate the entire batch before any writes or deletion bookkeeping.
+    for message in targets {
+        validate_deletable_message_type(&message.message_type)?;
+    }
     let mut impact = DeletionImpact::default();
     for message in targets {
         impact.message_ids.push(message.id);
@@ -191,6 +203,84 @@ pub fn delete_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_messages_are_never_deletable() {
+        assert!(matches!(
+            validate_deletable_message_type(&MessageType::System),
+            Err(AppError::BadRequest("Cannot delete system message"))
+        ));
+        for kind in [
+            MessageType::Text,
+            MessageType::Audio,
+            MessageType::File,
+            MessageType::Sticker,
+            MessageType::Invite,
+            MessageType::Forwarded,
+            MessageType::Placeholder,
+        ] {
+            assert!(validate_deletable_message_type(&kind).is_ok());
+        }
+    }
+
+    #[test]
+    fn database_system_message_selection_is_rejected_before_any_writes() {
+        use diesel::connection::SimpleConnection;
+
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.test_transaction::<(), AppError, _>(|conn| {
+            conn.batch_execute(
+                "INSERT INTO groups(id, name) VALUES (87300, 'system-recall');
+                 INSERT INTO messages(id, chat_id, sender_uid, message_type, system_kind,
+                                      client_generated_id, created_at, reply_root_id, is_published)
+                 VALUES (87301, 87300, 1, 'text', NULL, 'system-recall-text', NOW(), NULL, true),
+                        (87302, 87300, 1, 'system', 'member_joined', 'system-recall-member', NOW(), NULL, true),
+                        (87303, 87300, 1, 'system', 'unknown', 'system-recall-unknown', NOW(), NULL, true),
+                        (87304, 87300, 1, 'system', 'thread_message_pinned', 'system-recall-thread', NOW(), 87301, true);
+                 UPDATE groups SET last_message_id = 87304 WHERE id = 87300;
+                 INSERT INTO group_membership(chat_id, uid, last_read_message_id) VALUES (87300, 1, 87304);
+                 INSERT INTO message_mentions(message_id, mentioned_uid, chat_id) VALUES (87301, 2, 87300);
+                 INSERT INTO attachments(id, message_id, kind, external_reference, size, created_at)
+                 VALUES (87310, 87301, 'text/plain', 'system-recall-attachment', 1, NOW());",
+            )?;
+            for system_id in [87302, 87303, 87304] {
+                for (uid, is_admin) in [(1, false), (2, true)] {
+                    for ids in [vec![system_id], vec![87301, system_id]] {
+                        assert!(matches!(
+                            delete_selection(conn, 87300, uid, is_admin, &ids),
+                            Err(AppError::BadRequest("Cannot delete system message"))
+                        ));
+                    }
+                }
+            }
+            // The shared helper must also reject callers that skip entry-point validation.
+            let targets = messages::table
+                .filter(messages::chat_id.eq(87300))
+                .order(messages::id.asc())
+                .for_update()
+                .select(DeletionTarget::as_select())
+                .load(conn)?;
+            assert!(matches!(
+                soft_delete_batch(conn, &targets),
+                Err(AppError::BadRequest("Cannot delete system message"))
+            ));
+            assert_eq!(messages::table.filter(messages::chat_id.eq(87300))
+                .filter(messages::deleted_at.is_not_null()).count().get_result::<i64>(conn)?, 0);
+            assert_eq!(groups::table.find(87300_i64).select(groups::last_message_id)
+                .first::<Option<i64>>(conn)?, Some(87304));
+            assert_eq!(group_membership::table.find((87300_i64, 1)).select(group_membership::last_read_message_id)
+                .first::<Option<i64>>(conn)?, Some(87304));
+            assert_eq!(message_mentions::table.filter(message_mentions::chat_id.eq(87300))
+                .count().get_result::<i64>(conn)?, 1);
+            assert!(attachments::table.find(87310_i64).select(attachments::deleted_at)
+                .first::<Option<chrono::DateTime<Utc>>>(conn)?.is_none());
+            Ok(())
+        });
+    }
 
     #[test]
     fn selection_is_bounded_and_deduplicated() {

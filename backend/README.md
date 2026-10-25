@@ -219,8 +219,9 @@ when the server reports no newer page, including empty filtered responses.
 `POST /chats/{chat_id}/messages/bulk-delete` accepts `{ "messageIds": ["123", "124"] }`
 with 1–100 IDs. The caller must belong to a writable chat and must own every
 selected message unless they are a chat admin. Missing, cross-chat, unauthorized,
-or unpublished messages reject the entire batch before any deletion. Duplicate IDs
-are deduplicated; already deleted messages are accepted so retries are idempotent.
+unpublished, or system messages reject the entire batch before any deletion.
+Duplicate IDs are deduplicated; already deleted non-system messages are accepted
+so retries are idempotent.
 
 A single transaction soft-deletes the messages and attachments, removes mentions,
 reconciles affected thread statistics and the chat preview, and shifts read cursors.
@@ -229,12 +230,17 @@ The response and `messagesBulkDeleted` WebSocket event carry the confirmed IDs,
 summaries are also broadcast. Search-index removal happens after commit. The
 existing single-message DELETE endpoint remains available.
 
+System messages cannot be recalled through either endpoint, even by their sender
+or a chat admin (`400 Cannot delete system message`). This includes unknown legacy
+system events and system messages in threads.
+
 Multi-selection recall and removed-member cleanup share `soft_delete_batch` and
 `reconcile_deletions` in `services/message_deletion.rs`. The database helpers return
 affected message/thread IDs; callers own transactions, authorization and events.
 Recall validates, deletes and reconciles in one transaction. Member cleanup deletes
-up to 500 messages per transaction, including unpublished messages, and merges the
-affected ranges before reconciling them in a final transaction. Each committed batch
+up to 500 messages per transaction, including unpublished messages but excluding
+all system messages, and merges the affected ranges before reconciling them in a
+final transaction. Each committed batch
 emits `complete: false`; `complete: true` is sent only after reconciliation succeeds.
 
 ## Conversation collection summaries
