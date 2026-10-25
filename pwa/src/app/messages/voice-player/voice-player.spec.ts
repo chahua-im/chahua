@@ -150,9 +150,7 @@ describe('VoicePlayer', () => {
     // Returning to the conversation reuses the adopted element instead of a second Audio.
     const returned = open('/voice.ogg', dock);
     expect(audios).toHaveLength(1);
-    expect(create).toHaveBeenLastCalledWith(
-      expect.objectContaining({ peaks: [[0.5, 0.8, 0.3]], media: audios[0] }),
-    );
+    expect(create).toHaveBeenLastCalledWith(expect.objectContaining({ peaks: [[0.5, 0.8, 0.3]], media: audios[0] }));
     expect(playback.active()).toBe(returned.componentInstance);
     expect(playback.rate()).toBe(2);
     audios[0].dispatchEvent(new Event('ended'));
