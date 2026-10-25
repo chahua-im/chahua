@@ -104,6 +104,33 @@
             }
           }
         </div>
+        @if (!threadId() && chat()?.kind === Kind.group) {
+          <ion-item>
+            <ion-select
+              [label]="'chats.details.membershipMessages' | transloco"
+              labelPlacement="stacked"
+              interface="popover"
+              [value]="membershipVisibility()"
+              [disabled]="!canManage() || busy() || !membershipVisibility()"
+              (ionChange)="saveMembershipVisibility($event.detail.value)">
+              <ion-select-option [value]="MembershipVisibility.members">
+                {{ 'chats.details.membershipMembers' | transloco }}
+              </ion-select-option>
+              <ion-select-option [value]="MembershipVisibility.admins">
+                {{ 'chats.details.membershipAdmins' | transloco }}
+              </ion-select-option>
+              <ion-select-option [value]="MembershipVisibility.nobody">
+                {{ 'chats.details.membershipNobody' | transloco }}
+              </ion-select-option>
+            </ion-select>
+            @if (pending() === Action.MembershipVisibility) {
+              <ion-spinner slot="end" />
+            }
+          </ion-item>
+          <ion-item lines="none">
+            <ion-note class="ion-text-wrap">{{ 'chats.details.membershipNote' | transloco }}</ion-note>
+          </ion-item>
+        }
         <div class="quick-actions ion-padding-horizontal">
           @if (person(); as user) {
             <ion-button
@@ -146,7 +173,11 @@
                 <span>
                   <ion-icon
                     [icon]="
-                      !status?.subscribed ? icons.notificationsOutline : status?.archived ? icons.archive : icons.archiveOutline
+                      !status?.subscribed
+                        ? icons.notificationsOutline
+                        : status?.archived
+                          ? icons.archive
+                          : icons.archiveOutline
                     " />
                   {{
                     (status?.subscribed

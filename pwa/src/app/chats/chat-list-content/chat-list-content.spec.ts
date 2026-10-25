@@ -1,3 +1,4 @@
+import { SystemMessageKind } from '../../../generated/models';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -107,6 +108,7 @@ describe('ChatListContent', () => {
   const preferences = {
     showThreadsInMessages: signal(false),
     showAllAvatars: signal(false),
+    showMembershipMessages: signal(true),
   };
   const chats = {
     items: signal<ChatData[]>([]),
@@ -191,6 +193,7 @@ describe('ChatListContent', () => {
     vi.stubGlobal('IntersectionObserver', ListVisibilityObserver);
     presenceEvents = new Subject<ServerWsMessage>();
     connected.set(true);
+    preferences.showMembershipMessages.set(true);
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -271,6 +274,41 @@ describe('ChatListContent', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('uses the server visible preview time and retains the row while the preference refresh is pending', async () => {
+    const hidden = {
+      ...lastMessage,
+      id: encodeId('9007199254741100'),
+      createdAt: '2026-10-24T12:00:00Z',
+      messageType: MessageType.system,
+      systemKind: SystemMessageKind.member_joined,
+      message: 'joined',
+    };
+    const visible = { ...lastMessage, createdAt: '2026-10-24T10:00:00Z' };
+    chats.items.set([{ ...testChat, lastMessage: hidden, lastMessageAt: hidden.createdAt, unreadCount: 140 }]);
+    await fixture.whenStable();
+    const row = fixture.nativeElement.querySelector('app-chat-list-item');
+    preferences.showMembershipMessages.set(false);
+    await fixture.whenStable();
+    expect(fixture.componentInstance['conversationRows']()[0].preview?.id).toBe(hidden.id);
+    chats.items.set([
+      {
+        ...testChat,
+        lastMessage: visible,
+        lastMessageAt: visible.createdAt,
+        unreadCount: 140,
+      },
+    ]);
+    await fixture.whenStable();
+    const rendered = fixture.componentInstance['conversationRows']()[0];
+    expect(rendered.preview?.id).toBe(visible.id);
+    expect(rendered.entry.time).toBe(visible.createdAt);
+    expect(rendered.entry.unreadCount).toBe(140);
+    expect(rendered.sortTime).toBe(Date.parse(visible.createdAt));
+    await rendered.toggleRead?.();
+    expect(data.markRead).toHaveBeenCalledWith(testChat.id, visible.id);
+    expect(fixture.nativeElement.querySelector('app-chat-list-item')).toBe(row);
   });
 
   function conversationRow() {

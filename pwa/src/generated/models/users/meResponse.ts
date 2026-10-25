@@ -14,6 +14,7 @@ export interface MeResponse {
   muteDirectChatsByDefault: boolean;
   muteGroupChatsByDefault: boolean;
   permissions: string[];
+  showMembershipMessages: boolean;
   stickerPackOrder: StickerPackOrderItem[];
   uid: number;
   userGroup?: UserGroupTagInfo;

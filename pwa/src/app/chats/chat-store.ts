@@ -11,6 +11,7 @@ import { ThreadsService } from '../../generated/endpoints/threads/threads.servic
 import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
+  type MembershipMessagePolicy,
   NotificationSettingMode,
   type NotificationSettingsResponse,
   type UpdateNotificationSettingRequest,
@@ -34,6 +35,7 @@ import type { ConversationRef, ConversationState } from '../../generated/models'
 import { activeQuery } from '../api/query';
 import type { SnowflakeID } from '../api/snowflake-id';
 import { isMessageChange, type MessageChange } from '../messages/message-change';
+import { isMembershipMessage } from '../messages/system-message';
 import { ChatPins } from './chat-pins';
 
 export type ChatInfo = Pick<ChatListItem, 'kind' | 'name' | 'avatar' | 'peer'> &
@@ -56,6 +58,7 @@ export enum ChatChangeKind {
   Read,
   Membership,
   Attention,
+  MembershipMessagePolicy,
   Removed,
 }
 
@@ -109,6 +112,50 @@ export class ChatStore {
   private readonly notificationWriteVersions = new Map<SnowflakeID, number>();
   private readonly remoteClearVersions = new Map<GroupKind, number>();
   private readonly remotePreferenceVersions = new Map<SnowflakeID, number>();
+
+  private readonly membershipPolicies = linkedSignal(() => {
+    this.mentionAccount();
+    return new Map<SnowflakeID, MembershipMessagePolicy>();
+  });
+
+  membershipPolicy(id: SnowflakeID) {
+    return this.membershipPolicies().get(id);
+  }
+
+  membershipPolicyRequestGeneration() {
+    return this.revision;
+  }
+
+  async refreshMembershipPolicy(id: SnowflakeID) {
+    this.revision++;
+    this.fresh.delete(id);
+    this.detailsFresh.delete(id);
+    // Coalesce a burst of notifications with the existing metadata request.
+    await Promise.resolve();
+    if (this.entries().has(id) || this.requests.has(id)) await this.ensureDetails(id);
+  }
+
+  acceptMembershipPolicy(id: SnowflakeID, policy?: MembershipMessagePolicy, generation = this.revision) {
+    if (generation !== this.revision) return false;
+    if (!policy) return true;
+    const previous = this.membershipPolicy(id);
+    if (previous?.visibility === policy.visibility && previous.canView === policy.canView) return true;
+    this.membershipPolicies.update((entries) => new Map(entries).set(id, policy));
+    if (!policy.canView) {
+      const summary = this.summaries().get(id);
+      if (summary?.value.lastMessage && isMembershipMessage(summary.value.lastMessage)) {
+        this.summaries.update((entries) =>
+          new Map(entries).set(id, {
+            ...summary,
+            value: { ...summary.value, lastMessage: undefined, lastMessageAt: undefined },
+            previewVersion: this.snapshot(),
+          }),
+        );
+      }
+    }
+    if (previous && previous.canView !== policy.canView) this.changed(ChatChangeKind.MembershipMessagePolicy, id);
+    return true;
+  }
 
   private readonly groupsApi = inject(GroupsService);
   private readonly threadsApi = inject(ThreadsService);
@@ -364,6 +411,10 @@ export class ChatStore {
         for (const pins of this.pinScopes.values()) pins.receiveChange(event);
       }
       switch (event.type) {
+        case ServerWsMessageType.membershipMessagePolicyChanged:
+          // Notifications carry no setting snapshot. Failed reads remain stale and retry on normal access.
+          void this.refreshMembershipPolicy(event.payload.chatId).catch(() => {});
+          break;
         case ServerWsMessageType.readReceiptChanged:
           if (event.payload.privacyChanged) this.applyPeerRead(event.payload);
           break;
@@ -509,8 +560,9 @@ export class ChatStore {
   get(id: SnowflakeID): ChatInfo | undefined {
     return this.entries().get(id);
   }
-  remember(chats: readonly (ChatInfo & { id: SnowflakeID })[]) {
+  remember(chats: readonly (ChatInfo & { id: SnowflakeID; membershipMessagePolicy?: MembershipMessagePolicy })[]) {
     if (!chats.length) return;
+    for (const chat of chats) this.acceptMembershipPolicy(chat.id, chat.membershipMessagePolicy);
     this.entries.update((entries) => {
       const next = new Map(entries);
       for (const { id, kind, name, avatar, peer } of chats) {
@@ -543,6 +595,7 @@ export class ChatStore {
         if (uid !== this.session.user()?.uid) return;
         if (revision !== this.revision) continue;
         if (this.entries().get(id) === cached) this.remember([chat]);
+        if (!this.acceptMembershipPolicy(id, chat.membershipMessagePolicy)) continue;
         const { myRole, description, visibility } = chat;
         this.applyChatStates([[id, chat]], version, true);
         this.entries.update((entries) =>
@@ -564,6 +617,7 @@ export class ChatStore {
     // Query membership only contains IDs accepted from a complete list response.
     return {
       id,
+      membershipMessagePolicy: this.membershipPolicy(id),
       ...this.entries().get(id)!,
       ...this.summaries().get(id)!.value,
       ...this.readStates().get(id)!.state,
@@ -572,20 +626,25 @@ export class ChatStore {
     } as ChatListItem;
   }
 
-  acceptChats(chats: readonly ChatListItem[], version: number) {
+  acceptChats(chats: readonly ChatListItem[], version: number, policyGeneration = this.revision) {
+    if (policyGeneration !== this.revision) return;
     this.rememberMentions(
       chats.flatMap((chat) => (chat.lastMessage ? [chat.lastMessage] : [])),
       version,
     );
-    this.remember(chats);
     const summaries = new Map(this.summaries());
     const reads = new Map(this.readStates());
     for (const chat of chats) {
       const current = summaries.get(chat.id);
+      // A newer arrival only wins if it is still visible under this response's policy.
+      const previewRevoked =
+        chat.membershipMessagePolicy?.canView === false &&
+        current?.value.lastMessage &&
+        isMembershipMessage(current.value.lastMessage);
       summaries.set(chat.id, {
         value: {
           ...(current?.value ?? {}),
-          ...(!current || current.previewVersion <= version
+          ...(!current || current.previewVersion <= version || previewRevoked
             ? { lastMessage: chat.lastMessage, lastMessageAt: chat.lastMessageAt }
             : {}),
         },
@@ -621,6 +680,8 @@ export class ChatStore {
       }
       return next;
     });
+    // Commit the authorized preview before policy notifications can clear it or trigger another read.
+    this.remember(chats);
   }
 
   private receiveMessage(message: MessageResponse) {
@@ -636,7 +697,11 @@ export class ChatStore {
       return;
     }
     this.invalidateReads(new Set([message.chatId]));
-    if (previous && previous.id > message.id) return;
+    if (
+      !this.isChatMessageVisible(message) ||
+      (previous && previous.id > message.id && this.isChatMessageVisible({ ...previous, chatId: message.chatId }))
+    )
+      return;
     const preview = messagePreview(message);
     this.updatePreview(message.chatId, preview);
   }
@@ -658,12 +723,26 @@ export class ChatStore {
     );
   }
 
+  isChatMessageVisible(message: Pick<MessageResponse, 'chatId' | 'messageType' | 'systemKind'>) {
+    return (
+      (this.session.user()?.showMembershipMessages !== false &&
+        this.membershipPolicy(message.chatId)?.canView !== false) ||
+      this.get(message.chatId)?.kind === GroupKind.dm ||
+      !isMembershipMessage(message)
+    );
+  }
+
   private updatePreview(chatId: SnowflakeID, preview: MessagePreview) {
     const current = this.summaries().get(chatId);
+    const version = ++this.version;
     this.summaries.update((items) =>
       new Map(items).set(chatId, {
-        value: { ...current?.value, lastMessage: preview, lastMessageAt: preview.createdAt },
-        previewVersion: ++this.version,
+        value: {
+          ...current?.value,
+          lastMessage: preview,
+          lastMessageAt: preview.createdAt,
+        },
+        previewVersion: version,
         stateVersion: current?.stateVersion ?? 0,
       }),
     );
@@ -1374,6 +1453,8 @@ function messagePreview(message: MessageResponse): MessagePreview {
     sender: message.sender,
     message: message.message,
     messageType: message.messageType,
+    systemKind: message.systemKind,
+    systemLinks: message.systemLinks,
     isDeleted: message.isDeleted,
     attachments: message.attachments.map(({ kind }) => ({ kind })),
     mentions: message.mentions ?? [],

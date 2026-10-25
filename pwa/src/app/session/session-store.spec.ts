@@ -7,7 +7,7 @@ import type { UserGroupTagInfo } from '../../generated/models';
 import { authInterceptor } from '../api/auth.interceptor';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { testUser } from '../api/testing';
-import { SessionStore } from './session-store';
+import { ChatSettingsChanged, SessionStore } from './session-store';
 
 const TOKEN_KEY = 'jwt_token';
 const COOKIE_KEY = `${TOKEN_KEY}_${encodeURIComponent(window.location.origin)}`;
@@ -54,6 +54,74 @@ describe('SessionStore', () => {
     expect(request.request.headers.get('Authorization')).toBe(`Bearer ${session.token()}`);
     request.flush({ members: [{ uid: testUser.uid, userGroup }], excluded: [] });
   }
+
+  it('loads account membership visibility at startup and after refreshing the session', async () => {
+    localStorage.setItem('chahua.preferences.showMembershipMessages', 'true');
+    session.restoreToken();
+    for (const showMembershipMessages of [false, true]) {
+      const initializing = session.initialize();
+      http.expectOne('/_api/auth/refresh').flush({ token: 'refreshed-token' });
+      await Promise.resolve();
+      http.expectOne('/_api/users/me').flush({ ...testUser, showMembershipMessages });
+      await profile();
+      await initializing;
+      expect(session.user()?.showMembershipMessages).toBe(showMembershipMessages);
+      http.expectNone('/_api/users/me/chat-settings');
+    }
+  });
+
+  it('applies a saved membership preference only after confirmation and preserves other account fields', async () => {
+    session.user.set({ ...testUser });
+    const saving = session.setShowMembershipMessages(false);
+    const request = http.expectOne('/_api/users/me/chat-settings');
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.body).toEqual({ showMembershipMessages: false });
+    expect(session.user()?.showMembershipMessages).toBe(true);
+    session.user.update((user) => user && { ...user, username: 'new name' });
+    request.flush({ showMembershipMessages: false });
+    await saving;
+    expect(session.user()?.showMembershipMessages).toBe(false);
+    expect(session.user()?.username).toBe('new name');
+    expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBeNull();
+    const failed = session.setShowMembershipMessages(true);
+    const rejection = expect(failed).rejects.toBeDefined();
+    http.expectOne('/_api/users/me/chat-settings').flush('', { status: 503, statusText: 'Unavailable' });
+    await rejection;
+    expect(session.user()?.showMembershipMessages).toBe(false);
+  });
+
+  it('applies confirmed saves and learns changes from another device on a later read', async () => {
+    session.user.set(testUser);
+    const saving = session.setShowMembershipMessages(false);
+    http.expectOne('/_api/users/me/chat-settings').flush({ showMembershipMessages: false });
+    await saving;
+    expect(session.user()?.showMembershipMessages).toBe(false);
+    session.acceptChatSettings({ showMembershipMessages: true }, testUser.uid);
+    expect(session.user()?.showMembershipMessages).toBe(true);
+  });
+
+  it('rejects a page started before the local preference changed', async () => {
+    session.user.set(testUser);
+    const requestedUser = session.user();
+    const saving = session.setShowMembershipMessages(false);
+    http.expectOne('/_api/users/me/chat-settings').flush({ showMembershipMessages: false });
+    await saving;
+    expect(() => session.requireChatSettings({ showMembershipMessages: true }, requestedUser)).toThrow(
+      ChatSettingsChanged,
+    );
+    expect(session.user()?.showMembershipMessages).toBe(false);
+  });
+
+  it.each([1, 2])('ignores a delayed settings response after logout and login as UID %s', async (uid) => {
+    session.user.set({ ...testUser });
+    const saving = session.setShowMembershipMessages(false);
+    const request = http.expectOne('/_api/users/me/chat-settings');
+    session.logout();
+    session.user.set({ ...testUser, uid, showMembershipMessages: true });
+    request.flush({ showMembershipMessages: false });
+    await saving;
+    expect(session.user()?.showMembershipMessages).toBe(true);
+  });
 
   it('does not adopt shared or other-origin development cookies when targeting production', async () => {
     vi.stubGlobal('CHAHUA_DEV_BACKEND', false);
@@ -245,6 +313,7 @@ describe('SessionStore', () => {
     const client = TestBed.inject(HttpClient);
     client.get('/_api/chats/example/messages').subscribe();
     http.expectOne('/_api/chats/example/messages').flush({
+      chatSettings: { showMembershipMessages: true },
       messages: [
         { sender: { uid: 99, name: '其他人', gender: 2 } },
         {
@@ -269,9 +338,10 @@ describe('SessionStore', () => {
     const fresh = session.user();
     for (const url of ['/_api/saved-messages', '/_api/chats/example/saved-messages']) {
       client.get(url).subscribe();
-      http
-        .expectOne(url)
-        .flush({ messages: [{ sender: { uid: testUser.uid, name: '旧名字', gender: 1, userGroup: group } }] });
+      http.expectOne(url).flush({
+        chatSettings: { showMembershipMessages: true },
+        messages: [{ sender: { uid: testUser.uid, name: '旧名字', gender: 1, userGroup: group } }],
+      });
     }
     client.get('/_api/users/search?q=99').subscribe();
     http.expectOne('/_api/users/search?q=99').flush({ members: [{ uid: 99, username: '其他人', gender: 2 }] });

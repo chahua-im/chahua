@@ -1,5 +1,6 @@
 import { readChatFontSize, ChatFontSize } from './chat-font-size';
-import { Service, signal } from '@angular/core';
+import { computed, inject, Service, signal } from '@angular/core';
+import { SessionStore } from '../session/session-store';
 import { ColorMode, isColorMode } from './color-mode';
 import { type AppLocale, isAppLocale } from './locale';
 
@@ -15,6 +16,7 @@ const LOCALE_KEY = 'chahua.preferences.locale';
 
 @Service()
 export class Preferences {
+  private readonly session = inject(SessionStore);
   private readonly fontSize = signal(readChatFontSize());
   readonly chatFontSize = this.fontSize.asReadonly();
 
@@ -45,6 +47,7 @@ export class Preferences {
   readonly showThreadsInMessages = this.threads.asReadonly();
   readonly showAllAvatars = this.avatars.asReadonly();
   readonly showDmDetails = this.dmDetails.asReadonly();
+  readonly showMembershipMessages = computed(() => this.session.user()?.showMembershipMessages ?? true);
   readonly colorMode = this.mode.asReadonly();
   readonly selectedLocale = this.locale.asReadonly();
 
@@ -61,6 +64,10 @@ export class Preferences {
   setShowDmDetails(value: boolean) {
     window.localStorage.setItem(DM_DETAILS_KEY, String(value));
     this.dmDetails.set(value);
+  }
+
+  setShowMembershipMessages(value: boolean) {
+    return this.session.setShowMembershipMessages(value);
   }
 
   setColorMode(value: ColorMode) {

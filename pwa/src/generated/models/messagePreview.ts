@@ -10,6 +10,7 @@ import type { MessagePreviewAttachment } from './messagePreviewAttachment';
 import type { MessagePreviewSticker } from './messagePreviewSticker';
 import type { MessageType } from './messageType';
 import type { SnowflakeID } from './snowflakeID';
+import type { SystemMessageKind } from './systemMessageKind';
 import type { SystemMessageLinks } from './systemMessageLinks';
 import type { User } from './user';
 
@@ -25,5 +26,6 @@ export interface MessagePreview {
   messageType: MessageType;
   sender: User;
   sticker?: MessagePreviewSticker;
+  systemKind?: SystemMessageKind;
   systemLinks?: SystemMessageLinks;
 }

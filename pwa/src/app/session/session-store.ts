@@ -3,7 +3,7 @@ import { inject, isDevMode, Service, signal } from '@angular/core';
 import { firstValueFrom, timeout, type Observable } from 'rxjs';
 import { AuthService } from '../../generated/endpoints/auth/auth.service';
 import { UsersService } from '../../generated/endpoints/users/users.service';
-import type { MeResponse, StickerPackOrderItem, User } from '../../generated/models';
+import type { ChatSettings, MeResponse, StickerPackOrderItem, User } from '../../generated/models';
 import type { SnowflakeID } from '../api/snowflake-id';
 
 declare const CHAHUA_DEV_TOKEN: string | undefined;
@@ -17,9 +17,12 @@ const DEV_UID_KEY = 'uid';
 const DEFAULT_DEV_UID = 1;
 const CLIENT_ID_KEY = 'chahua.client-id';
 
+export class ChatSettingsChanged extends Error {}
+
 @Service()
 export class SessionStore {
   private urlTokenAdopted = false;
+  private chatSettingsWrite = 0;
   private readonly auth = inject(AuthService);
   private readonly users = inject(UsersService);
   readonly token = signal<string | undefined>(undefined);
@@ -70,6 +73,41 @@ export class SessionStore {
     }
   }
 
+  async setShowMembershipMessages(showMembershipMessages: boolean) {
+    const uid = this.user()?.uid;
+    if (uid == null) return;
+    const write = ++this.chatSettingsWrite;
+    const settings = await firstValueFrom(this.users.putChatSettings({ showMembershipMessages }));
+    if (write !== this.chatSettingsWrite || this.user()?.uid !== uid) return;
+    this.acceptChatSettings(settings, uid);
+  }
+
+  /** Adopt the server value on normal reads; other devices converge on their next refresh. */
+  acceptChatSettings(settings: ChatSettings, uid: number | undefined) {
+    const user = this.user();
+    if (!user || user.uid !== uid || settings.showMembershipMessages === user.showMembershipMessages) return;
+    this.user.set({
+      ...user,
+      showMembershipMessages: settings.showMembershipMessages,
+    });
+  }
+
+  requireChatSettings(settings: ChatSettings, requestedUser: MeResponse | undefined, filtersMembershipMessages = true) {
+    if (requestedUser && requestedUser.uid !== this.user()?.uid) throw new Error('Account changed');
+    // A local change since this request started takes precedence over its stale response.
+    if (requestedUser && requestedUser.showMembershipMessages !== this.user()?.showMembershipMessages) {
+      if (filtersMembershipMessages) throw new ChatSettingsChanged();
+      return;
+    }
+    this.acceptChatSettings(settings, requestedUser?.uid);
+    const show = this.user()?.showMembershipMessages ?? true;
+    if (
+      filtersMembershipMessages &&
+      (settings.showMembershipMessages !== show || show !== (requestedUser?.showMembershipMessages ?? true))
+    )
+      throw new ChatSettingsChanged();
+  }
+
   updateProfile(data: unknown) {
     const current = this.user();
     if (!current) return;
@@ -115,6 +153,7 @@ export class SessionStore {
   }
 
   logout() {
+    this.chatSettingsWrite++;
     this.saveToken(undefined);
     this.user.set(undefined);
   }

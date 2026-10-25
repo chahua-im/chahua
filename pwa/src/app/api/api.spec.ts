@@ -43,7 +43,14 @@ describe('Generated API client', () => {
     const http = TestBed.inject(HttpTestingController);
     const request = http.expectOne(`/_api/chats/${mockChatId}/messages?before=${mockCursor}`);
     expect(request.request.method).toBe('GET');
-    request.flush({ messages: [], nextCursor: null, prevCursor: null, olderCursor: null, newerCursor: null });
+    request.flush({
+      chatSettings: { showMembershipMessages: true },
+      messages: [],
+      nextCursor: null,
+      prevCursor: null,
+      olderCursor: null,
+      newerCursor: null,
+    });
     http.verify();
   });
 

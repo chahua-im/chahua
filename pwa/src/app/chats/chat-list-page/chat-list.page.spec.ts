@@ -238,8 +238,15 @@ describe('ChatListPage query lifecycle', () => {
           },
         },
         { provide: ChatStore, useValue: {} },
-        { provide: SessionStore, useValue: { user: signal(undefined) } },
-        { provide: Preferences, useValue: { showThreadsInMessages: () => true } },
+        {
+          provide: SessionStore,
+          useValue: {
+            requireChatSettings: SessionStore.prototype.requireChatSettings,
+            acceptChatSettings: SessionStore.prototype.acceptChatSettings,
+            user: signal(undefined),
+          },
+        },
+        { provide: Preferences, useValue: { showThreadsInMessages: () => true, showMembershipMessages: () => true } },
       ],
     })
       .overrideComponent(ChatListContent, { set: { template: '' } })

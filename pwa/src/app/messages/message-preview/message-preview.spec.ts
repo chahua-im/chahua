@@ -1,3 +1,4 @@
+import { SystemMessageKind } from '../../../generated/models';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { TranslocoService } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
@@ -27,29 +28,41 @@ describe('MessagePreview', () => {
   }
 
   it.each([
-    ['joined the chat', '测试用户 加入了群聊'],
-    ["accepted O'Brien's friend request", "测试用户 接受了 O'Brien 的好友申请"],
-    ['left the chat', '测试用户 退出了群聊'],
-    ['added 小花', '测试用户 邀请 小花 加入了群聊'],
-    ['removed 小花', '测试用户 将 小花 移出了群聊'],
-    ['pinned a message', '测试用户 置顶了消息'],
-    ['unpinned a message', '测试用户 取消置顶了消息'],
-    ['pinned a message in this thread', '测试用户 在本话题中置顶了消息'],
-    ['unpinned a message in this thread', '测试用户 在话题中取消置顶了消息'],
-  ])('renders the system phrase %s with its actor', (message, expected) => {
-    expect(render({ messageType: MessageType.system, message })).toBe(expected);
+    [SystemMessageKind.member_joined, 'joined the chat', '测试用户 加入了群聊'],
+    [
+      SystemMessageKind.friend_request_accepted,
+      "accepted O'Brien's friend request",
+      "测试用户 接受了 O'Brien 的好友申请",
+    ],
+    [SystemMessageKind.member_left, 'left the chat', '测试用户 退出了群聊'],
+    [SystemMessageKind.member_added, 'added 小花', '测试用户 邀请 小花 加入了群聊'],
+    [SystemMessageKind.member_removed, 'removed 小花', '测试用户 将 小花 移出了群聊'],
+    [SystemMessageKind.message_pinned, 'pinned a message', '测试用户 置顶了消息'],
+    [SystemMessageKind.message_unpinned, 'unpinned a message', '测试用户 取消置顶了消息'],
+    [SystemMessageKind.thread_message_pinned, 'pinned a message in this thread', '测试用户 在本话题中置顶了消息'],
+    [SystemMessageKind.thread_message_unpinned, 'unpinned a message in this thread', '测试用户 在话题中取消置顶了消息'],
+  ] as const)('renders the system phrase %s with its actor', (systemKind, message, expected) => {
+    expect(render({ messageType: MessageType.system, systemKind, message })).toBe(expected);
     expect(fixture.nativeElement.classList.contains('action')).toBe(true);
   });
 
   it('preserves the full target name as text, including spaces and markup', () => {
-    expect(render({ messageType: MessageType.system, message: 'added 小花 <b>And Bob</b>' })).toBe(
-      '测试用户 邀请 小花 <b>And Bob</b> 加入了群聊',
-    );
+    expect(
+      render({
+        messageType: MessageType.system,
+        systemKind: SystemMessageKind.member_added,
+        message: 'added 小花 <b>And Bob</b>',
+      }),
+    ).toBe('测试用户 邀请 小花 <b>And Bob</b> 加入了群聊');
     expect(fixture.nativeElement.querySelector('b')).toBeNull();
   });
 
   it('updates the displayed actor from the message and falls back to the uid when the name is missing', () => {
-    const message = { messageType: MessageType.system, message: 'joined the chat' };
+    const message = {
+      messageType: MessageType.system,
+      systemKind: SystemMessageKind.member_joined,
+      message: 'joined the chat',
+    };
     expect(render({ ...message, sender: { uid: 2, name: '小花', gender: 0 } })).toBe('小花 加入了群聊');
     expect(render({ ...message, sender: { uid: 2, gender: 0 } })).toBe('用户 2 加入了群聊');
   });
@@ -57,6 +70,7 @@ describe('MessagePreview', () => {
   it('opens the actor profile only when the system message is interactive', async () => {
     const message = {
       messageType: MessageType.system,
+      systemKind: SystemMessageKind.member_joined,
       message: 'joined the chat',
       sender: { uid: 2, name: '小花', gender: 0 },
     };
@@ -78,11 +92,11 @@ describe('MessagePreview', () => {
   });
 
   it.each([
-    ['added 小花', '小花'],
-    ['removed 小花', '小花'],
-    ["accepted O'Brien's friend request", "O'Brien"],
-  ])('links the target of %s using its UID', async (message, name) => {
-    const source = { messageType: MessageType.system, message, systemLinks: { uid: 42 } };
+    [SystemMessageKind.member_added, 'added 小花', '小花'],
+    [SystemMessageKind.member_removed, 'removed 小花', '小花'],
+    [SystemMessageKind.friend_request_accepted, "accepted O'Brien's friend request", "O'Brien"],
+  ] as const)('links the target of %s using its UID', async (systemKind, message, name) => {
+    const source = { messageType: MessageType.system, systemKind, message, systemLinks: { uid: 42 } };
     render(source);
     expect(fixture.nativeElement.querySelector('a')).toBeNull();
     fixture.componentRef.setInput('interactive', true);
@@ -102,13 +116,14 @@ describe('MessagePreview', () => {
   });
 
   it.each([
-    'pinned a message',
-    'unpinned a message',
-    'pinned a message in this thread',
-    'unpinned a message in this thread',
-  ])('links %s to the exact target, separately from its thread root', async (message) => {
+    [SystemMessageKind.message_pinned, 'pinned a message'],
+    [SystemMessageKind.message_unpinned, 'unpinned a message'],
+    [SystemMessageKind.thread_message_pinned, 'pinned a message in this thread'],
+    [SystemMessageKind.thread_message_unpinned, 'unpinned a message in this thread'],
+  ] as const)('links %s to the exact target, separately from its thread root', async (systemKind, message) => {
     const source = {
       messageType: MessageType.system,
+      systemKind,
       message,
       systemLinks: { messageId: testMessage.id },
       replyRootId: encodeId('9007199254740995'),
@@ -130,20 +145,22 @@ describe('MessagePreview', () => {
     expect(fixture.nativeElement.querySelector('a')).toBeNull();
   });
 
-  it.each(['added 小花', "accepted 小花's friend request", 'pinned a message in this thread'])(
-    'does not guess a destination for legacy %s',
-    (message) => {
-      fixture.componentRef.setInput('interactive', true);
-      render({ messageType: MessageType.system, message, replyRootId: testMessage.id });
-      expect(fixture.nativeElement.querySelectorAll('a')).toHaveLength(1);
-    },
-  );
+  it.each([
+    [SystemMessageKind.member_added, 'added 小花'],
+    [SystemMessageKind.friend_request_accepted, "accepted 小花's friend request"],
+    [SystemMessageKind.thread_message_pinned, 'pinned a message in this thread'],
+  ] as const)('does not guess a destination for legacy %s', (systemKind, message) => {
+    fixture.componentRef.setInput('interactive', true);
+    render({ messageType: MessageType.system, systemKind, message, replyRootId: testMessage.id });
+    expect(fixture.nativeElement.querySelectorAll('a')).toHaveLength(1);
+  });
 
   it('preserves translation word order and links when changing languages', async () => {
     fixture.componentRef.setInput('interactive', true);
     const transloco = TestBed.inject(TranslocoService);
     const target = {
       messageType: MessageType.system,
+      systemKind: SystemMessageKind.friend_request_accepted,
       message: "accepted 小花's friend request",
       systemLinks: { uid: 42 },
     };
@@ -159,6 +176,7 @@ describe('MessagePreview', () => {
       expect(
         render({
           messageType: MessageType.system,
+          systemKind: SystemMessageKind.thread_message_pinned,
           message: 'pinned a message in this thread',
           systemLinks: { messageId: testMessage.id },
         }),
@@ -173,6 +191,7 @@ describe('MessagePreview', () => {
     expect(
       render({
         messageType: MessageType.system,
+        systemKind: SystemMessageKind.friend_request_accepted,
         message: `accepted ${name}'s friend request`,
         systemLinks: { uid: 42 },
       }),

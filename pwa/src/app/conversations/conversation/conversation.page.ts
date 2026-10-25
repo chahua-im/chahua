@@ -110,6 +110,7 @@ import { MessageMenu } from '../../messages/message-menu/message-menu';
 import { MessageActions } from '../../messages/message-actions';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
+import { isMembershipMessage } from '../../messages/system-message';
 import { isVisibleMessage } from '../../messages/message-visibility';
 import { Message, type MessageContent } from '../../messages/message/message';
 import { VoicePlayback } from '../../messages/voice-player/voice-playback';
@@ -764,13 +765,21 @@ export class ConversationPage {
     void this.refreshReadReceipt(privacyChanged);
   }
   protected readonly outgoing = computed(() => this.outbox.items().filter((item) => item.chatId === this.id()));
+  protected readonly hideMembershipMessages = computed(
+    // Membership actions belong to groups; do not flash them while metadata is still loading.
+    () =>
+      !this.threadId() &&
+      this.chatInfo.get(this.id())?.kind !== GroupKind.dm &&
+      (!this.preferences.showMembershipMessages() || this.chatInfo.membershipPolicy(this.id())?.canView === false),
+  );
   protected readonly rows = computed(() => {
     const messages = this.conversation.items();
+    const hideMembershipMessages = this.hideMembershipMessages();
     const known = new Set(messages.map((message) => message.clientGeneratedId));
     const entries: { key: string; message: MessageContent; confirmed?: MessageResponse; outgoing?: OutgoingMessage }[] =
       [];
     for (const message of messages) {
-      if (!isVisibleMessage(message)) continue;
+      if (!isVisibleMessage(message) || (hideMembershipMessages && isMembershipMessage(message))) continue;
       const outgoing = this.outgoing().find(
         (item) => item.editId === message.id || item.clientGeneratedId === message.clientGeneratedId,
       );
@@ -829,6 +838,7 @@ export class ConversationPage {
   private subscriptionVersion = 0;
   private retryAction = () => {};
   private readonly position = signal<ScrollPosition | undefined>(undefined);
+  private membershipScrollPosition?: ScrollPosition;
   private readonly entryReadId = signal<SnowflakeID | undefined>(undefined);
   private firstUnreadAfter(boundary?: SnowflakeID) {
     if (!boundary) return undefined;
@@ -1156,6 +1166,15 @@ export class ConversationPage {
     afterNextRender(() => void this.observeResize());
     afterNextRender(() => this.observeComposer());
     afterNextRender(() => this.observeToolbar());
+    effect(() => {
+      const hide = this.hideMembershipMessages();
+      const active = this.active();
+      const page = this.conversation.page();
+      untracked(() => {
+        if (!active || !page || hide === this.conversation.hideMembershipMessages) return;
+        void this.reloadMembershipVisibility(hide);
+      });
+    });
     afterRenderEffect(() => {
       this.chatTitle();
       this.threadId();
@@ -1163,6 +1182,7 @@ export class ConversationPage {
       untracked(() => this.measureToolbar());
     });
     afterRenderEffect(() => {
+      this.rows();
       this.messageElements();
       this.position();
       if (this.active()) void this.positionAndRead();
@@ -1192,6 +1212,7 @@ export class ConversationPage {
   }
 
   private activate(id: SnowflakeID, threadId?: SnowflakeID) {
+    this.membershipScrollPosition = undefined;
     this.resetReactionSession();
     this.resetMentionSession();
     this.scrolling.reset();
@@ -1284,6 +1305,7 @@ export class ConversationPage {
       if (!retainComposer) this.cancelEdit();
       this.playback.pause();
     } else {
+      this.membershipScrollPosition = undefined;
       this.entryVersion.update((version) => version + 1);
       this.conversation.reset();
       this.rows();
@@ -1333,7 +1355,11 @@ export class ConversationPage {
       } else if (target.type === ConversationTargetKind.Message) {
         around = target.messageId;
       }
-      const loaded = await this.conversation.open(around, target.type === ConversationTargetKind.Message);
+      const loaded = await this.conversation.open(
+        around,
+        target.type === ConversationTargetKind.Message,
+        this.hideMembershipMessages(),
+      );
       if (!loaded || entry !== this.entryKey() || version !== this.navigationVersion) return;
       if (target.type === ConversationTargetKind.Latest) this.returnMessageIds.set([]);
       else if (target.type === ConversationTargetKind.Message && fromId && fromId > target.messageId) {
@@ -1345,10 +1371,17 @@ export class ConversationPage {
           : target.type === ConversationTargetKind.Resume
             ? this.firstUnreadId()
             : undefined;
+      let positionMessageId = messageId;
+      const targetMessage = this.conversation.items().find((message) => message.id === messageId);
+      if (targetMessage && this.hideMembershipMessages() && isMembershipMessage(targetMessage)) {
+        const visible = this.rows().filter((row) => row.confirmed);
+        positionMessageId =
+          visible.find((row) => row.confirmed!.id > targetMessage.id)?.confirmed?.id ?? visible.at(-1)?.confirmed?.id;
+      }
       this.position.set(
-        messageId
+        positionMessageId
           ? target.type === ConversationTargetKind.Message
-            ? { type: PositionKind.Message, messageId }
+            ? { type: PositionKind.Message, messageId: positionMessageId }
             : { type: PositionKind.Unread }
           : { type: PositionKind.Bottom },
       );
@@ -1360,6 +1393,27 @@ export class ConversationPage {
     } finally {
       if (entry === this.entryKey() && version === this.navigationVersion) this.pendingNavigation.set(undefined);
     }
+  }
+
+  private async reloadMembershipVisibility(
+    hide: boolean,
+    position = this.membershipScrollPosition ?? { type: PositionKind.Bottom as const },
+  ) {
+    const entry = this.entryKey();
+    const version = ++this.navigationVersion;
+    this.pendingNavigation.set(undefined);
+    const around = position.type === PositionKind.Anchor ? position.messageId : undefined;
+    this.retryAction = () => void this.reloadMembershipVisibility(this.hideMembershipMessages(), position);
+    this.position.set(position);
+    const loaded = await this.conversation.open(around, false, hide);
+    if (!loaded || entry !== this.entryKey() || version !== this.navigationVersion) return;
+    if (position.type === PositionKind.Anchor) {
+      const messageId = position.messageId;
+      const visible = this.rows().filter((row) => row.confirmed);
+      const anchor = visible.find((row) => row.confirmed!.id >= messageId) ?? visible.at(-1);
+      position = anchor ? { ...position, messageId: anchor.confirmed!.id } : { type: PositionKind.Bottom };
+    }
+    this.position.set(position);
   }
 
   protected async navigateDown() {
@@ -1655,6 +1709,9 @@ export class ConversationPage {
     const version = this.navigationVersion;
     const scroll = await this.content()?.getScrollElement();
     if (!scroll || !this.isCurrent(entry) || version !== this.navigationVersion) return;
+    // A response can replace the range while getScrollElement is awaiting.
+    // Defer positioning until Angular has rendered the corresponding rows.
+    if (this.rows().length !== this.messageElements().length) return;
     const position = this.position();
     if (position) {
       if (position.type === PositionKind.Bottom) {
@@ -1708,6 +1765,7 @@ export class ConversationPage {
     const elements = this.confirmedElements();
     const viewport = scroll.getBoundingClientRect();
     const allElements = this.messageElements();
+    if (rows.length !== allElements.length) return bounds;
     let bottomLow = 0,
       bottomHigh = allElements.length;
     while (bottomLow < bottomHigh) {
@@ -1736,6 +1794,27 @@ export class ConversationPage {
       else last = middle;
     }
     this.visibleDate.set(rows[first]?.message.createdAt);
+    // Settings can change this filter while the cached conversation is covered.
+    // Retain a non-membership row so it survives toggling in either direction.
+    let anchor = first;
+    while (rows[anchor] && (!rows[anchor].confirmed || isMembershipMessage(rows[anchor].message))) anchor++;
+    // A range of only membership events still identifies a historical location.
+    // Resolve its visible neighbour after fetching around that original message.
+    if (!rows[anchor]) {
+      anchor = first;
+      while (rows[anchor] && !rows[anchor].confirmed) anchor++;
+    }
+    const anchorMessage = rows[anchor]?.confirmed;
+    this.membershipScrollPosition =
+      this.atBottom() && this.conversation.atLatest()
+        ? { type: PositionKind.Bottom }
+        : anchorMessage
+          ? {
+              type: PositionKind.Anchor,
+              messageId: anchorMessage.id,
+              offset: allElements[anchor].nativeElement.getBoundingClientRect().bottom - viewport.top,
+            }
+          : undefined;
     const floating = this.floatingDate().nativeElement;
     const floatingTop = viewport.top + floating.offsetTop;
     const floatingBottom = floatingTop + floating.offsetHeight;
@@ -1766,8 +1845,9 @@ export class ConversationPage {
     }
     const element = elements[visible]?.nativeElement;
     const messageId = element?.getAttribute('data-message-id');
-    const confirmedId = messageId ? encodeId(messageId) : undefined;
-    if (element && confirmedId && element.getBoundingClientRect().bottom > viewport.top) {
+    const confirmedId =
+      element && messageId && element.getBoundingClientRect().bottom > viewport.top ? encodeId(messageId) : undefined;
+    if (confirmedId) {
       if (this.returnMessageIds().some((id) => id <= confirmedId))
         this.returnMessageIds.update((ids) => ids.filter((id) => id > confirmedId));
       const threadId = this.threadId();

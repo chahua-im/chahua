@@ -14,6 +14,7 @@ import type { ConversationUnreadPayload } from './conversationUnreadPayload';
 import type { FriendRequestReceivedPayload } from './friendRequestReceivedPayload';
 import type { FriendRequestResolvedPayload } from './friendRequestResolvedPayload';
 import type { FriendshipRemovedPayload } from './friendshipRemovedPayload';
+import type { MembershipMessagePolicyChanged } from './membershipMessagePolicyChanged';
 import type { MessageResponse } from './messageResponse';
 import type { NotificationPayload } from './notificationPayload';
 import type { PinUpdatePayload } from './pinUpdatePayload';
@@ -28,6 +29,10 @@ import type { NotificationExceptionsCleared } from './users/notificationExceptio
 import type { NotificationSettingsResponse } from './users/notificationSettingsResponse';
 
 export type ServerWsMessage =
+  | {
+      payload: MembershipMessagePolicyChanged;
+      type: 'membershipMessagePolicyChanged';
+    }
   | {
       payload: MessageResponse;
       type: 'message';

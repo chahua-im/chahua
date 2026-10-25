@@ -7,6 +7,7 @@
  */
 
 export enum ServerWsMessageType {
+  membershipMessagePolicyChanged = 'membershipMessagePolicyChanged',
   message = 'message',
   messageUpdated = 'messageUpdated',
   messageDeleted = 'messageDeleted',

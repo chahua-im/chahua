@@ -180,6 +180,7 @@ export class ChatListContent {
       const pendingPreview =
         pending && (!chat.lastMessageAt || pending.message.createdAt > chat.lastMessageAt) ? pending : undefined;
       const preview = pendingPreview?.message ?? last;
+      const activityAt = pendingPreview?.message.createdAt ?? last?.createdAt ?? chat.lastMessageAt;
       const draft = this.drafts.get(chat.id);
       const forward = this.drafts.forward(chat.id);
       const hasDraft = !!draft || !!forward?.length;
@@ -211,15 +212,15 @@ export class ChatListContent {
               : undefined,
           link: ['/chats/chat', decodeId(chat.id)],
           time:
-            draft && draft.savedAt > (Date.parse(preview?.createdAt ?? '') || 0)
+            draft && draft.savedAt > (Date.parse(activityAt ?? '') || 0)
               ? new Date(draft.savedAt).toISOString()
-              : (preview?.createdAt ?? chat.lastMessageAt),
+              : activityAt,
           unreadCount: chat.unreadCount,
           unreadMentions: chat.kind === GroupKind.group ? chat.unreadMentions : 0,
           unreadReactions: chat.unreadReactions,
           muted,
         } satisfies ChatListEntry,
-        toggleRead: last
+        toggleRead: last?.id
           ? () => (chat.unreadCount > 0 ? this.metadata.markRead(chat.id, last.id) : this.metadata.markUnread(chat.id))
           : undefined,
         toggleMuted: () => this.muteMenu().toggle(chat.id),

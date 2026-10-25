@@ -2,6 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { ChatFontSize } from './chat-font-size';
 import { ColorMode } from './color-mode';
+import { SessionStore } from '../session/session-store';
+import { testUser } from '../api/testing';
 import { Preferences } from './preferences';
 
 describe('Preferences', () => {
@@ -27,14 +29,14 @@ describe('Preferences', () => {
     expect(TestBed.inject(Preferences).chatFontSize()).toBe(ChatFontSize.Medium);
   });
 
-  it('starts with threads visible, grouped avatars and dm details', () => {
+  it('starts with threads and dm details visible, and grouped avatars', () => {
     const preferences = TestBed.inject(Preferences);
     expect(preferences.showThreadsInMessages()).toBe(true);
     expect(preferences.showAllAvatars()).toBe(false);
     expect(preferences.showDmDetails()).toBe(true);
   });
 
-  it('persists both settings and restores them in a fresh service', () => {
+  it('persists display settings and restores them in a fresh service', () => {
     const preferences = TestBed.inject(Preferences);
     preferences.setShowThreadsInMessages(false);
     preferences.setShowAllAvatars(true);
@@ -55,6 +57,19 @@ describe('Preferences', () => {
     expect(TestBed.inject(Preferences).showAllAvatars()).toBe(false);
     expect(TestBed.inject(Preferences).showDmDetails()).toBe(true);
   });
+  it('uses the current account preference and ignores the legacy browser value', () => {
+    localStorage.setItem('chahua.preferences.showMembershipMessages', 'false');
+    const preferences = TestBed.inject(Preferences);
+    const session = TestBed.inject(SessionStore);
+    session.user.set({ ...testUser, showMembershipMessages: true });
+    expect(preferences.showMembershipMessages()).toBe(true);
+    session.user.set({ ...testUser, showMembershipMessages: false });
+    expect(preferences.showMembershipMessages()).toBe(false);
+    session.user.set({ ...testUser, uid: 2, showMembershipMessages: true });
+    expect(preferences.showMembershipMessages()).toBe(true);
+    expect(localStorage.getItem('chahua.preferences.showMembershipMessages')).toBe('false');
+  });
+
   it('remembers the last five distinct reactions across fresh service instances', () => {
     const preferences = TestBed.inject(Preferences);
     for (const emoji of ['👍', '❤️', '😂', '😮', '😢', '🍵', '❤️']) preferences.rememberReaction(emoji);

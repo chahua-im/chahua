@@ -1,9 +1,12 @@
+import { isMembershipMessage } from '../messages/system-message';
+import { ChatSettingsChanged, SessionStore } from '../session/session-store';
 import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, map, Subject, takeUntil } from 'rxjs';
 import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import {
   ServerWsMessageType,
+  GroupKind,
   type GetMessagesParams,
   type ListMessagesResponse,
   type MessagePreview,
@@ -12,7 +15,7 @@ import {
   type ThreadUpdatePayload,
 } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { ChatStore } from '../chats/chat-store';
+import { ChatChangeKind, ChatStore } from '../chats/chat-store';
 import { type SnowflakeID } from '../api/snowflake-id';
 import { type MessageChange } from '../messages/message-change';
 import { mergeMessages } from '../messages/message-merge';
@@ -27,16 +30,22 @@ export enum ConversationError {
   Open,
   Page,
 }
-type MessageRange = Pick<ListMessagesResponse, 'messages' | 'olderCursor' | 'newerCursor'>;
+type MessageRange = Pick<
+  ListMessagesResponse,
+  'messages' | 'olderCursor' | 'newerCursor' | 'chatSettings' | 'membershipMessagePolicy'
+>;
 type MessageUpdate = (message: MessageResponse) => MessageResponse;
 type ConversationContext = Readonly<{ chatId: SnowflakeID; threadId?: SnowflakeID }>;
 @Injectable()
 export class ConversationStore {
   private readonly api = inject(ChatsService);
+  private readonly session = inject(SessionStore);
   private readonly destroyRef = inject(DestroyRef);
   private version = 0;
   private readonly cancel = new Subject<void>();
   private latestSeenId?: SnowflakeID;
+  hideMembershipMessages = false;
+  private pageHidesMembershipMessages = false;
   private needsResync = false;
   private readonly pendingUpdates = new Map<SnowflakeID, MessageUpdate>();
   /** Ids recalled in this context; their snapshots inside quoting messages must be redacted too. */
@@ -60,6 +69,15 @@ export class ConversationStore {
 
   constructor() {
     this.destroyRef.onDestroy(() => this.reset());
+    this.chatInfo.changes$.pipe(takeUntilDestroyed()).subscribe(({ kind, chatId }) => {
+      if (kind !== ChatChangeKind.MembershipMessagePolicy || chatId !== this.context?.chatId || this.context.threadId)
+        return;
+      if (this.chatInfo.membershipPolicy(chatId)?.canView === false) {
+        this.currentPage.update(
+          (page) => page && { ...page, messages: page.messages.filter((message) => !isMembershipMessage(message)) },
+        );
+      }
+    });
     this.realtime.changes$.pipe(takeUntilDestroyed()).subscribe((event) => this.applyMessageChange(event));
     this.realtime.events$.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event.type === ServerWsMessageType.threadUpdate) this.updateThread(event.payload);
@@ -69,7 +87,9 @@ export class ConversationStore {
   canLoad(direction: PageDirection) {
     const page = this.page();
     const cursor = direction === PageDirection.Older ? page?.olderCursor : page?.newerCursor;
-    return !!cursor && !this.loading() && !this.paging();
+    return (
+      !!cursor && !this.loading() && !this.paging() && this.pageHidesMembershipMessages === this.hideMembershipMessages
+    );
   }
 
   reset(chatId?: SnowflakeID, threadId?: SnowflakeID) {
@@ -91,7 +111,19 @@ export class ConversationStore {
     this.currentError.set(undefined);
   }
 
-  async open(around?: SnowflakeID, exact = false): Promise<boolean> {
+  async open(
+    around?: SnowflakeID,
+    exact = false,
+    hideMembershipMessages = this.hideMembershipMessages,
+  ): Promise<boolean> {
+    // Returning to the retained page's filter still needs a fresh read: arrivals
+    // during the cancelled refresh may have been deferred or hidden.
+    const filterChanged =
+      this.hideMembershipMessages !== hideMembershipMessages ||
+      this.pageHidesMembershipMessages !== hideMembershipMessages;
+    this.hideMembershipMessages = hideMembershipMessages;
+    // Events seen under the previous preference cannot describe gaps in the new range.
+    if (filterChanged) this.latestSeenId = undefined;
     const version = ++this.version;
     this.cancel.next();
     this.pendingUpdates.clear();
@@ -100,24 +132,37 @@ export class ConversationStore {
     this.pageDirection.set(undefined);
     this.isLoading.set(false);
     this.currentError.set(undefined);
-    if (exact && this.items().some((message) => message.id === around && isVisibleMessage(message))) return true;
-    if (!around && this.atLatest()) return true;
+    if (
+      !this.needsResync &&
+      !filterChanged &&
+      exact &&
+      this.items().some((message) => message.id === around && isVisibleMessage(message))
+    )
+      return true;
+    if (!this.needsResync && !filterChanged && !around && this.atLatest()) return true;
     this.isLoading.set(true);
     this.needsResync = false;
     try {
       const mentionVersion = this.chatInfo.snapshot();
-      let page = await firstValueFrom(this.getMessages(around ? { around } : {}));
+      const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
+      const user = this.session.user();
+      let page = await firstValueFrom(this.getMessages(around ? { around } : {}, user));
       if (version !== this.version) return false;
       // A reconnect can happen while the first response is in flight. Reconcile once before committing it.
       if ((!page.newerCursor && this.needsResync) || (!page.messages.length && this.latestSeenId)) {
         this.needsResync = false;
         const lastId = page.messages.at(-1)?.id;
-        const newer = await firstValueFrom(this.getMessages(lastId ? { after: lastId } : {}));
+        const newer = await firstValueFrom(this.getMessages(lastId ? { after: lastId } : {}, user));
         if (version !== this.version) return false;
         page = lastId
-          ? { ...page, messages: mergeMessages(page.messages, newer.messages), newerCursor: newer.newerCursor }
+          ? {
+              ...page,
+              messages: mergeMessages(page.messages, newer.messages),
+              newerCursor: newer.newerCursor,
+            }
           : newer;
       }
+      if (policyGeneration !== this.chatInfo.membershipPolicyRequestGeneration()) throw new ChatSettingsChanged();
       page = this.applyPendingUpdates(page);
       this.chatInfo.rememberMentions(page.messages, mentionVersion);
       // `around` also returns neighbours when the target has been deleted.
@@ -125,10 +170,23 @@ export class ConversationStore {
         this.currentError.set(ConversationError.Missing);
         return false;
       }
+      this.pageHidesMembershipMessages = hideMembershipMessages;
       this.currentPage.set(this.withLiveCursor(page));
       return true;
-    } catch {
-      if (version === this.version) this.currentError.set(ConversationError.Open);
+    } catch (error) {
+      if (version === this.version && error instanceof ChatSettingsChanged) {
+        return this.open(
+          around,
+          exact,
+          this.filtersMembershipMessages() &&
+            (!(this.session.user()?.showMembershipMessages ?? true) ||
+              this.chatInfo.membershipPolicy(this.context!.chatId)?.canView === false),
+        );
+      }
+      if (version === this.version) {
+        this.needsResync = true;
+        this.currentError.set(ConversationError.Open);
+      }
       return false;
     } finally {
       if (version === this.version) {
@@ -143,6 +201,8 @@ export class ConversationStore {
   async load(direction: PageDirection, beforeMerge?: () => void | Promise<void>) {
     if (!this.canLoad(direction)) return;
     const current = this.page()!;
+    const user = this.session.user();
+    const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
     const cursor = direction === PageDirection.Older ? current.olderCursor : current.newerCursor;
     const version = this.version;
     this.pendingUpdates.clear();
@@ -154,22 +214,37 @@ export class ConversationStore {
     try {
       const mentionVersion = this.chatInfo.snapshot();
       const page = await firstValueFrom(
-        this.getMessages(direction === PageDirection.Older ? { before: cursor! } : { after: cursor! }),
+        this.getMessages(direction === PageDirection.Older ? { before: cursor! } : { after: cursor! }, user),
       );
       if (version !== this.version) return;
+      if (this.hidesMembershipMessages(page) !== this.hidesMembershipMessages(current)) throw new ChatSettingsChanged();
       this.chatInfo.rememberMentions(page.messages, mentionVersion);
       await beforeMerge?.();
       if (version !== this.version) return;
+      this.session.requireChatSettings(
+        page.chatSettings,
+        user,
+        this.filtersMembershipMessages() && page.membershipMessagePolicy?.canView !== false,
+      );
+      if (!this.chatInfo.acceptMembershipPolicy(this.context!.chatId, page.membershipMessagePolicy, policyGeneration))
+        throw new ChatSettingsChanged();
       this.currentPage.update((value) => {
         if (!value) return value;
         const messages = mergeMessages(value.messages, this.applyPendingUpdates(page).messages);
+        const updated = {
+          ...value,
+          chatSettings: page.chatSettings,
+          membershipMessagePolicy: page.membershipMessagePolicy,
+          messages,
+        };
         // Before/after responses only describe the requested edge.
         return direction === PageDirection.Older
-          ? { ...value, messages, olderCursor: page.olderCursor }
-          : this.withLiveCursor({ ...value, messages, newerCursor: page.newerCursor });
+          ? { ...updated, olderCursor: page.olderCursor }
+          : this.withLiveCursor({ ...updated, newerCursor: page.newerCursor });
       });
-    } catch {
-      if (version === this.version) this.currentError.set(ConversationError.Page);
+    } catch (error) {
+      if (version === this.version && !(error instanceof ChatSettingsChanged))
+        this.currentError.set(ConversationError.Page);
     } finally {
       if (version === this.version) {
         this.pageDirection.set(undefined);
@@ -181,12 +256,20 @@ export class ConversationStore {
   }
 
   receive(message: MessageResponse) {
-    if (!this.accepts(message)) return;
+    if (
+      !this.accepts(message) ||
+      ((this.hideMembershipMessages || this.chatInfo.membershipPolicy(message.chatId)?.canView === false) &&
+        isMembershipMessage(message))
+    )
+      return;
     if (!this.latestSeenId || message.id > this.latestSeenId) this.latestSeenId = message.id;
     // A live message cannot bridge a gap between historical messages and the present.
     if (!this.atLatest()) return;
     const page = this.page()!;
-    this.currentPage.set({ ...page, messages: mergeMessages(page.messages, [message]) });
+    this.currentPage.set({
+      ...page,
+      messages: mergeMessages(page.messages, [message]),
+    });
   }
 
   private applyMessageChange(event: MessageChange) {
@@ -212,7 +295,7 @@ export class ConversationStore {
   }
 
   private restoreChatPreview(deletedIds: ReadonlySet<SnowflakeID>) {
-    if (!this.context || !this.atLatest()) return;
+    if (!this.context || !this.atLatest() || this.pageHidesMembershipMessages) return;
     const { chatId, threadId } = this.context;
     const page = this.page()!;
     const previous = page.messages
@@ -331,12 +414,42 @@ export class ConversationStore {
     }));
   }
 
-  private getMessages(params: GetMessagesParams) {
-    return this.api.getMessages(this.context!.chatId, { max: 50, ...params, threadId: this.context?.threadId }).pipe(
-      map(({ messages, olderCursor, newerCursor }): MessageRange => ({ messages, olderCursor, newerCursor })),
-      takeUntil(this.cancel),
-      takeUntilDestroyed(this.destroyRef),
+  private filtersMembershipMessages() {
+    return !this.context?.threadId && this.chatInfo.get(this.context!.chatId)?.kind !== GroupKind.dm;
+  }
+
+  private hidesMembershipMessages(page: Pick<MessageRange, 'chatSettings' | 'membershipMessagePolicy'>) {
+    return (
+      this.filtersMembershipMessages() &&
+      (!page.chatSettings.showMembershipMessages || page.membershipMessagePolicy?.canView === false)
     );
+  }
+
+  private getMessages(params: GetMessagesParams, user = this.session.user()) {
+    const policyGeneration = this.chatInfo.membershipPolicyRequestGeneration();
+    return this.api
+      .getMessages(this.context!.chatId, {
+        max: 50,
+        ...params,
+        threadId: this.context?.threadId,
+      })
+      .pipe(
+        map(({ chatSettings, messages, olderCursor, newerCursor, membershipMessagePolicy }): MessageRange => {
+          // A group restriction already hides these messages regardless of the account preference.
+          this.session.requireChatSettings(
+            chatSettings,
+            user,
+            this.filtersMembershipMessages() && membershipMessagePolicy?.canView !== false,
+          );
+          if (!this.chatInfo.acceptMembershipPolicy(this.context!.chatId, membershipMessagePolicy, policyGeneration))
+            throw new ChatSettingsChanged();
+          const hidden = this.hidesMembershipMessages({ chatSettings, membershipMessagePolicy });
+          if (membershipMessagePolicy && hidden !== this.hideMembershipMessages) throw new ChatSettingsChanged();
+          return { chatSettings, messages, olderCursor, newerCursor, membershipMessagePolicy };
+        }),
+        takeUntil(this.cancel),
+        takeUntilDestroyed(this.destroyRef),
+      );
   }
 
   async reconnect() {
@@ -346,7 +459,7 @@ export class ConversationStore {
     this.needsResync = false;
     const lastId = page.messages.at(-1)?.id;
     if (!lastId) {
-      this.currentPage.set(undefined);
+      this.needsResync = true;
       await this.open();
       return;
     }
@@ -373,6 +486,8 @@ function toMessagePreview(message: MessageResponse): MessagePreview {
     sender: message.sender,
     message: message.message,
     messageType: message.messageType,
+    systemKind: message.systemKind,
+    systemLinks: message.systemLinks,
     sticker: message.sticker ? { emoji: message.sticker.emoji } : undefined,
     attachments: message.attachments.map(({ kind }) => ({ kind })),
     isDeleted: message.isDeleted,

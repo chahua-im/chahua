@@ -16,6 +16,7 @@ export * from './notificationExceptionsResponse';
 export * from './notificationSettingsResponse';
 export * from './searchUsersResponse';
 export * from './stickerPackOrderItem';
+export * from './updateChatSettings';
 export * from './updateNotificationSettingsRequest';
 export * from './updateStickerPackOrderItem';
 export * from './updateStickerPackOrderRequest';

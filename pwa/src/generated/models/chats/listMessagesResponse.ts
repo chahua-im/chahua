@@ -5,10 +5,14 @@
  * Real-time chat application backend API supporting groups, messaging, threads, stickers, invites, and push notifications.
  * OpenAPI spec version: 0.1.0
  */
+import type { ChatSettings } from '../chatSettings';
+import type { MembershipMessagePolicy } from '../membershipMessagePolicy';
 import type { MessageResponse } from '../messageResponse';
 import type { SnowflakeID } from '../snowflakeID';
 
 export interface ListMessagesResponse {
+  chatSettings: ChatSettings;
+  membershipMessagePolicy: MembershipMessagePolicy;
   messages: MessageResponse[];
   /** Cursor to fetch newer messages with the `after` query parameter. */
   newerCursor?: SnowflakeID;

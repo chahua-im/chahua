@@ -1,3 +1,4 @@
+import { MembershipMessageVisibility, SystemMessageKind } from '../../generated/models';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
@@ -5,12 +6,12 @@ import { TestBed } from '@angular/core/testing';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
-import { GroupKind, GroupRole, type ServerWsMessage } from '../../generated/models';
+import { GroupKind, GroupRole, MessageType, ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
 import { Connection } from '../api/connection';
 import { jsonInterceptor } from '../api/json.interceptor';
 import { decodeId, encodeId } from '../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../api/testing';
-import { ChatStore } from './chat-store';
+import { ChatChangeKind, ChatStore } from './chat-store';
 import { SessionStore } from '../session/session-store';
 
 describe('ChatStore', () => {
@@ -18,6 +19,7 @@ describe('ChatStore', () => {
   let http: HttpTestingController;
   let scope: EnvironmentInjector;
   let resync: Subject<void>;
+  let events: Subject<ServerWsMessage>;
   const url = `/_api/group/${decodeId(testChat.id)}`;
   const response = {
     id: wireChat.id,
@@ -31,6 +33,7 @@ describe('ChatStore', () => {
 
   beforeEach(() => {
     resync = new Subject();
+    events = new Subject();
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(withInterceptors([jsonInterceptor])),
@@ -38,7 +41,7 @@ describe('ChatStore', () => {
         provideChahuaBaseUrl('/_api'),
         {
           provide: Connection,
-          useValue: mockRealtime({ resync$: resync, events$: new Subject<ServerWsMessage>() }),
+          useValue: mockRealtime({ resync$: resync, events$: events }),
         },
       ],
     });
@@ -51,6 +54,140 @@ describe('ChatStore', () => {
     scope.destroy();
     vi.useRealTimers();
     http.verify();
+  });
+
+  it('revokes cached membership previews, rejects old policy snapshots and keeps ordinary messages visible', async () => {
+    const session = TestBed.inject(SessionStore);
+    session.user.set(testUser);
+    const message = {
+      ...testMessage,
+      mentions: [],
+      messageType: MessageType.system,
+      systemKind: SystemMessageKind.member_joined,
+    };
+    store.acceptChats([{ ...testChat, lastMessage: message, lastMessageAt: message.createdAt }], store.snapshot());
+    const staleVersion = store.snapshot();
+    const policyGeneration = store.membershipPolicyRequestGeneration();
+    for (let i = 0; i < 2; i++) {
+      events.next({ type: ServerWsMessageType.membershipMessagePolicyChanged, payload: { chatId: testChat.id } });
+    }
+    await Promise.resolve();
+    http.expectOne(url).flush({
+      ...response,
+      myRole: GroupRole.member,
+      membershipMessagePolicy: { visibility: MembershipMessageVisibility.admins, canView: false },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.get(testChat.id)?.myRole).toBe(GroupRole.member);
+    expect(store.isChatMessageVisible(message)).toBe(false);
+    expect(store.isChatMessageVisible(testMessage)).toBe(true);
+    expect(store.chat(testChat.id).lastMessage).toBeUndefined();
+    store.acceptChats([{ ...testChat, lastMessage: message }], staleVersion, policyGeneration);
+    expect(store.membershipPolicy(testChat.id)?.canView).toBe(false);
+    expect(store.chat(testChat.id).lastMessage).toBeUndefined();
+    session.user.set({ ...testUser, uid: 2 });
+    expect(store.membershipPolicy(testChat.id)).toBeUndefined();
+  });
+
+  it.each([undefined, MessageType.system, MessageType.text])(
+    'applies a restricted list preview before notifying consumers, preserving newer visible arrivals (%s)',
+    (arrivalType) => {
+      TestBed.inject(SessionStore).user.set(testUser);
+      const membership = {
+        ...testMessage,
+        id: encodeId('100'),
+        mentions: [],
+        messageType: MessageType.system,
+        systemKind: SystemMessageKind.member_joined,
+        createdAt: '2026-10-25T11:00:00Z',
+      };
+      store.acceptChats(
+        [{ ...testChat, lastMessage: membership, lastMessageAt: membership.createdAt }],
+        store.snapshot(),
+      );
+      const version = store.snapshot();
+      const arrival = {
+        ...testMessage,
+        id: encodeId('200'),
+        messageType: arrivalType ?? MessageType.text,
+        systemKind: arrivalType === MessageType.system ? SystemMessageKind.member_added : undefined,
+        createdAt: '2026-10-25T12:00:00Z',
+      };
+      if (arrivalType) TestBed.inject(Connection).accept(arrival);
+      const visible = { ...testMessage, id: encodeId('90'), mentions: [], createdAt: '2026-10-25T10:00:00Z' };
+      const expected = arrivalType === MessageType.text ? arrival : visible;
+      const observed: ReturnType<ChatStore['chat']>[] = [];
+      const subscription = store.changes$.subscribe(({ kind }) => {
+        if (kind === ChatChangeKind.MembershipMessagePolicy) observed.push(store.chat(testChat.id));
+      });
+      store.acceptChats(
+        [
+          {
+            ...testChat,
+            membershipMessagePolicy: { visibility: MembershipMessageVisibility.admins, canView: false },
+            lastMessage: visible,
+            lastMessageAt: visible.createdAt,
+          },
+        ],
+        version,
+      );
+      subscription.unsubscribe();
+      expect(store.chat(testChat.id).lastMessage?.id).toBe(expected.id);
+      expect(store.chat(testChat.id).lastMessageAt).toBe(expected.createdAt);
+      expect(observed.map((chat) => chat.lastMessage?.id)).toEqual([expected.id]);
+      expect(store.membershipPolicy(testChat.id)?.canView).toBe(false);
+    },
+  );
+
+  it('keeps the server cursor when a visible read confirmation also covers a hidden tail', async () => {
+    vi.useFakeTimers();
+    store.acceptChats([{ ...testChat, lastReadMessageId: encodeId('100'), unreadCount: 1 }], store.snapshot());
+    const reading = store.markRead(testChat.id, encodeId('150'));
+    await vi.advanceTimersByTimeAsync(1000);
+    const request = http.expectOne(`/_api/chats/${decodeId(testChat.id)}/read`);
+    expect(request.request.body.messageId).toBe('150');
+    request.flush({ lastReadMessageId: '200', unreadCount: 0, unreadMentions: 0, unreadReactions: 0 });
+    await reading;
+    expect(store.chat(testChat.id).lastReadMessageId).toBe(encodeId('200'));
+    expect(store.chat(testChat.id).unreadCount).toBe(0);
+    await store.markRead(testChat.id, encodeId('150'));
+    http.expectNone(() => true);
+    vi.useRealTimers();
+  });
+
+  it('ignores hidden activity for previews without creating a separate read boundary', async () => {
+    TestBed.inject(SessionStore).user.set({ ...testUser, showMembershipMessages: false });
+    const visible = { ...testMessage, id: encodeId('100'), mentions: [] };
+    const hidden = {
+      ...testMessage,
+      id: encodeId('200'),
+      createdAt: '2026-10-24T12:00:00Z',
+      messageType: MessageType.system,
+      systemKind: SystemMessageKind.member_joined,
+      message: 'joined',
+      mentions: [],
+    };
+    store.acceptChats([{ ...testChat, lastMessage: visible, lastMessageAt: visible.createdAt }], store.snapshot());
+    const version = store.snapshot();
+    TestBed.inject(Connection).accept({ ...hidden, id: encodeId('201') });
+    store.acceptChats([{ ...testChat, lastMessage: visible, lastMessageAt: visible.createdAt }], version);
+    expect(store.chat(testChat.id).lastMessage?.id).toBe(visible.id);
+    expect(store.chat(testChat.id).lastMessageAt).toBe(visible.createdAt);
+    // A newer visible message can arrive after the hidden event with a higher ID.
+    TestBed.inject(Connection).accept({ ...visible, id: encodeId('150') });
+    store.acceptChats([{ ...testChat, lastMessage: visible }], version);
+    expect(store.chat(testChat.id).lastMessage?.id).toBe(encodeId('150'));
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messageUpdated,
+      payload: { ...visible, id: encodeId('150'), message: 'edited preview' },
+    });
+    expect(store.chat(testChat.id).lastMessage?.message).toBe('edited preview');
+    TestBed.inject(Connection).acceptChange({
+      type: ServerWsMessageType.messageDeleted,
+      payload: { ...visible, id: encodeId('150'), isDeleted: true },
+    });
+    expect(store.chat(testChat.id).lastMessage?.isDeleted).toBe(true);
   });
 
   it('retains projected chat information independently of later list results', async () => {

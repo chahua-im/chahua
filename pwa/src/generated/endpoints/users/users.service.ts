@@ -14,6 +14,7 @@ import type { Observable } from 'rxjs';
 
 import type {
   AuthTokenResponse,
+  ChatSettings,
   ClearExceptionsParams,
   GetExceptionsParams,
   GetUserSearchParams,
@@ -22,6 +23,7 @@ import type {
   NotificationExceptionsResponse,
   NotificationSettingsResponse,
   SearchUsersResponse,
+  UpdateChatSettings,
   UpdateNotificationSettingsRequest,
   UpdateStickerPackOrderRequest,
 } from '../../models';
@@ -187,6 +189,41 @@ export class UsersService {
     }
 
     return this.http.get<TData>(`${this.baseUrl}/users/me`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  putChatSettings<TData = ChatSettings>(
+    updateChatSettings: UpdateChatSettings,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  putChatSettings<TData = ChatSettings>(
+    updateChatSettings: UpdateChatSettings,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  putChatSettings<TData = ChatSettings>(
+    updateChatSettings: UpdateChatSettings,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  putChatSettings<TData = ChatSettings>(
+    updateChatSettings: UpdateChatSettings,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.put<TData>(`${this.baseUrl}/users/me/chat-settings`, updateChatSettings, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+
+    if (options?.observe === 'response') {
+      return this.http.put<TData>(`${this.baseUrl}/users/me/chat-settings`, updateChatSettings, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+
+    return this.http.put<TData>(`${this.baseUrl}/users/me/chat-settings`, updateChatSettings, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });

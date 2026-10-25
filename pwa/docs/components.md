@@ -110,7 +110,7 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 | Message            | message、own、分组标志、preview/interactive、待发状态/附件、菜单操作等待、跳转状态 → reply、jump、openThread、menu、react、retry；只持有手势和点击抑制状态 |
 | MessageAuthor      | sender、own；派生用户名、用户组和性别                                                                                                        |
 | MessageText        | text、mentions、interactive、profilesEnabled；派生文本片段，点击提及才打开资料                                                                                |
-| MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文、系统短语枚举；系统消息按完整译文插入用户名或消息链接，交互模式下允许跳转                                  |
+| MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文，按服务端 systemKind 选择系统译文；系统消息按完整译文插入用户名或消息链接，交互模式下允许跳转                                  |
 | MessageAttachments | message、overlayTime、outgoing、delivery、read、uploads；派生媒体框、相册布局、时间、发送/已读及上传反馈；局部保留相册初始尺寸、容器宽度、窗口及消息区域尺寸与资源加载失败 |
 | MessageStatus      | delivery、read；显示上传、发送中与已确认图标（失败重试由 Message 在气泡左侧显示），并仅按 ConversationPage 传入的当前 DM 范围授权回执将确认单勾替换为双勾 |
 | MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                                        |
@@ -181,6 +181,8 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 ChatDetails 的侧栏、会话信息 modal 和用户资料 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。名称和简介仅在进入编辑时创建各自的 Signal Form 字段草稿，保存只提交对应字段，另一个字段的草稿保持不变；切换会话清空草稿及头像上传进度。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
 
+ChatDetails 的群资料使用 Ionic 选择器展示成员变动消息可见范围，普通成员只读。当前值来自 ChatStore 的群策略，组件仅保存待提交选择；保存复用 perform，成功后重读当前群资料，失败恢复已知选择。权限和设置同步见[数据流](data-flow.md#系统消息链接)。
+
 ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资料中的添加/删除/拉黑成功后刷新它；所有消费者随共享值变化，不各自请求并维护副本。
 
 ## 设置与应用外围
@@ -192,7 +194,7 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 | NotificationCategoryPage | 分类通知独立路由页面；标题、返回和 NotificationCategory 详情 |
 | NotificationExceptionPicker | 激活普通／归档聊天查询，搜索已加载聊天，添加与默认相反的永久例外 |
 | NotificationCategory | 紧凑摘要或分类详情；正向通知开关、完整总数、例外分页、添加／移除／确认批量清除；刷新保留内容 |
-| GeneralSettings            | 聊天设置直接编辑 Preferences 的颜色模式、消息字号及三个显示开关，无额外状态副本                       |
+| GeneralSettings            | 编辑 Preferences 的颜色模式、消息字号及本机显示开关；群成员进出群消息开关从账号资料派生，通过 Preferences 调用 SessionStore 保存，持有局部保存中与错误状态                       |
 | LanguageSettings           | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog         |
 | FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |
 | PrivacySettings            | 四项隐私入口；独立读取拉黑列表、好友验证、在线状态和已读回执设置资源，显示实际摘要与加载状态，窄屏摘要位于标题下方 |

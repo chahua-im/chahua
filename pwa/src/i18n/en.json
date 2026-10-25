@@ -131,7 +131,9 @@
       "fontLarge": "Large",
       "fontPreviewIncoming": "This is a message preview. Move the slider to try different text sizes.",
       "fontPreviewOutgoing": "Choose a size that feels comfortable to read.",
-      "fontDefault": "System default"
+      "fontDefault": "System default",
+      "showMembershipMessages": "Show group join and leave messages",
+      "saveFailed": "Could not save. Please try again."
     },
     "language": {
       "title": "Language",
@@ -349,7 +351,12 @@
       "verificationMessage": "Send a verification message",
       "verificationPlaceholder": "Verification message",
       "blockTitle": "Block user",
-      "unblockTitle": "Unblock user"
+      "unblockTitle": "Unblock user",
+      "membershipMessages": "Membership messages",
+      "membershipMembers": "All members",
+      "membershipAdmins": "Admins only",
+      "membershipNobody": "Nobody",
+      "membershipNote": "Applies to past and new membership messages. Your personal display preference still applies when you have access."
     },
     "directory": {
       "groups": "Groups",
@@ -419,6 +426,7 @@
     "threadLoadFailed": "Failed to load thread status. Try again.",
     "threadUpdateFailed": "Failed to update thread. Try again.",
     "empty": "No messages yet",
+    "emptyVisible": "No visible messages",
     "missing": "This message was deleted or is unavailable.",
     "loadFailed": "Failed to load messages. Try again.",
     "editing": "Editing message",

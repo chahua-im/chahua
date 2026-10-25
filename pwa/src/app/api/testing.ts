@@ -1,7 +1,13 @@
 import { signal } from '@angular/core';
 import { filter, map, merge, Subject, type Observable } from 'rxjs';
 import type { ChatListItem, MeResponse, MessageResponse } from '../../generated/models';
-import { GroupKind, MessageType, ServerWsMessageType, type ServerWsMessage } from '../../generated/models';
+import {
+  MembershipMessageVisibility,
+  GroupKind,
+  MessageType,
+  ServerWsMessageType,
+  type ServerWsMessage,
+} from '../../generated/models';
 import { isMessageChange, type MessageChange, type PinChange } from '../messages/message-change';
 import { decodeId, encodeId } from './snowflake-id';
 import type { ResyncReason } from './connection';
@@ -14,8 +20,10 @@ export const testUser: MeResponse = {
   stickerPackOrder: [],
   muteGroupChatsByDefault: true,
   muteDirectChatsByDefault: false,
+  showMembershipMessages: true,
 };
 export const testChat: ChatListItem = {
+  membershipMessagePolicy: { visibility: MembershipMessageVisibility.members, canView: true },
   id: encodeId('9007199254740993'),
   kind: GroupKind.group,
   name: '测试群',
