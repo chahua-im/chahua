@@ -5,6 +5,89 @@ use diesel::PgConnection;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+pub fn load_chat_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+) -> QueryResult<crate::dto::users::ChatSettings> {
+    use crate::schema::user_extra;
+    let show_membership_messages = user_extra::table
+        .find(uid)
+        .select(user_extra::show_membership_messages)
+        .first::<bool>(conn)
+        .optional()?
+        .unwrap_or(true);
+    Ok(crate::dto::users::ChatSettings {
+        show_membership_messages,
+    })
+}
+
+/// Read the account preference, group policy and current role in one query.
+pub fn load_chat_settings_for_chat(
+    conn: &mut PgConnection,
+    uid: i32,
+    chat_id: i64,
+) -> QueryResult<(
+    crate::dto::users::ChatSettings,
+    crate::models::GroupKind,
+    crate::dto::groups::MembershipMessagePolicy,
+)> {
+    use crate::schema::{group_membership, groups, user_extra};
+    let (kind, show, visibility, role) = groups::table
+        .left_join(user_extra::table.on(user_extra::uid.eq(uid)))
+        .left_join(
+            group_membership::table.on(group_membership::chat_id
+                .eq(groups::id)
+                .and(group_membership::uid.eq(uid))),
+        )
+        .filter(groups::id.eq(chat_id))
+        .select((
+            groups::kind,
+            user_extra::show_membership_messages.nullable(),
+            groups::membership_message_visibility,
+            group_membership::role.nullable(),
+        ))
+        .first::<(
+            crate::models::GroupKind,
+            Option<bool>,
+            crate::models::MembershipMessageVisibility,
+            Option<crate::models::GroupRole>,
+        )>(conn)?;
+    Ok((
+        crate::dto::users::ChatSettings {
+            show_membership_messages: show.unwrap_or(true),
+        },
+        kind,
+        crate::dto::groups::MembershipMessagePolicy {
+            visibility,
+            can_view: kind == crate::models::GroupKind::Dm || visibility.allows(role.as_ref()),
+        },
+    ))
+}
+
+pub fn save_chat_settings(
+    conn: &mut PgConnection,
+    uid: i32,
+    settings: crate::dto::users::UpdateChatSettings,
+) -> QueryResult<crate::dto::users::ChatSettings> {
+    use crate::models::NewUserExtra;
+    use crate::schema::user_extra;
+    let user = NewUserExtra::new(uid, chrono::Utc::now().naive_utc());
+    // Update only this preference; concurrent callers use the last committed value.
+    let show_membership_messages = diesel::insert_into(user_extra::table)
+        .values((
+            user,
+            user_extra::show_membership_messages.eq(settings.show_membership_messages),
+        ))
+        .on_conflict(user_extra::uid)
+        .do_update()
+        .set(user_extra::show_membership_messages.eq(settings.show_membership_messages))
+        .returning(user_extra::show_membership_messages)
+        .get_result(conn)?;
+    Ok(crate::dto::users::ChatSettings {
+        show_membership_messages,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct UserProfile {
     pub username: Option<String>,
@@ -184,6 +267,82 @@ pub fn lookup_user_profiles(
 #[cfg(test)]
 mod tests {
     use super::normalize_discuz_username;
+
+    #[test]
+    fn account_chat_settings_persist_without_changing_other_accounts_or_settings() {
+        use crate::dto::users::UpdateChatSettings;
+        use crate::schema::user_extra as u;
+        use diesel::prelude::*;
+        let Ok(url) = std::env::var("WETTY_TEST_DATABASE_URL") else {
+            eprintln!("skipping (WETTY_TEST_DATABASE_URL unset)");
+            return;
+        };
+        let mut conn = PgConnection::establish(&url).unwrap();
+        conn.test_transaction::<_, diesel::result::Error, _>(|conn| {
+            let uid = 987_665_100;
+            assert!(super::load_chat_settings(conn, uid)?.show_membership_messages);
+            // Existing accounts acquire the migration's default; a new row also defaults to visible.
+            let now = chrono::Utc::now().naive_utc();
+            diesel::insert_into(u::table)
+                .values((
+                    u::uid.eq(uid),
+                    u::first_seen_at.eq(now),
+                    u::last_seen_at.eq(now),
+                ))
+                .execute(conn)?;
+            assert!(u::table
+                .find(uid)
+                .select(u::show_membership_messages)
+                .first::<bool>(conn)?);
+            diesel::update(u::table.find(uid))
+                .set((u::mute_group_chats_by_default.eq(true), u::token_gen.eq(7)))
+                .execute(conn)?;
+            assert!(
+                !super::save_chat_settings(
+                    conn,
+                    uid,
+                    UpdateChatSettings {
+                        show_membership_messages: false
+                    }
+                )?
+                .show_membership_messages
+            );
+            assert!(
+                !super::save_chat_settings(
+                    conn,
+                    uid + 1,
+                    UpdateChatSettings {
+                        show_membership_messages: false
+                    }
+                )?
+                .show_membership_messages
+            );
+            assert!(
+                super::save_chat_settings(
+                    conn,
+                    uid,
+                    UpdateChatSettings {
+                        show_membership_messages: true
+                    }
+                )?
+                .show_membership_messages
+            );
+            let saved: (bool, bool, i32) = u::table
+                .find(uid)
+                .select((
+                    u::show_membership_messages,
+                    u::mute_group_chats_by_default,
+                    u::token_gen,
+                ))
+                .first(conn)?;
+            assert_eq!(saved, (true, true, 7));
+            assert!(!u::table
+                .find(uid + 1)
+                .select(u::show_membership_messages)
+                .first::<bool>(conn)?);
+            Ok(())
+        });
+    }
 
     #[test]
     fn normalize_discuz_username_leaves_plain_values_unchanged() {

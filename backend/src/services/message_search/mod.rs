@@ -824,6 +824,7 @@ mod tests {
 
     fn message(id: i64, text: Option<&str>) -> Message {
         Message {
+            system_kind: None,
             forwarded_from_message_id: None,
             id,
             message: text.map(str::to_owned),

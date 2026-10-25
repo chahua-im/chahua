@@ -1131,6 +1131,7 @@ pub fn enrich_thread_list(
             thread_root_id,
             build_message_preview(
                 MessagePreviewInput {
+                    system_kind: lr.system_kind,
                     forwarded_from_name: forward_origins.name_for(&lr, &user_profiles),
                     id: lr.id,
                     client_generated_id: lr.client_generated_id,
@@ -1172,6 +1173,7 @@ pub fn enrich_thread_list(
             let root_msg = root_msg_map.get(&row.thread_root_id)?;
             let root_preview = build_message_preview(
                 MessagePreviewInput {
+                    system_kind: root_msg.system_kind,
                     forwarded_from_name: forward_origins.name_for(root_msg, &user_profiles),
                     id: root_msg.id,
                     client_generated_id: root_msg.client_generated_id.clone(),

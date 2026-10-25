@@ -7,7 +7,7 @@ use crate::dto::groups::{
 };
 use crate::dto::users::{NotificationSettingsResponse, UpdateNotificationSettingsRequest};
 use crate::errors::AppError;
-use crate::models::{FriendAddVerificationMode, GroupKind, NewUserExtra, PresenceVisibility};
+use crate::models::{GroupKind, NewUserExtra};
 use crate::schema::{group_membership, groups, media, user_extra};
 
 pub const MAX_TEMPORARY_MUTE_SECONDS: i64 = 7 * 24 * 60 * 60;
@@ -88,15 +88,7 @@ pub fn update_notification_defaults(
         ));
     }
     let now = Utc::now().naive_utc();
-    let user = NewUserExtra {
-        uid,
-        first_seen_at: now,
-        last_seen_at: now,
-        sticker_pack_order: serde_json::json!([]),
-        verification_mode: FriendAddVerificationMode::Direct,
-        verification_question: None,
-        presence_visibility: PresenceVisibility::Everyone,
-    };
+    let user = NewUserExtra::new(uid, now);
     // The conflict UPDATE writes only supplied fields, so concurrent edits to
     // different categories cannot overwrite each other or unrelated user settings.
     Ok(diesel::insert_into(user_extra::table)

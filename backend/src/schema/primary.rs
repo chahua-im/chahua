@@ -2,6 +2,10 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "membership_message_visibility"))]
+    pub struct MembershipMessageVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "friend_add_verification_mode"))]
     pub struct FriendAddVerificationMode;
 
@@ -64,6 +68,10 @@ pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "read_receipt_visibility"))]
     pub struct ReadReceiptVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "system_message_kind"))]
+    pub struct SystemMessageKind;
 
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "transcode_status"))]
@@ -189,6 +197,8 @@ diesel::table! {
     use super::sql_types::GroupVisibility;
     use super::sql_types::GroupKind;
 
+    use super::sql_types::MembershipMessageVisibility;
+
     groups (id) {
         id -> Int8,
         #[max_length = 255]
@@ -202,6 +212,7 @@ diesel::table! {
         kind -> GroupKind,
         dm_uid1 -> Nullable<Int4>,
         dm_uid2 -> Nullable<Int4>,
+        membership_message_visibility -> MembershipMessageVisibility,
     }
 }
 
@@ -275,6 +286,7 @@ diesel::table! {
 diesel::table! {
     use diesel::sql_types::*;
     use super::sql_types::MessageType;
+    use super::sql_types::SystemMessageKind;
     use super::sql_types::TranscodeStatus;
 
     messages (id) {
@@ -297,6 +309,7 @@ diesel::table! {
         transcode_status -> TranscodeStatus,
         forwarded_bundle_id -> Nullable<Int8>,
         forwarded_from_message_id -> Nullable<Int8>,
+        system_kind -> Nullable<SystemMessageKind>,
     }
 }
 
@@ -486,6 +499,7 @@ diesel::table! {
         read_receipt_visibility -> ReadReceiptVisibility,
         mute_group_chats_by_default -> Bool,
         mute_direct_chats_by_default -> Bool,
+        show_membership_messages -> Bool,
     }
 }
 

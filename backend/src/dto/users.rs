@@ -39,6 +39,20 @@ pub struct MeResponse {
     pub permissions: Vec<String>,
     pub mute_group_chats_by_default: bool,
     pub mute_direct_chats_by_default: bool,
+    pub show_membership_messages: bool,
+}
+
+/// Account-level display preference; the last committed write wins.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSettings {
+    pub show_membership_messages: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateChatSettings {
+    pub show_membership_messages: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
@@ -95,9 +109,11 @@ mod tests {
             permissions: vec![],
             mute_group_chats_by_default: true,
             mute_direct_chats_by_default: false,
+            show_membership_messages: false,
         };
 
         let value = serde_json::to_value(response).unwrap();
+        assert_eq!(value["showMembershipMessages"], json!(false));
         assert_eq!(value["gender"], json!(2));
         assert_eq!(value["userGroup"]["groupId"], json!(3));
         assert_eq!(value["userGroup"]["name"], json!("Moderator"));

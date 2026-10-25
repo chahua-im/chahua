@@ -77,6 +77,53 @@ mod tests {
     }
 
     #[test]
+    fn system_kind_contract() {
+        let document = api_document();
+        let kinds = document["components"]["schemas"]["SystemMessageKind"]["enum"]
+            .as_array()
+            .unwrap();
+        assert_eq!(kinds.len(), 10);
+        assert!(kinds.contains(&serde_json::json!("member_joined")));
+        for name in ["MessageResponse", "MessagePreview"] {
+            assert!(
+                document["components"]["schemas"][name]["properties"]["systemKind"].is_object()
+            );
+        }
+    }
+
+    #[test]
+    fn account_chat_settings_contract() {
+        let document = api_document();
+        assert!(document["paths"]["/users/me/chat-settings"]["put"].is_object());
+        assert_eq!(
+            document["components"]["schemas"]["MeResponse"]["properties"]["showMembershipMessages"]
+                ["type"],
+            "boolean"
+        );
+        assert_eq!(
+            document["components"]["schemas"]["UpdateChatSettings"]["required"],
+            serde_json::json!(["showMembershipMessages"])
+        );
+    }
+
+    #[test]
+    fn membership_filter_contract() {
+        let document = api_document();
+        let parameters = document["paths"]["/chats/{chat_id}/messages"]["get"]["parameters"]
+            .as_array()
+            .unwrap();
+        assert!(!parameters
+            .iter()
+            .any(|parameter| parameter["name"] == "excludeSystemKinds"));
+        let schemas = &document["components"]["schemas"];
+        assert!(schemas["ListChatsResponse"]["properties"]["chatSettings"].is_object());
+        assert!(schemas["ListMessagesResponse"]["properties"]["chatSettings"].is_object());
+        assert!(schemas["ListMessagesResponse"]["properties"]["readThroughMessageId"].is_null());
+        assert!(schemas["ChatListItem"]["properties"]["readThroughMessageId"].is_null());
+        assert!(schemas["ChatListItem"]["properties"]["lastNonMembershipMessage"].is_null());
+    }
+
+    #[test]
     fn notification_preferences_document_partial_defaults_and_explicit_chat_modes() {
         let document = api_document();
         assert!(document["paths"]["/users/me/notification-settings"]["patch"].is_object());

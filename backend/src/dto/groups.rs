@@ -18,6 +18,7 @@ pub struct CreateChatResponse {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupInfoResponse {
+    pub membership_message_policy: MembershipMessagePolicy,
     #[serde(with = "crate::serde_i64_string")]
     #[schema(value_type = String)]
     pub id: i64,
@@ -129,4 +130,19 @@ pub struct NotificationExceptionsResponse {
 pub struct NotificationExceptionsCleared {
     pub kind: GroupKind,
     pub chat_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipMessagePolicy {
+    pub visibility: crate::models::MembershipMessageVisibility,
+    pub can_view: bool,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipMessagePolicyChanged {
+    #[serde(with = "crate::serde_i64_string")]
+    #[schema(value_type = String)]
+    pub chat_id: i64,
 }

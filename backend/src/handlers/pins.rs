@@ -126,6 +126,9 @@ async fn list_pins_in_scope(
     let message_ids: Vec<i64> = pins.iter().map(|p| p.message_id).collect();
     let msgs: Vec<Message> = messages::table
         .filter(messages::id.eq_any(&message_ids))
+        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+            crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+        ))
         .filter(messages::deleted_at.is_null())
         .filter(messages::is_published.eq(true))
         .load(conn)?;
@@ -194,6 +197,9 @@ async fn create_pin_in_scope(
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
 
+    if msg.system_kind.is_some_and(|kind| kind.is_membership()) {
+        return Err(AppError::BadRequest("Cannot pin membership messages"));
+    }
     if let PinScope::Thread { thread_root_id } = scope {
         messages::table
             .filter(messages::id.eq(thread_root_id))
@@ -391,11 +397,22 @@ async fn send_pin_system_message(
     action: PinAction,
     message_id: i64,
 ) {
-    let text = match (scope, action) {
-        (PinScope::Chat, PinAction::Pinned) => "pinned a message",
-        (PinScope::Chat, PinAction::Unpinned) => "unpinned a message",
-        (PinScope::Thread { .. }, PinAction::Pinned) => "pinned a message in this thread",
-        (PinScope::Thread { .. }, PinAction::Unpinned) => "unpinned a message in this thread",
+    use crate::models::SystemMessageKind;
+    let (system_kind, text) = match (scope, action) {
+        (PinScope::Chat, PinAction::Pinned) => {
+            (SystemMessageKind::MessagePinned, "pinned a message")
+        }
+        (PinScope::Chat, PinAction::Unpinned) => {
+            (SystemMessageKind::MessageUnpinned, "unpinned a message")
+        }
+        (PinScope::Thread { .. }, PinAction::Pinned) => (
+            SystemMessageKind::ThreadMessagePinned,
+            "pinned a message in this thread",
+        ),
+        (PinScope::Thread { .. }, PinAction::Unpinned) => (
+            SystemMessageKind::ThreadMessageUnpinned,
+            "unpinned a message in this thread",
+        ),
     };
     let thread_root_id = scope.thread_root_id();
 
@@ -404,6 +421,7 @@ async fn send_pin_system_message(
             conn,
             state,
             PreparedMessageSend {
+                system_kind: Some(system_kind),
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,

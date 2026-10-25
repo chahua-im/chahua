@@ -14,6 +14,35 @@ use serde::{Deserialize, Serialize};
     Eq,
     utoipa::ToSchema,
 )]
+#[ExistingTypePath = "crate::schema::sql_types::MembershipMessageVisibility"]
+#[serde(rename_all = "camelCase")]
+pub enum MembershipMessageVisibility {
+    Members,
+    Admins,
+    Nobody,
+}
+
+impl MembershipMessageVisibility {
+    pub fn allows(self, role: Option<&GroupRole>) -> bool {
+        match self {
+            Self::Members => role.is_some(),
+            Self::Admins => role == Some(&GroupRole::Admin),
+            Self::Nobody => false,
+        }
+    }
+}
+
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
 #[ExistingTypePath = "crate::schema::sql_types::GroupVisibility"]
 #[serde(rename_all = "snake_case")]
 pub enum GroupVisibility {
@@ -137,6 +166,42 @@ pub enum MessageType {
     /// Server-generated forwarding replacement. The message body contains
     /// `pendingAudio` or `nestedForward`, which clients localize for display.
     Placeholder,
+}
+
+/// Stable system event identity, independent of its display text.
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::SystemMessageKind"]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMessageKind {
+    MemberJoined,
+    MemberLeft,
+    MemberAdded,
+    MemberRemoved,
+    MessagePinned,
+    MessageUnpinned,
+    ThreadMessagePinned,
+    ThreadMessageUnpinned,
+    FriendRequestAccepted,
+    Unknown,
+}
+
+impl SystemMessageKind {
+    pub fn is_membership(self) -> bool {
+        matches!(
+            self,
+            Self::MemberJoined | Self::MemberLeft | Self::MemberAdded | Self::MemberRemoved
+        )
+    }
 }
 
 /// Reason code stored in `message` only when `message_type` is `placeholder`.
@@ -295,6 +360,7 @@ pub struct Group {
     pub dm_uid1: Option<i32>,
     /// Canonical max uid of the DM pair; `None` for non-DM groups.
     pub dm_uid2: Option<i32>,
+    pub membership_message_visibility: MembershipMessageVisibility,
 }
 
 /// For inserting a group. Set `id` and `created_at` (e.g. `Utc::now()`) when not relying on DB defaults.
@@ -619,6 +685,7 @@ pub struct Message {
     pub transcode_status: TranscodeStatus,
     pub forwarded_bundle_id: Option<i64>,
     pub forwarded_from_message_id: Option<i64>,
+    pub system_kind: Option<SystemMessageKind>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -643,6 +710,7 @@ pub struct NewMessage {
     pub transcode_status: TranscodeStatus,
     pub forwarded_bundle_id: Option<i64>,
     pub forwarded_from_message_id: Option<i64>,
+    pub system_kind: Option<SystemMessageKind>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Insertable)]
@@ -887,6 +955,7 @@ pub struct UserExtra {
     pub presence_visibility: PresenceVisibility,
     pub mute_group_chats_by_default: bool,
     pub mute_direct_chats_by_default: bool,
+    pub show_membership_messages: bool,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -899,6 +968,20 @@ pub struct NewUserExtra {
     pub verification_mode: FriendAddVerificationMode,
     pub verification_question: Option<String>,
     pub presence_visibility: PresenceVisibility,
+}
+
+impl NewUserExtra {
+    pub fn new(uid: i32, now: chrono::NaiveDateTime) -> Self {
+        Self {
+            uid,
+            first_seen_at: now,
+            last_seen_at: now,
+            sticker_pack_order: serde_json::json!([]),
+            verification_mode: FriendAddVerificationMode::Direct,
+            verification_question: None,
+            presence_visibility: PresenceVisibility::Everyone,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]

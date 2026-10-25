@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use diesel::prelude::*;
 pub use metrics::ChatMetrics;
 use utoipa_axum::router::OpenApiRouter;
@@ -31,14 +31,14 @@ use crate::{
         messages::{attach_metadata, message_response_preview},
         notification_preferences::{
             load_chat_notification_setting, load_notification_defaults,
-            publish_chat_notification_setting, set_chat_archived, ChatNotificationSetting,
+            publish_chat_notification_setting, set_chat_archived,
         },
     },
     utils::{auth::CurrentUid, pagination::validate_limit},
 };
 use crate::{
     models::{GroupKind, MessageType},
-    schema::{group_membership, groups, media, messages as messages_schema},
+    schema::{group_membership, messages as messages_schema},
 };
 use crate::{AppState, MAX_CHATS_LIMIT};
 
@@ -136,176 +136,37 @@ async fn get_chats(
         let defaults = load_notification_defaults(conn, uid)?;
         let now = Utc::now();
 
-        let mut base_query = groups::table
-            .inner_join(group_membership::table)
-            .left_join(
-                messages_schema::table
-                    .on(groups::last_message_id.eq(messages_schema::id.nullable())),
-            )
-            .left_join(
-                media::table.on(groups::avatar_image_id
-                    .eq(media::id.nullable())
-                    .and(media::deleted_at.is_null())),
-            )
-            .filter(group_membership::uid.eq(uid))
-            .filter(group_membership::archived.eq(archived))
-            .into_boxed();
-        if let Some(chat_id) = q.chat_id {
-            base_query = base_query.filter(groups::id.eq(chat_id));
-        }
-
-        type RowType = (
-            i64,
-            String,
-            Option<String>,
-            Option<DateTime<Utc>>,
-            Option<i64>,
-            Option<crate::models::Message>,
-            ChatNotificationSetting,
-            bool,
-            GroupKind,
-            Option<i32>,
-            Option<i32>,
-        );
-
-        let rows: Vec<RowType> = match q.after {
-            None => base_query
-                .select((
-                    groups::id,
-                    groups::name,
-                    media::storage_key.nullable(),
-                    groups::last_message_at,
-                    group_membership::last_read_message_id,
-                    messages_schema::all_columns.nullable(),
-                    (
-                        group_membership::muted_until,
-                        group_membership::mute_override,
-                    ),
-                    group_membership::archived,
-                    groups::kind,
-                    groups::dm_uid1,
-                    groups::dm_uid2,
-                ))
-                .order_by((
-                    groups::last_message_at.desc().nulls_last(),
-                    groups::id.desc(),
-                ))
-                .limit(limit + 1)
-                .load(conn)?,
-            Some(after_id) => {
-                let cursor_at: Option<Option<DateTime<Utc>>> = groups::table
-                    .inner_join(group_membership::table)
-                    .filter(group_membership::uid.eq(uid))
-                    .filter(groups::id.eq(after_id))
-                    .select(groups::last_message_at)
-                    .first(conn)
-                    .optional()?;
-
-                let cursor_at = match cursor_at {
-                    Some(c) => c,
-                    None => {
-                        return Ok(ListChatsResponse {
-                            chats: vec![],
-                            next_cursor: None,
-                        })
-                    }
-                };
-                let cursor_id = after_id;
-
-                match cursor_at {
-                    Some(c_at) => base_query
-                        .select((
-                            groups::id,
-                            groups::name,
-                            media::storage_key.nullable(),
-                            groups::last_message_at,
-                            group_membership::last_read_message_id,
-                            messages_schema::all_columns.nullable(),
-                            (
-                                group_membership::muted_until,
-                                group_membership::mute_override,
-                            ),
-                            group_membership::archived,
-                            groups::kind,
-                            groups::dm_uid1,
-                            groups::dm_uid2,
-                        ))
-                        .filter(
-                            groups::last_message_at
-                                .lt(c_at)
-                                .or(groups::last_message_at
-                                    .eq(c_at)
-                                    .and(groups::id.lt(cursor_id)))
-                                .or(groups::last_message_at.is_null()),
-                        )
-                        .order_by((
-                            groups::last_message_at.desc().nulls_last(),
-                            groups::id.desc(),
-                        ))
-                        .limit(limit + 1)
-                        .load(conn)?,
-                    None => base_query
-                        .select((
-                            groups::id,
-                            groups::name,
-                            media::storage_key.nullable(),
-                            groups::last_message_at,
-                            group_membership::last_read_message_id,
-                            messages_schema::all_columns.nullable(),
-                            (
-                                group_membership::muted_until,
-                                group_membership::mute_override,
-                            ),
-                            group_membership::archived,
-                            groups::kind,
-                            groups::dm_uid1,
-                            groups::dm_uid2,
-                        ))
-                        .filter(
-                            groups::last_message_at
-                                .is_null()
-                                .and(groups::id.lt(cursor_id)),
-                        )
-                        .order_by((
-                            groups::last_message_at.desc().nulls_last(),
-                            groups::id.desc(),
-                        ))
-                        .limit(limit + 1)
-                        .load(conn)?,
-                }
-            }
-        };
-
+        let chat_settings = crate::services::user::load_chat_settings(conn, uid)?;
+        let rows = crate::services::chat_list::load_chat_page(
+            conn,
+            uid,
+            archived,
+            q.chat_id,
+            q.after,
+            limit + 1,
+            !chat_settings.show_membership_messages,
+        )?;
         let has_more = rows.len() as i64 > limit;
-        let items_to_process: Vec<RowType> = rows.into_iter().take(limit as usize).collect();
-
-        let messages_to_process: Vec<crate::models::Message> = items_to_process
+        let items_to_process: Vec<_> = rows.into_iter().take(limit as usize).collect();
+        let messages_to_process = items_to_process
             .iter()
-            .filter_map(|(_, _, _, _, _, msg, _, _, _, _, _)| msg.clone())
+            .filter_map(|row| row.last_message.clone())
             .collect();
 
         let memberships = items_to_process
             .iter()
-            .map(
-                |(
-                    id,
-                    _name,
-                    _avatar_key,
-                    _last_message_at,
-                    last_read_message_id,
-                    _msg,
-                    setting,
-                    archived,
-                    kind,
-                    _dm_uid1,
-                    _dm_uid2,
-                )| crate::services::unread::ChatUnreadMembership {
-                    chat_id: *id,
-                    last_read_message_id: *last_read_message_id,
-                    archived: *archived,
-                    is_muted: setting.is_muted(*kind, defaults, now),
-                },
-            )
+            .map(|row| crate::services::unread::ChatUnreadMembership {
+                hide_membership_messages:
+                    crate::services::system_messages::hides_membership_messages(
+                        chat_settings.show_membership_messages && row.membership_allowed,
+                        row.kind,
+                        None,
+                    ),
+                chat_id: row.chat_id,
+                last_read_message_id: row.last_read_message_id,
+                archived: row.archived,
+                is_muted: row.notification_setting.is_muted(row.kind, defaults, now),
+            })
             .collect::<Vec<_>>();
         let unread_counts = state
             .unread_service
@@ -333,12 +194,12 @@ async fn get_chats(
 
         let dm_peer_uids: Vec<i32> = items_to_process
             .iter()
-            .filter_map(|(.., kind, dm_uid1, dm_uid2)| {
-                if *kind == GroupKind::Dm {
-                    if *dm_uid1 == Some(uid) {
-                        *dm_uid2
+            .filter_map(|row| {
+                if row.kind == GroupKind::Dm {
+                    if row.dm_uid1 == Some(uid) {
+                        row.dm_uid2
                     } else {
-                        *dm_uid1
+                        row.dm_uid1
                     }
                 } else {
                     None
@@ -346,26 +207,28 @@ async fn get_chats(
             })
             .collect();
         let dm_peer_summaries = build_member_summary_map(conn, &state, &dm_peer_uids)?;
-        let chat_ids: Vec<i64> = items_to_process.iter().map(|row| row.0).collect();
+        let chat_ids: Vec<i64> = items_to_process.iter().map(|row| row.chat_id).collect();
         let peer_receipts =
             crate::services::read_receipts::visible_chat_receipts(conn, uid, &chat_ids)?;
 
         let chats: Vec<ChatListItem> = items_to_process
             .into_iter()
             .map(
-                |(
-                    id,
-                    name,
-                    avatar_key,
-                    last_message_at,
-                    last_read_message_id,
-                    msg,
-                    setting,
-                    archived,
-                    kind,
-                    dm_uid1,
-                    dm_uid2,
-                )| {
+                |crate::services::chat_list::ChatListRow {
+                     chat_id: id,
+                     name,
+                     avatar_key,
+                     last_message_at,
+                     last_read_message_id,
+                     last_message: msg,
+                     notification_setting: setting,
+                     archived,
+                     kind,
+                     dm_uid1,
+                     dm_uid2,
+                     membership_visibility,
+                     membership_allowed,
+                 }| {
                     let unread_count = unread_counts.get(&id).copied().unwrap_or(0);
                     let unread_mentions = mention_counts.get(&id).copied().unwrap_or(0);
                     let unread_reactions = reaction_counts.get(&id).copied().unwrap_or(0);
@@ -383,6 +246,10 @@ async fn get_chats(
                         None
                     };
                     ChatListItem {
+                        membership_message_policy: crate::dto::groups::MembershipMessagePolicy {
+                            visibility: membership_visibility,
+                            can_view: membership_allowed,
+                        },
                         id,
                         name: Some(name),
                         avatar: avatar_key
@@ -408,7 +275,11 @@ async fn get_chats(
 
         let next_cursor = has_more.then(|| chats.last().map(|c| c.id)).flatten();
 
-        Ok(ListChatsResponse { chats, next_cursor })
+        Ok(ListChatsResponse {
+            chats,
+            next_cursor,
+            chat_settings,
+        })
     })
     .await
     .map_err(|error| {
@@ -614,11 +485,20 @@ async fn mark_as_unread(
             let unread_count =
                 state
                     .unread_service
-                    .count_chat_unread(conn, chat_id, Some(message_id))?;
+                    .count_chat_unread(conn, uid, chat_id, Some(message_id))?;
             (Some(message_id), unread_count)
         } else {
             use crate::schema::messages::dsl;
+            let hide = crate::services::system_messages::load_membership_message_filter(
+                conn, uid, chat_id,
+            )?;
+            let predicate = if hide {
+                crate::services::system_messages::NON_MEMBERSHIP_PREDICATE
+            } else {
+                "TRUE"
+            };
             let last_two: Vec<i64> = messages_schema::table
+                .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(predicate))
                 .filter(
                     dsl::chat_id
                         .eq(chat_id)
@@ -717,7 +597,7 @@ async fn get_chat_unread_count(
         let unread_count =
             state
                 .unread_service
-                .count_chat_unread(conn, chat_id, last_read_message_id)?;
+                .count_chat_unread(conn, uid, chat_id, last_read_message_id)?;
         let unread_mentions = state.unread_service.count_chat_unread_mentions(
             conn,
             uid,

@@ -579,6 +579,7 @@ mod tests {
 
     fn message_for_save() -> Message {
         Message {
+            system_kind: None,
             forwarded_from_message_id: None,
             id: 10,
             message: Some("hello".to_string()),

@@ -191,7 +191,7 @@ async fn get_messages(
     let max = validate_limit(q.max, MAX_MESSAGES_LIMIT);
 
     let q_thread_id = q.thread_id;
-    macro_rules! base_query {
+    macro_rules! raw_query {
         () => {{
             let mut b = messages::table
                 .into_boxed()
@@ -211,6 +211,26 @@ async fn get_messages(
                 );
             }
             b
+        }};
+    }
+
+    let (chat_settings, kind, membership_message_policy) =
+        crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?;
+    let filtering = !membership_message_policy.can_view
+        || crate::services::system_messages::hides_membership_messages(
+            chat_settings.show_membership_messages,
+            kind,
+            q_thread_id,
+        );
+    macro_rules! base_query {
+        () => {{
+            let mut query = raw_query!();
+            if filtering {
+                query = query.filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+                    crate::services::system_messages::NON_MEMBERSHIP_PREDICATE,
+                ));
+            }
+            query
         }};
     }
 
@@ -250,10 +270,29 @@ async fn get_messages(
         // Combine: older reversed (oldest first) + newer (target first, ascending)
         let mut combined: Vec<Message> = older_to_use.into_iter().rev().collect();
         combined.extend(newer_to_use);
-
+        // Preserve an explicitly requested hidden target for exact-link validation.
+        // It remains hidden by the client, which positions its visible neighbour.
+        if filtering && membership_message_policy.can_view {
+            if let Some(target_message) = raw_query!()
+                .filter(dsl::id.eq(target))
+                .select(Message::as_select())
+                .first::<Message>(conn)
+                .optional()?
+            {
+                if target_message
+                    .system_kind
+                    .is_some_and(|kind| kind.is_membership())
+                {
+                    combined.push(target_message);
+                    combined.sort_by_key(|message| message.id);
+                }
+            }
+        }
         let messages_vec = attach_metadata(conn, combined, &state.media, &state.avatars, uid).await;
 
         return Ok(Json(ListMessagesResponse {
+            membership_message_policy,
+            chat_settings,
             messages: messages_vec,
             next_cursor: older_cursor,
             prev_cursor: newer_cursor,
@@ -276,11 +315,12 @@ async fn get_messages(
         let newer_cursor = has_more
             .then(|| messages_to_process.last().map(|m| m.id))
             .flatten();
-
         let messages_vec =
             attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
 
         return Ok(Json(ListMessagesResponse {
+            membership_message_policy,
+            chat_settings,
             messages: messages_vec,
             next_cursor: None,
             prev_cursor: newer_cursor,
@@ -312,11 +352,12 @@ async fn get_messages(
 
     // Reverse to return ASC (oldest first)
     let messages_to_process: Vec<Message> = messages_to_process.into_iter().rev().collect();
-
     let messages_vec =
         attach_metadata(conn, messages_to_process, &state.media, &state.avatars, uid).await;
 
     Ok(Json(ListMessagesResponse {
+        membership_message_policy,
+        chat_settings,
         messages: messages_vec,
         next_cursor: older_cursor,
         prev_cursor: None,
@@ -550,6 +591,13 @@ async fn get_message(
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
 
+    if message.system_kind.is_some_and(|kind| kind.is_membership())
+        && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
+            .2
+            .can_view
+    {
+        return Err(AppError::NotFound("Message not found"));
+    }
     let messages_vec =
         attach_metadata(conn, vec![message], &state.media, &state.avatars, uid).await;
     let response = messages_vec.into_iter().next().unwrap();
@@ -592,6 +640,7 @@ async fn post_message(
             conn,
             &state,
             PreparedMessageSend {
+                system_kind: None,
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
@@ -1039,6 +1088,7 @@ pub(super) async fn post_thread_message(
             conn,
             &state,
             PreparedMessageSend {
+                system_kind: None,
                 forwarded_from_message_id: None,
                 chat_id,
                 sender_uid: uid,
@@ -1221,6 +1271,13 @@ async fn patch_message(
             .first(conn)
             .optional()?
             .ok_or(AppError::NotFound("Message not found"))?;
+        if message.system_kind.is_some_and(|kind| kind.is_membership())
+            && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
+                .2
+                .can_view
+        {
+            return Err(AppError::NotFound("Message not found"));
+        }
         if message.sender_uid != uid {
             return Err(AppError::Forbidden("You can only edit your own messages"));
         }
@@ -1401,6 +1458,13 @@ async fn delete_message(
         .optional()?
         .ok_or(AppError::NotFound("Message not found"))?;
 
+    if message.system_kind.is_some_and(|kind| kind.is_membership())
+        && !crate::services::user::load_chat_settings_for_chat(conn, uid, chat_id)?
+            .2
+            .can_view
+    {
+        return Err(AppError::NotFound("Message not found"));
+    }
     if message.sender_uid != uid {
         // Not the sender — allow if requester is an admin
         let role = load_requester_group_role(conn, chat_id, uid)?;
@@ -1486,11 +1550,17 @@ async fn delete_message(
     .next()
     .unwrap();
 
-    // Broadcast deletion to all members
-    let member_uids: Vec<i32> = {
-        use crate::schema::group_membership as gm_dsl;
+    // Membership deletions obey the same audience as their original messages.
+    let member_uids: Vec<i32> = if message.system_kind.is_some_and(|kind| kind.is_membership()) {
         group_membership::table
-            .filter(gm_dsl::chat_id.eq(chat_id))
+            .inner_join(groups::table)
+            .filter(groups::id.eq(chat_id))
+            .filter(crate::services::system_messages::membership_allowed())
+            .select(group_membership::uid)
+            .load(conn)?
+    } else {
+        group_membership::table
+            .filter(group_membership::chat_id.eq(chat_id))
             .select(group_membership::uid)
             .load(conn)?
     };

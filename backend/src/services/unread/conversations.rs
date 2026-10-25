@@ -48,6 +48,8 @@ pub fn validate_conversation_views(views: &[ConversationView]) -> Result<(), App
 
 #[derive(QueryableByName)]
 struct Scope {
+    #[diesel(sql_type = Bool)]
+    membership_allowed: bool,
     #[diesel(sql_type = BigInt)]
     chat_id: i64,
     #[diesel(sql_type = Nullable<BigInt>)]
@@ -131,12 +133,13 @@ impl UnreadService {
             "SELECT gm.chat_id, NULL::BIGINT AS thread_id, g.kind = 'dm' AS is_dm,
                     gm.archived, (COALESCE(gm.muted_until > statement_timestamp(), FALSE)
                         OR COALESCE(gm.mute_override, CASE WHEN g.kind = 'dm' THEN $3 ELSE $2 END)) AS muted,
-                    gm.last_read_message_id
+                    gm.last_read_message_id,
+                    (g.kind = 'dm' OR g.membership_message_visibility = 'members' OR (g.membership_message_visibility = 'admins' AND gm.role = 'admin')) AS membership_allowed
              FROM group_membership gm JOIN groups g ON g.id = gm.chat_id
              WHERE gm.uid = $1
              UNION ALL
              SELECT ts.chat_id, ts.thread_root_id AS thread_id, g.kind = 'dm' AS is_dm,
-                    ts.archived, ts.archived AS muted, ts.last_read_message_id
+                    ts.archived, ts.archived AS muted, ts.last_read_message_id, TRUE AS membership_allowed
              FROM thread_user_states ts
              JOIN group_membership gm ON gm.chat_id = ts.chat_id AND gm.uid = ts.uid
              JOIN groups g ON g.id = ts.chat_id
@@ -146,10 +149,21 @@ impl UnreadService {
         ).bind::<Integer, _>(uid).bind::<Bool, _>(defaults.group_chats_muted).bind::<Bool, _>(defaults.direct_chats_muted).load::<Scope>(conn)?
             .into_iter().filter(|scope| selections.iter().any(|selection| selection.contains(scope))).collect::<Vec<_>>();
 
+        let settings = crate::services::user::load_chat_settings(conn, uid)?;
         let memberships = scopes
             .iter()
             .filter(|scope| scope.thread_id.is_none())
             .map(|scope| ChatUnreadMembership {
+                hide_membership_messages:
+                    crate::services::system_messages::hides_membership_messages(
+                        settings.show_membership_messages && scope.membership_allowed,
+                        if scope.is_dm {
+                            crate::models::GroupKind::Dm
+                        } else {
+                            crate::models::GroupKind::Group
+                        },
+                        scope.thread_id,
+                    ),
                 chat_id: scope.chat_id,
                 last_read_message_id: scope.last_read_message_id,
                 archived: scope.archived,
@@ -385,6 +399,7 @@ mod tests {
         let selections = views.iter().map(Selection::new).collect::<Vec<_>>();
         let scopes = vec![
             Scope {
+                membership_allowed: true,
                 chat_id: 1,
                 thread_id: None,
                 is_dm: false,
@@ -393,6 +408,7 @@ mod tests {
                 last_read_message_id: None,
             },
             Scope {
+                membership_allowed: true,
                 chat_id: 1,
                 thread_id: Some(10),
                 is_dm: false,
@@ -401,6 +417,7 @@ mod tests {
                 last_read_message_id: None,
             },
             Scope {
+                membership_allowed: true,
                 chat_id: 2,
                 thread_id: None,
                 is_dm: false,
@@ -451,6 +468,7 @@ mod tests {
         let selections = views.iter().map(Selection::new).collect::<Vec<_>>();
         let mut scopes = (1..=4)
             .map(|chat_id| Scope {
+                membership_allowed: true,
                 chat_id,
                 thread_id: None,
                 is_dm: false,
@@ -494,8 +512,8 @@ mod tests {
         };
         let mut conn = PgConnection::establish(&url).unwrap();
         conn.batch_execute("
-            CREATE TEMP TABLE user_extra (uid INTEGER PRIMARY KEY, mute_group_chats_by_default BOOLEAN, mute_direct_chats_by_default BOOLEAN);
-            INSERT INTO user_extra VALUES (1, FALSE, FALSE);
+            CREATE TEMP TABLE user_extra (uid INTEGER PRIMARY KEY, mute_group_chats_by_default BOOLEAN, mute_direct_chats_by_default BOOLEAN, show_membership_messages BOOLEAN NOT NULL DEFAULT true);
+            INSERT INTO user_extra (uid, mute_group_chats_by_default, mute_direct_chats_by_default) VALUES (1, FALSE, FALSE);
             CREATE TEMP TABLE groups (id BIGINT PRIMARY KEY, kind TEXT NOT NULL);
             CREATE TEMP TABLE group_membership (chat_id BIGINT, uid INTEGER, archived BOOLEAN, last_read_message_id BIGINT, muted_until TIMESTAMPTZ, PRIMARY KEY(chat_id, uid));
             CREATE TEMP TABLE messages (id BIGINT PRIMARY KEY, chat_id BIGINT, reply_root_id BIGINT, has_thread BOOLEAN DEFAULT FALSE, is_published BOOLEAN DEFAULT TRUE, deleted_at TIMESTAMPTZ);
@@ -504,6 +522,8 @@ mod tests {
             INSERT INTO groups VALUES (1,'group'),(2,'dm'),(3,'group'),(4,'group');
             INSERT INTO group_membership VALUES (1,1,FALSE,12,'9999-01-01'),(2,1,FALSE,20,NULL),(4,1,TRUE,0,NULL);
             ALTER TABLE group_membership ADD COLUMN mute_override BOOLEAN;
+            ALTER TABLE group_membership ADD COLUMN role TEXT NOT NULL DEFAULT 'member';
+            ALTER TABLE groups ADD COLUMN membership_message_visibility TEXT NOT NULL DEFAULT 'members';
             INSERT INTO messages(id,chat_id,has_thread) VALUES (10,1,TRUE),(12,1,TRUE),(13,1,FALSE),(20,2,TRUE),(21,2,FALSE),(30,3,TRUE),(31,3,FALSE),(40,4,FALSE);
             INSERT INTO messages(id,chat_id,reply_root_id) VALUES (1001,1,10),(1002,1,10),(2001,2,20),(1201,1,12),(3001,3,30);
             INSERT INTO messages(id,chat_id,reply_root_id,is_published) VALUES (1003,1,10,FALSE);
@@ -649,6 +669,28 @@ mod tests {
         assert_eq!(result[0].unread_unmuted_attention_count, 0);
         assert_eq!(result[0].unread_unmuted_message_count, 2);
         assert_eq!(result[0].unread_unmuted_conversation_count, 2);
+        // Preference changes affect only the group main scope, not its threads or DMs.
+        conn.batch_execute("ALTER TABLE messages ADD COLUMN system_kind TEXT;
+            INSERT INTO messages(id,chat_id,reply_root_id,system_kind) VALUES
+                (14,1,NULL,'member_joined'), (1005,1,10,'member_joined'), (22,2,NULL,'member_joined');").unwrap();
+        assert_eq!(
+            service
+                .conversation_summaries(&mut conn, 1, &views)
+                .unwrap()[0]
+                .unread_message_count,
+            5
+        );
+        conn.batch_execute("UPDATE user_extra SET show_membership_messages=FALSE WHERE uid=1")
+            .unwrap();
+        assert_eq!(
+            service
+                .conversation_summaries(&mut conn, 1, &views)
+                .unwrap()[0]
+                .unread_message_count,
+            4
+        );
+        conn.batch_execute("DELETE FROM messages WHERE id IN (14,1005,22)")
+            .unwrap();
         conn.batch_execute("DELETE FROM group_membership WHERE chat_id=2")
             .unwrap();
         let result = service

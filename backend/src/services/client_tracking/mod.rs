@@ -19,8 +19,8 @@ use diesel::PgConnection;
 use tracing::{error, info, warn};
 
 use crate::models::{
-    ActivityDailyMetric, ClientRecord, FriendAddVerificationMode, NewActivityDailyMetric,
-    NewClientRecord, NewUserExtra, UserExtra,
+    ActivityDailyMetric, ClientRecord, NewActivityDailyMetric, NewClientRecord, NewUserExtra,
+    UserExtra,
 };
 use crate::schema::{activity_daily_metrics, clients, push_subscriptions, user_extra};
 use crate::utils::auth::{extract_auth_context, X_APP_VERSION, X_ON_BEHALF_OF};
@@ -247,19 +247,11 @@ impl ClientTrackingService {
                         .get_result::<Option<String>>(conn)?
                 };
 
-                let new_user = NewUserExtra {
-                    uid,
-                    first_seen_at: existing_user
-                        .as_ref()
-                        .map_or(now, |user| user.first_seen_at),
-                    last_seen_at: now,
-                    sticker_pack_order: existing_user
-                        .as_ref()
-                        .map_or(serde_json::json!([]), |u| u.sticker_pack_order.clone()),
-                    verification_mode: FriendAddVerificationMode::Direct,
-                    verification_question: None,
-                    presence_visibility: crate::models::PresenceVisibility::Everyone,
-                };
+                let mut new_user = NewUserExtra::new(uid, now);
+                if let Some(existing) = &existing_user {
+                    new_user.first_seen_at = existing.first_seen_at;
+                    new_user.sticker_pack_order = existing.sticker_pack_order.clone();
+                }
 
                 diesel::insert_into(user_extra::table)
                     .values(&new_user)
