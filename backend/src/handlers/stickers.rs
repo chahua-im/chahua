@@ -1,6 +1,6 @@
 use aws_sdk_s3::primitives::ByteStream;
 use axum::{
-    extract::{Json, Multipart, Path, State},
+    extract::{Json, Multipart, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json as AxumJson,
@@ -8,30 +8,30 @@ use axum::{
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::PgConnection;
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::dto::stickers::{
-    FavoriteStickerListResponse, StickerDetailResponse, StickerMediaResponse,
-    StickerPackDetailResponse, StickerPackListResponse, StickerPackPreviewSticker,
-    StickerPackSummary, StickerSummary,
+    CreateStickerPackBody, FavoriteStickerListResponse, StickerDetailResponse,
+    StickerMediaResponse, StickerPackDetailResponse, StickerPackDiscoveryItem,
+    StickerPackDiscoveryQuery, StickerPackDiscoveryResponse, StickerPackListResponse,
+    StickerPackPreviewSticker, StickerPackSummary, StickerSummary, UpdateStickerPackBody,
 };
-use crate::dto::users::StickerPackOrderItem;
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::extractors::DbConn;
 use crate::{
     models::{
         Media, MediaPurpose, NewMedia, NewSticker, NewStickerPack, Sticker, StickerPack,
-        StickerPackSticker, UpdateStickerPack, UserFavoriteSticker, UserStickerPackSubscription,
+        StickerPackSticker, UpdateStickerPack, UserFavoriteSticker,
     },
     schema::{
         media, sticker_pack_stickers, sticker_packs, stickers, user_favorite_stickers,
         user_sticker_pack_subscriptions,
     },
     services::{
-        image_processing::process_sticker, media::build_storage_key, user::lookup_user_profiles,
+        image_processing::process_sticker, media::build_storage_key, sticker_discovery,
+        stickers as packs_service, user::lookup_user_profiles,
     },
     utils::{auth::CurrentUid, ids},
     AppState,
@@ -41,18 +41,70 @@ const MAX_STICKER_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
 const STICKER_STORAGE_PREFIX: &str = "stickers";
 const MAX_STICKER_EMOJI_GRAPHEMES: usize = 4;
 
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct CreateStickerPackBody {
-    name: String,
-    description: Option<String>,
-}
-
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct UpdateStickerPackBody {
-    name: Option<String>,
-    description: Option<String>,
+#[utoipa::path(
+    get,
+    path = "/packs",
+    tag = "stickers",
+    params(StickerPackDiscoveryQuery),
+    responses(
+        (status = 200, description = "Public nonempty sticker packs", body = StickerPackDiscoveryResponse),
+        (status = 400, description = "Invalid search or pagination parameters")
+    ),
+    security(("bearer_jwt" = []))
+)]
+async fn get_packs(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Query(query): Query<StickerPackDiscoveryQuery>,
+) -> Result<AxumJson<StickerPackDiscoveryResponse>, AppError> {
+    // One snapshot keeps ranked IDs, visibility and metadata consistent.
+    let response = conn
+        .build_transaction()
+        .read_only()
+        .repeatable_read()
+        .run(|conn| {
+            let ranking = sticker_discovery::discover_packs(conn, &query, Utc::now())?;
+            let ids: Vec<i64> = ranking.rows.iter().map(|row| row.pack_id).collect();
+            let packs = sticker_packs::table
+                .filter(sticker_packs::id.eq_any(&ids))
+                .select(StickerPack::as_select())
+                .load(conn)?;
+            let mut previews = sticker_discovery::load_preview_stickers(conn, &state.media, &ids)?;
+            let first_previews = previews
+                .iter()
+                .filter_map(|(&id, stickers)| {
+                    stickers.first().cloned().map(|sticker| (id, sticker))
+                })
+                .collect();
+            let mut summaries: HashMap<_, _> =
+                build_pack_summaries_with_previews(conn, uid, packs, first_previews)?
+                    .into_iter()
+                    .map(|pack| (pack.id, pack))
+                    .collect();
+            let packs = ranking
+                .rows
+                .into_iter()
+                .map(|row| {
+                    let pack = summaries.remove(&row.pack_id).ok_or(AppError::Internal(
+                        "Sticker pack missing from discovery snapshot",
+                    ))?;
+                    Ok(StickerPackDiscoveryItem {
+                        pack,
+                        subscriber_count: row.subscriber_count,
+                        recent_subscriber_count: row.recent_subscriber_count,
+                        preview_stickers: previews.remove(&row.pack_id).unwrap_or_default(),
+                    })
+                })
+                .collect::<Result<Vec<_>, AppError>>()?;
+            Ok::<_, AppError>(StickerPackDiscoveryResponse {
+                packs,
+                has_more: ranking.has_more,
+                recent_window_days: sticker_discovery::RECENT_WINDOW_DAYS,
+                stats_updated_at: ranking.stats_updated_at,
+            })
+        })?;
+    Ok(AxumJson(response))
 }
 
 fn normalize_required_name(input: &str) -> Result<String, AppError> {
@@ -184,6 +236,7 @@ fn load_first_stickers_for_packs(
         .order((
             sticker_pack_stickers::pack_id.asc(),
             sticker_pack_stickers::added_at.asc(),
+            sticker_pack_stickers::sticker_id.asc(),
         ))
         .distinct_on(sticker_pack_stickers::pack_id)
         .select((
@@ -215,6 +268,17 @@ fn build_pack_summaries(
     packs: Vec<StickerPack>,
 ) -> Result<Vec<StickerPackSummary>, AppError> {
     let pack_ids: Vec<i64> = packs.iter().map(|pack| pack.id).collect();
+    let previews = load_first_stickers_for_packs(conn, state, &pack_ids)?;
+    build_pack_summaries_with_previews(conn, uid, packs, previews)
+}
+
+fn build_pack_summaries_with_previews(
+    conn: &mut PgConnection,
+    uid: i32,
+    packs: Vec<StickerPack>,
+    mut previews: HashMap<i64, StickerPackPreviewSticker>,
+) -> Result<Vec<StickerPackSummary>, AppError> {
+    let pack_ids: Vec<i64> = packs.iter().map(|pack| pack.id).collect();
     let owner_uids: Vec<i32> = packs
         .iter()
         .map(|pack| pack.owner_uid)
@@ -224,7 +288,6 @@ fn build_pack_summaries(
 
     let counts = load_pack_counts(conn, &pack_ids)?;
     let subscribed = load_subscribed_pack_ids(conn, uid, &pack_ids)?;
-    let mut previews = load_first_stickers_for_packs(conn, state, &pack_ids)?;
     let owner_profiles = lookup_user_profiles(conn, &owner_uids).unwrap_or_default();
 
     Ok(packs
@@ -241,6 +304,7 @@ fn build_pack_summaries(
                 description: pack.description,
                 created_at: pack.created_at,
                 updated_at: pack.updated_at,
+                visibility: pack.visibility,
                 sticker_count: *counts.get(&pack.id).unwrap_or(&0),
                 is_subscribed: subscribed.contains(&pack.id),
                 preview_sticker,
@@ -294,7 +358,7 @@ fn build_sticker_summaries(
     tag = "stickers",
     request_body = CreateStickerPackBody,
     responses(
-        (status = 201, description = "Sticker pack created", body = StickerPackDetailResponse)
+        (status = 200, description = "Sticker pack created", body = StickerPackSummary)
     ),
     security(("bearer_jwt" = []))
 )]
@@ -313,37 +377,23 @@ async fn post_pack(
         AppError::Internal("Failed to generate ID")
     })?;
 
-    let pack = conn.transaction::<StickerPack, diesel::result::Error, _>(|conn| {
-        diesel::insert_into(sticker_packs::table)
-            .values(&NewStickerPack {
-                id: pack_id,
-                owner_uid: uid,
-                name: name.clone(),
-                description: body.description.clone(),
-                created_at: now,
-                updated_at: now,
-            })
-            .execute(conn)?;
-
-        diesel::insert_into(user_sticker_pack_subscriptions::table)
-            .values(&UserStickerPackSubscription {
-                uid,
-                pack_id,
-                subscribed_at: now,
-            })
-            .execute(conn)?;
-
-        sticker_packs::table
-            .filter(sticker_packs::id.eq(pack_id))
-            .select(StickerPack::as_select())
-            .first(conn)
-    })?;
-
-    let summary = build_pack_summaries(conn, &state, uid, vec![pack])?
+    let change = packs_service::create_pack(
+        conn,
+        NewStickerPack {
+            id: pack_id,
+            owner_uid: uid,
+            name,
+            description: body.description,
+            created_at: now,
+            updated_at: now,
+            visibility: body.visibility,
+        },
+    )?;
+    broadcast_orders(&state, change.orders);
+    let summary = build_pack_summaries(conn, &state, uid, vec![change.pack])?
         .into_iter()
         .next()
         .unwrap();
-    add_to_sticker_pack_order(conn, uid, pack_id, &state)?;
     Ok(AxumJson(summary))
 }
 
@@ -356,7 +406,7 @@ async fn post_pack(
         ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
-        (status = 200, description = "Sticker pack updated", body = StickerPackDetailResponse)
+        (status = 200, description = "Sticker pack updated", body = StickerPackSummary)
     ),
     security(("bearer_jwt" = []))
 )]
@@ -368,28 +418,24 @@ async fn patch_pack(
     Json(body): Json<UpdateStickerPackBody>,
 ) -> Result<AxumJson<StickerPackSummary>, AppError> {
     let conn = &mut *conn;
-    let _pack = require_pack_owner(conn, pack_id, uid)?;
-
-    let name = match body.name {
-        Some(ref name) => Some(normalize_required_name(name)?),
-        None => None,
-    };
-
-    diesel::update(sticker_packs::table.filter(sticker_packs::id.eq(pack_id)))
-        .set(&UpdateStickerPack {
+    let name = body
+        .name
+        .as_deref()
+        .map(normalize_required_name)
+        .transpose()?;
+    let change = packs_service::update_pack(
+        conn,
+        uid,
+        pack_id,
+        UpdateStickerPack {
             name,
             description: body.description,
             updated_at: Utc::now(),
-        })
-        .execute(conn)?;
-
-    let pack = sticker_packs::table
-        .filter(sticker_packs::id.eq(pack_id))
-        .select(StickerPack::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Sticker pack not found"))?;
-    let summary = build_pack_summaries(conn, &state, uid, vec![pack])?
+            visibility: body.visibility,
+        },
+    )?;
+    broadcast_orders(&state, change.orders);
+    let summary = build_pack_summaries(conn, &state, uid, vec![change.pack])?
         .into_iter()
         .next()
         .unwrap();
@@ -415,10 +461,8 @@ async fn delete_pack(
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     let conn = &mut *conn;
-    let _pack = require_pack_owner(conn, pack_id, uid)?;
-
-    diesel::delete(sticker_packs::table.filter(sticker_packs::id.eq(pack_id))).execute(conn)?;
-    remove_from_sticker_pack_order(conn, uid, pack_id, &state)?;
+    let orders = packs_service::delete_pack(conn, uid, pack_id)?;
+    broadcast_orders(&state, orders);
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -431,7 +475,8 @@ async fn delete_pack(
         ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
-        (status = 200, description = "Sticker pack details", body = StickerPackDetailResponse)
+        (status = 200, description = "Sticker pack details", body = StickerPackDetailResponse),
+        (status = 404, description = "Sticker pack not found or private")
     ),
     security(("bearer_jwt" = []))
 )]
@@ -441,22 +486,21 @@ async fn get_pack(
     Path(pack_id): Path<i64>,
     mut conn: DbConn,
 ) -> Result<AxumJson<StickerPackDetailResponse>, AppError> {
-    let conn = &mut *conn;
-    let pack = sticker_packs::table
-        .filter(sticker_packs::id.eq(pack_id))
-        .select(StickerPack::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Sticker pack not found"))?;
+    conn.build_transaction()
+        .read_only()
+        .repeatable_read()
+        .run(|conn| {
+            let pack = packs_service::visible_pack(conn, uid, pack_id)?;
 
-    let sticker_rows = load_sticker_rows_for_pack(conn, pack_id)?;
-    let stickers = build_sticker_summaries(conn, &state, uid, sticker_rows)?;
-    let pack = build_pack_summaries(conn, &state, uid, vec![pack])?
-        .into_iter()
-        .next()
-        .unwrap();
+            let sticker_rows = load_sticker_rows_for_pack(conn, pack_id)?;
+            let stickers = build_sticker_summaries(conn, &state, uid, sticker_rows)?;
+            let pack = build_pack_summaries(conn, &state, uid, vec![pack])?
+                .into_iter()
+                .next()
+                .unwrap();
 
-    Ok(AxumJson(StickerPackDetailResponse { pack, stickers }))
+            Ok(AxumJson(StickerPackDetailResponse { pack, stickers }))
+        })
 }
 
 #[utoipa::path(
@@ -473,17 +517,16 @@ async fn get_my_subscribed_packs(
     State(state): State<AppState>,
     mut conn: DbConn,
 ) -> Result<AxumJson<StickerPackListResponse>, AppError> {
-    let conn = &mut *conn;
-    let packs: Vec<StickerPack> = user_sticker_pack_subscriptions::table
-        .inner_join(sticker_packs::table)
-        .filter(user_sticker_pack_subscriptions::uid.eq(uid))
-        .order(user_sticker_pack_subscriptions::subscribed_at.desc())
-        .select(StickerPack::as_select())
-        .load(conn)?;
+    conn.build_transaction()
+        .read_only()
+        .repeatable_read()
+        .run(|conn| {
+            let packs = packs_service::subscribed_packs(conn, uid)?;
 
-    Ok(AxumJson(StickerPackListResponse {
-        packs: build_pack_summaries(conn, &state, uid, packs)?,
-    }))
+            Ok(AxumJson(StickerPackListResponse {
+                packs: build_pack_summaries(conn, &state, uid, packs)?,
+            }))
+        })
 }
 
 #[utoipa::path(
@@ -520,7 +563,8 @@ async fn get_my_owned_packs(
         ("pack_id" = String, Path, description = "Sticker pack ID")
     ),
     responses(
-        (status = 204, description = "Subscribed to sticker pack")
+        (status = 204, description = "Subscribed to sticker pack"),
+        (status = 404, description = "Sticker pack not found or private")
     ),
     security(("bearer_jwt" = []))
 )]
@@ -531,24 +575,8 @@ async fn put_subscription(
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     let conn = &mut *conn;
-    let pack: StickerPack = sticker_packs::table
-        .filter(sticker_packs::id.eq(pack_id))
-        .select(StickerPack::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Sticker pack not found"))?;
-
-    diesel::insert_into(user_sticker_pack_subscriptions::table)
-        .values(&UserStickerPackSubscription {
-            uid,
-            pack_id,
-            subscribed_at: Utc::now(),
-        })
-        .on_conflict_do_nothing()
-        .execute(conn)?;
-
-    // Also update order
-    add_to_sticker_pack_order(conn, uid, pack.id, &state)?;
+    let order = packs_service::subscribe(conn, uid, pack_id)?;
+    broadcast_orders(&state, vec![packs_service::OrderUpdate { uid, order }]);
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -572,24 +600,8 @@ async fn delete_subscription(
     mut conn: DbConn,
 ) -> Result<StatusCode, AppError> {
     let conn = &mut *conn;
-    let pack: StickerPack = sticker_packs::table
-        .filter(sticker_packs::id.eq(pack_id))
-        .select(StickerPack::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Sticker pack not found"))?;
-
-    if pack.owner_uid == uid {
-        return Err(AppError::BadRequest("Pack owner cannot unsubscribe"));
-    }
-
-    diesel::delete(
-        user_sticker_pack_subscriptions::table
-            .filter(user_sticker_pack_subscriptions::uid.eq(uid))
-            .filter(user_sticker_pack_subscriptions::pack_id.eq(pack_id)),
-    )
-    .execute(conn)?;
-    remove_from_sticker_pack_order(conn, uid, pack_id, &state)?;
+    let order = packs_service::unsubscribe(conn, uid, pack_id)?;
+    broadcast_orders(&state, vec![packs_service::OrderUpdate { uid, order }]);
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -887,34 +899,31 @@ async fn get_sticker(
     Path(sticker_id): Path<i64>,
     mut conn: DbConn,
 ) -> Result<AxumJson<StickerDetailResponse>, AppError> {
-    let conn = &mut *conn;
-    let (sticker, media_row): (Sticker, Media) = stickers::table
-        .inner_join(media::table)
-        .filter(stickers::id.eq(sticker_id))
-        .select((Sticker::as_select(), Media::as_select()))
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Sticker not found"))?;
+    conn.build_transaction()
+        .read_only()
+        .repeatable_read()
+        .run(|conn| {
+            let (sticker, media_row): (Sticker, Media) = stickers::table
+                .inner_join(media::table)
+                .filter(stickers::id.eq(sticker_id))
+                .select((Sticker::as_select(), Media::as_select()))
+                .first(conn)
+                .optional()?
+                .ok_or(AppError::NotFound("Sticker not found"))?;
 
-    let sticker_summary = build_sticker_summaries(conn, &state, uid, vec![(sticker, media_row)])?
-        .into_iter()
-        .next()
-        .unwrap();
+            let sticker_summary =
+                build_sticker_summaries(conn, &state, uid, vec![(sticker, media_row)])?
+                    .into_iter()
+                    .next()
+                    .unwrap();
 
-    let packs: Vec<StickerPack> = sticker_pack_stickers::table
-        .inner_join(sticker_packs::table)
-        .filter(sticker_pack_stickers::sticker_id.eq(sticker_id))
-        .order((
-            sticker_pack_stickers::added_at.asc(),
-            sticker_packs::id.asc(),
-        ))
-        .select(StickerPack::as_select())
-        .load(conn)?;
+            let packs = packs_service::packs_for_sticker(conn, uid, sticker_id)?;
 
-    Ok(AxumJson(StickerDetailResponse {
-        sticker: sticker_summary,
-        packs: build_pack_summaries(conn, &state, uid, packs)?,
-    }))
+            Ok(AxumJson(StickerDetailResponse {
+                sticker: sticker_summary,
+                packs: build_pack_summaries(conn, &state, uid, packs)?,
+            }))
+        })
 }
 
 #[utoipa::path(
@@ -1012,7 +1021,7 @@ async fn get_my_favorites(
 
 pub fn router() -> OpenApiRouter<crate::AppState> {
     OpenApiRouter::new()
-        .routes(utoipa_axum::routes!(post_pack))
+        .routes(utoipa_axum::routes!(post_pack, get_packs))
         .routes(utoipa_axum::routes!(get_my_subscribed_packs))
         .routes(utoipa_axum::routes!(get_my_owned_packs))
         .routes(utoipa_axum::routes!(get_my_favorites))
@@ -1027,91 +1036,18 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         ))
 }
 
-fn remove_from_sticker_pack_order(
-    conn: &mut PgConnection,
-    uid: i32,
-    pack_id: i64,
-    state: &crate::AppState,
-) -> Result<(), AppError> {
-    use crate::models::UserExtra;
-    use crate::schema::user_extra;
-
-    if let Ok(Some(extra)) = user_extra::table
-        .filter(user_extra::uid.eq(uid))
-        .select(UserExtra::as_select())
-        .first::<UserExtra>(conn)
-        .optional()
-    {
-        if let Ok(mut order) =
-            serde_json::from_value::<Vec<StickerPackOrderItem>>(extra.sticker_pack_order.clone())
-        {
-            let pack_id_str = pack_id.to_string();
-            let original_len = order.len();
-            order.retain(|item| item.sticker_pack_id != pack_id_str);
-            if order.len() < original_len {
-                let order_json = serde_json::to_value(&order).unwrap_or(serde_json::json!([]));
-                diesel::update(user_extra::table.filter(user_extra::uid.eq(uid)))
-                    .set(user_extra::sticker_pack_order.eq(&order_json))
-                    .execute(conn)?;
-
-                let msg = std::sync::Arc::new(ServerWsMessage::StickerPackOrderUpdated(
-                    StickerPackOrderUpdatePayload { order },
-                ));
-                state.ws_registry.broadcast_to_uids(&[uid], msg);
-            }
-        }
+fn broadcast_orders(state: &AppState, orders: Vec<packs_service::OrderUpdate>) {
+    for update in orders {
+        state.ws_registry.broadcast_to_uids(
+            &[update.uid],
+            std::sync::Arc::new(ServerWsMessage::StickerPackOrderUpdated(
+                StickerPackOrderUpdatePayload {
+                    order: update.order,
+                },
+            )),
+        );
     }
-    Ok(())
 }
 
-fn add_to_sticker_pack_order(
-    conn: &mut PgConnection,
-    uid: i32,
-    pack_id: i64,
-    state: &crate::AppState,
-) -> Result<(), AppError> {
-    use crate::models::UserExtra;
-    use crate::schema::user_extra;
-
-    if let Ok(Some(extra)) = user_extra::table
-        .filter(user_extra::uid.eq(uid))
-        .select(UserExtra::as_select())
-        .first::<UserExtra>(conn)
-        .optional()
-    {
-        if let Ok(mut order) =
-            serde_json::from_value::<Vec<StickerPackOrderItem>>(extra.sticker_pack_order.clone())
-        {
-            let pack_id_str = pack_id.to_string();
-            let mut changed = false;
-
-            let now = chrono::Utc::now().timestamp_millis();
-
-            if let Some(existing) = order.iter_mut().find(|i| i.sticker_pack_id == pack_id_str) {
-                if existing.last_used_on != now {
-                    existing.last_used_on = now;
-                    changed = true;
-                }
-            } else {
-                order.push(StickerPackOrderItem {
-                    sticker_pack_id: pack_id_str,
-                    last_used_on: now,
-                });
-                changed = true;
-            }
-
-            if changed {
-                let order_json = serde_json::to_value(&order).unwrap_or(serde_json::json!([]));
-                diesel::update(user_extra::table.filter(user_extra::uid.eq(uid)))
-                    .set(user_extra::sticker_pack_order.eq(&order_json))
-                    .execute(conn)?;
-
-                let msg = std::sync::Arc::new(ServerWsMessage::StickerPackOrderUpdated(
-                    StickerPackOrderUpdatePayload { order },
-                ));
-                state.ws_registry.broadcast_to_uids(&[uid], msg);
-            }
-        }
-    }
-    Ok(())
-}
+#[cfg(test)]
+mod tests;

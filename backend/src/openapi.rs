@@ -25,6 +25,7 @@ use utoipa::OpenApi;
             ChatAttachmentKindFilter,
             ConversationView,
             MessageSearchSort,
+            crate::dto::stickers::StickerPackSort,
             GroupSearchMode,
             GroupSelectorScope,
             UserSearchMode,
@@ -75,6 +76,46 @@ mod tests {
         let mut document = ApiDoc::openapi();
         document.merge(crate::handlers::api_router().into_openapi());
         serde_json::to_value(document).unwrap()
+    }
+
+    #[test]
+    fn sticker_discovery_and_visibility_contract() {
+        let document = api_document();
+        let schemas = &document["components"]["schemas"];
+        assert_eq!(
+            schemas["StickerPackSort"]["enum"],
+            serde_json::json!(["subscribers", "trending"])
+        );
+        assert_eq!(
+            schemas["StickerPackVisibility"]["enum"],
+            serde_json::json!(["public", "private"])
+        );
+        let parameters = document["paths"]["/stickers/packs"]["get"]["parameters"]
+            .as_array()
+            .unwrap();
+        for parameter in parameters {
+            assert_ne!(parameter["required"], true);
+        }
+        assert_eq!(
+            parameters.iter().find(|p| p["name"] == "limit").unwrap()["schema"]["maximum"],
+            50
+        );
+        assert_eq!(
+            schemas["CreateStickerPackBody"]["properties"]["visibility"]["default"],
+            "public"
+        );
+        assert!(!schemas["CreateStickerPackBody"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("visibility")));
+        assert!(schemas["StickerPackSummary"]["properties"]["visibility"].is_object());
+        assert!(
+            document["paths"]["/stickers/packs/{pack_id}"]["get"]["responses"]["404"].is_object()
+        );
+        assert!(
+            document["paths"]["/stickers/packs/{pack_id}/subscription"]["put"]["responses"]["404"]
+                .is_object()
+        );
     }
 
     #[test]

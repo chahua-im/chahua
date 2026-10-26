@@ -27,6 +27,20 @@ pub struct StickerPackOrderItem {
     pub last_used_on: i64,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStickerPackOrderItem {
+    pub sticker_pack_id: String,
+    pub last_used_on: i64,
+    pub is_auto_sort: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStickerPackOrderRequest {
+    pub order: Vec<UpdateStickerPackOrderItem>,
+}
+
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MeResponse {
