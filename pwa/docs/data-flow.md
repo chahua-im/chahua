@@ -81,6 +81,8 @@ index.html 的启动恢复层独立于 app-root，内嵌文案从语言文件生
 
 index.html 的独立内联脚本在 Angular 加载前检查更新；先复用已有 Service Worker，没有注册时确认生产 ngsw.json 后注册 serviceWorker.js。脚本直接使用 Angular Worker 的 CHECK_FOR_UPDATES / OPERATION_COMPLETED / VERSION_READY 消息，等待完整版本下载；Worker 脚本另用 registration.update() 检查。前台每 60 秒检查，恢复联网、回到前台和 controller 变化时也尝试检查；同一脚本不并发检查，失败或超时保留当前页面并重试。会话内记录自动刷新过的版本 hash，避免同一版本反复刷新。App 在已登录的业务页面完成渲染后标记为可交互；此之前及 landing 可以自动应用已就绪版本，可交互页面交给更新提示确认。
 
+设置页的手动检查同时监听 Worker 的版本事件，不把 `checkForUpdate()` 的 `false` 单独视为已是最新版本：收到无新版本确认且没有下载或安装失败时才显示最新；已检测到的后台下载等待 `VERSION_READY`，失败、离线未确认或超过 15 秒显示检查失败。已就绪版本继续保留，并读取启动监听层记录的就绪版本，避免漏过 Angular 订阅前的通知。
+
 Service Worker 缓存应用资源（包括 landing 安装页及含表情数据的延迟加载代码），不缓存业务 API。表情选择器的最近记录由 @nicematic/emoji-picker 存入 localStorage，与 Preferences 的快捷表态记录独立。共享聊天数据仅在内存，连续消息的保留与释放由页面生命周期决定，没有离线消息数据库。
 
 表情选择器不预取全部国旗图片。国旗图片使用浏览器原生懒加载，在滚动或搜索使对应图片接近可见区域时请求；加载失败沿用组件的 Unicode 字符回退。

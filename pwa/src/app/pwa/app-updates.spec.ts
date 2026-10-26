@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { SwUpdate, type VersionEvent } from '@angular/service-worker';
-import { Subject } from 'rxjs';
+import { firstValueFrom, Subject, timer } from 'rxjs';
 import { vi } from 'vitest';
 import { APP_UPDATES_ENABLED, AppUpdates, UpdateCheckResult } from './app-updates';
 
@@ -40,6 +40,10 @@ describe('AppUpdates', () => {
 
   it('checks the actual Angular worker and distinguishes current from downloaded updates', async () => {
     const service = TestBed.inject(AppUpdates);
+    worker.checkForUpdate.mockImplementation(async () => {
+      events.next({ type: 'NO_NEW_VERSION_DETECTED', version: { hash: 'current' } });
+      return false;
+    });
     expect(await service.check()).toBe(UpdateCheckResult.Current);
     worker.checkForUpdate.mockResolvedValue(true);
     expect(await service.check()).toBe(UpdateCheckResult.Updated);
@@ -51,6 +55,73 @@ describe('AppUpdates', () => {
     const service = TestBed.inject(AppUpdates);
     events.next({ type: 'VERSION_READY', currentVersion: { hash: 'old' }, latestVersion: { hash: 'new' } });
     expect(await service.check()).toBe(UpdateCheckResult.Updated);
+  });
+
+  it('waits for a background download instead of reporting current', async () => {
+    const service = TestBed.inject(AppUpdates);
+    events.next({ type: 'VERSION_DETECTED', version: { hash: 'new' } });
+    worker.checkForUpdate.mockImplementation(async () => {
+      events.next({ type: 'NO_NEW_VERSION_DETECTED', version: { hash: 'new' } });
+      return false;
+    });
+    const check = service.check();
+    let result: UpdateCheckResult | undefined;
+    void check.then((value) => (result = value));
+    await firstValueFrom(timer(0));
+    expect(result).toBeUndefined();
+    expect(service.checking()).toBe(true);
+    events.next({ type: 'VERSION_READY', currentVersion: { hash: 'old' }, latestVersion: { hash: 'new' } });
+    expect(await check).toBe(UpdateCheckResult.Updated);
+  });
+
+  it('does not report current when the worker fails to download the update', async () => {
+    const service = TestBed.inject(AppUpdates);
+    worker.checkForUpdate.mockImplementation(async () => {
+      events.next({ type: 'VERSION_DETECTED', version: { hash: 'new' } });
+      events.next({ type: 'VERSION_INSTALLATION_FAILED', version: { hash: 'new' }, error: 'download failed' });
+      return false;
+    });
+    expect(await service.check()).toBe(UpdateCheckResult.Failed);
+  });
+
+  it('reports a background download failure and allows a successful retry', async () => {
+    const service = TestBed.inject(AppUpdates);
+    events.next({ type: 'VERSION_DETECTED', version: { hash: 'new' } });
+    const check = service.check();
+    await firstValueFrom(timer(0));
+    events.next({ type: 'VERSION_INSTALLATION_FAILED', version: { hash: 'new' }, error: 'download failed' });
+    expect(await check).toBe(UpdateCheckResult.Failed);
+    worker.checkForUpdate.mockImplementation(async () => {
+      events.next({ type: 'VERSION_DETECTED', version: { hash: 'new' } });
+      events.next({ type: 'VERSION_READY', currentVersion: { hash: 'old' }, latestVersion: { hash: 'new' } });
+      return true;
+    });
+    expect(await service.check()).toBe(UpdateCheckResult.Updated);
+  });
+
+  it('times out a stalled background download without losing a later ready update', async () => {
+    vi.useFakeTimers();
+    const service = TestBed.inject(AppUpdates);
+    events.next({ type: 'VERSION_DETECTED', version: { hash: 'new' } });
+    const check = service.check();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(await check).toBe(UpdateCheckResult.Failed);
+    expect(service.checking()).toBe(false);
+    events.next({ type: 'VERSION_READY', currentVersion: { hash: 'old' }, latestVersion: { hash: 'new' } });
+    expect(service.available()).toBe(true);
+  });
+
+  it('does not report current when an offline worker returns false without checking a version', async () => {
+    const service = TestBed.inject(AppUpdates);
+    expect(await service.check()).toBe(UpdateCheckResult.Failed);
+  });
+
+  it('recovers readiness received by the early listener after service construction', async () => {
+    window.chahuaUpdates = { latestVersion: undefined, setInteractive: vi.fn() };
+    const service = TestBed.inject(AppUpdates);
+    window.chahuaUpdates.latestVersion = 'new';
+    expect(await service.check()).toBe(UpdateCheckResult.Updated);
+    expect(service.available()).toBe(true);
   });
 
   it('remembers an early update and offers each version once while the app is interactive', () => {
