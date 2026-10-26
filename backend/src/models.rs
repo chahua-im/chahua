@@ -530,6 +530,26 @@ pub struct NewMedia {
     pub reference: Option<String>,
 }
 
+#[derive(
+    diesel_derive_enum::DbEnum,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    utoipa::ToSchema,
+)]
+#[ExistingTypePath = "crate::schema::sql_types::StickerPackVisibility"]
+#[serde(rename_all = "camelCase")]
+pub enum StickerPackVisibility {
+    #[default]
+    Public,
+    Private,
+}
+
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]
 #[diesel(table_name = schema::sticker_packs)]
 pub struct StickerPack {
@@ -539,6 +559,7 @@ pub struct StickerPack {
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub visibility: StickerPackVisibility,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -550,6 +571,7 @@ pub struct NewStickerPack {
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub visibility: StickerPackVisibility,
 }
 
 #[derive(Debug, Clone, AsChangeset)]
@@ -558,6 +580,7 @@ pub struct UpdateStickerPack {
     pub name: Option<String>,
     pub description: Option<String>,
     pub updated_at: DateTime<Utc>,
+    pub visibility: Option<StickerPackVisibility>,
 }
 
 #[derive(Debug, Clone, Queryable, Selectable, Serialize, Insertable)]

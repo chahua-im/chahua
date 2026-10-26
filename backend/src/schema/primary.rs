@@ -2,6 +2,10 @@
 
 pub mod sql_types {
     #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+    #[diesel(postgres_type(name = "sticker_pack_visibility"))]
+    pub struct StickerPackVisibility;
+
+    #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
     #[diesel(postgres_type(name = "membership_message_visibility"))]
     pub struct MembershipMessageVisibility;
 
@@ -442,6 +446,9 @@ diesel::table! {
 }
 
 diesel::table! {
+    use diesel::sql_types::*;
+    use super::sql_types::StickerPackVisibility;
+
     sticker_packs (id) {
         id -> Int8,
         owner_uid -> Int4,
@@ -450,6 +457,7 @@ diesel::table! {
         description -> Nullable<Text>,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
+        visibility -> StickerPackVisibility,
     }
 }
 

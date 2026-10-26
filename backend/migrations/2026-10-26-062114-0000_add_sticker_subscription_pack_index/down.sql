@@ -1,0 +1,1 @@
+DROP INDEX idx_user_sticker_pack_subscriptions_pack_subscribed_at;
