@@ -7,6 +7,7 @@ import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url'
 import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
 import { encodeId } from '../api/snowflake-id';
 import { AttachmentUpload, UploadStatus, uploadBlob } from './upload';
+import { UploadErrorCode, UploadStage } from './upload-error';
 
 class FakeUpload {
   static requests: FakeUpload[] = [];
@@ -151,6 +152,7 @@ describe('Attachment upload tasks', () => {
         src = '';
         naturalWidth = 4000;
         naturalHeight = 3000;
+        removeAttribute = vi.fn();
         decode = vi.fn().mockResolvedValue(undefined);
       },
     );
@@ -317,6 +319,128 @@ describe('Attachment upload tasks', () => {
     await expect(pending).resolves.toBeUndefined();
     expect(task.state().status).toBe(UploadStatus.Failed);
     expect(FakeUpload.requests).toHaveLength(0);
+  });
+
+  it('reports the size limit and never retries an oversized file unchanged', async () => {
+    vi.useFakeTimers();
+    const task = create();
+    const pending = task.retry();
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 4 });
+    await pending;
+    expect(task.state().error).toMatchObject({
+      code: UploadErrorCode.TooLarge,
+      maxSizeMiB: 4 / 1024 / 1024,
+      canRetry: false,
+    });
+    await task.retry();
+    await vi.advanceTimersByTimeAsync(120_000);
+    window.dispatchEvent(new Event('online'));
+    http.expectNone('/_api/attachments/config');
+    http.expectNone('/_api/attachments/upload-url');
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(task.url);
+  });
+
+  it('stops automatic retries for non-media selected through the media picker', async () => {
+    vi.useFakeTimers();
+    const task = create(AttachmentUploadPurpose.media, new File(['text'], 'note.txt', { type: 'text/plain' }));
+    const pending = task.retry();
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    await pending;
+    expect(task.state().error).toMatchObject({
+      code: UploadErrorCode.UnsupportedMedia,
+      stage: UploadStage.Processing,
+      autoRetry: false,
+      canRetry: false,
+    });
+    await vi.advanceTimersByTimeAsync(120_000);
+    window.dispatchEvent(new Event('online'));
+    http.expectNone('/_api/attachments/config');
+    expect(FakeUpload.requests).toHaveLength(0);
+  });
+
+  it('exposes a processing timeout without signing or uploading a late result', async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const decode = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal(
+      'Image',
+      class {
+        src = '';
+        naturalWidth = 800;
+        naturalHeight = 600;
+        removeAttribute = vi.fn();
+        decode = decode;
+      },
+    );
+    const task = create(AttachmentUploadPurpose.media, photo());
+    const pending = task.retry();
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    await vi.waitFor(() => expect(decode).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await pending;
+    expect(task.state().error).toMatchObject({
+      code: UploadErrorCode.ProcessingTimeout,
+      stage: UploadStage.Processing,
+      autoRetry: false,
+      canRetry: true,
+    });
+    finish();
+    await vi.advanceTimersByTimeAsync(60_000);
+    http.expectNone('/_api/attachments/upload-url');
+    http.expectNone('/_api/attachments/config');
+    expect(FakeUpload.requests).toHaveLength(0);
+    expect(task.state().status).toBe(UploadStatus.Failed);
+  });
+
+  it.each([
+    ['', 'empty.txt', UploadErrorCode.Empty],
+    ['text', 'x'.repeat(256), UploadErrorCode.Filename],
+  ])('validates %s / %s before requesting config', async (contents, name, code) => {
+    const file = new File([contents], name);
+    const task = create(AttachmentUploadPurpose.file, file);
+    await task.retry();
+    expect(task.state().error).toMatchObject({ code, canRetry: false, autoRetry: false });
+    http.expectNone('/_api/attachments/config');
+  });
+
+  it.each([
+    [400, 'Attachment content type is invalid', UploadErrorCode.InvalidType, false],
+    [401, 'Expired token', UploadErrorCode.Authentication, false],
+    [403, 'Forbidden', UploadErrorCode.Forbidden, false],
+    [429, 'Too many requests', UploadErrorCode.RateLimited, true],
+    [503, 'Unavailable', UploadErrorCode.Server, true],
+  ])('preserves the API error for status %s', async (status, detail, code, autoRetry) => {
+    const task = create();
+    const pending = task.retry();
+    http.expectOne('/_api/attachments/config').flush(detail, { status, statusText: 'Failed' });
+    await pending;
+    expect(task.state().error).toMatchObject({ code, stage: UploadStage.Config, autoRetry });
+    expect(task.retryable).toBe(autoRetry);
+  });
+
+  it('keeps a storage rejection distinct from account permission and renews the URL on retry', async () => {
+    const task = create();
+    const pending = task.retry();
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    (await sign()).finish(403);
+    await pending;
+    expect(task.state().error).toMatchObject({
+      code: UploadErrorCode.StorageRejected,
+      stage: UploadStage.Storage,
+      autoRetry: false,
+      canRetry: true,
+    });
+    const retry = task.retry();
+    expect(task.state().error?.code).toBe(UploadErrorCode.StorageRejected);
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 });
+    (await sign(encodeId('101'))).finish();
+    await retry;
+    expect(task.state().error).toBeUndefined();
   });
 
   it.each(['config', 'upload-url'])('cancels a pending %s request when disposed', async (stage) => {

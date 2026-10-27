@@ -8,13 +8,24 @@ import {
   inject,
   input,
   linkedSignal,
+  output,
   signal,
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
-import { IonBadge, IonIcon } from '@ionic/angular';
-import { documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
+import {
+  IonBadge,
+  IonIcon,
+  IonModal,
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonButtons,
+  IonButton,
+  IonContent,
+} from '@ionic/angular';
+import { alertCircleOutline, documentAttachOutline, downloadOutline, playCircle } from 'ionicons/icons';
 import { type MessageResponse, MessageType } from '../../../generated/models';
 import type { SnowflakeID } from '../../api/snowflake-id';
 import { openMediaViewer } from '../media-viewer/media-viewer';
@@ -22,6 +33,7 @@ import { MessageDelivery } from '../message-delivery';
 import { MessageStatus } from '../message-status/message-status';
 import { type AttachmentUpload, UploadStatus } from '../upload';
 import { UploadProgress } from '../upload-progress/upload-progress';
+import { UploadFailure } from '../upload-failure';
 import { type VoiceDock } from '../voice-player/voice-playback';
 import { VoicePlayer } from '../voice-player/voice-player';
 
@@ -44,7 +56,24 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   selector: 'app-message-attachments',
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
-  imports: [MediaLoaded, VoicePlayer, IonBadge, IonIcon, UploadProgress, MessageStatus, LocalDatePipe, TranslocoPipe],
+  imports: [
+    MediaLoaded,
+    VoicePlayer,
+    IonBadge,
+    IonIcon,
+    IonModal,
+    IonHeader,
+    IonToolbar,
+    IonTitle,
+    IonButtons,
+    IonButton,
+    IonContent,
+    UploadProgress,
+    UploadFailure,
+    MessageStatus,
+    LocalDatePipe,
+    TranslocoPipe,
+  ],
   host: {
     '[class.overlay-time]': 'overlayTime()',
     '[class.album]': 'album()',
@@ -74,6 +103,26 @@ export class MessageAttachments {
   readonly delivery = input<MessageDelivery>();
   readonly read = input(false);
   readonly uploads = input<readonly AttachmentUpload[]>([]);
+  readonly retryUpload = output<AttachmentUpload>();
+  readonly removeUpload = output<AttachmentUpload>();
+  protected readonly showUploads = signal(false);
+  private readonly uploadsModal = viewChild(IonModal);
+  /** Only hidden tiles need the picker; visible failures already show their own icon. */
+  protected readonly hiddenUploadFailures = computed(() =>
+    this.items()
+      .slice(9)
+      .some((item) => !!item.upload?.state().error),
+  );
+  protected readonly failureIcon = alertCircleOutline;
+  protected async closeUploads() {
+    await this.uploadsModal()?.dismiss();
+  }
+  protected async more(key: SnowflakeID | string, event: Event): Promise<void> {
+    if (!this.hiddenUploadFailures()) return this.view(key, event);
+    event.preventDefault();
+    event.stopPropagation();
+    this.showUploads.set(true);
+  }
   /** Confirmed messages hand their identity to the voice player so the docked bar can label and locate them. */
   protected readonly dock = computed<VoiceDock | undefined>(() => {
     const { id, chatId, sender, createdAt } = this.message();
@@ -106,6 +155,7 @@ export class MessageAttachments {
       const limit = sticker ? 160 : 420;
       return {
         ...attachment,
+        upload,
         kind: attachmentKind(message.messageType, attachment.kind),
         sticker: !!sticker,
         knownSize,

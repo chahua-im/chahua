@@ -174,6 +174,15 @@ describe('image compression sources', () => {
     expect(convertToBlob.mock.calls.map(([options]) => options.type)).toEqual(['image/webp', 'image/png']);
   });
 
+  it('keeps a compressed filename within the server limit without splitting Unicode characters', async () => {
+    const file = new File([new Uint8Array(100)], '📷'.repeat(251) + '.jpg', { type: 'image/jpeg' });
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ close: vi.fn() }));
+    mockCanvas(new Blob(['small'], { type: 'image/webp' }));
+    const result = await compressImage(file, { width: 800, height: 600 });
+    expect(result.file.name).toBe('📷'.repeat(250) + '.webp');
+    expect(Array.from(result.file.name)).toHaveLength(255);
+  });
+
   it('closes a HEIC bitmap returned after cancellation without starting canvas encoding', async () => {
     const file = new File(['heic'], 'photo.heic', { type: 'image/heic' });
     const bitmap = { width: 4032, height: 3024, close: vi.fn() } as unknown as ImageBitmap;

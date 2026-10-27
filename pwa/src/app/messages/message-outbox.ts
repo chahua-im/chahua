@@ -324,6 +324,59 @@ export class MessageOutbox {
     return item;
   }
 
+  async retryUpload(item: OutgoingMessage, upload: AttachmentUpload): Promise<void> {
+    if (item.disposed || item.cancelled() || !item.uploads.includes(upload)) return;
+    await upload.retry();
+    if (item.disposed || item.cancelled() || !item.uploads.includes(upload)) return;
+    if (item.uploads.every((attachment) => attachment.state().status !== UploadStatus.Failed)) await this.retry(item);
+  }
+
+  removeUpload(item: OutgoingMessage, upload: AttachmentUpload) {
+    if (
+      item.disposed ||
+      item.cancelled() ||
+      !item.uploads.includes(upload) ||
+      upload.state().status !== UploadStatus.Failed
+    )
+      return;
+    const task = this.tasks.get(item)!;
+    const intent = task.intent();
+    const uploads = intent.uploads.filter((attachment) => attachment !== upload);
+    let attachmentIds = intent.body.attachmentIds ?? [];
+    let text = intent.body.message ?? '';
+    let mentions = intent.local.mentions;
+    const original = item.confirmed();
+    if (!uploads.length && !attachmentIds.length && !text.trim()) {
+      // Removing the only new attachment leaves nothing to send; an edit keeps the confirmed message.
+      if (!original) {
+        void this.cancel(item);
+        return;
+      }
+      text = original.message ?? '';
+      attachmentIds = original.attachments.map((attachment) => attachment.id);
+      mentions = original.mentions;
+    }
+    if (
+      original &&
+      !task.inflight &&
+      (!task.patch || task.patch.revision <= task.acknowledged()) &&
+      !uploads.length &&
+      (original.message ?? '') === text &&
+      original.attachments.length === attachmentIds.length &&
+      original.attachments.every((attachment) => attachmentIds.includes(attachment.id))
+    ) {
+      // Only discard a no-op when no older request can still change the server copy.
+      this.remove(item);
+      return;
+    }
+    this.edit(item, text, {
+      messageType: intent.body.messageType,
+      attachmentIds,
+      uploads,
+      mentions,
+    });
+  }
+
   /** Batch recall keeps the row and uploads until publication and a successful DELETE. */
   waitForPublication(item: OutgoingMessage): Promise<MessageResponse> {
     if (item.published()) return Promise.resolve(item.confirmed()!);

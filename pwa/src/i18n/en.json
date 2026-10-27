@@ -515,7 +515,6 @@
     "composer": {
       "tooManyAttachments": "You can add up to 20 attachments per message.",
       "editMediaOnly": "You can only add photos or videos while editing.",
-      "processingFailed": "Processing failed. Check the file size, permissions, or network and try again.",
       "placeholder": "Type a message",
       "media": "Media",
       "files": "Files",
@@ -588,6 +587,32 @@
     "placeholder": {
       "pendingAudio": "[Pending voice message]",
       "unavailable": "[Unavailable message]"
+    },
+    "upload": {
+      "offline": "The upload stopped because the network disconnected.",
+      "tooLarge": "This file exceeds the {{limit}} MiB limit. Compress it, or remove it and choose another file.",
+      "tooLargeUnknown": "This file exceeds the server size limit. Compress it, or remove it and choose another file.",
+      "empty": "This file is empty. Remove it and choose another file.",
+      "filename": "The filename must contain 1–255 characters. Shorten it and select the file again.",
+      "unsupportedMedia": "This file could not be identified as an image or video. Remove it and send it using Files.",
+      "invalidType": "This file type does not meet the upload requirements. Remove it and choose another file.",
+      "authentication": "Your login has expired. Sign in again, then retry.",
+      "forbidden": "The server does not allow this upload. Check whether your account has upload permission.",
+      "storageRejected": "The file storage service rejected this upload. Please retry.",
+      "rateLimited": "Too many upload requests.",
+      "server": "The upload service is temporarily unavailable.",
+      "timeout": "The upload request timed out.",
+      "network": "Cannot connect to the upload service. Check your network connection.",
+      "processingTimeout": "Media processing stopped making progress. Retry, or remove it and send the original using Files.",
+      "processingFailed": "This media could not be processed. Retry, or remove it and send the original using Files.",
+      "rejected": "The server did not accept this file. Retry or choose another file.",
+      "unknown": "The upload did not complete. Please retry.",
+      "autoRetry": "Will retry automatically.",
+      "retrying": "Retrying upload…",
+      "unreadable": "Cannot read this local file. Remove it and choose it again.",
+      "reconnect": "Will retry when you reconnect.",
+      "failedTitle": "Upload failed",
+      "attachmentsTitle": "Attachments"
     }
   },
   "stickers": {

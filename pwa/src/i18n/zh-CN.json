@@ -515,7 +515,6 @@
     "composer": {
       "tooManyAttachments": "每条消息最多添加 20 个附件。",
       "editMediaOnly": "编辑消息时只能添加图片或视频。",
-      "processingFailed": "处理失败，请检查文件大小、权限或网络后重试。",
       "placeholder": "输入消息",
       "media": "媒体",
       "files": "文件",
@@ -588,6 +587,32 @@
     "placeholder": {
       "pendingAudio": "[待转码语音]",
       "unavailable": "[无法显示的消息]"
+    },
+    "upload": {
+      "offline": "上传因网络中断而停止。",
+      "tooLarge": "文件超过 {{limit}} MiB 上限，请压缩文件或移除后重新选择。",
+      "tooLargeUnknown": "文件超过服务器大小上限，请压缩文件或移除后重新选择。",
+      "empty": "文件为空，请移除后重新选择。",
+      "filename": "文件名不能为空或超过 255 个字符，请缩短文件名后重新选择。",
+      "unsupportedMedia": "无法识别为图片或视频，请移除后通过“文件”入口发送。",
+      "invalidType": "文件类型不符合上传要求，请移除后重新选择。",
+      "authentication": "登录状态已失效，请重新登录后重试。",
+      "forbidden": "服务器不允许此次上传，请确认账号是否有上传权限。",
+      "storageRejected": "文件存储服务拒绝了此次上传，请重试。",
+      "rateLimited": "上传请求过于频繁。",
+      "server": "上传服务暂时不可用。",
+      "timeout": "上传请求超时。",
+      "network": "无法连接上传服务，请检查网络连接。",
+      "processingTimeout": "媒体处理长时间没有进展，请重试，或移除后通过“文件”入口发送原文件。",
+      "processingFailed": "无法处理此媒体，请重试，或移除后通过“文件”入口发送原文件。",
+      "rejected": "服务器未接受此文件，请重试或重新选择文件。",
+      "unknown": "上传未完成，请重试。",
+      "autoRetry": "将自动重试。",
+      "retrying": "正在重试上传…",
+      "unreadable": "无法读取本地文件，请移除后重新选择。",
+      "reconnect": "联网后将自动重试。",
+      "failedTitle": "上传失败",
+      "attachmentsTitle": "附件"
     }
   },
   "stickers": {

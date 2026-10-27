@@ -515,7 +515,6 @@
     "composer": {
       "tooManyAttachments": "每則訊息最多新增 20 個附件。",
       "editMediaOnly": "編輯訊息時只能新增圖片或影片。",
-      "processingFailed": "處理失敗，請檢查檔案大小、權限或網路後重試。",
       "placeholder": "輸入訊息",
       "media": "媒體",
       "files": "檔案",
@@ -588,6 +587,32 @@
     "placeholder": {
       "pendingAudio": "[待轉碼語音]",
       "unavailable": "[無法顯示的訊息]"
+    },
+    "upload": {
+      "offline": "上傳因網路中斷而停止。",
+      "tooLarge": "檔案超過 {{limit}} MiB 上限，請壓縮檔案或移除後重新選擇。",
+      "tooLargeUnknown": "檔案超過伺服器大小上限，請壓縮檔案或移除後重新選擇。",
+      "empty": "檔案為空，請移除後重新選擇。",
+      "filename": "檔案名稱不能為空或超過 255 個字元，請縮短名稱後重新選擇。",
+      "unsupportedMedia": "無法辨識為圖片或影片，請移除後透過「檔案」入口傳送。",
+      "invalidType": "檔案類型不符合上傳要求，請移除後重新選擇。",
+      "authentication": "登入狀態已失效，請重新登入後重試。",
+      "forbidden": "伺服器不允許此次上傳，請確認帳號是否有上傳權限。",
+      "storageRejected": "檔案儲存服務拒絕了此次上傳，請重試。",
+      "rateLimited": "上傳請求過於頻繁。",
+      "server": "上傳服務暫時無法使用。",
+      "timeout": "上傳請求逾時。",
+      "network": "無法連線至上傳服務，請檢查網路連線。",
+      "processingTimeout": "媒體處理長時間沒有進展，請重試，或移除後透過「檔案」入口傳送原始檔案。",
+      "processingFailed": "無法處理此媒體，請重試，或移除後透過「檔案」入口傳送原始檔案。",
+      "rejected": "伺服器未接受此檔案，請重試或重新選擇檔案。",
+      "unknown": "上傳未完成，請重試。",
+      "autoRetry": "將自動重試。",
+      "retrying": "正在重試上傳…",
+      "unreadable": "無法讀取本機檔案，請移除後重新選擇。",
+      "reconnect": "連線後將自動重試。",
+      "failedTitle": "上傳失敗",
+      "attachmentsTitle": "附件"
     }
   },
   "stickers": {

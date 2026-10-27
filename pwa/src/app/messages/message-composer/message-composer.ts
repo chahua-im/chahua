@@ -15,7 +15,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { IonAlert, IonButton, IonIcon, IonItem, IonLabel, IonList, IonTextarea, isPlatform } from '@ionic/angular';
+import { IonAlert, IonIcon, IonItem, IonLabel, IonList, IonTextarea, isPlatform } from '@ionic/angular';
 import {
   attachOutline,
   closeOutline,
@@ -47,6 +47,7 @@ import type { MessageContent } from '../message/message';
 import { StickerPicker } from '../sticker-picker/sticker-picker';
 import { AttachmentUpload, UploadStatus } from '../upload';
 import { UploadProgress } from '../upload-progress/upload-progress';
+import { UploadFailure } from '../upload-failure';
 import { VoicePlayer } from '../voice-player/voice-player';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { displayText, editText, wireText } from './mention-text';
@@ -73,10 +74,10 @@ enum Panel {
     ChatAvatar,
     IonAlert,
     VoicePlayer,
-    IonButton,
     IonIcon,
     IonTextarea,
     UploadProgress,
+    UploadFailure,
     IonList,
     IonItem,
     IonLabel,

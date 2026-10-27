@@ -6,9 +6,10 @@ interface Dimensions {
   height: number;
 }
 
-interface MediaProcessingOptions {
+export interface MediaProcessingOptions {
   signal?: AbortSignal;
   onProgress?: (progress: number) => void;
+  onQueueWait?: (waiting: boolean) => void;
 }
 
 interface CompressedMedia {
@@ -23,7 +24,9 @@ function throwIfAborted(signal?: AbortSignal) {
 }
 
 function appendFileExtension(fileName: string, extension: string) {
-  return `${fileName}${extension}`;
+  return `${Array.from(fileName)
+    .slice(0, 255 - extension.length)
+    .join('')}${extension}`;
 }
 
 const MAX_MEDIA_DIMENSION = 1920;
@@ -194,9 +197,15 @@ function loadHeicTo() {
   return heicToModulePromise;
 }
 
-function runHeicConversion<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+function runHeicConversion<T>(
+  operation: () => Promise<T>,
+  { signal, onQueueWait }: MediaProcessingOptions,
+): Promise<T> {
+  throwIfAborted(signal);
+  onQueueWait?.(true);
   const guardedOperation = () => {
     throwIfAborted(signal);
+    onQueueWait?.(false);
     return operation();
   };
   const result = heicConversionTail.then(guardedOperation);
@@ -287,5 +296,5 @@ export async function compressImage(
     throwIfAborted(options.signal);
     const bitmap = await heicTo({ blob: file, type: 'bitmap' });
     return compressImageSource(file, bitmap, { width: bitmap.width, height: bitmap.height }, options);
-  }, options.signal);
+  }, options);
 }
