@@ -66,17 +66,17 @@ MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情�
 
 ## 根布局与聊天列表
 
-| 组件               | 输入、输出与局部字段                                                                                                 | 数据依赖                                                                              |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| App                | landingPage、启动 loading/slow/error、entryState、splitPaneVisible、sidebarSelection、浏览器返回动画状态、全局更新 toast 和可交互标记 | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                              |
-| NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                 | PushNotifications                                                                     |
-| ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                      | 将 selection 和 active 传给单列 ChatList                                              |
-| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                         | SessionStore、ChatListStore、Preferences、AppInstall；控制分类面板与菜单，active 时同步 selection，头像菜单提供收藏、设置与安装入口 |
-| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数 | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence |
-| ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量 |
-| ChatAvatar         | entry、size、online；当前头像和角标图片的加载状态 | 文字占位保持至当前 URL 图片成功加载；同 URL 的 entry 更新保留加载状态，URL 切换才重置并忽略旧事件；失败回退；展示在线圆点，无业务请求 |
-| DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                | GroupsService、UsersService；选择用户或打开资料                                       |
-| ChatLink           | 路由参数；failed                                                                                                     | 解析静态路由配置、按需查询用户／话题；负责详情弹窗与浏览器历史的生命周期（消息短链接由路由守卫解析）         |
+| 组件               | 输入、输出与局部字段                                                                                                                                   | 数据依赖                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| App                | landingPage、启动 loading/slow/error、entryState、splitPaneVisible、sidebarSelection、浏览器返回动画状态、全局更新 toast 和可交互标记                  | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                                                                              |
+| NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                                                   | PushNotifications                                                                                                                     |
+| ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                                                        | 将 selection 和 active 传给单列 ChatList                                                                                              |
+| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                                                           | SessionStore、ChatListStore、Preferences、AppInstall；控制分类面板与菜单，active 时同步 selection，头像菜单提供收藏、设置与安装入口   |
+| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数                                   | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence                                              |
+| ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量                                |
+| ChatAvatar         | entry、size、online；当前头像和角标图片的加载状态                                                                                                      | 文字占位保持至当前 URL 图片成功加载；同 URL 的 entry 更新保留加载状态，URL 切换才重置并忽略旧事件；失败回退；展示在线圆点，无业务请求 |
+| DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                                                  | GroupsService、UsersService；选择用户或打开资料                                                                                       |
+| ChatLink           | 路由参数；failed                                                                                                                                       | 解析静态路由配置、按需查询用户／话题；负责详情弹窗与浏览器历史的生命周期（消息短链接由路由守卫解析）                                  |
 
 ChatListPage 在 ionViewWillEnter 中先同步检测缓存视图，再激活列表查询，使 pop 动画使用已更新的本地行；ionViewDidLeave 同步释放子查询消费者。
 
@@ -84,18 +84,16 @@ ChatListContent 的普通会话行和话题行都是共享资料、查询成员�
 
 ## 消息页面
 
-| 组件               | 输入与局部字段                                                                                               | 数据依赖与传递                                                                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 组件               | 输入与局部字段                                                                                                                       | 数据依赖与传递                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关、当前 DM 范围的授权回执 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer、ChatDetails 和 Presence 展示组件传值 |
-| PinnedMessagesPage | id、threadId；活跃版本、loading/failed、滚动状态与浮动日期                                                   | 从共享 ChatPins 派生消息，复用 Message 和 MessageMenu；无需 ConversationStore                                                                         |
-| SavedMessagesPage  | active                                                                                                       | 路由及 toolbar；离开时销毁 SavedMessageList，重新进入时重新创建                                                                                       |
-| SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                              | 全局收藏接口；快照映射给非交互 Message                                                                                                                |
+| PinnedMessagesPage | id、threadId；活跃版本、loading/failed、滚动状态与浮动日期                                                                           | 从共享 ChatPins 派生消息，复用 Message 和 MessageMenu；无需 ConversationStore                                                                                             |
+| SavedMessagesPage  | active                                                                                                                               | 路由及 toolbar；离开时销毁 SavedMessageList，重新进入时重新创建                                                                                                           |
+| SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                                                      | 全局收藏接口；快照映射给非交互 Message                                                                                                                                    |
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图不可见的消息（撤回的普通消息整行移除，话题根保留为墓碑行）。日期与连续作者分组从最终可见行派生。
 会话标题在普通私聊显示 `UserPresenceDisplay`，普通群聊显示 `GroupPresenceDisplay`；话题不显示群人数。展示组件注册可见范围到应用级 Presence，ChatDetails 的私聊资料和群资料复用相同展示组件，不自行保存在线或人数副本。
 UserPresenceDisplay 按 online、away、模糊区间、精确时间的顺序展示；away 使用普通状态文字，不向头像传递在线断言。UserPresenceDisplay 和 GroupPresenceDisplay 始终保留状态行，仅在对应有效范围等待快照时展示紧凑线框；pending 范围属于 Presence，而不是组件自行启动的定时器。列表行的在线布尔值直接派生自同一 Presence，不向 ChatStore 或聊天列表响应复制在线字段。
-
-
 
 输入文字、回复对象与编辑目标由页面持有；Composer 通过 model 和输出传递变化。引用来源栈、当前置顶选择等只保留需要重新查找的 ID；已有同一对象引用无需转成 ID。未读数字直接消费 ChatStore。滚动中的已读与分页判断共用一次滚动尺寸读取；已确认消息的元素集合随消息行和视图变化派生，不在每次滚动时重新过滤。置顶栏持有当前显示的置顶对象引用，仅在栏位出现或消失时等待触摸与惯性结束；共享的置顶数据仍即时更新。
 
@@ -105,20 +103,20 @@ scrollActivity.moving 控制浮动日期，idle 同时要求没有触摸与惯�
 
 ## 消息展示与操作
 
-| 组件               | 输入、输出与局部状态                                                                                                                         |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Message            | message、own、分组标志、preview/interactive、待发状态/附件、菜单操作等待、跳转状态 → reply、jump、openThread、menu、react、retry；只持有手势和点击抑制状态 |
-| MessageAuthor      | sender、own；派生用户名、用户组和性别                                                                                                        |
-| MessageText        | text、mentions、interactive、profilesEnabled；派生文本片段，点击提及才打开资料                                                                                |
-| MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文，按服务端 systemKind 选择系统译文；系统消息按完整译文插入用户名或消息链接，交互模式下允许跳转                                  |
-| MessageAttachments | message、overlayTime、outgoing、delivery、read、uploads；派生媒体框、相册布局、时间、发送/已读及上传反馈；局部保留相册初始尺寸、容器宽度、窗口及消息区域尺寸与资源加载失败 |
-| MessageStatus      | delivery、read；显示上传、发送中与已确认图标（失败重试由 Message 在气泡左侧显示），并仅按 ConversationPage 传入的当前 DM 范围授权回执将确认单勾替换为双勾 |
-| MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                                        |
-| MessageThread      | info、preview → open                                                                                                                         |
-| InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                               |
-| MessageMenu        | messages、chatId、threadId、canReply → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy、busyMessageId                       |
-| ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                     |
-| EmojiPicker        | chosen 输出 Unicode 字符串；封装 @nicematic/emoji-picker 的尺寸与中英文语言映射，局部提供 PickerData、PickerSearch、PickerFlags，使用组件自带最近记录服务 |
+| 组件               | 输入、输出与局部状态                                                                                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Message            | message、own、分组标志、preview/interactive、待发状态/附件、菜单操作等待、跳转状态 → reply、jump、openThread、menu、react、retry、retryUpload、removeUpload；只持有手势和点击抑制状态                                                                    |
+| MessageAuthor      | sender、own；派生用户名、用户组和性别                                                                                                                                                                                                                    |
+| MessageText        | text、mentions、interactive、profilesEnabled；派生文本片段，点击提及才打开资料                                                                                                                                                                           |
+| MessagePreview     | 消息摘要字段、interactive（默认 false）；派生去重附件类型与正文，按服务端 systemKind 选择系统译文；系统消息按完整译文插入用户名或消息链接，交互模式下允许跳转                                                                                            |
+| MessageAttachments | message、overlayTime、outgoing、delivery、read、uploads → retryUpload、removeUpload；派生媒体框、相册布局、时间、发送/已读及上传反馈；局部保留相册初始尺寸、容器宽度、窗口及消息区域尺寸与资源加载失败；超过九项时可打开完整上传附件网格处理隐藏的失败项 |
+| MessageStatus      | delivery、read；显示上传、发送中与已确认图标（失败重试由 Message 在气泡左侧显示），并仅按 ConversationPage 传入的当前 DM 范围授权回执将确认单勾替换为双勾                                                                                                |
+| MessageReactions   | reactions、own、preview → react；头像与数量由输入派生                                                                                                                                                                                                    |
+| MessageThread      | info、preview → open                                                                                                                                                                                                                                     |
+| InviteCard         | code；preview、loading、failed；卡片自己维护固定几何与预览请求                                                                                                                                                                                           |
+| MessageMenu        | messages、chatId、threadId、canReply → reply、edit、editQueued、openThread；公开 open、reset、reactTo、busy、busyMessageId                                                                                                                               |
+| ReactionDetails    | chatId、messageId；完整表态名单、选中表情、loading/error                                                                                                                                                                                                 |
+| EmojiPicker        | chosen 输出 Unicode 字符串；封装 @nicematic/emoji-picker 的尺寸与中英文语言映射，局部提供 PickerData、PickerSearch、PickerFlags，使用组件自带最近记录服务                                                                                                |
 
 `picker-emojis.generated.json` 由 `npm run emoji:picker:generate` 从固定版本 `emojibase-data` 生成并提交，包含英文名称、英/简中/繁中搜索关键词、分类和准确的肤色序列。PickerData 与 PickerSearch 通过组件局部 provider 替换库内各自独立的数据源，网格、搜索、肤色浮层使用同一份数据；普通肤色查表转换，混合肤色作为独立条目保持原序列。搜索忽略大小写，空白分隔词取交集，完整表情精确匹配优先并容忍省略 VS16，输出使用与输入校验一致的 Unicode 17 RGI 序列，避免额外 VS16 将相同表态拆成不同键。生成器校验覆盖全部 RGI 序列。数据及索引只随 EmojiPicker 的延迟代码加载，静态索引在模块内复用，每个选择器的查询状态独立。
 
@@ -130,12 +128,12 @@ MessageActions 由菜单和会话页各自提供，复用逐条撤回及表态�
 
 ## 转发组件
 
-| 组件 | 状态与职责 |
-| --- | --- |
-| ForwardPicker | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用，可选 load 在选择目标时读取当前来源（话题整体转发），可选 moveFrom 指定待移动草稿的原 chatId／threadId；closed 输出；持有搜索、弹窗开关、当前选择、解析与失效状态、分页合并与重试、按压/滚动状态和可见行锚点；消费共享聊天／话题查询，选择目标后通过 ConversationNavigation 将来源交给 DraftStore 并导航。响应式宽度决定断点和外观，同一弹窗保留内容；渲染后缓存 DOM 行顺序，滚动时二分定位并只测量可见行，避免逐帧遍历已加载列表；ResizeObserver 补偿 Ionic 行异步完成布局引起的位置变化 |
-| ForwardedLabel | name 输入；复用转发来源图标与文案，用于气泡、引用和输入栏 |
-| ForwardedCard | preview 输入；只展示标题、前三条摘要与总数，不请求详情 |
-| ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows、Message 和 scrollActivity，视口测量同时派生浮动头像与日期；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件 |
+| 组件             | 状态与职责                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ForwardPicker    | messages 输入为固定的 MessageResponse／OutgoingMessage 选择引用，可选 load 在选择目标时读取当前来源（话题整体转发），可选 moveFrom 指定待移动草稿的原 chatId／threadId；closed 输出；持有搜索、弹窗开关、当前选择、解析与失效状态、分页合并与重试、按压/滚动状态和可见行锚点；消费共享聊天／话题查询，选择目标后通过 ConversationNavigation 将来源交给 DraftStore 并导航。响应式宽度决定断点和外观，同一弹窗保留内容；渲染后缓存 DOM 行顺序，滚动时二分定位并只测量可见行，避免逐帧遍历已加载列表；ResizeObserver 补偿 Ionic 行异步完成布局引起的位置变化 |
+| ForwardedLabel   | name 输入；复用转发来源图标与文案，用于气泡、引用和输入栏                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ForwardedCard    | preview 输入；只展示标题、前三条摘要与总数，不请求详情                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ForwardedRecords | 路由 id／messageId 或 savedId，以及可选 bundleId；独立只读会话页面，复用 conversation-header、messageRows、Message 和 scrollActivity，视口测量同时派生浮动头像与日期；内部引用定位，子记录路由导航；持有详情失效与后台校验状态，订阅根消息删除和共享聊天权限事件                                                                                                                                                                                                                                                                                          |
 
 ConversationPage 的选择项保存已确认消息或 OutgoingMessage 引用，分别用服务端 ID 或 clientGeneratedId 标识；仅已获得服务端 ID 的队列消息可选；发布后沿用选择，选择目标时读取其最新确认数据并脱离队列对象。多选期间停用浮动头像，显示消息行原位头像，点击统一用于选择。页面持有多选撤回确认快照、处理状态与结果提示；权限沿用单条撤回规则，失败项保留选中。
 
@@ -149,15 +147,16 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 ## 输入和媒体
 
-| 组件            | 输入、输出与局部字段                                                                                           | 所有权                                                                                                  |
-| --------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| MessageComposer | chatId、text model、editing、editingUploads、relationship、mentionsEnabled、restriction；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面             |
-| VoiceRecorder   | disabled、active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                | 设备资源和未发送录音属于组件，离开时释放                                                                |
-| UploadProgress  | value（0–1）                                                                                                   | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                                   |
-| VoicePlayer     | src、dock；playing、loading、failed、elapsed、duration、波形状态                                               | 挂载时创建 Audio 和 WaveSurfer 并读取波形；同一时间播放一条；带 dock 的消息语音把播放状态交给吸顶播放条，销毁时由 VoicePlayback 接管音频继续播放 |
-| VoiceBar        | 无输入，读取 VoicePlayback；toggle/dismiss/speed 经活跃语音执行，locate 经 ConversationNavigation 打开消息所属会话 | 只负责呈现吸顶播放条，挂在主栏 header 底部：会话页、聊天列表移动端页与桌面空态页各挂一个，桌面侧栏列表实例不挂 |
-| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                       | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；详情选中项按 ID 从当前列表派生，不复制包内贴纸；包列表按用户贴纸包顺序排序，发送贴纸时按开关记录包使用顺序 |
-| MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                               | 当前消息的媒体集合与本地画布，不写入聊天状态                                                            |
+| 组件            | 输入、输出与局部字段                                                                                                                         | 所有权                                                                                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MessageComposer | chatId、text model、editing、editingUploads、relationship、mentionsEnabled、restriction；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面                                                                         |
+| VoiceRecorder   | disabled、active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                                    | 设备资源和未发送录音属于组件，离开时释放                                                                                                                            |
+| UploadFailure   | upload → retry、remove                                                                                                                       | 输入栏和消息附件共用的失败图标与原因弹窗，操作只作用于该附件，后台重试与语言切换时更新弹窗                                                                          |
+| UploadProgress  | value（0–1）                                                                                                                                 | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                                                                                               |
+| VoicePlayer     | src、dock；playing、loading、failed、elapsed、duration、波形状态                                                                             | 挂载时创建 Audio 和 WaveSurfer 并读取波形；同一时间播放一条；带 dock 的消息语音把播放状态交给吸顶播放条，销毁时由 VoicePlayback 接管音频继续播放                    |
+| VoiceBar        | 无输入，读取 VoicePlayback；toggle/dismiss/speed 经活跃语音执行，locate 经 ConversationNavigation 打开消息所属会话                           | 只负责呈现吸顶播放条，挂在主栏 header 底部：会话页、聊天列表移动端页与桌面空态页各挂一个，桌面侧栏列表实例不挂                                                      |
+| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                                                     | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；详情选中项按 ID 从当前列表派生，不复制包内贴纸；包列表按用户贴纸包顺序排序，发送贴纸时按开关记录包使用顺序 |
+| MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                                                             | 当前消息的媒体集合与本地画布，不写入聊天状态                                                                                                                        |
 
 附件菜单使用原生 popover 顶层浮层，打开时按附件按钮当前位置定位，不改变输入焦点；点选媒体或文件时先关闭菜单、同步释放当前焦点，Android 上若选择前仍有输入焦点，等待至少 400ms 且 resize/scroll 静默 150ms 后触发文件输入，最长等待 1s，保持在浏览器临时用户激活时限内；其他情况直接触发文件输入。重新输入、重开菜单或重置输入区会取消尚未触发的选择器，重置也关闭菜单。菜单项继续使用 Ionic 列表组件。
 
@@ -167,17 +166,17 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 ## 资料、搜索与管理
 
-| 组件               | 输入与局部字段                                                                                                                                          | 共享数据/输出                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 组件               | 输入与局部字段                                                                                                                                                                                                                         | 共享数据/输出                                                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot、messages → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/readReceiptOverride 及其 loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人在线状态和已读回执覆盖值，Presence 失效个人状态 |
-| ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                          | 从聊天消息页提取话题根，点击导航                                |
-| ChatMembers        | chatId、canManage；query、members、cursor、loading/error、selectedUid、pending、成员实时更新版本                                                                           | MembersService、ChatStore；行点击打开资料，管理员可管理其他成员身份与个人发言权限，权限来自 ChatDetails |
-| ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                            | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料 |
-| ChatAttachments    | chatId、kind；items、cursor、loading/error、打开/定位状态                                                                                               | 列表归组件，打开原消息媒体或定位上下文                          |
-| ChatSearch         | chatId；query、sort、messages、cursor、loading/error                                                                                                    | 聊天消息搜索，点击定位原消息                                    |
-| ChatInvites        | chatId；邀请列表、创建限制、目标用户与操作状态                                                                                                          | InvitesService；DirectorySearch 选择指定用户                    |
-| StartChat          | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                                                                                 | 点击提交才创建或加入；改邀请码会使旧预览不可提交                |
-| ChatMute           | 公开 toggle(chatId)；根据共享永久偏好筛选临时静音选项，首次展示与菜单打开期间均同步                                                                                                                           | 调用 ChatStore.setNotificationSetting，原调用按钮持有等待状态                 |
+| ChatThreads        | chatId；items、cursor、loading/error、打开状态                                                                                                                                                                                         | 从聊天消息页提取话题根，点击导航                                                                                          |
+| ChatMembers        | chatId、canManage；query、members、cursor、loading/error、selectedUid、pending、成员实时更新版本                                                                                                                                       | MembersService、ChatStore；行点击打开资料，管理员可管理其他成员身份与个人发言权限，权限来自 ChatDetails                   |
+| ThreadParticipants | rootId、root、messages；派生参与者与名单范围                                                                                                                                                                                           | 话题参与者缓存及已加载消息按 UID 合并，无独立请求，点击打开资料                                                           |
+| ChatAttachments    | chatId、kind；items、cursor、loading/error、打开/定位状态                                                                                                                                                                              | 列表归组件，打开原消息媒体或定位上下文                                                                                    |
+| ChatSearch         | chatId；query、sort、messages、cursor、loading/error                                                                                                                                                                                   | 聊天消息搜索，点击定位原消息                                                                                              |
+| ChatInvites        | chatId；邀请列表、创建限制、目标用户与操作状态                                                                                                                                                                                         | InvitesService；DirectorySearch 选择指定用户                                                                              |
+| StartChat          | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                                                                                                                                                                | 点击提交才创建或加入；改邀请码会使旧预览不可提交                                                                          |
+| ChatMute           | 公开 toggle(chatId)；根据共享永久偏好筛选临时静音选项，首次展示与菜单打开期间均同步                                                                                                                                                    | 调用 ChatStore.setNotificationSetting，原调用按钮持有等待状态                                                             |
 
 ChatDetails 的侧栏、会话信息 modal 和用户资料 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。名称和简介仅在进入编辑时创建各自的 Signal Form 字段草稿，保存只提交对应字段，另一个字段的草稿保持不变；切换会话清空草稿及头像上传进度。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
 
@@ -187,24 +186,24 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 
 ## 设置与应用外围
 
-| 组件                       | 状态与职责                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------ |
-| Settings                   | 当前用户和更新状态；持有局部更新结果，打开通知、隐私、聊天、贴纸与语言子页 |
-| NotificationSettings       | 本机通知开关、权限申请及重试；私聊／群组 NotificationCategory 摘要行；进入时检查本机订阅，权限拒绝使用 toast |
-| NotificationCategoryPage | 分类通知独立路由页面；标题、返回和 NotificationCategory 详情 |
-| NotificationExceptionPicker | 激活普通／归档聊天查询，搜索已加载聊天，添加与默认相反的永久例外 |
-| NotificationCategory | 紧凑摘要或分类详情；正向通知开关、完整总数、例外分页、添加／移除／确认批量清除；刷新保留内容 |
-| GeneralSettings            | 编辑 Preferences 的颜色模式、消息字号及本机显示开关；群成员进出群消息开关从账号资料派生，通过 Preferences 调用 SessionStore 保存，持有局部保存中与错误状态                       |
-| LanguageSettings           | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog         |
-| FriendVerificationSettings | Signal Form、读取/保存状态与结果；FriendsService                               |
-| PrivacySettings            | 四项隐私入口；独立读取拉黑列表、好友验证、在线状态和已读回执设置资源，显示实际摘要与加载状态，窄屏摘要位于标题下方 |
-| ReadReceiptSettings        | 全局回执开关、读取/自动保存状态；FriendsService 读取/保存，成功后通过 ChatStore 失效回执隐私 |
-| BlockedUsers               | 拉黑用户列表、空状态和加载失败重试；点击用户路由打开资料页 |
-| PresenceSettings           | 全局 visibility、loading/saving、读取/保存失败与成功反馈；FriendsService 读取/保存，成功后通过 Presence 失效个人状态 |
-| StickerSettings            | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、创建贴纸包、贴纸包重排列表 | StickersService、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
-| StickerPackDetail          | packId；包详情、owned 状态、重命名/删除/退订与添加、点按移除贴纸               | StickersService、StickerPreferences；删除与退订移除顺序条目并关闭弹窗 |
-| AppInstall                 | 启动时捕获浏览器安装事件，available 控制菜单入口；点击消费事件并调用安装提示，安装完成时清除事件 |
-| Landing                    | 检测平台与选中平台；公开安装指引                                               |
+| 组件                        | 状态与职责                                                                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Settings                    | 当前用户和更新状态；持有局部更新结果，打开通知、隐私、聊天、贴纸与语言子页                                                                                 |
+| NotificationSettings        | 本机通知开关、权限申请及重试；私聊／群组 NotificationCategory 摘要行；进入时检查本机订阅，权限拒绝使用 toast                                               |
+| NotificationCategoryPage    | 分类通知独立路由页面；标题、返回和 NotificationCategory 详情                                                                                               |
+| NotificationExceptionPicker | 激活普通／归档聊天查询，搜索已加载聊天，添加与默认相反的永久例外                                                                                           |
+| NotificationCategory        | 紧凑摘要或分类详情；正向通知开关、完整总数、例外分页、添加／移除／确认批量清除；刷新保留内容                                                               |
+| GeneralSettings             | 编辑 Preferences 的颜色模式、消息字号及本机显示开关；群成员进出群消息开关从账号资料派生，通过 Preferences 调用 SessionStore 保存，持有局部保存中与错误状态 |
+| LanguageSettings            | 自动/三种语言的单选；写入 Preferences 并调用 Localization 切换 catalog                                                                                     |
+| FriendVerificationSettings  | Signal Form、读取/保存状态与结果；FriendsService                                                                                                           |
+| PrivacySettings             | 四项隐私入口；独立读取拉黑列表、好友验证、在线状态和已读回执设置资源，显示实际摘要与加载状态，窄屏摘要位于标题下方                                         |
+| ReadReceiptSettings         | 全局回执开关、读取/自动保存状态；FriendsService 读取/保存，成功后通过 ChatStore 失效回执隐私                                                               |
+| BlockedUsers                | 拉黑用户列表、空状态和加载失败重试；点击用户路由打开资料页                                                                                                 |
+| PresenceSettings            | 全局 visibility、loading/saving、读取/保存失败与成功反馈；FriendsService 读取/保存，成功后通过 Presence 失效个人状态                                       |
+| StickerSettings             | 置顶表态编辑（输入过滤与表情选择器）、自动整理开关、创建贴纸包、贴纸包重排列表                                                                             | StickersService、StickerPreferences、Preferences；重排写入中点使用时间并同步服务器 |
+| StickerPackDetail           | packId；包详情、owned 状态、重命名/删除/退订与添加、点按移除贴纸                                                                                           | StickersService、StickerPreferences；删除与退订移除顺序条目并关闭弹窗              |
+| AppInstall                  | 启动时捕获浏览器安装事件，available 控制菜单入口；点击消费事件并调用安装提示，安装完成时清除事件                                                           |
+| Landing                     | 检测平台与选中平台；公开安装指引                                                                                                                           |
 
 置顶表态输入由 `settings/emoji-sequences.ts` 提取完整的 Unicode 17.0.0 RGI emoji 序列；匹配集合固定，不依赖浏览器自带的 Unicode 数据或正则 `u` / `v` 标志。该文件由 `npm run emoji:generate` 生成并提交，生成器及 Unicode 数据依赖使用精确版本；升级匹配集合时更新依赖并重新生成。交互约定见[表情与贴纸设置](requirements.md#通知静音与设置)。
 

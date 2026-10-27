@@ -4,22 +4,22 @@ HTTP 使用生成客户端，实时事件来自唯一 Connection。共享资料�
 
 ## 所有权与存储
 
-| 所有者                 | 保存的状态                                                              | 生命周期                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| SessionStore           | token、当前用户及用户组、账号消息显示偏好                               | 应用；token 保存到 localStorage 和 Cookie，账号偏好以服务器为准 |
-| Connection             | 唯一 WebSocket、认证/心跳/重连、最近 256 个新消息 ID                    | 应用                                                        |
-| Presence               | 可见用户/普通群范围、最后授权快照、待回包的用户/群范围、一个分钟时钟与当前请求号 | 应用内存；展示消费者释放或文档隐藏即停止范围和时钟，不持久化 |
-| ChatStore              | 聊天资料、摘要、归档/静音、已读、话题摘要与订阅、好友关系查询、ChatPins | 应用缓存，不保存全部历史消息                                |
-| ChatListStore          | 查询成员 ID、游标、覆盖范围、消费者、好友请求与共享未读响应             | 应用；无消费者时取消读取                                    |
-| ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、用于改写引用快照的撤回与编辑记录 | 每个 ConversationPage；由页面生命周期控制                   |
-| MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                             | 应用内存；跨页面，整页刷新不恢复                            |
-| DraftStore             | 文字、回复目标 ID、保存时间                                             | 按账号和聊天/话题保存到 localStorage                        |
-| Preferences            | 本机显示偏好、消息字号、最近表情、置顶表态表情；派生账号成员消息偏好       | 本机项存 localStorage；账号项由 SessionStore 保存             |
-| StickerPreferences     | 自动整理开关、收藏贴纸使用顺序；读写 SessionStore 中的贴纸包顺序        | 应用；开关与收藏顺序保存到 localStorage，包顺序以服务器为准 |
-| MessageActions         | 请求操作，不保存消息缓存                                                | 每个 MessageMenu                                            |
-| ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                      | 应用；当前页面消费                                          |
-| PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                            | 应用；本机意图保存到 localStorage，去重保存到独立 IndexedDB |
-| AppUpdates             | 检查更新和可更新状态                                                    | 应用                                                        |
+| 所有者                 | 保存的状态                                                                         | 生命周期                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| SessionStore           | token、当前用户及用户组、账号消息显示偏好                                          | 应用；token 保存到 localStorage 和 Cookie，账号偏好以服务器为准 |
+| Connection             | 唯一 WebSocket、认证/心跳/重连、最近 256 个新消息 ID                               | 应用                                                            |
+| Presence               | 可见用户/普通群范围、最后授权快照、待回包的用户/群范围、一个分钟时钟与当前请求号   | 应用内存；展示消费者释放或文档隐藏即停止范围和时钟，不持久化    |
+| ChatStore              | 聊天资料、摘要、归档/静音、已读、话题摘要与订阅、好友关系查询、ChatPins            | 应用缓存，不保存全部历史消息                                    |
+| ChatListStore          | 查询成员 ID、游标、覆盖范围、消费者、好友请求与共享未读响应                        | 应用；无消费者时取消读取                                        |
+| ConversationStore      | 连续消息区间、双向游标、请求状态、期间收到的补丁、用于改写引用快照的撤回与编辑记录 | 每个 ConversationPage；由页面生命周期控制                       |
+| MessageOutbox          | 已提交内容、编辑/撤回意图、上传、确认与重试                                        | 应用内存；跨页面，整页刷新不恢复                                |
+| DraftStore             | 文字、回复目标 ID、保存时间                                                        | 按账号和聊天/话题保存到 localStorage                            |
+| Preferences            | 本机显示偏好、消息字号、最近表情、置顶表态表情；派生账号成员消息偏好               | 本机项存 localStorage；账号项由 SessionStore 保存               |
+| StickerPreferences     | 自动整理开关、收藏贴纸使用顺序；读写 SessionStore 中的贴纸包顺序                   | 应用；开关与收藏顺序保存到 localStorage，包顺序以服务器为准     |
+| MessageActions         | 请求操作，不保存消息缓存                                                           | 每个 MessageMenu                                                |
+| ConversationNavigation | 关闭会话入口弹层、路由与即时定位；不保存消息或位置                                 | 应用；当前页面消费                                              |
+| PushNotifications      | 本机通知意图、浏览器权限、操作状态、去重记录                                       | 应用；本机意图保存到 localStorage，去重保存到独立 IndexedDB     |
+| AppUpdates             | 检查更新和可更新状态                                                               | 应用                                                            |
 
 话题订阅的已知值、新鲜度与响应版本保存在同一缓存条目中；失效时继续显示已知值，读取使用新鲜度判断，不另存一套失效 ID。
 
@@ -91,42 +91,42 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 
 下表省略 `/_api`，c/t/m 分别表示聊天、话题根和消息 ID。
 
-| 触发                          | 接口与参数                                                             | 消费路径                                    |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 激活聊天分类或续页            | `GET /chats?limit=50`，归档加 archived，续页加 after                   | ChatListStore → ChatStore → ChatListContent |
-| 话题 tab，或消息 tab 开启话题 | `GET /threads?limit=20`，archived 与 before 时间游标                   | ChatListStore → ChatStore → ChatListContent |
-| 消息/好友列表显示请求         | `GET /friends/requests?archived=false`                                 | ChatListStore → ChatListContent             |
-| 打开请求历史                  | 同接口 archived=true；无前端续页                                       | 独立历史查询                                |
-| 显示 tab、归档计数或系统角标 | WS `watchConversationUnread`，包含对应 tab 的普通/archived 集合与 appBadge | 消费者共享订阅，服务端推送变化 |
-| 被覆盖的列表收到消息                       | 保留共享预览并标记读状态过期；返回后用逐会话 WS 快照校准，尚无快照时合并 HTTP 读取，窗口外的新聊天从首页补读至原覆盖边界 | ChatListStore → ChatStore                                   |
-| 列表失效（断线重连、手动刷新） | `GET /chats?limit=50`，读取到已加载条数或末尾                                                                    | ChatListStore → ChatStore → ChatListContent                 |
-| 进入会话；缺聊天资料；打开详情或菜单    | `GET /group/{c}`，按缓存新鲜度去重                                     | ChatStore → 标题、资料、权限                |
-| 私聊或用户资料缺关系          | `GET /friends/{uid}`                                                   | ChatStore.relationship → 三处共用           |
-| 用户资料的验证方式            | `GET /friends/add-info/{uid}`                                          | ChatDetails 在点击添加好友后读取            |
-| 恢复普通对话，读状态无缓存    | `GET /chats/{c}/unread`                                                | 页面决定打开位置                            |
-| 恢复话题，读状态无缓存        | `GET /chats/{c}/threads/{t}/read-state`                                | 页面决定打开位置                            |
-| 话题缺订阅状态                | `GET /chats/{c}/threads/{t}/subscribe`                                 | ChatStore → 订阅/归档按钮                   |
-| 打开、定位、双向分页          | `GET /chats/{c}/messages?max=50`，around/before/after；话题加 threadId | ConversationStore → 页面                    |
-| 回复预览或话题根缺失          | `GET /chats/{c}/messages/{m}`                                          | 页面局部预览                                |
-| 活跃可见消息进入视口          | 普通/话题 read 的 POST，1 秒合并目标                                   | ChatStore 更新读状态和计数                  |
-| 活跃私聊或私聊话题的对方已读 | `GET /chats/{c}/read-receipt`；话题回复加 threadId，话题根另读普通范围 | ConversationPage；范围切换、重连和 `readReceiptChanged` 时刷新 |
-| 进入会话/话题（active）       | `GET /chats/{c}/reactions`（话题加 threadId）；随后 `POST /chats/{c}/reactions/read` | 先合并本次会话的跳转 ID，再用响应 readThrough 确认该快照，不清除快照之后的表态 |
-| 离开会话/话题                 | `POST /chats/{c}/reactions/read`                                       | 清掉会话期间新到的 reaction                  |
-| 进入会话/话题（mention）      | `GET /chats/{c}/mentions`（话题加 threadId）                            | 保留本次会话的跳转 ID；mention 计数由消息已读游标派生，不单独 ack |
-| 置顶栏、置顶页、消息菜单      | 普通/话题范围的 `GET .../pins`                                         | 共享 ChatPins                               |
-| 全局收藏                      | `GET /saved-messages`，limit=50、before                                | SavedMessageList 快照                       |
-| 全局目录搜索                  | `GET /group`（joined）和 `/users/search`，300ms 防抖                   | DirectorySearch；群有游标，用户无游标       |
-| 群资料中的成员标签            | `GET /group/{c}/members`，limit、after、q、mode                        | ChatMembers 局部分页                        |
-| 资料中的话题标签              | `GET /chats/{c}/messages?max=50`，before                               | ChatThreads 筛选 threadInfo 根消息          |
-| 资料中的媒体标签              | `GET /chats/{c}/attachments`，kind、limit、before                      | ChatAttachments 局部分页                    |
-| 打开媒体或定位附件            | `GET /chats/{c}/messages/{m}`                                          | 当前消息的媒体集合，或所属话题路由          |
-| 聊天内消息搜索                | `GET /chats/{c}/messages/search`，q、sort、limit、offset               | ChatSearch 局部分页                         |
-| 邀请预览与管理                | `GET /invites/invite?inviteCode=...`、`GET /invites`                   | InviteCard、StartChat、ChatInvites          |
-| 查看完整表态                  | `GET /chats/{c}/messages/{m}/reactions`                                | ReactionDetails；用 sortIndex 还原时间顺序并按用户聚合，按表情本地过滤 |
-| 打开贴纸库                    | 收藏、已订阅包、自有包三个 GET                                         | StickerPicker；切包读取该包详情，包列表按用户贴纸包顺序排序 |
-| 打开表情和贴纸设置            | `GET /stickers/packs/mine/owned`、`GET /stickers/packs/mine/subscribed` | StickerSettings 合并展示                                    |
-| 打开贴纸包详情                | `GET /stickers/packs/{id}`                                             | StickerPackDetail                                           |
-| 好友验证设置                  | `GET /friends/me/settings`                                             | 表单组件                                    |
+| 触发                                 | 接口与参数                                                                                                               | 消费路径                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| 激活聊天分类或续页                   | `GET /chats?limit=50`，归档加 archived，续页加 after                                                                     | ChatListStore → ChatStore → ChatListContent                                    |
+| 话题 tab，或消息 tab 开启话题        | `GET /threads?limit=20`，archived 与 before 时间游标                                                                     | ChatListStore → ChatStore → ChatListContent                                    |
+| 消息/好友列表显示请求                | `GET /friends/requests?archived=false`                                                                                   | ChatListStore → ChatListContent                                                |
+| 打开请求历史                         | 同接口 archived=true；无前端续页                                                                                         | 独立历史查询                                                                   |
+| 显示 tab、归档计数或系统角标         | WS `watchConversationUnread`，包含对应 tab 的普通/archived 集合与 appBadge                                               | 消费者共享订阅，服务端推送变化                                                 |
+| 被覆盖的列表收到消息                 | 保留共享预览并标记读状态过期；返回后用逐会话 WS 快照校准，尚无快照时合并 HTTP 读取，窗口外的新聊天从首页补读至原覆盖边界 | ChatListStore → ChatStore                                                      |
+| 列表失效（断线重连、手动刷新）       | `GET /chats?limit=50`，读取到已加载条数或末尾                                                                            | ChatListStore → ChatStore → ChatListContent                                    |
+| 进入会话；缺聊天资料；打开详情或菜单 | `GET /group/{c}`，按缓存新鲜度去重                                                                                       | ChatStore → 标题、资料、权限                                                   |
+| 私聊或用户资料缺关系                 | `GET /friends/{uid}`                                                                                                     | ChatStore.relationship → 三处共用                                              |
+| 用户资料的验证方式                   | `GET /friends/add-info/{uid}`                                                                                            | ChatDetails 在点击添加好友后读取                                               |
+| 恢复普通对话，读状态无缓存           | `GET /chats/{c}/unread`                                                                                                  | 页面决定打开位置                                                               |
+| 恢复话题，读状态无缓存               | `GET /chats/{c}/threads/{t}/read-state`                                                                                  | 页面决定打开位置                                                               |
+| 话题缺订阅状态                       | `GET /chats/{c}/threads/{t}/subscribe`                                                                                   | ChatStore → 订阅/归档按钮                                                      |
+| 打开、定位、双向分页                 | `GET /chats/{c}/messages?max=50`，around/before/after；话题加 threadId                                                   | ConversationStore → 页面                                                       |
+| 回复预览或话题根缺失                 | `GET /chats/{c}/messages/{m}`                                                                                            | 页面局部预览                                                                   |
+| 活跃可见消息进入视口                 | 普通/话题 read 的 POST，1 秒合并目标                                                                                     | ChatStore 更新读状态和计数                                                     |
+| 活跃私聊或私聊话题的对方已读         | `GET /chats/{c}/read-receipt`；话题回复加 threadId，话题根另读普通范围                                                   | ConversationPage；范围切换、重连和 `readReceiptChanged` 时刷新                 |
+| 进入会话/话题（active）              | `GET /chats/{c}/reactions`（话题加 threadId）；随后 `POST /chats/{c}/reactions/read`                                     | 先合并本次会话的跳转 ID，再用响应 readThrough 确认该快照，不清除快照之后的表态 |
+| 离开会话/话题                        | `POST /chats/{c}/reactions/read`                                                                                         | 清掉会话期间新到的 reaction                                                    |
+| 进入会话/话题（mention）             | `GET /chats/{c}/mentions`（话题加 threadId）                                                                             | 保留本次会话的跳转 ID；mention 计数由消息已读游标派生，不单独 ack              |
+| 置顶栏、置顶页、消息菜单             | 普通/话题范围的 `GET .../pins`                                                                                           | 共享 ChatPins                                                                  |
+| 全局收藏                             | `GET /saved-messages`，limit=50、before                                                                                  | SavedMessageList 快照                                                          |
+| 全局目录搜索                         | `GET /group`（joined）和 `/users/search`，300ms 防抖                                                                     | DirectorySearch；群有游标，用户无游标                                          |
+| 群资料中的成员标签                   | `GET /group/{c}/members`，limit、after、q、mode                                                                          | ChatMembers 局部分页                                                           |
+| 资料中的话题标签                     | `GET /chats/{c}/messages?max=50`，before                                                                                 | ChatThreads 筛选 threadInfo 根消息                                             |
+| 资料中的媒体标签                     | `GET /chats/{c}/attachments`，kind、limit、before                                                                        | ChatAttachments 局部分页                                                       |
+| 打开媒体或定位附件                   | `GET /chats/{c}/messages/{m}`                                                                                            | 当前消息的媒体集合，或所属话题路由                                             |
+| 聊天内消息搜索                       | `GET /chats/{c}/messages/search`，q、sort、limit、offset                                                                 | ChatSearch 局部分页                                                            |
+| 邀请预览与管理                       | `GET /invites/invite?inviteCode=...`、`GET /invites`                                                                     | InviteCard、StartChat、ChatInvites                                             |
+| 查看完整表态                         | `GET /chats/{c}/messages/{m}/reactions`                                                                                  | ReactionDetails；用 sortIndex 还原时间顺序并按用户聚合，按表情本地过滤         |
+| 打开贴纸库                           | 收藏、已订阅包、自有包三个 GET                                                                                           | StickerPicker；切包读取该包详情，包列表按用户贴纸包顺序排序                    |
+| 打开表情和贴纸设置                   | `GET /stickers/packs/mine/owned`、`GET /stickers/packs/mine/subscribed`                                                  | StickerSettings 合并展示                                                       |
+| 打开贴纸包详情                       | `GET /stickers/packs/{id}`                                                                                               | StickerPackDetail                                                              |
+| 好友验证设置                         | `GET /friends/me/settings`                                                                                               | 表单组件                                                                       |
 
 Reaction 的已读是会话级：进入前台会话/话题、恢复可见或重连时读取 messageIds 与 readThrough；保留未跳转的目标，将新目标去重合并，再按 readThrough 确认快照。重复生命周期共享当前查询或已知结果；有效未读零跳过查询，真实重连或新通知强制校准。请求期间只有新通知或确认后仍有未读才追加查询；查询失败不确认。后台不查询或确认，前台离开时使用保存的聊天/话题身份再确认一次，不依赖旧路由仍激活。普通消息已读不推进 reaction 游标。
 
@@ -168,21 +168,21 @@ Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消�
 
 ## 实时事件与未推送的数据
 
-| 事件                                                      | 更新路径                                                                                              |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；隐藏列表记录待补未读或首页位置；当前页面决定接收和是否跟随底部 |
-| messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；编辑按服务器预览形状改写引用方内嵌的引用快照，撤回将其改为墓碑；正在读取的区间保留补丁；编辑刷新提及计数与全局汇总 |
-| reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                            |
+| 事件                                                      | 更新路径                                                                                                                                                                                             |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| message                                                   | Connection 合并 HTTP 与 WS 回声并去重；ChatStore 更新摘要、使已读失效；隐藏列表记录待补未读或首页位置；当前页面决定接收和是否跟随底部                                                                |
+| messageUpdated / messageDeleted / messagesBulkDeleted     | 更新摘要、置顶与已加载区间；编辑按服务器预览形状改写引用方内嵌的引用快照，撤回将其改为墓碑；正在读取的区间保留补丁；编辑刷新提及计数与全局汇总                                                       |
+| reactionUpdated                                           | 更新区间与置顶表态，保留广播缺省的个人选择                                                                                                                                                           |
 | notification（mention/reply/reaction）                    | 服务端定向发送（包括撤销他人消息上的表态）；非话题标记该 chat 的读状态过期，已加载话题定向读取 read-state，未知话题按列表覆盖情况校准；当前会话合并读取对应跳转 ID（reaction 还会按会话级 ack 清除） |
-| pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                 |
-| threadUpdate                                              | 更新已加载根消息统计；新订阅话题补列表头部，未读由 WS 推送                                                                |
-| threadMembershipChanged                                   | 用 status 快照更新订阅与归档；旧事件无 status 时补读，列表按项更新                                                                |
-| friendRequestReceived / friendRequestResolved             | 请求列表失效；接受时刷新聊天，相关好友关系查询失效                                                    |
-| friendshipRemoved                                         | 刷新相关关系查询和聊天归档计数                                                                        |
-| chatArchiveStateChanged                                   | 更新归档/静音字段并迁移已知列表项，未知项按 ID 校准                                                               |
-| readReceiptChanged                                      | 当前私聊页面与列表预览按 chatId 失效并读取对应范围；`privacyChanged` 先清除已知回执，普通推进保留已知回执直至新响应 |
-| 首次 presenceUpdate、恢复前台                             | Connection 区分认证连接与前台恢复的 resync，同一次 focus/visibility 恢复只发布一次；健康连接保留事件维护的数据，断线重连校准已加载范围                                                |
-| presenceSnapshot                                           | Presence 仅接收当前 `requestId` 的绝对授权快照；清除当前请求中缺席的用户/群，刷新期间保留已知状态；本机断网、断开或文档隐藏时不显示实时结论 |
+| pinAdded / pinRemoved / threadPinAdded / threadPinRemoved | 更新已缓存的 ChatPins                                                                                                                                                                                |
+| threadUpdate                                              | 更新已加载根消息统计；新订阅话题补列表头部，未读由 WS 推送                                                                                                                                           |
+| threadMembershipChanged                                   | 用 status 快照更新订阅与归档；旧事件无 status 时补读，列表按项更新                                                                                                                                   |
+| friendRequestReceived / friendRequestResolved             | 请求列表失效；接受时刷新聊天，相关好友关系查询失效                                                                                                                                                   |
+| friendshipRemoved                                         | 刷新相关关系查询和聊天归档计数                                                                                                                                                                       |
+| chatArchiveStateChanged                                   | 更新归档/静音字段并迁移已知列表项，未知项按 ID 校准                                                                                                                                                  |
+| readReceiptChanged                                        | 当前私聊页面与列表预览按 chatId 失效并读取对应范围；`privacyChanged` 先清除已知回执，普通推进保留已知回执直至新响应                                                                                  |
+| 首次 presenceUpdate、恢复前台                             | Connection 区分认证连接与前台恢复的 resync，同一次 focus/visibility 恢复只发布一次；健康连接保留事件维护的数据，断线重连校准已加载范围                                                               |
+| presenceSnapshot                                          | Presence 仅接收当前 `requestId` 的绝对授权快照；清除当前请求中缺席的用户/群，刷新期间保留已知状态；本机断网、断开或文档隐藏时不显示实时结论                                                          |
 
 Connection 每 10 秒心跳、退避重连；connected 在鉴权后的 presenceUpdate 为真。只有文档可见且窗口拥有焦点时才上报 active，否则为 inactive；心跳携带当前 state，连接打开并发送 auth 后，以及 visibilitychange、窗口 focus/blur 时立即发送 appState，不等待下次心跳。恢复可见且聚焦、连接已认证时发出 resync；未连接时等待认证成功统一校准。presenceUpdate 无在线用户列表消费者；stickerPackOrderUpdated 由 StickerPreferences 接收，替换 SessionStore 中的贴纸包顺序。重连时最新区间至多补一页，不扫旧历史；离线期间编辑/撤回/表态可能在重开区间后才更新。Presence 通过同一单例 Connection 发送 `{type:'watchPresence',requestId,userIds,chatIds}`，以该 socket 的可见范围替换服务端监看范围；Snowflake chatId 仅在 Connection 边界还原为十进制字符串。每次范围变动、重连、恢复联网或恢复可见都会发起新请求；非空范围立即取得 `presenceSnapshot`，随后每 15 秒刷新，发布前重新授权。客户端只采用最新请求的完整快照，绝不从本地页面推算群人数。
 
@@ -206,7 +206,7 @@ ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使�
 
 附件选择后立刻处理和上传；发送时把任务引用移交 MessageOutbox，立即上屏并释放输入区。编辑借用原任务，取消编辑不取消队列上传。文件、语音、贴纸单独发送时保留其他输入内容。已知私聊不可发送时，点击提交说明原因并保留文本、附件和录音；关系未知时交给服务器最终判断。
 
-附件等待任一失败即结束，不等待其他上传；重试复用已完成 ID、继续进行中的上传并重试失败任务。附件准备不占发送顺序；准备好后与文字共用每会话（chatId + threadId）的串行发送。前一条等待确认时暂停后续提交，失败后放行下一条；不同聊天/话题独立。创建请求发出后冻结正文、附件 ID 与 clientGeneratedId，重试使用原请求。编辑已发请求需先取得 ID，再 PATCH；未发请求的编辑直接修改待发内容。
+附件等待任一失败即结束，不等待其他上传；重试复用已完成 ID、继续进行中的上传并重试失败任务。附件弹窗的重试只重试该附件，没有其他失败附件时恢复队列发送；删除更新队列的附件选择并释放被移除任务，保留其余文字和附件。删除后没有内容的新消息直接移除，不发送空消息；编辑只剩原内容或空编辑删除唯一新附件时恢复已确认内容，不撤回服务器消息；只有没有在途或尚未确认的旧编辑请求时才直接丢弃待发编辑，否则保留恢复意图并继续通过队列同步。附件准备不占发送顺序；准备好后与文字共用每会话（chatId + threadId）的串行发送。前一条等待确认时暂停后续提交，失败后放行下一条；不同聊天/话题独立。创建请求发出后冻结正文、附件 ID 与 clientGeneratedId，重试使用原请求。编辑已发请求需先取得 ID，再 PATCH；未发请求的编辑直接修改待发内容。
 
 撤回立即隐藏并停止创建重试，dispose 附件任务；尚未发请求可直接删除。已发请求保留撤回意图，迟到响应、WS 或正常加载取得对应 ID 后补 DELETE。协议不能按 clientGeneratedId 查询/撤回，不扫历史兜底。队列关闭或整页刷新不持久化。
 
@@ -236,7 +236,9 @@ ConversationPage 只在活跃 DM 范围读取回执；普通聊天和话题使�
 
 ## 媒体与语音
 
-上传先读取限制，照片入口检测/压缩后申请签名 URL；文件入口保留原字节。签名 PUT 使用返回头，不携带聊天 token。AttachmentUpload 持有统一总进度（阶段权重见[加载反馈](loading-indicators.md)）、AbortSignal、本地 URL 和成功 ID；重试复用已有任务/ID，释放时取消处理与上传。
+上传先检查空文件与文件名，再读取限制，照片入口检测/压缩后申请签名 URL；文件入口保留原字节。签名 PUT 使用返回头，不携带聊天 token。AttachmentUpload 持有统一总进度（阶段权重见[加载反馈](loading-indicators.md)）、AbortSignal、本地 URL 和成功 ID；重试复用已有任务/ID，释放时取消处理与上传。失败状态保留阶段、原因、大小上限及手动/自动重试能力，已完成的附件不重传。文件名按 Unicode 字符计数最多 255 个字符，压缩追加扩展名时截短原名以符合限制。
+
+配置和签名请求的截止时间为 30 秒，存储上传连续 30 秒没有新增字节则中止；媒体检测、元数据读取和压缩连续 30 秒没有进度增长则终止本轮，释放元数据资源，迟到的编码结果不再上传。HEIC 串行转换的排队等待不计入处理超时，取得执行机会后重新计时，排队期间仍可取消。普通压缩异常仍回退原文件。网络、超时、限流和服务异常按 1 秒起、最多 30 秒间隔自动重试，离线等待联网；无法读取或无效文件不重试，处理失败或处理超时、登录失效、权限及存储拒绝只允许手动重试。自动重试期间保留错误信息直到成功；弹窗操作重新检查附件当前状态，成功后忽略迟到操作，展示规则见[加载反馈](loading-indicators.md)。
 
 静态图片保持比例、不放大、不裁剪，压缩候选同时限制短边 1400、总像素 800 万、长边 16000，尺寸向下取整。按实际像素透明度选择编码顺序：不透明图片 WebP → JPEG，透明图片 WebP → PNG；不支持或编码失败时尝试下一格式，第一个可用格式低于原体积 75% 才采用，否则保留原文件及原尺寸。HEIC 必要时解码为位图，该路径不要求体积节省。保留动图；所有格式编码失败回退原文件。原文件保留其原始格式，不禁止 AVIF 输入。浏览器已启动的不可取消编码结束后丢弃结果，不再上传。视频仍通过 Mediabunny 转码，低于原体积 50% 且轨道完整才采用。
 

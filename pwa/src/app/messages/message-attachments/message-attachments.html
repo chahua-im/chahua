@@ -50,9 +50,25 @@
           <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
         }
         @if (album() && last && items().length > 9) {
-          <button class="album-more" type="button" (click)="view(item.id ?? item.url, $event)">
+          <button
+            class="album-more"
+            [class.with-failures]="hiddenUploadFailures()"
+            type="button"
+            (pointerdown)="$event.stopPropagation()"
+            (click)="more(item.id ?? item.url, $event)">
+            @if (hiddenUploadFailures()) {
+              <ion-icon [icon]="failureIcon" />
+            }
             +{{ items().length - 9 }}
           </button>
+        }
+        @if (item.upload; as upload) {
+          @if (upload.state().error) {
+            <app-upload-failure
+              [upload]="upload"
+              (retry)="retryUpload.emit(upload)"
+              (remove)="removeUpload.emit(upload)" />
+          }
         }
         @if (last && overlayTime()) {
           <ion-badge #timePill class="media-time" color="medium">
@@ -64,6 +80,14 @@
     } @else if (item.kind === MediaKind.Audio) {
       <div class="audio-frame">
         <app-voice-player [src]="item.url" [dock]="dock()" />
+        @if (item.upload; as upload) {
+          @if (upload.state().error) {
+            <app-upload-failure
+              [upload]="upload"
+              (retry)="retryUpload.emit(upload)"
+              (remove)="removeUpload.emit(upload)" />
+          }
+        }
         @if (item.progress != null) {
           <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
         }
@@ -75,28 +99,76 @@
         }
       </div>
     } @else {
-      <a class="file" [href]="item.url" [attr.download]="item.fileName" target="_blank" rel="noopener">
-        <ion-icon [icon]="fileIcon"></ion-icon>
-        <span class="file-info">
-          <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
-          @if (item.size != null) {
-            <small>
-              @if (item.size < 1024) {
-                {{ item.size }} B
-              } @else if (item.size < 1024 * 1024) {
-                {{ (item.size / 1024).toFixed(1) }} KB
-              } @else {
-                {{ (item.size / (1024 * 1024)).toFixed(1) }} MB
-              }
-            </small>
+      <div class="file-frame">
+        <a class="file" [href]="item.url" [attr.download]="item.fileName" target="_blank" rel="noopener">
+          <ion-icon [icon]="fileIcon"></ion-icon>
+          <span class="file-info">
+            <span class="file-name" [title]="item.fileName">{{ item.fileName }}</span>
+            @if (item.size != null) {
+              <small>
+                @if (item.size < 1024) {
+                  {{ item.size }} B
+                } @else if (item.size < 1024 * 1024) {
+                  {{ (item.size / 1024).toFixed(1) }} KB
+                } @else {
+                  {{ (item.size / (1024 * 1024)).toFixed(1) }} MB
+                }
+              </small>
+            }
+          </span>
+          @if (item.progress != null) {
+            <app-upload-progress [value]="item.progress" />
+          } @else {
+            <ion-icon [icon]="downloadIcon"></ion-icon>
           }
-        </span>
-        @if (item.progress != null) {
-          <app-upload-progress [value]="item.progress" />
-        } @else {
-          <ion-icon [icon]="downloadIcon"></ion-icon>
+        </a>
+        @if (item.upload; as upload) {
+          @if (upload.state().error) {
+            <app-upload-failure
+              [upload]="upload"
+              (retry)="retryUpload.emit(upload)"
+              (remove)="removeUpload.emit(upload)" />
+          }
         }
-      </a>
+      </div>
     }
   }
 </div>
+@if (showUploads()) {
+  <ion-modal [isOpen]="true" (didDismiss)="showUploads.set(false)">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>{{ 'messages.upload.attachmentsTitle' | transloco }}</ion-title>
+          <ion-buttons slot="end">
+            <ion-button (click)="closeUploads()">{{ 'common.close' | transloco }}</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="ion-padding">
+        <div class="upload-grid">
+          @for (item of items(); track item.id ?? item.url) {
+            <div class="upload-tile">
+              @if (item.kind === MediaKind.Image) {
+                <img [src]="item.url" />
+              } @else {
+                <video [src]="item.url" muted playsinline preload="metadata"></video>
+              }
+              @if (item.progress != null) {
+                <div class="upload-overlay"><app-upload-progress [value]="item.progress" /></div>
+              }
+              @if (item.upload; as upload) {
+                @if (upload.state().error) {
+                  <app-upload-failure
+                    [upload]="upload"
+                    (retry)="retryUpload.emit(upload)"
+                    (remove)="removeUpload.emit(upload)" />
+                }
+              }
+            </div>
+          }
+        </div>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
+}

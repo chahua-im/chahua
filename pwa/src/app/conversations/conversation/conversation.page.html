@@ -189,6 +189,8 @@
           [busy]="row.message.id != null && menu()?.busyMessageId() === row.message.id"
           [uploads]="row.outgoing?.uploads ?? []"
           (retry)="row.outgoing && outbox.retry(row.outgoing)"
+          (retryUpload)="row.outgoing && outbox.retryUpload(row.outgoing, $event)"
+          (removeUpload)="row.outgoing && outbox.removeUpload(row.outgoing, $event)"
           [own]="row.message.sender.uid === session.user()?.uid"
           [read]="row.message.sender.uid === session.user()?.uid && isReadByPeer(row.message)"
           [first]="row.first"

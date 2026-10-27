@@ -540,6 +540,154 @@ describe('MessageOutbox', () => {
     expect(item.message().attachments[0].url).toBe(media.item.url);
     expect(media.dispose).not.toHaveBeenCalled();
   });
+
+  it('retries only the selected failed upload and sends when the remaining uploads are ready', async () => {
+    const first = upload();
+    const second = upload();
+    first.item.retryable = second.item.retryable = false;
+    const item = outbox.enqueue(testChat.id, undefined, '', { ...text, uploads: [first.item, second.item] });
+    first.finish(undefined);
+    second.finish(undefined);
+    await item.operation;
+    for (const [media, id] of [
+      [first, encodeId('7')],
+      [second, encodeId('8')],
+    ] as const) {
+      vi.mocked(media.item.retry).mockImplementation(async () => {
+        media.state.update((state) => ({ ...state, status: UploadStatus.Ready, id }));
+        return id;
+      });
+    }
+    await outbox.retryUpload(item, first.item);
+    expect(second.item.retry).toHaveBeenCalledOnce();
+    expect(api.postMessage).not.toHaveBeenCalled();
+    const retry = outbox.retryUpload(item, second.item);
+    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage.mock.calls[0][1].attachmentIds).toEqual([encodeId('7'), encodeId('8')]);
+    replies[0].next(accepted());
+    await retry;
+    await item.operation;
+  });
+
+  it('removes only a failed attachment, retaining text and already uploaded attachments', async () => {
+    const ready = upload();
+    const failed = upload();
+    failed.item.retryable = false;
+    const item = outbox.enqueue(testChat.id, undefined, 'keep caption', {
+      ...text,
+      uploads: [ready.item, failed.item],
+    });
+    ready.finish(encodeId('7'));
+    failed.finish(undefined);
+    await item.operation;
+    outbox.removeUpload(item, failed.item);
+    await vi.waitFor(() => expect(api.postMessage).toHaveBeenCalledOnce());
+    expect(api.postMessage.mock.calls[0][1]).toMatchObject({ message: 'keep caption', attachmentIds: [encodeId('7')] });
+    expect(item.uploads).toEqual([ready.item]);
+    expect(failed.dispose).toHaveBeenCalledOnce();
+    expect(ready.dispose).not.toHaveBeenCalled();
+    replies[0].next(accepted());
+    await item.operation;
+  });
+
+  it.each([MessageType.file, MessageType.audio, MessageType.text])(
+    'deletes an empty local %s message after removing its only failed upload',
+    async (messageType) => {
+      const failed = upload();
+      const item = outbox.enqueue(testChat.id, undefined, '', {
+        messageType,
+        attachmentIds: [],
+        uploads: [failed.item],
+      });
+      failed.finish(undefined);
+      await item.operation;
+      outbox.removeUpload(item, failed.item);
+      expect(outbox.items()).not.toContain(item);
+      expect(failed.dispose).toHaveBeenCalledOnce();
+      expect(api.postMessage).not.toHaveBeenCalled();
+      expect(api.deleteMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('drops an empty edit that loses its only failed upload instead of editing or recalling the message', async () => {
+    const failed = upload();
+    const item = outbox.enqueueEdit(testMessage, undefined, '', { ...text, uploads: [failed.item] });
+    failed.finish(undefined);
+    await item.operation;
+    outbox.removeUpload(item, failed.item);
+    expect(outbox.items()).not.toContain(item);
+    expect(api.patchMessage).not.toHaveBeenCalled();
+    expect(api.deleteMessage).not.toHaveBeenCalled();
+    expect(failed.dispose).toHaveBeenCalledOnce();
+  });
+  it('drops an edit that only tried to add the failed upload', async () => {
+    const failed = upload();
+    const item = outbox.enqueueEdit(testMessage, undefined, testMessage.message ?? '', {
+      ...text,
+      uploads: [failed.item],
+    });
+    failed.finish(undefined);
+    await item.operation;
+    outbox.removeUpload(item, failed.item);
+    expect(outbox.items()).not.toContain(item);
+    expect(api.patchMessage).not.toHaveBeenCalled();
+    expect(api.deleteMessage).not.toHaveBeenCalled();
+    expect(failed.dispose).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['pending', 'original'],
+    ['pending', ''],
+    ['timeout', 'original'],
+    ['timeout', ''],
+  ])(
+    'preserves the final text after removing a failed upload with a %s PATCH and text %j',
+    async (status, finalText) => {
+      const original = { ...testMessage, message: 'original', attachments: [] };
+      const item = outbox.enqueueEdit(original, undefined, 'older edit', text);
+      expect(api.patchMessage).toHaveBeenCalledOnce();
+      if (status === 'timeout') {
+        patches[0].error({ status: 408 });
+        await item.operation;
+      }
+      const failed = upload();
+      failed.item.retryable = false;
+      outbox.edit(item, finalText, { ...text, uploads: [failed.item] });
+      failed.finish(undefined);
+      if (status === 'timeout') await item.operation;
+      outbox.removeUpload(item, failed.item);
+      expect(outbox.items()).toContain(item);
+      expect(item.message().message).toBe('original');
+      expect(item.uploads).toEqual([]);
+      expect(failed.dispose).toHaveBeenCalledOnce();
+      if (status === 'pending') {
+        patches[0].next({ ...original, message: 'older edit', isEdited: true });
+      }
+      await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledTimes(2));
+      expect(item.message().message).toBe('original');
+      expect(api.patchMessage.mock.calls[1][2]).toEqual({ message: 'original', attachmentIds: [] });
+      patches[1].next(original);
+      await item.operation;
+      expect(item.delivery()).toBe(MessageDelivery.Sent);
+      expect(api.deleteMessage).not.toHaveBeenCalled();
+    },
+  );
+  it('keeps an edit that still adds another new attachment after deleting a failed one', async () => {
+    const ready = upload();
+    const failed = upload();
+    const item = outbox.enqueueEdit(testMessage, undefined, testMessage.message ?? '', {
+      ...text,
+      uploads: [ready.item, failed.item],
+    });
+    ready.finish(encodeId('7'));
+    failed.finish(undefined);
+    await item.operation;
+    outbox.removeUpload(item, failed.item);
+    expect(outbox.items()).toContain(item);
+    await vi.waitFor(() => expect(api.patchMessage).toHaveBeenCalledOnce());
+    expect(api.patchMessage.mock.calls[0][2].attachmentIds).toEqual([encodeId('7')]);
+    patches[0].next(testMessage);
+    await item.operation;
+  });
   it('fails immediately while another attachment is pending and retries failed attachments together', async () => {
     const ready = upload();
     const failed = upload();

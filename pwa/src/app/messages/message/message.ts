@@ -163,6 +163,9 @@ export class Message<T extends MessageContent = MessageResponse> {
   readonly read = input(false);
   readonly busy = input(false);
   readonly uploads = input<readonly AttachmentUpload[]>([]);
+  protected readonly hasUploadFailure = computed(() => this.uploads().some((upload) => !!upload.state().error));
+  readonly retryUpload = output<AttachmentUpload>();
+  readonly removeUpload = output<AttachmentUpload>();
   readonly retry = output<void>();
   protected readonly Delivery = MessageDelivery;
   protected readonly status = computed(() => {

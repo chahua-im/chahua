@@ -1,7 +1,7 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { getPlatforms } from '@ionic/angular';
+import { AlertController, getPlatforms, type AlertButton, type AlertOptions } from '@ionic/angular';
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { vi } from 'vitest';
 import { AttachmentsService } from '../../../generated/endpoints/attachments/attachments.service';
@@ -20,9 +20,49 @@ import { decodeId, encodeId } from '../../api/snowflake-id';
 import { testChat, testMessage } from '../../api/testing';
 import type { MessageContent } from '../message/message';
 import { AttachmentUpload, UploadStatus } from '../upload';
+import { UploadErrorCode } from '../upload-error';
 import { UploadProgress } from '../upload-progress/upload-progress';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { MessageComposer, type Composition } from './message-composer';
+
+interface FakeAlert {
+  header?: string;
+  subHeader?: string;
+  message?: string;
+  buttons?: (AlertButton | string)[];
+  present: () => Promise<void>;
+  dismiss: (data?: unknown, role?: string) => Promise<boolean>;
+  remove: () => void;
+  onDidDismiss: () => Promise<{ role?: string }>;
+}
+
+function fakeAlert(options: AlertOptions): FakeAlert {
+  let close!: (detail: { role?: string }) => void;
+  const dismissed = new Promise<{ role?: string }>((resolve) => (close = resolve));
+  return {
+    header: options.header,
+    subHeader: options.subHeader,
+    message: options.message as string | undefined,
+    buttons: options.buttons,
+    present: vi.fn(async () => {}),
+    dismiss: vi.fn(async (_data?: unknown, role?: string) => {
+      close({ role });
+      return true;
+    }),
+    remove: vi.fn(),
+    onDidDismiss: () => dismissed,
+  };
+}
+
+function mockAlerts() {
+  const created: FakeAlert[] = [];
+  vi.spyOn(TestBed.inject(AlertController), 'create').mockImplementation(async (options) => {
+    const alert = fakeAlert(options!);
+    created.push(alert);
+    return alert as unknown as HTMLIonAlertElement;
+  });
+  return created;
+}
 
 class FakeUpload {
   static requests: FakeUpload[] = [];
@@ -88,6 +128,7 @@ describe('Message composer upload ownership', () => {
         src = '';
         naturalWidth = 640;
         naturalHeight = 480;
+        removeAttribute = vi.fn();
         decode = vi.fn().mockResolvedValue(undefined);
       },
     );
@@ -117,6 +158,72 @@ describe('Message composer upload ownership', () => {
         : new File(['hello'], 'note.txt', { type: 'text/plain' });
     return composer['addFile'](file, purpose)!;
   }
+
+  it('opens the size error from the failed file and deletes only that attachment', async () => {
+    const upload = add();
+    const other = composer['addFile'](new File([], 'empty.txt'), AttachmentUploadPurpose.file)!;
+    const pending = upload.retry();
+    http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 4 });
+    await pending;
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelector('app-upload-failures')).toBeNull();
+    expect(element.querySelectorAll('.upload-failure')).toHaveLength(2);
+    expect(element.querySelector('.uploads')?.textContent).not.toContain('MiB');
+    expect(composer['canSend']()).toBe(false);
+    const created = mockAlerts();
+    element.querySelector<HTMLButtonElement>('.upload-failure')!.click();
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    const dialog = created[0];
+    expect(dialog.subHeader).toBe('note.txt');
+    expect(dialog.message).toContain('MiB');
+    expect(dialog.buttons).toEqual(expect.arrayContaining([expect.objectContaining({ text: '删除' })]));
+    expect(dialog.buttons).not.toEqual(expect.arrayContaining([expect.objectContaining({ text: '重试' })]));
+    await dialog.dismiss(undefined, 'destructive');
+    await vi.waitFor(() => expect(composer['selectedUploads']()).toEqual([other]));
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(upload.url);
+  });
+
+  it('retries the selected upload through its error dialog', async () => {
+    const upload = add();
+    const pending = upload.retry();
+    http.expectOne('/_api/attachments/config').flush({}, { status: 503, statusText: 'Unavailable' });
+    await pending;
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    const created = mockAlerts();
+    element.querySelector<HTMLButtonElement>('.upload-failure')!.click();
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    const dialog = created[0];
+    expect(dialog.message).toContain('将自动重试');
+    expect(upload.state().error?.code).toBe(UploadErrorCode.Server);
+    await dialog.dismiss(undefined, 'retry');
+    await vi.waitFor(() => http.expectOne('/_api/attachments/config').flush({ maxFileSizeBytes: 1024 }));
+    await vi.waitFor(() =>
+      http.expectOne('/_api/attachments/upload-url').flush({
+        attachmentId: encodeId('100'),
+        uploadUrl: 'https://storage.invalid/upload',
+        uploadHeaders: {},
+      }),
+    );
+    await vi.waitFor(() => expect(FakeUpload.requests).toHaveLength(1));
+    FakeUpload.requests[0].finish();
+    await vi.waitFor(() => expect(upload.state().status).toBe(UploadStatus.Ready));
+    fixture.detectChanges();
+    expect(element.querySelector('.upload-failure')).toBeNull();
+  });
+
+  it('keeps twenty failed files in the preview strip without inline error paragraphs', () => {
+    for (let index = 0; index < 20; index++) {
+      composer['addFile'](new File([], `empty-${index}.txt`), AttachmentUploadPurpose.file);
+    }
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelectorAll('.upload')).toHaveLength(20);
+    expect(element.querySelectorAll('.upload-failure')).toHaveLength(20);
+    expect(element.querySelector('app-upload-failures, .send-error, .upload-action')).toBeNull();
+    expect(element.textContent).not.toContain('文件为空');
+  });
 
   it('enables Send for a forward without text and leaves upload ownership untouched', () => {
     const upload = queuedUpload();

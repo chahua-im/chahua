@@ -3,11 +3,13 @@ import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { vi } from 'vitest';
+import { AlertController, IonModal, type AlertButton, type AlertOptions } from '@ionic/angular';
 import type { AttachmentResponse, MessageResponse } from '../../../generated/models';
 import { AttachmentUploadPurpose, MessageType } from '../../../generated/models';
 import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
 import { type AttachmentUpload, UploadStatus } from '../upload';
+import { UploadErrorCode, UploadStage } from '../upload-error';
 import { VoicePlayer } from '../voice-player/voice-player';
 import { MediaKind } from './media-kind';
 import { MessageAttachments, type MessageAttachmentSource } from './message-attachments';
@@ -21,6 +23,45 @@ const image: AttachmentResponse = {
   size: 2048,
   fileName: '照片.jpg',
 };
+
+interface FakeAlert {
+  header?: string;
+  subHeader?: string;
+  message?: string;
+  buttons?: (AlertButton | string)[];
+  present: () => Promise<void>;
+  dismiss: (data?: unknown, role?: string) => Promise<boolean>;
+  remove: () => void;
+  onDidDismiss: () => Promise<{ role?: string }>;
+}
+
+function fakeAlert(options: AlertOptions): FakeAlert {
+  let close!: (detail: { role?: string }) => void;
+  const dismissed = new Promise<{ role?: string }>((resolve) => (close = resolve));
+  return {
+    header: options.header,
+    subHeader: options.subHeader,
+    message: options.message as string | undefined,
+    buttons: options.buttons,
+    present: vi.fn(async () => {}),
+    dismiss: vi.fn(async (_data?: unknown, role?: string) => {
+      close({ role });
+      return true;
+    }),
+    remove: vi.fn(),
+    onDidDismiss: () => dismissed,
+  };
+}
+
+function mockAlerts() {
+  const created: FakeAlert[] = [];
+  vi.spyOn(TestBed.inject(AlertController), 'create').mockImplementation(async (options) => {
+    const alert = fakeAlert(options!);
+    created.push(alert);
+    return alert as unknown as HTMLIonAlertElement;
+  });
+  return created;
+}
 
 describe('MessageAttachments', () => {
   let resize: (width: number) => void;
@@ -44,7 +85,10 @@ describe('MessageAttachments', () => {
       },
     );
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
   async function render(message: Partial<MessageResponse> | Partial<MessageAttachmentSource>) {
     await TestBed.configureTestingModule({ imports: [MessageAttachments] }).compileComponents();
     const fixture = TestBed.createComponent(MessageAttachments);
@@ -421,6 +465,74 @@ describe('MessageAttachments', () => {
       retry: vi.fn<AttachmentUpload['retry']>(),
     } satisfies Pick<AttachmentUpload, 'file' | 'url' | 'purpose' | 'state' | 'retry'>;
   }
+
+  it.each([
+    [MessageType.text, 'image/jpeg'],
+    [MessageType.text, 'video/mp4'],
+    [MessageType.audio, 'audio/ogg'],
+    [MessageType.file, 'application/pdf'],
+  ])('opens the upload error instead of previewing or downloading failed %s / %s', async (messageType, kind) => {
+    const local = upload('blob:failed', kind);
+    local.state.set({
+      status: UploadStatus.Failed,
+      progress: 0,
+      error: {
+        code: UploadErrorCode.TooLarge,
+        stage: UploadStage.Signing,
+        canRetry: false,
+        autoRetry: false,
+        maxSizeMiB: 50,
+      },
+    });
+    const fixture = await render({
+      messageType,
+      attachments: [{ kind, url: local.url, fileName: local.file.name, size: 5 }],
+    });
+    fixture.componentRef.setInput('uploads', [local]);
+    fixture.detectChanges();
+    const remove = vi.fn();
+    fixture.componentInstance.removeUpload.subscribe(remove);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const click = vi.fn();
+    const created = mockAlerts();
+    fixture.nativeElement.addEventListener('click', click);
+    fixture.nativeElement.querySelector('.upload-failure').click();
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    const dialog = created[0];
+    expect(dialog.message).toContain('50 MiB');
+    expect(click).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    await dialog.dismiss(undefined, 'destructive');
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith(local));
+    fixture.destroy();
+  });
+
+  it('provides an attachment picker for failures beyond the nine visible album tiles', async () => {
+    const uploads = Array.from({ length: 12 }, (_, index) => upload(`blob:photo-${index}`));
+    uploads[11].state.set({
+      status: UploadStatus.Failed,
+      progress: 0,
+      error: {
+        code: UploadErrorCode.TooLarge,
+        stage: UploadStage.Signing,
+        canRetry: false,
+        autoRetry: false,
+        maxSizeMiB: 50,
+      },
+    });
+    const fixture = await render({
+      attachments: uploads.map((local) => ({ kind: 'image/jpeg', url: local.url, fileName: local.file.name, size: 5 })),
+    });
+    fixture.componentRef.setInput('uploads', uploads);
+    fixture.detectChanges();
+    const more = fixture.nativeElement.querySelector('.album-more');
+    expect(more.querySelector('ion-icon')).not.toBeNull();
+    more.click();
+    fixture.detectChanges();
+    expect((fixture.debugElement.query(By.directive(IonModal)).componentInstance as IonModal).isOpen).toBe(true);
+    expect(fixture.componentInstance['items']()).toHaveLength(12);
+    fixture.destroy();
+  });
 
   it.each([
     [MessageType.text, 'image/jpeg', '.media-frame', 'img'],

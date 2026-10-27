@@ -47,14 +47,13 @@
         <ng-container
           [ngTemplateOutlet]="attachmentPreview"
           [ngTemplateOutletContext]="{ $implicit: upload.file.type, url: upload.url }" />
-        @if (state.status !== Status.Ready) {
+        @if (state.status === Status.Processing || state.status === Status.Uploading) {
           <div class="upload-status">
-            @if (state.status === Status.Failed) {
-              <ion-button size="small" (click)="upload.retry()">{{ 'common.retry' | transloco }}</ion-button>
-            } @else {
-              <app-upload-progress [value]="state.progress" />
-            }
+            <app-upload-progress [value]="state.progress" />
           </div>
+        }
+        @if (state.error) {
+          <app-upload-failure [upload]="upload" (retry)="upload.retry()" (remove)="remove(upload)" />
         }
         <button type="button" class="upload-remove" (click)="remove(upload)">
           <ion-icon [icon]="icons.closeOutline" />
@@ -68,9 +67,6 @@
 }
 @if (!forwarding() && unsupported()) {
   <p class="ion-padding-horizontal">{{ 'messages.composer.editMediaOnly' | transloco }}</p>
-}
-@if (!forwarding() && error()) {
-  <p class="ion-padding-horizontal">{{ 'messages.composer.processingFailed' | transloco }}</p>
 }
 <input
   #photos

@@ -15,6 +15,8 @@ import { encodeId } from '../../api/snowflake-id';
 import { testMessage } from '../../api/testing';
 import { MessageDelivery } from '../message-delivery';
 import { UploadStatus, type AttachmentUpload } from '../upload';
+import { UploadErrorCode, UploadStage } from '../upload-error';
+import { UploadFailure } from '../upload-failure';
 import { Message, type MessageContent } from './message';
 
 describe('Message', () => {
@@ -860,6 +862,52 @@ describe('Message', () => {
     if (id == null) {
       expect(element.querySelector('app-message-status ion-icon, .thread-entry')).toBeNull();
     }
+  });
+
+  it('keeps upload failures on their files and forwards actions for only the selected attachment', async () => {
+    const fixture = await render();
+    const failed = (name: string, code: UploadErrorCode, canRetry: boolean) => ({
+      file: new File(['file'], name),
+      url: `blob:${name}`,
+      state: signal<ReturnType<AttachmentUpload['state']>>({
+        status: UploadStatus.Failed,
+        progress: 0,
+        error: { code, stage: UploadStage.Signing, canRetry, autoRetry: false, maxSizeMiB: 50 },
+      }),
+    });
+    const first = failed('large.zip', UploadErrorCode.TooLarge, false);
+    const second = failed('document.pdf', UploadErrorCode.StorageRejected, true);
+    fixture.componentRef.setInput('message', {
+      ...testMessage,
+      messageType: MessageType.file,
+      attachments: [first, second].map((upload) => ({
+        kind: 'application/octet-stream',
+        url: upload.url,
+        fileName: upload.file.name,
+        size: 4,
+      })),
+    });
+    fixture.componentRef.setInput('uploads', [first, second]);
+    fixture.componentRef.setInput('own', true);
+    fixture.componentRef.setInput('delivery', MessageDelivery.Failed);
+    fixture.detectChanges();
+    const element: HTMLElement = fixture.nativeElement;
+    expect(element.querySelectorAll('.file-frame .upload-failure')).toHaveLength(2);
+    expect(element.querySelector('.retry-button, .send-error, .upload-action, app-upload-failures')).toBeNull();
+    const retry = vi.fn();
+    const remove = vi.fn();
+    fixture.componentInstance.retryUpload.subscribe(retry);
+    fixture.componentInstance.removeUpload.subscribe(remove);
+    const failures = fixture.debugElement.queryAll(By.directive(UploadFailure));
+    (failures[0].componentInstance as UploadFailure).remove.emit();
+    (failures[1].componentInstance as UploadFailure).retry.emit();
+    expect(remove).toHaveBeenCalledExactlyOnceWith(first);
+    expect(retry).toHaveBeenCalledExactlyOnceWith(second);
+    first.state.set({ status: UploadStatus.Ready, progress: 1 });
+    second.state.set({ status: UploadStatus.Ready, progress: 1 });
+    fixture.detectChanges();
+    expect(element.querySelector('.upload-failure')).toBeNull();
+    expect(element.querySelector('.retry-button')).not.toBeNull();
   });
 
   it.each(['', '图片说明'])('shows upload, send, confirmation and failure status with caption %j', async (caption) => {

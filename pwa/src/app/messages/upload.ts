@@ -3,6 +3,7 @@ import { firstValueFrom, from, fromEvent, takeUntil, timeout } from 'rxjs';
 import { AttachmentsService } from '../../generated/endpoints/attachments/attachments.service';
 import { AttachmentUploadPurpose, type SnowflakeID } from '../../generated/models';
 import { prepareMedia } from './media-processing/prepare-media';
+import { UploadError, UploadErrorCode, UploadStage, uploadFailure, type UploadFailure } from './upload-error';
 
 const IDLE_TIMEOUT = 30_000;
 
@@ -21,6 +22,7 @@ export class AttachmentUpload {
     id?: SnowflakeID;
     width?: number;
     height?: number;
+    error?: UploadFailure;
   }>({ status: UploadStatus.Processing, progress: 0 });
   readonly state = this.uploadState.asReadonly();
   private readonly controller = new AbortController();
@@ -31,7 +33,7 @@ export class AttachmentUpload {
   private retryDelay = 1_000;
   private reconnect = false;
   retryable = true;
-  private readonly offline = () => this.attempt?.abort();
+  private readonly offline = () => this.attempt?.abort(new UploadError(UploadErrorCode.Offline));
   private readonly online = () => {
     if (!this.retryable) return;
     this.reconnect = !!this.pending;
@@ -52,6 +54,7 @@ export class AttachmentUpload {
   retry(): Promise<SnowflakeID | undefined> {
     if (this.controller.signal.aborted) return Promise.resolve(undefined);
     if (this.state().status === UploadStatus.Ready) return Promise.resolve(this.state().id);
+    if (this.state().error?.canRetry === false) return Promise.resolve(undefined);
     if (this.pending) return this.pending;
     clearTimeout(this.timer);
     this.retryable = true;
@@ -97,22 +100,34 @@ export class AttachmentUpload {
     const progress = (progress: number) => {
       if (!signal.aborted) this.uploadState.update((state) => ({ ...state, progress }));
     };
+    let stage = UploadStage.Config;
+    let maximumSize: number | undefined;
     try {
-      if (navigator.onLine === false) throw new Error('Offline');
+      if (!this.file.size) throw new UploadError(UploadErrorCode.Empty);
+      if (!this.file.name.trim() || Array.from(this.file.name).length > 255)
+        throw new UploadError(UploadErrorCode.Filename);
+      if (navigator.onLine === false) throw new UploadError(UploadErrorCode.Offline);
       const config = await firstValueFrom(this.api.getConfig().pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)));
+      maximumSize = config.maxFileSizeBytes;
       signal.throwIfAborted();
       if (processing) {
+        stage = UploadStage.Processing;
         this.prepared = await firstValueFrom(
           from(prepareMedia(this.file, signal, (value) => progress(value * uploadStart))).pipe(takeUntil(aborted)),
         );
         signal.throwIfAborted();
       }
       const { file, dimensions } = this.prepared ?? { file: this.file, dimensions: undefined };
+      stage = UploadStage.Signing;
       if (file.size > config.maxFileSizeBytes) {
-        this.retryable = false;
-        throw new Error('文件过大');
+        throw new UploadError(UploadErrorCode.TooLarge);
       }
-      this.uploadState.set({ ...dimensions, status: UploadStatus.Uploading, progress: uploadStart });
+      this.uploadState.update((state) => ({
+        ...state,
+        ...dimensions,
+        status: UploadStatus.Uploading,
+        progress: uploadStart,
+      }));
       const response = await firstValueFrom(
         this.api
           .postUploadUrl({
@@ -125,6 +140,7 @@ export class AttachmentUpload {
           .pipe(timeout(IDLE_TIMEOUT), takeUntil(aborted)),
       );
       signal.throwIfAborted();
+      stage = UploadStage.Storage;
       await uploadBlob(response.uploadUrl, file, response.uploadHeaders, signal, (value) =>
         progress(uploadStart + value * (1 - uploadStart)),
       );
@@ -134,15 +150,16 @@ export class AttachmentUpload {
         id: response.attachmentId,
         status: UploadStatus.Ready,
         progress: 1,
+        error: undefined,
       }));
       this.retryDelay = 1_000;
       return response.attachmentId;
     } catch (error) {
-      const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : undefined;
-      this.retryable =
-        this.retryable && (status == null || status === 0 || status === 408 || status === 429 || status >= 500);
-      if (!this.controller.signal.aborted)
-        this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed }));
+      if (!this.controller.signal.aborted) {
+        const failure = uploadFailure(signal.aborted ? signal.reason : error, stage, maximumSize);
+        this.retryable = failure.autoRetry;
+        this.uploadState.update((state) => ({ ...state, status: UploadStatus.Failed, error: failure }));
+      }
       return undefined;
     }
   }
@@ -197,7 +214,7 @@ export function uploadBlob(
           ? undefined
           : Object.assign(new Error('上传失败'), { status: xhr.status }),
       );
-    xhr.onerror = () => finish(new Error('上传失败'));
+    xhr.onerror = () => finish(new UploadError(UploadErrorCode.Network));
     xhr.onabort = () => finish(new DOMException('上传取消', 'AbortError'));
     if (signal?.aborted || navigator.onLine === false) {
       finish(new DOMException('上传取消', 'AbortError'));

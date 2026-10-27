@@ -64,12 +64,9 @@
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
 }
-.upload-status ion-button {
-  --color: inherit;
-  margin: 0;
-}
 .upload-remove {
   position: absolute;
+  z-index: 3;
   top: 4px;
   right: 4px;
   display: grid;
