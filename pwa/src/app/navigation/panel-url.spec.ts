@@ -1,4 +1,5 @@
 import { DefaultUrlSerializer } from '@angular/router';
+import { panelDefinitions } from './panel-definitions';
 import { panelPaths, PanelUrlSerializer, setPanelPaths } from './panel-url';
 
 describe('Readable panel URLs', () => {
@@ -22,6 +23,7 @@ describe('Readable panel URLs', () => {
     [['/chats/chat/100/info?view=3'], 'info=management'],
     [['/profile/2?view=2'], 'profile=2/privacy'],
     [['/chats/chat/200/info'], 'info=chats/chat/200/info'],
+    [['/chats/chat/100/thread/300/info?view=3'], 'info=thread/300/info/management'],
     [['/stickers/123'], 'stickers=123'],
     [['/chats/chat/100/stickers/123'], 'stickers=chats/chat/100/stickers/123'],
     [['/chats/chat/100/message/200/reactions'], 'reactions=200'],
@@ -37,6 +39,23 @@ describe('Readable panel URLs', () => {
     const url = serializer.serialize(tree);
     expect(url).toBe(`${base}?${address}`);
     expect(panelPaths(serializer.parse(url))).toEqual(paths);
+  });
+
+  it.each(panelDefinitions)('round-trips $path on list, chat and thread sources', (definition) => {
+    const id = '9007199254740993';
+    const path = '/' + definition.path.replace(/:\w+/g, id);
+    for (const source of ['/chats', `/chats/chat/${id}`, `/chats/chat/${id}/thread/${id}`]) {
+      const tree = serializer.parse(source);
+      setPanelPaths(tree, [path]);
+      expect(panelPaths(serializer.parse(serializer.serialize(tree)))).toEqual([path]);
+    }
+  });
+
+  it.each(['a$&b', 'a$$b', 'a%2Fb%3Fc%26d', 'a~b'])('preserves invitation code %s', (code) => {
+    const tree = serializer.parse(base);
+    setPanelPaths(tree, ['/chats/join/' + code]);
+    expect(tree.queryParams['join']).toBe(code);
+    expect(panelPaths(serializer.parse(serializer.serialize(tree)))).toEqual(['/chats/join/' + code]);
   });
 
   it('uses the thread as the scope without losing large IDs', () => {

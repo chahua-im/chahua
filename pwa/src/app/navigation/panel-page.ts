@@ -21,11 +21,10 @@ import { ChatsService } from '../../generated/endpoints/chats/chats.service';
 import { UsersService } from '../../generated/endpoints/users/users.service';
 import { encodeId } from '../api/snowflake-id';
 import { ChatDetails, DetailView } from '../chats/chat-details/chat-details';
-import { StartChat, StartChatKind } from '../chats/start-chat/start-chat';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
 import type { ViewerMedia } from '../messages/media-viewer/media-viewer';
-import { StickerPicker } from '../messages/sticker-picker/sticker-picker';
-import { panelRoutes } from '../panel-routes';
+import { panelComponents } from '../panel-routes';
+import { matchPanel, PanelContent, panelInputs } from './panel-definitions';
 import { PanelNavigation, panelIdentity } from './panel-navigation';
 
 @Component({
@@ -105,33 +104,22 @@ export class PanelPage {
     this.failed.set(false);
     const url = this.router.parseUrl(this.path());
     const segments = url.root.children['primary']?.segments.map((segment) => segment.path) ?? [];
-    const params: Record<string, string> = {};
-    const route = panelRoutes.find((route) => {
-      const parts = route.path!.split('/');
-      if (parts.length !== segments.length) return false;
-      return parts.every((part, index) => part.startsWith(':') || part === segments[index]);
-    });
+    const route = matchPanel(segments);
     try {
       if (!route) throw new Error('Unknown panel');
-      route.path!.split('/').forEach((part, index) => {
-        if (part.startsWith(':')) params[part.slice(1)] = segments[index];
-      });
-      const data = route.data ?? {};
-      let component = data['component'];
-      const props: Record<string, unknown> = { ...data['props'] };
-      const uid = Number(params['uid'] ?? url.queryParams['uid']);
-      if (uid) {
+      const { definition, params } = route;
+      const component = panelComponents[definition.content];
+      const props: Record<string, unknown> = { ...definition.props, ...panelInputs(definition, params) };
+      if (definition.content === PanelContent.Profile) {
+        const uid = Number(params['uid'] ?? url.queryParams['uid']);
+        if (!uid) throw new Error('User unavailable');
         const response = await firstValueFrom(
           this.users.getUserSearch({ q: String(uid), limit: 20 }).pipe(takeUntilDestroyed(this.destroy)),
         );
         const user = response.members.find((user) => user.uid === uid);
         if (!user) throw new Error('User unavailable');
-        component = ChatDetails;
         props['user'] = user;
-      } else if (component) {
-        for (const key of ['id', 'threadId', 'messageId', 'packId']) {
-          if (params[key]) props[key === 'id' ? 'chatId' : key] = encodeId(params[key]);
-        }
+      } else if (definition.content === PanelContent.ChatDetails) {
         if (params['id'] && params['threadId']) {
           const source = this.source();
           const context = source instanceof ConversationPage ? source.detailsContext() : undefined;
@@ -145,21 +133,11 @@ export class PanelPage {
               .pipe(takeUntilDestroyed(this.destroy)),
           );
         }
-        if (data['media']) {
-          const state = this.panels.state() as { media?: ViewerMedia[]; initial?: number };
-          if (!state.media?.length) throw new Error('Media unavailable');
-          props['media'] = state.media;
-          props['initial'] = state.initial ?? 0;
-        }
-      } else if (params['packId'] || params['stickerId']) {
-        component = StickerPicker;
-        props['selectable'] = false;
-        if (params['packId']) props['packId'] = encodeId(params['packId']);
-        if (params['stickerId']) props['stickerId'] = encodeId(params['stickerId']);
-      } else {
-        component = StartChat;
-        props['kind'] = data['kind'] ?? StartChatKind.Join;
-        props['code'] = params['code'] ?? '';
+      } else if (definition.content === PanelContent.Media) {
+        const state = this.panels.state() as { media?: ViewerMedia[]; initial?: number };
+        if (!state.media?.length) throw new Error('Media unavailable');
+        props['media'] = state.media;
+        props['initial'] = state.initial ?? 0;
       }
       if (component === ChatDetails) props['view'] ??= DetailView.Info;
       if (version === this.version && !this.destroy.destroyed) this.content.set({ component, props });

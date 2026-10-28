@@ -4,6 +4,7 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, RedirectCommand, Router, type CanActivateFn } from '@angular/router';
 import { filter, map } from 'rxjs';
 
+import { panelDefinition, PanelKind } from './panel-definitions';
 import { appendPanel, clearPanelParameters, panelIdentity, panelParent, panelPaths, setPanelPaths } from './panel-url';
 export { panelIdentity, panelPaths } from './panel-url';
 
@@ -22,13 +23,10 @@ export class PanelNavigation {
   readonly paths = computed(() => panelPaths(this.router.parseUrl(this.currentUrl())));
   readonly largeScreen = signal(false);
   readonly sidebar = computed(
-    () =>
-      this.largeScreen() &&
-      this.paths().length === 1 &&
-      /^\/chats\/chat\/\d+(?:\/thread\/\d+)?\/info$/.test(panelIdentity(this.paths()[0])),
+    () => this.largeScreen() && this.paths().length === 1 && panelDefinition(this.paths()[0])?.kind === PanelKind.Info,
   );
   readonly covered = computed(() => this.paths().length > 0 && !this.sidebar());
-  readonly media = computed(() => this.paths().at(-1) === '/media');
+  readonly media = computed(() => panelDefinition(this.paths().at(-1) ?? '')?.kind === PanelKind.Media);
   readonly state = signal<Record<string, unknown>>(this.location.getState() as Record<string, unknown>);
   private readonly leaveChecks = new Map<string, () => boolean | Promise<boolean>>();
   private closing = false;

@@ -1,49 +1,25 @@
 import { DefaultUrlSerializer, type UrlTree } from '@angular/router';
-import { DetailView } from '../chats/chat-details/detail-view';
-
-type SettingsAddress = { path: string; address: string; parent?: string; child?: string };
+import {
+  hasPanelViews,
+  panelDefinition,
+  panelDefinitions,
+  PanelKind,
+  panelParameterAddresses,
+  panelViews,
+} from './panel-definitions';
 
 // Standalone addresses preserve skipped ancestors; child segments compress only visited parents.
-const settingsAddresses: SettingsAddress[] = [
-  { path: '/settings', address: 'settings' },
-  { path: '/settings/general', address: 'general', parent: '/settings', child: 'general' },
-  { path: '/settings/language', address: 'language', parent: '/settings', child: 'language' },
-  { path: '/settings/privacy', address: 'privacy', parent: '/settings', child: 'privacy' },
-  ...['blocked-users', 'friend-verification', 'presence', 'read-receipts'].map((name) => ({
-    path: `/settings/${name}`,
-    address: name,
-    parent: '/settings/privacy',
-    child: name,
-  })),
-  { path: '/settings/notifications', address: 'notifications', parent: '/settings', child: 'notifications' },
-  {
-    path: '/settings/notifications/:value',
-    address: 'notification/:value',
-    parent: '/settings/notifications',
-    child: ':value',
-  },
-  { path: '/settings/stickers', address: 'sticker-settings', parent: '/settings', child: 'stickers' },
-  { path: '/settings/stickers/:value', address: 'sticker-pack/:value', parent: '/settings/stickers', child: ':value' },
-];
-
-const views: Record<string, string> = {
-  [DetailView.Info]: 'overview',
-  [DetailView.Invites]: 'invites',
-  [DetailView.Privacy]: 'privacy',
-  [DetailView.Management]: 'management',
-  image: 'images',
-  video: 'videos',
-  other: 'files',
-};
+const settingsAddresses = panelDefinitions.flatMap((definition) =>
+  definition.settings ? [{ path: '/' + definition.path, ...definition.settings }] : [],
+);
 const serializer = new DefaultUrlSerializer();
-const detailPath = /^(?:profile\/\d+|chats\/chat\/\d+(?:\/thread\/\d+)?\/(?:info|invites))$/;
 
 function match(pattern: string, value: string, prefix = false) {
-  return new RegExp('^' + pattern.replace(':value', '([^/]+)') + (prefix ? '(?=/|$)' : '$')).exec(value);
+  return new RegExp('^' + pattern.replace(/:\w+/g, '([^/]+)') + (prefix ? '(?=/|$)' : '$')).exec(value);
 }
 
 function substitute(pattern: string, value?: string) {
-  return pattern.replace(':value', value ?? '');
+  return pattern.replace(/:\w+/g, () => value ?? '');
 }
 
 function settingsNode(path: string) {
@@ -70,30 +46,26 @@ function encodePath(path: string, base: string | undefined) {
   if (node) return substitute(node.address, match(node.path, path)?.[1]);
   const url = serializer.parse(path);
   const identity = panelIdentity(path);
-  if (
-    detailPath.test(identity.slice(1)) &&
-    Object.keys(url.queryParams).length === 1 &&
-    views[url.queryParams['view']]
-  ) {
-    path = identity + '/' + views[url.queryParams['view']];
+  if (hasPanelViews(identity) && Object.keys(url.queryParams).length === 1 && panelViews[url.queryParams['view']]) {
+    path = identity + '/' + panelViews[url.queryParams['view']];
   }
-  if (
-    base &&
-    path.startsWith(base + '/') &&
-    /^(?:info|invites|search|message|thread)(?:\/|\?|$)/.test(path.slice(base.length + 1))
-  ) {
+  if (base && path.startsWith(base + '/') && panelDefinition(identity)?.conversation) {
     return path.slice(base.length + 1);
   }
   return path.slice(1);
 }
 
 function decodePath(address: string, base: string | undefined) {
-  if (base && /^(?:info|invites|search|message|thread)(?:\/|\?|$)/.test(address))
+  if (
+    base &&
+    (panelDefinition(base + '/' + address)?.conversation ||
+      hasPanelViews(base + '/' + address.slice(0, address.lastIndexOf('/'))))
+  )
     address = base.slice(1) + '/' + address;
   const separator = address.lastIndexOf('/');
   const identity = address.slice(0, separator);
-  const view = Object.entries(views).find(([, name]) => name === address.slice(separator + 1))?.[0];
-  if (view != null && detailPath.test(identity)) return '/' + identity + '?view=' + view;
+  const view = Object.entries(panelViews).find(([, name]) => name === address.slice(separator + 1))?.[0];
+  if (view != null && hasPanelViews(identity)) return '/' + identity + '?view=' + view;
   return '/' + address;
 }
 
@@ -114,25 +86,10 @@ function decodeGroup(address: string, base: string | undefined): string[] {
   return paths;
 }
 
-const panelKinds = [
-  { key: 'settings', path: /^settings(?:\/|$)/ },
-  { key: 'profile', path: /^profile(?:\/|$)/ },
-  { key: 'info', path: /^chats\/chat\/\d+(?:\/thread\/\d+)?\/info$/ },
-  { key: 'search', path: /^chats\/chat\/\d+\/search$/ },
-  { key: 'invites', path: /^chats\/chat\/\d+\/invites$/ },
-  { key: 'reactions', path: /^chats\/chat\/\d+\/message\/\d+\/reactions$/ },
-  { key: 'stickers', path: /^(?:chats\/chat\/\d+\/)?stickers\// },
-  { key: 'sticker', path: /^sticker\// },
-  { key: 'create', path: /^chats\/new$/ },
-  { key: 'add-friend', path: /^chats\/add-friend$/ },
-  { key: 'join', path: /^chats\/join(?:\/|$)/ },
-  { key: 'media', path: /^media$/ },
-];
-const panelKeys = new Set(['panel', ...panelKinds.map((kind) => kind.key)]);
+const panelKeys = new Set<string>(['panel', ...Object.values(PanelKind)]);
 
 export function panelKey(path: string) {
-  const identity = panelIdentity(path).slice(1);
-  return panelKinds.find((kind) => kind.path.test(identity))?.key ?? 'panel';
+  return panelDefinition(path)?.kind ?? 'panel';
 }
 
 /** One instance per kind. Existing settings ancestors move with their child. */
@@ -161,16 +118,16 @@ function decodeLegacy(value: string, base: string | undefined) {
 
 function decodeParameter(key: string, value: string, base: string | undefined): string[] {
   if (key === 'panel') return decodeLegacy(value, base);
-  if (key === 'settings') {
+  if (key === PanelKind.Settings) {
     // A leading ~ marks an explicitly recorded sparse chain from old links or skipped parents.
     if (value.startsWith('~')) return decodeLegacy(value.slice(1), base);
     return decodeGroup(value && value !== '1' ? 'settings/' + value : 'settings', base);
   }
-  if (key === 'create') return ['/chats/new'];
-  if (key === 'add-friend') return ['/chats/add-friend'];
-  if (key === 'join') return ['/chats/join' + (value ? '/' + value : '')];
-  if (key === 'reactions' && /^\d+$/.test(value)) return [decodePath('message/' + value + '/reactions', base)];
-  if (value.startsWith('chats/')) return [decodePath(value, base)];
+  const compact = panelParameterAddresses[key as PanelKind];
+  if (compact && (!compact.numeric || /^\d+$/.test(value)))
+    return [decodePath(substitute(compact.path, value).replace(/\/$/, ''), base)];
+  const path = decodePath(value, base);
+  if (value.startsWith('chats/') || panelDefinition(path)?.conversation) return [path];
   return [decodePath(key + (value ? '/' + value : ''), base)];
 }
 
@@ -226,11 +183,12 @@ export function setPanelPaths(url: UrlTree, paths: readonly string[]) {
   for (const [key, group] of groups) {
     const address = encodePath(group.at(-1)!, base);
     let value: string;
-    if (key === 'settings') value = settingsValue(group);
-    else if (key === 'create' || key === 'add-friend') value = '';
-    else if (key === 'join') value = address.slice('chats/join'.length).replace(/^\//, '');
-    else if (key === 'reactions' && /^message\/\d+\/reactions$/.test(address)) value = address.split('/')[1];
-    else if (address === key) value = '';
+    if (key === PanelKind.Settings) value = settingsValue(group);
+    else if (panelParameterAddresses[key as PanelKind]) {
+      const compact = panelParameterAddresses[key as PanelKind]!;
+      const matched = match(compact.path, address);
+      value = matched ? (matched[1] ?? '') : address === compact.path.replace(/\/:\w+$/, '') ? '' : address;
+    } else if (address === key) value = '';
     else value = address.startsWith(key + '/') ? address.slice(key.length + 1) : address;
     url.queryParams[key] = value;
   }

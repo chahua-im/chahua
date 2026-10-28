@@ -8,6 +8,13 @@ import { decodeId, encodeId } from '../api/snowflake-id';
 import { testMessage } from '../api/testing';
 import { ChatDetails } from '../chats/chat-details/chat-details';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
+import { GroupKind } from '../../generated/models';
+import { StartChat, StartChatKind } from '../chats/start-chat/start-chat';
+import { StickerPicker } from '../messages/sticker-picker/sticker-picker';
+import { NotificationCategoryPage } from '../settings/notification-settings/notification-category-page';
+import { StickerPackDetail } from '../settings/sticker-pack-detail/sticker-pack-detail';
+import { panelComponents } from '../panel-routes';
+import { matchPanel, panelDefinitions, panelInputs } from './panel-definitions';
 import { PanelPage } from './panel-page';
 import { PrivacySettings } from '../settings/privacy-settings/privacy-settings';
 
@@ -28,6 +35,52 @@ describe('Panel preloading', () => {
     TestBed.overrideComponent(PanelPage, { set: { template: '' } });
   });
   afterEach(() => TestBed.inject(HttpTestingController).verify());
+
+  it.each(panelDefinitions)('binds only supported component inputs for $path', (definition) => {
+    const path = definition.path.replace(/:\w+/g, '9007199254740993');
+    const matched = matchPanel(path.split('/'))!;
+    const inputs = { ...matched.definition.props, ...panelInputs(matched.definition, matched.params) };
+    const supported = reflectComponentType(panelComponents[definition.content])!.inputs.map(
+      (input) => input.templateName,
+    );
+    expect(Object.keys(inputs).every((key) => supported.includes(key))).toBe(true);
+  });
+
+  it.each([
+    { path: '/chats/new', component: StartChat, props: { kind: StartChatKind.Create } },
+    { path: '/chats/add-friend', component: StartChat, props: { kind: StartChatKind.Friend } },
+    { path: '/chats/join', component: StartChat, props: { kind: StartChatKind.Join } },
+    { path: '/chats/join/a%2Fb%26c', component: StartChat, props: { kind: StartChatKind.Join, code: 'a/b&c' } },
+    { path: '/settings/notifications/dm', component: NotificationCategoryPage, props: { kind: GroupKind.dm } },
+    { path: '/settings/notifications/group', component: NotificationCategoryPage, props: { kind: GroupKind.group } },
+    {
+      path: '/settings/stickers/9007199254740993',
+      component: StickerPackDetail,
+      props: { packId: encodeId('9007199254740993') },
+    },
+    {
+      path: '/stickers/9007199254740993',
+      component: StickerPicker,
+      props: { packId: encodeId('9007199254740993'), selectable: false },
+    },
+    {
+      path: '/chats/chat/100/stickers/9007199254740993',
+      component: StickerPicker,
+      props: { packId: encodeId('9007199254740993'), selectable: false },
+    },
+    {
+      path: '/sticker/9007199254740993',
+      component: StickerPicker,
+      props: { stickerId: encodeId('9007199254740993'), selectable: false },
+    },
+  ])('loads $path with its declared component and typed inputs', ({ path, component, props }) => {
+    const fixture = TestBed.createComponent(PanelPage);
+    fixture.componentRef.setInput('path', path);
+    fixture.detectChanges();
+    expect(fixture.componentInstance['content']()).toEqual({ component, props });
+    expect(fixture.componentInstance['failed']()).toBe(false);
+    TestBed.inject(HttpTestingController).expectNone(() => true);
+  });
 
   it.each(['known', 'missing', 'other-thread', 'other-chat'] as const)(
     'uses the source thread root only for its own scope (%s)',
