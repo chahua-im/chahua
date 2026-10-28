@@ -29,6 +29,7 @@ describe('ChatLink route-owned modals', () => {
     dismiss: ReturnType<typeof vi.fn>;
     onDidDismiss: ReturnType<typeof vi.fn>;
     remove: ReturnType<typeof vi.fn>;
+    canDismiss?: boolean | (() => Promise<boolean>);
   };
   let create: ReturnType<typeof vi.fn>;
   beforeEach(async () => {
@@ -103,6 +104,23 @@ describe('ChatLink route-owned modals', () => {
     await open;
     expect(TestBed.inject(Router).url).toBe('/chats');
     expect(back).not.toHaveBeenCalled();
+  });
+
+  it('stops consulting a closed modal before navigating back after Save', async () => {
+    vi.spyOn(TestBed.inject(Router), 'currentNavigation').mockReturnValue({ previousNavigation: {} } as never);
+    const page = TestBed.createComponent(ChatLink).componentInstance;
+    const guard = vi.fn().mockResolvedValue(false);
+    modal.canDismiss = guard;
+    vi.spyOn(TestBed.inject(Location), 'back').mockImplementation(() => {
+      expect(page.canLeave()).toBe(true);
+    });
+    const open = page['open']();
+    await vi.waitFor(() => expect(modal.present).toHaveBeenCalledOnce());
+    expect(await page.canLeave()).toBe(false);
+    dismissed.resolve({ role: 'saved' });
+    await open;
+    expect(guard).toHaveBeenCalledOnce();
+    expect(TestBed.inject(Location).back).toHaveBeenCalledOnce();
   });
 
   it('does not open a stale profile after the user has already returned', async () => {

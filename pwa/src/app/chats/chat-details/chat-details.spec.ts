@@ -9,7 +9,9 @@ import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import {
+  ChatAttachmentKindFilter,
   FriendPresenceOverride,
+  PrivacyExceptionKind,
   MembershipMessageVisibility,
   GroupKind,
   GroupRole,
@@ -25,7 +27,7 @@ import { Presence } from '../../presence/presence';
 import { SessionStore } from '../../session/session-store';
 import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
-import { ChatDetails } from './chat-details';
+import { ChatDetails, DetailView } from './chat-details';
 
 describe('ChatDetails', () => {
   let http: HttpTestingController;
@@ -72,9 +74,32 @@ describe('ChatDetails', () => {
     return fixture;
   }
 
+  it('keeps a management deep link while the group role loads, including a failed read and retry', async () => {
+    TestBed.inject(ChatStore).remember([testChat]);
+    const fixture = TestBed.createComponent(ChatDetails);
+    fixture.componentRef.setInput('chatId', testChat.id);
+    fixture.componentRef.setInput('view', DetailView.Management);
+    fixture.detectChanges();
+    expect(fixture.componentInstance['page']()).toBe(DetailView.Management);
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({}, { status: 503, statusText: 'Unavailable' });
+    await vi.waitFor(() => expect(fixture.componentInstance['error']()).toBe(true));
+    fixture.detectChanges();
+    expect(fixture.componentInstance['page']()).toBe(DetailView.Management);
+    expect(fixture.componentInstance['error']()).toBe(true);
+    const retry = fixture.componentInstance['load']();
+    http.expectOne(`/_api/group/${wireChat.id}`).flush({ ...wireChat, myRole: GroupRole.admin });
+    await retry;
+    fixture.detectChanges();
+    expect(fixture.componentInstance['canManage']()).toBe(true);
+    expect(fixture.componentInstance['page']()).toBe(DetailView.Management);
+    http.expectNone((request) => request.url.endsWith('/threads'));
+  });
+
   it('saves group visibility, disables changes while saving and restores the saved option after a failure', async () => {
     const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
     const component = fixture.componentInstance;
+    await component['openPage'](DetailView.Management);
+    fixture.detectChanges();
     const save = component['saveMembershipVisibility'](MembershipMessageVisibility.admins);
     fixture.detectChanges();
     const selector = fixture.nativeElement.querySelector('ion-select');
@@ -120,7 +145,8 @@ describe('ChatDetails', () => {
 
   it('shows the group policy without allowing ordinary members to change it', async () => {
     const fixture = await open({ ...wireChat, myRole: GroupRole.member });
-    expect(fixture.nativeElement.querySelector('ion-select').disabled).toBe(true);
+    expect(fixture.nativeElement.querySelector('ion-select')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('全体成员');
     await fixture.componentInstance['saveMembershipVisibility'](MembershipMessageVisibility.nobody);
     http.expectNone((request) => request.method === 'PATCH');
   });
@@ -128,6 +154,8 @@ describe('ChatDetails', () => {
   it('saves group restrictions, restores failed selections and removes management on live demotion', async () => {
     const fixture = await open({ ...wireChat, myRole: GroupRole.admin, speakingMode: SpeakingMode.unrestricted });
     const component = fixture.componentInstance;
+    await component['openPage'](DetailView.Management);
+    fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-speaking-mode-select')).not.toBeNull();
     const saving = component['saveSpeakingMode'](SpeakingMode.readOnly);
     const request = http.expectOne(`/_api/group/${wireChat.id}/speaking-mode`);
@@ -156,10 +184,72 @@ describe('ChatDetails', () => {
     http.expectNone((req) => req.method === 'PUT');
   });
 
-  it('keeps search and mute out of the profile and places invites before leaving', async () => {
+  it('shows group management, invitations and leaving as direct actions', async () => {
     const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
     const buttons = [...fixture.nativeElement.querySelectorAll('.quick-actions ion-button')];
-    expect(buttons.map((button: Element) => button.textContent?.trim())).toEqual(['邀请', '退群']);
+    expect(buttons.map((button: Element) => button.textContent?.trim())).toEqual(['群管理', '邀请', '退群']);
+    expect(fixture.nativeElement.querySelector('ion-popover')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('群管理');
+    expect(fixture.nativeElement.querySelector('.field-edit, ion-select')).toBeNull();
+  });
+
+  it('keeps the selected content mounted and restores overview scroll when returning from management', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    const content = component['overview']();
+    const scroll = document.createElement('div');
+    scroll.scrollTop = 246;
+    vi.spyOn(content, 'getScrollElement').mockResolvedValue(scroll);
+    const restore = vi.spyOn(content, 'scrollToPoint').mockResolvedValue();
+    const threads = fixture.nativeElement.querySelector('app-chat-threads');
+    const selected = component['tab']();
+    await component['openPage'](DetailView.Management);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('ion-content').hidden).toBe(true);
+    expect(fixture.nativeElement.querySelector('app-chat-threads')).toBe(threads);
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('群管理');
+    component['back']();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('ion-content').hidden).toBe(false);
+    expect(component['tab']()).toBe(selected);
+    expect(fixture.nativeElement.querySelector('app-chat-threads')).toBe(threads);
+    expect(restore).toHaveBeenCalledWith(0, 246, 0);
+    http.expectNone((request) => request.url.endsWith('/messages'));
+  });
+
+  it('opens invitations from the overview and returns without stacking a modal', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    const createModal = vi.spyOn(TestBed.inject(ModalController), 'create');
+    const invite = [...fixture.nativeElement.querySelectorAll('.quick-actions ion-button')].find(
+      (button: Element) => button.textContent?.trim() === '邀请',
+    ) as HTMLElement;
+    invite.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    http.match((request) => request.url.includes('/invites')).forEach((request) => request.flush({ invites: [] }));
+    http.match((request) => request.url.endsWith('/group')).forEach((request) => request.flush({ groups: [] }));
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('app-chat-invites')).not.toBeNull();
+    expect(createModal).not.toHaveBeenCalled();
+    component['back']();
+    fixture.detectChanges();
+    expect(component['page']()).toBe(DetailView.Info);
+    expect(fixture.nativeElement.querySelector('app-chat-invites')).toBeNull();
+  });
+
+  it('ignores a pending panel entry after switching to a different chat', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    let resolve!: (element: HTMLElement) => void;
+    vi.spyOn(component['overview'](), 'getScrollElement').mockReturnValue(new Promise((done) => (resolve = done)));
+    const opening = component['openPage'](DetailView.Management);
+    const nextId = encodeId('9007199254741993');
+    fixture.componentRef.setInput('chatId', nextId);
+    resolve(document.createElement('div'));
+    await opening;
+    expect(component['page']()).toBe(DetailView.Info);
+    fixture.destroy();
   });
 
   it('has no chat-specific saved messages tab or menu entry', async () => {
@@ -173,13 +263,19 @@ describe('ChatDetails', () => {
     http.expectNone((req) => req.url.includes('/saved-messages'));
   });
 
-  it('places topics and members before media and loads only the selected content', async () => {
+  it('keeps topics and members as tabs and opens media through list entries', async () => {
     const fixture = await open();
     const component = fixture.componentInstance;
     const labels = () =>
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim());
-    expect(labels()).toEqual(['话题', '成员', '图片', '视频', '文件']);
-    http.expectNone((req) => req.url.endsWith('/members') || req.url.endsWith('/threads'));
+    expect(labels()).toEqual(['话题', '成员']);
+    expect(
+      [...fixture.nativeElement.querySelectorAll('.media-links ion-item')].map((el: Element) => el.textContent?.trim()),
+    ).toEqual(['图片', '视频', '文件']);
+    http.expectNone((req) => req.url.endsWith('/attachments'));
+    http.expectNone(
+      (req) => req.url.endsWith('/members') || req.url.endsWith('/threads') || req.url.endsWith('/messages'),
+    );
     component['changeTab']('members');
     fixture.detectChanges();
     http
@@ -196,7 +292,9 @@ describe('ChatDetails', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-chat-threads').textContent).toContain('测试消息');
-    component['changeTab']('video');
+    const threads = fixture.nativeElement.querySelector('app-chat-threads');
+    (fixture.nativeElement.querySelectorAll('.media-links ion-item')[1] as HTMLElement).click();
+    await fixture.whenStable();
     fixture.detectChanges();
     http
       .expectOne((req) => req.url.endsWith('/attachments') && req.params.get('kind') === 'video')
@@ -204,10 +302,78 @@ describe('ChatDetails', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelectorAll('ion-segment')).toHaveLength(1);
-    expect(fixture.nativeElement.querySelector('app-chat-threads')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-chat-threads')).toBe(threads);
+    expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('视频');
+    component['back']();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('app-chat-threads')).toBe(threads);
+    expect(fixture.nativeElement.querySelector('app-chat-attachments')).toBeNull();
+    http.expectNone((req) => req.url.endsWith('/messages'));
   });
 
-  it('shows cached information and loads media while details are still pending', async () => {
+  it.each([
+    [ChatAttachmentKindFilter.image, '图片'],
+    [ChatAttachmentKindFilter.video, '视频'],
+    [ChatAttachmentKindFilter.other, '文件'],
+  ] as const)('loads %s only on entry and returns to the same members list after a retry', async (kind, title) => {
+    const fixture = await open();
+    const component = fixture.componentInstance;
+    component['changeTab']('members');
+    fixture.detectChanges();
+    http.expectOne((req) => req.url.endsWith('/members')).flush({ members: [], canManageMembers: false });
+    await fixture.whenStable();
+    const members = fixture.nativeElement.querySelector('app-chat-members');
+    http.expectNone((req) => req.url.endsWith('/attachments'));
+    const scroll = document.createElement('div');
+    scroll.scrollTop = 180;
+    vi.spyOn(component['overview'](), 'getScrollElement').mockResolvedValue(scroll);
+    const restore = vi.spyOn(component['overview'](), 'scrollToPoint').mockResolvedValue();
+    await component['openPage'](kind);
+    fixture.detectChanges();
+    const first = http.expectOne((req) => req.url.endsWith('/attachments'));
+    expect(first.request.params.get('kind')).toBe(kind);
+    first.flush({}, { status: 503, statusText: 'Unavailable' });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe(title);
+    expect(fixture.nativeElement.querySelector('app-chat-members')).toBe(members);
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('app-chat-attachments app-load-error ion-button')).not.toBeNull();
+    });
+    (fixture.nativeElement.querySelector('app-chat-attachments app-load-error ion-button') as HTMLElement).click();
+    http
+      .expectOne((req) => req.url.endsWith('/attachments') && req.params.get('kind') === kind)
+      .flush({ attachments: [] });
+    await fixture.whenStable();
+    component['back']();
+    await fixture.whenStable();
+    expect(component['tab']()).toBe('members');
+    expect(fixture.nativeElement.querySelector('app-chat-members')).toBe(members);
+    expect(fixture.nativeElement.querySelector('app-chat-attachments')).toBeNull();
+    expect(restore).toHaveBeenCalledWith(0, 180, 0);
+    http.expectNone((req) => req.url.endsWith('/members') || req.url.endsWith('/attachments'));
+  });
+
+  it('cancels an unfinished media read when returning and opens the next category independently', async () => {
+    const fixture = await open();
+    const component = fixture.componentInstance;
+    await component['openPage'](ChatAttachmentKindFilter.image);
+    fixture.detectChanges();
+    const prior = http.expectOne((req) => req.url.endsWith('/attachments'));
+    component['back']();
+    fixture.detectChanges();
+    expect(prior.cancelled).toBe(true);
+    await component['openPage'](ChatAttachmentKindFilter.other);
+    fixture.detectChanges();
+    http
+      .expectOne((req) => req.url.endsWith('/attachments') && req.params.get('kind') === 'other')
+      .flush({ attachments: [] });
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelector('ion-title').textContent.trim()).toBe('文件');
+    expect(fixture.nativeElement.querySelector('app-chat-attachments app-load-error')).toBeNull();
+  });
+
+  it('shows cached information and loads topics while details are still pending', async () => {
     const store = TestBed.inject(ChatStore);
     store.acceptChats([{ ...testChat, mutedUntil: '9999-12-31T23:59:59Z' }], store.snapshot());
     const fixture = TestBed.createComponent(ChatDetails);
@@ -281,6 +447,8 @@ describe('ChatDetails', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('解除好友');
+    await fixture.componentInstance['openPage'](DetailView.Privacy);
+    fixture.detectChanges();
     const selector: HTMLIonSelectElement = fixture.nativeElement.querySelector('ion-select');
     expect(selector.value).toBe(FriendPresenceOverride.inherit);
     selector.value = FriendPresenceOverride.hide;
@@ -293,7 +461,8 @@ describe('ChatDetails', () => {
     expect(presence.invalidateUsers).toHaveBeenCalledWith([2]);
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim()),
-    ).toEqual(['话题', '图片', '视频', '文件']);
+    ).toEqual([]);
+    expect(fixture.nativeElement.querySelector('.attachments ion-list-header').textContent).toContain('话题');
   });
 
   it('shows an uncached profile before its friend relationship arrives', async () => {
@@ -338,10 +507,35 @@ describe('ChatDetails', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
+    await fixture.componentInstance['openPage'](DetailView.Privacy);
+    fixture.detectChanges();
     expect((fixture.nativeElement.querySelector('ion-select') as HTMLIonSelectElement).value).toBe(
       FriendPresenceOverride.hide,
     );
     expect((fixture.nativeElement.querySelectorAll('ion-select')[1] as HTMLIonSelectElement).value).toBe('share');
+  });
+
+  it('keeps an open profile synchronized with exception edits and ignores older reads', async () => {
+    const fixture = TestBed.createComponent(ChatDetails);
+    fixture.componentRef.setInput('user', { uid: 2, username: '甲', gender: 0 });
+    fixture.detectChanges();
+    await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true }));
+    const prior = await vi.waitFor(() => http.expectOne('/_api/friends/2/presence-settings'));
+    const receipt = http.expectOne('/_api/friends/2/read-receipt-settings');
+    const store = TestBed.inject(ChatStore);
+    store.publishPrivacyOverride(PrivacyExceptionKind.presence, 2, false);
+    store.publishPrivacyOverride(PrivacyExceptionKind.readReceipts, 2, true);
+    prior.flush({ override: 'inherit' });
+    receipt.flush({ override: 'hide' });
+    await fixture.whenStable();
+    expect(fixture.componentInstance['presenceOverride']()).toBe('hide');
+    expect(fixture.componentInstance['receiptOverride']()).toBe('share');
+    store.publishPrivacyOverride(PrivacyExceptionKind.presence, 3, true);
+    expect(fixture.componentInstance['presenceOverride']()).toBe('hide');
+    store.publishPrivacyOverride(PrivacyExceptionKind.presence);
+    store.publishPrivacyOverride(PrivacyExceptionKind.readReceipts);
+    expect(fixture.componentInstance['presenceOverride']()).toBe('inherit');
+    expect(fixture.componentInstance['receiptOverride']()).toBe('inherit');
   });
 
   it('keeps the newest chat when a previous detail request completes later', async () => {
@@ -366,11 +560,12 @@ describe('ChatDetails', () => {
   it('edits fields in place and saves only the chosen field, preserving another draft', async () => {
     const fixture = await open({ ...wireChat, myRole: GroupRole.admin, description: '原简介' });
     const component = fixture.componentInstance;
+    await component['openPage'](DetailView.Management);
+    fixture.detectChanges();
     const { Name, Description } = component['Field'];
     expect(fixture.nativeElement.querySelectorAll('.field-edit')).toHaveLength(2);
     expect(fixture.nativeElement.querySelector('.avatar-edit')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('ion-popover')).toBeNull();
-    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).not.toContain('更多');
+    expect(fixture.nativeElement.querySelector('.group-editor')).not.toBeNull();
     component['edit'](Name);
     component['edit'](Description);
     fixture.detectChanges();
@@ -395,7 +590,7 @@ describe('ChatDetails', () => {
       .flush({ ...wireChat, name: '新群名', myRole: GroupRole.admin, description: '原简介' });
     await saving;
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('h2').textContent.trim()).toBe('新群名');
+    expect(fixture.nativeElement.querySelector('.group-editor h2').textContent.trim()).toBe('新群名');
     expect(fixture.nativeElement.querySelector('input.profile-input')).toBeNull();
     expect(description.value).toBe('尚未保存的简介');
     expect(component['edits']().description?.value).toBe('尚未保存的简介');
@@ -404,6 +599,8 @@ describe('ChatDetails', () => {
   it('keeps a failed field open for retry and permits clearing the description', async () => {
     const fixture = await open({ ...wireChat, myRole: GroupRole.admin, description: '原简介' });
     const component = fixture.componentInstance;
+    await component['openPage'](DetailView.Management);
+    fixture.detectChanges();
     const field = component['Field'].Description;
     component['edit'](field);
     component['fields'].description!.value().value.set('');
@@ -422,7 +619,7 @@ describe('ChatDetails', () => {
     await retry;
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('textarea')).toBeNull();
-    expect(fixture.nativeElement.querySelector('.profile p').textContent).toContain('添加群简介');
+    expect(fixture.nativeElement.querySelector('.group-editor p').textContent).toContain('添加群简介');
   });
 
   it('does not save an empty name or unchanged text and ignores Enter during composition', async () => {
@@ -524,7 +721,8 @@ describe('ChatDetails', () => {
 
   it('shows thread details and switches one action from subscription to archive and unarchive', async () => {
     const fixture = await open();
-    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('退群');
+    expect(fixture.nativeElement.querySelector('.quick-actions')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('退群');
     fixture.componentRef.setInput('threadId', testMessage.id);
     fixture.componentRef.setInput('threadRoot', testMessage);
     fixture.detectChanges();
@@ -539,7 +737,8 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim()),
-    ).toEqual(['成员', '图片', '视频', '文件']);
+    ).toEqual([]);
+    expect(fixture.nativeElement.querySelector('.attachments ion-list-header').textContent).toContain('成员');
     expect(fixture.nativeElement.querySelector('app-thread-participants').textContent).toContain(
       testMessage.sender.name,
     );
@@ -613,10 +812,21 @@ describe('ChatDetails', () => {
     http.expectOne((req) => req.url.endsWith('/threads')).flush({ threads: [] });
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('.quick-actions').textContent).toContain('解除好友');
+    const actions = () =>
+      [...fixture.nativeElement.querySelectorAll('.quick-actions ion-button')].map((button: Element) =>
+        button.textContent?.trim(),
+      );
+    expect(actions()).toEqual(['个人空间', '发消息', '解除好友', '拉黑']);
+    fixture.componentRef.setInput('currentConversation', true);
+    fixture.detectChanges();
+    expect(actions()).toEqual(['个人空间', '解除好友', '拉黑']);
+
+    await fixture.componentInstance['openPage'](DetailView.Privacy);
+    fixture.detectChanges();
     expect(
       [...fixture.nativeElement.querySelectorAll('ion-segment-button')].map((el: Element) => el.textContent?.trim()),
-    ).toEqual(['话题', '图片', '视频', '文件']);
+    ).toEqual([]);
+    expect(fixture.nativeElement.querySelector('.attachments ion-list-header').textContent).toContain('话题');
     alert.onDidDismiss.mockResolvedValue({ role: 'confirm' });
     const deleting = fixture.componentInstance['leave']();
     await Promise.resolve();

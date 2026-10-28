@@ -1,5 +1,4 @@
 import { MembershipMessageVisibility } from '../../../generated/models';
-import { decodeId } from '../../api/snowflake-id';
 import { Connection } from '../../api/connection';
 import {
   afterNextRender,
@@ -23,10 +22,14 @@ import { Router } from '@angular/router';
 import {
   AlertController,
   IonButton,
+  IonButtons,
   IonContent,
+  IonHeader,
   IonIcon,
   IonItem,
   IonLabel,
+  IonList,
+  IonListHeader,
   IonNote,
   IonSegment,
   IonSegmentButton,
@@ -35,6 +38,8 @@ import {
   IonSpinner,
   ModalController,
   IonToast,
+  IonTitle,
+  IonToolbar,
 } from '@ionic/angular';
 import {
   archive,
@@ -52,6 +57,11 @@ import {
   banOutline,
   personRemoveOutline,
   notificationsOutline,
+  settingsOutline,
+  shieldCheckmarkOutline,
+  imageOutline,
+  videocamOutline,
+  documentTextOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { BlocksService } from '../../../generated/endpoints/blocks/blocks.service';
@@ -62,6 +72,7 @@ import {
   ChatAttachmentKindFilter,
   FriendAddVerificationMode,
   FriendPresenceOverride,
+  PrivacyExceptionKind,
   FriendReadReceiptOverride,
   type MemberSummary,
   GroupKind,
@@ -114,12 +125,15 @@ enum InfoTab {
   Threads = 'threads',
   Members = 'members',
 }
-type ContentTab = ChatAttachmentKindFilter | InfoTab;
 
 export enum DetailView {
   Info,
   Invites,
+  Privacy,
+  Management,
 }
+type DetailPage =
+  DetailView | ChatAttachmentKindFilter.image | ChatAttachmentKindFilter.video | ChatAttachmentKindFilter.other;
 @Component({
   selector: 'app-chat-details',
   templateUrl: './chat-details.html',
@@ -131,6 +145,12 @@ export enum DetailView {
     LoadError,
     IonItem,
     IonButton,
+    IonButtons,
+    IonHeader,
+    IonList,
+    IonListHeader,
+    IonTitle,
+    IonToolbar,
     IonNote,
     IonContent,
     IonLabel,
@@ -181,6 +201,11 @@ export class ChatDetails {
     closeOutline,
     cameraOutline,
     checkmarkOutline,
+    settingsOutline,
+    shieldCheckmarkOutline,
+    imageOutline,
+    videocamOutline,
+    documentTextOutline,
   };
   private readonly friends = inject(FriendsService);
   private readonly destroy = inject(DestroyRef);
@@ -297,6 +322,12 @@ export class ChatDetails {
   protected readonly busy = computed(() => this.pending() != null);
   protected readonly error = linkedSignal({ source: this.scope, computation: () => false });
   protected readonly View = DetailView;
+  protected readonly page = linkedSignal<DetailPage>(() => {
+    this.scope();
+    return this.view();
+  });
+  private readonly overviewScroll = linkedSignal({ source: this.scope, computation: () => 0 });
+  private readonly overview = viewChild.required<IonContent>('overview');
   protected readonly Kind = GroupKind;
   protected readonly Field = GroupField;
   protected readonly canManage = computed(
@@ -304,16 +335,12 @@ export class ChatDetails {
   );
   protected readonly InfoTab = InfoTab;
   protected readonly AttachmentKind = ChatAttachmentKindFilter;
-  protected readonly tab = linkedSignal<ContentTab>(() => {
-    this.chatId();
+  protected readonly tab = linkedSignal<InfoTab>(() => {
+    this.scope();
     return this.threadId() ? InfoTab.Members : InfoTab.Threads;
   });
   protected changeTab(value: unknown) {
-    if (
-      Object.values(InfoTab).includes(value as InfoTab) ||
-      Object.values(ChatAttachmentKindFilter).includes(value as ChatAttachmentKindFilter)
-    )
-      this.tab.set(value as ContentTab);
+    if (Object.values(InfoTab).includes(value as InfoTab)) this.tab.set(value as InfoTab);
   }
   private readonly saveError = viewChild.required<IonToast>('saveError');
   protected readonly subscription = computed(() => {
@@ -338,6 +365,45 @@ export class ChatDetails {
   protected readonly fields = form(this.edits);
   protected readonly avatarProgress = linkedSignal({ source: this.scope, computation: () => 0 });
   constructor() {
+    effect(() => {
+      const page = this.page();
+      if (
+        (page === DetailView.Privacy && !this.presenceSettingsUid()) ||
+        ((page === DetailView.Management || page === DetailView.Invites) &&
+          this.chat() &&
+          (this.chat()!.kind !== GroupKind.group || this.threadId() != null || this.chat()!.myRole != null) &&
+          !this.canManage())
+      ) {
+        this.page.set(DetailView.Info);
+        this.edits.set({ name: undefined, description: undefined });
+      }
+    });
+    this.store.privacyOverrides$.pipe(takeUntilDestroyed()).subscribe(({ kind, uid, share }) => {
+      if (!this.presenceSettingsUid() || (uid != null && uid !== this.presenceSettingsUid())) return;
+      if (kind === PrivacyExceptionKind.presence) {
+        this.presenceSettingsVersion++;
+        this.presenceOverride.set(
+          share == null
+            ? FriendPresenceOverride.inherit
+            : share
+              ? FriendPresenceOverride.share
+              : FriendPresenceOverride.hide,
+        );
+        this.presenceOverrideLoading.set(false);
+        this.presenceOverrideError.set(false);
+      } else {
+        this.receiptSettingsVersion++;
+        this.receiptOverride.set(
+          share == null
+            ? FriendReadReceiptOverride.inherit
+            : share
+              ? FriendReadReceiptOverride.share
+              : FriendReadReceiptOverride.hide,
+        );
+        this.receiptOverrideLoading.set(false);
+        this.receiptOverrideError.set(false);
+      }
+    });
     inject(Connection)
       .resync$.pipe(takeUntilDestroyed())
       .subscribe(() => void this.load());
@@ -448,7 +514,16 @@ export class ChatDetails {
       async () => {
         const settings = await firstValueFrom(this.friends.updateFriendReadReceiptSettings(uid, { override }));
         this.store.invalidateReadReceiptPrivacy(uid);
-        if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) this.receiptOverride.set(settings.override);
+        if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) {
+          this.receiptOverride.set(settings.override);
+          this.store.publishPrivacyOverride(
+            PrivacyExceptionKind.readReceipts,
+            uid,
+            settings.override === FriendReadReceiptOverride.inherit
+              ? undefined
+              : settings.override === FriendReadReceiptOverride.share,
+          );
+        }
       },
       true,
     );
@@ -474,7 +549,16 @@ export class ChatDetails {
       async () => {
         const settings = await firstValueFrom(this.friends.updateFriendPresenceSettings(uid, { override }));
         this.presence.invalidateUsers([uid]);
-        if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) this.presenceOverride.set(settings.override);
+        if (this.isCurrent(scope) && uid === this.presenceSettingsUid()) {
+          this.presenceOverride.set(settings.override);
+          this.store.publishPrivacyOverride(
+            PrivacyExceptionKind.presence,
+            uid,
+            settings.override === FriendPresenceOverride.inherit
+              ? undefined
+              : settings.override === FriendPresenceOverride.share,
+          );
+        }
       },
       true,
     );
@@ -620,8 +704,34 @@ export class ChatDetails {
       }
     }
   }
-  protected invites() {
-    return this.router.navigate(['/chats/chat', decodeId(this.id()!), 'invites']);
+  protected async openPage(page: DetailPage) {
+    if (this.busy()) return;
+    if (page === DetailView.Privacy && !this.presenceSettingsUid()) return;
+    if ((page === DetailView.Management || page === DetailView.Invites) && !this.canManage()) return;
+    const scope = this.scope();
+    if (this.page() === DetailView.Info) {
+      const scroll = await this.overview().getScrollElement();
+      if (!this.isCurrent(scope)) return;
+      this.overviewScroll.set(scroll.scrollTop);
+    }
+    this.page.set(page);
+  }
+
+  protected back() {
+    if (this.busy()) return;
+    if (this.page() === DetailView.Invites && this.view() === DetailView.Invites) {
+      void this.modals.dismiss();
+      return;
+    }
+    this.page.set(DetailView.Info);
+    const scope = this.scope();
+    afterNextRender(
+      () => {
+        if (this.isCurrent(scope) && this.page() === DetailView.Info)
+          void this.overview().scrollToPoint(0, this.overviewScroll(), 0);
+      },
+      { injector: this.injector },
+    );
   }
 
   protected close() {

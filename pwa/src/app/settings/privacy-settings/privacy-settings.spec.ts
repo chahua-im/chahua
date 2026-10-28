@@ -49,8 +49,8 @@ describe('Privacy settings', () => {
     expect(page.querySelector('ion-note')?.textContent?.trim()).toBe('无');
     expect(page.querySelectorAll('ion-spinner')).toHaveLength(3);
     http.expectOne(friendsUrl).flush({ mode: 'direct' });
-    http.expectOne(presenceUrl).flush({ visibility: 'everyone' });
-    http.expectOne(receiptsUrl).flush({ visibility: 'friends' });
+    http.expectOne(presenceUrl).flush({ visibility: 'everyone', exceptionCount: 0 });
+    http.expectOne(receiptsUrl).flush({ visibility: 'friends', exceptionCount: 0 });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     TestBed.tick();
     fixture.detectChanges();
@@ -67,16 +67,16 @@ describe('Privacy settings', () => {
     returned.detectChanges();
     http.expectOne(blocksUrl).flush({ blocks: [{ since: '', user: { uid: 42, username: 'Blocked', gender: 0 } }] });
     http.expectOne(friendsUrl).flush({ mode: 'question', question: 'test' });
-    http.expectOne(presenceUrl).flush({ visibility: 'nobody' });
-    http.expectOne(receiptsUrl).flush({ visibility: 'nobody' });
+    http.expectOne(presenceUrl).flush({ visibility: 'nobody', exceptionCount: 2 });
+    http.expectOne(receiptsUrl).flush({ visibility: 'nobody', exceptionCount: 1 });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     TestBed.tick();
     returned.detectChanges();
     expect(
       Array.from(returned.nativeElement.querySelectorAll('ion-note') as NodeListOf<HTMLElement>).map((note) =>
-        note.textContent?.trim(),
+        note.textContent?.replace(/\s+/g, ' ').trim(),
       ),
-    ).toEqual(['1', '需要回答问题并由我确认', '不允许任何人', '关闭']);
+    ).toEqual(['1', '需要回答问题并由我确认', '不允许任何人 （2 个例外）', '关闭 （1 个例外）']);
   });
 
   it('retries failed summaries without replacing successful summaries', async () => {

@@ -1,4 +1,4 @@
-import { Component, computed, DestroyRef, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
@@ -52,7 +52,6 @@ export class LanguageSettings {
   protected readonly modals = inject(ModalController);
   protected readonly backIcon = chevronBackOutline;
   protected readonly locales = supportedLocales.map((locale) => ({ locale, label: localeLabels[locale] }));
-  private readonly destroy = inject(DestroyRef);
   protected readonly saving = signal(false);
   protected readonly failed = signal(false);
   private readonly radios = viewChild(IonRadioGroup);
@@ -71,8 +70,7 @@ export class LanguageSettings {
     this.saving.set(true);
     this.failed.set(false);
     try {
-      const applied = await this.localization.setLocale(this.requested);
-      if (applied && !this.destroy.destroyed) void this.modals.dismiss();
+      await this.localization.setLocale(this.requested);
     } catch {
       this.failed.set(true);
     } finally {

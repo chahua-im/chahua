@@ -1,0 +1,112 @@
+<ion-list [inset]="true">
+  <ion-list-header>{{ 'settings.privacyExceptions.title' | transloco }}</ion-list-header>
+  <ion-item [button]="true" [detail]="false" [disabled]="busy() || !rows()" (click)="openPicker()">
+    <ion-icon slot="start" color="primary" [icon]="addIcon" />
+    <ion-label color="primary">{{ 'settings.privacyExceptions.add' | transloco }}</ion-label>
+  </ion-item>
+  @for (row of rows(); track row.user.uid) {
+    <ion-item [button]="true" [detail]="false" [disabled]="busy()" (click)="choose(row.user, row.share)">
+      <app-chat-avatar
+        slot="start"
+        [size]="40"
+        [entry]="{ title: row.user.username ?? '' + row.user.uid, avatar: row.user.avatarUrl }" />
+      <ion-label>
+        <h3>{{ row.user.username ?? row.user.uid }}</h3>
+        <p>{{ (row.share ? 'settings.privacyExceptions.share' : 'settings.privacyExceptions.hide') | transloco }}</p>
+      </ion-label>
+      @if (editing() === row.user.uid) {
+        <ion-spinner slot="end" />
+      }
+      <ion-button slot="end" fill="clear" [disabled]="busy()" (click)="$event.stopPropagation(); remove(row)">
+        {{ 'common.remove' | transloco }}
+      </ion-button>
+    </ion-item>
+  }
+  @if (!rows() && loading()) {
+    <ion-item lines="none"><ion-spinner /></ion-item>
+  } @else if (rows()?.length === 0) {
+    <ion-item lines="none">
+      <ion-note>{{ 'settings.privacyExceptions.empty' | transloco }}</ion-note>
+    </ion-item>
+  }
+  @if (failed()) {
+    <ion-item lines="none">
+      <ion-note color="danger">{{ 'common.loadFailed' | transloco }}</ion-note>
+      <ion-button slot="end" fill="clear" [disabled]="loading() || busy()" (click)="load()">
+        {{ 'common.retry' | transloco }}
+      </ion-button>
+    </ion-item>
+  }
+  @if (rows()?.length) {
+    <ion-item [button]="true" [detail]="false" lines="none" [disabled]="busy()" (click)="clear()">
+      <ion-icon slot="start" color="danger" [icon]="trashIcon" />
+      <ion-label color="danger">{{ 'settings.privacyExceptions.clear' | transloco }}</ion-label>
+      @if (clearing()) {
+        <ion-spinner slot="end" />
+      }
+    </ion-item>
+  }
+  @if (saveFailed() && !pickerOpen()) {
+    <ion-item lines="none">
+      <ion-note color="danger">{{ 'settings.general.saveFailed' | transloco }}</ion-note>
+    </ion-item>
+  }
+</ion-list>
+<ion-modal [isOpen]="pickerOpen()" [canDismiss]="canDismissPicker" (didDismiss)="pickerOpen.set(false)">
+  <ng-template>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>{{ 'settings.privacyExceptions.add' | transloco }}</ion-title>
+        <ion-buttons slot="end">
+          <ion-button [disabled]="busy()" (click)="pickerOpen.set(false)">{{ 'common.cancel' | transloco }}</ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+      <ion-searchbar
+        [value]="query()"
+        (ionInput)="query.set($event.detail.value ?? '')"
+        [placeholder]="'settings.privacyExceptions.search' | transloco" />
+    </ion-header>
+    <ion-content appScrollbars>
+      <ion-list>
+        @for (user of candidates(); track user.uid) {
+          <ion-item
+            [button]="true"
+            [detail]="false"
+            [disabled]="busy() || existing().has(user.uid)"
+            (click)="choose(user)">
+            <app-chat-avatar
+              slot="start"
+              [size]="40"
+              [entry]="{ title: user.username ?? '' + user.uid, avatar: user.avatarUrl }" />
+            <ion-label>{{ user.username ?? user.uid }}</ion-label>
+            @if (editing() === user.uid) {
+              <ion-spinner slot="end" />
+            } @else if (existing().has(user.uid)) {
+              <ion-note slot="end">{{ 'settings.privacyExceptions.added' | transloco }}</ion-note>
+            }
+          </ion-item>
+        } @empty {
+          @if (friends() && !friendsLoading() && !friendsFailed()) {
+            <ion-item lines="none">
+              <ion-note>{{ 'settings.privacyExceptions.noFriends' | transloco }}</ion-note>
+            </ion-item>
+          }
+        }
+        @if (friendsLoading()) {
+          <ion-item lines="none"><ion-spinner /></ion-item>
+        }
+        @if (friendsFailed()) {
+          <ion-item lines="none">
+            <ion-note color="danger">{{ 'common.loadFailed' | transloco }}</ion-note>
+            <ion-button slot="end" fill="clear" (click)="loadFriends()">{{ 'common.retry' | transloco }}</ion-button>
+          </ion-item>
+        }
+        @if (saveFailed()) {
+          <ion-item lines="none">
+            <ion-note color="danger">{{ 'settings.general.saveFailed' | transloco }}</ion-note>
+          </ion-item>
+        }
+      </ion-list>
+    </ion-content>
+  </ng-template>
+</ion-modal>

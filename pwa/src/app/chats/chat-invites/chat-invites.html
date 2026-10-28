@@ -1,4 +1,5 @@
-<ion-list>
+<ion-list [inset]="true">
+  <ion-list-header>{{ 'chats.invites.create' | transloco }}</ion-list-header>
   <ion-item>
     <ion-select [label]="'chats.invites.type' | transloco" [value]="type()" (ionChange)="change($event.detail.value)">
       <ion-select-option [value]="Type.generic">{{ 'chats.invites.typeGeneric' | transloco }}</ion-select-option>
@@ -38,11 +39,27 @@
   }
   <ion-item>
     <ion-label>{{ 'chats.invites.expiry' | transloco }}</ion-label>
-    <input class="field" type="datetime-local" [formField]="fields.expiry" />
+    <input
+      #expiryInput
+      class="field"
+      type="datetime-local"
+      [formField]="fields.expiry"
+      (input)="inputInvalid.set(!expiryInput.validity.valid); expiryRejected.set(false)" />
   </ion-item>
+  @if (expiryInvalid() || expiryRejected() || inputInvalid()) {
+    <ion-item lines="none">
+      <ion-note color="danger">{{ 'chats.invites.invalidExpiry' | transloco }}</ion-note>
+    </ion-item>
+  }
   <ion-button
     class="ion-margin"
-    [disabled]="busy() || (type() === Type.membership && !requiredGroup()) || (type() === Type.targeted && !target())"
+    [disabled]="
+      busy() ||
+      expiryInvalid() ||
+      inputInvalid() ||
+      (type() === Type.membership && !requiredGroup()) ||
+      (type() === Type.targeted && !target())
+    "
     (click)="create()">
     <span class="action-content" [class.busy]="pending()?.action === Action.Create">
       <span class="action-label">{{ 'chats.invites.create' | transloco }}</span>
@@ -51,6 +68,9 @@
       }
     </span>
   </ion-button>
+</ion-list>
+<ion-list [inset]="true">
+  <ion-list-header>{{ 'chats.invites.shareTo' | transloco }}</ion-list-header>
   <ion-searchbar
     [placeholder]="'chats.invites.groupSearch' | transloco"
     [debounce]="300"
@@ -75,6 +95,19 @@
       </span>
     </ion-button>
   }
+  @if (groupsError()) {
+    <ion-item lines="none">
+      <ion-note color="danger">{{ 'chats.invites.groupsFailed' | transloco }}</ion-note>
+      <ion-button slot="end" fill="clear" [disabled]="loadingGroups()" (click)="loadGroups()">
+        {{ 'common.retry' | transloco }}
+      </ion-button>
+    </ion-item>
+  } @else if (loadingGroups() && !groups().length) {
+    <ion-item lines="none"><ion-spinner /></ion-item>
+  }
+</ion-list>
+<ion-list [inset]="true">
+  <ion-list-header>{{ 'chats.invites.listTitle' | transloco }}</ion-list-header>
   @if (loading()) {
     <div class="page-loading"><ion-spinner /></div>
   }
@@ -157,3 +190,5 @@
 @if (restriction(); as mode) {
   <p class="ion-padding">{{ 'speaking.blocked.' + mode | transloco }}</p>
 }
+
+<ion-toast [isOpen]="!!notice()" [message]="notice()" [duration]="2000" (didDismiss)="notice.set(undefined)" />

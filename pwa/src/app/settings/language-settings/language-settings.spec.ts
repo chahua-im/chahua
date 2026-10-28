@@ -40,7 +40,7 @@ describe('LanguageSettings', () => {
     expect(page.textContent).toContain('English');
   });
 
-  it('persists an explicit language, applies it and dismisses', async () => {
+  it('persists an explicit language, applies it and stays open', async () => {
     const fixture = TestBed.createComponent(LanguageSettings);
     await fixture.componentInstance['select']({ detail: { value: 'en' } } as RadioGroupCustomEvent);
     fixture.detectChanges();
@@ -48,7 +48,7 @@ describe('LanguageSettings', () => {
     expect(localStorage.getItem('chahua.preferences.locale')).toBe('en');
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('Language');
     expect(document.documentElement.lang).toBe('en');
-    expect(dismiss).toHaveBeenCalled();
+    expect(dismiss).not.toHaveBeenCalled();
   });
 
   it('keeps the page open after failure and retries the requested language', async () => {
@@ -67,7 +67,7 @@ describe('LanguageSettings', () => {
     apply.mockRestore();
     await fixture.componentInstance['save']();
     expect(TestBed.inject(Preferences).selectedLocale()).toBe('en');
-    expect(dismiss).toHaveBeenCalledOnce();
+    expect(dismiss).not.toHaveBeenCalled();
   });
 
   it('returns to automatic detection', async () => {

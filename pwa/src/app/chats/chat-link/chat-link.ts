@@ -47,8 +47,15 @@ export class ChatLink {
   }
   ionViewWillLeave() {
     this.version++;
-    void this.modal?.dismiss(undefined, 'navigate');
+    if (this.modal) {
+      this.modal.canDismiss = true;
+      void this.modal.dismiss(undefined, 'navigate');
+    }
     this.modal = undefined;
+  }
+  canLeave() {
+    const canDismiss = this.modal?.canDismiss;
+    return typeof canDismiss === 'function' ? canDismiss(undefined, 'back') : canDismiss !== false;
   }
   protected home() {
     return this.router.navigate(['/chats'], { replaceUrl: true });
@@ -122,6 +129,7 @@ export class ChatLink {
         return;
       }
       const result = await modal.onDidDismiss();
+      if (this.modal === modal) this.modal = undefined;
       if (result.role !== 'navigate' && version === this.version) {
         if (this.hasPreviousPage) this.location.back();
         else await this.home();

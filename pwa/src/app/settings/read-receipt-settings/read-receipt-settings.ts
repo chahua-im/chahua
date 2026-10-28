@@ -1,3 +1,5 @@
+import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
+import { PrivacyExceptionKind } from '../../../generated/models';
 import { Component, inject, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
@@ -29,6 +31,7 @@ import { LoadError } from '../../ui/load-error/load-error';
   templateUrl: './read-receipt-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    PrivacyExceptions,
     ContentScrollbars,
     LoadError,
     IonButton,
@@ -51,6 +54,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 export class ReadReceiptSettings {
   private readonly friends = inject(FriendsService);
   private readonly chats = inject(ChatStore);
+  protected readonly ExceptionKind = PrivacyExceptionKind;
   protected readonly modals = inject(ModalController);
   protected readonly backIcon = chevronBackOutline;
   protected readonly Visibility = ReadReceiptVisibility;
@@ -59,6 +63,9 @@ export class ReadReceiptSettings {
   protected readonly loadError = signal(false);
   protected readonly saveError = signal(false);
   protected readonly visibility = signal(ReadReceiptVisibility.friends);
+
+  private savedVisibility = this.visibility();
+  private requestedVisibility = this.visibility();
 
   constructor() {
     void this.loadReadReceiptSettings();
@@ -70,6 +77,8 @@ export class ReadReceiptSettings {
     try {
       const settings = await firstValueFrom(this.friends.getMyReadReceiptSettings());
       this.visibility.set(settings.visibility);
+      this.savedVisibility = settings.visibility;
+      this.requestedVisibility = settings.visibility;
     } catch {
       this.loadError.set(true);
     } finally {
@@ -79,12 +88,14 @@ export class ReadReceiptSettings {
 
   protected setEnabled(enabled: boolean) {
     if (this.loading() || this.saving() || this.loadError()) return;
-    this.visibility.set(enabled ? ReadReceiptVisibility.friends : ReadReceiptVisibility.nobody);
+    this.requestedVisibility = enabled ? ReadReceiptVisibility.friends : ReadReceiptVisibility.nobody;
+    this.visibility.set(this.requestedVisibility);
     void this.saveReadReceiptSettings();
   }
 
   protected async saveReadReceiptSettings() {
     if (this.loading() || this.saving() || this.loadError()) return;
+    this.visibility.set(this.requestedVisibility);
     this.saving.set(true);
     this.saveError.set(false);
     try {
@@ -92,8 +103,11 @@ export class ReadReceiptSettings {
         this.friends.updateMyReadReceiptSettings({ visibility: this.visibility() }),
       );
       this.visibility.set(settings.visibility);
+      this.savedVisibility = settings.visibility;
+      this.requestedVisibility = settings.visibility;
       this.chats.invalidateReadReceiptPrivacy();
     } catch {
+      this.visibility.set(this.savedVisibility);
       this.saveError.set(true);
     } finally {
       this.saving.set(false);

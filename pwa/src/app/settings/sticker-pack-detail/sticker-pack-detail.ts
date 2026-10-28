@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import {
@@ -26,6 +26,7 @@ import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../..
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { LoadError } from '../../ui/load-error/load-error';
+import { StickerEditor, type StickerEditorValue } from '../sticker-editor/sticker-editor';
 import { StickerPreferences } from '../sticker-preferences';
 
 @Component({
@@ -33,6 +34,7 @@ import { StickerPreferences } from '../sticker-preferences';
   templateUrl: './sticker-pack-detail.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    StickerEditor,
     ContentScrollbars,
     LoadError,
     MediaLoaded,
@@ -126,6 +128,10 @@ export class StickerPackDetail {
   protected readonly backIcon = chevronBackOutline;
   protected readonly pack = signal<StickerPackDetailResponse | undefined>(undefined);
   protected readonly busy = signal(false);
+  protected readonly renaming = signal(false);
+  private readonly editor = viewChild(StickerEditor);
+  protected readonly uploadFile = signal<File | undefined>(undefined);
+  protected readonly editorError = signal<string | undefined>(undefined);
   protected readonly error = signal(false);
   protected readonly notice = signal<string | undefined>(undefined);
   protected readonly owned = computed(() => this.pack()?.ownerUid === this.session.user()?.uid);
@@ -150,34 +156,23 @@ export class StickerPackDetail {
     }
   }
 
-  protected async rename() {
+  protected rename() {
+    if (!this.pack() || this.busy()) return;
+    this.editorError.set(undefined);
+    this.renaming.set(true);
+  }
+
+  protected async saveName({ name }: StickerEditorValue) {
     const pack = this.pack();
-    if (!pack || this.busy()) return;
-    const alert = await this.alerts.create({
-      header: this.transloco.translate('settings.stickerPack.renameTitle'),
-      inputs: [
-        {
-          name: 'name',
-          type: 'text',
-          value: pack.name,
-          placeholder: this.transloco.translate('settings.stickerPack.namePlaceholder'),
-        },
-      ],
-      buttons: [
-        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
-        { text: this.transloco.translate('common.save'), role: 'confirm' },
-      ],
-    });
-    await alert.present();
-    const result = await alert.onDidDismiss<{ values: { name: string } }>();
-    const name = result.data?.values.name.trim();
-    if (result.role !== 'confirm' || !name || name === pack.name) return;
+    if (!pack || this.busy() || !name.trim() || name.trim() === pack.name) return;
     this.busy.set(true);
+    this.editorError.set(undefined);
     try {
-      this.pack.set(await firstValueFrom(this.api.patchPack(pack.id, { name })));
-      this.notice.set(this.transloco.translate('settings.stickerPack.renamed'));
+      this.pack.set(await firstValueFrom(this.api.patchPack(pack.id, { name: name.trim() })));
+      await this.editor()?.dismiss();
+      this.renaming.set(false);
     } catch {
-      this.notice.set(this.transloco.translate('settings.stickerPack.renameFailed'));
+      this.editorError.set(this.transloco.translate('settings.stickerPack.renameFailed'));
     } finally {
       this.busy.set(false);
     }
@@ -281,25 +276,19 @@ export class StickerPackDetail {
       await invalid.present();
       return;
     }
-    const alert = await this.alerts.create({
-      header: this.transloco.translate('stickers.addTitle'),
-      inputs: [
-        { name: 'emoji', placeholder: this.transloco.translate('stickers.emojiPlaceholder') },
-        { name: 'name', placeholder: this.transloco.translate('stickers.optionalName') },
-      ],
-      buttons: [
-        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
-        { text: this.transloco.translate('common.upload'), role: 'confirm' },
-      ],
-    });
-    await alert.present();
-    const result = await alert.onDidDismiss<{ values: { emoji: string; name: string } }>();
-    const values = result.data?.values;
-    if (result.role !== 'confirm' || !values?.emoji.trim()) return;
+    this.editorError.set(undefined);
+    this.uploadFile.set(withDetectedMimeType(file, mimeType));
+  }
+
+  protected async saveSticker(values: StickerEditorValue) {
+    const pack = this.pack();
+    const file = this.uploadFile();
+    if (!pack || !file || this.busy() || !values.emoji.trim()) return;
+    this.editorError.set(undefined);
     this.busy.set(true);
     try {
       const body = new FormData();
-      body.append('file', withDetectedMimeType(file, mimeType), file.name);
+      body.append('file', file, file.name);
       body.append('emoji', values.emoji.trim());
       if (values.name.trim()) body.append('name', values.name.trim());
       const sticker = await firstValueFrom(
@@ -312,9 +301,10 @@ export class StickerPackDetail {
           stickerCount: current.stickerCount + 1,
           stickers: [...current.stickers, sticker],
         });
-      this.notice.set(this.transloco.translate('stickers.added'));
+      await this.editor()?.dismiss();
+      this.uploadFile.set(undefined);
     } catch {
-      this.notice.set(this.transloco.translate('stickers.addFailed'));
+      this.editorError.set(this.transloco.translate('stickers.addFailed'));
     } finally {
       this.busy.set(false);
     }

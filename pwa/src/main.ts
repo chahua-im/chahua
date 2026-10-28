@@ -5,7 +5,7 @@ import { AppUpdates } from './app/pwa/app-updates';
 import { LegacyMigration } from './app/pwa/legacy-migration';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { bootstrapApplication } from '@angular/platform-browser';
-import { RouteReuseStrategy, provideRouter, withComponentInputBinding } from '@angular/router';
+import { RouteReuseStrategy, provideRouter, withComponentInputBinding, withRouterConfig } from '@angular/router';
 import { provideTransloco } from '@jsverse/transloco';
 import { IonicRouteStrategy, provideIonicAngular } from '@ionic/angular';
 
@@ -67,7 +67,7 @@ bootstrapApplication(App, {
       infiniteLoadingSpinner: 'circular',
       useSetInputAPI: true,
     }),
-    provideRouter(routes, withComponentInputBinding()),
+    provideRouter(routes, withComponentInputBinding(), withRouterConfig({ canceledNavigationResolution: 'computed' })),
   ],
 }).then(
   () => window.chahuaStartup?.finish(),

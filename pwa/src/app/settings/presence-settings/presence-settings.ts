@@ -1,3 +1,5 @@
+import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
+import { PrivacyExceptionKind } from '../../../generated/models';
 import { Component, inject, signal } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
 import {
@@ -30,6 +32,7 @@ import { LoadError } from '../../ui/load-error/load-error';
   templateUrl: './presence-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    PrivacyExceptions,
     ContentScrollbars,
     LoadError,
     IonButton,
@@ -53,6 +56,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 export class PresenceSettings {
   private readonly friends = inject(FriendsService);
   private readonly presence = inject(Presence);
+  protected readonly ExceptionKind = PrivacyExceptionKind;
   protected readonly modals = inject(ModalController);
   protected readonly everyoneIcon = eyeOutline;
   protected readonly friendsIcon = peopleOutline;
@@ -66,6 +70,9 @@ export class PresenceSettings {
   protected readonly saved = signal(false);
   protected readonly visibility = signal(PresenceVisibility.everyone);
 
+  private savedVisibility = this.visibility();
+  private requestedVisibility = this.visibility();
+
   constructor() {
     void this.loadPresenceSettings();
   }
@@ -76,6 +83,8 @@ export class PresenceSettings {
     try {
       const settings = await firstValueFrom(this.friends.getMyPresenceSettings());
       this.visibility.set(settings.visibility);
+      this.savedVisibility = settings.visibility;
+      this.requestedVisibility = settings.visibility;
     } catch {
       this.loadError.set(true);
     } finally {
@@ -86,7 +95,8 @@ export class PresenceSettings {
   protected chooseVisibility(value: unknown) {
     if (!Object.values(PresenceVisibility).includes(value as PresenceVisibility) || this.saving()) return;
     if (value === this.visibility()) return;
-    this.visibility.set(value as PresenceVisibility);
+    this.requestedVisibility = value as PresenceVisibility;
+    this.visibility.set(this.requestedVisibility);
     this.saved.set(false);
     this.saveError.set(false);
     void this.savePresenceSettings();
@@ -94,15 +104,19 @@ export class PresenceSettings {
 
   protected async savePresenceSettings() {
     if (this.loading() || this.saving() || this.loadError()) return;
+    this.visibility.set(this.requestedVisibility);
     this.saving.set(true);
     this.saved.set(false);
     this.saveError.set(false);
     try {
       const settings = await firstValueFrom(this.friends.updateMyPresenceSettings({ visibility: this.visibility() }));
       this.visibility.set(settings.visibility);
+      this.savedVisibility = settings.visibility;
+      this.requestedVisibility = settings.visibility;
       this.presence.invalidateUsers();
       this.saved.set(true);
     } catch {
+      this.visibility.set(this.savedVisibility);
       this.saveError.set(true);
     } finally {
       this.saving.set(false);

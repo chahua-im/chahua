@@ -46,7 +46,9 @@
         "title": "Unable to load the app",
         "description": ""
       }
-    }
+    },
+    "updatePendingMessages": "You have unsent messages. Updating will discard these tasks.",
+    "updateAnyway": "Update anyway"
   },
   "common": {
     "done": "Done",
@@ -151,7 +153,9 @@
       "questionPlaceholder": "Enter the question the requester must answer",
       "questionInvalid": "Enter a question between 1 and 100 characters.",
       "saveFailed": "Save failed. Please try again.",
-      "apply": "Apply"
+      "apply": "Apply",
+      "discardTitle": "Discard unsaved changes?",
+      "discard": "Discard"
     },
     "presence": {
       "title": "Presence Privacy",
@@ -213,6 +217,19 @@
       "presence": "Who can see my last seen and online status",
       "loadFailed": "Failed to load. Click to retry",
       "blocksLoadFailed": "Could not load blocked users."
+    },
+    "privacyExceptions": {
+      "title": "Exceptions",
+      "count": "({{ count }} exceptions)",
+      "add": "Add exception",
+      "share": "Always share",
+      "hide": "Always hide",
+      "clear": "Delete all exceptions",
+      "empty": "No exceptions",
+      "search": "Search friends",
+      "added": "Added",
+      "noFriends": "No matching friends",
+      "clearTitle": "Delete all exceptions?"
     }
   },
   "chats": {
@@ -316,7 +333,11 @@
       "failed": "Something went wrong. Try again.",
       "refresh": "Refresh",
       "revokeTitle": "Revoke invite",
-      "groupFallback": "Group"
+      "groupFallback": "Group",
+      "invalidExpiry": "Choose a valid future time.",
+      "groupsFailed": "Could not load groups",
+      "shared": "Invitation sent",
+      "listTitle": "Invite codes"
     },
     "details": {
       "topic": "Thread",
@@ -356,7 +377,9 @@
       "membershipMembers": "All members",
       "membershipAdmins": "Admins only",
       "membershipNobody": "Nobody",
-      "membershipNote": "Applies to past and new membership messages. Your personal display preference still applies when you have access."
+      "membershipNote": "Applies to past and new membership messages. Your personal display preference still applies when you have access.",
+      "privacySettings": "Privacy settings",
+      "manageGroup": "Manage group"
     },
     "directory": {
       "groups": "Groups",
@@ -635,7 +658,8 @@
     "addPack": "Add pack",
     "emojiLoadFailed": "Failed to load emojis. Close and try again.",
     "createPack": "Create sticker pack",
-    "createFailed": "Failed to create sticker pack"
+    "createFailed": "Failed to create sticker pack",
+    "emojiLabel": "Emoji"
   },
   "emojiPicker": {
     "loadFailed": "Failed to load emojis. Close and try again."

@@ -11,11 +11,13 @@ import type {
   FriendReadReceiptSettingsResponse,
   FriendRelationshipResponse,
   FriendSettingsResponse,
+  GetPrivacyExceptionsParams,
   ListFriendRequestHistoryParams,
   ListFriendRequestHistoryResponse,
   ListFriendsResponse,
   PendingFriendRequestCountResponse,
   PresenceSettingsResponse,
+  PrivacyExceptionsResponse,
   ReadReceiptSettingsResponse,
 } from '../../models';
 
@@ -367,6 +369,33 @@ export function getMyPresenceSettingsResource(
 /**
  * @remarks httpResource is available in Angular 19.2 and later.
  */
+export function getPrivacyExceptionsResource(
+  params: Signal<GetPrivacyExceptionsParams>,
+  options: OrvalHttpResourceOptions<PrivacyExceptionsResponse, unknown> & {
+    defaultValue: NoInfer<PrivacyExceptionsResponse>;
+  },
+): HttpResourceRef<PrivacyExceptionsResponse>;
+export function getPrivacyExceptionsResource(
+  params: Signal<GetPrivacyExceptionsParams>,
+  options?: OrvalHttpResourceOptions<PrivacyExceptionsResponse, unknown>,
+): HttpResourceRef<PrivacyExceptionsResponse | undefined>;
+export function getPrivacyExceptionsResource(
+  params: Signal<GetPrivacyExceptionsParams>,
+  options?: OrvalHttpResourceOptions<PrivacyExceptionsResponse, unknown>,
+): HttpResourceRef<PrivacyExceptionsResponse | undefined> {
+  const baseUrl = options?.injector ? options.injector.get(CHAHUA_BASE_URL) : inject(CHAHUA_BASE_URL);
+  return httpResource<PrivacyExceptionsResponse>(() => {
+    const request = {
+      url: `${baseUrl}/me/privacy-exceptions`,
+      params: filterParams(params?.() ?? {}, new Set<string>([])),
+    };
+    return applyOrvalRequestExtension(request, options);
+  }, options);
+}
+
+/**
+ * @remarks httpResource is available in Angular 19.2 and later.
+ */
 export function getMyReadReceiptSettingsResource(
   options: OrvalHttpResourceOptions<ReadReceiptSettingsResponse, unknown> & {
     defaultValue: NoInfer<ReadReceiptSettingsResponse>;
@@ -394,6 +423,7 @@ export type GetFriendRelationshipResourceResult = NonNullable<FriendRelationship
 export type GetFriendPresenceSettingsResourceResult = NonNullable<FriendPresenceSettingsResponse>;
 export type GetFriendReadReceiptSettingsResourceResult = NonNullable<FriendReadReceiptSettingsResponse>;
 export type GetMyPresenceSettingsResourceResult = NonNullable<PresenceSettingsResponse>;
+export type GetPrivacyExceptionsResourceResult = NonNullable<PrivacyExceptionsResponse>;
 export type GetMyReadReceiptSettingsResourceResult = NonNullable<ReadReceiptSettingsResponse>;
 
 /**

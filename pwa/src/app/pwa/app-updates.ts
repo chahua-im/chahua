@@ -1,7 +1,11 @@
-import { computed, inject, InjectionToken, isDevMode, Service, signal } from '@angular/core';
+import { computed, inject, Injector, InjectionToken, isDevMode, Service, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SwUpdate } from '@angular/service-worker';
 import { firstValueFrom, from, map, of, ReplaySubject, switchMap, timeout } from 'rxjs';
+import { AlertController } from '@ionic/angular';
+import { TranslocoService } from '@jsverse/transloco';
+import { MessageOutbox } from '../messages/message-outbox';
+import { MessageDelivery } from '../messages/message-delivery';
 import { appVersion } from '../app-version';
 
 export enum UpdateCheckResult {
@@ -19,6 +23,8 @@ export const APP_UPDATES_ENABLED = new InjectionToken<boolean>('APP_UPDATES_ENAB
 @Service()
 export class AppUpdates {
   private readonly updates = inject(SwUpdate);
+  private readonly injector = inject(Injector);
+  private confirmingReload = false;
   private readonly checkingState = signal(false);
   private readonly availableState = signal(false);
   private readonly latestVersion = signal(window.chahuaUpdates?.latestVersion);
@@ -68,8 +74,30 @@ export class AppUpdates {
     return this.pendingCheck;
   }
 
-  readonly reload = () => {
-    // Reload lets Angular switch the entire document and its lazy chunks together.
+  readonly reload = async () => {
+    if (this.confirmingReload) return;
+    const unfinished = this.injector
+      .get(MessageOutbox)
+      .items()
+      .some((item) => !item.cancelled() && item.delivery() !== MessageDelivery.Sent);
+    if (unfinished) {
+      this.confirmingReload = true;
+      try {
+        const text = this.injector.get(TranslocoService);
+        const alert = await this.injector.get(AlertController).create({
+          header: text.translate('app.updateNow'),
+          message: text.translate('app.updatePendingMessages'),
+          buttons: [
+            { text: text.translate('app.updateLater'), role: 'cancel' },
+            { text: text.translate('app.updateAnyway'), role: 'destructive' },
+          ],
+        });
+        await alert.present();
+        if ((await alert.onDidDismiss()).role !== 'destructive') return;
+      } finally {
+        this.confirmingReload = false;
+      }
+    }
     window.location.reload();
   };
 

@@ -11,7 +11,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { NavigationEnd, NavigationStart, Router } from '@angular/router';
+import { GuardsCheckEnd, NavigationEnd, NavigationStart, Router } from '@angular/router';
 import {
   IonApp,
   IonButton,
@@ -118,8 +118,8 @@ export class App {
   constructor() {
     inject(DestroyRef).onDestroy(() => clearTimeout(this.slowTimer));
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
-      if (event instanceof NavigationStart) {
-        // Snapshot existing overlays so a newly opened page cannot be dismissed by an older transition.
+      if (event instanceof GuardsCheckEnd && event.shouldActivate) {
+        // Close overlays only after guards accept navigation, preserving unsaved forms on cancellation.
         this.document
           .querySelectorAll<
             HTMLIonModalElement | HTMLIonPopoverElement | HTMLIonAlertElement | HTMLIonActionSheetElement

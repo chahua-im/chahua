@@ -13,6 +13,7 @@ import { ThreadsService } from '../../generated/endpoints/threads/threads.servic
 import type { FriendRelationshipResponse } from '../../generated/models';
 import {
   ServerWsMessageType,
+  type PrivacyExceptionKind,
   type MembershipMessagePolicy,
   SpeakingMode,
   type GroupSpeakingModeResponse,
@@ -103,6 +104,11 @@ export class ChatStore {
     this.mentionAccount();
     return new Map<SnowflakeID, Partial<Record<keyof ChatState, number>>>();
   });
+  private readonly privacyOverrides = new Subject<{ kind: PrivacyExceptionKind; uid?: number; share?: boolean }>();
+  readonly privacyOverrides$ = this.privacyOverrides.asObservable();
+  publishPrivacyOverride(kind: PrivacyExceptionKind, uid?: number, share?: boolean) {
+    this.privacyOverrides.next({ kind, uid, share });
+  }
   private readonly preferenceChanges = new Subject<GroupKind>();
   readonly preferenceChanges$ = this.preferenceChanges.asObservable();
   readonly defaultsError = signal(false);

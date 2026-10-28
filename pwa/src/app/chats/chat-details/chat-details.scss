@@ -121,22 +121,12 @@ ion-content {
 .quick-actions ion-button:hover span {
   color: var(--ion-color-primary-shade);
 }
-.quick-actions ion-button.destructive {
-  --background: rgba(var(--ion-color-danger-rgb), 0.1);
-  --background-activated: rgba(var(--ion-color-danger-rgb), 0.18);
-  --background-focused: rgba(var(--ion-color-danger-rgb), 0.14);
-  --background-hover: rgba(var(--ion-color-danger-rgb), 0.14);
-  --color: var(--ion-color-danger);
-}
-.quick-actions ion-button.destructive:hover span {
-  color: var(--ion-color-danger-shade);
-}
 .attachments {
   background: var(--ion-background-color, #fff);
 }
 
 // Keep requests parallel, but show only the profile spinner until that first load settles.
-.attachments.pending {
+.details-content.pending {
   display: none;
 }
 
@@ -196,4 +186,19 @@ textarea.profile-input {
 .field-edit :is(ion-icon, ion-spinner) {
   width: 18px;
   height: 18px;
+}
+
+ion-content[hidden] {
+  display: none;
+}
+
+.quick-actions ion-button.destructive {
+  --background: rgba(var(--ion-color-danger-rgb), 0.1);
+  --background-activated: rgba(var(--ion-color-danger-rgb), 0.18);
+  --background-focused: rgba(var(--ion-color-danger-rgb), 0.14);
+  --background-hover: rgba(var(--ion-color-danger-rgb), 0.14);
+  --color: var(--ion-color-danger);
+}
+.quick-actions ion-button.destructive:hover span {
+  color: var(--ion-color-danger-shade);
 }

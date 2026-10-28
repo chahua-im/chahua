@@ -370,6 +370,47 @@ describe('ChatStore', () => {
       http.expectOne(threadUrl).flush({ lastReadMessageId: null });
       await Promise.resolve();
     });
+
+    it('keeps unrelated chat and thread receipts stable during a scoped privacy event and delayed response', async () => {
+      const otherId = encodeId('9007199254742999');
+      const otherRoot = encodeId('9007199254743999');
+      const dm = { ...testChat, kind: GroupKind.dm, peerLastReadMessageId: testMessage.id };
+      store.acceptChats([dm, { ...dm, id: otherId }], store.snapshot());
+      store.acceptThreads(
+        [
+          thread,
+          {
+            ...thread,
+            chatId: otherId,
+            threadRootMessage: { ...thread.threadRootMessage, id: otherRoot, chatId: otherId },
+          },
+        ],
+        store.snapshot(),
+        store.subscriptionSnapshot(),
+      );
+      const stale = store.snapshot();
+      events.next({
+        type: ServerWsMessageType.readReceiptChanged,
+        payload: { chatId: testChat.id, privacyChanged: true },
+      });
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeUndefined();
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeUndefined();
+      expect(store.chat(otherId).peerLastReadMessageId).toBe(testMessage.id);
+      expect(store.thread(otherRoot)?.peerLastReadMessageId).toBe(testMessage.id);
+      http.expectNone((request) => request.url.includes(decodeId(otherId)));
+
+      store.acceptChats([dm], stale);
+      store.acceptThreads([thread], stale, store.subscriptionSnapshot());
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeUndefined();
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeUndefined();
+      http.expectOne(receiptUrl).flush({ lastReadMessageId: null });
+      http.expectOne(threadUrl).flush({ lastReadMessageId: null });
+      await Promise.resolve();
+      expect(store.chat(testChat.id).peerLastReadMessageId).toBeNull();
+      expect(store.thread(rootId)?.peerLastReadMessageId).toBeNull();
+      expect(store.chat(otherId).peerLastReadMessageId).toBe(testMessage.id);
+      expect(store.thread(otherRoot)?.peerLastReadMessageId).toBe(testMessage.id);
+    });
   });
 
   it('refreshes a loaded DM preview receipt when the peer reads', async () => {

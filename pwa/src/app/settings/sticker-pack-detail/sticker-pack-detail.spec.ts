@@ -12,6 +12,7 @@ import { testUser } from '../../api/testing';
 import { SessionStore } from '../../session/session-store';
 import { StickerPreferences } from '../sticker-preferences';
 import { StickerPackDetail } from './sticker-pack-detail';
+import { StickerEditor } from '../sticker-editor/sticker-editor';
 
 describe('StickerPackDetail', () => {
   const sticker: StickerSummary = {
@@ -67,6 +68,9 @@ describe('StickerPackDetail', () => {
         { provide: StickerPreferences, useValue: preferences },
       ],
     });
+    TestBed.overrideComponent(StickerEditor, {
+      set: { template: '<ion-modal [canDismiss]="canDismiss" />' },
+    });
     session = TestBed.inject(SessionStore);
     session.user.set({ ...testUser });
   });
@@ -120,10 +124,11 @@ describe('StickerPackDetail', () => {
       onDidDismiss: async () => ({ role: 'confirm', data: { values: { name: ' 新名 ' } } }),
     }));
     const component = await loaded();
-    await component['rename']();
+    component['rename']();
+    await component['saveName']({ name: ' 新名 ', emoji: '' });
     expect(api['patchPack']).toHaveBeenCalledWith(pack.id, { name: '新名' });
     expect(component['pack']()?.name).toBe('新名');
-    expect(component['notice']()).toBe('贴纸包已重命名');
+    expect(component['renaming']()).toBe(false);
   });
 
   it('removes a sticker from an owned pack after confirmation', async () => {
@@ -161,13 +166,15 @@ describe('StickerPackDetail', () => {
     }));
     const file = new File(['png-bytes'], 'tea.png', { type: 'image/png' });
     await component['upload']({ target: { files: [file], value: '' } } as unknown as Event);
+    expect(component['uploadFile']()).toBeDefined();
+    await component['saveSticker']({ emoji: '🍵', name: '茶' });
     expect(post).toHaveBeenCalledOnce();
     const [url, body] = post.mock.calls[0] as [string, FormData];
     expect(url).toBe(`/_api/stickers/packs/201/stickers`);
     expect(body.get('emoji')).toBe('🍵');
     expect(body.get('name')).toBe('茶');
     expect(component['pack']()?.stickers).toHaveLength(2);
-    expect(component['notice']()).toBe('贴纸已添加');
+    expect(component['uploadFile']()).toBeUndefined();
   });
 
   it('rejects unsupported or oversized files with an explanation alert', async () => {
@@ -191,5 +198,57 @@ describe('StickerPackDetail', () => {
     api['getPack'].mockReturnValueOnce(of(pack));
     await component['retry']();
     expect(component['pack']()).toBeDefined();
+  });
+
+  it('retains the rename form on failure and allows retry', async () => {
+    const component = await loaded();
+    component['rename']();
+    api['patchPack'].mockReturnValueOnce(throwError(() => new Error('offline')));
+    await component['saveName']({ name: '新名', emoji: '' });
+    expect(component['renaming']()).toBe(true);
+    expect(component['editorError']()).toBeTruthy();
+    expect(component['pack']()?.name).toBe(pack.name);
+    await component['saveName']({ name: '新名', emoji: '' });
+    expect(component['renaming']()).toBe(false);
+    expect(component['pack']()?.name).toBe('新名');
+  });
+
+  it('keeps the editor mounted until its successful dismissal finishes', async () => {
+    const fixture = TestBed.createComponent(StickerPackDetail);
+    fixture.componentRef.setInput('packId', pack.id);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const component = fixture.componentInstance;
+    component['rename']();
+    fixture.detectChanges();
+    let finish!: (dismissed: boolean) => void;
+    const closing = vi.spyOn(component['editor']()!, 'dismiss').mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const saving = component['saveName']({ name: '新名', emoji: '' });
+    await vi.waitFor(() => expect(closing).toHaveBeenCalledOnce());
+    expect(component['renaming']()).toBe(true);
+    expect(component['busy']()).toBe(true);
+    finish(true);
+    await saving;
+    expect(component['renaming']()).toBe(false);
+    expect(component['busy']()).toBe(false);
+  });
+
+  it('retains the selected upload after failure so it can be retried', async () => {
+    const component = await loaded();
+    const file = new File(['png-bytes'], 'tea.png', { type: 'image/png' });
+    await component['upload']({ target: { files: [file], value: '' } } as unknown as Event);
+    const selected = component['uploadFile']();
+    post.mockReturnValueOnce(throwError(() => new Error('offline')));
+    await component['saveSticker']({ emoji: '🍵', name: '茶' });
+    expect(component['uploadFile']()).toBe(selected);
+    expect(component['editorError']()).toBeTruthy();
+    expect(component['pack']()?.stickers).toHaveLength(1);
+    await component['saveSticker']({ emoji: '🍵', name: '茶' });
+    expect(component['uploadFile']()).toBeUndefined();
+    expect(component['pack']()?.stickers).toHaveLength(2);
   });
 });

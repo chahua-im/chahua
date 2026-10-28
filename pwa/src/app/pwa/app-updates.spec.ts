@@ -1,3 +1,7 @@
+import { signal } from '@angular/core';
+import { AlertController } from '@ionic/angular';
+import { MessageOutbox } from '../messages/message-outbox';
+import { MessageDelivery } from '../messages/message-delivery';
 import { TestBed } from '@angular/core/testing';
 import { SwUpdate, type VersionEvent } from '@angular/service-worker';
 import { firstValueFrom, Subject, timer } from 'rxjs';
@@ -13,6 +17,7 @@ describe('AppUpdates', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: SwUpdate, useValue: worker },
+        { provide: MessageOutbox, useValue: { items: signal([]) } },
         { provide: APP_UPDATES_ENABLED, useValue: true },
       ],
     });
@@ -168,6 +173,40 @@ describe('AppUpdates', () => {
     vi.stubGlobal('window', { location: { reload } });
     const install = TestBed.inject(AppUpdates).reload;
     install();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+  it.each([MessageDelivery.Sending, MessageDelivery.Uploading, MessageDelivery.Failed])(
+    'confirms updates with unfinished delivery %s and keeps tasks on cancellation',
+    async (delivery) => {
+      const reload = vi.fn();
+      vi.stubGlobal('window', { location: { reload } });
+      const items = signal([{ delivery: signal(delivery), cancelled: signal(false) }]);
+      const present = vi.fn();
+      const create = vi.fn().mockResolvedValue({ present, onDidDismiss: async () => ({ role: 'cancel' }) });
+      TestBed.overrideProvider(MessageOutbox, { useValue: { items } });
+      TestBed.configureTestingModule({ providers: [{ provide: AlertController, useValue: { create } }] });
+      const service = TestBed.inject(AppUpdates);
+      await service.reload();
+      expect(present).toHaveBeenCalledOnce();
+      expect(reload).not.toHaveBeenCalled();
+      expect(items()).toHaveLength(1);
+      create.mockResolvedValueOnce({ present, onDidDismiss: async () => ({ role: 'destructive' }) });
+      await service.reload();
+      expect(reload).toHaveBeenCalledOnce();
+    },
+  );
+  it('does not warn for sent or cancelled messages', async () => {
+    const reload = vi.fn();
+    vi.stubGlobal('window', { location: { reload } });
+    TestBed.overrideProvider(MessageOutbox, {
+      useValue: {
+        items: () => [
+          { delivery: () => MessageDelivery.Sent, cancelled: () => false },
+          { delivery: () => MessageDelivery.Failed, cancelled: () => true },
+        ],
+      },
+    });
+    await TestBed.inject(AppUpdates).reload();
     expect(reload).toHaveBeenCalledOnce();
   });
 });

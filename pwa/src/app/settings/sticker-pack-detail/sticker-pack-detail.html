@@ -65,3 +65,22 @@
   }
 </ion-content>
 <ion-toast [isOpen]="!!notice()" [message]="notice()" [duration]="2500" (didDismiss)="notice.set(undefined)" />
+
+@if (renaming()) {
+  <app-sticker-editor
+    [title]="'settings.stickerPack.renameTitle' | transloco"
+    [initialName]="pack()!.name"
+    [busy]="busy()"
+    [error]="editorError()"
+    (confirmed)="saveName($event)"
+    (closed)="renaming.set(false)" />
+}
+@if (uploadFile()) {
+  <app-sticker-editor
+    [title]="'stickers.addTitle' | transloco"
+    [withEmoji]="true"
+    [busy]="busy()"
+    [error]="editorError()"
+    (confirmed)="saveSticker($event)"
+    (closed)="uploadFile.set(undefined)" />
+}
