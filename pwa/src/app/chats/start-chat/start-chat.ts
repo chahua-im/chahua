@@ -27,11 +27,8 @@ import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { inviteCode, inviteStatus, InviteStatus } from '../invite';
-export enum StartChatKind {
-  Create,
-  Join,
-  Friend,
-}
+import { StartChatKind } from './start-chat-kind';
+export { StartChatKind } from './start-chat-kind';
 
 enum StartChatAction {
   Lookup,
