@@ -39,6 +39,30 @@ describe('App', () => {
 
   afterAll(() => vi.unstubAllGlobals());
 
+  it('preserves open forms when navigation is rejected and dismisses them after guards accept', async () => {
+    TestBed.overrideComponent(App, { set: { template: '' } });
+    const router = TestBed.inject(Router);
+    router.resetConfig([
+      { path: 'chats', children: [] },
+      { path: 'blocked', canActivate: [() => false], children: [] },
+      { path: 'accepted', children: [] },
+    ]);
+    const fixture = TestBed.createComponent(App);
+    await router.navigateByUrl('/chats');
+    await fixture.whenStable();
+    const overlay = document.createElement('ion-modal');
+    overlay.dismiss = vi.fn().mockResolvedValue(true);
+    document.body.append(overlay);
+    try {
+      expect(await router.navigateByUrl('/blocked')).toBe(false);
+      expect(overlay.dismiss).not.toHaveBeenCalled();
+      expect(await router.navigateByUrl('/accepted')).toBe(true);
+      expect(overlay.dismiss).toHaveBeenCalledWith(undefined, 'navigate');
+    } finally {
+      overlay.remove();
+    }
+  });
+
   it('only restores the token synchronously on landing', () => {
     history.replaceState(null, '', '/landing?token=landing-token');
     try {

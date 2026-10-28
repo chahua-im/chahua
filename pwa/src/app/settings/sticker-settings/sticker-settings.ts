@@ -1,16 +1,15 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import type { ItemReorderEventDetail } from '@ionic/angular';
 import {
-  AlertController,
+  IonChip,
   IonBadge,
   IonButton,
   IonButtons,
   IonContent,
   IonHeader,
   IonIcon,
-  IonInput,
   IonItem,
   IonLabel,
   IonList,
@@ -24,7 +23,7 @@ import {
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
-import { addOutline, chevronBackOutline, cubeOutline, happyOutline } from 'ionicons/icons';
+import { addOutline, chevronBackOutline, cubeOutline, happyOutline, closeCircleOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackSummary, UpdateStickerPackOrderItem } from '../../../generated/models';
@@ -33,7 +32,7 @@ import { EmojiPicker } from '../../messages/emoji-picker/emoji-picker';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { Preferences } from '../preferences';
-import { extractEmojiSequences } from '../emoji-sequences';
+import { StickerEditor, type StickerEditorValue } from '../sticker-editor/sticker-editor';
 import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } from '../sticker-preferences';
 
 @Component({
@@ -41,16 +40,17 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
   templateUrl: './sticker-settings.html',
   styleUrl: '../settings/settings.scss',
   imports: [
+    StickerEditor,
     ContentScrollbars,
     EmojiPicker,
     LoadError,
+    IonChip,
     IonBadge,
     IonButton,
     IonButtons,
     IonContent,
     IonHeader,
     IonIcon,
-    IonInput,
     IonItem,
     IonLabel,
     IonList,
@@ -120,14 +120,15 @@ import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } fro
   `,
 })
 export class StickerSettings {
+  private readonly destroy = inject(DestroyRef);
+  private readonly editor = viewChild(StickerEditor);
   private readonly api = inject(StickersService);
-  private readonly alerts = inject(AlertController);
   private readonly transloco = inject(TranslocoService);
   private readonly router = inject(Router);
   protected readonly modals = inject(ModalController);
   protected readonly preferences = inject(StickerPreferences);
   protected readonly reactions = inject(Preferences);
-  protected readonly icons = { happyOutline, addOutline, cubeOutline };
+  protected readonly icons = { happyOutline, addOutline, cubeOutline, closeCircleOutline };
   protected readonly backIcon = chevronBackOutline;
   protected readonly autoSortLimit = AUTO_SORT_LIMIT;
   protected readonly loading = signal(true);
@@ -140,6 +141,8 @@ export class StickerSettings {
     sortStickerPacksByPreference(this.packs(), this.preferences.packOrder()),
   );
   protected readonly creating = signal(false);
+  protected readonly createOpen = signal(false);
+  protected readonly createError = signal<string | undefined>(undefined);
   protected readonly savingOrder = signal(false);
   protected readonly orderFailed = signal(false);
   private pendingOrder?: UpdateStickerPackOrderItem;
@@ -169,52 +172,40 @@ export class StickerSettings {
     }
   }
 
-  protected editPinned(event: Event) {
-    const value = String((event.target as HTMLIonInputElement).value ?? '');
-    this.reactions.setPinnedReactions(extractEmojiSequences(value));
+  protected removePinned(emoji: string) {
+    this.reactions.setPinnedReactions(this.reactions.pinnedReactions().filter((item) => item !== emoji));
   }
 
   protected addPinned(emoji: string) {
     const pinned = this.reactions.pinnedReactions();
     if (pinned.includes(emoji) || pinned.length >= 5) return;
     this.reactions.setPinnedReactions([...pinned, emoji]);
+    if (this.reactions.pinnedReactions().length === 5) this.choosingPinned.set(false);
   }
 
-  protected async createPack() {
-    if (this.creating()) return;
+  protected createPack() {
+    this.createError.set(undefined);
+    this.createOpen.set(true);
+  }
+
+  protected async savePack({ name }: StickerEditorValue) {
+    if (this.creating() || !name.trim()) return;
     this.creating.set(true);
+    this.createError.set(undefined);
     try {
-      await this.createPackFromPrompt();
-    } finally {
-      this.creating.set(false);
-    }
-  }
-
-  private async createPackFromPrompt() {
-    const alert = await this.alerts.create({
-      header: this.transloco.translate('stickers.createPack'),
-      inputs: [{ name: 'name', placeholder: this.transloco.translate('common.name') }],
-      buttons: [
-        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
-        { text: this.transloco.translate('common.create'), role: 'confirm' },
-      ],
-    });
-    await alert.present();
-    const result = await alert.onDidDismiss<{ values: { name: string } }>();
-    const name = result.data?.values.name.trim();
-    if (result.role !== 'confirm' || !name) return;
-    try {
-      const pack = await firstValueFrom(this.api.postPack({ name }));
+      const pack = await firstValueFrom(this.api.postPack({ name: name.trim() }));
+      if (this.destroy.destroyed) return;
       this.owned.update((owned) => [...owned, pack]);
       this.packs.update((packs) => [pack, ...packs]);
       this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
+      await this.editor()?.dismiss();
+      if (this.destroy.destroyed) return;
+      this.createOpen.set(false);
       await this.router.navigate(['/settings/stickers', decodeId(pack.id)]);
     } catch {
-      const failure = await this.alerts.create({
-        header: this.transloco.translate('stickers.createFailed'),
-        buttons: [this.transloco.translate('common.ok')],
-      });
-      await failure.present();
+      this.createError.set(this.transloco.translate('stickers.createFailed'));
+    } finally {
+      this.creating.set(false);
     }
   }
 

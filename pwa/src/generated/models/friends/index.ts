@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './clearPrivacyExceptionsParams';
 export * from './createFriendRequestBody';
 export * from './friendAddInfoResponse';
 export * from './friendAddVerificationMode';
@@ -20,12 +21,16 @@ export * from './friendRequestResponse';
 export * from './friendRequestStatus';
 export * from './friendResponse';
 export * from './friendSettingsResponse';
+export * from './getPrivacyExceptionsParams';
 export * from './listFriendRequestHistoryParams';
 export * from './listFriendRequestHistoryResponse';
 export * from './listFriendsResponse';
 export * from './pendingFriendRequestCountResponse';
 export * from './presenceSettingsResponse';
 export * from './presenceVisibility';
+export * from './privacyException';
+export * from './privacyExceptionKind';
+export * from './privacyExceptionsResponse';
 export * from './readReceiptSettingsResponse';
 export * from './readReceiptVisibility';
 export * from './updateFriendPresenceSettingsBody';

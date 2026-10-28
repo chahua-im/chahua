@@ -1,7 +1,8 @@
-import { Component, inject, signal } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
+import { afterNextRender, Component, computed, ElementRef, inject, signal } from '@angular/core';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { applyWhen, disabled, form, FormField, maxLength, pattern, required } from '@angular/forms/signals';
 import {
+  AlertController,
   IonButton,
   IonButtons,
   IonContent,
@@ -55,6 +56,9 @@ import { LoadError } from '../../ui/load-error/load-error';
 })
 export class FriendVerificationSettings {
   private readonly friends = inject(FriendsService);
+  private readonly alerts = inject(AlertController);
+  private readonly transloco = inject(TranslocoService);
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly modals = inject(ModalController);
   protected readonly allowIcon = personAddOutline;
   protected readonly messageIcon = chatbubbleOutline;
@@ -68,6 +72,15 @@ export class FriendVerificationSettings {
   protected readonly saveError = signal(false);
   protected readonly saved = signal(false);
   protected readonly verification = signal({ mode: FriendAddVerificationMode.direct, question: '' });
+  private readonly applied = signal({ mode: FriendAddVerificationMode.direct, question: '' });
+  protected readonly dirty = computed(() => {
+    const value = this.verification();
+    return (
+      value.mode === FriendAddVerificationMode.question &&
+      (value.mode !== this.applied().mode || value.question.trim() !== this.applied().question)
+    );
+  });
+  private discardConfirmation?: Promise<boolean>;
   protected readonly verificationForm = form(this.verification, (fields) => {
     disabled(fields, () => this.loading() || this.saving() || this.loadError());
     applyWhen(
@@ -83,6 +96,34 @@ export class FriendVerificationSettings {
 
   constructor() {
     void this.loadVerification();
+    afterNextRender(() => {
+      const modal = this.element.nativeElement.closest('ion-modal');
+      if (modal) modal.canDismiss = (_data, role) => this.canDismiss(role);
+    });
+  }
+
+  async canDismiss(role?: string): Promise<boolean> {
+    if (role === 'saved') return true;
+    if (this.saving()) return false;
+    if (!this.dirty()) return true;
+    this.discardConfirmation ??= this.confirmDiscard().finally(() => {
+      this.discardConfirmation = undefined;
+    });
+    return this.discardConfirmation;
+  }
+
+  private async confirmDiscard() {
+    const alert = await this.alerts.create({
+      header: this.transloco.translate('settings.friendVerification.discardTitle'),
+      buttons: [
+        { text: this.transloco.translate('common.cancel'), role: 'cancel' },
+        { text: this.transloco.translate('settings.friendVerification.discard'), role: 'destructive' },
+      ],
+    });
+    await alert.present();
+    const discard = (await alert.onDidDismiss()).role === 'destructive';
+    if (discard) this.verification.set(this.applied());
+    return discard;
   }
 
   protected async loadVerification() {
@@ -91,6 +132,7 @@ export class FriendVerificationSettings {
     try {
       const settings = await firstValueFrom(this.friends.getMyFriendSettings());
       this.verification.set({ mode: settings.mode, question: settings.question ?? '' });
+      this.applied.set(this.verification());
     } catch {
       this.loadError.set(true);
     } finally {
@@ -120,7 +162,9 @@ export class FriendVerificationSettings {
         }),
       );
       this.verification.set({ mode: settings.mode, question: settings.question ?? '' });
+      this.applied.set(this.verification());
       this.saved.set(true);
+      if (mode === FriendAddVerificationMode.question) await this.modals.dismiss(undefined, 'saved');
     } catch {
       this.saveError.set(true);
     } finally {

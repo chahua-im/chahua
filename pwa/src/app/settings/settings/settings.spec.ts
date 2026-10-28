@@ -139,7 +139,9 @@ describe('Settings', () => {
     fixture.detectChanges();
   }
 
-  async function loadPresence(settings: PresenceSettingsResponse = { visibility: PresenceVisibility.everyone }) {
+  async function loadPresence(
+    settings: PresenceSettingsResponse = { visibility: PresenceVisibility.everyone, exceptionCount: 0 },
+  ) {
     http.expectOne(presenceEndpoint).flush(settings);
     await fixture.whenStable();
     fixture.detectChanges();
@@ -169,6 +171,7 @@ describe('Settings', () => {
     await nav.push(destination.component);
     page = (await nav.getActive())!.element!;
     await fixture.whenStable();
+    if (label === '在线状态隐私') http.expectOne('/_api/me/privacy-exceptions?kind=presence').flush({ exceptions: [] });
   }
 
   async function openNotifications() {
@@ -266,7 +269,7 @@ describe('Settings', () => {
     expect(restored[1].checked).toBe(true);
     expect(restored[2].checked).toBe(false);
     const done = Array.from(page.querySelectorAll('ion-button')).find(
-      (button) => button.textContent?.trim() === '完成',
+      (button) => button.querySelector('ion-icon') != null,
     )!;
     done.click();
     expect(dismiss).toHaveBeenCalledOnce();
@@ -334,7 +337,7 @@ describe('Settings', () => {
     expect(localStorage.getItem('chahua.preferences.colorMode')).toBe('dark');
   });
 
-  it('requires Apply for question mode and saves its trimmed text only after confirmation', async () => {
+  it('saves the question from the toolbar and closes only after success', async () => {
     await openPage('好友验证');
     await load({ mode: Mode.need_message });
     expect(Array.from(page.querySelectorAll('ion-radio')).map((radio) => radio.value)).toEqual([
@@ -344,12 +347,12 @@ describe('Settings', () => {
       Mode.forbid,
     ]);
     expect(
-      Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '应用'),
+      Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '保存'),
     ).toBe(false);
     await choose(Mode.question);
     await enterQuestion('   ');
     const apply = Array.from(page.querySelectorAll('ion-button')).find(
-      (button) => button.textContent?.trim() === '应用',
+      (button) => button.textContent?.trim() === '保存',
     )!;
     expect(apply.disabled).toBe(true);
     http.expectNone(endpoint);
@@ -367,9 +370,7 @@ describe('Settings', () => {
       fixture.detectChanges();
       expect(page.textContent).toContain('已保存');
     });
-    await back();
-    expect(page.tagName).toBe('APP-PRIVACY-SETTINGS');
-    expect(dismiss).not.toHaveBeenCalled();
+    expect(dismiss).toHaveBeenCalledWith(undefined, 'saved');
   });
 
   it('loads and saves presence privacy, invalidating all individual presence snapshots', async () => {
@@ -403,7 +404,7 @@ describe('Settings', () => {
     await choose(Mode.forbid);
     expect(page.querySelector('ion-textarea')).toBeNull();
     expect(
-      Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '应用'),
+      Array.from(page.querySelectorAll('ion-button')).some((button) => button.textContent?.trim() === '保存'),
     ).toBe(false);
     const request = http.expectOne(endpoint);
     expect(request.request.body).toEqual({ mode: Mode.forbid });

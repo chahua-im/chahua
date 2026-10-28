@@ -8,6 +8,9 @@ import {
   IonItem,
   IonLabel,
   IonList,
+  IonListHeader,
+  IonNote,
+  IonToast,
   IonSearchbar,
   IonSelect,
   IonSelectOption,
@@ -46,6 +49,9 @@ enum InviteAction {
     DirectorySearch,
     FormField,
     IonList,
+    IonListHeader,
+    IonNote,
+    IonToast,
     IonItem,
     IonLabel,
     IonButton,
@@ -77,7 +83,10 @@ export class ChatInvites {
     );
   }
   protected readonly type = signal(InviteType.generic);
-  protected readonly values = signal({ target: '', group: '', expiry: '' });
+  protected readonly values = signal({ expiry: '' });
+  protected readonly expiryRejected = signal(false);
+  protected readonly expiryInvalid = computed(() => !this.validExpiry(this.values().expiry));
+  protected readonly inputInvalid = signal(false);
   protected readonly fields = form(this.values);
   protected readonly groups = signal<GroupSelectorItem[]>([]);
   protected readonly cursor = signal<SnowflakeID | undefined>(undefined);
@@ -90,6 +99,9 @@ export class ChatInvites {
   protected readonly busy = computed(() => this.pending() != null || this.loading());
   protected readonly loadingGroups = signal(false);
   protected readonly error = signal(false);
+  protected readonly groupsError = signal(false);
+  protected readonly notice = signal<string | undefined>(undefined);
+  private groupsVersion = 0;
   protected readonly copied = signal(false);
   constructor() {
     effect(() => {
@@ -113,7 +125,10 @@ export class ChatInvites {
     }
   }
   protected async loadGroups(more = false) {
-    if (more) this.loadingGroups.set(true);
+    if (more && this.loadingGroups()) return;
+    const version = ++this.groupsVersion;
+    this.loadingGroups.set(true);
+    this.groupsError.set(false);
     try {
       const page = await firstValueFrom(
         this.groupsApi.getGroups({
@@ -124,19 +139,29 @@ export class ChatInvites {
           after: more ? this.cursor() : undefined,
         }),
       );
+      if (version !== this.groupsVersion || this.destroy.destroyed) return;
       this.groups.update((items) => (more ? [...items, ...page.groups] : page.groups));
       this.cursor.set(page.nextCursor);
     } catch {
-      this.error.set(true);
+      if (version === this.groupsVersion) this.groupsError.set(true);
     } finally {
-      if (more) this.loadingGroups.set(false);
+      if (version === this.groupsVersion) this.loadingGroups.set(false);
     }
   }
   protected change(value: unknown) {
     if (Object.values(InviteType).includes(value as InviteType)) this.type.set(value as InviteType);
   }
+  private validExpiry(value: string) {
+    return !value || (Number.isFinite(Date.parse(value)) && Date.parse(value) > Date.now());
+  }
   protected async create() {
     if (this.busy()) return;
+    if (this.inputInvalid() || !this.validExpiry(this.values().expiry)) {
+      this.expiryRejected.set(true);
+      return;
+    }
+    if (this.type() === InviteType.targeted && !this.target()) return;
+    if (this.type() === InviteType.membership && !this.requiredGroup()) return;
     this.pending.set({ action: InviteAction.Create });
     this.error.set(false);
     try {
@@ -207,6 +232,7 @@ export class ChatInvites {
           clientGeneratedId: crypto.randomUUID(),
         }),
       );
+      this.notice.set(this.transloco.translate('chats.invites.shared'));
     } catch (error) {
       const mode = speakingErrorMode(error);
       if (mode) this.restriction.set(mode);

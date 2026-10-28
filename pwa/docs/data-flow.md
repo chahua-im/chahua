@@ -117,9 +117,9 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 | 全局收藏                             | `GET /saved-messages`，limit=50、before                                                                                  | SavedMessageList 快照                                                          |
 | 全局目录搜索                         | `GET /group`（joined）和 `/users/search`，300ms 防抖                                                                     | DirectorySearch；群有游标，用户无游标                                          |
 | 群资料中的成员标签                   | `GET /group/{c}/members`，limit、after、q、mode                                                                          | ChatMembers 局部分页                                                           |
-| 资料中的话题标签              | `GET /chats/{c}/threads?limit=50&order=newest`，cursor 根 ID           | ChatThreads 局部分页                        |
-| 话题资料中的成员标签          | `GET /chats/{c}/threads/{t}/participants?limit=100`，cursor 用户 UID   | ThreadParticipants 局部分页                 |
-| 资料中的媒体标签                     | `GET /chats/{c}/attachments`，kind、limit、before                                                                        | ChatAttachments 局部分页                                                       |
+| 资料中的话题标签                     | `GET /chats/{c}/threads?limit=50&order=newest`，cursor 根 ID                                                               | ChatThreads 局部分页                                                           |
+| 话题资料中的成员列表                 | `GET /chats/{c}/threads/{t}/participants?limit=100`，cursor 用户 UID                                                       | ThreadParticipants 局部分页                                                    |
+| 资料中的媒体二级页                   | `GET /chats/{c}/attachments`，kind、limit、before                                                                        | ChatAttachments 局部分页                                                       |
 | 打开媒体或定位附件                   | `GET /chats/{c}/messages/{m}`                                                                                            | 当前消息的媒体集合，或所属话题路由                                             |
 | 聊天内消息搜索                       | `GET /chats/{c}/messages/search`，q、sort、limit、offset                                                                 | ChatSearch 局部分页                                                            |
 | 邀请预览与管理                       | `GET /invites/invite?inviteCode=...`、`GET /invites`                                                                     | InviteCard、StartChat、ChatInvites                                             |
@@ -324,3 +324,11 @@ ChatStore 共享群模式、本人身份与个人模式，按更严格者派生�
 兑换邀请成功后，StartChat 直接将响应中的群详情交给 ChatStore，替换上一次成员关系的个人限制并复用详情，不再补发详情请求；入群请求期间收到的较新权限事件优先，旧账号回包不更新缓存或导航。已是成员时，邀请预览只用于导航，不覆盖现有权限。
 
 ConversationPage 按主聊天、新话题、已有话题回复计算发送权限；话题根与回复数读取不受订阅状态过滤的共享摘要，取消订阅不改变已有话题的回复权限，回复数归零仍及时撤销“仅回复”权限。单独获取的话题根同样应用 `threadUpdate`，读取期间收到的回复数更新和根消息编辑优先于迟到的根消息响应，不增加补读请求；编辑按原消息的 `replyRootId` 判断。MessageComposer 保留本地未提交内容，MessageMenu 单独限制编辑与创建话题。MessageOutbox 识别结构化 `403 speakingRestricted`，记录有效模式供消息行展示，手动重试保留原 `clientGeneratedId`。客户端提示不替代服务端授权，协议见[后端发言权限](../../backend/docs/speaking-restrictions.md)。
+
+隐私设置响应 `PresenceSettingsResponse`、`ReadReceiptSettingsResponse` 包含 `exceptionCount`，仅统计当前账号在当前好友关系中的显式覆盖。`GET /me/privacy-exceptions?kind=presence|readReceipts` 批量返回好友资料和分享规则；添加选择器读取现有 `GET /friends/`，不逐好友读取规则。单项修改复用 `/friends/{uid}/presence-settings` 或 `/friends/{uid}/read-receipt-settings`，移除写入 inherit；`DELETE /me/privacy-exceptions` 在事务中仅清除调用者对应方向及类别的覆盖，不改全局规则、对方规则或好友关系。查询沿用 friendships 的 uid1 主键前缀和 uid2 索引，不扫描消息表。
+
+隐私例外保存成功后通过 ChatStore.privacyOverrides$ 更新仍挂载的好友资料并使旧读取失效；单项保存同时失效相应在线状态或已读回执快照。批量清空已读回执例外由后端仅向实际修改的好友私聊发送 `readReceiptChanged`，客户端通过该 WS 事件失效对应私聊及话题回执；HTTP 成功后不再执行全局回执失效或重复补读，无关聊天保留原回执。账号切换清除例外列表及选择器，迟到请求不能写入新账号；刷新期间保留已知行，初次读取失败不显示空列表。返回隐私首页时重新读取摘要。
+
+ChatLink 的好友验证路由通过 canDeactivate 检查 modal.canDismiss；弹窗关闭、返回按钮和浏览器返回共用未保存问题确认。只有路由守卫同意离开后 App 才关闭现有弹层，取消导航保留表单。保存成功或确认放弃后不重复确认。
+
+资料侧栏的隐私、群管理、邀请与图片/视频/文件切换由 ChatDetails 局部状态驱动，不改变会话路由。首页的内容列表在进入二级页时保留实例，返回不重复读取；邀请和媒体组件按进入/离开创建和释放；首页不读取媒体列表或数量，打开媒体页才按当前聊天与类别读取。退出媒体页取消未完成读取；返回首页复用保留的列表与滚动位置。现有好友隐私和群设置保存接口、共享状态与权限更新路径不变。

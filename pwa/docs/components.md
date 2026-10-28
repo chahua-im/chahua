@@ -178,9 +178,9 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 | StartChat          | kind、code；创建/加入表单、搜索词、邀请预览、busy/error                                                                                                                                                                                | 点击提交才创建或加入；改邀请码会使旧预览不可提交                                                                          |
 | ChatMute           | 公开 toggle(chatId)；根据共享永久偏好筛选临时静音选项，首次展示与菜单打开期间均同步                                                                                                                                                    | 调用 ChatStore.setNotificationSetting，原调用按钮持有等待状态                                                             |
 
-ChatDetails 的侧栏、会话信息 modal 和用户资料 modal 共用一个组件，均无 toolbar。基础资料有缓存就直接显示；当前标签独立读取，不等待详情或好友关系。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。名称和简介仅在进入编辑时创建各自的 Signal Form 字段草稿，保存只提交对应字段，另一个字段的草稿保持不变；切换会话清空草稿及头像上传进度。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
+ChatDetails 的侧栏、会话信息 modal 和用户资料 modal 共用一个组件，资料首页无 toolbar，二级页使用 Ionic header。基础资料有缓存就直接显示；当前话题/成员列表独立读取，不等待详情或好友关系；媒体列表在打开对应二级页时读取。切换聊天恢复默认标签，切换标签销毁原列表组件并释放读取；标签顺序见[需求](requirements.md#信息群组好友与搜索)。名称和简介仅在进入编辑时创建各自的 Signal Form 字段草稿，保存只提交对应字段，另一个字段的草稿保持不变；切换会话清空草稿及头像上传进度。资料写操作共用组件内 perform：等待与错误随聊天/话题范围重置，迟到响应仍更新原聊天的共享数据，但不关闭当前表单或触发旧页面导航。
 
-ChatDetails 的群资料使用 Ionic 选择器展示成员变动消息可见范围，普通成员只读。当前值来自 ChatStore 的群策略，组件仅保存待提交选择；保存复用 perform，成功后重读当前群资料，失败恢复已知选择。权限和设置同步见[数据流](data-flow.md#系统消息链接)。
+ChatDetails 的群管理页使用 Ionic 选择器展示成员变动消息可见范围，普通成员在资料首页查看只读状态。当前值来自 ChatStore 的群策略，组件仅保存待提交选择；保存复用 perform，成功后重读当前群资料，失败恢复已知选择。权限和设置同步见[数据流](data-flow.md#系统消息链接)。
 
 ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资料中的添加/删除/拉黑成功后刷新它；所有消费者随共享值变化，不各自请求并维护副本。
 
@@ -218,3 +218,9 @@ ChatList 的四个 tab 数字消费集合 `unreadUnmutedConversationCount`，有
 `conversationUnread` 管理 ChatListStore 的连接级未读订阅、消费者、快照和 requestId；Connection 负责 WS 编解码与发送。系统图标和列表共享订阅，不创建单独的未读 HTTP 查询。
 
 SpeakingModeSelect 由 ChatDetails 与 ChatMembers 复用，输入 label、disabled，value model 为 SpeakingMode；Ionic 选择框只负责选择，调用方持有保存状态和错误。群模式与有效发言权限由 ChatStore 共享，ConversationPage 将当前操作的 restriction 传给 MessageComposer；VoiceRecorder 接收 disabled，限制生效时保留尚未发送的录音。
+
+PrivacyExceptions 接收 PrivacyExceptionKind，持有例外列表、好友选择器、搜索、保存与清空状态；FriendsService 提供批量读取和单项覆盖写入，ChatStore.privacyOverrides$ 通知已挂载资料同步。PresenceSettings、ReadReceiptSettings 各自保留已保存值和失败待重试值，选择控件始终可回退到真实状态。
+
+StickerEditor 接收标题、初始名称、是否填写对应表情、busy 和 error，输出 confirmed（名称、表情）及 closed。Signal Form 保留未提交输入并验证必填字段；父页面持有文件和 API 写入状态，保存成功后先等待编辑器 dismiss 完成，再销毁编辑器或跳转。编辑器和隐私好友选择器在保存期间阻止用户取消，但允许已获准的路由离开及父容器移除清理子弹窗。
+
+ChatDetails 使用局部 DetailPage（DetailView 与媒体类别）切换资料、隐私、群管理、邀请及图片/视频/文件，共用侧栏或 modal 容器。资料首页的 ion-content 隐藏时保留当前内容组件，返回恢复滚动；二级页切换重建各自的滚动容器；媒体页创建 ChatAttachments，退出时销毁并取消未完成读取。页面与返回位置随聊天/用户/话题范围重置；权限撤销关闭相应内部页。好友和管理员操作直接展示，破坏性操作沿用确认，并拒绝切换对象前遗留的确认。

@@ -11,5 +11,6 @@ import type { ReadReceiptVisibility } from './readReceiptVisibility';
  * A user's global policy for publishing read receipts.
  */
 export interface ReadReceiptSettingsResponse {
+  exceptionCount: number;
   visibility: ReadReceiptVisibility;
 }

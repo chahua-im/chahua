@@ -11,5 +11,6 @@ import type { PresenceVisibility } from './presenceVisibility';
  * A user's global policy for publishing online and last-seen presence.
  */
 export interface PresenceSettingsResponse {
+  exceptionCount: number;
   visibility: PresenceVisibility;
 }

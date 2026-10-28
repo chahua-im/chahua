@@ -4,9 +4,6 @@
       <ion-button (click)="modals.dismiss()"><ion-icon slot="icon-only" [icon]="backIcon"></ion-icon></ion-button>
     </ion-buttons>
     <ion-title>{{ 'settings.menu.privacy' | transloco }}</ion-title>
-    <ion-buttons slot="end">
-      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
-    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">
@@ -78,6 +75,9 @@
                 {{ 'settings.presence.nobody' | transloco }}
               }
             }
+            @if (presence.value().exceptionCount) {
+              {{ 'settings.privacyExceptions.count' | transloco: { count: presence.value().exceptionCount } }}
+            }
           </ion-note>
         } @else if (presence.isLoading()) {
           <ion-spinner />
@@ -103,6 +103,9 @@
               @case (ReceiptVisibility.nobody) {
                 {{ 'common.disabled' | transloco }}
               }
+            }
+            @if (readReceipts.value().exceptionCount) {
+              {{ 'settings.privacyExceptions.count' | transloco: { count: readReceipts.value().exceptionCount } }}
             }
           </ion-note>
         } @else if (readReceipts.isLoading()) {

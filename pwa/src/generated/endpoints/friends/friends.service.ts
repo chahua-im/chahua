@@ -11,6 +11,7 @@ import type { HttpContext, HttpEvent, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import type { Observable } from 'rxjs';
 import type {
+  ClearPrivacyExceptionsParams,
   CreateFriendRequestBody,
   FriendAddInfoResponse,
   FriendPresenceSettingsResponse,
@@ -18,11 +19,13 @@ import type {
   FriendRelationshipResponse,
   FriendRequestResponse,
   FriendSettingsResponse,
+  GetPrivacyExceptionsParams,
   ListFriendRequestHistoryParams,
   ListFriendRequestHistoryResponse,
   ListFriendsResponse,
   PendingFriendRequestCountResponse,
   PresenceSettingsResponse,
+  PrivacyExceptionsResponse,
   ReadReceiptSettingsResponse,
   SnowflakeID,
   UpdateFriendPresenceSettingsBody,
@@ -444,30 +447,6 @@ export class FriendsService {
       observe: 'body',
     });
   }
-  deleteFriend<TData = void>(uid: number, options?: HttpClientBodyOptions): Observable<TData>;
-  deleteFriend<TData = void>(uid: number, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
-  deleteFriend<TData = void>(uid: number, options?: HttpClientResponseOptions): Observable<AngularHttpResponse<TData>>;
-  deleteFriend<TData = void>(
-    uid: number,
-    options?: HttpClientObserveOptions,
-  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
-    if (options?.observe === 'events') {
-      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'events',
-      });
-    }
-    if (options?.observe === 'response') {
-      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
-        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-        observe: 'response',
-      });
-    }
-    return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
-      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
-      observe: 'body',
-    });
-  }
   /**
    * @summary GET /friends/:uid — The current user's relationship with one profile user.
    */
@@ -500,6 +479,30 @@ export class FriendsService {
       });
     }
     return this.http.get<TData>(`${this.baseUrl}/friends/${uid}`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+    });
+  }
+  deleteFriend<TData = void>(uid: number, options?: HttpClientBodyOptions): Observable<TData>;
+  deleteFriend<TData = void>(uid: number, options?: HttpClientEventOptions): Observable<HttpEvent<TData>>;
+  deleteFriend<TData = void>(uid: number, options?: HttpClientResponseOptions): Observable<AngularHttpResponse<TData>>;
+  deleteFriend<TData = void>(
+    uid: number,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/friends/${uid}`, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
     });
@@ -722,6 +725,80 @@ export class FriendsService {
     return this.http.put<TData>(`${this.baseUrl}/me/presence-settings`, updatePresenceSettingsBody, {
       ...(options as Omit<NonNullable<typeof options>, 'observe'>),
       observe: 'body',
+    });
+  }
+  getPrivacyExceptions<TData = PrivacyExceptionsResponse>(
+    params: GetPrivacyExceptionsParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  getPrivacyExceptions<TData = PrivacyExceptionsResponse>(
+    params: GetPrivacyExceptionsParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  getPrivacyExceptions<TData = PrivacyExceptionsResponse>(
+    params: GetPrivacyExceptionsParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  getPrivacyExceptions<TData = PrivacyExceptionsResponse>(
+    params: GetPrivacyExceptionsParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+    if (options?.observe === 'events') {
+      return this.http.get<TData>(`${this.baseUrl}/me/privacy-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.get<TData>(`${this.baseUrl}/me/privacy-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+    return this.http.get<TData>(`${this.baseUrl}/me/privacy-exceptions`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
+    });
+  }
+  clearPrivacyExceptions<TData = void>(
+    params: ClearPrivacyExceptionsParams,
+    options?: HttpClientBodyOptions,
+  ): Observable<TData>;
+  clearPrivacyExceptions<TData = void>(
+    params: ClearPrivacyExceptionsParams,
+    options?: HttpClientEventOptions,
+  ): Observable<HttpEvent<TData>>;
+  clearPrivacyExceptions<TData = void>(
+    params: ClearPrivacyExceptionsParams,
+    options?: HttpClientResponseOptions,
+  ): Observable<AngularHttpResponse<TData>>;
+  clearPrivacyExceptions<TData = void>(
+    params: ClearPrivacyExceptionsParams,
+    options?: HttpClientObserveOptions,
+  ): Observable<TData | HttpEvent<TData> | AngularHttpResponse<TData>> {
+    const filteredParams = filterParams({ ...params, ...options?.params }, new Set<string>([]));
+    if (options?.observe === 'events') {
+      return this.http.delete<TData>(`${this.baseUrl}/me/privacy-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'events',
+        params: filteredParams,
+      });
+    }
+    if (options?.observe === 'response') {
+      return this.http.delete<TData>(`${this.baseUrl}/me/privacy-exceptions`, {
+        ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+        observe: 'response',
+        params: filteredParams,
+      });
+    }
+    return this.http.delete<TData>(`${this.baseUrl}/me/privacy-exceptions`, {
+      ...(options as Omit<NonNullable<typeof options>, 'observe'>),
+      observe: 'body',
+      params: filteredParams,
     });
   }
   getMyReadReceiptSettings<TData = ReadReceiptSettingsResponse>(options?: HttpClientBodyOptions): Observable<TData>;

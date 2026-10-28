@@ -1,7 +1,7 @@
 import { HttpTestingController } from '@angular/common/http/testing';
 import { DestroyRef, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { firstValueFrom, takeUntil } from 'rxjs';
+import { EMPTY, firstValueFrom, takeUntil } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../generated/endpoints/chahua.base-url';
 import { FriendsService } from '../../generated/endpoints/friends/friends.service';
@@ -22,6 +22,8 @@ describe('Chat feature requests', () => {
   const lists = { refreshChats: vi.fn() };
   const relationships = new Map<number, ReturnType<typeof activeQuery<FriendRelationshipResponse | undefined>>>();
   const store = {
+    privacyOverrides$: EMPTY,
+    publishPrivacyOverride: vi.fn(),
     relationship: (uid: number) => {
       let query = relationships.get(uid);
       if (!query) {

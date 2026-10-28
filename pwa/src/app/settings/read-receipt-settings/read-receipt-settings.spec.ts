@@ -1,3 +1,4 @@
+import { EMPTY } from 'rxjs';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
@@ -18,7 +19,7 @@ describe('Read receipt toggle', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
-        { provide: ChatStore, useValue: { invalidateReadReceiptPrivacy: invalidate } },
+        { provide: ChatStore, useValue: { invalidateReadReceiptPrivacy: invalidate, privacyOverrides$: EMPTY } },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -45,6 +46,7 @@ describe('Read receipt toggle', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(invalidate).not.toHaveBeenCalled();
+    expect(toggle.checked).toBe(true);
     const retry = Array.from(page.querySelectorAll('ion-button')).find(
       (button) => button.textContent?.trim() === '重试',
     )!;

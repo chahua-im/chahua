@@ -46,7 +46,9 @@
         "title": "应用加载遇到问题",
         "description": ""
       }
-    }
+    },
+    "updatePendingMessages": "仍有未发送的消息，更新将丢失这些任务。",
+    "updateAnyway": "仍然更新"
   },
   "common": {
     "done": "完成",
@@ -151,7 +153,9 @@
       "questionPlaceholder": "填写申请者需要回答的问题",
       "questionInvalid": "请填写 1–100 字的问题。",
       "saveFailed": "保存失败，请重试。",
-      "apply": "应用"
+      "apply": "应用",
+      "discardTitle": "放弃未保存的修改？",
+      "discard": "放弃修改"
     },
     "presence": {
       "title": "谁能查看我的活动状态",
@@ -213,6 +217,19 @@
       "presence": "谁能查看我的活动状态",
       "loadFailed": "加载失败，点击重试",
       "blocksLoadFailed": "拉黑用户列表加载失败。"
+    },
+    "privacyExceptions": {
+      "title": "例外",
+      "count": "（{{ count }} 个例外）",
+      "add": "添加例外",
+      "share": "始终分享",
+      "hide": "始终隐藏",
+      "clear": "删除所有例外",
+      "empty": "暂无例外",
+      "search": "搜索好友",
+      "added": "已添加",
+      "noFriends": "没有匹配的好友",
+      "clearTitle": "删除所有例外？"
     }
   },
   "chats": {
@@ -316,7 +333,11 @@
       "failed": "操作失败，请重试。",
       "refresh": "刷新",
       "revokeTitle": "撤销邀请",
-      "groupFallback": "群聊"
+      "groupFallback": "群聊",
+      "invalidExpiry": "请选择未来的有效时间。",
+      "groupsFailed": "群组加载失败",
+      "shared": "邀请已发送",
+      "listTitle": "邀请码"
     },
     "details": {
       "topic": "话题",
@@ -356,7 +377,9 @@
       "membershipMembers": "全体成员可见",
       "membershipAdmins": "仅管理员可见",
       "membershipNobody": "所有人不可见",
-      "membershipNote": "适用于历史和新的进退群消息。有查看权限时，仍遵循个人的显示偏好。"
+      "membershipNote": "适用于历史和新的进退群消息。有查看权限时，仍遵循个人的显示偏好。",
+      "privacySettings": "隐私设置",
+      "manageGroup": "群管理"
     },
     "directory": {
       "groups": "群聊",
@@ -635,7 +658,8 @@
     "addPack": "添加贴纸包",
     "emojiLoadFailed": "表情加载失败，请关闭后重试。",
     "createPack": "创建贴纸包",
-    "createFailed": "创建贴纸包失败"
+    "createFailed": "创建贴纸包失败",
+    "emojiLabel": "对应表情"
   },
   "emojiPicker": {
     "loadFailed": "表情加载失败，请关闭后重试。"

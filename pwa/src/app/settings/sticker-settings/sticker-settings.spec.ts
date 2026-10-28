@@ -93,7 +93,7 @@ describe('StickerSettings', () => {
 
   it('creates a pack from the alert name, records its order and opens the detail page', async () => {
     const component = await loaded();
-    await component['createPack']();
+    await component['savePack']({ name: ' 新包 ', emoji: '' });
     expect(api.postPack).toHaveBeenCalledWith({ name: '新包' });
     expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith({
       stickerPackId: encodeId('301'),
@@ -109,11 +109,11 @@ describe('StickerSettings', () => {
     >();
     api.postPack.mockReturnValueOnce(response);
     const component = await loaded();
-    const pending = component['createPack']();
+    const pending = component['savePack']({ name: ' 新包 ', emoji: '' });
     await vi.waitFor(() => expect(api.postPack).toHaveBeenCalledOnce());
     expect(component['creating']()).toBe(true);
-    await component['createPack']();
-    expect(alerts.create).toHaveBeenCalledOnce();
+    await component['savePack']({ name: ' 新包 ', emoji: '' });
+    expect(api.postPack).toHaveBeenCalledOnce();
     response.next({ ...ownedPack, id: encodeId('301'), name: '新包', stickers: [] });
     response.complete();
     await pending;
@@ -134,12 +134,12 @@ describe('StickerSettings', () => {
     expect(component['savingOrder']()).toBe(false);
   });
 
-  it('shows a failure alert when creating a pack fails', async () => {
+  it('keeps the creation form open when saving fails', async () => {
     api.postPack.mockReturnValueOnce(throwError(() => new Error('offline')));
     const component = await loaded();
-    await component['createPack']();
+    await component['savePack']({ name: ' 新包 ', emoji: '' });
     expect(navigate).not.toHaveBeenCalled();
-    expect(alerts.create).toHaveBeenLastCalledWith({ header: '创建贴纸包失败', buttons: ['知道了'] });
+    expect(component['createError']()).toBe('创建贴纸包失败');
   });
 
   it('computes midpoint order values when packs are reordered', async () => {
@@ -184,13 +184,14 @@ describe('StickerSettings', () => {
     }
   });
 
-  it('keeps only emoji sequences from the pinned input and appends picked emoji', () => {
+  it('removes individual pinned emoji and caps unique additions at five', () => {
     const component = page();
-    component['editPinned']({ target: { value: '👍abc❤️👍' } } as unknown as Event);
-    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '❤️']);
+    component['reactions'].setPinnedReactions(['👍', '❤️']);
     component['addPinned']('👍');
     expect(component['reactions'].pinnedReactions()).toEqual(['👍', '❤️']);
-    component['addPinned']('😂');
-    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '❤️', '😂']);
+    for (const emoji of ['😂', '🍵', '🎉', '😮']) component['addPinned'](emoji);
+    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '❤️', '😂', '🍵', '🎉']);
+    component['removePinned']('❤️');
+    expect(component['reactions'].pinnedReactions()).toEqual(['👍', '😂', '🍵', '🎉']);
   });
 });

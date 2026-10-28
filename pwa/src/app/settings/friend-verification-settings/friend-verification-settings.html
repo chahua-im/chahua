@@ -6,9 +6,15 @@
       </ion-button>
     </ion-buttons>
     <ion-title>{{ 'settings.friendVerification.title' | transloco }}</ion-title>
-    <ion-buttons slot="end">
-      <ion-button (click)="modals.dismiss()">{{ 'common.done' | transloco }}</ion-button>
-    </ion-buttons>
+    @if (!loading() && !loadError() && verification().mode === Mode.question) {
+      <ion-buttons slot="end">
+        <ion-button
+          [disabled]="!dirty() || verificationForm().disabled() || verificationForm().invalid()"
+          (click)="saveVerification()">
+          {{ 'common.save' | transloco }}
+        </ion-button>
+      </ion-buttons>
+    }
   </ion-toolbar>
 </ion-header>
 <ion-content appScrollbars color="light">
@@ -82,15 +88,6 @@
           }
         } @else if (saved()) {
           <ion-label class="saved-feedback" color="medium">{{ 'common.saved' | transloco }}</ion-label>
-        }
-        @if (verification().mode === Mode.question) {
-          <ion-button
-            slot="end"
-            fill="clear"
-            [disabled]="verificationForm().disabled() || verificationForm().invalid()"
-            (click)="saveVerification()">
-            {{ 'settings.friendVerification.apply' | transloco }}
-          </ion-button>
         }
       </ion-item>
     }

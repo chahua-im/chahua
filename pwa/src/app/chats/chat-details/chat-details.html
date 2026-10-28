@@ -1,136 +1,78 @@
-<ion-content appScrollbars color="light">
-  @let chatId = id()!;
+@let chatId = id()!;
+@if (page() !== View.Info) {
+  <ion-header>
+    <ion-toolbar>
+      <ion-buttons slot="start">
+        <ion-button [disabled]="busy()" (click)="back()">
+          <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
+        </ion-button>
+      </ion-buttons>
+      <ion-title>
+        @switch (page()) {
+          @case (AttachmentKind.image) {
+            {{ 'chats.details.tabs.images' | transloco }}
+          }
+          @case (AttachmentKind.video) {
+            {{ 'chats.details.tabs.videos' | transloco }}
+          }
+          @case (AttachmentKind.other) {
+            {{ 'chats.details.tabs.files' | transloco }}
+          }
+          @case (View.Privacy) {
+            {{ 'chats.details.privacySettings' | transloco }}
+          }
+          @case (View.Management) {
+            {{ 'chats.details.manageGroup' | transloco }}
+          }
+          @case (View.Invites) {
+            {{ 'chats.details.invite' | transloco }}
+          }
+        }
+      </ion-title>
+      <ion-buttons slot="end">
+        <ion-button (click)="close()"><ion-icon slot="icon-only" [icon]="icons.closeOutline" /></ion-button>
+      </ion-buttons>
+    </ion-toolbar>
+  </ion-header>
+}
+<ion-content #overview appScrollbars color="light" [hidden]="page() !== View.Info">
   <ion-button class="close-button" slot="fixed" fill="clear" (click)="close()">
     <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
   </ion-button>
-  @if (view() !== View.Info) {
-    <ion-button fill="clear" (click)="modals.dismiss()">
-      <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
-    </ion-button>
-  }
-  @switch (view()) {
-    @case (View.Invites) {
-      <app-chat-invites [chatId]="chatId" />
-    }
-    @default {
-      @if (chat() || person()) {
-        <div class="profile ion-text-center ion-padding">
-          <div class="profile-avatar">
-            <app-chat-avatar [entry]="avatarEntry()" [size]="88" />
-            @if (canManage()) {
-              <input #avatarInput type="file" accept="image/*" hidden (change)="avatar($event)" />
-              <button type="button" class="avatar-edit" [disabled]="busy()" (click)="avatarInput.click()">
-                @if (pending() === Action.Avatar) {
-                  <span class="avatar-upload"><app-upload-progress [value]="avatarProgress()" /></span>
-                } @else {
-                  <ion-icon [icon]="icons.cameraOutline" />
-                }
-              </button>
-            }
-          </div>
-          <h2 [class.editable]="canManage()">
-            <span class="profile-name">
-              <span class="profile-title" [class.editing]="canManage() && edits().name != null">
-                @if (threadId()) {
-                  @if (threadRoot(); as root) {
-                    <app-message-preview [message]="root" />
-                  } @else {
-                    {{ 'chats.details.topic' | transloco }}
-                  }
-                } @else {
-                  {{ person()?.username ?? chat()?.name ?? ('common.user' | transloco) }}
-                }
-              </span>
-              @if (canManage() && edits().name != null) {
-                <input
-                  class="profile-input"
-                  [formField]="fields.name!.value"
-                  [readOnly]="pending() === Action.Name"
-                  (keydown)="editKeydown($event, Field.Name)" />
-              }
-            </span>
-            @if (canManage()) {
-              <button
-                type="button"
-                class="field-edit"
-                [disabled]="busy() || (edits().name != null && !edits().name?.value?.trim())"
-                (click)="edits().name == null ? edit(Field.Name) : save(Field.Name)">
-                @if (pending() === Action.Name) {
-                  <ion-spinner />
-                } @else {
-                  <ion-icon [icon]="edits().name == null ? icons.createOutline : icons.checkmarkOutline" />
-                }
-              </button>
-            }
-          </h2>
-          @if (threadId()) {
-            <p>{{ 'chats.details.topicIn' | transloco: { name: chat()?.peer?.username ?? chat()?.name } }}</p>
-          } @else if (person(); as user) {
-            @if (user.userGroup; as group) {
-              <p>{{ group.name }}</p>
-            }
-          } @else if (chat()?.description || canManage()) {
-            <p [class.editable]="canManage()">
-              @if (canManage() && edits().description != null) {
-                <textarea
-                  class="profile-input"
-                  rows="3"
-                  [formField]="fields.description!.value"
-                  [readOnly]="pending() === Action.Description"
-                  (keydown)="editKeydown($event, Field.Description)"></textarea>
+  @if (view() === View.Info || page() === View.Info) {
+    @if (chat() || person()) {
+      <div class="profile ion-text-center ion-padding">
+        <div class="profile-avatar"><app-chat-avatar [entry]="avatarEntry()" [size]="88" /></div>
+        <h2>
+          <span class="profile-title">
+            @if (threadId()) {
+              @if (threadRoot(); as root) {
+                <app-message-preview [message]="root" />
               } @else {
-                <span>{{ chat()?.description || ('chats.details.addDescription' | transloco) }}</span>
+                {{ 'chats.details.topic' | transloco }}
               }
-              @if (canManage()) {
-                <button
-                  type="button"
-                  class="field-edit"
-                  [disabled]="busy()"
-                  (click)="edits().description == null ? edit(Field.Description) : save(Field.Description)">
-                  @if (pending() === Action.Description) {
-                    <ion-spinner />
-                  } @else {
-                    <ion-icon [icon]="edits().description == null ? icons.createOutline : icons.checkmarkOutline" />
-                  }
-                </button>
-              }
-            </p>
-          }
-          @if (!threadId()) {
-            @if (person(); as user) {
-              <app-user-presence [uid]="user.uid" />
-            } @else if (chat()?.kind === Kind.group) {
-              <app-group-presence [chatId]="id()" />
+            } @else {
+              {{ person()?.username ?? chat()?.name ?? ('common.user' | transloco) }}
             }
+          </span>
+        </h2>
+        @if (threadId()) {
+          <p>{{ 'chats.details.topicIn' | transloco: { name: chat()?.peer?.username ?? chat()?.name } }}</p>
+        } @else if (person(); as user) {
+          @if (user.userGroup; as group) {
+            <p>{{ group.name }}</p>
           }
-        </div>
-        @if (!threadId() && chat()?.kind === Kind.group) {
-          <ion-item>
-            <ion-select
-              [label]="'chats.details.membershipMessages' | transloco"
-              labelPlacement="stacked"
-              interface="popover"
-              [value]="membershipVisibility()"
-              [disabled]="!canManage() || busy() || !membershipVisibility()"
-              (ionChange)="saveMembershipVisibility($event.detail.value)">
-              <ion-select-option [value]="MembershipVisibility.members">
-                {{ 'chats.details.membershipMembers' | transloco }}
-              </ion-select-option>
-              <ion-select-option [value]="MembershipVisibility.admins">
-                {{ 'chats.details.membershipAdmins' | transloco }}
-              </ion-select-option>
-              <ion-select-option [value]="MembershipVisibility.nobody">
-                {{ 'chats.details.membershipNobody' | transloco }}
-              </ion-select-option>
-            </ion-select>
-            @if (pending() === Action.MembershipVisibility) {
-              <ion-spinner slot="end" />
-            }
-          </ion-item>
-          <ion-item lines="none">
-            <ion-note class="ion-text-wrap">{{ 'chats.details.membershipNote' | transloco }}</ion-note>
-          </ion-item>
+          <app-user-presence [uid]="user.uid" />
+        } @else {
+          @if (chat()?.description) {
+            <p>{{ chat()?.description }}</p>
+          }
+          @if (chat()?.kind === Kind.group) {
+            <app-group-presence [chatId]="id()" />
+          }
         }
+      </div>
+      @if (person() || threadId() || canManage()) {
         <div class="quick-actions ion-padding-horizontal">
           @if (person(); as user) {
             <ion-button
@@ -166,6 +108,44 @@
               }
             }
           }
+          @if (canManage()) {
+            <ion-button fill="clear" [disabled]="busy()" (click)="openPage(View.Management)">
+              <span>
+                <ion-icon [icon]="icons.settingsOutline" />
+                {{ 'chats.details.manageGroup' | transloco }}
+              </span>
+            </ion-button>
+            <ion-button fill="clear" [disabled]="busy()" (click)="openPage(View.Invites)">
+              <span>
+                <ion-icon [icon]="icons.linkOutline" />
+                {{ 'chats.details.invite' | transloco }}
+              </span>
+            </ion-button>
+          }
+          @if (canManage() || (otherUser() && relationship()?.isFriend)) {
+            <ion-button fill="clear" class="destructive" [disabled]="busy()" (click)="leave()">
+              <span>
+                @if (pending() === Action.Leave) {
+                  <ion-spinner />
+                } @else {
+                  <ion-icon [icon]="person() ? icons.personRemoveOutline : icons.exitOutline" />
+                }
+                {{ (person() ? 'chats.details.unfriend' : 'chats.details.leaveGroup') | transloco }}
+              </span>
+            </ion-button>
+          }
+          @if (otherUser()) {
+            <ion-button fill="clear" class="destructive" [disabled]="busy() || !relationship()" (click)="blockUser()">
+              <span>
+                @if (pending() === Action.Block) {
+                  <ion-spinner />
+                } @else {
+                  <ion-icon [icon]="icons.banOutline" />
+                }
+                {{ (relationship()?.blocking ? 'chats.details.unblock' : 'chats.details.block') | transloco }}
+              </span>
+            </ion-button>
+          }
           @if (!person() || otherUser()) {
             @if (threadId()) {
               @let status = cachedSubscription();
@@ -191,159 +171,98 @@
               </ion-button>
             }
           }
-          @if (canManage()) {
-            <ion-button fill="clear" (click)="invites()">
-              <span>
-                <ion-icon [icon]="icons.linkOutline" />
-                {{ 'chats.details.invite' | transloco }}
-              </span>
-            </ion-button>
-          }
-          @if (!threadId() && (chat()?.kind === Kind.group || (otherUser() && relationship()?.isFriend))) {
-            <ion-button fill="clear" class="destructive" [disabled]="busy()" (click)="leave()">
-              <span>
-                @if (pending() === Action.Leave) {
-                  <ion-spinner />
-                } @else {
-                  <ion-icon [icon]="person() ? icons.personRemoveOutline : icons.exitOutline" />
-                }
-                {{ (person() ? 'chats.details.unfriend' : 'chats.details.leaveGroup') | transloco }}
-              </span>
-            </ion-button>
-          }
-          @if (otherUser()) {
-            <ion-button fill="clear" class="destructive" [disabled]="busy() || !relationship()" (click)="blockUser()">
-              <span>
-                @if (pending() === Action.Block) {
-                  <ion-spinner />
-                } @else {
-                  <ion-icon [icon]="icons.banOutline" />
-                }
-                {{ (relationship()?.blocking ? 'chats.details.unblock' : 'chats.details.block') | transloco }}
-              </span>
-            </ion-button>
-          }
         </div>
-        @if (!threadId() && chat()?.kind === Kind.group && chat()?.speakingMode; as mode) {
-          <ion-item>
-            @if (canManage()) {
-              <app-speaking-mode-select
-                [label]="'speaking.groupTitle' | transloco"
-                [value]="speakingMode()"
-                [disabled]="busy()"
-                (valueChange)="saveSpeakingMode($event)" />
-              @if (pending() === Action.Speaking) {
-                <ion-spinner slot="end" />
-              }
-            } @else {
-              <ion-label>{{ 'speaking.groupTitle' | transloco }}</ion-label>
-              <ion-note slot="end">{{ 'speaking.modes.' + mode | transloco }}</ion-note>
-            }
-          </ion-item>
-          @if (canManage()) {
-            <ion-item lines="none">
-              <ion-note class="ion-text-wrap">{{ 'speaking.adminNote' | transloco }}</ion-note>
+      }
+      @if (otherUser() && relationship()?.isFriend) {
+        <ion-list [inset]="true">
+          @if (otherUser() && relationship()?.isFriend) {
+            <ion-item [button]="true" [detail]="true" lines="none" (click)="openPage(View.Privacy)">
+              <ion-icon slot="start" [icon]="icons.shieldCheckmarkOutline" color="primary" />
+              <ion-label>{{ 'chats.details.privacySettings' | transloco }}</ion-label>
             </ion-item>
           }
-        }
-        @if (otherUser() && relationship()?.isFriend) {
-          <ion-item class="presence-settings">
-            <ion-select
-              [label]="'settings.presence.friendTitle' | transloco"
-              labelPlacement="stacked"
-              interface="popover"
-              [value]="presenceOverride()"
-              [disabled]="busy() || presenceOverrideLoading() || presenceOverrideError()"
-              (ionChange)="saveFriendPresenceOverride($event.detail.value)">
-              <ion-select-option [value]="PresenceOverride.inherit">
-                {{ 'settings.presence.friendInherit' | transloco }}
-              </ion-select-option>
-              <ion-select-option [value]="PresenceOverride.share">
-                {{ 'settings.presence.friendShare' | transloco }}
-              </ion-select-option>
-              <ion-select-option [value]="PresenceOverride.hide">
-                {{ 'settings.presence.friendHide' | transloco }}
-              </ion-select-option>
-            </ion-select>
-            @if (pending() === Action.Presence || presenceOverrideLoading()) {
-              <ion-spinner slot="end"></ion-spinner>
+        </ion-list>
+      }
+      @if (!threadId() && chat()?.kind === Kind.group && !canManage()) {
+        <ion-list [inset]="true">
+          @if (chat()?.speakingMode; as mode) {
+            <ion-item>
+              <ion-label>{{ 'speaking.groupTitle' | transloco }}</ion-label>
+              <ion-note slot="end">{{ 'speaking.modes.' + mode | transloco }}</ion-note>
+            </ion-item>
+          }
+          <ion-item lines="none">
+            <ion-label>{{ 'chats.details.membershipMessages' | transloco }}</ion-label>
+            <ion-note slot="end">
+              @switch (membershipVisibility()) {
+                @case (MembershipVisibility.members) {
+                  {{ 'chats.details.membershipMembers' | transloco }}
+                }
+                @case (MembershipVisibility.admins) {
+                  {{ 'chats.details.membershipAdmins' | transloco }}
+                }
+                @case (MembershipVisibility.nobody) {
+                  {{ 'chats.details.membershipNobody' | transloco }}
+                }
+              }
+            </ion-note>
+          </ion-item>
+        </ion-list>
+      }
+      @if (!threadId() && chat()?.kind === Kind.group && !canManage()) {
+        <ion-list [inset]="true">
+          <ion-item [button]="true" [detail]="false" lines="none" [disabled]="busy()" (click)="leave()">
+            <ion-icon slot="start" color="danger" [icon]="icons.exitOutline" />
+            <ion-label color="danger">{{ 'chats.details.leaveGroup' | transloco }}</ion-label>
+            @if (pending() === Action.Leave) {
+              <ion-spinner slot="end" />
             }
           </ion-item>
-          <ion-item lines="none">
-            <ion-note class="ion-text-wrap">{{ 'settings.presence.reciprocalNote' | transloco }}</ion-note>
-          </ion-item>
-          @if (presenceOverrideError()) {
-            <app-load-error
-              compact
-              [message]="'settings.presence.friendLoadFailed' | transloco"
-              (retry)="loadFriendPresenceSettings()" />
-          }
-          <ion-item class="presence-settings">
-            <ion-select
-              [label]="'settings.readReceipt.friendTitle' | transloco"
-              labelPlacement="stacked"
-              interface="popover"
-              [value]="receiptOverride()"
-              [disabled]="busy() || receiptOverrideLoading() || receiptOverrideError()"
-              (ionChange)="saveFriendReadReceiptOverride($event.detail.value)">
-              <ion-select-option [value]="ReceiptOverride.inherit">
-                {{ 'settings.readReceipt.friendInherit' | transloco }}
-              </ion-select-option>
-              <ion-select-option [value]="ReceiptOverride.share">
-                {{ 'settings.readReceipt.friendShare' | transloco }}
-              </ion-select-option>
-              <ion-select-option [value]="ReceiptOverride.hide">
-                {{ 'settings.readReceipt.friendHide' | transloco }}
-              </ion-select-option>
-            </ion-select>
-            @if (pending() === Action.ReadReceipt || receiptOverrideLoading()) {
-              <ion-spinner slot="end"></ion-spinner>
-            }
-          </ion-item>
-          <ion-item lines="none">
-            <ion-note class="ion-text-wrap">{{ 'settings.readReceipt.reciprocalNote' | transloco }}</ion-note>
-          </ion-item>
-          @if (receiptOverrideError()) {
-            <app-load-error
-              compact
-              [message]="'settings.readReceipt.friendLoadFailed' | transloco"
-              (retry)="loadFriendReadReceiptSettings()" />
-          }
-        }
-      } @else if (loading()) {
-        <div class="page-loading"><ion-spinner /></div>
+        </ion-list>
       }
-      @if (error() || relationshipQuery()?.error()) {
-        <app-load-error
-          compact
-          [message]="'chats.details.loadFailed' | transloco"
-          (retry)="load(); relationshipQuery()?.refresh()" />
-      }
-      @if (id()) {
-        <div class="attachments" [class.pending]="loading() && !chat() && !person()">
-          <ion-segment [value]="tab()" (ionChange)="changeTab($event.detail.value)">
-            @if (!threadId()) {
+    } @else if (loading()) {
+      <div class="page-loading"><ion-spinner /></div>
+    }
+    @if (error() || relationshipQuery()?.error()) {
+      <app-load-error
+        compact
+        [message]="'chats.details.loadFailed' | transloco"
+        (retry)="load(); relationshipQuery()?.refresh()" />
+    }
+    @if (id()) {
+      <div class="details-content" [class.pending]="loading() && !chat() && !person()">
+        <ion-list class="media-links" [inset]="true">
+          <ion-item [button]="true" [detail]="true" (click)="openPage(AttachmentKind.image)">
+            <ion-icon slot="start" color="primary" [icon]="icons.imageOutline" />
+            <ion-label>{{ 'chats.details.tabs.images' | transloco }}</ion-label>
+          </ion-item>
+          <ion-item [button]="true" [detail]="true" (click)="openPage(AttachmentKind.video)">
+            <ion-icon slot="start" color="primary" [icon]="icons.videocamOutline" />
+            <ion-label>{{ 'chats.details.tabs.videos' | transloco }}</ion-label>
+          </ion-item>
+          <ion-item [button]="true" [detail]="true" lines="none" (click)="openPage(AttachmentKind.other)">
+            <ion-icon slot="start" color="primary" [icon]="icons.documentTextOutline" />
+            <ion-label>{{ 'chats.details.tabs.files' | transloco }}</ion-label>
+          </ion-item>
+        </ion-list>
+        <div class="attachments">
+          @if (!threadId() && chat()?.kind === Kind.group) {
+            <ion-segment [value]="tab()" (ionChange)="changeTab($event.detail.value)">
               <ion-segment-button [value]="InfoTab.Threads">
                 <ion-label>{{ 'chats.details.tabs.threads' | transloco }}</ion-label>
               </ion-segment-button>
-            }
-            @if (threadId() || chat()?.kind === Kind.group) {
               <ion-segment-button [value]="InfoTab.Members">
                 <ion-label>{{ 'chats.details.tabs.members' | transloco }}</ion-label>
               </ion-segment-button>
-            }
-            <ion-segment-button [value]="AttachmentKind.image">
-              <ion-label>{{ 'chats.details.tabs.images' | transloco }}</ion-label>
-            </ion-segment-button>
-            <ion-segment-button [value]="AttachmentKind.video">
-              <ion-label>{{ 'chats.details.tabs.videos' | transloco }}</ion-label>
-            </ion-segment-button>
-            <ion-segment-button [value]="AttachmentKind.other">
-              <ion-label>{{ 'chats.details.tabs.files' | transloco }}</ion-label>
-            </ion-segment-button>
-          </ion-segment>
-          @let selected = tab();
-          @switch (selected) {
+            </ion-segment>
+          } @else {
+            <ion-list-header>
+              <ion-label>
+                {{ (threadId() ? 'chats.details.tabs.members' : 'chats.details.tabs.threads') | transloco }}
+              </ion-label>
+            </ion-list-header>
+          }
+          @switch (tab()) {
             @case (InfoTab.Threads) {
               <app-chat-threads [chatId]="chatId" />
             }
@@ -354,15 +273,239 @@
                 <app-chat-members [chatId]="chatId" [canManage]="canManage()" />
               }
             }
-            @default {
-              @for (kind of [selected]; track kind) {
-                <app-chat-attachments [chatId]="chatId" [kind]="kind" />
-              }
-            }
           }
         </div>
-      }
+      </div>
     }
   }
 </ion-content>
+@for (section of [page()]; track section) {
+  @if (page() !== View.Info) {
+    <ion-content appScrollbars color="light">
+      @switch (page()) {
+        @case (AttachmentKind.image) {
+          <app-chat-attachments [chatId]="chatId" [kind]="AttachmentKind.image" />
+        }
+        @case (AttachmentKind.video) {
+          <app-chat-attachments [chatId]="chatId" [kind]="AttachmentKind.video" />
+        }
+        @case (AttachmentKind.other) {
+          <app-chat-attachments [chatId]="chatId" [kind]="AttachmentKind.other" />
+        }
+        @case (View.Privacy) {
+          <ion-list [inset]="true">
+            @if (otherUser() && relationship()?.isFriend) {
+              <ion-item class="presence-settings">
+                <ion-select
+                  [label]="'settings.presence.friendTitle' | transloco"
+                  labelPlacement="stacked"
+                  interface="popover"
+                  [value]="presenceOverride()"
+                  [disabled]="busy() || presenceOverrideLoading() || presenceOverrideError()"
+                  (ionChange)="saveFriendPresenceOverride($event.detail.value)">
+                  <ion-select-option [value]="PresenceOverride.inherit">
+                    {{ 'settings.presence.friendInherit' | transloco }}
+                  </ion-select-option>
+                  <ion-select-option [value]="PresenceOverride.share">
+                    {{ 'settings.presence.friendShare' | transloco }}
+                  </ion-select-option>
+                  <ion-select-option [value]="PresenceOverride.hide">
+                    {{ 'settings.presence.friendHide' | transloco }}
+                  </ion-select-option>
+                </ion-select>
+                @if (pending() === Action.Presence || presenceOverrideLoading()) {
+                  <ion-spinner slot="end"></ion-spinner>
+                }
+              </ion-item>
+              <ion-item lines="none">
+                <ion-note class="ion-text-wrap">{{ 'settings.presence.reciprocalNote' | transloco }}</ion-note>
+              </ion-item>
+              @if (presenceOverrideError()) {
+                <app-load-error
+                  compact
+                  [message]="'settings.presence.friendLoadFailed' | transloco"
+                  (retry)="loadFriendPresenceSettings()" />
+              }
+              <ion-item class="presence-settings">
+                <ion-select
+                  [label]="'settings.readReceipt.friendTitle' | transloco"
+                  labelPlacement="stacked"
+                  interface="popover"
+                  [value]="receiptOverride()"
+                  [disabled]="busy() || receiptOverrideLoading() || receiptOverrideError()"
+                  (ionChange)="saveFriendReadReceiptOverride($event.detail.value)">
+                  <ion-select-option [value]="ReceiptOverride.inherit">
+                    {{ 'settings.readReceipt.friendInherit' | transloco }}
+                  </ion-select-option>
+                  <ion-select-option [value]="ReceiptOverride.share">
+                    {{ 'settings.readReceipt.friendShare' | transloco }}
+                  </ion-select-option>
+                  <ion-select-option [value]="ReceiptOverride.hide">
+                    {{ 'settings.readReceipt.friendHide' | transloco }}
+                  </ion-select-option>
+                </ion-select>
+                @if (pending() === Action.ReadReceipt || receiptOverrideLoading()) {
+                  <ion-spinner slot="end"></ion-spinner>
+                }
+              </ion-item>
+              <ion-item lines="none">
+                <ion-note class="ion-text-wrap">{{ 'settings.readReceipt.reciprocalNote' | transloco }}</ion-note>
+              </ion-item>
+              @if (receiptOverrideError()) {
+                <app-load-error
+                  compact
+                  [message]="'settings.readReceipt.friendLoadFailed' | transloco"
+                  (retry)="loadFriendReadReceiptSettings()" />
+              }
+            }
+          </ion-list>
+        }
+        @case (View.Management) {
+          @if (canManage()) {
+            <div class="profile group-editor ion-text-center ion-padding">
+              <div class="profile-avatar">
+                <app-chat-avatar [entry]="avatarEntry()" [size]="88" />
+                @if (canManage()) {
+                  <input #avatarInput type="file" accept="image/*" hidden (change)="avatar($event)" />
+                  <button type="button" class="avatar-edit" [disabled]="busy()" (click)="avatarInput.click()">
+                    @if (pending() === Action.Avatar) {
+                      <span class="avatar-upload"><app-upload-progress [value]="avatarProgress()" /></span>
+                    } @else {
+                      <ion-icon [icon]="icons.cameraOutline" />
+                    }
+                  </button>
+                }
+              </div>
+              <h2 [class.editable]="canManage()">
+                <span class="profile-name">
+                  <span class="profile-title" [class.editing]="canManage() && edits().name != null">
+                    {{ chat()?.name }}
+                  </span>
+                  @if (canManage() && edits().name != null) {
+                    <input
+                      class="profile-input"
+                      [formField]="fields.name!.value"
+                      [readOnly]="pending() === Action.Name"
+                      (keydown)="editKeydown($event, Field.Name)" />
+                  }
+                </span>
+                @if (canManage()) {
+                  <button
+                    type="button"
+                    class="field-edit"
+                    [disabled]="busy() || (edits().name != null && !edits().name?.value?.trim())"
+                    (click)="edits().name == null ? edit(Field.Name) : save(Field.Name)">
+                    @if (pending() === Action.Name) {
+                      <ion-spinner />
+                    } @else {
+                      <ion-icon [icon]="edits().name == null ? icons.createOutline : icons.checkmarkOutline" />
+                    }
+                  </button>
+                  @if (edits().name != null) {
+                    <button type="button" class="field-edit" [disabled]="busy()" (click)="cancelEdit(Field.Name)">
+                      <ion-icon [icon]="icons.closeOutline" />
+                    </button>
+                  }
+                }
+              </h2>
+              <p [class.editable]="canManage()">
+                @if (canManage() && edits().description != null) {
+                  <textarea
+                    class="profile-input"
+                    rows="3"
+                    [formField]="fields.description!.value"
+                    [readOnly]="pending() === Action.Description"
+                    (keydown)="editKeydown($event, Field.Description)"></textarea>
+                } @else {
+                  <span>{{ chat()?.description || ('chats.details.addDescription' | transloco) }}</span>
+                }
+                @if (canManage()) {
+                  <button
+                    type="button"
+                    class="field-edit"
+                    [disabled]="busy()"
+                    (click)="edits().description == null ? edit(Field.Description) : save(Field.Description)">
+                    @if (pending() === Action.Description) {
+                      <ion-spinner />
+                    } @else {
+                      <ion-icon [icon]="edits().description == null ? icons.createOutline : icons.checkmarkOutline" />
+                    }
+                  </button>
+                  @if (edits().description != null) {
+                    <button
+                      type="button"
+                      class="field-edit"
+                      [disabled]="busy()"
+                      (click)="cancelEdit(Field.Description)">
+                      <ion-icon [icon]="icons.closeOutline" />
+                    </button>
+                  }
+                }
+              </p>
+            </div>
+            <ion-list [inset]="true">
+              @if (!threadId() && chat()?.kind === Kind.group) {
+                <ion-item>
+                  <ion-select
+                    [label]="'chats.details.membershipMessages' | transloco"
+                    labelPlacement="stacked"
+                    interface="popover"
+                    [value]="membershipVisibility()"
+                    [disabled]="!canManage() || busy() || !membershipVisibility()"
+                    (ionChange)="saveMembershipVisibility($event.detail.value)">
+                    <ion-select-option [value]="MembershipVisibility.members">
+                      {{ 'chats.details.membershipMembers' | transloco }}
+                    </ion-select-option>
+                    <ion-select-option [value]="MembershipVisibility.admins">
+                      {{ 'chats.details.membershipAdmins' | transloco }}
+                    </ion-select-option>
+                    <ion-select-option [value]="MembershipVisibility.nobody">
+                      {{ 'chats.details.membershipNobody' | transloco }}
+                    </ion-select-option>
+                  </ion-select>
+                  @if (pending() === Action.MembershipVisibility) {
+                    <ion-spinner slot="end" />
+                  }
+                </ion-item>
+                <ion-item lines="none">
+                  <ion-note class="ion-text-wrap">{{ 'chats.details.membershipNote' | transloco }}</ion-note>
+                </ion-item>
+              }
+              @if (!threadId() && chat()?.kind === Kind.group && chat()?.speakingMode; as mode) {
+                <ion-item>
+                  @if (canManage()) {
+                    <app-speaking-mode-select
+                      [label]="'speaking.groupTitle' | transloco"
+                      [value]="speakingMode()"
+                      [disabled]="busy()"
+                      (valueChange)="saveSpeakingMode($event)" />
+                    @if (pending() === Action.Speaking) {
+                      <ion-spinner slot="end" />
+                    }
+                  } @else {
+                    <ion-label>{{ 'speaking.groupTitle' | transloco }}</ion-label>
+                    <ion-note slot="end">{{ 'speaking.modes.' + mode | transloco }}</ion-note>
+                  }
+                </ion-item>
+                @if (canManage()) {
+                  <ion-item lines="none">
+                    <ion-note class="ion-text-wrap">{{ 'speaking.adminNote' | transloco }}</ion-note>
+                  </ion-item>
+                }
+              }
+            </ion-list>
+          }
+        }
+        @case (View.Invites) {
+          @if (canManage()) {
+            <app-chat-invites [chatId]="chatId" />
+          }
+        }
+      }
+      @if (error()) {
+        <app-load-error compact [message]="'chats.details.loadFailed' | transloco" (retry)="load()" />
+      }
+    </ion-content>
+  }
+}
 <ion-toast #saveError [message]="'chats.details.saveFailed' | transloco" [duration]="3000" />

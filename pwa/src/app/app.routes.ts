@@ -90,6 +90,7 @@ export const routes: Routes = [
   {
     path: 'settings/friend-verification',
     component: ChatLink,
+    canDeactivate: [(page: ChatLink) => page.canLeave()],
     data: { modal: true, component: FriendVerificationSettings },
   },
   { path: 'settings/privacy', component: ChatLink, data: { modal: true, component: PrivacySettings } },

@@ -46,7 +46,9 @@
         "title": "應用程式載入遇到問題",
         "description": ""
       }
-    }
+    },
+    "updatePendingMessages": "仍有未傳送的訊息，更新將遺失這些工作。",
+    "updateAnyway": "仍然更新"
   },
   "common": {
     "done": "完成",
@@ -151,7 +153,9 @@
       "questionPlaceholder": "填寫申請者需要回答的問題",
       "questionInvalid": "請填寫 1–100 字的問題。",
       "saveFailed": "儲存失敗，請重試。",
-      "apply": "套用"
+      "apply": "套用",
+      "discardTitle": "放棄未儲存的修改？",
+      "discard": "放棄修改"
     },
     "presence": {
       "title": "誰能查看我的活動狀態",
@@ -213,6 +217,19 @@
       "presence": "誰能查看我的活動狀態",
       "loadFailed": "載入失敗，點擊重試",
       "blocksLoadFailed": "封鎖使用者清單載入失敗。"
+    },
+    "privacyExceptions": {
+      "title": "例外",
+      "count": "（{{ count }} 個例外）",
+      "add": "新增例外",
+      "share": "始終分享",
+      "hide": "始終隱藏",
+      "clear": "刪除所有例外",
+      "empty": "暫無例外",
+      "search": "搜尋好友",
+      "added": "已新增",
+      "noFriends": "沒有符合的好友",
+      "clearTitle": "刪除所有例外？"
     }
   },
   "chats": {
@@ -316,7 +333,11 @@
       "failed": "操作失敗，請重試。",
       "refresh": "重新整理",
       "revokeTitle": "撤銷邀請",
-      "groupFallback": "群聊"
+      "groupFallback": "群聊",
+      "invalidExpiry": "請選擇未來的有效時間。",
+      "groupsFailed": "群組載入失敗",
+      "shared": "邀請已傳送",
+      "listTitle": "邀請碼"
     },
     "details": {
       "topic": "話題",
@@ -356,7 +377,9 @@
       "membershipMembers": "全體成員可見",
       "membershipAdmins": "僅管理員可見",
       "membershipNobody": "所有人不可見",
-      "membershipNote": "適用於歷史和新的進退群訊息。有查看權限時，仍遵循個人的顯示偏好。"
+      "membershipNote": "適用於歷史和新的進退群訊息。有查看權限時，仍遵循個人的顯示偏好。",
+      "privacySettings": "隱私設定",
+      "manageGroup": "群組管理"
     },
     "directory": {
       "groups": "群聊",
@@ -635,7 +658,8 @@
     "addPack": "新增貼紙包",
     "emojiLoadFailed": "表情載入失敗，請關閉後重試。",
     "createPack": "建立貼紙包",
-    "createFailed": "建立貼紙包失敗"
+    "createFailed": "建立貼紙包失敗",
+    "emojiLabel": "對應表情"
   },
   "emojiPicker": {
     "loadFailed": "表情載入失敗，請關閉後重試。"
