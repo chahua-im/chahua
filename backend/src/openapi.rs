@@ -22,6 +22,7 @@ use utoipa::OpenApi;
     ),
     components(
         schemas(
+            crate::dto::friends::PrivacyExceptionKind,
             ChatAttachmentKindFilter,
             ConversationView,
             MessageSearchSort,

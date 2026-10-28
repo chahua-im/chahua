@@ -648,3 +648,11 @@ Chat and thread lists accept optional exact-row filters (`chatId` on `/chats`, `
 `readReceiptChanged` includes optional `readerUid` and `threadRootId` for ordinary cursor advances. With `readerUid` present, an absent thread identifies the main chat. Privacy invalidations omit the reader and affect all scopes. The event still carries no cursor: authorized HTTP reads enforce current privacy policy.
 
 Notification settings support `DELETE /users/me/notification-exceptions?kind=group|dm` to reset all explicit overrides in one category. The owner-scoped update clears their temporary mutes as well, preserves archive flags and inherited temporary mutes, and returns the exact affected `chatIds`. A single `notificationExceptionsCleared` WebSocket event synchronizes the owner’s devices and invalidates unread summaries. No schema change is needed.
+
+### Privacy exceptions
+
+`GET /me/presence-settings` and `GET /me/read-receipt-settings` include `exceptionCount` for the caller's explicit overrides among current friends. Their PUT responses include the same count; changing a global policy preserves exceptions.
+
+`GET /me/privacy-exceptions?kind=presence|readReceipts` returns `{ "exceptions": [{ "user": MemberSummary, "share": true }] }`. It batches profile resolution and exposes only the caller-owned direction. Individual changes use the existing friend settings endpoints; `inherit` removes an exception.
+
+`DELETE /me/privacy-exceptions?kind=presence|readReceipts` returns 204 and atomically restores the caller's selected overrides to inheritance. It preserves the opposite direction, the other privacy category, global settings, and friendships. Presence policy invalidation follows successful presence changes. Read-receipt resets capture the affected peer UIDs with `UPDATE RETURNING`, resolve their DMs in at most two indexed queries, and send `readReceiptChanged` only to those DMs' participants. An empty reset sends no invalidation. Both canonical friendship halves use the existing UID indexes; no migration is required.

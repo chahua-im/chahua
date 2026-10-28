@@ -19,6 +19,7 @@ use crate::dto::friends::{
     UpdateFriendReadReceiptSettingsBody, UpdateFriendSettingsBody, UpdatePresenceSettingsBody,
     UpdateReadReceiptSettingsBody,
 };
+use crate::dto::friends::{PrivacyException, PrivacyExceptionKind, PrivacyExceptionsResponse};
 use crate::dto::users::MemberSummary;
 use crate::dto::ws::{
     FriendRequestReceivedPayload, FriendRequestResolvedPayload, FriendshipRemovedPayload,
@@ -29,6 +30,7 @@ use crate::extractors::DbConn;
 use crate::handlers::users::build_member_summary_map;
 use crate::models::{FriendRequest, FriendRequestStatus};
 use crate::services::authz::Action as AuthzAction;
+use crate::services::privacy_exceptions;
 use crate::services::social::{self, CreateRequestOutcome, ResolveOutcome};
 use crate::services::user::lookup_user_profiles;
 use crate::utils::auth::{CurrentUid, Principal};
@@ -551,7 +553,10 @@ async fn get_my_presence_settings(
     mut conn: DbConn,
 ) -> Result<Json<PresenceSettingsResponse>, AppError> {
     let visibility = social::get_presence_settings(&mut conn, uid)?;
-    Ok(Json(PresenceSettingsResponse { visibility }))
+    Ok(Json(PresenceSettingsResponse {
+        visibility,
+        exception_count: privacy_exceptions::count(&mut conn, uid, PrivacyExceptionKind::Presence)?,
+    }))
 }
 
 #[utoipa::path(
@@ -571,7 +576,10 @@ async fn update_my_presence_settings(
 ) -> Result<Json<PresenceSettingsResponse>, AppError> {
     let visibility = social::update_presence_settings(&mut conn, uid, body.visibility)?;
     state.presence_service.user_policy_changed(uid);
-    Ok(Json(PresenceSettingsResponse { visibility }))
+    Ok(Json(PresenceSettingsResponse {
+        visibility,
+        exception_count: privacy_exceptions::count(&mut conn, uid, PrivacyExceptionKind::Presence)?,
+    }))
 }
 
 #[utoipa::path(
@@ -587,7 +595,14 @@ async fn get_my_read_receipt_settings(
     mut conn: DbConn,
 ) -> Result<Json<ReadReceiptSettingsResponse>, AppError> {
     let visibility = social::get_read_receipt_settings(&mut conn, uid)?;
-    Ok(Json(ReadReceiptSettingsResponse { visibility }))
+    Ok(Json(ReadReceiptSettingsResponse {
+        visibility,
+        exception_count: privacy_exceptions::count(
+            &mut conn,
+            uid,
+            PrivacyExceptionKind::ReadReceipts,
+        )?,
+    }))
 }
 
 #[utoipa::path(
@@ -614,7 +629,14 @@ async fn update_my_read_receipt_settings(
             uid,
         )?;
     }
-    Ok(Json(ReadReceiptSettingsResponse { visibility }))
+    Ok(Json(ReadReceiptSettingsResponse {
+        visibility,
+        exception_count: privacy_exceptions::count(
+            &mut conn,
+            uid,
+            PrivacyExceptionKind::ReadReceipts,
+        )?,
+    }))
 }
 
 fn validate_presence_friend_uid(uid: i32, peer_uid: i32) -> Result<(), AppError> {
@@ -750,8 +772,73 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_user_friend_add_info))
 }
 
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+struct PrivacyExceptionsQuery {
+    kind: PrivacyExceptionKind,
+}
+
+#[utoipa::path(
+    get, path = "/me/privacy-exceptions", operation_id = "get_privacy_exceptions", tag = "friends",
+    params(PrivacyExceptionsQuery),
+    responses((status = 200, description = "Caller-owned overrides for current friends", body = PrivacyExceptionsResponse)),
+    security(("bearer_jwt" = []))
+)]
+async fn get_privacy_exceptions(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Query(query): Query<PrivacyExceptionsQuery>,
+) -> Result<Json<PrivacyExceptionsResponse>, AppError> {
+    let rows = privacy_exceptions::list(&mut conn, uid, query.kind)?;
+    let uids: Vec<i32> = rows.iter().map(|(peer, _)| *peer).collect();
+    let mut summaries = build_member_summary_map(&mut conn, &state, &uids)?;
+    Ok(Json(PrivacyExceptionsResponse {
+        exceptions: rows
+            .into_iter()
+            .map(|(peer, share)| PrivacyException {
+                user: summaries
+                    .remove(&peer)
+                    .unwrap_or_else(|| missing_user_summary(peer)),
+                share,
+            })
+            .collect(),
+    }))
+}
+
+#[utoipa::path(
+    delete, path = "/me/privacy-exceptions", operation_id = "clear_privacy_exceptions", tag = "friends",
+    params(PrivacyExceptionsQuery),
+    responses((status = 204, description = "Restored caller-owned overrides to the global policy")),
+    security(("bearer_jwt" = []))
+)]
+async fn clear_privacy_exceptions(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    mut conn: DbConn,
+    Query(query): Query<PrivacyExceptionsQuery>,
+) -> Result<StatusCode, AppError> {
+    let peers = privacy_exceptions::clear(&mut conn, uid, query.kind)?;
+    if !peers.is_empty() {
+        match query.kind {
+            PrivacyExceptionKind::Presence => state.presence_service.user_policy_changed(uid),
+            PrivacyExceptionKind::ReadReceipts => {
+                crate::services::read_receipts::broadcast_privacy_changed_for_peers(
+                    &mut conn,
+                    &state.ws_registry,
+                    uid,
+                    &peers,
+                )?;
+            }
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub fn presence_settings_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .routes(routes!(get_privacy_exceptions))
+        .routes(routes!(clear_privacy_exceptions))
         .routes(routes!(get_my_presence_settings))
         .routes(routes!(update_my_presence_settings))
         .routes(routes!(get_my_read_receipt_settings))

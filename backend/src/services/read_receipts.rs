@@ -529,7 +529,7 @@ pub fn broadcast_global_privacy_changed(
     registry: &Arc<ConnectionRegistry>,
     uid: i32,
 ) -> Result<(), diesel::result::Error> {
-    let greater: Vec<i32> = friendships::table
+    let mut peers: Vec<i32> = friendships::table
         .filter(friendships::uid1.eq(uid))
         .select(friendships::uid2)
         .load(conn)?;
@@ -537,6 +537,19 @@ pub fn broadcast_global_privacy_changed(
         .filter(friendships::uid2.eq(uid))
         .select(friendships::uid1)
         .load(conn)?;
+    peers.extend(lesser);
+    broadcast_privacy_changed_for_peers(conn, registry, uid, &peers)
+}
+
+/// Resolve affected DMs in two indexed batches, rather than querying every friend or each pair.
+pub fn broadcast_privacy_changed_for_peers(
+    conn: &mut PgConnection,
+    registry: &Arc<ConnectionRegistry>,
+    uid: i32,
+    peer_uids: &[i32],
+) -> Result<(), diesel::result::Error> {
+    let (greater, lesser): (Vec<_>, Vec<_>) =
+        peer_uids.iter().copied().partition(|peer| *peer > uid);
     let mut dm_chats: Vec<(i64, i32)> = Vec::new();
     if !greater.is_empty() {
         dm_chats.extend(

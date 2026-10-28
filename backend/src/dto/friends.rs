@@ -108,6 +108,7 @@ pub struct UpdateFriendSettingsBody {
 #[serde(rename_all = "camelCase")]
 pub struct PresenceSettingsResponse {
     pub visibility: crate::models::PresenceVisibility,
+    pub exception_count: i64,
 }
 
 /// Body for PUT /me/presence-settings.
@@ -138,6 +139,27 @@ pub struct UpdateFriendPresenceSettingsBody {
 #[serde(rename_all = "camelCase")]
 pub struct ReadReceiptSettingsResponse {
     pub visibility: crate::models::ReadReceiptVisibility,
+    pub exception_count: i64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum PrivacyExceptionKind {
+    Presence,
+    ReadReceipts,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyException {
+    pub user: MemberSummary,
+    pub share: bool,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyExceptionsResponse {
+    pub exceptions: Vec<PrivacyException>,
 }
 
 /// Body for PUT /me/read-receipt-settings.
