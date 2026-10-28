@@ -13,17 +13,18 @@ import {
   viewChildren,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { TranslocoPipe } from '@jsverse/transloco';
-import { MessageDatePipe } from '../../messages/message-date.pipe';
 import { Router } from '@angular/router';
-import { IonBackButton, IonButtons, IonContent, IonHeader, IonSpinner, IonTitle, IonToolbar } from '@ionic/angular';
+import { IonButtons, IonContent, IonHeader, IonSpinner, IonTitle, IonToolbar } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import type { MessageResponse } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
+import { MessageDatePipe } from '../../messages/message-date.pipe';
 import { MessageMenu } from '../../messages/message-menu/message-menu';
-import { Message } from '../../messages/message/message';
 import { isVisibleMessage } from '../../messages/message-visibility';
+import { Message } from '../../messages/message/message';
+import { PageBack } from '../../navigation/page-back';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
@@ -39,7 +40,7 @@ import { messageRows } from '../message-rows';
     MessageDatePipe,
     TranslocoPipe,
     LoadError,
-    IonBackButton,
+    PageBack,
     IonButtons,
     IonContent,
     IonHeader,

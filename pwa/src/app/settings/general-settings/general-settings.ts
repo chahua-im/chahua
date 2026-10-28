@@ -1,5 +1,4 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -11,30 +10,31 @@ import {
   IonList,
   IonListHeader,
   IonNote,
-  IonRange,
   IonRadio,
   IonRadioGroup,
+  IonRange,
   IonSpinner,
   IonTitle,
   IonToggle,
   IonToolbar,
-  ModalController,
   type ToggleCustomEvent,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   chatbubblesOutline,
   chevronBackOutline,
   contrastOutline,
   moonOutline,
+  peopleOutline,
   personCircleOutline,
   personOutline,
-  peopleOutline,
   sunnyOutline,
 } from 'ionicons/icons';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { SessionStore } from '../../session/session-store';
 import { ChatFontSize, chatFontSizes } from '../chat-font-size';
 import { ColorMode } from '../color-mode';
-import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../preferences';
 
 @Component({
@@ -71,7 +71,7 @@ export class GeneralSettings {
   protected readonly saveError = signal(false);
   protected readonly membershipIcon = peopleOutline;
   protected readonly preferences = inject(Preferences);
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly ColorMode = ColorMode;
   protected readonly threadsIcon = chatbubblesOutline;
   protected readonly FontSize = ChatFontSize;

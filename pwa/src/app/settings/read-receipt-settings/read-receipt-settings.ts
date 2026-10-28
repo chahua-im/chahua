@@ -1,7 +1,4 @@
-import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
-import { PrivacyExceptionKind } from '../../../generated/models';
 import { Component, inject, signal } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -12,19 +9,21 @@ import {
   IonLabel,
   IonList,
   IonNote,
-  IonToggle,
   IonSpinner,
   IonTitle,
+  IonToggle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
-import { ReadReceiptVisibility } from '../../../generated/models';
+import { PrivacyExceptionKind, ReadReceiptVisibility } from '../../../generated/models';
 import { ChatStore } from '../../chats/chat-store';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
+import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
 
 @Component({
   selector: 'app-read-receipt-settings',
@@ -55,7 +54,7 @@ export class ReadReceiptSettings {
   private readonly friends = inject(FriendsService);
   private readonly chats = inject(ChatStore);
   protected readonly ExceptionKind = PrivacyExceptionKind;
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly backIcon = chevronBackOutline;
   protected readonly Visibility = ReadReceiptVisibility;
   protected readonly loading = signal(true);

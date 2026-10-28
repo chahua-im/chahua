@@ -1,6 +1,5 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -14,10 +13,11 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline } from 'ionicons/icons';
 import { getBlocksResource } from '../../../generated/endpoints/blocks/blocks.resource';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 
 import {
@@ -51,7 +51,7 @@ import { FriendAddVerificationMode, PresenceVisibility, ReadReceiptVisibility } 
   host: { class: 'ion-page' },
 })
 export class PrivacySettings {
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly backIcon = chevronBackOutline;
   protected readonly blocks = getBlocksResource();
   protected readonly verification = getMyFriendSettingsResource();
@@ -60,4 +60,10 @@ export class PrivacySettings {
   protected readonly ReceiptVisibility = ReadReceiptVisibility;
   protected readonly Mode = FriendAddVerificationMode;
   protected readonly Visibility = PresenceVisibility;
+  panelResume() {
+    this.blocks.reload();
+    this.verification.reload();
+    this.presence.reload();
+    this.readReceipts.reload();
+  }
 }

@@ -1,7 +1,7 @@
-import { MembershipMessageVisibility } from '../../../generated/models';
-import { Connection } from '../../api/connection';
+import { DetailView } from './detail-view';
 import {
   afterNextRender,
+  afterRenderEffect,
   Component,
   computed,
   DestroyRef,
@@ -10,13 +10,11 @@ import {
   Injector,
   input,
   linkedSignal,
-  output,
   signal,
   untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { form, FormField } from '@angular/forms/signals';
 import { Router } from '@angular/router';
 import {
@@ -36,32 +34,33 @@ import {
   IonSelect,
   IonSelectOption,
   IonSpinner,
-  ModalController,
-  IonToast,
   IonTitle,
+  IonToast,
   IonToolbar,
+  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import {
   archive,
   archiveOutline,
+  banOutline,
+  cameraOutline,
+  chatbubbleOutline,
+  checkmarkOutline,
+  chevronBackOutline,
   closeOutline,
   createOutline,
-  cameraOutline,
-  checkmarkOutline,
+  documentTextOutline,
   exitOutline,
-  linkOutline,
-  personAddOutline,
-  chatbubbleOutline,
-  chevronBackOutline,
   globeOutline,
-  banOutline,
-  personRemoveOutline,
+  imageOutline,
+  linkOutline,
   notificationsOutline,
+  personAddOutline,
+  personRemoveOutline,
   settingsOutline,
   shieldCheckmarkOutline,
-  imageOutline,
   videocamOutline,
-  documentTextOutline,
 } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { BlocksService } from '../../../generated/endpoints/blocks/blocks.service';
@@ -72,25 +71,28 @@ import {
   ChatAttachmentKindFilter,
   FriendAddVerificationMode,
   FriendPresenceOverride,
-  PrivacyExceptionKind,
   FriendReadReceiptOverride,
-  type MemberSummary,
   GroupKind,
   GroupRole,
+  MembershipMessageVisibility,
+  PrivacyExceptionKind,
   SpeakingMode,
+  type MemberSummary,
   type MessagePreview as MessagePreviewData,
   type MessageResponse,
   type SnowflakeID,
 } from '../../../generated/models';
+import { Connection } from '../../api/connection';
+import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { mediaDimensions } from '../../messages/media-processing/prepare-media';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { ConversationNavigation } from '../../conversations/conversation-navigation';
-import { ThreadParticipants } from '../thread-participants/thread-participants';
 import { uploadBlob } from '../../messages/upload';
 import { UploadProgress } from '../../messages/upload-progress/upload-progress';
+import { PanelNavigation } from '../../navigation/panel-navigation';
+import { Presence } from '../../presence/presence';
+import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
-import { Presence } from '../../presence/presence';
 import { LoadError } from '../../ui/load-error/load-error';
 import { ChatAttachments } from '../chat-attachments/chat-attachments';
 import { ChatAvatar, conversationAvatar } from '../chat-avatar/chat-avatar';
@@ -98,10 +100,10 @@ import { ChatInvites } from '../chat-invites/chat-invites';
 import { ChatListStore } from '../chat-list-store';
 import { ChatMembers } from '../chat-members/chat-members';
 import { ChatStore } from '../chat-store';
-import { SpeakingModeSelect } from '../speaking-mode-select';
 import { ChatThreads } from '../chat-threads/chat-threads';
-import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { dismissChatOverlays } from '../dismiss-chat-overlays';
+import { SpeakingModeSelect } from '../speaking-mode-select';
+import { ThreadParticipants } from '../thread-participants/thread-participants';
 enum DetailAction {
   MembershipVisibility,
   Thread,
@@ -126,13 +128,8 @@ enum InfoTab {
   Members = 'members',
 }
 
-export enum DetailView {
-  Info,
-  Invites,
-  Privacy,
-  Management,
-}
-type DetailPage =
+export { DetailView } from './detail-view';
+export type DetailPage =
   DetailView | ChatAttachmentKindFilter.image | ChatAttachmentKindFilter.video | ChatAttachmentKindFilter.other;
 @Component({
   selector: 'app-chat-details',
@@ -178,13 +175,12 @@ type DetailPage =
 })
 export class ChatDetails {
   readonly chatId = input<SnowflakeID>();
-  readonly asModal = input(false);
-  readonly view = input(DetailView.Info);
+  readonly panelPath = input<string>();
+  readonly view = input<DetailPage>(DetailView.Info);
   readonly user = input<MemberSummary>();
   readonly currentConversation = input(false);
   readonly threadId = input<SnowflakeID>();
   readonly threadRoot = input<MessageResponse | MessagePreviewData>();
-  readonly closed = output<void>();
   protected readonly icons = {
     archive,
     archiveOutline,
@@ -231,6 +227,8 @@ export class ChatDetails {
   private readonly blocks = inject(BlocksService);
   private readonly navigation = inject(ConversationNavigation);
   protected readonly modals = inject(ModalController);
+  private readonly panels = inject(PanelNavigation);
+  protected readonly hasParentPanel = computed(() => this.panels.paths().length > 1);
   private readonly router = inject(Router);
   private readonly api = inject(GroupsService);
   private readonly members = inject(MembersService);
@@ -322,6 +320,7 @@ export class ChatDetails {
   protected readonly busy = computed(() => this.pending() != null);
   protected readonly error = linkedSignal({ source: this.scope, computation: () => false });
   protected readonly View = DetailView;
+  protected readonly overviewVisited = linkedSignal({ source: this.scope, computation: () => false });
   protected readonly page = linkedSignal<DetailPage>(() => {
     this.scope();
     return this.view();
@@ -366,9 +365,23 @@ export class ChatDetails {
   protected readonly avatarProgress = linkedSignal({ source: this.scope, computation: () => 0 });
   constructor() {
     effect(() => {
+      if (this.page() === DetailView.Info) this.overviewVisited.set(true);
+    });
+    afterRenderEffect(() => {
+      if (this.page() === DetailView.Info) {
+        const scroll = this.overviewScroll();
+        untracked(() => {
+          void this.overview().scrollToPoint(0, scroll, 0);
+        });
+      }
+    });
+
+    effect(() => {
       const page = this.page();
       if (
-        (page === DetailView.Privacy && !this.presenceSettingsUid()) ||
+        (page === DetailView.Privacy &&
+          !this.presenceSettingsUid() &&
+          (this.relationship() || (this.chat() && !this.person()) || (this.person() && !this.otherUser()))) ||
         ((page === DetailView.Management || page === DetailView.Invites) &&
           this.chat() &&
           (this.chat()!.kind !== GroupKind.group || this.threadId() != null || this.chat()!.myRole != null) &&
@@ -376,6 +389,8 @@ export class ChatDetails {
       ) {
         this.page.set(DetailView.Info);
         this.edits.set({ name: undefined, description: undefined });
+        const path = this.panelPath();
+        if (path) untracked(() => void this.panels.replacePage(path, DetailView.Info));
       }
     });
     this.store.privacyOverrides$.pipe(takeUntilDestroyed()).subscribe(({ kind, uid, share }) => {
@@ -699,8 +714,7 @@ export class ChatDetails {
       })
     ) {
       if (!this.user()) {
-        await dismissChatOverlays(this.modals);
-        await this.router.navigate(['/chats']);
+        if (await this.router.navigate(['/chats'])) await dismissChatOverlays(this.modals);
       }
     }
   }
@@ -714,29 +728,15 @@ export class ChatDetails {
       if (!this.isCurrent(scope)) return;
       this.overviewScroll.set(scroll.scrollTop);
     }
-    this.page.set(page);
+    await this.panels.updatePage(page);
   }
 
   protected back() {
-    if (this.busy()) return;
-    if (this.page() === DetailView.Invites && this.view() === DetailView.Invites) {
-      void this.modals.dismiss();
-      return;
-    }
-    this.page.set(DetailView.Info);
-    const scope = this.scope();
-    afterNextRender(
-      () => {
-        if (this.isCurrent(scope) && this.page() === DetailView.Info)
-          void this.overview().scrollToPoint(0, this.overviewScroll(), 0);
-      },
-      { injector: this.injector },
-    );
+    if (!this.busy()) void this.panels.back();
   }
 
   protected close() {
-    this.closed.emit();
-    if (this.user() || this.asModal()) void this.modals.dismiss();
+    if (!this.busy()) void this.panels.close();
   }
   protected messageUser() {
     const id = this.id();

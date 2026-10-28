@@ -3,18 +3,18 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter, Router } from '@angular/router';
 import { NavController } from '@ionic/angular';
-import { beforeAll, afterAll, vi } from 'vitest';
+import { afterAll, beforeAll, vi } from 'vitest';
+import WaveSurfer from 'wavesurfer.js';
 import { Connection } from '../../api/connection';
 import { encodeId } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testUser } from '../../api/testing';
-import WaveSurfer from 'wavesurfer.js';
 import { VoicePlayback, type VoiceDock } from '../../messages/voice-player/voice-playback';
 import { VoicePlayer } from '../../messages/voice-player/voice-player';
 import { SessionStore } from '../../session/session-store';
-import { ChatListContent } from '../chat-list-content/chat-list-content';
-import { ListTab, type ListSelection } from '../list-tabs';
-import { ChatListStore } from '../chat-list-store';
 import { Preferences } from '../../settings/preferences';
+import { ChatListContent } from '../chat-list-content/chat-list-content';
+import { ChatListStore } from '../chat-list-store';
+import { ListTab, type ListSelection } from '../list-tabs';
 import { ChatList } from './chat-list';
 
 beforeAll(() => {
@@ -368,8 +368,7 @@ describe('ChatList', () => {
       const contents = fixture.debugElement.queryAll(By.directive(ContentStub));
       expect(contents.length).toBe(1);
       expect(contents[0].componentInstance.selection()).toEqual(selection);
-      const back: HTMLIonBackButtonElement = fixture.nativeElement.querySelector('ion-back-button');
-      expect(back.text).toBeUndefined();
+      const back: HTMLIonButtonElement = fixture.nativeElement.querySelector('.list-back');
       back.click();
       await fixture.whenStable();
       expect(opened).toHaveBeenLastCalledWith(normal);

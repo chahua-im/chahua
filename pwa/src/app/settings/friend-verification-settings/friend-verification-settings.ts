@@ -1,5 +1,4 @@
-import { afterNextRender, Component, computed, ElementRef, inject, signal } from '@angular/core';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { applyWhen, disabled, form, FormField, maxLength, pattern, required } from '@angular/forms/signals';
 import {
   AlertController,
@@ -18,12 +17,13 @@ import {
   IonTextarea,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { banOutline, chatbubbleOutline, chevronBackOutline, helpCircleOutline, personAddOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
 import { FriendAddVerificationMode } from '../../../generated/models';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 
@@ -58,8 +58,7 @@ export class FriendVerificationSettings {
   private readonly friends = inject(FriendsService);
   private readonly alerts = inject(AlertController);
   private readonly transloco = inject(TranslocoService);
-  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly allowIcon = personAddOutline;
   protected readonly messageIcon = chatbubbleOutline;
   protected readonly questionIcon = helpCircleOutline;
@@ -96,10 +95,9 @@ export class FriendVerificationSettings {
 
   constructor() {
     void this.loadVerification();
-    afterNextRender(() => {
-      const modal = this.element.nativeElement.closest('ion-modal');
-      if (modal) modal.canDismiss = (_data, role) => this.canDismiss(role);
-    });
+    inject(DestroyRef).onDestroy(
+      this.panels.registerLeaveCheck('/settings/friend-verification', () => this.canDismiss()),
+    );
   }
 
   async canDismiss(role?: string): Promise<boolean> {
@@ -164,11 +162,11 @@ export class FriendVerificationSettings {
       this.verification.set({ mode: settings.mode, question: settings.question ?? '' });
       this.applied.set(this.verification());
       this.saved.set(true);
-      if (mode === FriendAddVerificationMode.question) await this.modals.dismiss(undefined, 'saved');
     } catch {
       this.saveError.set(true);
     } finally {
       this.saving.set(false);
     }
+    if (this.saved() && mode === FriendAddVerificationMode.question) await this.panels.back();
   }
 }

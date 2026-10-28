@@ -1,11 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { vi, type MockInstance } from 'vitest';
+import { Router } from '@angular/router';
+import { AlertController } from '@ionic/angular';
 import { of, Subject, throwError } from 'rxjs';
+import { vi } from 'vitest';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackSummary } from '../../../generated/models';
 import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { AlertController, ModalController } from '@ionic/angular';
-import { Router } from '@angular/router';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { StickerPreferences } from '../sticker-preferences';
 import { StickerSettings } from './sticker-settings';
 
@@ -59,7 +60,7 @@ describe('StickerSettings', () => {
       providers: [
         { provide: StickersService, useValue: api },
         { provide: StickerPreferences, useValue: preferences },
-        { provide: ModalController, useValue: { dismiss: vi.fn() } },
+        { provide: PanelNavigation, useValue: { back: vi.fn() } },
         { provide: AlertController, useValue: alerts },
         { provide: Router, useValue: { navigate } },
       ],
@@ -80,6 +81,31 @@ describe('StickerSettings', () => {
     await vi.waitFor(() => expect(component['loading']()).toBe(false));
     return component;
   }
+
+  it('keeps loaded rows and their DOM during a failed resume refresh and retry', async () => {
+    const fixture = TestBed.createComponent(StickerSettings);
+    fixture.detectChanges();
+    await vi.waitFor(() => expect(fixture.componentInstance['loading']()).toBe(false));
+    fixture.detectChanges();
+    const list = fixture.nativeElement.querySelector('ion-reorder-group');
+    const row = list.querySelector('ion-item');
+    const response = new Subject<{ packs: StickerPackSummary[] }>();
+    api.getMyOwnedPacks.mockReturnValueOnce(response);
+    fixture.componentInstance.panelResume();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('ion-reorder-group')).toBe(list);
+    response.error(new Error('offline'));
+    await vi.waitFor(() => expect(fixture.componentInstance['loadError']()).toBe(true));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('ion-reorder-group')).toBe(list);
+    expect(list.querySelector('ion-item')).toBe(row);
+    expect(fixture.nativeElement.querySelector('app-load-error')).not.toBeNull();
+    await fixture.componentInstance['load']();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('ion-reorder-group')).toBe(list);
+    expect(list.querySelector('ion-item')).toBe(row);
+    expect(fixture.nativeElement.querySelector('app-load-error')).toBeNull();
+  });
 
   it('merges owned and subscribed packs, sorting by usage order and flagging owned', async () => {
     preferences.packOrder.mockReturnValue([

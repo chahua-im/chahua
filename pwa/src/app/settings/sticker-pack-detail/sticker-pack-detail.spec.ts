@@ -1,7 +1,6 @@
-import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
-import { AlertController, ModalController } from '@ionic/angular';
 import { HttpClient } from '@angular/common/http';
+import { TestBed } from '@angular/core/testing';
+import { AlertController, ModalController } from '@ionic/angular';
 import { of, throwError } from 'rxjs';
 import { vi, type MockInstance } from 'vitest';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
@@ -9,10 +8,11 @@ import { StickersService } from '../../../generated/endpoints/stickers/stickers.
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { testUser } from '../../api/testing';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { SessionStore } from '../../session/session-store';
+import { StickerEditor } from '../sticker-editor/sticker-editor';
 import { StickerPreferences } from '../sticker-preferences';
 import { StickerPackDetail } from './sticker-pack-detail';
-import { StickerEditor } from '../sticker-editor/sticker-editor';
 
 describe('StickerPackDetail', () => {
   const sticker: StickerSummary = {
@@ -64,6 +64,7 @@ describe('StickerPackDetail', () => {
         { provide: HttpClient, useValue: { post } },
         { provide: CHAHUA_BASE_URL, useValue: '/_api' },
         { provide: ModalController, useValue: { dismiss } },
+        { provide: PanelNavigation, useValue: { back: dismiss, close: dismiss, registerLeaveCheck: () => () => {} } },
         { provide: AlertController, useValue: alerts },
         { provide: StickerPreferences, useValue: preferences },
       ],

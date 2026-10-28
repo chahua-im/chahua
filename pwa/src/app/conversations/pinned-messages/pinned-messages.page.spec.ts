@@ -156,10 +156,13 @@ describe('PinnedMessagesPage', () => {
 
   it('requires confirmation before deleting a pin from its own thread scope', async () => {
     const pin = await pins(GroupRole.admin, true);
+    const alert = fixture.nativeElement.querySelector('ion-alert') as HTMLIonAlertElement;
+    // This test drives dismissal events itself; don't also start Ionic's asynchronous presentation.
+    const openAlert = vi.spyOn(alert, 'isOpen', 'set').mockImplementation(() => {});
     select(pin.message);
     await page['menu']()!['choose'](MessageAction.Pin);
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('ion-alert').isOpen).toBe(true);
+    expect(openAlert).toHaveBeenCalledWith(true);
     http.expectNone((request) => request.method === 'DELETE');
     await page['menu']()!['confirm'](new CustomEvent('didDismiss', { detail: { role: 'cancel' } }));
     expect(page['pins']().items()).toHaveLength(1);

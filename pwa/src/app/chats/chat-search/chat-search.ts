@@ -1,8 +1,10 @@
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
+  IonButtons,
+  IonContent,
+  IonHeader,
   IonInfiniteScroll,
   IonInfiniteScrollContent,
   IonLabel,
@@ -10,21 +12,19 @@ import {
   IonSegment,
   IonSegmentButton,
   IonSpinner,
-  IonHeader,
-  IonToolbar,
   IonTitle,
-  IonButtons,
-  IonContent,
-  ModalController,
+  IonToolbar,
   type InfiniteScrollCustomEvent,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { MessageSearchSort, type MessageResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
 import { Message } from '../../messages/message/message';
-import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { fillScrollViewport } from '../../scrolling/fill-scroll-viewport';
 import { LoadError } from '../../ui/load-error/load-error';
 @Component({
   selector: 'app-chat-search',
@@ -52,7 +52,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 })
 export class ChatSearch {
   readonly chatId = input.required<SnowflakeID>();
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly query = signal('');
   protected readonly sort = signal(MessageSearchSort.relevance);
   protected readonly Sort = MessageSearchSort;

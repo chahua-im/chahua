@@ -424,19 +424,6 @@
     }
   </app-message-composer>
 </ion-footer>
-@if (largeScreen() && sidebarOpen() && active()) {
-  <aside class="details-sidebar">
-    @for (chatId of [id()]; track chatId) {
-      <app-chat-details
-        [currentConversation]="true"
-        [chatId]="chatId"
-        [threadId]="threadId()"
-        [threadRoot]="threadRoot()"
-        (closed)="sidebarOpen.set(false)" />
-    }
-  </aside>
-}
-
 <ng-template #actions>
   @if (canForwardTopic()) {
     <ion-button [title]="'messages.forward.action' | transloco" (click)="openTopicForward()">

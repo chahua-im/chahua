@@ -441,3 +441,17 @@ app-markdown-body pre code.hljs {
   background: none;
   overflow-x: visible;
 }
+
+// The same panel instance becomes a non-blocking information column on wide screens.
+ion-modal.route-panel.panel-sidebar {
+  inset-inline-start: auto;
+  width: 360px;
+  --width: 360px;
+  --height: 100%;
+  --border-radius: 0;
+  --box-shadow: none;
+  border-inline-start: 1px solid var(--ion-color-light-shade);
+}
+app-panel-page[hidden] {
+  display: none;
+}

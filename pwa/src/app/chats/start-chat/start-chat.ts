@@ -1,7 +1,5 @@
-import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -14,17 +12,19 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { GroupsService } from '../../../generated/endpoints/groups/groups.service';
 import { InvitesService } from '../../../generated/endpoints/invites/invites.service';
 import { type InvitePreviewResponse, type SnowflakeID } from '../../../generated/models';
 import { ConversationNavigation } from '../../conversations/conversation-navigation';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { SessionStore } from '../../session/session-store';
+import { ChatAvatar } from '../chat-avatar/chat-avatar';
 import { ChatListStore } from '../chat-list-store';
 import { ChatStore } from '../chat-store';
-import { SessionStore } from '../../session/session-store';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { inviteCode, inviteStatus, InviteStatus } from '../invite';
 export enum StartChatKind {
@@ -66,7 +66,7 @@ export class StartChat {
   protected readonly Kind = StartChatKind;
   protected readonly status = inviteStatus;
   protected readonly Status = InviteStatus;
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   private readonly groups = inject(GroupsService);
   private readonly invites = inject(InvitesService);
   private readonly navigation = inject(ConversationNavigation);

@@ -1,7 +1,4 @@
-import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
-import { PrivacyExceptionKind } from '../../../generated/models';
 import { Component, inject, signal } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -17,15 +14,17 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
-import { chevronBackOutline, eyeOutline, peopleOutline, eyeOffOutline } from 'ionicons/icons';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { chevronBackOutline, eyeOffOutline, eyeOutline, peopleOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { FriendsService } from '../../../generated/endpoints/friends/friends.service';
-import { PresenceVisibility } from '../../../generated/models';
+import { PresenceVisibility, PrivacyExceptionKind } from '../../../generated/models';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Presence } from '../../presence/presence';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
+import { PrivacyExceptions } from '../privacy-exceptions/privacy-exceptions';
 
 @Component({
   selector: 'app-presence-settings',
@@ -57,7 +56,7 @@ export class PresenceSettings {
   private readonly friends = inject(FriendsService);
   private readonly presence = inject(Presence);
   protected readonly ExceptionKind = PrivacyExceptionKind;
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly everyoneIcon = eyeOutline;
   protected readonly friendsIcon = peopleOutline;
   protected readonly nobodyIcon = eyeOffOutline;

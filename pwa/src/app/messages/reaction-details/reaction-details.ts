@@ -1,6 +1,4 @@
-import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -14,11 +12,13 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import type { ReactionDetailGroup, ReactionReactor, SnowflakeID } from '../../../generated/models';
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 
@@ -48,7 +48,7 @@ import { LoadError } from '../../ui/load-error/load-error';
 export class ReactionDetails {
   readonly chatId = input.required<SnowflakeID>();
   readonly messageId = input.required<SnowflakeID>();
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   private readonly api = inject(ChatsService);
   protected readonly groups = signal<ReactionDetailGroup[]>([]);
   protected readonly emoji = signal('');

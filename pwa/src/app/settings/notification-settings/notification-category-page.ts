@@ -1,17 +1,9 @@
 import { Component, inject, input } from '@angular/core';
+import { IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonTitle, IonToolbar } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import {
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonTitle,
-  IonToolbar,
-  ModalController,
-} from '@ionic/angular';
 import { chevronBackOutline } from 'ionicons/icons';
 import { GroupKind } from '../../../generated/models';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { NotificationCategory } from './notification-category';
 
@@ -34,7 +26,7 @@ import { NotificationCategory } from './notification-category';
     <ion-header
       ><ion-toolbar>
         <ion-buttons slot="start"
-          ><ion-button (click)="modals.dismiss()"><ion-icon slot="icon-only" [icon]="backIcon" /></ion-button
+          ><ion-button (click)="panels.back()"><ion-icon slot="icon-only" [icon]="backIcon" /></ion-button
         ></ion-buttons>
         <ion-title>{{
           (kind() === Kind.dm ? 'notificationPreferences.directTitle' : 'notificationPreferences.groupTitle')
@@ -48,6 +40,6 @@ import { NotificationCategory } from './notification-category';
 export class NotificationCategoryPage {
   readonly kind = input.required<GroupKind>();
   protected readonly Kind = GroupKind;
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly backIcon = chevronBackOutline;
 }

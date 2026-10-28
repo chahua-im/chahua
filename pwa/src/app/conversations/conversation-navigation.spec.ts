@@ -80,6 +80,13 @@ describe('Forward destination navigation', () => {
     expect(modals.dismiss).not.toHaveBeenCalled();
   });
 
+  it('keeps the source panel when opening a conversation is rejected', async () => {
+    router.navigate.mockResolvedValue(false);
+    expect(await TestBed.inject(ConversationNavigation).open(testChat.id)).toBe(false);
+    expect(modals.getTop).not.toHaveBeenCalled();
+    expect(modals.dismiss).not.toHaveBeenCalled();
+  });
+
   it('keeps the picker until routing succeeds, then dismisses it with the navigation role', async () => {
     let resolve!: (opened: boolean) => void;
     router.navigate.mockImplementation(

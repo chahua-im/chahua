@@ -1,3 +1,4 @@
+import { PanelUrlSerializer } from './app/navigation/panel-url';
 import { inject, isDevMode, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideServiceWorker } from '@angular/service-worker';
 import { AppInstall } from './app/pwa/app-install';
@@ -5,7 +6,13 @@ import { AppUpdates } from './app/pwa/app-updates';
 import { LegacyMigration } from './app/pwa/legacy-migration';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { bootstrapApplication } from '@angular/platform-browser';
-import { RouteReuseStrategy, provideRouter, withComponentInputBinding, withRouterConfig } from '@angular/router';
+import {
+  UrlSerializer,
+  RouteReuseStrategy,
+  provideRouter,
+  withComponentInputBinding,
+  withRouterConfig,
+} from '@angular/router';
 import { provideTransloco } from '@jsverse/transloco';
 import { IonicRouteStrategy, provideIonicAngular } from '@ionic/angular';
 
@@ -58,6 +65,7 @@ bootstrapApplication(App, {
     provideHttpClient(withInterceptors([authInterceptor, jsonInterceptor])),
     provideChahuaBaseUrl(CHAHUA_API_BASE),
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
+    { provide: UrlSerializer, useClass: PanelUrlSerializer },
     provideIonicAngular({
       mode: 'ios',
       backButtonText: '',

@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
-import { ModalController } from '@ionic/angular';
 import { afterAll, beforeAll, vi } from 'vitest';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { MediaKind } from '../message-attachments/media-kind';
 import { MediaViewer } from './media-viewer';
 
@@ -24,7 +24,7 @@ const album = [
 describe('MediaViewer', () => {
   const dismiss = vi.fn().mockResolvedValue(true);
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [{ provide: ModalController, useValue: { dismiss } }] });
+    TestBed.configureTestingModule({ providers: [{ provide: PanelNavigation, useValue: { back: dismiss } }] });
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
     dismiss.mockClear();
   });
@@ -70,10 +70,10 @@ describe('MediaViewer', () => {
     element.querySelector<HTMLButtonElement>('.close')!.click();
     expect(dismiss).toHaveBeenCalledTimes(2);
   });
-  it('dismisses on Escape and navigates with the arrow keys', () => {
+  it('navigates with arrow keys and leaves Escape to the panel container', () => {
     const fixture = open(album);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
-    expect(dismiss).toHaveBeenCalledOnce();
+    expect(dismiss).not.toHaveBeenCalled();
     fixture.detectChanges();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', cancelable: true }));
     fixture.detectChanges();

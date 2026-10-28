@@ -57,11 +57,12 @@ export class ConversationNavigation {
   }
 
   async open(chatId: SnowflakeID, threadId?: SnowflakeID, messageId?: SnowflakeID) {
-    await dismissChatOverlays(this.modals);
-    return this.navigate(chatId, threadId, messageId);
+    const opened = await this.navigate(chatId, threadId, messageId);
+    if (opened) await dismissChatOverlays(this.modals);
+    return opened;
   }
 
-  private navigate(chatId: SnowflakeID, threadId?: SnowflakeID, messageId?: SnowflakeID) {
+  private async navigate(chatId: SnowflakeID, threadId?: SnowflakeID, messageId?: SnowflakeID) {
     const commands = ['/chats/chat', decodeId(chatId), ...(threadId ? ['thread', decodeId(threadId)] : [])];
     const extras = messageId ? { fragment: `msg=${decodeId(messageId)}` } : {};
     const url = this.router.serializeUrl(this.router.createUrlTree(commands, extras));
@@ -70,7 +71,19 @@ export class ConversationNavigation {
       if (messageId) this.goTo(chatId, { type: ConversationTargetKind.Message, messageId }, threadId);
       return true;
     }
-    return messageId ? this.router.navigate(commands, extras) : this.router.navigate(commands);
+    const sameMessage =
+      !!messageId &&
+      this.router.isActive(url, {
+        paths: 'exact',
+        queryParams: 'ignored',
+        fragment: 'exact',
+        matrixParams: 'exact',
+      });
+    const opened = await (messageId ? this.router.navigate(commands, extras) : this.router.navigate(commands));
+    // Removing a panel preserves the component and its unchanged message input.
+    if (opened && sameMessage && messageId)
+      this.goTo(chatId, { type: ConversationTargetKind.Message, messageId }, threadId);
+    return opened;
   }
 
   private readonly requests = new Subject<{

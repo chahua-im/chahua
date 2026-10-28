@@ -1,4 +1,3 @@
-import { SystemMessageKind } from '../../../generated/models';
 import { Location } from '@angular/common';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -13,11 +12,12 @@ import {
   IonPopover,
   IonRouterOutlet,
   IonTextarea,
-  NavController,
   iosTransitionAnimation,
+  NavController,
 } from '@ionic/angular';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
+import WaveSurfer from 'wavesurfer.js';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
 import { PinsService } from '../../../generated/endpoints/pins/pins.service';
@@ -29,6 +29,7 @@ import {
   NotificationType,
   ServerWsMessageType,
   SpeakingMode,
+  SystemMessageKind,
   type MessageResponse,
   type ServerWsMessage,
   type ThreadSubscriptionStatusResponse,
@@ -37,24 +38,23 @@ import { Connection, ResyncReason } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
-import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
 import { ChatListStore } from '../../chats/chat-list-store';
+import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
 import { ForwardPicker } from '../../messages/forward-picker/forward-picker';
+import { ForwardSelectionError, forwardSourceMessage } from '../../messages/forwarding';
 import { MessageDelivery } from '../../messages/message-delivery';
 import { MessageAction } from '../../messages/message-menu/message-menu';
 import { MessageNotice } from '../../messages/message-notice';
-import { ForwardSelectionError, forwardSourceMessage } from '../../messages/forwarding';
 import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { Message, type MessageContent } from '../../messages/message/message';
 import { SavedMessageStore } from '../../messages/saved-message-store';
 import { StickerFavorites } from '../../messages/sticker-favorites';
+import { UploadStatus, type AttachmentUpload } from '../../messages/upload';
 import { VoicePlayback, type VoiceDock } from '../../messages/voice-player/voice-playback';
 import { VoicePlayer } from '../../messages/voice-player/voice-player';
-import { UploadStatus, type AttachmentUpload } from '../../messages/upload';
-import WaveSurfer from 'wavesurfer.js';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { ConversationNavigation, ConversationTargetKind, type ConversationTarget } from '../conversation-navigation';
+import { ConversationNavigation, ConversationTargetKind } from '../conversation-navigation';
 import { ConversationError, PageDirection } from '../conversation-store';
 import { DraftStore } from '../draft-store';
 import { ConversationPage, ThreadError } from './conversation.page';
@@ -2603,6 +2603,10 @@ describe('ConversationPage', () => {
     expect(markRead).not.toHaveBeenCalled();
     rect.mockReturnValue(new DOMRect(0, -20, 300, 220));
     scroll.scrollTop = 20;
+    const covered = vi.spyOn(component['panels'], 'covered').mockReturnValue(true);
+    await component['trackScroll']();
+    expect(markRead).not.toHaveBeenCalled();
+    covered.mockReturnValue(false);
     await component['trackScroll']();
     expect(markRead).toHaveBeenLastCalledWith(testChat.id, encodeId('100'));
   });
@@ -3249,6 +3253,65 @@ describe('ConversationPage', () => {
       },
     });
   }
+
+  it('does not acknowledge reactions received behind a panel when navigating to another conversation', async () => {
+    const router = TestBed.inject(Router);
+    const url = vi.spyOn(router, 'url', 'get');
+    const cover = (covered: boolean) => {
+      const path = `/chats/chat/${wireChat.id}` + (covered ? '?profile=2' : '');
+      url.mockReturnValue(path);
+      (router.events as Subject<NavigationEnd>).next(new NavigationEnd(1, path, path));
+      fixture.detectChanges();
+    };
+    component.ionViewDidEnter();
+    await fixture.whenStable();
+    const api = TestBed.inject(ChatsService);
+    vi.mocked(api.acknowledgeChatReactions).mockClear();
+    cover(true);
+    fixture.detectChanges();
+    reactionNotification();
+    await fixture.whenStable();
+    // The destination URL no longer contains the source panel when Ionic leaves the old page.
+    vi.mocked(TestBed.inject(Router).isActive).mockReturnValue(false);
+    cover(false);
+    fixture.detectChanges();
+    component.ionViewWillLeave();
+    await fixture.whenStable();
+    expect(api.acknowledgeChatReactions).not.toHaveBeenCalled();
+  });
+
+  it('ignores a snapshot covered in flight and refreshes reactions when the panel closes', async () => {
+    const router = TestBed.inject(Router);
+    const url = vi.spyOn(router, 'url', 'get');
+    const cover = (covered: boolean) => {
+      const path = `/chats/chat/${wireChat.id}` + (covered ? '?profile=2' : '');
+      url.mockReturnValue(path);
+      (router.events as Subject<NavigationEnd>).next(new NavigationEnd(1, path, path));
+      fixture.detectChanges();
+    };
+    useReactionHttp();
+    component.ionViewDidEnter();
+    const pending = http.expectOne(`/_api/chats/${wireChat.id}/reactions`);
+    cover(true);
+    fixture.detectChanges();
+    pending.flush({ messageIds: ['101'], readThrough: reactionBoundary });
+    await fixture.whenStable();
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions/read`);
+    reactionNotification(encodeId('102'));
+    http.expectNone(`/_api/chats/${wireChat.id}/reactions`);
+    cover(false);
+    fixture.detectChanges();
+    http
+      .expectOne(`/_api/chats/${wireChat.id}/reactions`)
+      .flush({ messageIds: ['101', '102'], readThrough: reactionBoundary });
+    await Promise.resolve();
+    await Promise.resolve();
+    const ack = http.expectOne(`/_api/chats/${wireChat.id}/reactions/read`);
+    expect(ack.request.body.readThrough).toBe(reactionBoundary);
+    ack.flush({ unreadReactions: 0 });
+    await fixture.whenStable();
+    expect(component['reactionJumpIds']()).toEqual([encodeId('102'), encodeId('101')]);
+  });
 
   it('fetches reaction IDs and acknowledges the conversation on entry', async () => {
     useReactionHttp();

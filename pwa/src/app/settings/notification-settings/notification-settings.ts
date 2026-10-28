@@ -1,5 +1,4 @@
 import { afterRenderEffect, Component, DestroyRef, inject, viewChild } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -7,24 +6,25 @@ import {
   IonHeader,
   IonIcon,
   IonItem,
+  IonLabel,
   IonList,
   IonListHeader,
-  IonLabel,
   IonNote,
   IonSpinner,
   IonTitle,
   IonToast,
   IonToggle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
 import type { ToggleCustomEvent } from '@ionic/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline, notificationsOutline, refreshOutline } from 'ionicons/icons';
-import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
-import { ChatStore } from '../../chats/chat-store';
 import { GroupKind } from '../../../generated/models';
-import { NotificationCategory } from './notification-category';
+import { ChatStore } from '../../chats/chat-store';
+import { PanelNavigation } from '../../navigation/panel-navigation';
+import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { NotificationCategory } from './notification-category';
 
 @Component({
   selector: 'app-notification-settings',
@@ -54,7 +54,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 export class NotificationSettings {
   protected readonly store = inject(ChatStore);
   protected readonly Kind = GroupKind;
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly notifications = inject(PushNotifications);
   protected readonly PushError = PushNotificationError;
   protected readonly backIcon = chevronBackOutline;

@@ -1,4 +1,3 @@
-import { GeneralSettings } from '../general-settings/general-settings';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ChangeDetectorRef, Component, getDebugNode, signal } from '@angular/core';
@@ -13,21 +12,23 @@ import {
   type FriendSettingsResponse,
   type PresenceSettingsResponse,
 } from '../../../generated/models';
-import { jsonInterceptor } from '../../api/json.interceptor';
 import { Connection } from '../../api/connection';
+import { jsonInterceptor } from '../../api/json.interceptor';
 import { mockRealtime, testUser } from '../../api/testing';
-import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Presence } from '../../presence/presence';
+import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { PushNotificationError, PushNotifications } from '../../pwa/push-notifications';
 import { SessionStore } from '../../session/session-store';
 import { ColorMode } from '../color-mode';
 import { FriendVerificationSettings } from '../friend-verification-settings/friend-verification-settings';
-import { Preferences } from '../preferences';
-import { PrivacySettings } from '../privacy-settings/privacy-settings';
-import { PresenceSettings } from '../presence-settings/presence-settings';
-import { StickerSettings } from '../sticker-settings/sticker-settings';
-import { StickerPreferences } from '../sticker-preferences';
+import { GeneralSettings } from '../general-settings/general-settings';
 import { NotificationSettings } from '../notification-settings/notification-settings';
+import { Preferences } from '../preferences';
+import { PresenceSettings } from '../presence-settings/presence-settings';
+import { PrivacySettings } from '../privacy-settings/privacy-settings';
+import { StickerPreferences } from '../sticker-preferences';
+import { StickerSettings } from '../sticker-settings/sticker-settings';
 import { Settings } from './settings';
 
 @Component({ imports: [IonNav], template: '<ion-nav [root]="root"></ion-nav>' })
@@ -98,6 +99,7 @@ describe('Settings', () => {
         { provide: Connection, useValue: mockRealtime() },
         SessionStore,
         { provide: ModalController, useValue: { dismiss } },
+        { provide: PanelNavigation, useValue: { back: dismiss, close: dismiss, registerLeaveCheck: () => () => {} } },
         { provide: PushNotifications, useValue: notifications },
         { provide: AppUpdates, useValue: updates },
         { provide: Presence, useValue: presence },
@@ -370,7 +372,7 @@ describe('Settings', () => {
       fixture.detectChanges();
       expect(page.textContent).toContain('已保存');
     });
-    expect(dismiss).toHaveBeenCalledWith(undefined, 'saved');
+    expect(dismiss).toHaveBeenCalledWith();
   });
 
   it('loads and saves presence privacy, invalidating all individual presence snapshots', async () => {

@@ -10,7 +10,7 @@
     [routerLink]="entry().link"
     [state]="entry().state"
     routerLinkActive
-    [routerLinkActiveOptions]="{ exact: true }"
+    [routerLinkActiveOptions]="{ paths: 'exact', queryParams: 'ignored', fragment: 'ignored', matrixParams: 'ignored' }"
     #active="routerLinkActive"
     [color]="active.isActive ? 'primary' : undefined"
     [detail]="false"

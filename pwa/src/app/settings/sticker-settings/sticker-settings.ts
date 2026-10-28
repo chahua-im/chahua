@@ -1,12 +1,11 @@
 import { Component, computed, DestroyRef, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import type { ItemReorderEventDetail } from '@ionic/angular';
 import {
-  IonChip,
   IonBadge,
   IonButton,
   IonButtons,
+  IonChip,
   IonContent,
   IonHeader,
   IonIcon,
@@ -21,19 +20,20 @@ import {
   IonTitle,
   IonToggle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
-import { addOutline, chevronBackOutline, cubeOutline, happyOutline, closeCircleOutline } from 'ionicons/icons';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { addOutline, chevronBackOutline, closeCircleOutline, cubeOutline, happyOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { StickersService } from '../../../generated/endpoints/stickers/stickers.service';
 import type { StickerPackSummary, UpdateStickerPackOrderItem } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { EmojiPicker } from '../../messages/emoji-picker/emoji-picker';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
 import { Preferences } from '../preferences';
 import { StickerEditor, type StickerEditorValue } from '../sticker-editor/sticker-editor';
-import { AUTO_SORT_LIMIT, StickerPreferences, sortStickerPacksByPreference } from '../sticker-preferences';
+import { AUTO_SORT_LIMIT, sortStickerPacksByPreference, StickerPreferences } from '../sticker-preferences';
 
 @Component({
   selector: 'app-sticker-settings',
@@ -125,13 +125,14 @@ export class StickerSettings {
   private readonly api = inject(StickersService);
   private readonly transloco = inject(TranslocoService);
   private readonly router = inject(Router);
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly preferences = inject(StickerPreferences);
   protected readonly reactions = inject(Preferences);
   protected readonly icons = { happyOutline, addOutline, cubeOutline, closeCircleOutline };
   protected readonly backIcon = chevronBackOutline;
   protected readonly autoSortLimit = AUTO_SORT_LIMIT;
   protected readonly loading = signal(true);
+  protected readonly loaded = signal(false);
   protected readonly loadError = signal(false);
   protected readonly choosingPinned = signal(false);
   private readonly owned = signal<StickerPackSummary[]>([]);
@@ -160,6 +161,7 @@ export class StickerSettings {
         firstValueFrom(this.api.getMyOwnedPacks()),
         firstValueFrom(this.api.getMySubscribedPacks()),
       ]);
+      this.loaded.set(true);
       this.owned.set(ownedPacks.packs);
       this.packs.set([
         ...ownedPacks.packs,
@@ -261,5 +263,8 @@ export class StickerSettings {
     } finally {
       this.savingOrder.set(false);
     }
+  }
+  panelResume() {
+    void this.load();
   }
 }

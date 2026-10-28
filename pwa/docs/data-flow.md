@@ -92,7 +92,7 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 下表省略 `/_api`，c/t/m 分别表示聊天、话题根和消息 ID。
 
 | 触发                                 | 接口与参数                                                                                                               | 消费路径                                                                       |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
 | 激活聊天分类或续页                   | `GET /chats?limit=50`，归档加 archived，续页加 after                                                                     | ChatListStore → ChatStore → ChatListContent                                    |
 | 话题 tab，或消息 tab 开启话题        | `GET /threads?limit=20`，archived 与 before 时间游标                                                                     | ChatListStore → ChatStore → ChatListContent                                    |
 | 消息/好友列表显示请求                | `GET /friends/requests?archived=false`                                                                                   | ChatListStore → ChatListContent                                                |
@@ -117,8 +117,8 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 | 全局收藏                             | `GET /saved-messages`，limit=50、before                                                                                  | SavedMessageList 快照                                                          |
 | 全局目录搜索                         | `GET /group`（joined）和 `/users/search`，300ms 防抖                                                                     | DirectorySearch；群有游标，用户无游标                                          |
 | 群资料中的成员标签                   | `GET /group/{c}/members`，limit、after、q、mode                                                                          | ChatMembers 局部分页                                                           |
-| 资料中的话题标签                     | `GET /chats/{c}/threads?limit=50&order=newest`，cursor 根 ID                                                               | ChatThreads 局部分页                                                           |
-| 话题资料中的成员列表                 | `GET /chats/{c}/threads/{t}/participants?limit=100`，cursor 用户 UID                                                       | ThreadParticipants 局部分页                                                    |
+| 资料中的话题标签                     | `GET /chats/{c}/threads?limit=50&order=newest`，cursor 根 ID                                                             | ChatThreads 局部分页                                                           |
+| 话题资料中的成员列表                 | `GET /chats/{c}/threads/{t}/participants?limit=100`，cursor 用户 UID                                                     | ThreadParticipants 局部分页                                                    |
 | 资料中的媒体二级页                   | `GET /chats/{c}/attachments`，kind、limit、before                                                                        | ChatAttachments 局部分页                                                       |
 | 打开媒体或定位附件                   | `GET /chats/{c}/messages/{m}`                                                                                            | 当前消息的媒体集合，或所属话题路由                                             |
 | 聊天内消息搜索                       | `GET /chats/{c}/messages/search`，q、sort、limit、offset                                                                 | ChatSearch 局部分页                                                            |
@@ -151,7 +151,7 @@ Mention 跳转列表按当前页面会话保存，首次读取、真实重连及
 
 只有消息 tab 开启话题时才使用两来源共同覆盖范围：未加载边界为 Infinity，末尾为 -Infinity，展示时间不早于两边较新边界的行。触底补覆盖较浅的一侧，相同则同时补。其他分类独立分页。群/好友的归档数字都是后端归档对话未读总数，不遍历归档历史分类型 count。
 
-ThreadParticipants 独立读取服务端参与者分页，名单不从 ChatStore 或会话消息推导；ChatDetails 只传 chatId 与 rootId，根消息仍用于信息头部。参与者 UID 游标是普通 number，ChatThreads 的根 ID 游标使用 SnowflakeID 品牌类型，生成客户端在 HTTP 边界无损转换；两者的 null 末页游标原样保留。资料列表不写入订阅、归档或未读缓存。SavedMessagesPage 通过 SavedMessageList 读取全局收藏快照；进入媒体详情时保留列表与滚动位置；离开收藏及其详情时销毁列表，重新进入时重新读取。
+ThreadParticipants 独立读取服务端参与者分页，名单不从 ChatStore 或会话消息推导；ChatDetails 只传 chatId 与 rootId，根消息仍用于信息头部，应用壳向路由面板传入当前会话中同一话题的根消息；独立话题详情通过消息接口读取根消息。参与者 UID 游标是普通 number，ChatThreads 的根 ID 游标使用 SnowflakeID 品牌类型，生成客户端在 HTTP 边界无损转换；两者的 null 末页游标原样保留。资料列表不写入订阅、归档或未读缓存。SavedMessagesPage 通过 SavedMessageList 读取全局收藏快照；进入媒体详情时保留列表与滚动位置；离开收藏及其详情时销毁列表，重新进入时重新读取。
 
 ChatDetails 可由 chatId 或用户资料打开；后者从共享好友关系派生 dmChatId，得到可访问会话后读取详情和当前标签。不为资料另存好友状态。验证方式在点击添加好友后读取，发送前在确认弹窗内收集验证信息；添加、解除好友与拉黑操作完成后刷新共享关系。
 
@@ -163,9 +163,9 @@ ChatMembers 的管理权限由 ChatDetails 的当前群身份派生；角色修�
 
 连续消息每页最多 50 条，使用普通 DOM。接近边缘 1.5 个视口时预取，一次一个方向；手指离开且惯性结束后才合并历史，以首条可见消息底部为锚。媒体预留尺寸。浮动日期复用同一滚动状态和可见消息测量。
 
-Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消息 DOM 和滚动位置，取消未完成的消息读取、清理菜单和未提交附件并暂停语音；进入设置或详情 modal 路由同样保留消息区间，并保留编辑与未发送附件；隐藏时不标记已读，返回复用原节点并按已有重连逻辑补取新消息。导航离开该群及其话题范围时释放保留的群聊。其他页面完成离开时清理连续区间、局部输入、菜单和读取；仅在真正离开后执行，允许取消 iOS 返回手势。列表释放查询消费者，共享资料/置顶仍可复用。局部读取和查询消费者随页面释放。已发出的资料写操作仍可更新原聊天的共享数据，界面收尾只作用于原范围；菜单等使用 takeUntilDestroyed 的请求随组件销毁结束订阅，MessageOutbox 则跨页面继续。异步结果使用请求版本或进入上下文，旧结果不能覆盖新页面。[Ionic 生命周期](https://ionicframework.com/docs/angular/lifecycle)
+Ionic 会缓存页面实例。群聊进入其话题时保留群聊区间、消息 DOM 和滚动位置，取消未完成的消息读取、清理菜单和未提交附件并暂停语音；打开面板不触发主页面的 Ionic 离开生命周期，原位保留消息、编辑与未发送附件；遮罩覆盖期间不确认消息与表态已读，关闭后恢复阅读。置顶及转发记录页面保留来源区间和输入资源，返回复用原节点并按已有重连逻辑补取新消息。导航离开该群及其话题范围时释放保留的群聊。其他页面完成离开时清理连续区间、局部输入、菜单和读取；仅在真正离开后执行，允许取消 iOS 返回手势。列表释放查询消费者，共享资料/置顶仍可复用。局部读取和查询消费者随页面释放。已发出的资料写操作仍可更新原聊天的共享数据，界面收尾只作用于原范围；菜单等使用 takeUntilDestroyed 的请求随组件销毁结束订阅，MessageOutbox 则跨页面继续。异步结果使用请求版本或进入上下文，旧结果不能覆盖新页面。[Ionic 生命周期](https://ionicframework.com/docs/angular/lifecycle)
 
-分栏下 App 持有 sidebarSelection，分类切换不改路由；单列分类共用 ChatListPage，通过无组件的子路由保留分类地址；普通分类之间切换使用 replaceUrl 替换当前历史项，打开归档和好友请求历史仍新增历史项。ChatList 保留四个 ChatListContent，仅起点与终点参与切换动画，各分类保留自己的滚动位置，只有当前分类激活查询和续页。ChatLink 根据静态路由数据创建设置或详情 modal，离开时关闭自己的实例；异步读取和呈现完成时校验页面版本，旧页面不能留下弹窗。关闭使用浏览器历史，直接打开且无应用内前页时回到聊天列表。ConversationNavigation.open 统一收藏、搜索、媒体定位、话题、好友资料、创建/加入与通知入口：关闭弹层并打开所属会话；目标 URL 已相同时通过 requests$ 定位，否则由路由输入触发一次定位。goTo 供当前会话接收列表点击等即时指令，不保存第二份导航状态。
+分栏下 App 持有 sidebarSelection，分类切换不改路由；单列分类共用 ChatListPage，通过无组件的子路由保留分类地址；普通分类之间切换使用 replaceUrl 替换当前历史项，打开归档和好友请求历史仍新增历史项。ChatList 保留四个 ChatListContent，仅起点与终点参与切换动画，各分类保留自己的滚动位置，只有当前分类激活查询和续页。ChatLink 在应用壳中维护一个稳定面板容器，PanelPage 根据静态配置加载内容并在销毁时取消预读取。关闭与内部返回遵循 PanelNavigation 的 URL 与历史规则；详情直接进入时以所属聊天为底层，通用面板以聊天列表为底层。ConversationNavigation.open 统一收藏、搜索、媒体定位、话题、好友资料、创建/加入与通知入口：导航成功后关闭局部弹层，失败保留原操作界面；目标 URL 已相同时通过 requests$ 定位，否则由路由输入触发一次定位。goTo 供当前会话接收列表点击等即时指令，不保存第二份导航状态。
 
 ## 实时事件与未推送的数据
 
@@ -279,7 +279,7 @@ NotificationCategory 分别调用 `GET /users/me/notification-exceptions?kind=gr
 
 静音与归档通过 ChatStore 乐观修改共享字段；归档与取消归档只改变 archived，保留原有通知偏好。兼容的 chatArchiveStateChanged 事件携带实际 mutedUntil，不能把归档视为永久静音或把取消归档视为取消静音。话题订阅修改已知订阅状态；未知状态在写入后读取。失败只回退版本仍属于本次操作的字段，后到的推送或选择优先。汇总计数由服务端在写入提交后推送更新。SavedMessageList 取消收藏时先移除快照，失败且列表未重置时按原位置恢复。
 
-媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。每次路由导航关闭已经存在的 modal、popover、alert 和 action-sheet，Toast 保留自己的生命周期。
+媒体查看通过 `/media` 路由打开，完整相册和选中位置保存在浏览器 history.state，支持返回、前进和刷新，不把签名附件 URL 放入地址。直接复制该地址不携带相册；对外分享继续使用消息链接。导航成功后关闭局部 modal、popover、alert 和 action-sheet；路由面板由面板状态管理，不参与全局关闭，Toast 保留自己的生命周期。
 
 会话集合由 conversation-views 定义，列表筛选和汇总请求共用 categories、include、exclude、archived 的语义；主聊天与 thread 分开选择，显式加入不绕过成员、订阅或归档条件。集合消息数包含静音；协议同时提供 `unreadUnmutedMessageCount` 和 `unreadUnmutedConversationCount` 区分未静音消息数与会话数，tab 数字和列表标题都使用 `unreadUnmutedConversationCount`，会话内标题使用该会话读状态的未读数。`unreadAttentionCount` 包含群聊及群聊话题的全部未读提及/回复；tab badge 与列表标题的 mention 使用 `unreadUnmutedAttentionCount`，排除静音主聊天和已归档话题，会话内标题使用该会话读状态的 `unreadMentions`。话题列表通过响应的 `chatKind` 区分群聊和私聊，不等待父聊天详情。行内 `@` 仍使用单会话 `unreadMentions`，通过主聊天有效静音或话题 archived 决定灰色。重叠集合各自计数，不能相加充当全局总数。完整汇总独立于列表分页；后端在消息、编辑、撤回、已读、订阅、归档、静音与成员关系变化后合并更新，并按最近静音到期时间调度刷新，不依赖前端已加载的聊天。当前尚未提供自定义 tab 编辑界面，汇总协议支持显式混合会话集合。
 
@@ -293,7 +293,7 @@ Push 注册按当前账号、设备标识及浏览器订阅内容复用会话内
 
 `MessagePreview` 按 messageType 判别 placeholder，再用固定枚举将 message 原因代码映射到翻译键；正文复用该预览，收藏和记录 DTO 保留原类型与代码。应用生成的通知使用相同映射，后台 Web Push 保留服务端的回退文案。既有占位消息再次转发不列入待确认替换集合。
 
-隐私首页独立读取 `GET /blocks`、`GET /friends/me/settings`、`/me/presence-settings` 与 `/me/read-receipt-settings`，不以本地默认值填充未完成或失败的摘要。子页通过 ChatLink 路由打开，返回时重新创建首页并读取最新设置；拉黑列表读取 `GET /blocks`，用户项链接到现有资料页，复用其中的解除拉黑与关系刷新流程。
+隐私首页独立读取 `GET /blocks`、`GET /friends/me/settings`、`/me/presence-settings` 与 `/me/read-receipt-settings`，不以本地默认值填充未完成或失败的摘要。子页通过面板导航打开，返回时保留首页实例并重新读取最新设置，已知摘要在刷新期间继续展示；拉黑列表读取 `GET /blocks`，用户项链接到现有资料页，复用其中的解除拉黑与关系刷新流程。
 
 ## 系统消息链接
 
@@ -329,6 +329,18 @@ ConversationPage 按主聊天、新话题、已有话题回复计算发送权限
 
 隐私例外保存成功后通过 ChatStore.privacyOverrides$ 更新仍挂载的好友资料并使旧读取失效；单项保存同时失效相应在线状态或已读回执快照。批量清空已读回执例外由后端仅向实际修改的好友私聊发送 `readReceiptChanged`，客户端通过该 WS 事件失效对应私聊及话题回执；HTTP 成功后不再执行全局回执失效或重复补读，无关聊天保留原回执。账号切换清除例外列表及选择器，迟到请求不能写入新账号；刷新期间保留已知行，初次读取失败不显示空列表。返回隐私首页时重新读取摘要。
 
-ChatLink 的好友验证路由通过 canDeactivate 检查 modal.canDismiss；弹窗关闭、返回按钮和浏览器返回共用未保存问题确认。只有路由守卫同意离开后 App 才关闭现有弹层，取消导航保留表单。保存成功或确认放弃后不重复确认。
+PanelNavigation 使用按类型命名的查询参数保存当前面板层级，例如 `?settings=privacy/blocked-users&profile=2`。面板参数从左到右表示从底层到顶层，最后一个显示；非面板参数不参与层级。设置、当前聊天信息、搜索、邀请、媒体和创建等首页使用无值参数，例如 `?settings`、`?info`、`?search`、`?media`；资料使用 `profile=2`，表态使用 `reactions=200`，贴纸与贴纸包分别使用 `sticker=123`、`stickers=123`，加入群使用 `join=code`，创建群和添加好友分别使用 `create`、`add-friend`。
 
-资料侧栏的隐私、群管理、邀请与图片/视频/文件切换由 ChatDetails 局部状态驱动，不改变会话路由。首页的内容列表在进入二级页时保留实例，返回不重复读取；邀请和媒体组件按进入/离开创建和释放；首页不读取媒体列表或数量，打开媒体页才按当前聊天与类别读取。退出媒体页取消未完成读取；返回首页复用保留的列表与滚动位置。现有好友隐私和群设置保存接口、共享状态与权限更新路径不变。
+设置内部的实际父子链压缩到同一个值，例如 `settings=privacy/blocked-users`、`settings=notifications/dm`、`settings=stickers/123`。跳过父页的稀疏链保留显式标记，例如 `settings=~privacy` 只有隐私页，`settings=~settings~blocked-users` 不补出隐私页。当前聊天或话题的信息页使用 `info=images`、`info=management` 等可读内部页，用户资料内部页使用 `profile=2/privacy`；其他聊天的面板值保留完整所属聊天路径。
+
+每种类型只保留一个面板流程。同类新对象替换旧对象并移到最上层，其他类型保持相对顺序；设置内部切换保留实际经过且仍属于目标页的父级，移除旧分支。替换新增浏览器历史，因此原窗口返回可恢复替换前的界面；当前链接不再携带被替换的对象。退出检查覆盖当前顶层以及所有将被移除的面板，包括被其他类型覆盖的未保存表单；取消时 URL、输入和实例保持不变。
+
+PanelUrlSerializer 按原始参数顺序解析，兼容绝对路径、重复 panel 参数及单个 panel 的旧链格式；重复的同名参数按最后出现位置归并，输出不保留重复面板 key。参数顺序属于导航协议，不排序。命名参数的值保留可读斜杠，其他参数和 fragment 继续使用 Angular 默认编码。旧入口路径仍由守卫兼容，内部组件继续接收原有面板路径及 view 值。
+
+`history.state.panelDepth` 记录当前流程实际新增的历史步数，返回退一步，关闭回到流程起点并清除起点已有的面板参数；直接打开或复制链接时按 URL 的实际面板链退回，资料内部页先返回其首页。复制链接不复制浏览器操作历史，不人为补写历史条目；页面按钮可以逐层返回，浏览器返回仍遵循新标签页自己的历史。媒体载荷继续保存在 history.state，不放入 URL；只有媒体地址时不能恢复相册。
+
+主路由守卫在查询参数变化和主页面切换时检查当前面板退出条件。好友验证注册未保存问题检查，浏览器返回、面板按钮及遮罩退出共用检查；保存成功先结束保存状态再返回。取消导航保留表单和历史位置。浏览器返回遇到可见的局部弹层时先关闭该弹层并取消主导航。会话跳转失败保留来源界面，只有成功后才清理局部弹层。
+
+资料侧栏的隐私、群管理、邀请与图片/视频/文件切换通过面板地址的内部页后缀驱动，不改变会话主路径。首页的内容列表在进入二级页时保留实例，返回不重复读取；邀请和媒体组件按进入/离开创建和释放；首页不读取媒体列表或数量，打开媒体页才按当前聊天与类别读取。退出媒体页取消未完成读取；返回首页复用保留的列表与滚动位置。好友隐私子页等待好友关系确认，群管理和邀请子页等待本人群角色确认；列表摘要中的未知角色不视为无权限。加载失败在原页重试，只有确认无权限后才退出子页，并原位替换对应面板地址；被其他面板覆盖时也只更新所属资料页，保留来源层级和关闭深度。现有好友隐私和群设置保存接口、共享状态与权限更新路径不变。
+
+话题信息面板优先复用当前 ConversationPage 中同一聊天、同一话题的根消息，并继续接收其更新；只有来源不匹配或缺少根消息时才读取消息接口。面板遮挡会话时结束可见表态会话并使在途快照失效，保留已有跳转目标；直接进入其他会话不确认遮挡期间的新表态，关闭面板恢复可见后重新读取并按服务端快照边界确认。

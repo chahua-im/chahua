@@ -1,37 +1,37 @@
-import { Preferences } from '../preferences';
-import { localeLabels } from '../locale';
-import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
-import { RouterLink } from '@angular/router';
 import { Component, computed, inject, isDevMode, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import {
   IonButton,
   IonButtons,
   IonContent,
   IonHeader,
   IonIcon,
+  IonInput,
   IonItem,
   IonLabel,
   IonList,
   IonNote,
-  IonInput,
   IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
 import { translateSignal, TranslocoPipe } from '@jsverse/transloco';
 import {
-  languageOutline,
-  happyOutline,
+  chatbubblesOutline,
   constructOutline,
   eyeOutline,
+  happyOutline,
+  languageOutline,
   notificationsOutline,
   refreshOutline,
-  chatbubblesOutline,
 } from 'ionicons/icons';
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { AppUpdates, UpdateCheckResult } from '../../pwa/app-updates';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { devBackendEnabled, SessionStore } from '../../session/session-store';
+import { localeLabels } from '../locale';
+import { Preferences } from '../preferences';
 
 @Component({
   selector: 'app-settings',
@@ -59,7 +59,7 @@ import { devBackendEnabled, SessionStore } from '../../session/session-store';
   host: { class: 'ion-page' },
 })
 export class Settings {
-  private readonly modals = inject(ModalController);
+  private readonly panels = inject(PanelNavigation);
 
   protected readonly session = inject(SessionStore);
   protected readonly updates = inject(AppUpdates);
@@ -101,7 +101,7 @@ export class Settings {
   }
 
   protected close() {
-    return this.modals.dismiss();
+    return this.panels.close();
   }
 
   protected async checkUpdates() {

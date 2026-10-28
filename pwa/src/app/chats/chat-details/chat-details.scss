@@ -7,16 +7,23 @@ ion-content {
   --padding-top: var(--ion-safe-area-top, 0px);
   --padding-bottom: var(--ion-safe-area-bottom, 0px);
 }
-.close-button {
+.close-button,
+.back-button {
   width: 44px;
   height: 44px;
   margin: 0;
   --padding-start: 0;
   --padding-end: 0;
   top: calc(var(--ion-safe-area-top, 0px) + 4px);
+}
+.close-button {
   inset-inline-end: 4px;
 }
-.close-button ion-icon {
+.back-button {
+  inset-inline-start: 4px;
+}
+.close-button ion-icon,
+.back-button ion-icon {
   font-size: 28px;
 }
 .profile {

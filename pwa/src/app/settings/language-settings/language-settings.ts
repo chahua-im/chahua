@@ -1,5 +1,4 @@
 import { Component, computed, inject, signal, viewChild } from '@angular/core';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -9,16 +8,17 @@ import {
   IonItem,
   IonList,
   IonNote,
-  IonSpinner,
   IonRadio,
   IonRadioGroup,
+  IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
 import type { RadioGroupCustomEvent } from '@ionic/core';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline } from 'ionicons/icons';
 import { Localization } from '../../i18n/localization';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { localeLabels, supportedLocales, type AppLocale } from '../locale';
 import { Preferences } from '../preferences';
@@ -49,7 +49,7 @@ import { Preferences } from '../preferences';
 export class LanguageSettings {
   protected readonly preferences = inject(Preferences);
   private readonly localization = inject(Localization);
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly backIcon = chevronBackOutline;
   protected readonly locales = supportedLocales.map((locale) => ({ locale, label: localeLabels[locale] }));
   protected readonly saving = signal(false);

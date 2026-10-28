@@ -1,7 +1,7 @@
 <ion-header>
   <ion-toolbar>
     <ion-buttons slot="start">
-      <ion-button (click)="modals.dismiss()">
+      <ion-button (click)="panels.back()">
         <ion-icon slot="icon-only" [icon]="backIcon"></ion-icon>
       </ion-button>
     </ion-buttons>
@@ -66,11 +66,13 @@
     </ion-item>
   </ion-list>
   <ion-list [inset]="true">
-    @if (loading()) {
+    @if (loading() && !loaded()) {
       <ion-item lines="none"><ion-spinner /></ion-item>
-    } @else if (loadError()) {
+    }
+    @if (loadError()) {
       <app-load-error compact [message]="'settings.stickers.loadFailed' | transloco" (retry)="load()" />
-    } @else {
+    }
+    @if (loaded()) {
       <ion-reorder-group [disabled]="savingOrder()" (ionItemReorder)="reorder($event)">
         @for (pack of orderedPacks(); track pack.id) {
           @if (

@@ -1,16 +1,8 @@
 @use '../sticky-avatar';
-:host:has(> .details-sidebar) {
+:host.details-open {
   padding-inline-end: 360px;
 }
 
-.details-sidebar {
-  position: absolute;
-  top: 0;
-  inset-inline-end: 0;
-  width: 360px;
-  height: 100%;
-  border-inline-start: 1px solid var(--ion-color-light-shade);
-}
 .sidebar-icon {
   width: 26px;
   height: 26px;
