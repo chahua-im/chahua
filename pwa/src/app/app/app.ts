@@ -11,7 +11,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { GuardsCheckEnd, NavigationEnd, NavigationStart, Router } from '@angular/router';
+import { NavigationEnd, Router } from '@angular/router';
 import {
   IonApp,
   IonButton,
@@ -26,11 +26,13 @@ import {
 } from '@ionic/angular';
 import { translateSignal, TranslocoPipe } from '@jsverse/transloco';
 import { filter, map, TimeoutError } from 'rxjs';
+import { ChatLink } from '../chats/chat-link/chat-link';
 import { ChatList } from '../chats/chat-list/chat-list';
 import { listSelection, ListTab, type ListSelection } from '../chats/list-tabs';
-import { PushNotifications } from '../pwa/push-notifications';
-import { NotificationPrompt } from '../pwa/notification-prompt/notification-prompt';
+import { PanelNavigation } from '../navigation/panel-navigation';
 import { AppUpdates } from '../pwa/app-updates';
+import { NotificationPrompt } from '../pwa/notification-prompt/notification-prompt';
+import { PushNotifications } from '../pwa/push-notifications';
 import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { SessionStore } from '../session/session-store';
 
@@ -64,12 +66,14 @@ enum EntryState {
     IonSplitPane,
     IonToast,
     ChatList,
+    ChatLink,
     NotificationPrompt,
     TranslocoPipe,
   ],
 })
 export class App {
   private readonly router = inject(Router);
+  private readonly panels = inject(PanelNavigation);
   private readonly document = inject(DOCUMENT);
   private readonly notifications = inject(PushNotifications);
   protected readonly landingPage = toSignal(
@@ -118,14 +122,7 @@ export class App {
   constructor() {
     inject(DestroyRef).onDestroy(() => clearTimeout(this.slowTimer));
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
-      if (event instanceof GuardsCheckEnd && event.shouldActivate) {
-        // Close overlays only after guards accept navigation, preserving unsaved forms on cancellation.
-        this.document
-          .querySelectorAll<
-            HTMLIonModalElement | HTMLIonPopoverElement | HTMLIonAlertElement | HTMLIonActionSheetElement
-          >('ion-modal, ion-popover, ion-alert, ion-action-sheet')
-          .forEach((overlay) => void overlay.dismiss(undefined, 'navigate'));
-      }
+      if (event instanceof NavigationEnd) void this.panels.dismissTransientOverlays();
     });
     afterRenderEffect(() => this.updates.setInteractive(!this.landingPage() && !!this.session.user()));
     this.session.restoreToken();

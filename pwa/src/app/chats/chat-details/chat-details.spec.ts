@@ -11,18 +11,19 @@ import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-u
 import {
   ChatAttachmentKindFilter,
   FriendPresenceOverride,
-  PrivacyExceptionKind,
-  MembershipMessageVisibility,
   GroupKind,
   GroupRole,
-  SpeakingMode,
+  MembershipMessageVisibility,
+  PrivacyExceptionKind,
   ServerWsMessageType,
+  SpeakingMode,
   type ServerWsMessage,
 } from '../../../generated/models';
 import { Connection } from '../../api/connection';
 import { jsonInterceptor } from '../../api/json.interceptor';
 import { decodeId, encodeId } from '../../api/snowflake-id';
 import { mockRealtime, testChat, testMessage, testUser, wireChat, wireMessage } from '../../api/testing';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Presence } from '../../presence/presence';
 import { SessionStore } from '../../session/session-store';
 import { ChatListStore } from '../chat-list-store';
@@ -54,6 +55,20 @@ describe('ChatDetails', () => {
   });
   afterEach(() => http.verify());
 
+  function createDetails() {
+    const fixture = TestBed.createComponent(ChatDetails);
+    const panels = TestBed.inject(PanelNavigation);
+    vi.spyOn(panels, 'updatePage').mockImplementation(async (view) => {
+      fixture.componentRef.setInput('view', view);
+      return true;
+    });
+    vi.spyOn(panels, 'back').mockImplementation(async () => {
+      fixture.componentRef.setInput('view', DetailView.Info);
+      return true;
+    });
+    return fixture;
+  }
+
   async function open(
     chat: typeof wireChat & {
       mutedUntil?: string;
@@ -62,7 +77,7 @@ describe('ChatDetails', () => {
       speakingMode?: SpeakingMode;
     } = { ...wireChat },
   ) {
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     http.expectOne(`/_api/group/${wireChat.id}`).flush(chat);
@@ -93,6 +108,30 @@ describe('ChatDetails', () => {
     expect(fixture.componentInstance['canManage']()).toBe(true);
     expect(fixture.componentInstance['page']()).toBe(DetailView.Management);
     http.expectNone((request) => request.url.endsWith('/threads'));
+  });
+
+  it('returns a revoked management view to the overview in both the component and panel URL', async () => {
+    const fixture = await open({ ...wireChat, myRole: GroupRole.admin });
+    const component = fixture.componentInstance;
+    const path = `/chats/chat/${wireChat.id}/info`;
+    fixture.componentRef.setInput('panelPath', path);
+    await component['openPage'](DetailView.Management);
+    fixture.detectChanges();
+    const replace = vi.spyOn(TestBed.inject(PanelNavigation), 'replacePage').mockResolvedValue(true);
+    events.next({
+      type: ServerWsMessageType.memberSpeakingModeChanged,
+      payload: {
+        chatId: testChat.id,
+        uid: testUser.uid,
+        role: GroupRole.member,
+        speakingMode: SpeakingMode.unrestricted,
+        groupSpeakingMode: SpeakingMode.unrestricted,
+        effectiveSpeakingMode: SpeakingMode.unrestricted,
+      },
+    });
+    fixture.detectChanges();
+    expect(component['page']()).toBe(DetailView.Info);
+    expect(replace).toHaveBeenCalledExactlyOnceWith(path, DetailView.Info);
   });
 
   it('saves group visibility, disables changes while saving and restores the saved option after a failure', async () => {
@@ -376,7 +415,7 @@ describe('ChatDetails', () => {
   it('shows cached information and loads topics while details are still pending', async () => {
     const store = TestBed.inject(ChatStore);
     store.acceptChats([{ ...testChat, mutedUntil: '9999-12-31T23:59:59Z' }], store.snapshot());
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     const details = http.expectOne(`/_api/group/${wireChat.id}`);
@@ -394,7 +433,7 @@ describe('ChatDetails', () => {
   it('reuses shared details when the panel is reopened', async () => {
     const first = await open();
     first.destroy();
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.profile h2').textContent.trim()).toBe(testChat.name);
@@ -406,7 +445,7 @@ describe('ChatDetails', () => {
 
   it('keeps cached information and media available after detail loading fails', async () => {
     TestBed.inject(ChatStore).remember([testChat]);
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     http.expectOne((req) => req.url.endsWith('/threads')).flush({ threads: [] });
@@ -427,7 +466,7 @@ describe('ChatDetails', () => {
   it('loads a known peer relationship in parallel without blocking the profile or media', async () => {
     const peer = { uid: 2, username: '朋友', gender: 0 };
     TestBed.inject(ChatStore).remember([{ ...testChat, kind: GroupKind.dm, peer }]);
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     const details = http.expectOne(`/_api/group/${wireChat.id}`);
@@ -466,7 +505,7 @@ describe('ChatDetails', () => {
   });
 
   it('shows an uncached profile before its friend relationship arrives', async () => {
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ion-content > .page-loading')).not.toBeNull();
@@ -488,8 +527,41 @@ describe('ChatDetails', () => {
     fixture.detectChanges();
   });
 
+  it('keeps a directly opened privacy page through delayed relationship loading and retry', async () => {
+    const fixture = createDetails();
+    const component = fixture.componentInstance;
+    fixture.componentRef.setInput('user', { uid: 2, username: '朋友', gender: 0 });
+    fixture.componentRef.setInput('view', DetailView.Privacy);
+    fixture.detectChanges();
+    expect(component['page']()).toBe(DetailView.Privacy);
+    expect(fixture.nativeElement.querySelector('ion-list ion-spinner')).not.toBeNull();
+    await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({}, { status: 503, statusText: 'Unavailable' }));
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['page']()).toBe(DetailView.Privacy);
+    const retry = fixture.nativeElement.querySelector(
+      'ion-content:not([hidden]) app-load-error ion-button',
+    ) as HTMLElement;
+    expect(retry).not.toBeNull();
+    retry.click();
+    await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true }));
+    await vi.waitFor(() => http.expectOne('/_api/friends/2/presence-settings').flush({ override: 'share' }));
+    http.expectOne('/_api/friends/2/read-receipt-settings').flush({ override: 'hide' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['page']()).toBe(DetailView.Privacy);
+    expect(fixture.nativeElement.querySelectorAll('ion-select')).toHaveLength(2);
+    const refresh = component['relationshipQuery']()!.refresh();
+    await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: false }));
+    await refresh;
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component['page']()).toBe(DetailView.Info);
+    expect(fixture.nativeElement.querySelector('ion-select')).toBeNull();
+  });
+
   it('does not let a prior friend presence response overwrite the newly selected friend', async () => {
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('user', { uid: 2, username: '甲', gender: 0 });
     fixture.detectChanges();
     await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true }));
@@ -516,7 +588,7 @@ describe('ChatDetails', () => {
   });
 
   it('keeps an open profile synchronized with exception edits and ignores older reads', async () => {
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('user', { uid: 2, username: '甲', gender: 0 });
     fixture.detectChanges();
     await vi.waitFor(() => http.expectOne('/_api/friends/2').flush({ peerUid: 2, isFriend: true }));
@@ -539,7 +611,7 @@ describe('ChatDetails', () => {
   });
 
   it('keeps the newest chat when a previous detail request completes later', async () => {
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     const previous = http.expectOne(`/_api/group/${wireChat.id}`);
@@ -710,13 +782,26 @@ describe('ChatDetails', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('dismisses the overlay when the close button is tapped in a modal context', async () => {
+  it('closes the panel flow when the close button is tapped', async () => {
     const fixture = await open();
-    fixture.componentRef.setInput('asModal', true);
     fixture.detectChanges();
-    const dismiss = vi.spyOn(TestBed.inject(ModalController), 'dismiss').mockResolvedValue(true);
+    const dismiss = vi.spyOn(TestBed.inject(PanelNavigation), 'close').mockResolvedValue(true);
     (fixture.nativeElement.querySelector('.close-button') as HTMLElement).click();
     expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers a separate return to the source when the profile has parent panels', async () => {
+    const panels = TestBed.inject(PanelNavigation);
+    const paths = signal<string[]>([]);
+    vi.spyOn(panels, 'paths').mockImplementation(paths);
+    const fixture = await open();
+    expect(fixture.nativeElement.querySelector('.back-button')).toBeNull();
+    paths.set(['/settings', '/profile/2']);
+    fixture.detectChanges();
+    const close = vi.spyOn(panels, 'close');
+    (fixture.nativeElement.querySelector('.back-button') as HTMLElement).click();
+    expect(panels.back).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it('shows thread details and switches one action from subscription to archive and unarchive', async () => {
@@ -795,7 +880,7 @@ describe('ChatDetails', () => {
 
   it('deletes a confirmed friend through the friend endpoint, not the group member endpoint', async () => {
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    const fixture = TestBed.createComponent(ChatDetails);
+    const fixture = createDetails();
     fixture.componentRef.setInput('chatId', testChat.id);
     fixture.detectChanges();
     http

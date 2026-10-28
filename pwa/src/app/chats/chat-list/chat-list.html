@@ -12,10 +12,7 @@
     <ion-toolbar>
       @if (list().archived || list().requestHistory) {
         <ion-buttons slot="start">
-          <ion-back-button
-            class="show-back-button"
-            [defaultHref]="outlet ? '/chats/' + list().tab : undefined"
-            (click)="back()"></ion-back-button>
+          <ion-button class="list-back" (click)="back()"><ion-icon slot="icon-only" [icon]="backIcon" /></ion-button>
         </ion-buttons>
         <ion-title>
           {{ (list().requestHistory ? 'chats.list.friendRequests' : 'chats.list.archived') | transloco }}

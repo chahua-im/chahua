@@ -11,11 +11,9 @@ import {
   viewChildren,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonAvatar,
   IonBadge,
-  IonBackButton,
   IonButton,
   IonButtons,
   IonContent,
@@ -31,17 +29,19 @@ import {
   IonSegmentButton,
   IonTitle,
   IonToolbar,
+  NavController,
   type SegmentCustomEvent,
 } from '@ionic/angular';
-import { addCircleOutline, bookmarkOutline, settingsOutline, downloadOutline } from 'ionicons/icons';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { addCircleOutline, bookmarkOutline, chevronBack, downloadOutline, settingsOutline } from 'ionicons/icons';
+import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { AppInstall } from '../../pwa/app-install';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
-import { VoiceBar } from '../../messages/voice-player/voice-bar';
 import { SessionStore } from '../../session/session-store';
 import { Preferences } from '../../settings/preferences';
-import { ChatListStore } from '../chat-list-store';
 import { AvatarColor, AvatarTextPipe } from '../avatar-text.pipe';
 import { ChatListContent } from '../chat-list-content/chat-list-content';
+import { ChatListStore } from '../chat-list-store';
 import { DirectorySearch } from '../directory-search/directory-search';
 import { isListTab, ListTab, type ListSelection } from '../list-tabs';
 
@@ -59,7 +59,6 @@ import { isListTab, ListTab, type ListSelection } from '../list-tabs';
     DirectorySearch,
     IonAvatar,
     IonBadge,
-    IonBackButton,
     IonButton,
     IonButtons,
     IonContent,
@@ -132,6 +131,8 @@ export class ChatList {
   protected readonly search = signal('');
   protected readonly ListTab = ListTab;
   protected readonly outlet = inject(IonRouterOutlet, { optional: true });
+  private readonly nav = inject(NavController);
+  protected readonly backIcon = chevronBack;
   protected readonly addIcon = addCircleOutline;
   protected readonly installer = inject(AppInstall);
   protected readonly savedIcon = bookmarkOutline;
@@ -142,7 +143,8 @@ export class ChatList {
     // The sidebar has no router outlet; returning there only changes its local selection.
     if (!this.outlet) {
       this.openList.emit({ tab: this.list().tab, archived: false, requestHistory: false });
-    }
+    } else if (this.outlet.canGoBack()) this.nav.back();
+    else void this.nav.navigateBack(['/chats', this.list().tab], { replaceUrl: true });
   }
 
   protected selectTab(event: SegmentCustomEvent) {

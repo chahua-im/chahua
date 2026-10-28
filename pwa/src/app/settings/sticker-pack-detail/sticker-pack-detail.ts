@@ -1,6 +1,5 @@
-import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import {
   AlertController,
   IonButton,
@@ -13,8 +12,8 @@ import {
   IonTitle,
   IonToast,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { chevronBackOutline, createOutline, trashOutline } from 'ionicons/icons';
 import { firstValueFrom } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
@@ -23,6 +22,7 @@ import type { StickerPackDetailResponse, StickerSummary } from '../../../generat
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { MediaLoaded } from '../../messages/media-loaded';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../../messages/media-processing/file-type';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -121,7 +121,7 @@ export class StickerPackDetail {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
   private readonly alerts = inject(AlertController);
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly session = inject(SessionStore);
   private readonly preferences = inject(StickerPreferences);
   protected readonly icons = { createOutline, trashOutline };
@@ -195,7 +195,7 @@ export class StickerPackDetail {
     try {
       await firstValueFrom(this.api.deletePack(pack.id));
       this.preferences.removePackOrderItem(pack.id);
-      await this.modals.dismiss();
+      await this.panels.back();
     } catch {
       this.busy.set(false);
       this.notice.set(this.transloco.translate('settings.stickerPack.deleteFailed'));
@@ -219,7 +219,7 @@ export class StickerPackDetail {
     try {
       await firstValueFrom(this.api.deleteSubscription(pack.id));
       this.preferences.removePackOrderItem(pack.id);
-      await this.modals.dismiss();
+      await this.panels.back();
     } catch {
       this.busy.set(false);
       this.notice.set(this.transloco.translate('settings.stickerPack.unsubscribeFailed'));

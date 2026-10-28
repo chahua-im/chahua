@@ -1,27 +1,27 @@
-import { Router } from '@angular/router';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, output, signal } from '@angular/core';
-import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
+import { Router } from '@angular/router';
 import {
   AlertController,
   IonButton,
   IonButtons,
+  IonCol,
   IonContent,
-  IonHeader,
   IonFooter,
   IonGrid,
-  IonRow,
-  IonCol,
+  IonHeader,
   IonIcon,
   IonItem,
   IonLabel,
   IonList,
   IonPopover,
+  IonRow,
   IonTitle,
   IonToolbar,
   ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 import { addOutline, cloudUploadOutline, cubeOutline, heart } from 'ionicons/icons';
 import { firstValueFrom, type Observable } from 'rxjs';
 import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
@@ -33,13 +33,14 @@ import type {
   StickerSummary,
 } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { SessionStore } from '../../session/session-store';
 import {
-  StickerPreferences,
-  sortStickerPacksByPreference,
-  sortFavoriteStickersByPreference,
   AUTO_SORT_LIMIT,
+  sortFavoriteStickersByPreference,
+  sortStickerPacksByPreference,
+  StickerPreferences,
 } from '../../settings/sticker-preferences';
 import { MediaLoaded } from '../media-loaded';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../media-processing/file-type';
@@ -90,6 +91,7 @@ export class StickerPicker {
   readonly packId = input<SnowflakeID>();
   readonly stickerId = input<SnowflakeID>();
   protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   private readonly router = inject(Router);
   private readonly api = inject(StickersService);
   protected readonly packs = signal<StickerPackSummary[]>([]);

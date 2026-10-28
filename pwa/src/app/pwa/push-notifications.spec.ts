@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { provideRouter, Router } from '@angular/router';
 import { SwPush } from '@angular/service-worker';
 import { ModalController } from '@ionic/angular';
 import { BehaviorSubject, NEVER, of, Subject, throwError } from 'rxjs';
@@ -8,10 +8,11 @@ import { vi } from 'vitest';
 import { PushService } from '../../generated/endpoints/push/push.service';
 import { ApiPushProvider, GroupKind } from '../../generated/models';
 import { Connection } from '../api/connection';
-import { testUser, testChat, testMessage } from '../api/testing';
 import { encodeId } from '../api/snowflake-id';
+import { testChat, testMessage, testUser } from '../api/testing';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
+import { PanelNavigation } from '../navigation/panel-navigation';
 import { SessionStore } from '../session/session-store';
 import { PushNotificationError, PushNotifications } from './push-notifications';
 
@@ -88,6 +89,20 @@ describe('PushNotifications', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('does not treat a covered conversation as being read, but permits a non-blocking sidebar', async () => {
+    const router = TestBed.inject(Router);
+    router.resetConfig([{ path: 'chats/chat/:id', children: [] }]);
+    await router.navigateByUrl('/chats/chat/9007199254740993');
+    const service = TestBed.inject(PushNotifications);
+    const panels = TestBed.inject(PanelNavigation);
+    expect(service['currentConversation'](testMessage)).toBe(true);
+    await router.navigateByUrl('/chats/chat/9007199254740993?panel=%2Fsettings');
+    expect(service['currentConversation'](testMessage)).toBe(false);
+    panels.largeScreen.set(true);
+    await router.navigateByUrl('/chats/chat/9007199254740993?panel=%2Fchats%2Fchat%2F9007199254740993%2Finfo');
+    expect(service['currentConversation'](testMessage)).toBe(true);
   });
 
   it('loads a thread subscription only when the notification decision depends on it', async () => {

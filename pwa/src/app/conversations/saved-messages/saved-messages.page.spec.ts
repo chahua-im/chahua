@@ -2,8 +2,8 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter, Router } from '@angular/router';
 import { By } from '@angular/platform-browser';
+import { provideRouter, Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { vi } from 'vitest';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
@@ -46,6 +46,7 @@ describe('SavedMessagesPage', () => {
         provideRouter([
           { path: 'chats/saved', children: [] },
           { path: 'media', children: [], data: { modal: true } },
+          { path: 'chats/saved/500/forwarded', children: [], data: { preserveConversation: true } },
           { path: 'chats', children: [] },
         ]),
         provideHttpClient(withInterceptors([jsonInterceptor])),
@@ -181,6 +182,20 @@ describe('SavedMessagesPage', () => {
     page.ionViewDidLeave();
     await router.navigateByUrl('/chats');
     expect(fixture.nativeElement.querySelector('app-saved-message-list')).toBeNull();
+  });
+
+  it('retains the loaded collection and pagination while reading forwarded records', async () => {
+    await saved();
+    const collection = list();
+    const node = fixture.nativeElement.querySelector('app-message');
+    await TestBed.inject(Router).navigateByUrl('/chats/saved/500/forwarded');
+    page.ionViewDidLeave();
+    expect(list()).toBe(collection);
+    await TestBed.inject(Router).navigateByUrl('/chats/saved');
+    page.ionViewDidEnter();
+    expect(fixture.nativeElement.querySelector('app-message')).toBe(node);
+    expect(list()['nextCursor']()).toBe(encodeId('499'));
+    http.expectNone('/_api/saved-messages?limit=50');
   });
 
   it('offers the saved-message menu for system snapshots without per-row action buttons', async () => {

@@ -36,10 +36,15 @@
   </ion-header>
 }
 <ion-content #overview appScrollbars color="light" [hidden]="page() !== View.Info">
+  @if (hasParentPanel()) {
+    <ion-button class="back-button" slot="fixed" fill="clear" [disabled]="busy()" (click)="back()">
+      <ion-icon slot="icon-only" [icon]="icons.chevronBackOutline" />
+    </ion-button>
+  }
   <ion-button class="close-button" slot="fixed" fill="clear" (click)="close()">
     <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
   </ion-button>
-  @if (view() === View.Info || page() === View.Info) {
+  @if (overviewVisited() || page() === View.Info) {
     @if (chat() || person()) {
       <div class="profile ion-text-center ion-padding">
         <div class="profile-avatar"><app-chat-avatar [entry]="avatarEntry()" [size]="88" /></div>
@@ -357,6 +362,13 @@
                   [message]="'settings.readReceipt.friendLoadFailed' | transloco"
                   (retry)="loadFriendReadReceiptSettings()" />
               }
+            } @else if (relationshipQuery()?.error()) {
+              <app-load-error
+                compact
+                [message]="'chats.details.loadFailed' | transloco"
+                (retry)="relationshipQuery()?.refresh()" />
+            } @else {
+              <ion-item lines="none"><ion-spinner /></ion-item>
             }
           </ion-list>
         }

@@ -4,6 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { AlertController, ModalController, provideIonicAngular } from '@ionic/angular';
 import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
 import { FriendAddVerificationMode as Mode } from '../../../generated/models';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { FriendVerificationSettings } from './friend-verification-settings';
 
 describe('Friend verification unsaved question', () => {
@@ -21,6 +22,7 @@ describe('Friend verification unsaved question', () => {
         provideHttpClientTesting(),
         provideChahuaBaseUrl('/_api'),
         { provide: ModalController, useValue: { dismiss } },
+        { provide: PanelNavigation, useValue: { back: dismiss, close: dismiss, registerLeaveCheck: () => () => {} } },
         {
           provide: AlertController,
           useValue: { create: async () => ({ present: async () => {}, onDidDismiss: confirm }) },
@@ -69,6 +71,6 @@ describe('Friend verification unsaved question', () => {
     request.flush({ mode: Mode.question, question: '问题' });
     await success;
     expect(component['dirty']()).toBe(false);
-    expect(dismiss).toHaveBeenCalledWith(undefined, 'saved');
+    expect(dismiss).toHaveBeenCalledWith();
   });
 });

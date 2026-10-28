@@ -1,15 +1,3 @@
-import { ForwardPicker } from '../../messages/forward-picker/forward-picker';
-import { ForwardedLabel } from '../../messages/forwarded-label';
-import { ConversationViewportHeader } from '../conversation-viewport-header';
-import {
-  canForward,
-  canSelect,
-  forwardSourceMessage,
-  ForwardSelectionError,
-  MAX_FORWARD_MESSAGES,
-  type ForwardSourcesResult,
-} from '../../messages/forwarding';
-import { userColors } from '../../messages/user-colors';
 import { DOCUMENT, Location, NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
@@ -24,13 +12,12 @@ import {
   input,
   linkedSignal,
   signal,
-  type Signal,
   untracked,
   viewChild,
   viewChildren,
+  type Signal,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   ActivatedRoute,
   NavigationEnd,
@@ -39,7 +26,6 @@ import {
   Router,
   RouterLink,
 } from '@angular/router';
-import { MessageDatePipe } from '../../messages/message-date.pipe';
 import {
   IonAlert,
   IonBadge,
@@ -56,34 +42,35 @@ import {
   IonList,
   IonPopover,
   IonRouterOutlet,
-  NavController,
   IonSpinner,
   IonTitle,
-  IonToolbar,
   IonToast,
+  IonToolbar,
+  NavController,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import {
   archive,
   archiveOutline,
   arrowRedoOutline,
-  closeOutline,
-  trashOutline,
   arrowUndoOutline,
-  createOutline,
   at,
   chevronBack,
   chevronDown,
   chevronUpOutline,
-  heartOutline,
   closeCircleOutline,
+  closeOutline,
+  createOutline,
   ellipsisVertical,
+  heartOutline,
   informationCircleOutline,
   listOutline,
-  searchOutline,
-  returnUpForwardOutline,
-  returnDownBackOutline,
-  notificationsOutline,
   notificationsOffOutline,
+  notificationsOutline,
+  returnDownBackOutline,
+  returnUpForwardOutline,
+  searchOutline,
+  trashOutline,
 } from 'ionicons/icons';
 import { firstValueFrom, forkJoin, of, Subject, takeUntil, timer } from 'rxjs';
 import { ChatsService } from '../../../generated/endpoints/chats/chats.service';
@@ -94,34 +81,47 @@ import {
   MessageType,
   NotificationType,
   ServerWsMessageType,
-  type MessageResponse,
   type MentionInfo,
+  type MessageResponse,
   type PinResponse,
   type ThreadUpdatePayload,
 } from '../../../generated/models';
 import { Connection, ResyncReason } from '../../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { ChatAvatar, conversationAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { AvatarColor, AvatarTextPipe } from '../../chats/avatar-text.pipe';
+import { ChatAvatar, conversationAvatar } from '../../chats/chat-avatar/chat-avatar';
 import { ChatMute } from '../../chats/chat-mute/chat-mute';
-import { ChatDetails } from '../../chats/chat-details/chat-details';
-import { ChatStore, ChatChangeKind } from '../../chats/chat-store';
-import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
-import { MessageMenu } from '../../messages/message-menu/message-menu';
-import { MessageActions } from '../../messages/message-actions';
-import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
+import { ChatChangeKind, ChatStore } from '../../chats/chat-store';
 import { SpeakingAction } from '../../chats/speaking';
+import { ForwardPicker } from '../../messages/forward-picker/forward-picker';
+import { ForwardedLabel } from '../../messages/forwarded-label';
+import {
+  canForward,
+  canSelect,
+  ForwardSelectionError,
+  forwardSourceMessage,
+  MAX_FORWARD_MESSAGES,
+  type ForwardSourcesResult,
+} from '../../messages/forwarding';
+import { MessageActions } from '../../messages/message-actions';
+import { MessageComposer, type Composition } from '../../messages/message-composer/message-composer';
+import { MessageDatePipe } from '../../messages/message-date.pipe';
+import { MessageMenu } from '../../messages/message-menu/message-menu';
+import { MessageOutbox, type OutgoingMessage } from '../../messages/message-outbox';
 import { MessagePreview } from '../../messages/message-preview/message-preview';
-import { isMembershipMessage } from '../../messages/system-message';
 import { isVisibleMessage } from '../../messages/message-visibility';
 import { Message, type MessageContent } from '../../messages/message/message';
-import { VoicePlayback } from '../../messages/voice-player/voice-playback';
+import { isMembershipMessage } from '../../messages/system-message';
+import { userColors } from '../../messages/user-colors';
 import { VoiceBar } from '../../messages/voice-player/voice-bar';
+import { VoicePlayback } from '../../messages/voice-player/voice-playback';
+import { PanelNavigation } from '../../navigation/panel-navigation';
+import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { scrollActivity } from '../../scrolling/scroll-activity';
 import { SessionStore } from '../../session/session-store';
-import { GroupPresenceDisplay, UserPresenceDisplay } from '../../presence/presence-display';
 import { Preferences } from '../../settings/preferences';
+import { LoadError } from '../../ui/load-error/load-error';
 import {
   ConversationNavigation,
   ConversationTargetKind,
@@ -129,9 +129,9 @@ import {
   type ForwardDraftLocation,
 } from '../conversation-navigation';
 import { ConversationError, ConversationStore, PageDirection } from '../conversation-store';
+import { ConversationViewportHeader } from '../conversation-viewport-header';
 import { DraftStore } from '../draft-store';
 import { messageRows } from '../message-rows';
-import { LoadError } from '../../ui/load-error/load-error';
 
 function parseMessageId(id: string | null | undefined) {
   return id && /^[1-9]\d{0,18}$/.test(id) && BigInt(id) <= 9223372036854775807n ? encodeId(id) : undefined;
@@ -170,6 +170,7 @@ type ScrollPosition =
   styleUrls: ['../conversation-header.scss', './conversation.page.scss'],
   providers: [ConversationStore, MessageActions],
   host: {
+    '[class.details-open]': 'sidebarOpen()',
     '(dragover)': 'composer()?.dragover($event)',
     '(drop)': 'composer()?.drop($event)',
     '(document:visibilitychange)': 'visibilityChanged()',
@@ -186,7 +187,6 @@ type ScrollPosition =
     TranslocoPipe,
     GroupPresenceDisplay,
     UserPresenceDisplay,
-    ChatDetails,
     ChatMute,
     ChatAvatar,
     RouterLink,
@@ -218,15 +218,21 @@ type ScrollPosition =
   ],
 })
 export class ConversationPage {
+  readonly detailsContext = computed(() => ({
+    chatId: this.id(),
+    threadId: this.threadId(),
+    threadRoot: this.threadRoot(),
+  }));
   protected readonly stickySender = signal<MessageContent['sender'] | undefined>(undefined);
   protected readonly stickyOffset = signal(0);
   protected readonly stickyRow = signal<number | undefined>(undefined);
   private readonly wide = window.matchMedia('(min-width: 1200px)');
   protected readonly largeScreen = signal(this.wide.matches);
-  protected readonly sidebarOpen = signal(false);
+  private readonly panels = inject(PanelNavigation);
+  protected readonly sidebarOpen = computed(() => this.panels.sidebar());
   protected readonly infoIcon = informationCircleOutline;
   protected details() {
-    if (this.largeScreen()) this.sidebarOpen.update((open) => !open);
+    if (this.sidebarOpen()) void this.panels.close();
     else
       void this.router.navigate([
         '/chats/chat',
@@ -999,7 +1005,13 @@ export class ConversationPage {
   constructor() {
     // Selection is page state: Escape must leave it before the app-level shortcut leaves the chat.
     const escapeSelection = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || !this.selecting()) return;
+      if (
+        event.key !== 'Escape' ||
+        !this.selecting() ||
+        this.panels.paths().length ||
+        this.document.querySelector('ion-modal:not(.overlay-hidden), ion-alert:not(.overlay-hidden)')
+      )
+        return;
       event.preventDefault();
       event.stopImmediatePropagation();
       this.cancelSelection();
@@ -1228,7 +1240,17 @@ export class ConversationPage {
       this.rows();
       this.messageElements();
       this.position();
+      this.panels.covered();
       if (this.active()) void this.positionAndRead();
+    });
+    effect(() => {
+      if (this.panels.covered()) {
+        // Retain jump targets, but end the visible session and discard its pending snapshot.
+        // A later primary-page exit must not acknowledge reactions received behind the panel.
+        this.reactionSessionEntered = false;
+        this.reactionFresh = false;
+        this.reactionRequest = undefined;
+      } else if (this.entered) untracked(() => void this.enterReactionSession());
     });
     this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (
@@ -1524,7 +1546,7 @@ export class ConversationPage {
   }
 
   private async enterReactionSession() {
-    if (this.document.hidden || !this.isCurrent()) return;
+    if (this.document.hidden || this.panels.covered() || !this.isCurrent()) return;
     if (this.reactionRequest || this.reactionFresh) return;
     if (!this.reactionChanged && this.chatInfo.cachedUnreadReactions(this.id(), this.threadId()) === 0) {
       this.reactionSessionEntered = true;
@@ -1544,7 +1566,8 @@ export class ConversationPage {
         const response = await firstValueFrom(
           this.api.getChatReactions(chatId, { threadId }).pipe(takeUntilDestroyed(this.destroyRef)),
         );
-        if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden) return;
+        if (this.reactionRequest !== request || !this.isCurrent(entry) || this.document.hidden || this.panels.covered())
+          return;
         this.reactionJumpIds.update((ids) =>
           [...new Set([...ids, ...response.messageIds])]
             .filter((id) => request.readThrough == null || id > request.readThrough)
@@ -1589,7 +1612,7 @@ export class ConversationPage {
     const threadId = this.threadId();
     this.resetReactionSession();
     // The router already points at the destination during ionViewWillLeave.
-    if (entered && !this.document.hidden) await this.ackReactions(entry, chatId, threadId);
+    if (entered && !this.document.hidden && !this.panels.covered()) await this.ackReactions(entry, chatId, threadId);
   }
 
   protected async jumpToNextReaction() {
@@ -1803,7 +1826,14 @@ export class ConversationPage {
       below: Math.max(0, scroll.scrollHeight - top - height),
     };
     this.atBottom.set(bounds.below < 40);
-    if (!this.entered || this.document.hidden || this.conversation.loading() || this.position()) return bounds;
+    if (
+      !this.entered ||
+      this.document.hidden ||
+      this.panels.covered() ||
+      this.conversation.loading() ||
+      this.position()
+    )
+      return bounds;
     const rows = this.rows();
     const elements = this.confirmedElements();
     const viewport = scroll.getBoundingClientRect();

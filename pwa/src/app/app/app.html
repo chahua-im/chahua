@@ -19,6 +19,7 @@
         [swipeGesture]="false"
         (stackWillChange)="prepareTransition(outlet)"></ion-router-outlet>
     </ion-split-pane>
+    <app-chat-link [source]="outlet.isActivated ? outlet.component : null" />
     <app-notification-prompt />
   } @else {
     <ion-content appScrollbars>

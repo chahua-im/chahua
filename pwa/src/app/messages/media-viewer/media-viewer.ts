@@ -1,4 +1,3 @@
-import { Router } from '@angular/router';
 import {
   afterRenderEffect,
   Component,
@@ -11,8 +10,9 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { Router } from '@angular/router';
+import { IonIcon, IonSpinner } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { IonIcon, IonSpinner, ModalController } from '@ionic/angular';
 import {
   chevronBackOutline,
   chevronForwardOutline,
@@ -23,6 +23,7 @@ import {
   play,
   scanOutline,
 } from 'ionicons/icons';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { MediaKind } from '../message-attachments/media-kind';
 
 export interface ViewerMedia {
@@ -66,7 +67,7 @@ export class MediaViewer {
     play,
     scanOutline,
   };
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   private readonly viewport = viewChild<ElementRef<HTMLElement>>('viewport');
   private readonly gallery = viewChild<ElementRef<HTMLElement>>('gallery');
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
@@ -96,18 +97,13 @@ export class MediaViewer {
     this.resize(this.zoom() ? 1 : 2);
   }
   protected background(event: MouseEvent) {
-    if (event.target === event.currentTarget) void this.modals.dismiss();
+    if (event.target === event.currentTarget) void this.panels.back();
   }
   protected async fullscreen() {
     if (document.fullscreenElement) await document.exitFullscreen();
     else await this.host.nativeElement.requestFullscreen();
   }
   protected key(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      void this.modals.dismiss();
-      return;
-    }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault();
       this.move(event.key === 'ArrowRight' ? 1 : -1);

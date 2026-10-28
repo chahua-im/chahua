@@ -9,7 +9,7 @@ flowchart TD
   APP[App] --> LANDING[Landing]
   APP --> OUTLET[IonRouterOutlet]
   APP --> LIST[ChatList：分栏侧栏]
-  LINK --> SETTINGS[Settings]
+  PANEL --> SETTINGS[Settings]
   SETTINGS --> STICKERSET[StickerSettings]
   STICKERSET --> PACKDETAIL[StickerPackDetail]
   APP --> NOTIFICATIONS[NotificationPrompt]
@@ -21,13 +21,14 @@ flowchart TD
   OUTLET --> PAGE[ConversationPage]
   OUTLET --> PINS[PinnedMessagesPage]
   OUTLET --> SAVED[SavedMessagesPage]
-  OUTLET --> LINK[ChatLink]
+  APP --> LINK[ChatLink]
+  LINK --> PANEL[PanelPage]
   PAGE --> MSG[Message]
   PINS --> MSG
   PAGE --> MENU[MessageMenu]
   PINS --> MENU
   PAGE --> COMPOSER[MessageComposer]
-  PAGE --> DETAILS[ChatDetails：侧栏或 modal]
+  PANEL --> DETAILS[ChatDetails：侧栏或 modal]
   PAGE --> PRESENCE[UserPresenceDisplay / GroupPresenceDisplay]
   COMPOSER --> RECORDER[VoiceRecorder]
   COMPOSER --> STICKERS[StickerPicker]
@@ -62,21 +63,23 @@ flowchart TD
 
 收藏、搜索、附件定位、话题列表、好友资料、创建/加入和通知通过 ConversationNavigation.open 关闭弹层并进入会话；消息定位由目标页面执行，同一路由的重复定位通过 requests$ 交给已有页面，不保存额外导航状态。
 
-MediaViewer、ChatDetails 的独立模式、StartChat、StickerPicker 的详情模式和设置各页由 ChatLink 按路由创建和关闭 modal。简单展示组件不为数据传递新建服务。
+panel-url 将按类型命名的有序查询参数转换为内部面板路径，并归并同类面板；PanelNavigation 管理面板链、替换退出检查与历史，PanelUrlSerializer 保留参数顺序和查询值中的可读斜杠。
+
+ChatLink 在应用壳中承载一个稳定的路由面板容器，PanelPage 按 panel-routes 的静态配置加载 MediaViewer、ChatDetails、StartChat、StickerPicker 和设置页面；父页隐藏时保留组件，返回后恢复。PanelPage 仅在已挂载的隐藏页面变为可见时调用 panelResume，包括从复制链接创建后首次显示的父页；初始可见页面由组件自身加载。简单展示组件不为数据传递新建服务。
 
 ## 根布局与聊天列表
 
-| 组件               | 输入、输出与局部字段                                                                                                                                   | 数据依赖                                                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| App                | landingPage、启动 loading/slow/error、entryState、splitPaneVisible、sidebarSelection、浏览器返回动画状态、全局更新 toast 和可交互标记                  | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                                                                              |
-| NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                                                   | PushNotifications                                                                                                                     |
-| ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                                                        | 将 selection 和 active 传给单列 ChatList                                                                                              |
-| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                                                           | SessionStore、ChatListStore、Preferences、AppInstall；控制分类面板与菜单，active 时同步 selection，头像菜单提供收藏、设置与安装入口   |
-| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数                                   | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence                                              |
-| ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量                                |
-| ChatAvatar         | entry、size、online；当前头像和角标图片的加载状态                                                                                                      | 文字占位保持至当前 URL 图片成功加载；同 URL 的 entry 更新保留加载状态，URL 切换才重置并忽略旧事件；失败回退；展示在线圆点，无业务请求 |
-| DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                                                  | GroupsService、UsersService；选择用户或打开资料                                                                                       |
-| ChatLink           | 路由参数；failed                                                                                                                                       | 解析静态路由配置、按需查询用户／话题；负责详情弹窗与浏览器历史的生命周期（消息短链接由路由守卫解析）                                  |
+| 组件               | 输入、输出与局部字段                                                                                                                                   | 数据依赖                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| App                | landingPage、启动 loading/slow/error、entryState、splitPaneVisible、sidebarSelection、浏览器返回动画状态、全局更新 toast 和可交互标记                  | SessionStore；路由决定单列页面，分栏分类选择保存在根组件                                                                                   |
+| NotificationPrompt | 首次通知询问；弹窗开关、允许按钮等待状态、toast 引用                                                                                                   | PushNotifications                                                                                                                          |
+| ChatListPage       | 路由分类/归档范围；active；接收 openList 并导航                                                                                                        | 将 selection 和 active 传给单列 ChatList                                                                                                   |
+| ChatList           | selection、active → openList；搜索词、原生 segment 与内容 ID                                                                                           | SessionStore、ChatListStore、Preferences、AppInstall；控制分类面板与菜单，active 时同步 selection，头像菜单提供收藏、设置与安装入口        |
+| ChatListContent    | selection、active → openList；刷新状态、查询消费者、显示准备状态、派生列表行、一个可见行 observer 和在线范围释放函数                                   | ChatListStore、ChatStore、DraftStore、MessageOutbox、Preferences、SessionStore、Presence                                                   |
+| ChatListItem       | entry（含未读数、unreadMentions 与 unreadReactions）、online、button、两侧 actions、actionsAlwaysVisible → selected；pendingAction、操作失败与滑动引用 | 接收行数据和回调，不自行读取聊天或在线数据；mention 显示 @ 徽标，reaction 只显示心形徽标，均不显示数量                                     |
+| ChatAvatar         | entry、size、online；当前头像和角标图片的加载状态                                                                                                      | 文字占位保持至当前 URL 图片成功加载；同 URL 的 entry 更新保留加载状态，URL 切换才重置并忽略旧事件；失败回退；展示在线圆点，无业务请求      |
+| DirectorySearch    | query、usersOnly、selecting → selected；群/用户结果、群游标和请求版本                                                                                  | GroupsService、UsersService；选择用户或打开资料                                                                                            |
+| ChatLink           | 响应式容器、保留关闭动画中的页面；PanelPage 持有解析结果与 failed                                                                                      | 容器负责响应式呈现和弹窗生命周期；PanelPage 解析配置并查询用户／话题；PanelNavigation 管理 URL、历史与退出检查（消息短链接由独立守卫解析） |
 
 ChatListPage 在 ionViewWillEnter 中先同步检测缓存视图，再激活列表查询，使 pop 动画使用已更新的本地行；ionViewDidLeave 同步释放子查询消费者。
 
@@ -84,12 +87,12 @@ ChatListContent 的普通会话行和话题行都是共享资料、查询成员�
 
 ## 消息页面
 
-| 组件               | 输入与局部字段                                                                                                                       | 数据依赖与传递                                                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关、当前 DM 范围的授权回执 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer、ChatDetails 和 Presence 展示组件传值 |
-| PinnedMessagesPage | id、threadId；活跃版本、loading/failed、滚动状态与浮动日期                                                                           | 从共享 ChatPins 派生消息，复用 Message 和 MessageMenu；无需 ConversationStore                                                                                             |
-| SavedMessagesPage  | active                                                                                                                               | 路由及 toolbar；离开时销毁 SavedMessageList，重新进入时重新创建                                                                                                           |
-| SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                                                      | 全局收藏接口；快照映射给非交互 Message                                                                                                                                    |
+| 组件               | 输入与局部字段                                                                                                                       | 数据依赖与传递                                                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ConversationPage   | id、threadId、message、reply；进入上下文、定位目标、未读边界、滚动锚点、输入/回复/编辑、置顶选择、信息栏开关、当前 DM 范围的授权回执 | 提供 ConversationStore；消费 ChatStore、MessageOutbox、DraftStore、ConversationNavigation；向 Message、MessageMenu、MessageComposer 和 Presence 展示组件传值；应用壳向路由 ChatDetails 传递当前话题上下文 |
+| PinnedMessagesPage | id、threadId；活跃版本、loading/failed、滚动状态与浮动日期                                                                           | 从共享 ChatPins 派生消息，复用 Message 和 MessageMenu；无需 ConversationStore                                                                                                                             |
+| SavedMessagesPage  | active                                                                                                                               | 路由及 toolbar；阅读转发记录时保留 SavedMessageList，真正离开收藏范围时释放                                                                                                                               |
+| SavedMessageList   | saved、nextCursor、loading/failed、取消收藏状态                                                                                      | 全局收藏接口；快照映射给非交互 Message                                                                                                                                                                    |
 
 ConversationPage.rows 合并已确认区间与队尾，按 clientGeneratedId 保持行身份，在原位置覆盖待保存的编辑，过滤撤回意图不可见的消息（撤回的普通消息整行移除，话题根保留为墓碑行）。日期与连续作者分组从最终可见行派生。
 会话标题在普通私聊显示 `UserPresenceDisplay`，普通群聊显示 `GroupPresenceDisplay`；话题不显示群人数。展示组件注册可见范围到应用级 Presence，ChatDetails 的私聊资料和群资料复用相同展示组件，不自行保存在线或人数副本。
@@ -168,7 +171,7 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 | 组件               | 输入与局部字段                                                                                                                                                                                                                         | 共享数据/输出                                                                                                             |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| ChatDetails        | chatId 或 user、modal、view、currentConversation、threadId、threadRoot → closed；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/readReceiptOverride 及其 loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人在线状态和已读回执覆盖值，Presence 失效个人状态 |
+| ChatDetails        | chatId 或 user、view、currentConversation、threadId、threadRoot；tab、字段编辑草稿、头像上传进度、pending/error、详情 loading、当前好友的 presenceOverride/readReceiptOverride 及其 loading/error 与请求版本 | ChatStore 的头像、标题、详情、订阅与好友关系；FriendsService 读取/保存本人在线状态和已读回执覆盖值，Presence 失效个人状态 |
 | ChatThreads        | chatId；items、cursor、loaded、loading/error、retryable、失败请求分页方式、打开状态                                                                        | ThreadsService 的聊天话题分页；MessageResponse 根消息直接展示，点击导航 |
 | ChatMembers        | chatId、canManage；query、members、cursor、loading/error、selectedUid、pending、成员实时更新版本                                                                                                                                       | MembersService、ChatStore；行点击打开资料，管理员可管理其他成员身份与个人发言权限，权限来自 ChatDetails                   |
 | ThreadParticipants | chatId、rootId；participants、cursor、loaded、loading/error、retryable、失败请求分页方式                                                                  | ThreadsService 的话题参与者分页；点击打开资料，不依赖 ChatStore 或会话消息 |
@@ -207,7 +210,7 @@ ChatDetails 和 ConversationPage 激活同一个好友关系查询。用户资�
 
 置顶表态输入由 `settings/emoji-sequences.ts` 提取完整的 Unicode 17.0.0 RGI emoji 序列；匹配集合固定，不依赖浏览器自带的 Unicode 数据或正则 `u` / `v` 标志。该文件由 `npm run emoji:generate` 生成并提交，生成器及 Unicode 数据依赖使用精确版本；升级匹配集合时更新依赖并重新生成。交互约定见[表情与贴纸设置](requirements.md#通知静音与设置)。
 
-设置与详情统一由 ChatLink 路由托管 modal，关闭恢复浏览器历史；会话缓存保留底层状态。Localization 在首个页面渲染前读取保存的语言并加载 catalog；语言页切换时先加载目标 catalog，再更新活动语言。Landing 只提供安装指引，普通浏览器中 App 在该入口只同步恢复并保存 token；已安装 PWA 由路由 guard 重定向到聊天并正常初始化登录。
+设置与详情统一由 ChatLink 承载；面板变化不激活新的主页面，会话维持挂载，遮罩覆盖期间停止确认消息已读并继续正常通知。Localization 在首个页面渲染前读取保存的语言并加载 catalog；语言页切换时先加载目标 catalog，再更新活动语言。Landing 只提供安装指引，普通浏览器中 App 在该入口只同步恢复并保存 token；已安装 PWA 由路由 guard 重定向到聊天并正常初始化登录。
 
 消息、提及、成员和目录结果通过 Router 打开资料，不直接依赖 ChatDetails；弹窗组件的静态导入集中在路由入口，展示组件之间没有循环依赖。
 
@@ -223,4 +226,4 @@ PrivacyExceptions 接收 PrivacyExceptionKind，持有例外列表、好友选�
 
 StickerEditor 接收标题、初始名称、是否填写对应表情、busy 和 error，输出 confirmed（名称、表情）及 closed。Signal Form 保留未提交输入并验证必填字段；父页面持有文件和 API 写入状态，保存成功后先等待编辑器 dismiss 完成，再销毁编辑器或跳转。编辑器和隐私好友选择器在保存期间阻止用户取消，但允许已获准的路由离开及父容器移除清理子弹窗。
 
-ChatDetails 使用局部 DetailPage（DetailView 与媒体类别）切换资料、隐私、群管理、邀请及图片/视频/文件，共用侧栏或 modal 容器。资料首页的 ion-content 隐藏时保留当前内容组件，返回恢复滚动；二级页切换重建各自的滚动容器；媒体页创建 ChatAttachments，退出时销毁并取消未完成读取。页面与返回位置随聊天/用户/话题范围重置；权限撤销关闭相应内部页。好友和管理员操作直接展示，破坏性操作沿用确认，并拒绝切换对象前遗留的确认。
+ChatDetails 的 view 输入由面板路径派生（DetailView 与媒体类别），切换资料、隐私、群管理、邀请及图片/视频/文件；宽屏信息栏和 modal 复用同一组件实例。资料首页的 ion-content 隐藏时保留当前内容组件，返回恢复滚动；二级页切换重建各自的滚动容器；媒体页创建 ChatAttachments，退出时销毁并取消未完成读取。页面与返回位置随聊天/用户/话题范围重置；权限撤销关闭相应内部页。好友和管理员操作直接展示，破坏性操作沿用确认，并拒绝切换对象前遗留的确认。

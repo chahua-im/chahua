@@ -1,6 +1,5 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TranslocoPipe } from '@jsverse/transloco';
 import {
   IonButton,
   IonButtons,
@@ -14,13 +13,14 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
-  ModalController,
 } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { chevronBackOutline } from 'ionicons/icons';
 import { getBlocksResource } from '../../../generated/endpoints/blocks/blocks.resource';
+import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
-import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
 
 @Component({
   selector: 'app-blocked-users',
@@ -47,7 +47,10 @@ import { ChatAvatar } from '../../chats/chat-avatar/chat-avatar';
   host: { class: 'ion-page' },
 })
 export class BlockedUsers {
-  protected readonly modals = inject(ModalController);
+  protected readonly panels = inject(PanelNavigation);
   protected readonly backIcon = chevronBackOutline;
   protected readonly blocks = getBlocksResource();
+  panelResume() {
+    this.blocks.reload();
+  }
 }

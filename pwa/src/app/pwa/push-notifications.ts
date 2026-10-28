@@ -3,6 +3,7 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router } from '@angular/router';
 import { SwPush } from '@angular/service-worker';
 import { ModalController } from '@ionic/angular';
+import { TranslocoService } from '@jsverse/transloco';
 import { filter, firstValueFrom, map, timeout } from 'rxjs';
 import { PushService } from '../../generated/endpoints/push/push.service';
 import {
@@ -13,14 +14,14 @@ import {
   type ConversationRef,
   type MessageResponse,
 } from '../../generated/models';
-import { TranslocoService } from '@jsverse/transloco';
 import { Connection } from '../api/connection';
 import { decodeId, encodeId, type SnowflakeID } from '../api/snowflake-id';
-import { Preferences } from '../settings/preferences';
 import { ChatListStore } from '../chats/chat-list-store';
 import { ChatStore } from '../chats/chat-store';
 import { ConversationNavigation } from '../conversations/conversation-navigation';
+import { PanelNavigation } from '../navigation/panel-navigation';
 import { SessionStore } from '../session/session-store';
+import { Preferences } from '../settings/preferences';
 import { notificationText, shouldNotify } from './notification-policy';
 
 const ENABLED_KEY = 'chahua.notifications.enabled';
@@ -66,6 +67,7 @@ export class PushNotifications {
   private readonly session = inject(SessionStore);
   private readonly router = inject(Router);
   private readonly modals = inject(ModalController);
+  private readonly panels = inject(PanelNavigation);
   private readonly navigation = inject(ConversationNavigation);
   private readonly seen = new Set<SnowflakeID>();
   private started = false;
@@ -209,7 +211,7 @@ export class PushNotifications {
     const target =
       `chats/chat/${decodeId(message.chatId)}` +
       (message.replyRootId ? `/thread/${decodeId(message.replyRootId)}` : '');
-    return path === target && url.queryParams['settings'] !== '1';
+    return path === target && !this.panels.covered() && url.queryParams['settings'] !== '1';
   }
 
   private async notify(message: MessageResponse) {
@@ -256,7 +258,10 @@ export class PushNotifications {
     this.remember(message.id);
     await this.workerCommand({
       type: 'CHAHUA_NOTIFY',
-      suppress: !document.hidden && this.currentConversation(message) && !modal,
+      suppress:
+        !document.hidden &&
+        this.currentConversation(message) &&
+        (!modal || (!!modal.classList?.contains('route-panel') && this.panels.sidebar())),
       payload: {
         type: 'newMessage',
         title,

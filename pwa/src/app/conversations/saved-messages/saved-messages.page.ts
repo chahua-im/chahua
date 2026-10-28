@@ -1,9 +1,10 @@
 import { ChangeDetectorRef, Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { TranslocoPipe } from '@jsverse/transloco';
 import { NavigationEnd, Router } from '@angular/router';
-import { IonBackButton, IonButtons, IonContent, IonHeader, IonTitle, IonToolbar } from '@ionic/angular';
+import { IonButtons, IonContent, IonHeader, IonTitle, IonToolbar } from '@ionic/angular';
+import { TranslocoPipe } from '@jsverse/transloco';
 import { SavedMessageList } from '../../messages/saved-message-list/saved-message-list';
+import { PageBack } from '../../navigation/page-back';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 
 @Component({
@@ -12,7 +13,7 @@ import { ContentScrollbars } from '../../scrolling/content-scrollbars';
   imports: [
     TranslocoPipe,
     ContentScrollbars,
-    IonBackButton,
+    PageBack,
     IonButtons,
     IonContent,
     IonHeader,
@@ -43,7 +44,8 @@ export class SavedMessagesPage {
     this.release();
   }
   private release() {
-    if (this.router.routerState.snapshot.root.firstChild?.data['modal']) return;
+    const data = this.router.routerState.snapshot.root.firstChild?.data;
+    if (data?.['modal'] || data?.['preserveConversation']) return;
     this.active.set(false);
     this.changeDetector.detectChanges();
   }
