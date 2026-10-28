@@ -15,6 +15,7 @@ pub mod message_search;
 pub mod messages;
 pub mod notification_preferences;
 pub mod presence;
+pub mod privacy_exceptions;
 pub mod push;
 pub mod reactions;
 pub mod read_receipts;
