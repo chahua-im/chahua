@@ -1,5 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   AlertController,
   IonButton,
@@ -21,6 +22,7 @@ import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { MediaLoaded } from '../../messages/media-loaded';
+import { appendSticker, StickerUpdates } from '../../messages/sticker-updates';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../../messages/media-processing/file-type';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -117,6 +119,7 @@ import { StickerPreferences } from '../sticker-preferences';
 export class StickerPackDetail {
   readonly packId = input.required<SnowflakeID>();
   private readonly api = inject(RpcApi);
+  private readonly updates = inject(StickerUpdates);
   private readonly transloco = inject(TranslocoService);
   private readonly http = inject(HttpClient);
   private readonly baseUrl = inject(CHAHUA_BASE_URL);
@@ -138,6 +141,9 @@ export class StickerPackDetail {
   private epoch = 0;
 
   constructor() {
+    this.updates.added.pipe(takeUntilDestroyed()).subscribe(({ pack, sticker }) => {
+      this.pack.update((current) => (current?.id === pack.id ? appendSticker(current, sticker) : current));
+    });
     effect(() => void this.load(this.packId()));
   }
 
@@ -150,7 +156,7 @@ export class StickerPackDetail {
     this.busy.set(true);
     this.error.set(false);
     try {
-      const pack = await firstValueFrom(this.api.stickers.getPack({ packId: id }));
+      const pack = await firstValueFrom(this.updates.getPack(id));
       if (epoch === this.epoch) this.pack.set(pack);
     } catch {
       if (epoch === this.epoch) this.error.set(true);
@@ -174,7 +180,7 @@ export class StickerPackDetail {
     try {
       const updated = await firstValueFrom(this.api.stickers.updatePack({ packId: pack.id, name: name.trim() }));
       if (this.epoch !== epoch || this.pack()?.id !== pack.id) return;
-      this.pack.set({ ...pack, ...updated, stickers: pack.stickers });
+      this.pack.update((current) => (current?.id === updated.id ? { ...current, ...updated } : current));
       await this.editor()?.dismiss();
       this.renaming.set(false);
     } catch {

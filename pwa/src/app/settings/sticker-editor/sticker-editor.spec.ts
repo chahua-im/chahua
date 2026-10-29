@@ -2,6 +2,20 @@ import { TestBed } from '@angular/core/testing';
 import { StickerEditor } from './sticker-editor';
 
 describe('StickerEditor dismissal', () => {
+  it('validates whole emoji sequences rather than code points', () => {
+    const fixture = TestBed.createComponent(StickerEditor);
+    fixture.componentRef.setInput('title', '贴纸');
+    fixture.componentRef.setInput('withEmoji', true);
+    const editor = fixture.componentInstance;
+    for (const emoji of ['👨‍👩‍👧‍👦', '👩🏽‍💻🇨🇳1️⃣👍🏿', ' 👍 ']) {
+      editor['value'].set({ name: '', emoji });
+      expect(editor['validEmoji']()).toBe(true);
+    }
+    for (const emoji of ['', 'hello🍵', '🍵 🍵', '🍵🍵🍵🍵🍵']) {
+      editor['value'].set({ name: '', emoji });
+      expect(editor['validEmoji']()).toBe(false);
+    }
+  });
   it('allows saved and navigation dismissal while blocking cancellation during a save', async () => {
     TestBed.overrideComponent(StickerEditor, {
       set: { template: '<ion-modal [canDismiss]="canDismiss" />' },

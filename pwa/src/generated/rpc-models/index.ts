@@ -287,6 +287,13 @@ export type ConversationsWatchUnreadParams = {
   requestId: number;
   views: Array<Shared.ConversationView>;
 };
+export type CreateStickerFromMessageBody = {
+  chatId: Shared.SnowflakeID;
+  description?: string;
+  emoji: string;
+  messageId: Shared.SnowflakeID;
+  name?: string;
+};
 export type ExceptionsQuery = { after?: Shared.SnowflakeID; kind: Shared.GroupKind; limit?: number };
 export type FriendsAcceptRequestParams = { requestId: Shared.SnowflakeID };
 export type FriendsArchiveRequestParams = { requestId: Shared.SnowflakeID };
@@ -551,6 +558,14 @@ export type SessionUnavailableReason = 'authLookupUnavailable';
 export type SessionsListClientsParams = {};
 export type StickerPackDiscoveryQuery = { limit?: number; offset?: number; q?: string; sort?: Shared.StickerPackSort };
 export type StickersAddToPackParams = { packId: Shared.SnowflakeID; stickerId: Shared.SnowflakeID };
+export type StickersCreateFromMessageParams = {
+  chatId: Shared.SnowflakeID;
+  description?: string;
+  emoji: string;
+  messageId: Shared.SnowflakeID;
+  name?: string;
+  packId: Shared.SnowflakeID;
+};
 export type StickersCreatePackParams = {
   description?: string;
   name: string;

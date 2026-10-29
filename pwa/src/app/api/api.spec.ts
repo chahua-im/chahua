@@ -14,6 +14,33 @@ describe('RPC API boundary', () => {
     TestBed.configureTestingModule({ providers: [provideRpcTesting()] });
   });
 
+  it('preserves source and result Snowflakes when creating a sticker through RPC', () => {
+    const peer = TestBed.inject(RpcTestPeer);
+    peer.authenticate();
+    const received = vi.fn();
+    TestBed.inject(RpcApi)
+      .stickers.createFromMessage({
+        packId: encodeId('9223372036854775807'),
+        chatId: encodeId('9007199254740993'),
+        messageId: encodeId('9007199254740995'),
+        emoji: '🍵',
+      })
+      .subscribe(received);
+    peer
+      .expect('stickers.createFromMessage', {
+        packId: '9223372036854775807',
+        chatId: '9007199254740993',
+        messageId: '9007199254740995',
+        emoji: '🍵',
+      })
+      .flush({ id: '9007199254740997', media: { id: '9007199254740999' } });
+    expect(received).toHaveBeenCalledWith({
+      id: encodeId('9007199254740997'),
+      media: { id: encodeId('9007199254740999') },
+    });
+    peer.verify();
+  });
+
   it('serializes flat RPC params without losing Snowflakes, null, or zero', () => {
     const chatId = '9223372036854775806';
     const before = '9223372036854775805';

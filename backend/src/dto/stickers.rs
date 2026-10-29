@@ -6,11 +6,11 @@ use crate::models::StickerPackVisibility;
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateStickerFromMessageBody {
-    #[serde(with = "crate::serde_i64_string")]
-    #[schema(value_type = String)]
+    #[serde(deserialize_with = "crate::dto::rpc::deserialize_id")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
     pub chat_id: i64,
-    #[serde(with = "crate::serde_i64_string")]
-    #[schema(value_type = String)]
+    #[serde(deserialize_with = "crate::dto::rpc::deserialize_id")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
     pub message_id: i64,
     pub emoji: String,
     pub name: Option<String>,

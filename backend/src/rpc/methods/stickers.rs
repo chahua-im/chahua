@@ -186,3 +186,19 @@ pub async fn list_favorites(
     let mut conn = services.db.get()?;
     stickers::get_my_favorites(uid, &mut conn, &services.media)
 }
+
+pub async fn create_from_message(
+    context: &RpcCallContext,
+    services: &RpcServices,
+    params: StickersCreateFromMessageParams,
+) -> Result<crate::dto::stickers::StickerSummary, AppError> {
+    stickers::post_pack_sticker_from_message(
+        context.uid()?,
+        params.pack_id,
+        params.body,
+        &services.db,
+        &services.media,
+        services.id_gen.as_ref(),
+    )
+    .await
+}

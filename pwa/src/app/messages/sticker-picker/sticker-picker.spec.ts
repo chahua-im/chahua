@@ -13,6 +13,7 @@ import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
 import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { StickerPreferences } from '../../settings/sticker-preferences';
+import { StickerUpdates } from '../sticker-updates';
 import { StickerPicker } from './sticker-picker';
 
 const sticker: StickerSummary = {
@@ -148,6 +149,30 @@ describe('StickerPicker selection during RPC requests', () => {
     fixture.detectChanges();
     return { fixture, rpc };
   }
+
+  it('keeps local additions when an older pack RPC response arrives', async () => {
+    const { fixture, rpc } = await renderDetails();
+    const picker = fixture.componentInstance;
+    const pending = picker['openPack'](pack.id);
+    const response = rpc.expect('stickers.getPack', { packId: decodeId(pack.id) });
+    const added = { ...sticker, id: encodeId('109') };
+    TestBed.inject(StickerUpdates).added.next({ pack, sticker: added });
+    expect(picker['stickers']()).toEqual([sticker, added]);
+    response.flush(wirePack);
+    await pending;
+    expect(picker['stickers']()).toEqual([sticker, added]);
+    expect(picker['pack']()?.stickerCount).toBe(2);
+  });
+
+  it('keeps a newly added pack when an older library RPC response arrives', async () => {
+    const { fixture, rpc } = await render();
+    const pending = fixture.componentInstance['load']();
+    const newPack = { ...pack, id: encodeId('120'), stickerCount: 0 };
+    TestBed.inject(StickerUpdates).added.next({ pack: newPack, sticker });
+    replyLibrary(rpc);
+    await pending;
+    expect(fixture.componentInstance['packs']().find((item) => item.id === newPack.id)?.stickerCount).toBe(1);
+  });
 
   it('opens the whole pack, selects the message sticker and changes selection without sending', async () => {
     const rpc = peer();

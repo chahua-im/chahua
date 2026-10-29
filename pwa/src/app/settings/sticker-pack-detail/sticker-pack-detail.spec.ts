@@ -18,6 +18,7 @@ import { PanelNavigation } from '../../navigation/panel-navigation';
 import { SessionStore } from '../../session/session-store';
 import { StickerEditor } from '../sticker-editor/sticker-editor';
 import { StickerPreferences } from '../sticker-preferences';
+import { StickerUpdates } from '../../messages/sticker-updates';
 import { StickerPackDetail } from './sticker-pack-detail';
 
 const sticker: StickerSummary = {
@@ -140,6 +141,18 @@ describe('StickerPackDetail', () => {
     expect(component['pack']()?.name).toBe('新名');
     expect(component['pack']()?.stickers).toEqual([sticker]);
     expect(component['renaming']()).toBe(false);
+  });
+
+  it('preserves a sticker created while a rename RPC is pending', async () => {
+    const component = (await loaded()).componentInstance;
+    component['rename']();
+    const pending = component['saveName']({ name: 'Tea', emoji: '' });
+    const added = { ...sticker, id: encodeId('109') };
+    TestBed.inject(StickerUpdates).added.next({ pack, sticker: added });
+    const { stickers: _stickers, ...summary } = pack;
+    peer.expect('stickers.updatePack', { packId: '201', name: 'Tea' }).flush(wireSummary({ ...summary, name: 'Tea' }));
+    await pending;
+    expect(component['pack']()?.stickers).toEqual([sticker, added]);
   });
 
   it('removes a sticker from an owned pack after confirmation', async () => {

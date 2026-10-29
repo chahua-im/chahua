@@ -24,6 +24,7 @@ import type {
   ClearExceptionsQuery,
   ConversationsWatchStatesParams,
   ConversationsWatchUnreadParams,
+  CreateStickerFromMessageBody,
   ExceptionsQuery,
   FriendsAcceptRequestParams,
   FriendsArchiveRequestParams,
@@ -134,6 +135,7 @@ import type {
   SessionsListClientsParams,
   StickerPackDiscoveryQuery,
   StickersAddToPackParams,
+  StickersCreateFromMessageParams,
   StickersCreatePackParams,
   StickersDeletePackParams,
   StickersFavoriteParams,
@@ -318,6 +320,10 @@ export const rpcSchemas: Record<string, JsonCodec> = {
   },
   CreateServiceTokenResponse: {
     serviceToken: 'ServiceTokenResponse',
+  },
+  CreateStickerFromMessageBody: {
+    chatId: 1,
+    messageId: 1,
   },
   ExceptionsQuery: {
     after: 1,
@@ -1088,6 +1094,11 @@ export const rpcSchemas: Record<string, JsonCodec> = {
     packId: 1,
     stickerId: 1,
   },
+  StickersCreateFromMessageParams: {
+    chatId: 1,
+    messageId: 1,
+    packId: 1,
+  },
   StickersDeletePackParams: {
     packId: 1,
   },
@@ -1737,6 +1748,10 @@ export const rpcMethods: Record<string, RpcMethodCodec> = {
     params: 'StickersListPacksParams',
     result: 'StickerPackDiscoveryResponse',
   },
+  'stickers.createFromMessage': {
+    params: 'StickersCreateFromMessageParams',
+    result: 'StickerSummary',
+  },
   'stickers.createPack': {
     params: 'StickersCreatePackParams',
     result: 'StickerPackSummary',
@@ -1932,6 +1947,7 @@ export const rpcMethodClasses: Record<string, RpcMethodClass> = {
   'push.subscribe': 'mutation',
   'push.unsubscribe': 'mutation',
   'stickers.listPacks': 'read',
+  'stickers.createFromMessage': 'mutation',
   'stickers.createPack': 'mutation',
   'stickers.getPack': 'read',
   'stickers.updatePack': 'mutation',

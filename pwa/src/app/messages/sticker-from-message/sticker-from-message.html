@@ -1,0 +1,26 @@
+<app-sticker-editor
+  [title]="'stickers.fromMessage.title' | transloco"
+  [withEmoji]="true"
+  [busy]="busy()"
+  [saveDisabled]="saveDisabled()"
+  [error]="errorKey() ? errorText() : undefined"
+  [content]="destination"
+  (confirmed)="save($event)"
+  (closed)="dismissed()" />
+
+<ng-template #destination>
+  <img class="preview" [src]="message().attachments[0]?.url" />
+  <ion-list [inset]="true">
+    <ion-item>
+      <ion-select
+        [label]="'stickers.fromMessage.pack' | transloco"
+        [disabled]="busy()"
+        [value]="packId()"
+        (ionChange)="packId.set($event.detail.value)">
+        @for (pack of orderedPacks(); track pack.id) {
+          <ion-select-option [value]="pack.id">{{ pack.name }}</ion-select-option>
+        }
+      </ion-select>
+    </ion-item>
+  </ion-list>
+</ng-template>

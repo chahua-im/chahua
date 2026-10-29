@@ -313,16 +313,30 @@ mod tests {
 
     #[test]
     fn sticker_from_message_contract() {
-        let document = api_document();
-        let endpoint =
-            &document["paths"]["/stickers/packs/{pack_id}/stickers/from-message"]["post"];
-        for status in ["201", "400", "403", "404", "409"] {
-            assert!(endpoint["responses"][status].is_object());
+        let document = crate::rpc::schema::openrpc_document();
+        let method = document["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|method| method["name"] == "stickers.createFromMessage")
+            .unwrap();
+        assert_eq!(method["x-execution-class"], "mutation");
+        for field in ["packId", "chatId", "messageId"] {
+            let param = method["params"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|param| param["name"] == field)
+                .unwrap();
+            assert_eq!(param["schema"]["type"], "string");
+            assert_eq!(param["schema"]["x-snowflake-id"], true);
         }
-        let schema = &document["components"]["schemas"]["CreateStickerFromMessageBody"];
-        for field in ["chatId", "messageId"] {
-            assert_eq!(schema["properties"][field]["type"], "string");
-        }
+
+        let params: crate::dto::rpc::stickers::StickersCreateFromMessageParams = serde_json::from_value(
+            serde_json::json!({"packId": "9223372036854775807", "chatId": "9007199254740993", "messageId": "9007199254740995", "emoji": "😀"})
+        ).unwrap();
+        assert_eq!(params.pack_id, i64::MAX);
+        assert_eq!(params.body.chat_id, 9007199254740993);
         let body: crate::dto::stickers::CreateStickerFromMessageBody = serde_json::from_value(
             serde_json::json!({"chatId": "9007199254740993", "messageId": "9007199254740995", "emoji": "😀"})
         ).unwrap();

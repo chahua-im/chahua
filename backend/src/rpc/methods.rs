@@ -219,6 +219,7 @@ register_methods! {
 ("push.subscribe", crate::dto::rpc::push::PushSubscribeParams, (), Mutation, push::subscribe),
 ("push.unsubscribe", crate::dto::rpc::push::PushUnsubscribeParams, (), Mutation, push::unsubscribe),
 ("stickers.listPacks", crate::dto::rpc::stickers::StickersListPacksParams, crate::dto::stickers::StickerPackDiscoveryResponse, Read, stickers::list_packs),
+("stickers.createFromMessage", crate::dto::rpc::stickers::StickersCreateFromMessageParams, crate::dto::stickers::StickerSummary, Mutation, stickers::create_from_message),
 ("stickers.createPack", crate::dto::rpc::stickers::StickersCreatePackParams, crate::dto::stickers::StickerPackSummary, Mutation, stickers::create_pack),
 ("stickers.getPack", crate::dto::rpc::stickers::StickersGetPackParams, crate::dto::stickers::StickerPackDetailResponse, Read, stickers::get_pack),
 ("stickers.updatePack", crate::dto::rpc::stickers::StickersUpdatePackParams, crate::dto::stickers::StickerPackSummary, Mutation, stickers::update_pack),
