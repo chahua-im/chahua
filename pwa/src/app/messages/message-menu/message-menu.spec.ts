@@ -5,6 +5,9 @@ import { provideRouter } from '@angular/router';
 import { getPlatforms, IonModal } from '@ionic/angular';
 import { timeOutline } from 'ionicons/icons';
 import { vi } from 'vitest';
+import { of, Subject, throwError } from 'rxjs';
+import { RpcApi } from '../../../generated/rpc-api';
+import { StickerPackVisibility, type StickerPackListResponse } from '../../../generated/models';
 import { GroupKind, GroupRole, MessageType, SpeakingMode, type MessageResponse } from '../../../generated/models';
 import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { testChat, testMessage, testUser } from '../../api/testing';
@@ -67,6 +70,22 @@ describe('MessageMenu', () => {
     loading: () => false,
     set: vi.fn().mockResolvedValue(undefined),
   };
+  const pack = {
+    id: encodeId('121'),
+    name: 'Tea',
+    ownerUid: testUser.uid,
+    visibility: StickerPackVisibility.private,
+    isSubscribed: false,
+    stickerCount: 0,
+    createdAt: testMessage.createdAt,
+    updatedAt: testMessage.createdAt,
+  };
+  const stickers = { listOwnedPacks: vi.fn(() => of({ packs: [pack] })) };
+  const imageMessage = {
+    ...testMessage,
+    message: '',
+    attachments: [{ id: encodeId('123'), kind: 'image/png', size: 100, url: '/image.png', fileName: 'image.png' }],
+  };
   const selection = () => ({
     messageId: testMessage.id,
     element: document.createElement('div'),
@@ -76,8 +95,36 @@ describe('MessageMenu', () => {
   const labels = () =>
     [...fixture.nativeElement.querySelectorAll('.actions button')].map((button: Element) => button.textContent?.trim());
 
+  it.each([GroupKind.group, GroupKind.dm])(
+    'allows saving another sender’s image in a read-only %s',
+    async (chatKind) => {
+      kind.set(chatKind);
+      canDm.set(false);
+      mode.set(SpeakingMode.readOnly);
+      const source = {
+        ...testMessage,
+        message: '',
+        attachments: [{ id: encodeId('123'), kind: 'image/png', size: 100, url: '/image.png', fileName: 'image.png' }],
+      };
+      setMessages([source]);
+      expect(menu['menuActions']()).toContainEqual({
+        kind: 'action',
+        action: MessageAction.CreateSticker,
+        disabled: false,
+        destructive: false,
+      });
+      await menu['choose'](MessageAction.CreateSticker);
+      expect(menu['selection']()).toBeUndefined();
+      expect(menu['stickerSource']()).toEqual({ message: source, packs: [pack] });
+      expect(stickers.listOwnedPacks).toHaveBeenCalledOnce();
+      menu.reset();
+      expect(menu['stickerSource']()).toBeUndefined();
+    },
+  );
+
   beforeEach(async () => {
     vi.clearAllMocks();
+    stickers.listOwnedPacks.mockReset().mockReturnValue(of({ packs: [pack] }));
     savedLoading.set(false);
     authorWidth = 100;
     const computedStyle = window.getComputedStyle;
@@ -117,6 +164,10 @@ describe('MessageMenu', () => {
       providers: [
         { provide: SavedMessageStore, useValue: savedMessages },
         { provide: StickerFavorites, useValue: favoriteStickers },
+        {
+          provide: RpcApi,
+          useValue: { stickers, invites: { getByCode: () => throwError(() => new Error('unavailable')) } },
+        },
         {
           provide: Preferences,
           useValue: {
@@ -167,6 +218,55 @@ describe('MessageMenu', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
+
+  it('shows only a toast when the owned-pack list is empty, including while the read is pending', async () => {
+    setMessages([imageMessage]);
+    const response = new Subject<StickerPackListResponse>();
+    stickers.listOwnedPacks.mockReturnValueOnce(response);
+    const choosing = menu['choose'](MessageAction.CreateSticker);
+    await vi.waitFor(() => expect(stickers.listOwnedPacks).toHaveBeenCalledOnce());
+    fixture.detectChanges();
+    expect(menu.busy()).toBe(true);
+    expect(menu.busyMessageId()).toBe(imageMessage.id);
+    expect(fixture.nativeElement.querySelector('app-sticker-from-message')).toBeNull();
+    response.next({ packs: [] });
+    await choosing;
+    fixture.detectChanges();
+    expect(menu.busy()).toBe(false);
+    expect(menu['notice']()).toBe(MessageNotice.NoOwnedStickerPacks);
+    expect(fixture.nativeElement.querySelector('ion-toast').message).toBe('暂无可用的自有贴纸包。');
+    expect(fixture.nativeElement.querySelector('app-sticker-from-message')).toBeNull();
+  });
+
+  it('shows a toast on pack-read failure and permits retrying from the menu', async () => {
+    setMessages([imageMessage]);
+    stickers.listOwnedPacks.mockReturnValueOnce(throwError(() => new Error('offline')));
+    await menu['choose'](MessageAction.CreateSticker);
+    expect(menu['notice']()).toBe(MessageNotice.Failed);
+    expect(menu['stickerSource']()).toBeUndefined();
+    expect(menu.busy()).toBe(false);
+    menu.open(selection());
+    await menu['choose'](MessageAction.CreateSticker);
+    expect(menu['stickerSource']()).toEqual({ message: imageMessage, packs: [pack] });
+    expect(stickers.listOwnedPacks).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([{ packs: [] }, { packs: [pack] }])(
+    'does not open a modal or toast for a late pack response after leaving',
+    async ({ packs }) => {
+      setMessages([imageMessage]);
+      const response = new Subject<StickerPackListResponse>();
+      stickers.listOwnedPacks.mockReturnValueOnce(response);
+      const choosing = menu['choose'](MessageAction.CreateSticker);
+      await vi.waitFor(() => expect(stickers.listOwnedPacks).toHaveBeenCalledOnce());
+      menu.reset();
+      response.next({ packs });
+      await choosing;
+      expect(menu['stickerSource']()).toBeUndefined();
+      expect(menu['notice']()).toBeUndefined();
+      expect(menu.busy()).toBe(false);
+    },
+  );
 
   it('limits editing by original location while retaining reactions and recall', () => {
     TestBed.inject(SessionStore).user.set(testUser);
@@ -351,6 +451,18 @@ describe('MessageMenu', () => {
     expect(menu['notice']()).toBe(MessageNotice.Copied);
     expect(ensureDetails).not.toHaveBeenCalled();
     expect(conversation.ensure).not.toHaveBeenCalled();
+  });
+
+  it('does not offer sticker creation for a queued image', () => {
+    const { content } = openQueued();
+    content.update((message) => ({
+      ...message,
+      message: '',
+      attachments: [{ kind: 'image/png', size: 100, url: '/queued.png', fileName: 'queued.png' }],
+    }));
+    expect(
+      menu['menuActions']().some((slot) => slot.kind === 'action' && slot.action === MessageAction.CreateSticker),
+    ).toBe(false);
   });
 
   it('switches an open queued menu to the server message by client ID after acknowledgement', async () => {

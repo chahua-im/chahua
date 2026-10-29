@@ -33,10 +33,19 @@ import {
   createOutline,
   heart,
   heartOutline,
+  happyOutline,
   pinOutline,
   trashOutline,
 } from 'ionicons/icons';
-import { GroupKind, GroupRole, MessageType, type MessageResponse } from '../../../generated/models';
+import { firstValueFrom, timeout } from 'rxjs';
+import { RpcApi } from '../../../generated/rpc-api';
+import {
+  GroupKind,
+  GroupRole,
+  MessageType,
+  type MessageResponse,
+  type StickerPackSummary,
+} from '../../../generated/models';
 import { copyText } from '../../api/clipboard';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { ChatStore } from '../../chats/chat-store';
@@ -55,6 +64,8 @@ import { Message, type MessageContent, type MessageMenuSelection } from '../mess
 import { exceedsReactionLimit } from '../reaction-state';
 import { SavedMessageStore } from '../saved-message-store';
 import { StickerFavorites } from '../sticker-favorites';
+import { StickerFromMessage } from '../sticker-from-message/sticker-from-message';
+import { canCreateSticker } from '../sticker-from-message/eligibility';
 
 export enum MessageAction {
   Reply,
@@ -69,6 +80,7 @@ export enum MessageAction {
   FavoriteSticker,
   Forward,
   Select,
+  CreateSticker,
 }
 
 const COLUMNS = 5;
@@ -92,7 +104,18 @@ export function pageSlots(actions: readonly MenuSlot[], page: number): readonly 
   selector: 'app-message-menu',
   templateUrl: './message-menu.html',
   styleUrl: './message-menu.scss',
-  imports: [ForwardPicker, Message, EmojiPicker, IonAlert, IonIcon, IonModal, IonSpinner, IonToast, TranslocoPipe],
+  imports: [
+    StickerFromMessage,
+    ForwardPicker,
+    Message,
+    EmojiPicker,
+    IonAlert,
+    IonIcon,
+    IonModal,
+    IonSpinner,
+    IonToast,
+    TranslocoPipe,
+  ],
   providers: [MessageActions],
 })
 export class MessageMenu {
@@ -104,6 +127,9 @@ export class MessageMenu {
   readonly allowSelect = input(false);
   readonly select = output<MessageResponse | OutgoingMessage>();
   protected readonly forwarding = signal<readonly ForwardSource[]>([]);
+  protected readonly stickerSource = signal<{ message: MessageResponse; packs: StickerPackSummary[] } | undefined>(
+    undefined,
+  );
   readonly editQueued = output<OutgoingMessage>();
   readonly openThread = output<SnowflakeID>();
   readonly messages = input.required<readonly MessageResponse[]>();
@@ -113,6 +139,7 @@ export class MessageMenu {
   private readonly messageActions = inject(MessageActions);
   private readonly savedMessages = inject(SavedMessageStore);
   private readonly favoriteStickers = inject(StickerFavorites);
+  private readonly stickers = inject(RpcApi);
   private readonly outbox = inject(MessageOutbox);
   private readonly document = inject(DOCUMENT);
   private readonly modal = viewChild(IonModal);
@@ -196,6 +223,7 @@ export class MessageMenu {
     [MessageAction.Edit]: createOutline,
     [MessageAction.Save]: this.saved() ? bookmark : bookmarkOutline,
     [MessageAction.FavoriteSticker]: this.favorited() ? heart : heartOutline,
+    [MessageAction.CreateSticker]: happyOutline,
     [MessageAction.Link]: linkOutline,
     [MessageAction.Recall]: trashOutline,
     [MessageAction.Reactions]: peopleOutline,
@@ -297,6 +325,8 @@ export class MessageMenu {
       message.sticker
     )
       add(MessageAction.FavoriteSticker, { disabled: this.favoriteStickers.loading() });
+    const stickerSource = this.serverMessage();
+    if (!this.queued() && stickerSource && canCreateSticker(stickerSource)) add(MessageAction.CreateSticker);
     if (this.allowSelect() && source && canSelect(source)) add(MessageAction.Select);
     if (this.canReact() && message?.reactions?.length) add(MessageAction.Reactions);
     if (message && !this.queued() && !this.dm() && message.messageType !== MessageType.invite) add(MessageAction.Link);
@@ -537,6 +567,7 @@ export class MessageMenu {
   }
 
   reset() {
+    this.stickerSource.set(undefined);
     this.forwarding.set([]);
     this.version++;
     this.selection.set(undefined);
@@ -604,6 +635,9 @@ export class MessageMenu {
     await this.close();
     if (version !== this.version) return;
     switch (action) {
+      case MessageAction.CreateSticker:
+        if (canCreateSticker(message)) await this.prepareSticker(message);
+        break;
       case MessageAction.Forward:
         this.forwarding.set([message]);
         break;
@@ -693,6 +727,29 @@ export class MessageMenu {
 
   private canRecallMessage(message: MessageResponse) {
     return this.admin() || message.sender.uid === this.session.user()?.uid;
+  }
+
+  private async prepareSticker(message: MessageResponse) {
+    if (this.busy()) return;
+    const version = this.version;
+    const uid = this.session.user()?.uid;
+    const active = () => version === this.version && uid === this.session.user()?.uid;
+    this.pending.set(true);
+    this.actingOn.set(message.id);
+    this.notice.set(undefined);
+    try {
+      const { packs } = await firstValueFrom(this.stickers.stickers.listOwnedPacks().pipe(timeout(30000)));
+      if (!active()) return;
+      if (packs.length) this.stickerSource.set({ message, packs });
+      else this.notice.set(MessageNotice.NoOwnedStickerPacks);
+    } catch {
+      if (active()) this.notice.set(MessageNotice.Failed);
+    } finally {
+      if (active()) {
+        this.pending.set(false);
+        this.actingOn.set(undefined);
+      }
+    }
   }
 
   private async perform(operation: () => Promise<unknown>, success?: MessageNotice, messageId?: SnowflakeID) {

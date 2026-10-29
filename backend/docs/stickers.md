@@ -1,16 +1,17 @@
 # Stickers and sticker packs
 
-All sticker endpoints require the existing bearer authentication. Pack IDs and
+Sticker RPC methods require an authenticated session; HTTP uploads require bearer authentication. Pack IDs and
 sticker IDs retain their string-encoded Snowflake representation. Field names
 use camelCase.
 
 ## Create a sticker from a message
 
-`POST /stickers/packs/{packId}/stickers/from-message` adds a new sticker to an
-existing pack owned by the caller. The JSON body is:
+`stickers.createFromMessage` adds a new sticker to an
+existing pack owned by the caller. The flat RPC parameters are:
 
 ```json
 {
+  "packId": "789",
   "chatId": "123",
   "messageId": "456",
   "emoji": "😀",
@@ -19,7 +20,7 @@ existing pack owned by the caller. The JSON body is:
 }
 ```
 
-`chatId`, `messageId`, and `emoji` are required. The caller must be a current
+`packId`, `chatId`, `messageId`, and `emoji` are required. The caller must be a current
 member of the source chat. The source must be a published, undeleted text-type
 message with no non-whitespace text and exactly one active image attachment;
 images sent as file messages are excluded. The image may belong to any sender.
@@ -35,16 +36,16 @@ one to four emoji graphemes. Static images are resized to a maximum dimension
 of 512 pixels and encoded as WebP; animated GIF/WebP images retain their bytes.
 Blank optional names and descriptions are stored as null.
 
-Success returns `201` with the existing `StickerSummary` representation. The
+Success returns the existing `StickerSummary` representation as the RPC result. The
 sticker has independent media; the source message and attachment are unchanged.
 This operation does not create packs or emit message update events. Each
 successful request creates a new sticker; retries are not deduplicated.
 
-Invalid composition, emoji, image data, or excessive input size returns `400`.
-Missing chat membership or pack ownership returns `403`; missing packs and
-missing, deleted, or unpublished source messages return `404`. Source eligibility
+Invalid composition, emoji, image data, or excessive input size returns RPC `BadRequest` (1000).
+Missing chat membership or pack ownership returns RPC `Forbidden` (1003); missing packs and
+missing, deleted, or unpublished source messages return RPC `NotFound` (1004). Source eligibility
 and permissions are checked again before committing. Replacing the source image
-during processing returns `409`; other changes return the corresponding
+during processing returns RPC `Conflict` (1009); other changes return the corresponding
 eligibility or permission error. Database inserts are atomic. Failure to acquire
 a connection for insertion, failed revalidation, or a failed commit triggers
 best-effort deletion of the newly uploaded sticker object.

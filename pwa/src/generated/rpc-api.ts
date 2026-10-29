@@ -28,6 +28,7 @@ import type {
   ClearExceptionsQuery,
   ConversationsWatchStatesParams,
   ConversationsWatchUnreadParams,
+  CreateStickerFromMessageBody,
   ExceptionsQuery,
   FriendsAcceptRequestParams,
   FriendsArchiveRequestParams,
@@ -138,6 +139,7 @@ import type {
   SessionsListClientsParams,
   StickerPackDiscoveryQuery,
   StickersAddToPackParams,
+  StickersCreateFromMessageParams,
   StickersCreatePackParams,
   StickersDeletePackParams,
   StickersFavoriteParams,
@@ -420,6 +422,8 @@ export class RpcApi {
   readonly stickers = {
     listPacks: (params: StickersListPacksParams = {}) =>
       this.#call<Shared.StickerPackDiscoveryResponse>('stickers.listPacks', params),
+    createFromMessage: (params: StickersCreateFromMessageParams) =>
+      this.#call<Shared.StickerSummary>('stickers.createFromMessage', params),
     createPack: (params: StickersCreatePackParams) =>
       this.#call<Shared.StickerPackSummary>('stickers.createPack', params),
     getPack: (params: StickersGetPackParams) =>

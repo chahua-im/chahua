@@ -659,7 +659,19 @@
     "emojiLoadFailed": "表情加载失败，请关闭后重试。",
     "createPack": "创建贴纸包",
     "createFailed": "创建贴纸包失败",
-    "emojiLabel": "对应表情"
+    "emojiLabel": "对应表情",
+    "emojiHint": "请输入 1–4 个表情，不含文字或空格。",
+    "fromMessage": {
+      "action": "存为贴纸",
+      "title": "添加到贴纸包",
+      "pack": "目标贴纸包",
+      "invalid": "图片或表情不符合要求：仅支持 10 MiB 以内的单张纯图片消息和 1–4 个表情。",
+      "forbidden": "你已无法访问此聊天，或无权修改所选贴纸包。",
+      "missing": "源消息或贴纸包已不存在。",
+      "changed": "源图片已变化，请关闭后重新选择图片。",
+      "uncertain": "未能确认保存结果，请先查看贴纸包，避免重复添加。",
+      "noOwnedPacks": "暂无可用的自有贴纸包。"
+    }
   },
   "emojiPicker": {
     "loadFailed": "表情加载失败，请关闭后重试。"

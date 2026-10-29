@@ -1,6 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, computed, DestroyRef, effect, inject, input, linkedSignal, output, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
   AlertController,
@@ -43,6 +44,7 @@ import {
   StickerPreferences,
 } from '../../settings/sticker-preferences';
 import { MediaLoaded } from '../media-loaded';
+import { appendSticker, StickerUpdates } from '../sticker-updates';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../media-processing/file-type';
 
 type StickerContent = StickerPackDetailResponse | { stickers: StickerSummary[] };
@@ -94,6 +96,7 @@ export class StickerPicker {
   protected readonly panels = inject(PanelNavigation);
   private readonly router = inject(Router);
   private readonly api = inject(RpcApi);
+  private readonly updates = inject(StickerUpdates);
   protected readonly packs = signal<StickerPackSummary[]>([]);
   private readonly content = signal<StickerContent>({ stickers: [] });
   protected readonly pack = computed(() => {
@@ -109,6 +112,25 @@ export class StickerPicker {
   private retryPackId?: SnowflakeID;
   protected readonly error = signal(false);
   constructor() {
+    this.updates.added.pipe(takeUntilDestroyed()).subscribe(({ pack, sticker }) => {
+      this.content.update((content) =>
+        'id' in content && content.id === pack.id ? appendSticker(content, sticker) : content,
+      );
+      this.packs.update((packs) => {
+        const existing = packs.find((item) => item.id === pack.id);
+        if (!existing && (this.packId() || this.stickerId())) return packs;
+        const current = existing ?? pack;
+        const updated = {
+          ...current,
+          stickerCount: current.stickerCount + 1,
+          previewSticker: current.previewSticker ?? sticker,
+        };
+        return sortStickerPacksByPreference(
+          existing ? packs.map((item) => (item.id === pack.id ? updated : item)) : [...packs, updated],
+          this.preferences.packOrder(),
+        );
+      });
+    });
     inject(DestroyRef).onDestroy(() => this.cancelHold());
     effect(() => {
       const pack = this.packId();
@@ -197,22 +219,46 @@ export class StickerPicker {
   protected async load() {
     this.busy.set(true);
     this.error.set(false);
+    // A library response started before a creation must not remove the new pack or its count.
+    const additions = new Map<SnowflakeID, StickerPackSummary>();
+    const subscription = this.updates.added.subscribe(({ pack, sticker }) => {
+      const current = additions.get(pack.id) ?? pack;
+      additions.set(pack.id, {
+        ...current,
+        stickerCount: current.stickerCount + 1,
+        previewSticker: current.previewSticker ?? sticker,
+      });
+    });
     try {
       const [favorites, subscribed, owned] = await Promise.all([
         firstValueFrom(this.api.stickers.listFavorites()),
         firstValueFrom(this.api.stickers.listSubscribedPacks()),
         firstValueFrom(this.api.stickers.listOwnedPacks()),
       ]);
-      const merged = [...new Map([...subscribed.packs, ...owned.packs].map((pack) => [pack.id, pack])).values()];
+      const merged = new Map([...subscribed.packs, ...owned.packs].map((pack) => [pack.id, pack]));
+      for (const [id, added] of additions) {
+        const current = merged.get(id);
+        merged.set(
+          id,
+          current
+            ? {
+                ...current,
+                stickerCount: Math.max(current.stickerCount, added.stickerCount),
+                previewSticker: current.previewSticker ?? added.previewSticker,
+              }
+            : added,
+        );
+      }
       this.content.set({
         stickers: this.preferences.autoSortFavoritesEnabled()
           ? sortFavoriteStickersByPreference(favorites.stickers, this.preferences.favoriteStickerOrder())
           : favorites.stickers,
       });
-      this.packs.set(sortStickerPacksByPreference(merged, this.preferences.packOrder()));
+      this.packs.set(sortStickerPacksByPreference([...merged.values()], this.preferences.packOrder()));
     } catch {
       this.error.set(true);
     } finally {
+      subscription.unsubscribe();
       this.busy.set(false);
     }
   }
@@ -225,7 +271,7 @@ export class StickerPicker {
     this.busy.set(true);
     this.error.set(false);
     try {
-      const pack = await firstValueFrom(this.api.stickers.getPack({ packId: id }));
+      const pack = await firstValueFrom(this.updates.getPack(id));
       this.content.set(pack);
     } catch {
       this.error.set(true);
@@ -241,9 +287,7 @@ export class StickerPicker {
       const sticker = await firstValueFrom(this.api.stickers.get({ stickerId: id }));
       const pack = sticker.packs[0];
       this.retryPackId = pack?.id;
-      this.content.set(
-        pack ? await firstValueFrom(this.api.stickers.getPack({ packId: pack.id })) : { stickers: [sticker] },
-      );
+      this.content.set(pack ? await firstValueFrom(this.updates.getPack(pack.id)) : { stickers: [sticker] });
       this.packs.set(sticker.packs);
     } catch {
       this.error.set(true);

@@ -115,3 +115,13 @@ pub struct StickersUnfavoriteParams {
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StickersListFavoritesParams {}
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StickersCreateFromMessageParams {
+    #[serde(deserialize_with = "crate::dto::rpc::deserialize_id")]
+    #[schema(schema_with = crate::serde_i64_string::schema)]
+    pub pack_id: i64,
+    #[serde(flatten)]
+    pub body: crate::dto::stickers::CreateStickerFromMessageBody,
+}

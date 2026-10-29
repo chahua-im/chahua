@@ -224,6 +224,8 @@ SpeakingModeSelect 由 ChatDetails 与 ChatMembers 复用，输入 label、disab
 
 PrivacyExceptions 接收 PrivacyExceptionKind，持有例外列表、好友选择器、搜索、保存与清空状态；FriendsService 提供批量读取和单项覆盖写入，ChatStore.privacyOverrides$ 通知已挂载资料同步。PresenceSettings、ReadReceiptSettings 各自保留已保存值和失败待重试值，选择控件始终可回退到真实状态。
 
-StickerEditor 接收标题、初始名称、是否填写对应表情、busy 和 error，输出 confirmed（名称、表情）及 closed。Signal Form 保留未提交输入并验证必填字段；父页面持有文件和 API 写入状态，保存成功后先等待编辑器 dismiss 完成，再销毁编辑器或跳转。编辑器和隐私好友选择器在保存期间阻止用户取消，但允许已获准的路由离开及父容器移除清理子弹窗。
+StickerEditor 接收标题、初始名称、是否填写对应表情、busy、error、附加内容模板 content 和 saveDisabled，输出 confirmed（名称、表情）及 closed。Signal Form 保留未提交输入并验证必填字段，表情使用现有 Unicode emoji 序列集合校验；父页面持有文件和 API 写入状态，保存成功后先等待编辑器 dismiss 完成，再销毁编辑器或跳转。编辑器和隐私好友选择器在保存期间阻止用户取消，但允许已获准的路由离开及父容器移除清理子弹窗。
+
+StickerFromMessage 接收来源 message 和已读取的自有包列表 packs，持有目标包 ID 和提交状态，输出 saved 与 closed；通过 StickerEditor 的 content 模板展示来源图片和选包表单。MessageMenu 在打开保存弹窗前读取自有包；空列表或读取失败只显示 Toast，有包时保存来源与包列表并打开弹窗，reset 时清理并使迟到回包失效。StickerUpdates 传递本地新增结果，并在包读取期间暂存新增项以避免迟到回包覆盖；不持久缓存包内容。具体入口与字段规则见[需求](requirements.md#通知静音与设置)，请求时机见[数据流](data-flow.md)。
 
 ChatDetails 的 view 输入由面板路径派生（DetailView 与媒体类别），切换资料、隐私、群管理、邀请及图片/视频/文件；宽屏信息栏和 modal 复用同一组件实例。资料首页的 ion-content 隐藏时保留当前内容组件，返回恢复滚动；二级页切换重建各自的滚动容器；媒体页创建 ChatAttachments，退出时销毁并取消未完成读取。页面与返回位置随聊天/用户/话题范围重置；权限撤销关闭相应内部页。好友和管理员操作直接展示，破坏性操作沿用确认，并拒绝切换对象前遗留的确认。

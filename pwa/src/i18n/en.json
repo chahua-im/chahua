@@ -659,7 +659,19 @@
     "emojiLoadFailed": "Failed to load emojis. Close and try again.",
     "createPack": "Create sticker pack",
     "createFailed": "Failed to create sticker pack",
-    "emojiLabel": "Emoji"
+    "emojiLabel": "Emoji",
+    "emojiHint": "Enter 1–4 emoji without text or spaces.",
+    "fromMessage": {
+      "action": "Save as sticker",
+      "title": "Add to sticker pack",
+      "pack": "Sticker pack",
+      "invalid": "Use an image-only message with one image up to 10 MiB and 1–4 emoji.",
+      "forbidden": "You no longer have access to this chat or permission to edit the selected pack.",
+      "missing": "The source message or sticker pack no longer exists.",
+      "changed": "The source image changed. Close this dialog and select the image again.",
+      "uncertain": "The save result could not be confirmed. Check the pack before trying again to avoid duplicates.",
+      "noOwnedPacks": "You have no sticker packs of your own."
+    }
   },
   "emojiPicker": {
     "loadFailed": "Failed to load emojis. Close and try again."

@@ -1,7 +1,9 @@
-import { Component, input, linkedSignal, output, viewChild } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { Component, computed, input, linkedSignal, output, TemplateRef, viewChild } from '@angular/core';
 import { applyWhen, disabled, form, FormField, pattern, required } from '@angular/forms/signals';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { TranslocoPipe } from '@jsverse/transloco';
+import { extractEmojiSequences } from '../emoji-sequences';
 import {
   IonButton,
   IonButtons,
@@ -26,6 +28,7 @@ export interface StickerEditorValue {
   selector: 'app-sticker-editor',
   imports: [
     ContentScrollbars,
+    NgTemplateOutlet,
     FormField,
     TranslocoPipe,
     IonButton,
@@ -51,7 +54,10 @@ export interface StickerEditorValue {
             </ion-buttons>
             <ion-title>{{ title() }}</ion-title>
             <ion-buttons slot="end">
-              <ion-button [disabled]="fields().disabled() || fields().invalid() || unchanged()" (click)="submit()">
+              <ion-button
+                [disabled]="fields().disabled() || fields().invalid() || unchanged() || saveDisabled() || !validEmoji()"
+                (click)="submit()"
+              >
                 @if (busy()) {
                   <ion-spinner />
                 } @else {
@@ -62,6 +68,7 @@ export interface StickerEditorValue {
           </ion-toolbar></ion-header
         >
         <ion-content appScrollbars color="light">
+          <ng-container [ngTemplateOutlet]="content() ?? null" />
           <ion-list [inset]="true">
             @if (withEmoji()) {
               <ion-item
@@ -70,6 +77,9 @@ export interface StickerEditorValue {
                   [placeholder]="'stickers.emojiPlaceholder' | transloco"
                   [formField]="fields.emoji"
               /></ion-item>
+              <ion-item lines="none"
+                ><ion-note>{{ 'stickers.emojiHint' | transloco }}</ion-note></ion-item
+              >
             }
             <ion-item lines="none"
               ><ion-input
@@ -93,6 +103,8 @@ export class StickerEditor {
   readonly withEmoji = input(false);
   readonly busy = input(false);
   readonly error = input<string>();
+  readonly content = input<TemplateRef<unknown>>();
+  readonly saveDisabled = input(false);
   readonly closed = output<void>();
   readonly confirmed = output<StickerEditorValue>();
   private readonly modal = viewChild.required(IonModal);
@@ -104,6 +116,12 @@ export class StickerEditor {
   }
 
   protected readonly value = linkedSignal(() => ({ name: this.initialName(), emoji: '' }));
+  protected readonly validEmoji = computed(() => {
+    if (!this.withEmoji()) return true;
+    const value = this.value().emoji.trim();
+    const emojis = extractEmojiSequences(value);
+    return emojis.length >= 1 && emojis.length <= 4 && emojis.join('') === value;
+  });
   protected readonly fields = form(this.value, (fields) => {
     disabled(fields, () => this.busy());
     applyWhen(
@@ -127,7 +145,14 @@ export class StickerEditor {
     return !this.withEmoji() && !!this.initialName() && this.value().name.trim() === this.initialName();
   }
   protected submit() {
-    if (this.fields().disabled() || this.fields().invalid() || this.unchanged()) return;
+    if (
+      this.fields().disabled() ||
+      this.fields().invalid() ||
+      this.unchanged() ||
+      this.saveDisabled() ||
+      !this.validEmoji()
+    )
+      return;
     this.confirmed.emit({ name: this.value().name.trim(), emoji: this.value().emoji.trim() });
   }
 }

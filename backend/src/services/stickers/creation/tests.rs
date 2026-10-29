@@ -75,6 +75,7 @@ async fn fake_storage_with_content(content: Vec<u8>, pause: Option<StoragePause>
                 bucket: "test".into(),
                 attachment_prefix: "attachments".into(),
                 base_url: None,
+                upload_proxy_path: None,
                 endpoint_url: Some(endpoint),
                 max_attachment_file_size_bytes: 50 * 1024 * 1024,
             }),

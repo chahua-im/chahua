@@ -101,6 +101,9 @@
                           @case (Action.Link) {
                             {{ 'messages.menu.actions.link' | transloco }}
                           }
+                          @case (Action.CreateSticker) {
+                            {{ 'stickers.fromMessage.action' | transloco }}
+                          }
                           @case (Action.Recall) {
                             {{ 'messages.menu.actions.recall' | transloco }}
                           }
@@ -149,25 +152,36 @@
   [duration]="2500"
   (didDismiss)="notice.set(undefined)"
   [message]="
-    notice() === Notice.Copied
-      ? ('messages.menu.notice.copied' | transloco)
-      : notice() === Notice.Saved
-        ? ('messages.menu.notice.saved' | transloco)
-        : notice() === Notice.Unsaved
-          ? ('messages.menu.notice.unsaved' | transloco)
-          : notice() === Notice.Pinned
-            ? ('messages.menu.notice.pinned' | transloco)
-            : notice() === Notice.Unpinned
-              ? ('messages.menu.notice.unpinned' | transloco)
-              : notice() === Notice.Recalled
-                ? ('messages.menu.notice.recalled' | transloco)
-                : notice() === Notice.ReactionLimit
-                  ? ('messages.menu.notice.reactionLimit' | transloco)
-                  : notice() === Notice.MetadataFailed
-                    ? ('messages.menu.notice.metadataFailed' | transloco)
-                    : ('messages.menu.notice.failed' | transloco)
+    notice() === Notice.NoOwnedStickerPacks
+      ? ('stickers.fromMessage.noOwnedPacks' | transloco)
+      : notice() === Notice.StickerAdded
+        ? ('stickers.added' | transloco)
+        : notice() === Notice.Copied
+          ? ('messages.menu.notice.copied' | transloco)
+          : notice() === Notice.Saved
+            ? ('messages.menu.notice.saved' | transloco)
+            : notice() === Notice.Unsaved
+              ? ('messages.menu.notice.unsaved' | transloco)
+              : notice() === Notice.Pinned
+                ? ('messages.menu.notice.pinned' | transloco)
+                : notice() === Notice.Unpinned
+                  ? ('messages.menu.notice.unpinned' | transloco)
+                  : notice() === Notice.Recalled
+                    ? ('messages.menu.notice.recalled' | transloco)
+                    : notice() === Notice.ReactionLimit
+                      ? ('messages.menu.notice.reactionLimit' | transloco)
+                      : notice() === Notice.MetadataFailed
+                        ? ('messages.menu.notice.metadataFailed' | transloco)
+                        : ('messages.menu.notice.failed' | transloco)
   "></ion-toast>
 
 @if (forwarding().length) {
   <app-forward-picker [messages]="forwarding()" (closed)="forwarding.set([])" />
+}
+@if (stickerSource(); as source) {
+  <app-sticker-from-message
+    [message]="source.message"
+    [packs]="source.packs"
+    (closed)="stickerSource.set(undefined)"
+    (saved)="notice.set(Notice.StickerAdded)" />
 }
