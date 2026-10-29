@@ -276,6 +276,7 @@ mod tests {
                 attachment_prefix: "attachments".to_owned(),
                 base_url: Some("https://media.invalid".to_owned()),
                 endpoint_url: None,
+                upload_proxy_path: None,
                 max_attachment_file_size_bytes: 1,
             }),
         );

@@ -71,7 +71,7 @@ Each worktree keeps its own `backend/target` and `pwa/node_modules`. Removing a 
 | File                                        | Scope and creation                                                                                                       |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `<git-common-dir>/runspace/.env`            | Shared service settings and credentials; created by `init` or `up`. Required for local mode, optional for `pwa --online` |
-| `runspace/.env`                             | This worktree's four application ports; automatically created if absent                                                  |
+| `runspace/.env`                             | This worktree's four application ports and optional `PWA_HOST`; automatically created if absent                          |
 | `<git-common-dir>/runspace/seed-state.json` | Shared fixture progress, written by seeding                                                                              |
 | `pwa/.env.local`                            | Optional `CHAHUA_DEV_TOKEN` preset; not required for startup                                                             |
 
@@ -101,7 +101,7 @@ If changing a shared service port, update both its `*_PORT` setting and correspo
 
 ## Port overrides and LAN HTTPS
 
-All frontend modes bind to `127.0.0.1` by default and are accessible only from this machine; pass `--host 0.0.0.0` to allow LAN access.
+All frontend modes bind to `127.0.0.1` by default and are accessible only from this machine; pass `--host 0.0.0.0` to allow LAN access, or add `PWA_HOST=0.0.0.0` to the ignored worktree file `runspace/.env`. The command-line `--host` takes precedence over this saved setting.
 
 `dev`, `pwa`, and `pwa --online` accept `--port 14443` or `--port=14443` to override the frontend port for that invocation. This does not change backend ports or rewrite saved assignments. A missing worktree env file is still created with automatically allocated defaults. Occupied ports and overrides matching backend/shared-service ports are rejected.
 
@@ -112,11 +112,15 @@ node runspace/dev.mjs dev --port 14443 --host 0.0.0.0 --ssl \
   --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem
 ```
 
-Local mode requires `--ssl`; online mode enables HTTPS by default. In `pwa/`, the equivalent frontend-only command is `npm run dev -- --port 14443 --host 0.0.0.0 --ssl --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem`. The certificate must cover the accessed hostname/IP and be trusted by the device.
+To enable HTTPS, local mode requires `--ssl`; online mode enables HTTPS by default. In `pwa/`, the equivalent frontend-only command is `npm run dev -- --port 14443 --host 0.0.0.0 --ssl --ssl-cert /path/to/dev.pem --ssl-key /path/to/dev-key.pem`. The certificate must cover the accessed hostname/IP and be trusted by the device.
 
 `dev --port …` also updates the backend's localhost CORS origins for that run. Frontend-only commands cannot update an already-running backend. The launcher selects the proxy target: neither the shell's `API_PROXY_TARGET` nor `--proxy-config` can override it.
 
-This exposes the frontend only. RustFS remains bound to loopback, and default media/upload URLs use `127.0.0.1`. LAN media tests need a storage endpoint reachable from the device over trusted HTTPS, with matching `S3_ENDPOINT_URL` and `S3_BASE_URL` settings; changing the frontend host alone does not provide this.
+In local mode, the launcher sets `S3_UPLOAD_PROXY_PATH=/_storage` and derives a relative `S3_BASE_URL` from the storage endpoint path and bucket. Browsers upload and read media through the frontend's `/_storage/…` proxy, using the current page's scheme, host and port. Switching between LAN and VPN addresses does not require changing storage settings. RustFS stays bound to loopback; no separate storage port, certificate or Nginx is needed. Keep `S3_ENDPOINT_URL` pointed at the internal RustFS endpoint. The launcher supplies these browser URL settings at runtime without rewriting the shared env file. Restart both the backend and frontend after updating the launcher/proxy configuration; refresh existing pages to obtain fresh media URLs.
+
+The storage proxy removes `/_storage`, preserves the encoded object path and signed query, and restores the internal endpoint's Host (including port) for S3 signature validation. Browser cookies and Authorization headers are not forwarded to storage. Backend S3 operations still use the internal endpoint directly. Online frontend mode does not enable this proxy.
+
+HTTP supports image uploads when the page itself uses HTTP. To test recording and Service Worker features from a LAN/VPN IP, use trusted HTTPS. A single certificate can cover both IP addresses; each testing device must trust its issuer. Keep certificates/private keys outside the repository. Private settings in `runspace/.env` are ignored by Git; generic launcher/proxy code is tracked.
 
 ## Test data and development tools
 
@@ -148,6 +152,8 @@ Launcher regression checks use temporary Git worktrees and local test servers, w
 
 ```bash
 node --test runspace/dev.test.mjs
+# Exercise the actual frontend proxy with a local SigV4-verifying mock storage server:
+node --test pwa/scripts/storage-proxy.test.mjs
 # Also exercise real bacon with a temporary Rust server:
 RUNSPACE_TEST_BACON="$(command -v bacon)" node --test runspace/dev.test.mjs
 ```

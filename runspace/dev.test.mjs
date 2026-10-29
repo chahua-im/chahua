@@ -64,6 +64,8 @@ test('worktrees share infra and credentials but keep distinct, persistent app po
   assert.deepEqual((await configure(paths(other))).config, second.config);
   assert.equal(second.api, `http://127.0.0.1:${second.config.API_PORT}`);
   assert.match(second.config.CORS_ALLOWED_ORIGINS, new RegExp(`:${second.config.PWA_PORT}`));
+  assert.equal(second.config.S3_BASE_URL, '/_storage/chahua-local');
+  assert.equal(second.config.S3_UPLOAD_PROXY_PATH, '/_storage');
   execFileSync('docker', [
     'compose',
     '--env-file',
@@ -84,6 +86,7 @@ test('online frontend config does not require shared infrastructure initializati
   assert.equal(online.config.ONLINE_PWA_PORT, '24443');
   assert.ok(readFileSync(online.localEnv, 'utf8').includes('API_PORT='));
   assert.equal(online.config.DATABASE_URL, undefined);
+  assert.equal(online.config.S3_UPLOAD_PROXY_PATH, undefined);
   await assert.rejects(configure(paths(root)), /init first/);
   await assert.rejects(configure(paths(root), { online: true, pwaPort: '65536' }), /between 1 and 65535/);
 });
@@ -197,7 +200,7 @@ test('dev uses shared Compose, isolates targets, and cleans up on Ctrl+C; online
   writeFileSync(resolve(root, 'pwa/node_modules/@angular/cli/package.json'), '{"type":"module"}');
   writeFileSync(
     resolve(root, 'pwa/node_modules/@angular/cli/bin/ng.js'),
-    `import net from 'node:net'; console.log('CLI_ARGS '+JSON.stringify(process.argv)); console.log('TARGET '+process.env.API_PROXY_TARGET); net.createServer().listen(Number(process.argv[process.argv.indexOf('--port')+1]),'127.0.0.1');`,
+    `import net from 'node:net'; console.log('CLI_ARGS '+JSON.stringify(process.argv)); console.log('TARGET '+process.env.API_PROXY_TARGET); console.log('STORAGE '+process.env.STORAGE_PROXY_TARGET); net.createServer().listen(Number(process.argv[process.argv.indexOf('--port')+1]),'127.0.0.1');`,
   );
   const run = (args) => {
     const child = spawn(process.execPath, [resolve(root, 'runspace/dev.mjs'), ...args], {
@@ -205,6 +208,7 @@ test('dev uses shared Compose, isolates targets, and cleans up on Ctrl+C; online
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
         API_PROXY_TARGET: 'https://unexpected.example',
+        STORAGE_PROXY_TARGET: 'https://unexpected.example',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -220,6 +224,7 @@ test('dev uses shared Compose, isolates targets, and cleans up on Ctrl+C; online
     });
     return { child, output: () => output };
   };
+  writeFileSync(context.localEnv, readFileSync(context.localEnv, 'utf8') + 'PWA_HOST=0.0.0.0\n');
   const savedEnv = readFileSync(context.localEnv, 'utf8');
   const defaultPortBlocker = createServer();
   defaultPortBlocker.listen(Number(context.config.PWA_PORT), '127.0.0.1');
@@ -233,7 +238,9 @@ test('dev uses shared Compose, isolates targets, and cleans up on Ctrl+C; online
   const local = run(['dev', '--port', overridePort, '--ssl', '--ssl-cert', 'dev.pem', '--ssl-key', 'dev-key.pem']);
   await waitUntil(() => local.output().includes('WATCHER_READY') && local.output().includes('CLI_ARGS'));
   assert.match(local.output(), new RegExp(`TARGET http://127.0.0.1:${context.config.API_PORT}`));
+  assert.ok(local.output().includes(`STORAGE ${endpoint}\n`));
   assert.match(local.output(), /CHAHUA_DEV_BACKEND=true/);
+  assert.match(local.output(), /"--host","0.0.0.0"/);
   assert.match(local.output(), new RegExp(`PWA: https://localhost:${overridePort}`));
   assert.match(local.output(), new RegExp(`CORS .*https://localhost:${overridePort}`));
   assert.match(local.output(), /"--ssl-cert","dev.pem","--ssl-key","dev-key.pem"/);
@@ -247,10 +254,12 @@ test('dev uses shared Compose, isolates targets, and cleans up on Ctrl+C; online
   const calls = readFileSync(composeLog, 'utf8').trim().split('\n').map(JSON.parse);
   assert.ok(calls.every((call) => call[call.indexOf('--env-file') + 1] === context.sharedEnv));
   assert.ok(!calls.some((call) => call.includes('stop') || call.includes('down')));
-  const online = run(['pwa', '--online', `--port=${overridePort}`]);
+  const online = run(['pwa', '--online', `--port=${overridePort}`, '--host', '127.0.0.1']);
   await waitUntil(() => online.output().includes('CLI_ARGS'));
   assert.match(online.output(), /TARGET https:\/\/chahui.app\/_api/);
   assert.match(online.output(), /CHAHUA_DEV_BACKEND=false/);
+  assert.match(online.output(), /"--host","127.0.0.1"/);
+  assert.ok(online.output().includes('STORAGE \n'));
   assert.match(online.output(), new RegExp(`localhost:${overridePort}`));
   const onlineExited = once(online.child, 'exit');
   online.child.kill('SIGINT');
