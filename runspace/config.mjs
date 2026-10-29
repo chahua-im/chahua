@@ -189,6 +189,11 @@ export async function configure(locations, { initialize = false, online = false,
       METRICS_ADDR: `127.0.0.1:${local.METRICS_PORT}`,
       CORS_ALLOWED_ORIGINS: `http://localhost:${local.PWA_PORT},http://127.0.0.1:${local.PWA_PORT},https://localhost:${local.PWA_PORT},https://127.0.0.1:${local.PWA_PORT}`,
     };
+    if (!online) {
+      const storagePath = new URL(config.S3_ENDPOINT_URL).pathname.replace(/\/$/, '');
+      config.S3_BASE_URL = `/_storage${storagePath}/${config.S3_BUCKET_NAME}`;
+      config.S3_UPLOAD_PROXY_PATH = '/_storage';
+    }
     return {
       ...locations,
       config,

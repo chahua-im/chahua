@@ -39,6 +39,8 @@ pub struct MediaConfig {
     pub base_url: Option<String>,
     /// Custom S3 endpoint, for MinIO and friends. Forces path-style addressing.
     pub endpoint_url: Option<String>,
+    /// Browser proxy prefix for signed uploads. The proxy must restore the signed Host.
+    pub upload_proxy_path: Option<String>,
     pub max_attachment_file_size_bytes: i64,
 }
 
@@ -113,6 +115,7 @@ impl AppConfig {
                     .unwrap_or_else(|_| "attachments".to_string()),
                 base_url: std::env::var("S3_BASE_URL").ok(),
                 endpoint_url: std::env::var("S3_ENDPOINT_URL").ok(),
+                upload_proxy_path: std::env::var("S3_UPLOAD_PROXY_PATH").ok(),
                 max_attachment_file_size_bytes: read_positive_i64_env(
                     "ATTACHMENT_MAX_FILE_SIZE_BYTES",
                     DEFAULT_MAX_ATTACHMENT_FILE_SIZE_BYTES,

@@ -1441,6 +1441,7 @@ mod tests {
                 attachment_prefix: "attachments".into(),
                 base_url: None,
                 endpoint_url: None,
+                upload_proxy_path: None,
                 max_attachment_file_size_bytes: 1,
             }),
         );
