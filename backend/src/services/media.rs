@@ -162,7 +162,24 @@ impl MediaStore {
         &self,
         storage_key: &str,
     ) -> Result<Vec<u8>, (StatusCode, &'static str)> {
-        let object = self
+        self.download_object(storage_key, None).await
+    }
+
+    /// Bound actual bytes read, rather than trusting client-provided attachment metadata.
+    pub async fn get_object_limited(
+        &self,
+        storage_key: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, (StatusCode, &'static str)> {
+        self.download_object(storage_key, Some(max_bytes)).await
+    }
+
+    async fn download_object(
+        &self,
+        storage_key: &str,
+        max_bytes: Option<usize>,
+    ) -> Result<Vec<u8>, (StatusCode, &'static str)> {
+        let mut object = self
             .client
             .get_object()
             .bucket(&self.config.bucket)
@@ -177,12 +194,17 @@ impl MediaStore {
                 )
             })?;
 
-        let bytes = object.body.collect().await.map_err(|e| {
+        let mut bytes = Vec::new();
+        while let Some(chunk) = object.body.try_next().await.map_err(|e| {
             tracing::error!("Failed to read object body {}: {:?}", storage_key, e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read media")
-        })?;
-
-        Ok(bytes.into_bytes().to_vec())
+        })? {
+            if max_bytes.is_some_and(|limit| chunk.len() > limit.saturating_sub(bytes.len())) {
+                return Err((StatusCode::PAYLOAD_TOO_LARGE, "Media file too large"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
     }
 
     /// Best-effort delete, used to roll back an upload whose database write

@@ -312,6 +312,26 @@ mod tests {
     }
 
     #[test]
+    fn sticker_from_message_contract() {
+        let document = api_document();
+        let endpoint =
+            &document["paths"]["/stickers/packs/{pack_id}/stickers/from-message"]["post"];
+        for status in ["201", "400", "403", "404", "409"] {
+            assert!(endpoint["responses"][status].is_object());
+        }
+        let schema = &document["components"]["schemas"]["CreateStickerFromMessageBody"];
+        for field in ["chatId", "messageId"] {
+            assert_eq!(schema["properties"][field]["type"], "string");
+        }
+        let body: crate::dto::stickers::CreateStickerFromMessageBody = serde_json::from_value(
+            serde_json::json!({"chatId": "9007199254740993", "messageId": "9007199254740995", "emoji": "😀"})
+        ).unwrap();
+        assert_eq!(body.chat_id, 9007199254740993);
+        assert_eq!(body.message_id, 9007199254740995);
+        assert!(body.name.is_none());
+    }
+
+    #[test]
     fn sticker_discovery_and_visibility_contract() {
         let document = api_document();
         let schemas = &document["components"]["schemas"];

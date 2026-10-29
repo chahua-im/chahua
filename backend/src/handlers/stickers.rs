@@ -7,10 +7,10 @@ use axum::{
 use utoipa_axum::router::OpenApiRouter;
 
 use crate::dto::stickers::{
-    CreateStickerPackBody, FavoriteStickerListResponse, PostStickerMultipart,
-    StickerDetailResponse, StickerPackDetailResponse, StickerPackDiscoveryQuery,
-    StickerPackDiscoveryResponse, StickerPackListResponse, StickerPackSummary, StickerSummary,
-    UpdateStickerPackBody,
+    CreateStickerFromMessageBody, CreateStickerPackBody, FavoriteStickerListResponse,
+    PostStickerMultipart, StickerDetailResponse, StickerPackDetailResponse,
+    StickerPackDiscoveryQuery, StickerPackDiscoveryResponse, StickerPackListResponse,
+    StickerPackSummary, StickerSummary, UpdateStickerPackBody,
 };
 use crate::errors::AppError;
 use crate::extractors::DbConn;
@@ -18,7 +18,7 @@ use crate::services::api::stickers::{self, StickerUpload};
 use crate::utils::auth::CurrentUid;
 use crate::AppState;
 
-const MAX_STICKER_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
+use crate::services::stickers::creation::MAX_STICKER_UPLOAD_BYTES;
 
 #[utoipa::path(get, path = "/packs", tag = "stickers", params(StickerPackDiscoveryQuery), responses((status = 200, description = "Public nonempty sticker packs", body = StickerPackDiscoveryResponse), (status = 400, description = "Invalid search or pagination parameters")), security(("bearer_jwt" = [])))]
 async fn get_packs(
@@ -152,9 +152,9 @@ async fn post_pack_sticker(
     CurrentUid(uid): CurrentUid,
     State(state): State<AppState>,
     Path(pack_id): Path<i64>,
-    mut conn: DbConn,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
+    stickers::check_upload_pack_owner(uid, pack_id, &state.db).await?;
     let mut upload = StickerUpload {
         emoji: None,
         name: None,
@@ -212,7 +212,42 @@ async fn post_pack_sticker(
         uid,
         pack_id,
         upload,
-        &mut conn,
+        &state.db,
+        &state.media,
+        state.id_gen.as_ref(),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, AxumJson(summary)))
+}
+
+/// Copy the stored image into an owned pack. The source message is unchanged.
+/// Each successful request creates a new sticker, as with a multipart upload.
+#[utoipa::path(
+    post,
+    path = "/packs/{pack_id}/stickers/from-message",
+    tag = "stickers",
+    params(("pack_id" = String, Path, description = "Existing sticker pack owned by the current user")),
+    request_body = CreateStickerFromMessageBody,
+    responses(
+        (status = 201, description = "Sticker created from the stored image", body = StickerSummary),
+        (status = 400, description = "Message is not a single image without text, or sticker input is invalid or exceeds 10 MiB"),
+        (status = 403, description = "Chat membership or sticker pack ownership required"),
+        (status = 404, description = "Pack or published message not found"),
+        (status = 409, description = "Source image changed during processing")
+    ),
+    security(("bearer_jwt" = []))
+)]
+async fn post_pack_sticker_from_message(
+    CurrentUid(uid): CurrentUid,
+    State(state): State<AppState>,
+    Path(pack_id): Path<i64>,
+    Json(body): Json<CreateStickerFromMessageBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let summary = stickers::post_pack_sticker_from_message(
+        uid,
+        pack_id,
+        body,
+        &state.db,
         &state.media,
         state.id_gen.as_ref(),
     )
@@ -297,6 +332,7 @@ pub fn router() -> OpenApiRouter<crate::AppState> {
         .routes(utoipa_axum::routes!(get_pack, patch_pack, delete_pack))
         .routes(utoipa_axum::routes!(put_subscription, delete_subscription))
         .routes(utoipa_axum::routes!(post_pack_sticker))
+        .routes(utoipa_axum::routes!(post_pack_sticker_from_message))
         .routes(utoipa_axum::routes!(put_pack_sticker, delete_pack_sticker))
         .routes(utoipa_axum::routes!(get_sticker))
         .routes(utoipa_axum::routes!(put_favorite, delete_favorite))

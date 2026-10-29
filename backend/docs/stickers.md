@@ -1,8 +1,63 @@
-# Sticker pack discovery and visibility
+# Stickers and sticker packs
 
 All sticker endpoints require the existing bearer authentication. Pack IDs and
 sticker IDs retain their string-encoded Snowflake representation. Field names
 use camelCase.
+
+## Create a sticker from a message
+
+`POST /stickers/packs/{packId}/stickers/from-message` adds a new sticker to an
+existing pack owned by the caller. The JSON body is:
+
+```json
+{
+  "chatId": "123",
+  "messageId": "456",
+  "emoji": "😀",
+  "name": "Optional name",
+  "description": "Optional description"
+}
+```
+
+`chatId`, `messageId`, and `emoji` are required. The caller must be a current
+member of the source chat. The source must be a published, undeleted text-type
+message with no non-whitespace text and exactly one active image attachment;
+images sent as file messages are excluded. The image may belong to any sender.
+Read-only speaking restrictions do not prevent copying an accessible image.
+Membership checks do not lock the member record or the chat. Removal after the
+final membership check may race with a successful copy; message and attachment
+locks still keep the source content consistent through insertion.
+
+The server reads the stored attachment, which may already be compressed, and
+uses the same processing as a direct sticker upload. Inputs are limited to
+10 MiB, including actual bytes downloaded from storage. Emoji validation accepts
+one to four emoji graphemes. Static images are resized to a maximum dimension
+of 512 pixels and encoded as WebP; animated GIF/WebP images retain their bytes.
+Blank optional names and descriptions are stored as null.
+
+Success returns `201` with the existing `StickerSummary` representation. The
+sticker has independent media; the source message and attachment are unchanged.
+This operation does not create packs or emit message update events. Each
+successful request creates a new sticker; retries are not deduplicated.
+
+Invalid composition, emoji, image data, or excessive input size returns `400`.
+Missing chat membership or pack ownership returns `403`; missing packs and
+missing, deleted, or unpublished source messages return `404`. Source eligibility
+and permissions are checked again before committing. Replacing the source image
+during processing returns `409`; other changes return the corresponding
+eligibility or permission error. Database inserts are atomic. Failure to acquire
+a connection for insertion, failed revalidation, or a failed commit triggers
+best-effort deletion of the newly uploaded sticker object.
+
+Both message-based creation and multipart sticker uploads acquire database
+connections only for their initial checks and final insertion. Downloads,
+multipart reads, image processing, and object uploads run without holding a
+database connection. Connection acquisition and synchronous database queries run
+on blocking workers rather than the async executor.
+
+Message and membership lookups use primary keys. The attachment lookup is scoped
+by the existing message-ID index and fetches at most two active rows to reject
+multi-attachment messages. No new database index or migration is required.
 
 ## Visibility
 

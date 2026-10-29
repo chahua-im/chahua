@@ -1,38 +1,43 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use aws_sdk_s3::primitives::ByteStream;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::PgConnection;
 
 use crate::dto::stickers::{
-    CreateStickerPackBody, FavoriteStickerListResponse, StickerDetailResponse,
-    StickerMediaResponse, StickerPackDetailResponse, StickerPackDiscoveryItem,
-    StickerPackDiscoveryQuery, StickerPackDiscoveryResponse, StickerPackListResponse,
-    StickerPackPreviewSticker, StickerPackSummary, StickerSummary, UpdateStickerPackBody,
+    CreateStickerFromMessageBody, CreateStickerPackBody, FavoriteStickerListResponse,
+    StickerDetailResponse, StickerMediaResponse, StickerPackDetailResponse,
+    StickerPackDiscoveryItem, StickerPackDiscoveryQuery, StickerPackDiscoveryResponse,
+    StickerPackListResponse, StickerPackPreviewSticker, StickerPackSummary, StickerSummary,
+    UpdateStickerPackBody,
 };
 use crate::dto::ws::{ServerWsMessage, StickerPackOrderUpdatePayload};
 use crate::errors::AppError;
 use crate::models::{
-    Media, MediaPurpose, NewMedia, NewSticker, NewStickerPack, Sticker, StickerPack,
-    StickerPackSticker, UpdateStickerPack, UserFavoriteSticker,
+    Media, NewStickerPack, Sticker, StickerPack, StickerPackSticker, UpdateStickerPack,
+    UserFavoriteSticker,
 };
 use crate::schema::{
     media, sticker_pack_stickers, sticker_packs, stickers, user_favorite_stickers,
     user_sticker_pack_subscriptions,
 };
 use crate::services::{
-    image_processing::process_sticker,
-    media::{build_storage_key, MediaStore},
+    media::MediaStore,
     sticker_discovery, stickers as packs_service,
+    stickers::{
+        creation::{
+            create_sticker, create_sticker_from_message, validate_sticker_emoji, StickerInput,
+        },
+        require_pack_owner,
+    },
     user::lookup_user_profiles,
     ws_registry::ConnectionRegistry,
 };
 use crate::utils::ids::{self, IdGen};
 
-const STICKER_STORAGE_PREFIX: &str = "stickers";
-const MAX_STICKER_EMOJI_GRAPHEMES: usize = 4;
+use crate::state::DbPool;
+
 pub struct StickerUpload {
     pub emoji: Option<String>,
     pub name: Option<String>,
@@ -246,15 +251,31 @@ pub fn delete_subscription(
     Ok(())
 }
 
+pub async fn check_upload_pack_owner(
+    uid: i32,
+    pack_id: i64,
+    pool: &DbPool,
+) -> Result<(), AppError> {
+    let pool = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get()?;
+        require_pack_owner(&mut conn, pack_id, uid).map(|_| ())
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(?error, "sticker pack database task failed");
+        AppError::Internal("Failed to read sticker pack")
+    })?
+}
+
 pub async fn post_pack_sticker(
     uid: i32,
     pack_id: i64,
     upload: StickerUpload,
-    conn: &mut PgConnection,
+    pool: &DbPool,
     media_store: &MediaStore,
     id_gen: &IdGen,
 ) -> Result<StickerSummary, AppError> {
-    require_pack_owner(conn, pack_id, uid)?;
     let emoji = validate_sticker_emoji(
         upload
             .emoji
@@ -263,100 +284,51 @@ pub async fn post_pack_sticker(
     )?;
     let content_type = upload
         .content_type
-        .as_deref()
         .ok_or(AppError::BadRequest("Missing sticker file content type"))?;
-    if !is_allowed_sticker_content_type(content_type) {
-        return Err(AppError::BadRequest("Unsupported sticker content type"));
-    }
-    let file_bytes = upload
+    let bytes = upload
         .file_bytes
-        .as_deref()
         .ok_or(AppError::BadRequest("Missing sticker file"))?;
-    let file_name = upload
-        .file_name
-        .unwrap_or_else(|| "sticker.bin".to_string());
-    let sticker_name = upload
-        .name
-        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
-    let sticker_description = upload
-        .description
-        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
-    let processed = process_sticker(content_type, file_bytes)
-        .map_err(|_| AppError::BadRequest("Invalid or corrupted sticker image"))?;
-    let media_id = ids::next_id(id_gen).await.map_err(|e| {
-        tracing::error!("next_id for sticker media: {:?}", e);
-        AppError::Internal("Failed to generate ID")
-    })?;
-    let sticker_id = ids::next_id(id_gen).await.map_err(|e| {
-        tracing::error!("next_id for sticker: {:?}", e);
-        AppError::Internal("Failed to generate ID")
-    })?;
-    let storage_key = build_storage_key(
-        STICKER_STORAGE_PREFIX,
-        &file_name,
-        &uuid::Uuid::new_v4().to_string(),
-    );
-    media_store
-        .put_object(
-            &storage_key,
-            &processed.content_type,
-            ByteStream::from(processed.data.clone()),
-        )
-        .await?;
-    let now = Utc::now();
-    let create_result = conn.transaction::<(Sticker, Media), diesel::result::Error, _>(|conn| {
-        diesel::insert_into(media::table)
-            .values(&NewMedia {
-                id: media_id,
-                content_type: processed.content_type.clone(),
-                storage_key: storage_key.clone(),
-                size: processed.data.len() as i64,
-                created_at: now,
-                deleted_at: None,
-                file_name: file_name.clone(),
-                width: processed.width,
-                height: processed.height,
-                purpose: MediaPurpose::Sticker,
-                reference: None,
-            })
-            .execute(conn)?;
-        diesel::insert_into(stickers::table)
-            .values(&NewSticker {
-                id: sticker_id,
-                media_id,
-                emoji: emoji.clone(),
-                name: sticker_name.clone(),
-                description: sticker_description.clone(),
-                created_at: now,
-            })
-            .execute(conn)?;
-        diesel::insert_into(sticker_pack_stickers::table)
-            .values(&StickerPackSticker {
-                pack_id,
-                sticker_id,
-                added_at: now,
-            })
-            .execute(conn)?;
-        Ok((
-            stickers::table
-                .filter(stickers::id.eq(sticker_id))
-                .select(Sticker::as_select())
-                .first(conn)?,
-            media::table
-                .filter(media::id.eq(media_id))
-                .select(Media::as_select())
-                .first(conn)?,
-        ))
-    });
-    let (sticker, media_row) = match create_result {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!("create sticker: {:?}", error);
-            media_store.delete_object(&storage_key).await;
-            return Err(AppError::Internal("Failed to create sticker"));
-        }
-    };
-    Ok(StickerSummary {
+    let (sticker, media_row) = create_sticker(
+        pool,
+        media_store,
+        id_gen,
+        uid,
+        pack_id,
+        StickerInput {
+            content_type,
+            bytes,
+            file_name: upload
+                .file_name
+                .unwrap_or_else(|| "sticker.bin".to_string()),
+            emoji,
+            name: upload.name,
+            description: upload.description,
+        },
+        None,
+    )
+    .await?;
+    Ok(created_sticker_summary(media_store, sticker, media_row))
+}
+
+pub async fn post_pack_sticker_from_message(
+    uid: i32,
+    pack_id: i64,
+    body: CreateStickerFromMessageBody,
+    pool: &DbPool,
+    media_store: &MediaStore,
+    id_gen: &IdGen,
+) -> Result<StickerSummary, AppError> {
+    let (sticker, media_row) =
+        create_sticker_from_message(pool, media_store, id_gen, uid, pack_id, body).await?;
+    Ok(created_sticker_summary(media_store, sticker, media_row))
+}
+
+fn created_sticker_summary(
+    media_store: &MediaStore,
+    sticker: Sticker,
+    media_row: Media,
+) -> StickerSummary {
+    StickerSummary {
         id: sticker.id,
         media: media_response(media_store, &media_row),
         emoji: sticker.emoji,
@@ -364,7 +336,7 @@ pub async fn post_pack_sticker(
         description: sticker.description,
         created_at: sticker.created_at,
         is_favorited: false,
-    })
+    }
 }
 
 pub fn put_pack_sticker(
@@ -486,28 +458,6 @@ fn normalize_required_name(input: &str) -> Result<String, AppError> {
     Ok(trimmed.to_string())
 }
 
-fn validate_sticker_emoji(input: &str) -> Result<String, AppError> {
-    use unicode_segmentation::UnicodeSegmentation;
-    if input.is_empty() {
-        return Err(AppError::BadRequest("Invalid emoji"));
-    }
-    let graphemes: Vec<&str> = input.graphemes(true).collect();
-    if graphemes.len() > MAX_STICKER_EMOJI_GRAPHEMES {
-        return Err(AppError::BadRequest("Too many emoji"));
-    }
-    if !graphemes
-        .iter()
-        .all(|grapheme| emojis::get(grapheme).is_some())
-    {
-        return Err(AppError::BadRequest("Invalid emoji"));
-    }
-    Ok(input.to_string())
-}
-
-fn is_allowed_sticker_content_type(content_type: &str) -> bool {
-    content_type.starts_with("image/") || content_type == "video/webm"
-}
-
 fn media_response(media_store: &MediaStore, media_row: &Media) -> StickerMediaResponse {
     StickerMediaResponse {
         id: media_row.id,
@@ -517,23 +467,6 @@ fn media_response(media_store: &MediaStore, media_row: &Media) -> StickerMediaRe
         width: media_row.width,
         height: media_row.height,
     }
-}
-
-fn require_pack_owner(
-    conn: &mut PgConnection,
-    pack_id: i64,
-    uid: i32,
-) -> Result<StickerPack, AppError> {
-    let pack = sticker_packs::table
-        .filter(sticker_packs::id.eq(pack_id))
-        .select(StickerPack::as_select())
-        .first(conn)
-        .optional()?
-        .ok_or(AppError::NotFound("Sticker pack not found"))?;
-    if pack.owner_uid != uid {
-        return Err(AppError::Forbidden("Sticker pack owner required"));
-    }
-    Ok(pack)
 }
 
 fn load_pack_counts(conn: &mut PgConnection, pack_ids: &[i64]) -> QueryResult<HashMap<i64, i64>> {

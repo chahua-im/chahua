@@ -1,6 +1,8 @@
 use chrono::Utc;
 use diesel::prelude::*;
 
+pub mod creation;
+
 use crate::{
     dto::users::StickerPackOrderItem,
     errors::AppError,
@@ -20,6 +22,25 @@ pub struct OrderUpdate {
 pub struct PackChange {
     pub pack: StickerPack,
     pub orders: Vec<OrderUpdate>,
+}
+
+pub fn require_pack_owner(
+    conn: &mut PgConnection,
+    pack_id: i64,
+    uid: i32,
+) -> Result<StickerPack, AppError> {
+    let pack: StickerPack = sticker_packs::table
+        .filter(sticker_packs::id.eq(pack_id))
+        .select(StickerPack::as_select())
+        .first(conn)
+        .optional()?
+        .ok_or(AppError::NotFound("Sticker pack not found"))?;
+
+    if pack.owner_uid != uid {
+        return Err(AppError::Forbidden("Sticker pack owner required"));
+    }
+
+    Ok(pack)
 }
 
 pub fn visible_pack(
