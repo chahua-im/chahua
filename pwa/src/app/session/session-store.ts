@@ -30,7 +30,8 @@ export class SessionStore {
   restoreToken() {
     const url = new URL(window.location.href);
     const urlToken = url.searchParams.get('token');
-    const token = urlToken ?? storedToken(TOKEN_KEY) ?? storedToken(LEGACY_TOKEN_KEY) ?? developmentToken();
+    const stored = storedToken(TOKEN_KEY) ?? storedToken(LEGACY_TOKEN_KEY) ?? developmentToken();
+    const token = urlToken && sameSession(urlToken, stored) ? stored : (urlToken ?? stored);
     url.searchParams.delete('token');
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
 
@@ -44,10 +45,9 @@ export class SessionStore {
     const deadline = new Date(Date.now() + 30000);
     const request = <T>(response: Observable<T>) => firstValueFrom(response.pipe(timeout({ first: deadline })));
     try {
-      // The dev UID lives in per-tab sessionStorage, so every page load mints a
-      // fresh dev session instead of reusing the shared stored token; that is
-      // what lets two tabs run different UIDs at once. An explicit ?token= URL
-      // token or CHAHUA_DEV_TOKEN still wins.
+      // The per-tab dev UID needs a fresh local session on each page load.
+      // An explicit URL credential suppresses this even when its matching stored
+      // token is retained. A configured development token also suppresses it.
       if (isDevMode() && devBackendEnabled() && !this.urlTokenAdopted && !developmentToken()) {
         try {
           const { token } = await request(
@@ -214,6 +214,31 @@ function storedToken(key: string) {
       .find((cookie) => cookie.startsWith(`${cookieKey(key)}=`))
       ?.slice(cookieKey(key).length + 1)
   );
+}
+
+function sameSession(first: string, second: string | undefined) {
+  const firstIdentity = tokenIdentity(first);
+  const secondIdentity = second === undefined ? undefined : tokenIdentity(second);
+  return (
+    firstIdentity !== undefined &&
+    secondIdentity !== undefined &&
+    firstIdentity.uid === secondIdentity.uid &&
+    firstIdentity.gen === secondIdentity.gen
+  );
+}
+
+function tokenIdentity(token: string) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return;
+    const decoded: unknown = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    if (!decoded || typeof decoded !== 'object' || !('uid' in decoded) || !('gen' in decoded)) return;
+    const { uid, gen } = decoded;
+    if (Number.isSafeInteger(uid) && Number.isSafeInteger(gen)) return { uid, gen };
+  } catch {
+    // This only chooses a local candidate; refresh verifies the token.
+  }
+  return undefined;
 }
 
 function findOwnProfile(data: unknown, uid: number): Partial<User & MeResponse> | undefined {

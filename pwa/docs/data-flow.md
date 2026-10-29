@@ -67,7 +67,11 @@ LegacyMigration 通过 Angular 初始化器先于组件和偏好服务运行，�
 
 ## 身份、协议与入口
 
-SessionStore 按 URL token、localStorage、Cookie、开发预设选择身份并移除 URL 中的 token；开发构建在没有这些 token 时请求 `POST /auth/dev-session`，以 sessionStorage 的 `uid`（默认 1）和 localStorage 中持久化的 `X-Client-Id` 换取身份。localStorage 和 Cookie 使用同一个键 `jwt_token`；读取身份及刷新 token 时同步写入两处。Cookie 只属于当前主机，使用 `Path=/`、`SameSite=Lax`，HTTPS 下设置 `Secure`，每次写入续期 400 天。Cookie 过期不影响 localStorage；只有 Cookie 时自动补入 localStorage。退出登录或登录收到 401 时清除两处，网络失败保留凭据供重试。请求仍使用 Bearer token。
+SessionStore 先按 localStorage、Cookie（当前键优先于旧键）和开发预设读取已有凭据，再处理 URL token。若两者的 JWT payload 都能解析出安全整数 `uid`、`gen`，且这两个字段分别相同，保留原 token，不因 `cid`、`ver`、`iat` 或签名字符串不同而替换；用户或代际变化时采用 URL token。没有已有凭据或任一 payload 无法比较时仍优先采用 URL token，交给服务端校验。无论采用还是忽略 URL token，均从地址栏移除该参数，保留其他参数、fragment 和历史状态。此处解码仅用于选择凭据，不验证签名、不证明登录有效；`POST /auth/refresh` 仍验证签名与当前代际，并正常保存服务端返回的新 token。
+
+本地后端开发构建没有显式 URL 凭据或开发预设时，每次页面加载请求 `POST /auth/dev-session`，以 sessionStorage 的 `uid`（默认 1）和 localStorage 中持久化的 `X-Client-Id` 换取身份；显式 URL token 即使因身份相同而保留旧凭据，也不触发开发会话创建。
+
+localStorage 和 Cookie 使用同一个键 `jwt_token`；读取身份及刷新 token 时同步写入两处。Cookie 只属于当前主机，使用 `Path=/`、`SameSite=Lax`，HTTPS 下设置 `Secure`，每次写入续期 400 天。Cookie 过期不影响 localStorage；只有 Cookie 时自动补入 localStorage，并同样参与 URL token 的身份比较。退出登录或登录收到 401 时清除两处，网络失败保留凭据供重试。请求仍使用 Bearer token。
 
 iOS/iPadOS 17.2+ 与 macOS Safari 安装网页应用时复制 Cookie，不复制 localStorage；安装后两边存储独立，已安装应用不会收到 Safari 后续的登录变化。更早 iOS 不提供这条安装登录传递；`start_url` 固定为 `/chats`，不携带 token。[WebKit 安装行为](https://webkit.org/blog/14787/webkit-features-in-safari-17-2/#login-cookies)
 

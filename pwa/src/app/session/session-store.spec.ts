@@ -12,6 +12,18 @@ import { ChatSettingsChanged, SessionStore } from './session-store';
 const TOKEN_KEY = 'jwt_token';
 const COOKIE_KEY = `${TOKEN_KEY}_${encodeURIComponent(window.location.origin)}`;
 
+function sessionToken(uid: number, gen: number, claims: Record<string, unknown> = {}) {
+  const payload = btoa(JSON.stringify({ uid, gen, ...claims }))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `eyJhbGciOiJIUzI1NiJ9.${payload}.signature`;
+}
+
+function tokenPayload(payload: unknown) {
+  return `eyJhbGciOiJIUzI1NiJ9.${btoa(JSON.stringify(payload)).replace(/=/g, '')}.signature`;
+}
+
 describe('SessionStore', () => {
   let session: SessionStore;
   let http: HttpTestingController;
@@ -169,6 +181,103 @@ describe('SessionStore', () => {
     expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
     expect(session.user()).toBeUndefined();
     http.expectNone(() => true);
+  });
+
+  it.each([
+    {
+      stored: sessionToken(42, 7, { cid: 'old-client' }),
+      incoming: sessionToken(42, 7, { ver: 2, cid: 'discuz-client', iat: 1 }),
+      key: TOKEN_KEY,
+    },
+    {
+      stored: sessionToken(42, 7, { ver: 2, cid: 'old-client', iat: 2 }),
+      incoming: sessionToken(42, 7, { cid: 'discuz-client' }),
+      key: 'chahua.auth.token',
+    },
+  ])('keeps the existing token for a matching URL identity', ({ stored, incoming, key }) => {
+    localStorage.setItem(key, stored);
+    history.replaceState(null, '', `/landing?token=${incoming}&example=preserved#install`);
+
+    session.restoreToken();
+
+    expect(session.token()).toBe(stored);
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(stored);
+    expect(localStorage.getItem('chahua.auth.token')).toBeNull();
+    expect(location.pathname + location.search + location.hash).toBe('/landing?example=preserved#install');
+  });
+
+  it('does not issue a development session when a matching URL token retains the stored token', async () => {
+    const stored = sessionToken(42, 7, { cid: 'stored-client' });
+    const incoming = sessionToken(42, 7, { ver: 2, cid: 'redirect-client', iat: 1 });
+    localStorage.setItem(TOKEN_KEY, stored);
+    history.replaceState(null, '', `/?token=${incoming}`);
+    session.restoreToken();
+
+    const startup = session.initialize();
+
+    http.expectNone('/_api/auth/dev-session');
+    const refresh = http.expectOne('/_api/auth/refresh');
+    expect(refresh.request.headers.get('Authorization')).toBe(`Bearer ${stored}`);
+    refresh.flush({ token: 'refreshed-token' });
+    await Promise.resolve();
+    http.expectOne('/_api/users/me').flush(testUser);
+    await profile();
+    await startup;
+  });
+
+  it.each([
+    { stored: sessionToken(42, 7), incoming: sessionToken(43, 7), reason: 'UID changes' },
+    { stored: sessionToken(42, 7), incoming: sessionToken(42, 8), reason: 'generation changes' },
+  ])('adopts the URL token when the $reason', ({ stored, incoming }) => {
+    localStorage.setItem(TOKEN_KEY, stored);
+    history.replaceState(null, '', `/?token=${incoming}`);
+
+    session.restoreToken();
+
+    expect(session.token()).toBe(incoming);
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(incoming);
+  });
+
+  it('keeps a cookie-only installed-PWA token for a matching URL identity', () => {
+    vi.stubGlobal('ngDevMode', false);
+    const stored = sessionToken(42, 7, { cid: 'installed-client' });
+    const incoming = sessionToken(42, 7, { ver: 2, cid: 'browser-client', iat: 1 });
+    history.replaceState(null, '', `/?token=${incoming}`);
+    document.cookie = `${TOKEN_KEY}=${stored}; Path=/`;
+
+    session.restoreToken();
+
+    expect(session.token()).toBe(stored);
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(stored);
+    expect(document.cookie).toContain(`${TOKEN_KEY}=${stored}`);
+  });
+
+  it.each([
+    'not-a-jwt',
+    'header.!.signature',
+    tokenPayload({}),
+    tokenPayload({ uid: 42, gen: 7.5 }),
+    tokenPayload({ uid: Number.MAX_SAFE_INTEGER + 1, gen: 7 }),
+  ])('adopts the URL token when the stored token is not comparable (%s)', (stored) => {
+    const incoming = sessionToken(42, 7);
+    localStorage.setItem(TOKEN_KEY, stored);
+    history.replaceState(null, '', `/?token=${incoming}`);
+
+    session.restoreToken();
+
+    expect(session.token()).toBe(incoming);
+  });
+
+  it('keeps URL precedence when its payload cannot be compared', () => {
+    const stored = sessionToken(42, 7);
+    const incoming = 'header.!.signature';
+    localStorage.setItem(TOKEN_KEY, stored);
+    history.replaceState(null, '', `/?token=${incoming}&example=preserved#install`);
+
+    session.restoreToken();
+
+    expect(session.token()).toBe(incoming);
+    expect(location.pathname + location.search + location.hash).toBe('/?example=preserved#install');
   });
 
   it('removes the URL token, refreshes it, and uses the new token for the current user', async () => {
