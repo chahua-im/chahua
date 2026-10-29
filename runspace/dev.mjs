@@ -133,7 +133,7 @@ try {
         '--proxy-config',
         'proxy.conf.dev.mjs',
         '--host',
-        '127.0.0.1',
+        config.PWA_HOST ?? '127.0.0.1',
         '--port',
         port,
         ...(online ? ['--ssl'] : []),
@@ -146,6 +146,7 @@ try {
         env: {
           ...environment,
           API_PROXY_TARGET: online ? 'https://chahui.app/_api' : api,
+          STORAGE_PROXY_TARGET: online ? '' : new URL(config.S3_ENDPOINT_URL).origin,
           CHAHUA_DEV_TOKEN: preset.CHAHUA_DEV_TOKEN ?? '',
         },
       },

@@ -113,8 +113,23 @@ impl MediaStore {
         if content_disposition.is_none() {
             upload_headers.remove("content-disposition");
         }
+        let upload_url = match self.config.upload_proxy_path.as_deref() {
+            Some(prefix) => {
+                // Keep the encoded path and query intact: both participate in the signature.
+                let uri: axum::http::Uri = presigned_request
+                    .uri()
+                    .parse()
+                    .expect("S3 presigner returns a valid HTTP URI");
+                format!(
+                    "{}{}",
+                    prefix.trim_end_matches('/'),
+                    uri.path_and_query().unwrap()
+                )
+            }
+            None => presigned_request.uri().to_string(),
+        };
         Ok(PresignedUpload {
-            upload_url: presigned_request.uri().to_string(),
+            upload_url,
             upload_headers,
         })
     }
@@ -223,7 +238,57 @@ pub fn attachment_content_disposition(filename: &str) -> String {
 }
 #[cfg(test)]
 mod tests {
-    use super::{attachment_content_disposition, build_storage_key};
+    use super::*;
+
+    #[tokio::test]
+    async fn uploads_use_browser_proxy_only_when_configured() {
+        use aws_sdk_s3::config::{Credentials, Region};
+
+        let endpoint = "http://127.0.0.1:19000";
+        for proxy_path in [None, Some("/_storage")] {
+            let client = aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::Config::builder()
+                    .behavior_version_latest()
+                    .region(Region::new("us-west-2"))
+                    .credentials_provider(Credentials::new("test", "test", None, None, "test"))
+                    .endpoint_url(endpoint)
+                    .force_path_style(true)
+                    .build(),
+            );
+            let store = MediaStore::new(
+                client,
+                Arc::new(crate::config::MediaConfig {
+                    bucket: "local-bucket".into(),
+                    attachment_prefix: "attachments".into(),
+                    base_url: Some("/_storage/local-bucket".into()),
+                    endpoint_url: Some(endpoint.into()),
+                    upload_proxy_path: proxy_path.map(str::to_owned),
+                    max_attachment_file_size_bytes: 1024,
+                }),
+            );
+            let upload = store
+                .presign_upload(
+                    "attachments/a b+%.webp",
+                    "image/webp",
+                    42,
+                    None,
+                    Duration::minutes(15),
+                )
+                .await
+                .unwrap();
+            assert!(upload.upload_url.starts_with(&format!(
+                "{}/local-bucket/attachments/a%20b%2B%25.webp?",
+                proxy_path.unwrap_or(endpoint),
+            )));
+            assert!(upload.upload_url.contains("X-Amz-Signature="));
+            assert_eq!(upload.upload_headers["content-type"], "image/webp");
+            assert!(!upload.upload_headers.contains_key("content-length"));
+            assert_eq!(
+                store.public_url("attachments/photo.webp"),
+                "/_storage/local-bucket/attachments/photo.webp"
+            );
+        }
+    }
 
     #[test]
     fn storage_key_uses_file_extension() {
