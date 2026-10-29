@@ -63,6 +63,19 @@ and execute database work on Tokio's blocking pool. WebSocket unread snapshots a
 push unread calculations also run on the blocking pool. No full chat history is
 retained in application memory for unread counting.
 
+`GET /chats/unread` accepts either a normal user-session bearer token or a service token
+with `X-On-Behalf-Of: <uid>` and the global `onBehalfOf.socialRead` permission. Delegation
+uses the same authorization path as social reads and requires the target user to exist.
+Service tokens without delegation, invalid user IDs, and user-session tokens carrying
+`X-On-Behalf-Of` are rejected; unauthorized or revoked service tokens cannot read the summary.
+Both credential paths return the same unread/mention summary for the acting user.
+
+Discuz `checkNewPm()` calls this endpoint with its configured ServiceToken and the owner's
+UID in `X-On-Behalf-Of`, not a locally minted user JWT. These delegated requests do not
+create client identities or update client app versions. Discuz's authenticated PWA redirect
+still carries a user JWT; the [PWA identity contract](../pwa/docs/data-flow.md#身份协议与入口)
+retains an existing token when its user and generation match, preserving the existing client ID.
+
 Database-backed unread regressions run when `WETTY_TEST_DATABASE_URL` points to a
 migrated local PostgreSQL database. Their fixtures are rolled back.
 
@@ -357,8 +370,8 @@ Client commands are decoded by the serde-tagged `ClientWsMessage` enum in
 | Type | Fields | Behavior |
 | --- | --- | --- |
 | `auth` | Required `ticket` string | Must be the first message, within five seconds; invalid credentials or a non-auth first message close the connection. |
-| `ping` | Optional `state`: `active` or `inactive` | Updates liveness and app state, replies with `pong`; missing/null state defaults to `active`. |
-| `appState` | Optional `state`: `active` or `inactive` | Updates app state and liveness; missing/null state defaults to `inactive`. |
+| `ping` | Optional `state`: `active` or `inactive` | Updates liveness and app state, replies with `pong`; only active reports advance last seen. Missing/null state defaults to `active`. |
+| `appState` | Optional `state`: `active` or `inactive` | Updates app state and liveness; only active reports advance last seen. Missing/null state defaults to `inactive`. |
 | `watchPresence` | Optional/null numeric `requestId`; optional/null `userIds` and `chatIds` arrays | Replaces the presence scope described below; missing/null arrays are empty. |
 
 After authentication, unknown message types are ignored without closing the socket.
@@ -384,18 +397,54 @@ ID or substitute zero. Clients that change scopes and need to reject stale snaps
 can opt in by supplying it on each replacement.
 
 Individual `online` means at least one fresh, open authenticated WebSocket reports active
-application state. If all fresh connections are inactive, exact presence returns
-`online: false, away: true`; active connections take precedence across devices. Offline
-and active responses omit `away`. Group counts still include both active and inactive
-connections, counting each user once.
+application state. Active connections take precedence across devices. With no active connection,
+exact presence returns `online: false, away: true` while any fresh connection is less than five
+minutes past its active-to-inactive transition. Repeated inactive pings or state reports refresh
+connection liveness without restarting that grace period. At five minutes, or immediately when
+no fresh connections remain, personal presence becomes offline and omits `away`.
 
-`user_extra.last_seen_at` records HTTP and WebSocket heartbeat activity, sharing the existing
-five-minute per-client write throttle. Heartbeats acknowledge Pong before scheduling a blocking
-activity write; each socket has at most one outstanding activity task. Inactive heartbeats also
-refresh activity, and writes without an app version preserve the last HTTP-reported version.
-A failed activity write is logged without closing the socket. The timestamp remains an
-approximation of connection/request activity, not an exact disconnect or foreground time;
-normal write delay is about five minutes plus one heartbeat interval and scheduling latency.
+New connections start inactive without an away grace until they report active. Opening or
+reconnecting an inactive socket cannot manufacture online presence or renew an away grace.
+An active report establishes online presence immediately; a subsequent inactive transition
+starts a new grace. Personal expiry does not close sockets. Group counts still include all
+fresh active and inactive connections, counting each user once, even after personal away expiry.
+Push suppression still requires a fresh active connection. Watched snapshots publish expiry
+on the existing 15-second refresh schedule, so observers can see it up to one interval later.
+
+`user_extra.last_seen_at` records tracked authenticated HTTP requests, active WebSocket pings,
+and explicit active state reports. Inactive pings and state reports do not advance last seen
+or schedule client bookkeeping. HTTP activity advances last seen without changing foreground
+state or restarting the away grace; an offline user can therefore have recent HTTP activity.
+Every qualifying observation immediately advances a process-wide in-memory buffer before
+client bookkeeping, coalesced by user and UTC day. Presence reads the newer of pending activity
+and the persisted timestamp,
+so recent activity is visible without waiting for a database write. One worker flushes all
+dirty users every 15 seconds, using one bulk update per pending UTC day and updating daily
+active-user rollups in the same transaction. Timestamps never move backward; activity arriving
+during a flush remains pending, and failed batches remain available for the next interval.
+Interrupt and termination signals request a final flush before exit. A process crash can lose
+unflushed observations; database failures can extend the normal 15-second persistence delay.
+
+Client bookkeeping retains a separate five-minute per-client throttle, bypassed when the
+application version, account, or UTC day changes. It initializes user records and records client
+activity, versions, rebinding, and client/new-user rollups without advancing existing users'
+last-seen timestamps. WebSocket handlers record active observations before replying or
+coalescing metadata work; each socket has at most one outstanding bookkeeping task, and
+heartbeats do not await that task. Delayed bookkeeping does not create another last-seen
+observation. Missing app-version headers preserve the last HTTP-reported version. Tracking
+failures are logged without closing the socket, and already buffered activity is retained.
+Last-seen is qualifying server-observed activity, not an exact human interaction, disconnect,
+or foreground time. Snapshot publication follows the presence refresh schedule above.
+
+Client bookkeeping is limited to direct user-session clients. Requests with a service-token
+bearer credential or an `X-On-Behalf-Of` header do not insert or update `clients`, rebind client
+push subscriptions, or contribute client-bookkeeping rollups. WebSockets retain this exclusion
+from their upgrade request for subsequent active state reports and pings; their auth frame
+still requires a valid user-session ticket. Excluded sockets can still report presence and
+advance user last seen through active session reports, independently of client bookkeeping.
+The existing HTTP activity exclusion for delegated requests is unchanged. This does not
+remove existing client records. App-version request counters still count HTTP requests, but
+excluded requests do not contribute a resolved client ID to unique-client version gauges.
 
 User discoverability is limited to self, friends, or current shared regular-group membership.
 An existing DM without friendship or a shared regular group does not grant presence access.

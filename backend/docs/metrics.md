@@ -60,7 +60,7 @@ not part of this endpoint unless source code registers them later.
 | --- | --- | --- | --- |
 | `ws_connected_users` | Gauge | Current number of user entries in the in-process connection registry. | No labels. |
 | `ws_active_connections` | Gauge | Current registered connections reporting active app presence. | No labels. |
-| `ws_inactive_connections` | Gauge | Current registered connections reporting inactive app presence. | No labels. |
+| `ws_inactive_connections` | Gauge | Current registered connections not reporting active app presence, including newly connected sockets and connections past personal away expiry. | No labels. |
 | `ws_connections_total` | Counter | Successfully registered WebSocket connections. | No labels. |
 | `ws_connection_duration_seconds` | Histogram | Duration from the authenticated socket handler start through connection removal, in seconds. | `H2`; no labels. |
 | `ws_messages_pushed_total` | Counter; `message_type` | Broadcast messages accepted by a WebSocket send buffer. | One series per emitted message type, not per user or connection. |
@@ -122,17 +122,28 @@ of the backend README](../README.md#scoped-websocket-presence).
 
 ## Client tracking and daily activity
 
-Authenticated HTTP requests and WebSocket heartbeats (both active and inactive) share
-the per-client five-minute activity write throttle. Heartbeats update user/client activity
-and daily rollups without changing the recorded HTTP application version.
+Tracked authenticated HTTP requests, active WebSocket pings, and explicit active state reports
+record last-seen activity in memory immediately, independently of client bookkeeping success.
+Inactive WebSocket reports update connection liveness only; they do not buffer last seen or
+schedule bookkeeping. A shared 15-second batch flush persists user timestamps and daily
+active-user increments transactionally; pending UTC days are handled separately, and only the
+current day's rollup updates today's gauges.
+Client bookkeeping keeps its five-minute per-client throttle, bypassed on account,
+application-version, or UTC-day changes. It records client activity, rebinding, and
+new-user/client rollups without producing another last-seen observation. WebSocket reports
+do not change the recorded HTTP application version.
+Client bookkeeping follows the [direct user-session eligibility rules](../README.md#scoped-websocket-presence):
+service-token requests and requests carrying `X-On-Behalf-Of` schedule no client writes,
+including after a WebSocket upgrade. They therefore do not increment client-write,
+client-write-throttling, client-rebind, or client-bookkeeping rollup metrics.
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
-| `client_activity_writes_total` | Counter; `result` | Client activity database writes attempted. | Result is a small outcome classification. |
-| `client_activity_writes_skipped_total` | Counter; `reason` | Client activity writes skipped before a write; currently used for throttling. | Keep reasons bounded; never label by client or user. |
+| `client_activity_writes_total` | Counter; `result` | Client bookkeeping database writes attempted; excludes last-seen batch flushes. | Result is a small outcome classification. |
+| `client_activity_writes_skipped_total` | Counter; `reason` | Client bookkeeping writes skipped by throttling; the last-seen observation is still buffered. | Keep reasons bounded; never label by client or user. |
 | `client_rebinds_total` | Counter | Client-to-user rebind events recorded during a daily rollup update. | No labels. |
 | `client_tracking_purge_total` | Counter; `kind` | Client tracking records purged, incremented by the number deleted. | `kind` is a bounded record-kind classification. |
-| `activity_daily_rollup_updates_total` | Counter; `result` | Daily activity rollup update attempts. | Result is a small outcome classification. |
+| `activity_daily_rollup_updates_total` | Counter; `result` | Daily activity rollup updates from client bookkeeping, purge work, and last-seen batches; failed batch acquisition or persistence also records an error. | Result is a small outcome classification. |
 | `activity_today_active_users` | Gauge | Exact active-user count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_new_users` | Gauge | Exact new-user count for today mirrored from the daily rollup. | No labels. |
 | `activity_today_active_clients` | Gauge | Exact active-client count for today mirrored from the daily rollup. | No labels. |

@@ -5,12 +5,13 @@ mod metrics;
 pub use metrics::WsMetrics;
 
 use crate::dto::ws::{PresenceUpdatePayload, ServerWsMessage};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 pub const STALE_CONNECTION_TIMEOUT_SECS: u64 = 300;
+const AWAY_TIMEOUT_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -20,7 +21,7 @@ pub enum AppPresenceState {
 }
 
 impl AppPresenceState {
-    fn from_u8(value: u8) -> Self {
+    const fn from_u8(value: u8) -> Self {
         match value {
             x if x == Self::Inactive as u8 => Self::Inactive,
             _ => Self::Active,
@@ -41,27 +42,61 @@ pub struct ConnectionEntry {
     pub lagged: tokio::sync::Notify,
     /// Unix timestamp (seconds) when we last received a ping from the client.
     pub last_ping_at: AtomicU64,
-    pub app_state: AtomicU8,
-    pub last_state_at: AtomicU64,
+    /// Unix timestamp (seconds) when the app last transitioned from active to inactive, packed
+    /// with the current app state so presence readers never observe a mismatched pair.
+    state_and_last_transition_at: AtomicU64,
 }
 
 impl ConnectionEntry {
     pub fn update_ping(&self, state: AppPresenceState) {
-        let now = now_secs();
-        self.last_ping_at.store(now, Ordering::Relaxed);
-        self.app_state.store(state as u8, Ordering::Relaxed);
-        self.last_state_at.store(now, Ordering::Relaxed);
+        self.update_app_state(state);
     }
 
     pub fn update_app_state(&self, state: AppPresenceState) {
-        let now = now_secs();
-        self.last_ping_at.store(now, Ordering::Relaxed);
-        self.app_state.store(state as u8, Ordering::Relaxed);
-        self.last_state_at.store(now, Ordering::Relaxed);
+        self.update_app_state_at(state, now_secs());
     }
 
-    pub fn app_state(&self) -> AppPresenceState {
-        AppPresenceState::from_u8(self.app_state.load(Ordering::Relaxed))
+    fn update_app_state_at(&self, state: AppPresenceState, now: u64) {
+        self.last_ping_at.store(now, Ordering::Relaxed);
+        let mut current = self.state_and_last_transition_at.load(Ordering::Relaxed);
+        loop {
+            let (previous_state, _) = Self::unpack_state(current);
+            let transition_at = if previous_state == AppPresenceState::Active
+                && state == AppPresenceState::Inactive
+            {
+                now
+            } else if state == AppPresenceState::Active {
+                0
+            } else {
+                Self::unpack_state(current).1
+            };
+            let next = Self::pack_state(state, transition_at);
+            match self.state_and_last_transition_at.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    fn app_state(&self) -> AppPresenceState {
+        Self::unpack_state(self.state_and_last_transition_at.load(Ordering::Relaxed)).0
+    }
+
+    fn state_and_last_transition_at(&self) -> (AppPresenceState, u64) {
+        Self::unpack_state(self.state_and_last_transition_at.load(Ordering::Relaxed))
+    }
+
+    const fn pack_state(state: AppPresenceState, transition_at: u64) -> u64 {
+        (transition_at << 8) | state as u64
+    }
+
+    const fn unpack_state(value: u64) -> (AppPresenceState, u64) {
+        (AppPresenceState::from_u8(value as u8), value >> 8)
     }
 }
 
@@ -120,8 +155,10 @@ impl ConnectionRegistry {
             states_changed: Arc::new(tokio::sync::Notify::new()),
             lagged: tokio::sync::Notify::new(),
             last_ping_at: AtomicU64::new(now),
-            app_state: AtomicU8::new(AppPresenceState::Active as u8),
-            last_state_at: AtomicU64::new(now),
+            state_and_last_transition_at: AtomicU64::new(ConnectionEntry::pack_state(
+                AppPresenceState::Inactive,
+                0,
+            )),
         });
         self.inner.entry(uid).or_default().push(entry.clone());
         self.metrics.record_connection_open();
@@ -222,20 +259,24 @@ impl ConnectionRegistry {
     /// Aggregates personal presence across fresh connections; active wins over inactive.
     /// Group counts continue to include both states through `is_online`.
     pub fn personal_presence(&self, uid: i32) -> Option<AppPresenceState> {
-        let now = now_secs();
+        self.personal_presence_at(uid, now_secs())
+    }
+
+    fn personal_presence_at(&self, uid: i32, now: u64) -> Option<AppPresenceState> {
         let entries = self.inner.get(&uid)?;
-        let mut state = None;
+        let mut away = false;
         for entry in entries.iter().filter(|entry| {
             !entry.tx.is_closed()
                 && now.saturating_sub(entry.last_ping_at.load(Ordering::Relaxed))
                     <= STALE_CONNECTION_TIMEOUT_SECS
         }) {
-            match entry.app_state() {
-                AppPresenceState::Active => return Some(AppPresenceState::Active),
-                AppPresenceState::Inactive => state = Some(AppPresenceState::Inactive),
+            let (state, transition_at) = entry.state_and_last_transition_at();
+            if state == AppPresenceState::Active {
+                return Some(AppPresenceState::Active);
             }
+            away |= transition_at != 0 && now.saturating_sub(transition_at) < AWAY_TIMEOUT_SECS;
         }
-        state
+        away.then_some(AppPresenceState::Inactive)
     }
 
     /// Counts online users in a unique membership UID list using one liveness timestamp.
@@ -529,38 +570,88 @@ mod tests {
     }
 
     #[test]
-    fn personal_presence_aggregates_active_and_away_without_changing_group_counts() {
+    fn personal_away_expires_at_five_minutes_despite_inactive_reports() {
+        let registry = registry();
+        let (entry, _rx) = registry.register(7, "client-a".into());
+
+        entry.update_app_state_at(AppPresenceState::Active, 1_000);
+        entry.update_app_state_at(AppPresenceState::Inactive, 1_100);
+        entry.update_app_state_at(AppPresenceState::Inactive, 1_200);
+
+        assert_eq!(
+            entry.state_and_last_transition_at(),
+            (AppPresenceState::Inactive, 1_100)
+        );
+        assert_eq!(
+            registry.personal_presence_at(7, 1_399),
+            Some(AppPresenceState::Inactive)
+        );
+        assert_eq!(registry.personal_presence_at(7, 1_400), None);
+
+        entry.update_app_state_at(AppPresenceState::Active, 1_450);
+        entry.update_app_state_at(AppPresenceState::Inactive, 1_500);
+        assert_eq!(
+            registry.personal_presence_at(7, 1_799),
+            Some(AppPresenceState::Inactive)
+        );
+        assert_eq!(registry.personal_presence_at(7, 1_800), None);
+    }
+
+    #[test]
+    fn expired_away_connection_stays_live_without_suppressing_push() {
+        let registry = registry();
+        let (entry, _rx) = registry.register(7, "client-a".into());
+        let now = now_secs();
+        entry.update_app_state_at(AppPresenceState::Active, now - AWAY_TIMEOUT_SECS - 1);
+        entry.update_app_state_at(AppPresenceState::Inactive, now - AWAY_TIMEOUT_SECS);
+
+        entry.update_ping(AppPresenceState::Inactive);
+
+        assert_eq!(registry.personal_presence(7), None);
+        assert_eq!(registry.count_online(&[7]), 1);
+        assert!(!registry.should_suppress_push(7, 30));
+    }
+
+    #[test]
+    fn personal_presence_prefers_active_device_over_away_device() {
         let registry = registry();
         let (away, _away_rx) = registry.register(7, "away".into());
-        away.update_app_state(AppPresenceState::Inactive);
+        away.update_app_state_at(AppPresenceState::Active, 100);
+        away.update_app_state_at(AppPresenceState::Inactive, 150);
+        let (active, _active_rx) = registry.register(7, "active".into());
+        active.update_app_state_at(AppPresenceState::Active, 200);
+
         assert_eq!(
-            registry.personal_presence(7),
-            Some(AppPresenceState::Inactive)
-        );
-        assert_eq!(registry.count_online(&[7]), 1);
-        let (active, active_rx) = registry.register(7, "active".into());
-        assert_eq!(
-            registry.personal_presence(7),
+            registry.personal_presence_at(7, 400),
             Some(AppPresenceState::Active)
         );
-        assert_eq!(registry.count_online(&[7]), 1);
-        active.last_ping_at.store(
-            now_secs().saturating_sub(STALE_CONNECTION_TIMEOUT_SECS + 1),
-            Ordering::Relaxed,
-        );
+
+        active.last_ping_at.store(99, Ordering::Relaxed);
         assert_eq!(
-            registry.personal_presence(7),
+            registry.personal_presence_at(7, 400),
             Some(AppPresenceState::Inactive)
         );
-        active.update_ping(AppPresenceState::Active);
-        drop(active_rx);
+    }
+
+    #[test]
+    fn initial_or_reconnected_inactive_connection_has_no_personal_away_grace() {
+        let registry = registry();
+        let (entry, _rx) = registry.register(7, "client-a".into());
+
+        entry.update_app_state_at(AppPresenceState::Inactive, 1_000);
+        assert_eq!(registry.personal_presence_at(7, 1_000), None);
+
+        entry.update_app_state_at(AppPresenceState::Active, 1_010);
+        entry.update_app_state_at(AppPresenceState::Inactive, 1_020);
         assert_eq!(
-            registry.personal_presence(7),
+            registry.personal_presence_at(7, 1_020),
             Some(AppPresenceState::Inactive)
         );
-        registry.remove_connection(7, away.conn_id);
-        assert_eq!(registry.personal_presence(7), None);
-        assert_eq!(registry.count_online(&[7]), 0);
+        registry.remove_connection(7, entry.conn_id);
+
+        let (reconnected, _reconnected_rx) = registry.register(7, "client-a".into());
+        reconnected.update_app_state_at(AppPresenceState::Inactive, 1_100);
+        assert_eq!(registry.personal_presence_at(7, 1_100), None);
     }
 
     #[test]
@@ -608,6 +699,7 @@ mod tests {
     fn lists_only_fresh_open_connections_for_the_requested_user() {
         let registry = registry();
         let (first, first_rx) = registry.register(7, "client-a".to_string());
+        first.update_ping(AppPresenceState::Active);
         let (second, _second_rx) = registry.register(7, "client-a".to_string());
         second.update_app_state(AppPresenceState::Inactive);
         let (other_user, _other_rx) = registry.register(8, "client-b".to_string());
@@ -647,6 +739,7 @@ mod tests {
         let registry = registry();
         let (closing, _closing_rx) = registry.register(7, "client-a".to_string());
         let (surviving, _surviving_rx) = registry.register(7, "client-b".to_string());
+        surviving.update_ping(AppPresenceState::Active);
 
         registry.remove_connection(7, closing.conn_id);
 

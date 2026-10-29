@@ -248,7 +248,9 @@ fn on_behalf_of_uid(headers: &HeaderMap) -> Result<Option<i32>, AppError> {
     Ok(Some(uid))
 }
 
-fn bearer_token(headers: &HeaderMap) -> Result<Option<&str>, (StatusCode, &'static str)> {
+pub(crate) fn bearer_token(
+    headers: &HeaderMap,
+) -> Result<Option<&str>, (StatusCode, &'static str)> {
     let Some(value) = headers.get(AUTHORIZATION) else {
         return Ok(None);
     };

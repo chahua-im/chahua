@@ -1,3 +1,6 @@
+mod last_seen;
+pub use last_seen::LastSeen;
+
 mod metrics;
 pub use metrics::{ActivityTodaySnapshot, ClientTrackingMetrics};
 
@@ -20,10 +23,10 @@ use tracing::{error, info, warn};
 
 use crate::models::{
     ActivityDailyMetric, ClientRecord, NewActivityDailyMetric, NewClientRecord, NewUserExtra,
-    UserExtra,
 };
 use crate::schema::{activity_daily_metrics, clients, push_subscriptions, user_extra};
-use crate::utils::auth::{extract_auth_context, X_APP_VERSION, X_ON_BEHALF_OF};
+use crate::services::service_tokens;
+use crate::utils::auth::{bearer_token, extract_auth_context, X_APP_VERSION, X_ON_BEHALF_OF};
 
 const ACTIVITY_WRITE_THROTTLE: Duration = Duration::from_secs(5 * 60);
 const PURGE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -36,6 +39,7 @@ const WS_UPGRADE_PATHS: [&str; 2] = ["/ws", "/ws/"];
 struct CachedActivity {
     last_written_at: Instant,
     uid: i32,
+    day: NaiveDate,
     last_app_version: Option<String>,
 }
 
@@ -86,6 +90,7 @@ pub struct ClientTrackingService {
     db: Pool<ConnectionManager<PgConnection>>,
     metrics: Arc<ClientTrackingMetrics>,
     recent_writes: DashMap<String, CachedActivity>,
+    pub last_seen: Arc<LastSeen>,
 }
 
 impl ClientTrackingService {
@@ -94,9 +99,10 @@ impl ClientTrackingService {
         metrics: Arc<ClientTrackingMetrics>,
     ) -> Arc<Self> {
         let service = Arc::new(Self {
-            db,
-            metrics,
+            db: db.clone(),
+            metrics: metrics.clone(),
             recent_writes: DashMap::new(),
+            last_seen: Arc::new(LastSeen::new(db.clone(), metrics.clone())),
         });
 
         let gauge_service = service.clone();
@@ -140,11 +146,24 @@ impl ClientTrackingService {
         client_id: &str,
         app_version: Option<&str>,
     ) -> Result<(), (StatusCode, &'static str)> {
+        self.last_seen.record(uid, Utc::now().naive_utc());
+        self.record_client_activity(uid, client_id, app_version)
+    }
+
+    pub fn record_client_activity(
+        &self,
+        uid: i32,
+        client_id: &str,
+        app_version: Option<&str>,
+    ) -> Result<(), (StatusCode, &'static str)> {
+        let now = Utc::now().naive_utc();
+        let today = now.date();
         if let Some(entry) = self.recent_writes.get(client_id) {
             let app_version_changed = app_version
                 .is_some_and(|version| entry.last_app_version.as_deref() != Some(version));
             if entry.uid == uid
                 && !app_version_changed
+                && entry.day == today
                 && entry.last_written_at.elapsed() < ACTIVITY_WRITE_THROTTLE
             {
                 self.metrics.record_activity_write_skipped("throttled");
@@ -152,8 +171,6 @@ impl ClientTrackingService {
             }
         }
 
-        let now = Utc::now().naive_utc();
-        let today = now.date();
         let conn = &mut self.db.get().map_err(|e| {
             error!("client tracking: failed to get DB connection: {:?}", e);
             self.metrics.record_activity_write("error");
@@ -174,11 +191,6 @@ impl ClientTrackingService {
                     .select(ClientRecord::as_select())
                     .first::<ClientRecord>(conn)
                     .optional()?;
-                let existing_user = user_extra::table
-                    .find(uid)
-                    .select(UserExtra::as_select())
-                    .first::<UserExtra>(conn)
-                    .optional()?;
 
                 let active_client_delta = i64::from(
                     existing_client
@@ -186,12 +198,6 @@ impl ClientTrackingService {
                         .is_none_or(|client| client.last_active.date() != today),
                 );
                 let new_client_delta = i64::from(existing_client.is_none());
-                let active_user_delta = i64::from(
-                    existing_user
-                        .as_ref()
-                        .is_none_or(|user| user.last_seen_at.date() != today),
-                );
-                let new_user_delta = i64::from(existing_user.is_none());
                 let rebind_delta = i64::from(
                     existing_client
                         .as_ref()
@@ -247,24 +253,17 @@ impl ClientTrackingService {
                         .get_result::<Option<String>>(conn)?
                 };
 
-                let mut new_user = NewUserExtra::new(uid, now);
-                if let Some(existing) = &existing_user {
-                    new_user.first_seen_at = existing.first_seen_at;
-                    new_user.sticker_pack_order = existing.sticker_pack_order.clone();
-                }
-
-                diesel::insert_into(user_extra::table)
-                    .values(&new_user)
+                let new_user_delta = diesel::insert_into(user_extra::table)
+                    .values(NewUserExtra::new(uid, now))
                     .on_conflict(user_extra::uid)
-                    .do_update()
-                    .set(user_extra::last_seen_at.eq(now))
-                    .execute(conn)?;
+                    .do_nothing()
+                    .execute(conn)? as i64;
 
                 let today_metrics = Self::upsert_daily_metrics(
                     conn,
                     DailyMetricDelta {
                         day: today,
-                        active_users: active_user_delta,
+                        active_users: new_user_delta,
                         new_users: new_user_delta,
                         active_clients: active_client_delta,
                         new_clients: new_client_delta,
@@ -300,6 +299,7 @@ impl ClientTrackingService {
             client_id.to_string(),
             CachedActivity {
                 last_written_at: Instant::now(),
+                day: today,
                 uid,
                 last_app_version: recorded_app_version,
             },
@@ -562,6 +562,31 @@ impl ClientTrackingService {
     }
 }
 
+/// Flush all users together, including one final batch when the server stops.
+pub async fn run_last_seen_worker(
+    last_seen: Arc<LastSeen>,
+    mut shutdown: tokio::sync::oneshot::Receiver<()>,
+) {
+    let period = Duration::from_secs(15);
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        let stopping = tokio::select! {
+            _ = &mut shutdown => true,
+            _ = interval.tick() => false,
+        };
+        let batch = last_seen.clone();
+        match tokio::task::spawn_blocking(move || batch.flush()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => warn!(%error, "last-seen batch flush failed"),
+            Err(error) => warn!(%error, "last-seen batch worker failed"),
+        }
+        if stopping {
+            break;
+        }
+    }
+}
+
 pub async fn track_client_activity(
     State(state): State<crate::AppState>,
     request: Request<axum::body::Body>,
@@ -597,8 +622,11 @@ pub async fn track_client_activity(
     next.run(request).await
 }
 
-fn should_record_client_activity(headers: &HeaderMap) -> bool {
+pub(crate) fn should_record_client_activity(headers: &HeaderMap) -> bool {
     !headers.contains_key(X_ON_BEHALF_OF)
+        && bearer_token(headers).is_ok_and(|token| {
+            !token.is_some_and(|token| token.starts_with(service_tokens::TOKEN_PREFIX))
+        })
 }
 
 fn app_version_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -617,6 +645,63 @@ fn should_record_app_version_request(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn throttled_client_activity_still_advances_last_seen() {
+        let db = Pool::builder()
+            .max_size(1)
+            .min_idle(Some(0))
+            .build_unchecked(ConnectionManager::<PgConnection>::new(
+                "last_seen_test_invalid_option=value",
+            ));
+        let metrics = Arc::new(ClientTrackingMetrics::new(&prometheus::Registry::new()));
+        let last_seen = Arc::new(LastSeen::new(db.clone(), metrics.clone()));
+        let service = ClientTrackingService {
+            db,
+            metrics,
+            recent_writes: DashMap::new(),
+            last_seen: last_seen.clone(),
+        };
+        let before = Utc::now().naive_utc();
+        last_seen.record(17, before - chrono::Duration::minutes(3));
+        service.recent_writes.insert(
+            "client".into(),
+            CachedActivity {
+                last_written_at: Instant::now(),
+                uid: 17,
+                day: before.date(),
+                last_app_version: None,
+            },
+        );
+
+        service.record_activity(17, "client", None).unwrap();
+
+        assert!(last_seen.latest(17, None).unwrap() >= before);
+    }
+
+    #[test]
+    fn client_activity_records_last_seen_before_database_failure() {
+        let db = Pool::builder()
+            .max_size(1)
+            .min_idle(Some(0))
+            .connection_timeout(Duration::from_millis(1))
+            .build_unchecked(ConnectionManager::<PgConnection>::new(
+                "last_seen_test_invalid_option=value",
+            ));
+        let metrics = Arc::new(ClientTrackingMetrics::new(&prometheus::Registry::new()));
+        let last_seen = Arc::new(LastSeen::new(db.clone(), metrics.clone()));
+        let service = ClientTrackingService {
+            db,
+            metrics,
+            recent_writes: DashMap::new(),
+            last_seen: last_seen.clone(),
+        };
+        let before = Utc::now().naive_utc();
+
+        assert!(service.record_activity(17, "client", None).is_err());
+
+        assert!(last_seen.latest(17, None).unwrap() >= before);
+    }
 
     #[test]
     fn daily_metric_delta_detects_zero_values() {
@@ -642,11 +727,28 @@ mod tests {
     }
 
     #[test]
-    fn delegated_requests_do_not_record_client_activity() {
+    fn automation_credentials_are_excluded_from_client_tracking() {
+        use axum::http::{header::AUTHORIZATION, HeaderValue};
+
         let mut headers = HeaderMap::new();
+        // WebSockets authenticate their session in the first frame, not the upgrade headers.
+        assert!(should_record_client_activity(&headers));
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer user-session"),
+        );
         assert!(should_record_client_activity(&headers));
 
-        headers.insert(X_ON_BEHALF_OF, axum::http::HeaderValue::from_static("42"));
+        let credential = format!("Bearer svc_{}_{}", "ab".repeat(16), "cd".repeat(32));
+        headers.insert(AUTHORIZATION, HeaderValue::from_str(&credential).unwrap());
+        assert!(!should_record_client_activity(&headers));
+        headers.insert(X_ON_BEHALF_OF, HeaderValue::from_static("42"));
+        assert!(!should_record_client_activity(&headers));
+
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer user-session"),
+        );
         assert!(!should_record_client_activity(&headers));
     }
 
@@ -718,9 +820,11 @@ mod tests {
             .connection_customizer(Box::new(diesel::r2d2::TestCustomizer))
             .build(ConnectionManager::<PgConnection>::new(url))
             .expect("create test database pool");
+        let metrics = Arc::new(ClientTrackingMetrics::new(&prometheus::Registry::new()));
         let service = ClientTrackingService {
+            last_seen: Arc::new(LastSeen::new(pool.clone(), metrics.clone())),
             db: pool,
-            metrics: Arc::new(ClientTrackingMetrics::new(&prometheus::Registry::new())),
+            metrics,
             recent_writes: DashMap::new(),
         };
 

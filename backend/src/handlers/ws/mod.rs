@@ -3,8 +3,10 @@
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::Json;
+use chrono::Utc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
@@ -15,6 +17,7 @@ use crate::dto::ws::{
     ClientWsMessage, OnlineClientConnectionResponse, OnlineClientStatus, ServerWsMessage,
     TicketResponse,
 };
+use crate::services::client_tracking::{should_record_client_activity, ClientTrackingService};
 use crate::services::presence::{take_pending_changes, PresenceChanges};
 use crate::services::ws_registry;
 use crate::utils::auth::BearerSession;
@@ -103,6 +106,25 @@ const MAX_WATCHED_USERS: usize = 100;
 const MAX_WATCHED_GROUPS: usize = 4;
 const PRESENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 
+fn record_active_ws_activity(
+    activity_tasks: &mut tokio::task::JoinSet<()>,
+    tracking: &Arc<ClientTrackingService>,
+    uid: i32,
+    client_id: &str,
+    track_client: bool,
+) {
+    tracking.last_seen.record(uid, Utc::now().naive_utc());
+    if track_client && activity_tasks.is_empty() {
+        let tracking = tracking.clone();
+        let client_id = client_id.to_owned();
+        activity_tasks.spawn_blocking(move || {
+            if let Err(error) = tracking.record_client_activity(uid, &client_id, None) {
+                warn!(?error, uid, "failed to record ws activity");
+            }
+        });
+    }
+}
+
 fn parse_presence_watch(
     request_id: Option<u64>,
     user_ids: Option<Vec<i32>>,
@@ -185,11 +207,16 @@ async fn send_presence_snapshot(
         (status = 101, description = "Switching Protocols"),
     ),
 )]
-async fn ws_handler(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| handle_auth_and_socket(socket, state))
+async fn ws_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let track_client = should_record_client_activity(&headers);
+    ws.on_upgrade(move |socket| handle_auth_and_socket(socket, state, track_client))
 }
 
-async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
+async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState, track_client: bool) {
     // Wait for auth message, timeout after 5 seconds
     let auth_result = timeout(std::time::Duration::from_secs(5), socket.recv()).await;
 
@@ -216,20 +243,20 @@ async fn handle_auth_and_socket(mut socket: WebSocket, state: AppState) {
 
     let registry = state.ws_registry.clone();
     let (entry, rx) = registry.register(uid, client_id);
-    let conn_id = entry.conn_id;
 
-    handle_socket(socket, state, uid, conn_id, registry, entry, rx).await;
+    handle_socket(socket, state, uid, registry, entry, rx, track_client).await;
 }
 
 async fn handle_socket(
     mut socket: WebSocket,
     state: AppState,
     uid: i32,
-    conn_id: u64,
     registry: Arc<ws_registry::ConnectionRegistry>,
     entry: Arc<ws_registry::ConnectionEntry>,
     mut rx: tokio::sync::mpsc::Receiver<Arc<ServerWsMessage>>,
+    track_client: bool,
 ) {
+    let conn_id = entry.conn_id;
     let started_at = Instant::now();
     let mut presence_changes = state.presence_service.subscribe_changes();
     let mut activity_tasks = tokio::task::JoinSet::new();
@@ -333,31 +360,40 @@ async fn handle_socket(
                                 entry.update_ping(app_state);
                                 registry.refresh_metrics();
                                 trace!("ws ping received uid={} conn_id={}", uid, conn_id);
+                                if app_state == AppPresenceState::Active {
+                                    record_active_ws_activity(
+                                        &mut activity_tasks,
+                                        &state.client_tracking,
+                                        uid,
+                                        &entry.client_id,
+                                        track_client,
+                                    );
+                                }
                                 if socket.send(Message::Text(PONG_JSON.into())).await.is_err() {
                                     break;
                                 }
-                                if activity_tasks.is_empty() {
-                                    let tracking = state.client_tracking.clone();
-                                    let client_id = entry.client_id.clone();
-                                    activity_tasks.spawn_blocking(move || {
-                                        if let Err(error) = tracking.record_activity(uid, &client_id, None) {
-                                            warn!(?error, uid, "failed to record ws activity");
-                                        }
-                                    });
-                                }
                             }
-                            ClientWsMessage::AppState { state } => {
-                                let state = state
+                            ClientWsMessage::AppState { state: app_state } => {
+                                let app_state = app_state
                                     .map(AppPresenceState::from)
                                     .unwrap_or(AppPresenceState::Inactive);
-                                entry.update_app_state(state);
+                                entry.update_app_state(app_state);
                                 registry.refresh_metrics();
                                 trace!(
                                     "ws app_state received uid={} conn_id={} state={:?}",
                                     uid,
                                     conn_id,
-                                    state
+                                    app_state
                                 );
+                                if app_state == AppPresenceState::Active {
+                                    record_active_ws_activity(
+                                        &mut activity_tasks,
+                                        &state.client_tracking,
+                                        uid,
+                                        &entry.client_id,
+                                        track_client,
+                                    );
+                                }
                             }
                             ClientWsMessage::WatchPresence { request_id, user_ids, chat_ids } => {
                                 let Some(next_watch) = parse_presence_watch(request_id, user_ids, chat_ids) else {

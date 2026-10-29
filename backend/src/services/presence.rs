@@ -23,6 +23,7 @@ use crate::dto::ws::{
 };
 use crate::models::{GroupKind, PresenceVisibility};
 use crate::schema::{group_membership, groups, user_extra};
+use crate::services::client_tracking::LastSeen;
 use crate::services::social;
 use crate::services::ws_registry::{AppPresenceState, ConnectionRegistry};
 use crate::state::DbPool;
@@ -60,6 +61,7 @@ pub struct PresenceSnapshotService {
     db: DbPool,
     registry: Arc<ConnectionRegistry>,
     metrics: Arc<PresenceMetrics>,
+    last_seen: Arc<LastSeen>,
     changes: tokio::sync::broadcast::Sender<PresenceChange>,
     // Authorization is never cached; only the viewer-independent aggregate is shared.
     group_counts: Cache<i64, GroupCounts>,
@@ -70,11 +72,13 @@ impl PresenceSnapshotService {
         db: DbPool,
         registry: Arc<ConnectionRegistry>,
         metrics: Arc<PresenceMetrics>,
+        last_seen: Arc<LastSeen>,
     ) -> Self {
         Self {
             db,
             registry,
             metrics,
+            last_seen,
             changes: tokio::sync::broadcast::channel(64).0,
             group_counts: Cache::builder()
                 .max_capacity(MAX_CACHED_GROUPS)
@@ -121,6 +125,7 @@ impl PresenceSnapshotService {
     ) -> Result<PresenceSnapshotPayload, Arc<PresenceSnapshotError>> {
         let db = self.db.clone();
         let registry = self.registry.clone();
+        let last_seen = self.last_seen.clone();
         let user_ids = unique_i32(&user_ids);
         let chat_ids = unique_i64(&chat_ids);
         let scope_started = Instant::now();
@@ -129,7 +134,7 @@ impl PresenceSnapshotService {
             let users = if user_ids.is_empty() {
                 Vec::new()
             } else {
-                load_visible_users(&mut conn, &registry, viewer_uid, &user_ids)?
+                load_visible_users(&mut conn, &registry, &last_seen, viewer_uid, &user_ids)?
             };
             let visible_chat_ids = if chat_ids.is_empty() {
                 Vec::new()
@@ -200,6 +205,7 @@ impl PresenceSnapshotService {
 fn load_visible_users(
     conn: &mut PgConnection,
     registry: &ConnectionRegistry,
+    last_seen: &LastSeen,
     viewer_uid: i32,
     user_ids: &[i32],
 ) -> Result<Vec<UserPresenceResponse>, diesel::result::Error> {
@@ -262,6 +268,11 @@ fn load_visible_users(
     if !policy_uids.contains(&viewer_uid) {
         policy_uids.push(viewer_uid);
     }
+    // Keep pending observations if a flush commits between this read and the DB query.
+    let observed_by_uid: HashMap<i32, NaiveDateTime> = policy_uids
+        .iter()
+        .filter_map(|uid| last_seen.latest(*uid, None).map(|at| (*uid, at)))
+        .collect();
     let presence_by_uid: HashMap<i32, (NaiveDateTime, PresenceVisibility)> = user_extra::table
         .filter(user_extra::uid.eq_any(policy_uids))
         .select((
@@ -304,9 +315,13 @@ fn load_visible_users(
                         relationship.peer_shares_presence,
                     )
                 });
-            let last_seen_at = presence_by_uid.get(&uid).map(|(last_seen_at, _)| {
-                DateTime::<Utc>::from_naive_utc_and_offset(*last_seen_at, Utc)
-            });
+            let persisted = presence_by_uid
+                .get(&uid)
+                .map(|(at, _)| *at)
+                .max(observed_by_uid.get(&uid).copied());
+            let last_seen_at = last_seen
+                .latest(uid, persisted)
+                .map(|at| DateTime::<Utc>::from_naive_utc_and_offset(at, Utc));
             user_presence(
                 uid,
                 exact,
@@ -509,7 +524,13 @@ mod tests {
             .build_unchecked(ConnectionManager::<PgConnection>::new(
                 "presence_test_invalid_option=value",
             ));
-        let presence = PresenceSnapshotService::new(db, connections, metrics);
+        let last_seen = Arc::new(LastSeen::new(
+            db.clone(),
+            Arc::new(super::super::client_tracking::ClientTrackingMetrics::new(
+                &registry,
+            )),
+        ));
+        let presence = PresenceSnapshotService::new(db, connections, metrics, last_seen);
 
         assert!(presence
             .snapshot(7, Some(1), vec![], vec![123])

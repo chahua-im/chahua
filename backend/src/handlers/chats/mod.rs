@@ -26,6 +26,7 @@ use crate::{
     errors::AppError,
     extractors::DbConn,
     handlers::{members::check_membership, users::build_member_summary_map},
+    services::authz::Action as AuthzAction,
     services::{
         chat,
         messages::{attach_metadata, message_response_preview},
@@ -34,7 +35,10 @@ use crate::{
             publish_chat_notification_setting, set_chat_archived,
         },
     },
-    utils::{auth::CurrentUid, pagination::validate_limit},
+    utils::{
+        auth::{CurrentUid, Principal},
+        pagination::validate_limit,
+    },
 };
 use crate::{
     models::{GroupKind, MessageType},
@@ -797,16 +801,18 @@ async fn acknowledge_chat_reactions(
     responses(
         (status = 200, description = "Total unread count", body = UnreadCountResponse),
     ),
-    security(("bearer_jwt" = [])),
+    security(("bearer_jwt" = []), ("service_token_bearer" = [])),
+    params(("X-On-Behalf-Of" = Option<i32>, Header, description = "Acting user UID; required with a service token, forbidden with user auth"))
 )]
 async fn get_unread_count(
-    CurrentUid(uid): CurrentUid,
+    principal: Principal,
     State(state): State<AppState>,
 ) -> Result<Json<UnreadCountResponse>, AppError> {
     let response = tokio::task::spawn_blocking(move || -> Result<_, AppError> {
         let mut conn = state.db.get()?;
         let conn = &mut *conn;
 
+        let uid = principal.require_user_action(conn, &state, AuthzAction::OnBehalfOfSocialRead)?;
         let counts = state.unread_service.count_user_unread_summary(conn, uid)?;
         let (unread_mentions, mention_badges, archived_mention_badges) =
             state.unread_service.count_user_mention_summary(conn, uid)?;

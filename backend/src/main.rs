@@ -109,6 +109,15 @@ async fn main() {
         metrics.ws.clone(),
     ));
     let unread_service = Arc::new(services::unread::UnreadService::new());
+    let client_tracking = services::client_tracking::ClientTrackingService::start(
+        pool.clone(),
+        metrics.client_tracking.clone(),
+    );
+    let (last_seen_shutdown, shutdown_requested) = tokio::sync::oneshot::channel();
+    let last_seen_worker = tokio::spawn(services::client_tracking::run_last_seen_worker(
+        client_tracking.last_seen.clone(),
+        shutdown_requested,
+    ));
 
     let state = AppState::new(AppInner {
         db: pool.clone(),
@@ -125,6 +134,7 @@ async fn main() {
             pool.clone(),
             ws_registry.clone(),
             metrics.presence.clone(),
+            client_tracking.last_seen.clone(),
         )),
         push_service: services::push::PushService::start(
             pool.clone(),
@@ -133,10 +143,7 @@ async fn main() {
             unread_service.clone(),
         ),
         unread_service: unread_service.clone(),
-        client_tracking: services::client_tracking::ClientTrackingService::start(
-            pool.clone(),
-            metrics.client_tracking.clone(),
-        ),
+        client_tracking,
         background_service: services::background::BackgroundService::start(
             pool.clone(),
             ws_registry.clone(),
@@ -271,14 +278,31 @@ async fn main() {
     let api_server = axum::serve(app_listener, app);
     let metrics_server = axum::serve(metrics_listener, metrics_app);
 
-    tokio::select! {
-        result = api_server => {
-            result.unwrap();
-        }
-        result = metrics_server => {
-            result.unwrap();
+    let result = tokio::select! {
+        result = api_server => result,
+        result = metrics_server => result,
+        _ = shutdown_signal() => Ok(()),
+    };
+    let _ = last_seen_shutdown.send(());
+    last_seen_worker.await.expect("last-seen worker failed");
+    result.unwrap();
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install termination signal handler");
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.expect("install interrupt signal handler"),
+            _ = terminate.recv() => {},
         }
     }
+    #[cfg(not(unix))]
+    tokio::signal::ctrl_c()
+        .await
+        .expect("install interrupt signal handler");
 }
 
 async fn build_media_store(config: &AppConfig) -> services::media::MediaStore {

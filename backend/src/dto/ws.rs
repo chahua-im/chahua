@@ -205,7 +205,7 @@ pub enum LastSeenBucket {
 pub struct UserPresenceResponse {
     pub uid: i32,
     pub online: bool,
-    /// Present only when all fresh connections are inactive and exact presence is visible.
+    /// Present only with exact visibility, no active connection, and a fresh connection within its away grace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub away: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
