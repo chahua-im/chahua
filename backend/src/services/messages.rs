@@ -2846,6 +2846,7 @@ mod tests {
                 attachment_prefix: "attachments".to_string(),
                 base_url: Some(base_url.to_string()),
                 endpoint_url: None,
+                upload_proxy_path: None,
                 max_attachment_file_size_bytes: 1,
             }),
         )
