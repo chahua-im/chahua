@@ -364,6 +364,19 @@ ion-content.custom-scrollbars::part(scroll) {
   scrollbar-width: none;
 }
 
+// Ionic's native textarea uses z-index: 1; its bars must remain above the input.
+ion-textarea.custom-scrollbars .os-scrollbar {
+  z-index: 2;
+}
+
+:where([appScrollbars].custom-scrollbars) {
+  position: relative;
+}
+
+app-emoji-picker nicematic-grid > div {
+  position: relative;
+}
+
 .os-scrollbar {
   --os-size: 12px;
   --os-padding-perpendicular: 3px;

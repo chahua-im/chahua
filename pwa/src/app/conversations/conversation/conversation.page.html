@@ -317,6 +317,8 @@
   }
 
   <app-message-composer
+    [dockStickers]="largeScreen()"
+    (stickersOpened)="stickersOpened()"
     [hidden]="selecting()"
     [style.--context-light]="composerContextColors()?.light"
     [style.--context-dark]="composerContextColors()?.dark"

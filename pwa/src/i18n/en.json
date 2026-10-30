@@ -637,6 +637,7 @@
     }
   },
   "stickers": {
+    "favorites": "Favorites",
     "title": "Stickers",
     "count": "Stickers: {{ count }}",
     "invalidUploadTitle": "Can't add sticker",
@@ -651,6 +652,7 @@
     "addFailed": "Failed to add sticker",
     "favorite": "Favorite sticker",
     "unfavorite": "Remove favorite",
+    "favoriteFailed": "Could not update favorite. Please try again.",
     "favoriteOne": "Favorite",
     "unsubscribe": "Unsubscribe",
     "subscribeAll": "Subscribe to pack",

@@ -152,20 +152,20 @@ ForwardPlaceholder 枚举定义后端原因代码，placeholderLabel 返回翻�
 
 | 组件            | 输入、输出与局部字段                                                                                                                         | 所有权                                                                                                                                                              |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MessageComposer | chatId、text model、editing、editingUploads、relationship、mentionsEnabled、restriction；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面                                                                         |
+| MessageComposer | chatId、text model、editing、editingUploads、relationship、mentionsEnabled、restriction、dockStickers；stickersOpened 通知页面关闭信息栏，stickersVisible 供页面预留右栏空间；submitted 输出包含文字/附件/语音/贴纸的 Composition | 持有未提交上传、面板选择、提及候选及局部拖入层数；手动键盘操作输出 editLast / escape 给页面                                                                         |
 | VoiceRecorder   | disabled、active model → submitted(File)、discarded；录音状态、计时、Blob、手势目标与错误                                                    | 设备资源和未发送录音属于组件，离开时释放                                                                                                                            |
 | UploadFailure   | upload → retry、remove                                                                                                                       | 输入栏和消息附件共用的失败图标与原因弹窗，操作只作用于该附件，后台重试与语言切换时更新弹窗                                                                          |
 | UploadProgress  | value（0–1）                                                                                                                                 | 输入栏和消息附件共用的固定尺寸 SVG 进度环，只负责呈现                                                                                                               |
 | VoicePlayer     | src、dock；playing、loading、failed、elapsed、duration、波形状态                                                                             | 挂载时创建 Audio 和 WaveSurfer 并读取波形；同一时间播放一条；带 dock 的消息语音把播放状态交给吸顶播放条，销毁时由 VoicePlayback 接管音频继续播放                    |
 | VoiceBar        | 无输入，读取 VoicePlayback；toggle/dismiss/speed 经活跃语音执行，locate 经 ConversationNavigation 打开消息所属会话                           | 只负责呈现吸顶播放条，挂在主栏 header 底部：会话页、聊天列表移动端页与桌面空态页各挂一个，桌面侧栏列表实例不挂                                                      |
-| StickerPicker   | embedded、selectable、packId、stickerId → selected；content、packs、busy/error、长按菜单                                                     | content 保存当前包或贴纸列表，pack 和 stickers 从中派生；详情选中项按 ID 从当前列表派生，不复制包内贴纸；包列表按用户贴纸包顺序排序，发送贴纸时按开关记录包使用顺序 |
+| StickerPicker   | embedded、grouped、selectable、packId、stickerId → selected；contents、activeId、packs、busy/error、分组加载与上传错误状态、长按菜单                                                     | contents 按包 ID 缓存内容（空键为收藏），activeId 选择当前包，content、pack 和 stickers 从中派生；grouped 启用连续分组；局部 StickerLibraryScroll 负责接近视口的渲染窗口、包图标定位、滚动高亮与尺寸/内容变化时的锚点恢复；详情选中项按 ID 从当前列表派生，不复制包内贴纸；包列表按用户贴纸包顺序排序，发送贴纸时按开关记录包使用顺序 |
 | MediaViewer     | media、initial；index、scale、加载状态与拖动坐标                                                                                             | 当前消息的媒体集合与本地画布，不写入聊天状态                                                                                                                        |
 
 附件菜单使用原生 popover 顶层浮层，打开时按附件按钮当前位置定位，不改变输入焦点；点选媒体或文件时先关闭菜单、同步释放当前焦点，Android 上若选择前仍有输入焦点，等待至少 400ms 且 resize/scroll 静默 150ms 后触发文件输入，最长等待 1s，保持在浏览器临时用户激活时限内；其他情况直接触发文件输入。重新输入、重开菜单或重置输入区会取消尚未触发的选择器，重置也关闭菜单。菜单项继续使用 Ionic 列表组件。
 
 上传任务提交后归 MessageOutbox，编辑只借用任务引用。输入区可以继续输入和录音。VoicePlayer 不显示原生音频控制条，挂载即下载音频并解码波形，波形读取失败时仍保留可用播放。消息语音的播放由根服务 VoicePlayback 独占：播放中的语音在离开或切换会话后继续播放，VoiceBar 吸顶播放条随语音出现在会话页和聊天列表页的 header 底部，接管播放/暂停、跳转原消息、已播时长与倍速，关闭或播完即收起；倍速由 VoicePlayback 全局记忆，跨语音保持；录音预览与待发送预览不进吸顶条。
 
-创建贴纸包使用创建返回的摘要与空 stickers 列表构成详情，并追加到包列表，不额外补读；贴纸库上传新贴纸后重读该包，包详情页上传后把响应追加到当前列表。更新包元数据时合并返回摘要，保留同一包的已知贴纸。收藏状态写回当前 content，随后订阅更新不会恢复过期的收藏值。
+创建贴纸包使用创建返回的摘要与空 stickers 列表构成详情，并追加到包列表，不额外补读；更新包元数据时保留同一包的已知贴纸。贴纸库上传新贴纸后重读该包，包详情页上传后把响应追加到当前列表。收藏状态同步写回所有已加载分组，并即时增删已加载收藏列表的成员；失败恢复原状态与原收藏顺序。独立贴纸详情保留正在浏览的贴纸，不作为收藏列表处理。面板内的收藏变更覆盖迟到包响应及收藏列表响应中的旧值；随后订阅更新不会恢复过期的收藏值。收藏失败通过独立 Toast 提示，不混入分组加载错误。发送时按被点击的分组记录使用顺序，不使用当前滚动高亮包推断来源。
 
 ## 资料、搜索与管理
 

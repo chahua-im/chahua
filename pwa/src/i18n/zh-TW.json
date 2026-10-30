@@ -637,6 +637,7 @@
     }
   },
   "stickers": {
+    "favorites": "收藏",
     "title": "貼紙",
     "count": "{{ count }} 張貼紙",
     "invalidUploadTitle": "無法新增貼紙",
@@ -651,6 +652,7 @@
     "addFailed": "新增表情失敗",
     "favorite": "收藏表情",
     "unfavorite": "取消收藏",
+    "favoriteFailed": "收藏狀態更新失敗，請重試。",
     "favoriteOne": "收藏單個",
     "unsubscribe": "取消訂閱",
     "subscribeAll": "訂閱整組",

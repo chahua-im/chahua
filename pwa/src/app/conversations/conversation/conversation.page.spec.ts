@@ -18,6 +18,8 @@ import { vi } from 'vitest';
 import WaveSurfer from 'wavesurfer.js';
 import { RpcTestPeer, provideRpcTesting } from '../../api/rpc-testing';
 import { RpcErrorCode } from '../../api/rpc-error';
+import { StickerPicker } from '../../messages/sticker-picker/sticker-picker';
+import { PanelNavigation } from '../../navigation/panel-navigation';
 import {
   AttachmentUploadPurpose,
   GroupKind,
@@ -115,6 +117,13 @@ describe('ConversationPage', () => {
         disconnect() {
           for (const target of this.targets) resizes.delete(target);
         }
+      },
+    );
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe() {}
+        disconnect() {}
       },
     );
     vi.stubGlobal('matchMedia', () => Object.assign(new EventTarget(), { matches: false }));
@@ -230,6 +239,70 @@ describe('ConversationPage', () => {
     for (const request of peer.match('chats.acknowledgeReactions')) request.flush({ unreadReactions: 0 });
     for (const request of peer.match('chats.getReadReceipt')) request.flush({});
   }
+
+  async function openStickers() {
+    fixture.nativeElement.querySelector('.sticker-button').click();
+    fixture.detectChanges();
+    peer.expect('stickers.listFavorites').flush({ stickers: [] });
+    peer.expect('stickers.listSubscribedPacks').flush({ packs: [] });
+    peer.expect('stickers.listOwnedPacks').flush({ packs: [] });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    return fixture.debugElement.query(By.directive(StickerPicker));
+  }
+
+  it('keeps the sticker picker and conversation DOM and restores scrolling across the three-column breakpoint', async () => {
+    const picker = await openStickers();
+    const grid = picker.nativeElement.querySelector('.sticker-grid');
+    const libraryScroll = picker.nativeElement.querySelector('.sticker-library') as HTMLElement;
+    const message = fixture.nativeElement.querySelector('app-message');
+    const composer = component['composer']();
+    component['updateDraft']('保留草稿');
+    libraryScroll.scrollTop = 120;
+    libraryScroll.dispatchEvent(new Event('scroll'));
+    const wide = component['wide'];
+    for (const matches of [true, false, true]) {
+      Object.assign(wide, { matches });
+      wide.dispatchEvent(new Event('change'));
+      // JSDOM has no layout; simulate scrollTop being clamped during the layout change.
+      libraryScroll.scrollTop = 0;
+      fixture.detectChanges();
+      expect(fixture.nativeElement.classList.contains('details-open')).toBe(matches);
+      expect(fixture.nativeElement.querySelector('.sticker-panel').classList.contains('docked')).toBe(matches);
+      expect(fixture.debugElement.query(By.directive(StickerPicker)).componentInstance).toBe(picker.componentInstance);
+      expect(fixture.nativeElement.querySelector('.sticker-grid')).toBe(grid);
+      expect(fixture.nativeElement.querySelector('.sticker-library')).toBe(libraryScroll);
+      expect(libraryScroll.scrollTop).toBe(120);
+      expect(fixture.nativeElement.querySelector('app-message')).toBe(message);
+      expect(component['composer']()).toBe(composer);
+      expect(component['draft']()).toBe('保留草稿');
+    }
+    peer.expectNone('stickers.listFavorites');
+    fixture.nativeElement.querySelector('.sticker-panel ion-button').click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('app-sticker-picker')).toBeNull();
+    expect(fixture.nativeElement.classList.contains('details-open')).toBe(false);
+  });
+
+  it('shares the right column with the information panel, including history navigation', async () => {
+    component['largeScreen'].set(true);
+    const panels = TestBed.inject(PanelNavigation);
+    const paths = signal([`/chats/chat/${wireChat.id}/info`]);
+    Object.defineProperty(panels, 'paths', { value: paths });
+    panels.largeScreen.set(true);
+    const close = vi.spyOn(panels, 'close').mockImplementation(async () => {
+      paths.set([]);
+      return true;
+    });
+    fixture.detectChanges();
+    await openStickers();
+    expect(close).toHaveBeenCalledOnce();
+    expect(component['composer']()!.stickersVisible()).toBe(true);
+    paths.set([`/chats/chat/${wireChat.id}/info`]);
+    fixture.detectChanges();
+    expect(component['composer']()!.stickersVisible()).toBe(false);
+    expect(fixture.nativeElement.querySelector('app-sticker-picker')).toBeNull();
+  });
 
   it('applies live restrictions without replacing the composer or draft, and resumes after restoration', async () => {
     component['updateDraft']('保留草稿');

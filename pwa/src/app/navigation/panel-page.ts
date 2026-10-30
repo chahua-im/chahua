@@ -18,6 +18,7 @@ import { IonButton, IonContent, IonSpinner } from '@ionic/angular';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { RpcApi } from '../../generated/rpc-api';
+import { ContentScrollbars } from '../scrolling/content-scrollbars';
 import { encodeId } from '../api/snowflake-id';
 import { ChatDetails, DetailView } from '../chats/chat-details/chat-details';
 import { ConversationPage } from '../conversations/conversation/conversation.page';
@@ -29,12 +30,12 @@ import { PanelNavigation, panelIdentity } from './panel-navigation';
 @Component({
   selector: 'app-panel-page',
   host: { class: 'ion-page' },
-  imports: [NgComponentOutlet, IonContent, IonSpinner, IonButton, TranslocoPipe],
+  imports: [ContentScrollbars, NgComponentOutlet, IonContent, IonSpinner, IonButton, TranslocoPipe],
   template: `
     @if (content(); as page) {
       <ng-container *ngComponentOutlet="page.component; inputs: inputs()" />
     } @else {
-      <ion-content>
+      <ion-content appScrollbars>
         @if (failed()) {
           <p class="ion-padding">{{ 'chats.link.failed' | transloco }}</p>
           <ion-button fill="clear" (click)="load()">{{ 'common.retry' | transloco }}</ion-button>

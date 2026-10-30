@@ -1,5 +1,5 @@
 @if (suggestions().length && !restriction()) {
-  <ion-list class="mentions">
+  <ion-list appScrollbars class="mentions">
     @for (member of suggestions(); track member.uid; let i = $index) {
       <ion-item
         [button]="true"
@@ -30,7 +30,7 @@
   }
 </ng-template>
 @if (!forwarding() && (existing().length || visualUploads().length)) {
-  <div class="uploads">
+  <div appScrollbars class="uploads">
     @for (item of existing(); track item.id) {
       <div class="upload">
         <ng-container
@@ -94,6 +94,7 @@
     <div class="input-wrapper" [hidden]="voiceActive()">
       <div class="input-row">
         <ion-textarea
+          appScrollbars
           [disabled]="!!restriction()"
           [placeholder]="
             (restriction() ? 'speaking.blocked.' + restriction() : 'messages.composer.placeholder') | transloco
@@ -102,7 +103,7 @@
           [rows]="1"
           [value]="restriction() ? '' : display().text"
           (ionInput)="changed($event.detail.value || '', $event.detail.event)"
-          (ionFocus)="panel.set(Panel.None)"
+          (ionFocus)="!dockStickers() && closeStickers()"
           (paste)="paste($event)"
           (keydown)="key($event)" />
         @if (!editing() && !forwarding()) {
@@ -139,8 +140,20 @@
     }
   </div>
 </div>
-@if (panel() === Panel.Stickers && !restriction()) {
-  <app-sticker-picker [embedded]="true" (selected)="sticker($event)" />
+@if (stickersVisible()) {
+  <div class="sticker-panel" [class.docked]="dockStickers()">
+    @if (dockStickers()) {
+      <ion-toolbar>
+        <ion-title>{{ 'stickers.title' | transloco }}</ion-title>
+        <ion-buttons slot="end">
+          <ion-button (click)="closeStickers()">
+            <ion-icon slot="icon-only" [icon]="icons.closeOutline" />
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    }
+    <app-sticker-picker [embedded]="true" [grouped]="dockStickers()" (selected)="sticker($event)" />
+  </div>
 }
 
 <div #attachmentMenu popover="auto" class="attachment-menu" (pointerdown)="$event.preventDefault()">

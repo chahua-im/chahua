@@ -115,10 +115,6 @@
   overflow-x: auto;
   flex-shrink: 0;
   overscroll-behavior-x: contain;
-  scrollbar-width: none;
-}
-.gallery-viewport::-webkit-scrollbar {
-  display: none;
 }
 .gallery {
   display: flex;

@@ -165,11 +165,13 @@ describe('StickerPackDetail', () => {
   });
 
   it('deletes the pack, drops it from the order and closes the page', async () => {
+    const removed = vi.spyOn(TestBed.inject(StickerUpdates).removed, 'next');
     const component = (await loaded()).componentInstance;
     const deletion = component['deletePack']();
     (await peer.expectAsync('stickers.deletePack', { packId: '201' })).flush(null);
     await deletion;
     expect(preferences.removePackOrderItem).toHaveBeenCalledWith(pack.id);
+    expect(removed).toHaveBeenCalledExactlyOnceWith({ id: pack.id, deleted: true });
     expect(dismiss).toHaveBeenCalledOnce();
   });
 
@@ -179,11 +181,26 @@ describe('StickerPackDetail', () => {
     await vi.waitFor(() => expect(fixture.componentInstance['pack']()).toBeDefined());
     const component = fixture.componentInstance;
     expect(component['owned']()).toBe(false);
+    const removed = vi.spyOn(TestBed.inject(StickerUpdates).removed, 'next');
     const unsubscribe = component['unsubscribe']();
     (await peer.expectAsync('stickers.unsubscribeFromPack', { packId: '201' })).flush(null);
     await unsubscribe;
     expect(preferences.removePackOrderItem).toHaveBeenCalledWith(pack.id);
+    expect(removed).toHaveBeenCalledExactlyOnceWith({ id: pack.id, deleted: false });
     expect(dismiss).toHaveBeenCalledOnce();
+  });
+
+  it.each(['deletePack', 'unsubscribe'] as const)('keeps open libraries unchanged when %s fails', async (action) => {
+    const component = (await loaded()).componentInstance;
+    const removed = vi.spyOn(TestBed.inject(StickerUpdates).removed, 'next');
+    const pending = component[action]();
+    (await peer.expectAsync(action === 'deletePack' ? 'stickers.deletePack' : 'stickers.unsubscribeFromPack')).error(
+      1503,
+    );
+    await pending;
+    expect(removed).not.toHaveBeenCalled();
+    expect(preferences['removePackOrderItem']).not.toHaveBeenCalled();
+    expect(dismiss).not.toHaveBeenCalled();
   });
 
   it('uploads a sticker with its emoji and appends it to the pack', async () => {

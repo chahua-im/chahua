@@ -8,11 +8,13 @@ import type {
   StickerSummary,
 } from '../../generated/models';
 
-/** Local creations update already mounted pack views without refetching them. */
+/** Confirmed local changes update already mounted sticker views. */
 @Service()
 export class StickerUpdates {
   private readonly api = inject(RpcApi);
   readonly added = new Subject<{ pack: StickerPackSummary; sticker: StickerSummary }>();
+  /** A deleted or unsubscribed pack must leave open libraries, including pending reads. */
+  readonly removed = new Subject<{ id: SnowflakeID; deleted: boolean }>();
 
   getPack(id: SnowflakeID) {
     return defer(() => {

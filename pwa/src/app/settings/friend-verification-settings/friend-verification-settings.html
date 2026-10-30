@@ -60,6 +60,7 @@
       @if (verification().mode === Mode.question) {
         <ion-item>
           <ion-textarea
+            appScrollbars
             [label]="'settings.friendVerification.questionLabel' | transloco"
             labelPlacement="stacked"
             [placeholder]="'settings.friendVerification.questionPlaceholder' | transloco"
