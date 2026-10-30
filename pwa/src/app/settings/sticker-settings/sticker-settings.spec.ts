@@ -10,6 +10,7 @@ import { PanelNavigation } from '../../navigation/panel-navigation';
 import { Preferences } from '../preferences';
 import { StickerPreferences } from '../sticker-preferences';
 import { StickerSettings } from './sticker-settings';
+import { StickerUpdates } from '../../messages/sticker-updates';
 
 const ownedPack: StickerPackSummary = {
   id: encodeId('201'),
@@ -143,12 +144,14 @@ describe('StickerSettings', () => {
   });
 
   it('creates a pack from the alert name, records its order and opens the detail page', async () => {
+    const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
     const component = (await loaded()).componentInstance;
     const saving = component['savePack']({ name: ' 新包 ', emoji: '' });
     peer
       .expect('stickers.createPack', { name: '新包' })
       .flush(wirePack({ ...ownedPack, id: encodeId('301'), name: '新包' }));
     await saving;
+    expect(changed).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: encodeId('301'), stickers: [] }));
     expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith({
       stickerPackId: encodeId('301'),
       lastUsedOn: expect.any(Number),

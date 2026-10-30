@@ -129,6 +129,7 @@ describe('StickerPackDetail', () => {
   });
 
   it('renames through the pack endpoint and updates the title signal', async () => {
+    const changed = vi.spyOn(TestBed.inject(StickerUpdates).changed, 'next');
     const fixture = await loaded();
     const component = fixture.componentInstance;
     component['rename']();
@@ -141,6 +142,7 @@ describe('StickerPackDetail', () => {
     expect(component['pack']()?.name).toBe('新名');
     expect(component['pack']()?.stickers).toEqual([sticker]);
     expect(component['renaming']()).toBe(false);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(component['pack']());
   });
 
   it('preserves a sticker created while a rename RPC is pending', async () => {
@@ -156,12 +158,26 @@ describe('StickerPackDetail', () => {
   });
 
   it('removes a sticker from an owned pack after confirmation', async () => {
+    const changed = vi.spyOn(TestBed.inject(StickerUpdates).stickerRemoved, 'next');
     const component = (await loaded()).componentInstance;
     const remove = component['removeSticker'](sticker);
     (await peer.expectAsync('stickers.removeFromPack', { packId: '201', stickerId: '101' })).flush(null);
     await remove;
     expect(component['pack']()?.stickers).toEqual([]);
     expect(component['pack']()?.stickerCount).toBe(0);
+    expect(changed).toHaveBeenCalledExactlyOnceWith({ pack, stickerId: sticker.id });
+  });
+
+  it('does not publish a delayed removal after switching accounts', async () => {
+    const component = (await loaded()).componentInstance;
+    const changed = vi.spyOn(TestBed.inject(StickerUpdates).stickerRemoved, 'next');
+    const pending = component['removeSticker'](sticker);
+    const response = await peer.expectAsync('stickers.removeFromPack');
+    TestBed.inject(SessionStore).user.set({ ...testUser, uid: 2 });
+    response.flush(null);
+    await pending;
+    expect(changed).not.toHaveBeenCalled();
+    expect(component['pack']()?.stickers).toEqual([sticker]);
   });
 
   it('deletes the pack, drops it from the order and closes the page', async () => {
@@ -204,6 +220,7 @@ describe('StickerPackDetail', () => {
   });
 
   it('uploads a sticker with its emoji and appends it to the pack', async () => {
+    const added = vi.spyOn(TestBed.inject(StickerUpdates).added, 'next');
     const component = (await loaded()).componentInstance;
     const file = new File(['png-bytes'], 'tea.png', { type: 'image/png' });
     await component['upload']({ target: { files: [file], value: '' } } as unknown as Event);
@@ -217,6 +234,7 @@ describe('StickerPackDetail', () => {
     request.flush({ ...sticker, id: encodeId('105') });
     await saving;
     expect(component['pack']()?.stickers).toHaveLength(2);
+    expect(added).toHaveBeenCalledExactlyOnceWith({ pack, sticker: component['pack']()?.stickers[1] });
     expect(component['uploadFile']()).toBeUndefined();
   });
 

@@ -16,7 +16,11 @@ describe('Readable panel URLs', () => {
     [['/settings/privacy', '/settings/blocked-users'], 'settings=~privacy/blocked-users'],
     [['/settings', '/settings/notifications', '/settings/notifications/dm'], 'settings=notifications/dm'],
     [['/profile/2', '/settings/notifications/dm'], 'profile=2&settings=~notification/dm'],
-    [['/settings', '/settings/stickers', '/settings/stickers/123'], 'settings=stickers/123'],
+    [
+      ['/settings', '/settings/general', '/settings/stickers', '/settings/stickers/123'],
+      'settings=general/stickers/123',
+    ],
+    [['/settings', '/settings/stickers', '/settings/stickers/123'], 'settings=~settings~sticker-settings/123'],
     [['/settings/stickers/123'], 'settings=~sticker-pack/123'],
     [['/chats/chat/100/info'], 'info'],
     [['/chats/chat/100/info?view=image'], 'info=images'],
@@ -49,6 +53,12 @@ describe('Readable panel URLs', () => {
       setPanelPaths(tree, [path]);
       expect(panelPaths(serializer.parse(serializer.serialize(tree)))).toEqual([path]);
     }
+  });
+
+  it('preserves the visited chain in old sticker settings links', () => {
+    const tree = serializer.parse(`${base}?settings=stickers/123`);
+    expect(panelPaths(tree)).toEqual(['/settings', '/settings/stickers', '/settings/stickers/123']);
+    expect(serializer.serialize(tree)).toBe(`${base}?settings=~settings~sticker-settings/123`);
   });
 
   it.each(['a$&b', 'a$$b', 'a%2Fb%3Fc%26d', 'a~b'])('preserves invitation code %s', (code) => {

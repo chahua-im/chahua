@@ -484,7 +484,7 @@ describe('StickerPicker selection during RPC requests', () => {
         lastUsedOn: 1000 - index,
       })),
     );
-    fixture.componentInstance['packs'].update((packs) => [
+    fixture.componentInstance['libraryPacks'].update((packs) => [
       ...Array.from({ length: 20 }, (_, index) => ({ ...pack, id: encodeId(String(900 + index)) })),
       ...packs,
     ]);

@@ -70,6 +70,9 @@ function decodePath(address: string, base: string | undefined) {
 }
 
 function decodeGroup(address: string, base: string | undefined): string[] {
+  // Preserve shared links from when sticker settings lived directly under settings.
+  if (/^settings\/stickers(?:\/|$)/.test(address))
+    return ['/settings', ...decodeGroup(address.replace('settings/stickers', 'sticker-settings'), base)];
   let node = settingsAddresses.find((item) => match(item.address, address, true));
   if (!node) return [decodePath(address, base)];
   let matched = match(node.address, address, true)!;

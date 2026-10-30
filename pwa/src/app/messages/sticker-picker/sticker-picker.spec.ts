@@ -1,5 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { SessionStore } from '../../session/session-store';
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { AlertController, ModalController } from '@ionic/angular';
 import { of, Subject, throwError } from 'rxjs';
@@ -8,8 +9,10 @@ import { RpcApi } from '../../../generated/rpc-api';
 import { StickerPackVisibility, type StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { StickerPreferences } from '../../settings/sticker-preferences';
+import { StickerPackDetail } from '../../settings/sticker-pack-detail/sticker-pack-detail';
 import { StickerPicker } from './sticker-picker';
 import { StickerUpdates } from '../sticker-updates';
+import { StickerFavorites } from '../sticker-favorites';
 
 const sticker: StickerSummary = {
   id: encodeId('101'),
@@ -38,10 +41,11 @@ const pack: StickerPackDetailResponse = {
 describe('StickerPicker selection during requests', () => {
   const intersections = new Map<Element, (visible?: boolean) => void>();
   const api = {
+    deletePackSticker: vi.fn(() => of(undefined)),
     postPack: vi.fn(() => of({ ...pack, stickers: [] })),
     getMyFavorites: vi.fn(() => of({ stickers: [sticker] })),
     getMySubscribedPacks: vi.fn(() => of({ packs: [pack] })),
-    getMyOwnedPacks: vi.fn(() => of({ packs: [] })),
+    getMyOwnedPacks: vi.fn(() => of({ packs: [] as StickerPackDetailResponse[] })),
     getPack: vi.fn((_id: SnowflakeID) => of(pack)),
     getSticker: vi.fn((_id: SnowflakeID) => of({ ...sticker, packs: [pack] })),
     deleteSubscription: vi.fn((_id: SnowflakeID) => of(undefined)),
@@ -84,6 +88,8 @@ describe('StickerPicker selection during requests', () => {
       },
     );
     vi.clearAllMocks();
+    api.deletePackSticker.mockReset().mockReturnValue(of(undefined));
+    preferences.packOrder.mockReset().mockReturnValue([]);
     api.getMyFavorites.mockReset().mockReturnValue(of({ stickers: [sticker] }));
     api.getMySubscribedPacks.mockReset().mockReturnValue(of({ packs: [pack] }));
     api.getMyOwnedPacks.mockReset().mockReturnValue(of({ packs: [] }));
@@ -131,6 +137,464 @@ describe('StickerPicker selection during requests', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it.each([false, true])(
+    'syncs confirmed detail favorites with a mounted sidebar (late reads: %s)',
+    async (lateReads) => {
+      const other = { ...sticker, id: encodeId('105'), isFavorited: true };
+      api.getMyFavorites.mockReturnValue(of({ stickers: [other] }));
+      const { fixture } = await render();
+      fixture.componentRef.setInput('grouped', true);
+      const sidebar = fixture.componentInstance;
+      await sidebar['loadGroup'](pack.id);
+      fixture.detectChanges();
+      const existingTile = fixture.nativeElement.querySelector('.sticker-item');
+      const detail = await renderDetails();
+      const picker = detail.componentInstance;
+      const favorites = new Subject<{ stickers: StickerSummary[] }>();
+      const packRead = new Subject<StickerPackDetailResponse>();
+      let reads: Promise<unknown>[] = [];
+      if (lateReads) {
+        api.getMyFavorites.mockReturnValueOnce(favorites);
+        api.getPack.mockReturnValueOnce(packRead);
+        reads = [sidebar['load'](), sidebar['loadGroup'](pack.id, true)];
+      }
+      await picker['favorite'](sticker);
+      expect(sidebar['groups']()[0].content?.stickers).toEqual([{ ...sticker, isFavorited: true }, other]);
+      if (lateReads) {
+        favorites.next({ stickers: [other] });
+        packRead.next(pack);
+        await Promise.all(reads);
+      }
+      expect(sidebar['groups']()[0].content?.stickers).toEqual([{ ...sticker, isFavorited: true }, other]);
+      expect(sidebar['groups']()[1].content?.stickers[0].isFavorited).toBe(true);
+      if (lateReads) {
+        api.getMyFavorites.mockReturnValueOnce(favorites);
+        api.getPack.mockReturnValueOnce(packRead);
+        reads = [sidebar['load'](), sidebar['loadGroup'](pack.id, true)];
+      }
+      await picker['favorite'](picker['chosen']()!);
+      if (lateReads) {
+        favorites.next({ stickers: [{ ...sticker, isFavorited: true }, other] });
+        packRead.next({ ...pack, stickers: [{ ...sticker, isFavorited: true }] });
+        await Promise.all(reads);
+      }
+      fixture.detectChanges();
+      expect(sidebar['groups']()[0].content?.stickers).toEqual([other]);
+      expect(sidebar['groups']()[1].content?.stickers[0].isFavorited).toBe(false);
+      expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(existingTile);
+      expect(api.getMyFavorites).toHaveBeenCalledTimes(lateReads ? 3 : 1);
+      expect(api.getPack).toHaveBeenCalledTimes(lateReads ? 4 : 2);
+    },
+  );
+
+  it('does not broadcast a failed favorite or a confirmation from a previous account', async () => {
+    const user = signal({ uid: 1 });
+    TestBed.overrideProvider(SessionStore, { useValue: { user } });
+    const fixture = await renderDetails();
+    const picker = fixture.componentInstance;
+    const changed = vi.fn();
+    TestBed.inject(StickerUpdates).favoriteChanged.subscribe(changed);
+    api.putFavorite.mockReturnValueOnce(throwError(() => new Error('offline')));
+    await picker['favorite'](sticker);
+    expect(changed).not.toHaveBeenCalled();
+    expect(picker['chosen']()?.isFavorited).toBe(false);
+    const response = new Subject<undefined>();
+    api.putFavorite.mockReturnValueOnce(response);
+    const pending = picker['favorite'](sticker);
+    user.set({ uid: 2 });
+    response.next(undefined);
+    await pending;
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('syncs message-menu favorites into an already mounted picker', async () => {
+    const { fixture } = await render();
+    const favorites = TestBed.inject(StickerFavorites);
+    await favorites.ensure();
+    await favorites.set(sticker, true);
+    expect(fixture.componentInstance['stickers']()[0].isFavorited).toBe(true);
+    await fixture.componentInstance['favorite']({ ...sticker, isFavorited: true });
+    expect(favorites.isFavorite(sticker.id)).toBe(false);
+  });
+
+  it.each([false, true])(
+    'merges an upload across a delayed read after changing layout (picker closed: %s)',
+    async (closed) => {
+      TestBed.overrideProvider(SessionStore, { useValue: { user: () => ({ uid: 1 }) } });
+      const { fixture } = await renderGroups();
+      const picker = fixture.componentInstance;
+      await picker['loadGroup'](pack.id);
+      const detail = TestBed.createComponent(StickerPackDetail);
+      detail.componentRef.setInput('packId', pack.id);
+      detail.detectChanges();
+      await detail.whenStable();
+      const response = new Subject<StickerPackDetailResponse>();
+      api.getPack.mockReturnValueOnce(response);
+      fixture.componentRef.setInput('grouped', false);
+      fixture.detectChanges();
+      const pending = picker['selectPack'](pack.id);
+      fixture.componentRef.setInput('grouped', true);
+      fixture.detectChanges();
+      picker['selectPack'](pack.id);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.sticker-add').disabled).toBe(false);
+      const originalTile = fixture.nativeElement.querySelector(
+        '.sticker-group:nth-child(2) .sticker-item:not(.sticker-add)',
+      );
+      const added = { ...sticker, id: encodeId('999') };
+      const upload = new Subject<StickerSummary>();
+      const post = vi.spyOn(TestBed.inject(HttpClient), 'post').mockReturnValueOnce(upload);
+      const event = {
+        target: { files: [new File(['png'], 'tea.png', { type: 'image/png' })], value: '' },
+      } as unknown as Event;
+      const uploading = picker['upload'](event, pack.id);
+      await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
+      const reads = api.getPack.mock.calls.length;
+      if (closed) fixture.destroy();
+      upload.next(added);
+      await uploading;
+      expect(detail.componentInstance['pack']()?.stickers).toEqual([sticker, added]);
+      response.next(pack);
+      await pending;
+      expect(api.getPack).toHaveBeenCalledTimes(reads);
+      if (!closed) {
+        fixture.detectChanges();
+        expect(picker['groups']().find((group) => group.id === pack.id)?.content?.stickers).toEqual([sticker, added]);
+        expect(picker['packs']().find((item) => item.id === pack.id)?.stickerCount).toBe(2);
+        expect(fixture.nativeElement.contains(originalTile)).toBe(true);
+      }
+    },
+  );
+
+  it.each([
+    { grouped: false, leaveBeforeResponse: false },
+    { grouped: true, leaveBeforeResponse: false },
+    { grouped: false, leaveBeforeResponse: true },
+    { grouped: true, leaveBeforeResponse: true },
+  ])(
+    'syncs settings removal without replacing surviving tiles ($grouped, $leaveBeforeResponse)',
+    async ({ grouped, leaveBeforeResponse }) => {
+      const remaining = { ...sticker, id: encodeId('109') };
+      const originalPack = { ...pack, stickerCount: 2, stickers: [sticker, remaining], previewSticker: sticker };
+      api.getPack.mockReturnValue(of(originalPack));
+      const { fixture } = await render();
+      fixture.componentRef.setInput('grouped', grouped);
+      const picker = fixture.componentInstance;
+      await picker['selectPack'](pack.id);
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const grid = fixture.nativeElement.querySelectorAll('.sticker-grid')[grouped ? 1 : 0];
+      const survivingTile = grid.querySelectorAll('.sticker-item')[1];
+      const staleRead = new Subject<StickerPackDetailResponse>();
+      api.getPack.mockReturnValueOnce(staleRead);
+      const pending = picker['loadGroup'](pack.id, true);
+      const detail = TestBed.createComponent(StickerPackDetail);
+      detail.componentRef.setInput('packId', pack.id);
+      detail.detectChanges();
+      await detail.whenStable();
+      vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue({
+        present: async () => {},
+        onDidDismiss: async () => ({ role: 'destructive' }),
+      } as HTMLIonAlertElement);
+      const response = new Subject<undefined>();
+      api.deletePackSticker.mockReturnValueOnce(response);
+      const removal = detail.componentInstance['removeSticker'](sticker);
+      await vi.waitFor(() => expect(api.deletePackSticker).toHaveBeenCalledWith(pack.id, sticker.id));
+      if (leaveBeforeResponse) detail.destroy();
+      response.next(undefined);
+      await removal;
+      fixture.detectChanges();
+      expect(api.deletePackSticker).toHaveBeenCalledWith(pack.id, sticker.id);
+      expect(picker['stickers']()).toEqual([remaining]);
+      expect(picker['activeId']()).toBe(pack.id);
+      expect(grid.querySelector('.sticker-item')).toBe(survivingTile);
+      expect(picker['packs']()[0].previewSticker?.id).toBe(remaining.id);
+      staleRead.next(originalPack);
+      await pending;
+      fixture.detectChanges();
+      expect(picker['stickers']()).toEqual([remaining]);
+      expect(grid.querySelector('.sticker-item')).toBe(survivingTile);
+      expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    },
+  );
+
+  it.each([false, true])(
+    'preserves later additions and favorites after a delayed removal (grouped: %s)',
+    async (grouped) => {
+      const remaining = { ...sticker, id: encodeId('112') };
+      const originalPack = { ...pack, stickers: [sticker, remaining], stickerCount: 2, previewSticker: sticker };
+      api.getPack.mockReturnValue(of(originalPack));
+      const { fixture } = await render();
+      fixture.componentRef.setInput('grouped', grouped);
+      const picker = fixture.componentInstance;
+      await picker['selectPack'](pack.id);
+      await fixture.whenStable();
+      const detail = TestBed.createComponent(StickerPackDetail);
+      detail.componentRef.setInput('packId', pack.id);
+      detail.detectChanges();
+      await detail.whenStable();
+      vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue({
+        present: async () => {},
+        onDidDismiss: async () => ({ role: 'destructive' }),
+      } as HTMLIonAlertElement);
+      const response = new Subject<undefined>();
+      api.deletePackSticker.mockReturnValueOnce(response);
+      const removal = detail.componentInstance['removeSticker'](sticker);
+      await vi.waitFor(() => expect(api.deletePackSticker).toHaveBeenCalled());
+      detail.destroy();
+      const added = { ...sticker, id: encodeId('111') };
+      TestBed.inject(StickerUpdates).added.next({ pack: originalPack, sticker: added });
+      await picker['favorite'](remaining);
+      fixture.detectChanges();
+      const tiles = [...fixture.nativeElement.querySelectorAll('.sticker-group')]
+        .at(-1)
+        .querySelectorAll('.sticker-item');
+      response.next(undefined);
+      await removal;
+      fixture.detectChanges();
+      expect(picker['stickers']()).toEqual([{ ...remaining, isFavorited: true }, added]);
+      expect(picker['packs']()[0].stickerCount).toBe(2);
+      expect(picker['packs']()[0].previewSticker?.id).toBe(remaining.id);
+      const survivingTiles = [...fixture.nativeElement.querySelectorAll('.sticker-group')]
+        .at(-1)
+        .querySelectorAll('.sticker-item');
+      expect(survivingTiles[0]).toBe(tiles[1]);
+      expect(survivingTiles[1]).toBe(tiles[2]);
+      expect(detail.componentInstance['pack']()).toBe(originalPack);
+    },
+  );
+
+  it.each([false, true])('syncs a reopened detail before its next removal (read pending: %s)', async (readPending) => {
+    const remaining = { ...sticker, id: encodeId('112') };
+    const originalPack = { ...pack, stickers: [sticker, remaining], stickerCount: 2 };
+    api.getPack.mockReturnValue(of(originalPack));
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    const detail = TestBed.createComponent(StickerPackDetail);
+    detail.componentRef.setInput('packId', pack.id);
+    detail.detectChanges();
+    await detail.whenStable();
+    vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue({
+      present: async () => {},
+      onDidDismiss: async () => ({ role: 'destructive' }),
+    } as HTMLIonAlertElement);
+    const response = new Subject<undefined>();
+    api.deletePackSticker.mockReturnValueOnce(response);
+    const removal = detail.componentInstance['removeSticker'](sticker);
+    await vi.waitFor(() => expect(api.deletePackSticker).toHaveBeenCalled());
+    detail.destroy();
+    const read = new Subject<StickerPackDetailResponse>();
+    if (readPending) api.getPack.mockReturnValueOnce(read);
+    const reopened = TestBed.createComponent(StickerPackDetail);
+    reopened.componentRef.setInput('packId', pack.id);
+    reopened.detectChanges();
+    await reopened.whenStable();
+    response.next(undefined);
+    await removal;
+    if (readPending) read.next(originalPack);
+    await reopened.whenStable();
+    expect(reopened.componentInstance['pack']()?.stickers).toEqual([remaining]);
+    expect(picker['stickers']()).toEqual([remaining]);
+    await reopened.componentInstance['removeSticker'](remaining);
+    expect(picker['stickers']()).toEqual([]);
+    expect(picker['packs']()[0].stickerCount).toBe(0);
+  });
+
+  it('does not subtract a delayed removal from a library that already includes it', async () => {
+    const remaining = { ...sticker, id: encodeId('112') };
+    const originalPack = { ...pack, stickers: [sticker, remaining], stickerCount: 2, previewSticker: sticker };
+    api.getPack.mockReturnValue(of(originalPack));
+    const detail = TestBed.createComponent(StickerPackDetail);
+    detail.componentRef.setInput('packId', pack.id);
+    detail.detectChanges();
+    await detail.whenStable();
+    vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue({
+      present: async () => {},
+      onDidDismiss: async () => ({ role: 'destructive' }),
+    } as HTMLIonAlertElement);
+    const response = new Subject<undefined>();
+    api.deletePackSticker.mockReturnValueOnce(response);
+    const removal = detail.componentInstance['removeSticker'](sticker);
+    await vi.waitFor(() => expect(api.deletePackSticker).toHaveBeenCalled());
+    detail.destroy();
+    // The server has deleted the membership, but the DELETE response has not arrived.
+    const currentPack = { ...originalPack, stickers: [remaining], stickerCount: 1, previewSticker: remaining };
+    api.getMySubscribedPacks.mockReturnValue(of({ packs: [currentPack] }));
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    const read = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(read);
+    response.next(undefined);
+    await removal;
+    expect(picker['packs']()[0].stickerCount).toBe(1);
+    expect(picker['packs']()[0].previewSticker?.id).toBe(remaining.id);
+    read.next(currentPack);
+    await fixture.whenStable();
+    expect(picker['packs']()[0].stickerCount).toBe(1);
+    expect(picker['contents']().get(pack.id)?.stickers).toEqual([remaining]);
+  });
+
+  it('replaces a removed cover in an unloaded pack and keeps it after opening the pack', async () => {
+    const remaining = {
+      ...sticker,
+      id: encodeId('112'),
+      media: { ...sticker.media, url: 'https://example.test/remaining.png' },
+    };
+    const originalPack = { ...pack, stickers: [sticker, remaining], stickerCount: 2, previewSticker: sticker };
+    api.getPack.mockReturnValue(of(originalPack));
+    api.getMySubscribedPacks.mockReturnValue(of({ packs: [originalPack] }));
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    const detail = TestBed.createComponent(StickerPackDetail);
+    detail.componentRef.setInput('packId', pack.id);
+    detail.detectChanges();
+    await detail.whenStable();
+    vi.spyOn(TestBed.inject(AlertController), 'create').mockResolvedValue({
+      present: async () => {},
+      onDidDismiss: async () => ({ role: 'destructive' }),
+    } as HTMLIonAlertElement);
+    const currentPack = { ...originalPack, stickers: [remaining], stickerCount: 1, previewSticker: remaining };
+    api.getPack.mockReturnValue(of(currentPack));
+    const reads = api.getPack.mock.calls.length;
+    await detail.componentInstance['removeSticker'](sticker);
+    await fixture.whenStable();
+    expect(api.getPack).toHaveBeenCalledTimes(reads + 1);
+    expect(picker['packs']()[0].previewSticker?.id).toBe(remaining.id);
+    expect(fixture.nativeElement.querySelector('.pack-tab img')?.getAttribute('src')).toBe(remaining.media.url);
+    await picker['selectPack'](pack.id);
+    expect(picker['packs']()[0].previewSticker?.id).toBe(remaining.id);
+  });
+
+  it.each([false, true])('retains removal across an overlapping library read (initial: %s)', async (initial) => {
+    const response = new Subject<{ packs: StickerPackDetailResponse[] }>();
+    let picker: StickerPicker;
+    let pending: Promise<void> | undefined;
+    if (initial) {
+      api.getMyOwnedPacks.mockReturnValueOnce(response);
+      const fixture = TestBed.createComponent(StickerPicker);
+      fixture.componentRef.setInput('embedded', true);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      picker = fixture.componentInstance;
+    } else {
+      const { fixture } = await render();
+      picker = fixture.componentInstance;
+      api.getMyOwnedPacks.mockReturnValueOnce(response);
+      pending = picker['load']();
+    }
+    api.getPack.mockReturnValue(of({ ...pack, stickers: [], stickerCount: 0, previewSticker: undefined }));
+    TestBed.inject(StickerUpdates).stickerRemoved.next({ pack, stickerId: sticker.id });
+    response.next({ packs: [pack] });
+    if (pending) await pending;
+    await vi.waitFor(() => expect(picker['busy']()).toBe(false));
+    expect(picker['packs']()[0].stickerCount).toBe(0);
+    expect(picker['packs']()[0].previewSticker).toBeUndefined();
+  });
+
+  it.each([false, true])(
+    'keeps refreshed removal metadata across a stale library response (pack first: %s)',
+    async (packFirst) => {
+      const remaining = { ...sticker, id: encodeId('112') };
+      const added = { ...sticker, id: encodeId('113') };
+      const originalPack = { ...pack, stickers: [sticker, remaining], stickerCount: 2, previewSticker: sticker };
+      const otherPack = { ...originalPack, id: encodeId('114') };
+      api.getMySubscribedPacks.mockReturnValue(of({ packs: [originalPack, otherPack] }));
+      const { fixture } = await render();
+      const picker = fixture.componentInstance;
+      const libraryRead = new Subject<{ packs: StickerPackDetailResponse[] }>();
+      api.getMySubscribedPacks.mockReturnValueOnce(libraryRead);
+      const libraryPending = picker['load']();
+      const packRead = new Subject<StickerPackDetailResponse>();
+      api.getPack.mockReturnValueOnce(packRead);
+      const updates = TestBed.inject(StickerUpdates);
+      const reads = api.getPack.mock.calls.length;
+      updates.stickerRemoved.next({ pack: originalPack, stickerId: sticker.id });
+      const packPending = picker['loadGroup'](pack.id);
+      updates.added.next({ pack: originalPack, sticker: added });
+      expect(api.getPack).toHaveBeenCalledTimes(reads + 1);
+      const completePack = async () => {
+        packRead.next({ ...originalPack, stickers: [remaining], stickerCount: 1, previewSticker: remaining });
+        await packPending;
+      };
+      if (packFirst) await completePack();
+      libraryRead.next({ packs: [originalPack, otherPack] });
+      await libraryPending;
+      if (!packFirst) {
+        expect(picker['packs']()[0].previewSticker?.id).not.toBe(sticker.id);
+        await completePack();
+      }
+      expect(picker['packs']()[0].stickerCount).toBe(2);
+      expect(picker['packs']()[0].previewSticker?.id).toBe(remaining.id);
+      expect(picker['contents']().get(pack.id)?.stickers).toEqual([remaining, added]);
+      expect(picker['packs']()[1].previewSticker?.id).toBe(sticker.id);
+    },
+  );
+
+  it('retains confirmed edits and empty creations across a delayed library response', async () => {
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    fixture.componentRef.setInput('grouped', true);
+    const response = new Subject<{ packs: StickerPackDetailResponse[] }>();
+    api.getMyOwnedPacks.mockReturnValueOnce(response);
+    const pending = picker['load']();
+    const updated = { ...pack, name: 'New name', stickerCount: 0, stickers: [], previewSticker: undefined };
+    const created = { ...updated, id: encodeId('120') };
+    const updates = TestBed.inject(StickerUpdates);
+    updates.changed.next(updated);
+    updates.changed.next(created);
+    const added = { ...sticker, id: encodeId('121') };
+    updates.added.next({ pack: updated, sticker: added });
+    response.next({ packs: [pack] });
+    await pending;
+    expect(picker['packs']().map(({ id, name, stickerCount }) => ({ id, name, stickerCount }))).toEqual([
+      { id: pack.id, name: 'New name', stickerCount: 1 },
+      { id: created.id, name: 'New name', stickerCount: 0 },
+    ]);
+    expect(picker['contents']().get(pack.id)?.stickers).toEqual([added]);
+    expect(picker['contents']().get(created.id)?.stickers).toEqual([]);
+  });
+
+  it('reacts to pack order changes and rollback while retaining the active group and scroll anchor', async () => {
+    const order = signal([
+      { stickerPackId: pack.id, lastUsedOn: 2 },
+      { stickerPackId: secondPack.id, lastUsedOn: 1 },
+    ]);
+    preferences.packOrder.mockImplementation(order);
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    const group = sections[1];
+    const tile = group.querySelector('.sticker-item');
+    const viewport: HTMLElement = fixture.nativeElement.querySelector('.sticker-library');
+    Object.defineProperty(group, 'offsetTop', { get: () => (picker['packs']()[0].id === pack.id ? 100 : 400) });
+    picker['scroll'].jump(pack.id);
+    fixture.detectChanges();
+    expect(viewport.scrollTop).toBe(100);
+    const reads = api.getPack.mock.calls.length;
+    order.set([
+      { stickerPackId: pack.id, lastUsedOn: 2 },
+      { stickerPackId: secondPack.id, lastUsedOn: 3 },
+    ]);
+    fixture.detectChanges();
+    expect(picker['packs']().map((item) => item.id)).toEqual([secondPack.id, pack.id]);
+    expect(fixture.nativeElement.querySelectorAll('.sticker-group')[2]).toBe(group);
+    expect(group.querySelector('.sticker-item')).toBe(tile);
+    expect(picker['activeId']()).toBe(pack.id);
+    expect(viewport.scrollTop).toBe(400);
+    order.set([
+      { stickerPackId: pack.id, lastUsedOn: 2 },
+      { stickerPackId: secondPack.id, lastUsedOn: 1 },
+    ]);
+    fixture.detectChanges();
+    expect(picker['packs']().map((item) => item.id)).toEqual([pack.id, secondPack.id]);
+    expect(viewport.scrollTop).toBe(100);
+    expect(api.getPack).toHaveBeenCalledTimes(reads);
   });
 
   it('adds a created sticker to an open pack and preserves it across a delayed pack read', async () => {
@@ -673,7 +1137,7 @@ describe('StickerPicker selection during requests', () => {
     expect(sections[2].querySelector('.upload-error')).toBeNull();
     expect(picker['error']()).toBe(false);
     expect(picker['activeId']()).toBe(secondPack.id);
-    post.mockReturnValueOnce(of(undefined));
+    post.mockReturnValueOnce(of({ ...sticker, id: encodeId('999') }));
     await picker['upload'](event, pack.id);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('.upload-error')).toBeNull();
@@ -982,7 +1446,7 @@ describe('StickerPicker selection during requests', () => {
         lastUsedOn: 1000 - index,
       })),
     );
-    fixture.componentInstance['packs'].update((packs) => [
+    fixture.componentInstance['libraryPacks'].update((packs) => [
       ...Array.from({ length: 20 }, (_, index) => ({ ...pack, id: encodeId(String(900 + index)) })),
       pack,
     ]);

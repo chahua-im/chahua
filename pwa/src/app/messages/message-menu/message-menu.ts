@@ -686,7 +686,7 @@ export class MessageMenu {
         const sticker = message.sticker;
         if (sticker)
           await this.perform(
-            () => this.favoriteStickers.set(sticker.id, !favorited),
+            () => this.favoriteStickers.set(sticker, !favorited),
             favorited ? MessageNotice.Unsaved : MessageNotice.Saved,
           );
         break;

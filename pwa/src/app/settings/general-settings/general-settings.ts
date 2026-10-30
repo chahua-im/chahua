@@ -1,4 +1,5 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import {
   IonButton,
   IonButtons,
@@ -24,6 +25,7 @@ import {
   chatbubblesOutline,
   chevronBackOutline,
   contrastOutline,
+  happyOutline,
   moonOutline,
   peopleOutline,
   personCircleOutline,
@@ -42,6 +44,7 @@ import { Preferences } from '../preferences';
   templateUrl: './general-settings.html',
   styleUrl: './general-settings.scss',
   imports: [
+    RouterLink,
     ContentScrollbars,
     TranslocoPipe,
     IonButton,
@@ -82,6 +85,7 @@ export class GeneralSettings {
   protected readonly lightIcon = sunnyOutline;
   protected readonly darkIcon = moonOutline;
   protected readonly backIcon = chevronBackOutline;
+  protected readonly stickerIcon = happyOutline;
 
   protected setFontSize(value: number | { lower: number; upper: number }) {
     if (typeof value === 'number') this.preferences.setChatFontSize(value);

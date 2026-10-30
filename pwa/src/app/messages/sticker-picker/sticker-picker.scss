@@ -32,9 +32,17 @@
   touch-action: pan-y;
   -webkit-touch-callout: none;
 }
-.sticker-item:active {
+.sticker-item:active:not(:disabled) {
   background: var(--ion-background-color-step-100, var(--ion-color-light));
   transform: scale(0.88);
+}
+.sticker-add {
+  border: 1px dashed var(--ion-color-medium);
+  color: var(--ion-color-primary);
+  font-size: 32px;
+}
+.sticker-add:disabled {
+  opacity: 0.5;
 }
 .sticker-item img,
 .sticker-item video {
