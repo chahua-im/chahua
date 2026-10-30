@@ -1,37 +1,58 @@
-import { afterNextRender, DestroyRef, Directive, ElementRef, inject } from '@angular/core';
-import { IonContent } from '@ionic/angular';
+import { afterRenderEffect, booleanAttribute, Directive, ElementRef, inject, input } from '@angular/core';
+import { IonContent, IonTextarea } from '@ionic/angular';
 import { OverlayScrollbars } from 'overlayscrollbars';
+import { attachScrollbars } from './overlay-scrollbars';
 
-@Directive({ selector: 'ion-content[appScrollbars]' })
+@Directive({ selector: '[appScrollbars]' })
 export class ContentScrollbars {
-  private readonly content = inject(IonContent);
-  private readonly host = inject<ElementRef<HTMLIonContentElement>>(ElementRef).nativeElement;
-  private readonly destroyRef = inject(DestroyRef);
+  readonly enabled = input(true, { alias: 'appScrollbars', transform: booleanAttribute });
+  private readonly content = inject(IonContent, { optional: true, self: true });
+  private readonly textarea = inject(IonTextarea, { optional: true, self: true });
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
 
   constructor() {
-    afterNextRender(() => void this.initialize());
+    afterRenderEffect((onCleanup) => {
+      if (!this.enabled()) return;
+      let disposed = false;
+      let cleanup: (() => void) | undefined;
+      onCleanup(() => {
+        disposed = true;
+        cleanup?.();
+      });
+      void (async () => {
+        const viewport = this.content
+          ? await this.content.getScrollElement()
+          : this.textarea
+            ? await this.textarea.getInputElement()
+            : this.host;
+        if (!disposed) cleanup = this.initialize(viewport);
+      })();
+    });
   }
 
-  private async initialize() {
-    const viewport = await this.content.getScrollElement();
-    if (this.destroyRef.destroyed) return;
-
-    // Keep Ionic's scroll element in its shadow root; only the bars use the fixed slot.
-    const instance = OverlayScrollbars(
-      {
-        target: viewport,
-        elements: { viewport },
-        scrollbars: { slot: this.host },
-        cancel: { nativeScrollbarsOverlaid: true },
-      },
-      { scrollbars: { autoHide: 'leave' } },
-    );
+  private initialize(viewport: HTMLElement) {
+    // Ionic hides unslotted children of ion-textarea on render. Its positioned input wrapper
+    // keeps the bars beside the native textarea and aligned with the editable area.
+    const slot = this.textarea ? viewport.parentElement! : this.host;
+    const instance = attachScrollbars(viewport, slot);
     if (!OverlayScrollbars.valid(instance)) return;
 
     this.host.classList.add('custom-scrollbars');
     const { scrollbarHorizontal, scrollbarVertical } = instance.elements();
-    scrollbarHorizontal.scrollbar.slot = 'fixed';
-    scrollbarVertical.scrollbar.slot = 'fixed';
+    if (this.content) {
+      // Keep Ionic's scroll element in its shadow root; only the bars use the fixed slot.
+      scrollbarHorizontal.scrollbar.slot = 'fixed';
+      scrollbarVertical.scrollbar.slot = 'fixed';
+    }
+    if (!this.content) {
+      const update = () => instance.update(true);
+      viewport.addEventListener('input', update);
+      return () => {
+        viewport.removeEventListener('input', update);
+        instance.destroy();
+        this.host.classList.remove('custom-scrollbars');
+      };
+    }
 
     let frame = 0;
     const update = () => {
@@ -55,12 +76,12 @@ export class ContentScrollbars {
     children.observe(this.host, { childList: true });
     observeContent();
 
-    this.destroyRef.onDestroy(() => {
+    return () => {
       children.disconnect();
       sizes.disconnect();
       cancelAnimationFrame(frame);
       instance.destroy();
       this.host.classList.remove('custom-scrollbars');
-    });
+    };
   }
 }

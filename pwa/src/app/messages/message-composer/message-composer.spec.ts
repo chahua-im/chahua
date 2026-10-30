@@ -425,7 +425,9 @@ describe('Message composer upload ownership', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
   });
 
-  it('sends stickers independently while preserving selected attachments and draft text', () => {
+  it.each([false, true])('sends stickers independently and preserves the draft (docked: %s)', (docked) => {
+    fixture.componentRef.setInput('dockStickers', docked);
+    composer['panel'].set(composer['Panel'].Stickers);
     const upload = add();
     composer.text.set('保留草稿');
     const sticker: StickerSummary = {
@@ -439,8 +441,25 @@ describe('Message composer upload ownership', () => {
     expect(submitted).toHaveBeenCalledExactlyOnceWith({ messageType: MessageType.sticker, attachmentIds: [], sticker });
     expect(composer['uploads']()).toEqual([upload]);
     expect(composer.text()).toBe('保留草稿');
+    expect(composer.stickersVisible()).toBe(docked);
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(upload.url);
   });
+
+  it.each([false, true])(
+    'only dismisses the inline picker on outside clicks and input focus (docked: %s)',
+    (docked) => {
+      fixture.componentRef.setInput('dockStickers', docked);
+      fixture.detectChanges();
+      composer['panel'].set(composer['Panel'].Stickers);
+      composer['outside']({ target: document.body } as unknown as Event);
+      expect(composer.stickersVisible()).toBe(docked);
+      composer['panel'].set(composer['Panel'].Stickers);
+      fixture.debugElement.query(By.css('ion-textarea')).triggerEventHandler('ionFocus');
+      expect(composer.stickersVisible()).toBe(docked);
+      composer.closeStickers();
+      expect(composer.stickersVisible()).toBe(false);
+    },
+  );
 
   it('hands off voice immediately and resets the recorder UI without disposing its upload', () => {
     const recorder = fixture.debugElement.query(By.directive(VoiceRecorder)).componentInstance as VoiceRecorder;

@@ -1,27 +1,27 @@
-import { provideHttpClient } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
+import { SessionStore } from '../../session/session-store';
 import { TestBed } from '@angular/core/testing';
 import { AlertController, ModalController } from '@ionic/angular';
+import { of, Subject, throwError } from 'rxjs';
 import { vi } from 'vitest';
-import { provideChahuaBaseUrl } from '../../../generated/endpoints/chahua.base-url';
-import {
-  StickerPackVisibility,
-  type StickerPackDetailResponse,
-  type StickerPackSummary,
-  type StickerSummary,
-} from '../../../generated/models';
-import { provideRpcTesting, RpcTestPeer } from '../../api/rpc-testing';
-import { decodeId, encodeId, type SnowflakeID } from '../../api/snowflake-id';
-import { ContentScrollbars } from '../../scrolling/content-scrollbars';
+import { RpcApi } from '../../../generated/rpc-api';
+import { StickerPackVisibility, type StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
+import { encodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { StickerPreferences } from '../../settings/sticker-preferences';
-import { StickerUpdates } from '../sticker-updates';
 import { StickerPicker } from './sticker-picker';
+import { StickerUpdates } from '../sticker-updates';
 
 const sticker: StickerSummary = {
   id: encodeId('101'),
   createdAt: '2026-09-08T00:00:00Z',
   emoji: '🍵',
   isFavorited: false,
-  media: { id: encodeId('102'), contentType: 'image/png', size: 12, url: 'https://example.test/sticker.png' },
+  media: {
+    id: encodeId('102'),
+    contentType: 'image/png',
+    size: 12,
+    url: 'https://example.test/sticker.png',
+  },
 };
 const pack: StickerPackDetailResponse = {
   id: encodeId('103'),
@@ -29,24 +29,26 @@ const pack: StickerPackDetailResponse = {
   createdAt: sticker.createdAt,
   updatedAt: sticker.createdAt,
   ownerUid: 1,
-  isSubscribed: false,
   visibility: StickerPackVisibility.public,
+  isSubscribed: false,
   stickerCount: 1,
   stickers: [sticker],
 };
-const wireSticker = { ...sticker, id: '101', media: { ...sticker.media, id: '102' } };
-const wirePack = { ...pack, id: '103', stickers: [wireSticker] };
-const wireSummary = (value: StickerPackSummary) => ({
-  ...value,
-  id: decodeId(value.id),
-  previewSticker: value.previewSticker && {
-    ...value.previewSticker,
-    id: decodeId(value.previewSticker.id),
-    media: { ...value.previewSticker.media, id: decodeId(value.previewSticker.media.id) },
-  },
-});
 
-describe('StickerPicker selection during RPC requests', () => {
+describe('StickerPicker selection during requests', () => {
+  const intersections = new Map<Element, (visible?: boolean) => void>();
+  const api = {
+    postPack: vi.fn(() => of({ ...pack, stickers: [] })),
+    getMyFavorites: vi.fn(() => of({ stickers: [sticker] })),
+    getMySubscribedPacks: vi.fn(() => of({ packs: [pack] })),
+    getMyOwnedPacks: vi.fn(() => of({ packs: [] })),
+    getPack: vi.fn((_id: SnowflakeID) => of(pack)),
+    getSticker: vi.fn((_id: SnowflakeID) => of({ ...sticker, packs: [pack] })),
+    deleteSubscription: vi.fn((_id: SnowflakeID) => of(undefined)),
+    putFavorite: vi.fn((_id: SnowflakeID) => of(undefined)),
+    deleteFavorite: vi.fn((_id: SnowflakeID) => of(undefined)),
+    putSubscription: vi.fn((_id: SnowflakeID) => of(undefined)),
+  };
   const modals = { dismiss: vi.fn().mockResolvedValue(true) };
   const preferences = {
     autoSortPacksEnabled: vi.fn(() => false),
@@ -59,12 +61,58 @@ describe('StickerPicker selection during RPC requests', () => {
   };
 
   beforeEach(() => {
+    intersections.clear();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        private targets = new Set<Element>();
+        constructor(private callback: (entries: { target: Element; isIntersecting: boolean }[]) => void) {}
+        observe(target: Element) {
+          this.targets.add(target);
+          intersections.set(target, (visible = true) => this.callback([{ target, isIntersecting: visible }]));
+        }
+        disconnect() {
+          for (const target of this.targets) intersections.delete(target);
+        }
+      },
+    );
     vi.clearAllMocks();
+    api.getMyFavorites.mockReset().mockReturnValue(of({ stickers: [sticker] }));
+    api.getMySubscribedPacks.mockReset().mockReturnValue(of({ packs: [pack] }));
+    api.getMyOwnedPacks.mockReset().mockReturnValue(of({ packs: [] }));
+    api.getPack.mockReset().mockReturnValue(of(pack));
+    api.getSticker.mockReset().mockReturnValue(of({ ...sticker, packs: [pack] }));
+    api.deleteSubscription.mockReset().mockReturnValue(of(undefined));
+    api.putFavorite.mockReset().mockReturnValue(of(undefined));
+    api.deleteFavorite.mockReset().mockReturnValue(of(undefined));
+    api.putSubscription.mockReset().mockReturnValue(of(undefined));
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(),
-        provideChahuaBaseUrl('/_api'),
-        provideRpcTesting(),
+        { provide: SessionStore, useValue: { user: () => undefined } },
+        {
+          provide: RpcApi,
+          useValue: {
+            stickers: {
+              createPack: api.postPack,
+              listFavorites: api.getMyFavorites,
+              listSubscribedPacks: api.getMySubscribedPacks,
+              listOwnedPacks: api.getMyOwnedPacks,
+              getPack: ({ packId }: { packId: SnowflakeID }) => api.getPack(packId),
+              get: ({ stickerId }: { stickerId: SnowflakeID }) => api.getSticker(stickerId),
+              unsubscribeFromPack: ({ packId }: { packId: SnowflakeID }) => api.deleteSubscription(packId),
+              subscribeToPack: ({ packId }: { packId: SnowflakeID }) => api.putSubscription(packId),
+              favorite: ({ stickerId }: { stickerId: SnowflakeID }) => api.putFavorite(stickerId),
+              unfavorite: ({ stickerId }: { stickerId: SnowflakeID }) => api.deleteFavorite(stickerId),
+            },
+          },
+        },
         { provide: ModalController, useValue: modals },
         { provide: StickerPreferences, useValue: preferences },
         {
@@ -72,56 +120,65 @@ describe('StickerPicker selection during RPC requests', () => {
           useValue: {
             create: async () => ({
               present: async () => {},
-              onDidDismiss: async () => ({ role: 'confirm', data: { values: { name: 'Tea' } } }),
+              onDidDismiss: async () => ({ role: 'confirm', data: { values: { name: 'Tea', emoji: '🍵' } } }),
             }),
           },
         },
       ],
-    }).overrideComponent(StickerPicker, { remove: { imports: [ContentScrollbars] } });
-  });
-
-  afterEach(() => {
-    try {
-      TestBed.inject(RpcTestPeer).verify();
-    } finally {
-      try {
-        TestBed.resetTestingModule();
-      } finally {
-        vi.useRealTimers();
-      }
-    }
-  });
-
-  function peer() {
-    const rpc = TestBed.inject(RpcTestPeer);
-    rpc.authenticate();
-    return rpc;
-  }
-
-  function replyLibrary(rpc: RpcTestPeer, favorites: StickerSummary[] = [sticker]) {
-    rpc.expect('stickers.listFavorites').flush({
-      stickers: favorites.map((item) => ({
-        ...item,
-        id: decodeId(item.id),
-        media: { ...item.media, id: decodeId(item.media.id) },
-      })),
     });
-    rpc.expect('stickers.listSubscribedPacks').flush({ packs: [wireSummary(pack)] });
-    rpc.expect('stickers.listOwnedPacks').flush({ packs: [] });
-  }
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
-  async function render(embedded = true, selectable = true, favorites: StickerSummary[] = [sticker]) {
-    const rpc = peer();
+  it('adds a created sticker to an open pack and preserves it across a delayed pack read', async () => {
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    await picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    const original = fixture.nativeElement.querySelector('.sticker-item');
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const pending = picker['selectPack'](pack.id);
+    const added = { ...sticker, id: encodeId('109') };
+    TestBed.inject(StickerUpdates).added.next({ pack, sticker: added });
+    fixture.detectChanges();
+    expect(picker['stickers']()).toEqual([sticker, added]);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(original);
+    response.next(pack);
+    await pending;
+    expect(picker['stickers']()).toEqual([sticker, added]);
+    expect(picker['pack']()?.stickerCount).toBe(2);
+    expect(api.getPack).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a newly created pack when an older library response arrives', async () => {
+    const { fixture } = await render();
+    const response = new Subject<{ packs: never[] }>();
+    api.getMyOwnedPacks.mockReturnValueOnce(response);
+    const pending = fixture.componentInstance['load']();
+    const newPack = { ...pack, id: encodeId('120'), stickerCount: 0 };
+    TestBed.inject(StickerUpdates).added.next({ pack: newPack, sticker });
+    response.next({ packs: [] });
+    await pending;
+    expect(fixture.componentInstance['packs']().find((item) => item.id === newPack.id)?.stickerCount).toBe(1);
+  });
+
+  async function render(embedded = true, selectable = true) {
     const fixture = TestBed.createComponent(StickerPicker);
     fixture.componentRef.setInput('embedded', embedded);
     fixture.componentRef.setInput('selectable', selectable);
     const selected = vi.fn();
     fixture.componentInstance.selected.subscribe(selected);
     fixture.detectChanges();
-    replyLibrary(rpc, favorites);
     await fixture.whenStable();
     fixture.detectChanges();
-    await vi.waitFor(() => expect(fixture.nativeElement.querySelector('.sticker-item')).not.toBeNull());
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.sticker-item')).not.toBeNull();
+    });
     const button = fixture.nativeElement.querySelector('.sticker-item') as HTMLButtonElement;
     const pointer = (type: string) =>
       button.dispatchEvent(
@@ -134,56 +191,517 @@ describe('StickerPicker selection during RPC requests', () => {
           clientY: 100,
         }),
       );
-    return { fixture, rpc, button, pointer, selected };
+    return { fixture, button, pointer, selected };
   }
 
-  async function renderDetails(rpc = peer()) {
+  const secondPack = { ...pack, id: encodeId('110'), name: 'Coffee', ownerUid: 2 };
+  async function renderGroups() {
+    api.getMySubscribedPacks.mockReturnValueOnce(of({ packs: [pack, secondPack] }));
+    api.getPack.mockImplementation((id?: SnowflakeID) => of(id === secondPack.id ? secondPack : pack));
+    const result = await render();
+    result.fixture.componentRef.setInput('grouped', true);
+    result.fixture.detectChanges();
+    await result.fixture.whenStable();
+    intersections.get(result.fixture.nativeElement.querySelector('.sticker-group'))!();
+    result.fixture.detectChanges();
+    return result;
+  }
+
+  it('loads only approaching groups and sends using the clicked group instead of the highlighted group', async () => {
+    preferences.autoSortPacksEnabled.mockReturnValue(true);
+    const { fixture, selected } = await renderGroups();
+    const picker = fixture.componentInstance;
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    expect(
+      [...fixture.nativeElement.querySelectorAll('.group-title')].map((el) => (el as HTMLElement).textContent?.trim()),
+    ).toEqual(['收藏', 'Tea', 'Coffee']);
+    expect(api.getPack).not.toHaveBeenCalled();
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    intersections.get(sections[1])!();
+    intersections.get(sections[1])!();
+    expect(api.getPack).toHaveBeenCalledTimes(1);
+    picker['selectPack'](secondPack.id);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    response.next(pack);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(picker['activeId']()).toBe(secondPack.id);
+    sections[1].querySelector('.sticker-item').click();
+    expect(selected).toHaveBeenCalledWith(sticker);
+    expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith({
+      stickerPackId: pack.id,
+      lastUsedOn: expect.any(Number),
+    });
+    preferences.upsertPackOrderItem.mockClear();
+    sections[0].querySelector('.sticker-item').click();
+    expect(preferences.upsertPackOrderItem).not.toHaveBeenCalled();
+  });
+
+  it('jumps to a group, tracks scrolling, and retains the current grid and data across layouts', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    const scroll = fixture.nativeElement.querySelector('.sticker-library');
+    [0, 200, 500].forEach((offset, index) =>
+      Object.defineProperty(sections[index], 'offsetTop', { configurable: true, value: offset }),
+    );
+    picker['selectPack'](secondPack.id);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(scroll.scrollTop).toBe(500);
+    scroll.scrollTop = 250;
+    scroll.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+    expect(picker['activeId']()).toBe(pack.id);
+    expect(fixture.nativeElement.querySelectorAll('.pack-tab')[1].classList.contains('selected')).toBe(true);
+    intersections.get(sections[1])!();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const grid = sections[1].querySelector('.sticker-grid');
+    const tile = grid.querySelector('.sticker-item');
+    fixture.componentRef.setInput('grouped', false);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.sticker-grid')).toHaveLength(1);
+    expect(fixture.nativeElement.querySelector('.sticker-grid')).toBe(grid);
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+    fixture.componentRef.setInput('grouped', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.sticker-grid')[1]).toBe(grid);
+    expect(api.getPack).toHaveBeenCalledTimes(2);
+  });
+
+  it('anchors the same tile through row reflow and ignores resize-generated scroll events', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    await picker['loadGroup'](pack.id);
+    fixture.detectChanges();
+    const scroll: HTMLElement = fixture.nativeElement.querySelector('.sticker-library');
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    let width = 360;
+    Object.defineProperty(scroll, 'clientWidth', { get: () => width });
+    picker['scroll']['scrollWidth'] = width;
+    intersections.get(sections[1])!();
+    fixture.detectChanges();
+    Object.defineProperty(sections[1], 'offsetTop', { get: () => (picker.grouped() ? 200 : 0) });
+    Object.defineProperty(sections[2], 'offsetTop', { get: () => 3000 });
+    const tile: HTMLElement = sections[1].querySelector('.sticker-item');
+    vi.spyOn(tile, 'getBoundingClientRect').mockImplementation(() => {
+      const top = (picker.grouped() ? 1200 : 400) - scroll.scrollTop;
+      return { top, bottom: top + 80 } as DOMRect;
+    });
+    scroll.scrollTop = 1210;
+    scroll.dispatchEvent(new Event('scroll'));
+    expect(picker['activeId']()).toBe(pack.id);
+    width = 800;
+    scroll.scrollTop = 700; // The browser clamps the old pixel position as the grid gets shorter.
+    scroll.dispatchEvent(new Event('scroll'));
+    fixture.componentRef.setInput('grouped', false);
+    fixture.detectChanges();
+    expect(scroll.scrollTop).toBe(410);
+    scroll.dispatchEvent(new Event('scroll'));
+    width = 360;
+    fixture.componentRef.setInput('grouped', true);
+    fixture.detectChanges();
+    expect(scroll.scrollTop).toBe(1210);
+    expect(fixture.nativeElement.querySelectorAll('.sticker-grid')[1].querySelector('.sticker-item')).toBe(tile);
+  });
+
+  it('keeps the pack heading anchored when favorites above it grow', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    const viewport: HTMLElement = fixture.nativeElement.querySelector('.sticker-library');
+    let favoritesHeight = 100;
+    Object.defineProperty(sections[1], 'offsetTop', { get: () => favoritesHeight });
+    picker['selectPack'](pack.id);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(viewport.scrollTop).toBe(100);
+    viewport.dispatchEvent(new Event('scroll'));
+    await picker['favorite']({ ...sticker, id: encodeId('199') });
+    favoritesHeight = 188;
+    fixture.detectChanges();
+    expect(viewport.scrollTop).toBe(188);
+    expect(picker['activeId']()).toBe(pack.id);
+  });
+
+  it('releases distant group media while keeping its data and the active grid across layouts', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    intersections.get(sections[1])!();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(sections[1].querySelector('.sticker-item')).not.toBeNull();
+    picker['selectPack'](secondPack.id);
+    intersections.get(sections[1])!(false);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(sections[1].querySelector('.sticker-item')).toBeNull();
+    expect(sections[1].querySelector('.group-placeholder').style.getPropertyValue('--placeholder-rows')).toBe('1');
+    const tile = sections[2].querySelector('.sticker-item');
+    fixture.componentRef.setInput('grouped', false);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBe(tile);
+    fixture.componentRef.setInput('grouped', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.sticker-group')[2].querySelector('.sticker-item')).toBe(tile);
+    picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.nativeElement.querySelectorAll('.sticker-group')[1].querySelector('.sticker-item')).not.toBeNull();
+    expect(api.getPack).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    'removes cached packs and rejects overlapping reads (response already arrived: %s)',
+    async (resolved) => {
+      const { fixture } = await renderGroups();
+      const picker = fixture.componentInstance;
+      picker['selectPack'](pack.id);
+      await fixture.whenStable();
+      const response = new Subject<StickerPackDetailResponse>();
+      api.getPack.mockReturnValueOnce(response);
+      const pendingPack = picker['loadGroup'](pack.id, true);
+      const library = new Subject<{ packs: StickerPackDetailResponse[] }>();
+      api.getMySubscribedPacks.mockReturnValueOnce(library);
+      const pendingLibrary = picker['load']();
+      if (resolved) response.next(pack);
+      TestBed.inject(StickerUpdates).removed.next({ id: pack.id, deleted: true });
+      expect(response.observed).toBe(false);
+      expect(picker['contents']().has(pack.id)).toBe(false);
+      library.next({ packs: [pack, secondPack] });
+      await Promise.all([pendingPack, pendingLibrary]);
+      fixture.detectChanges();
+      expect(picker['packs']().map((item) => item.id)).toEqual([secondPack.id]);
+      expect(picker['contents']().has(pack.id)).toBe(false);
+      expect(picker['activeId']()).toBe(secondPack.id);
+      expect(picker['groupErrors']().has(pack.id)).toBe(false);
+      expect(fixture.nativeElement.querySelector('.pack-tab[title="Tea"]')).toBeNull();
+      // A subsequent library read may reflect a new subscription from another client.
+      await picker['load']();
+      expect(picker['packs']().map((item) => item.id)).toContain(pack.id);
+    },
+  );
+
+  it('does not select a deleted pack between caching its response and completing the selection', async () => {
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const selecting = picker['selectPack'](pack.id);
+    response.next(pack);
+    await Promise.resolve();
+    expect(picker['contents']().has(pack.id)).toBe(true);
+    TestBed.inject(StickerUpdates).removed.next({ id: pack.id, deleted: true });
+    await selecting;
+    expect(picker['activeId']()).toBeUndefined();
+    expect(picker['contents']().has(pack.id)).toBe(false);
+    expect(picker['busy']()).toBe(false);
+  });
+
+  it('removes a confirmed unsubscribe from the library while keeping the explicit detail open', async () => {
+    const foreign = { ...pack, ownerUid: 2, isSubscribed: true };
+    api.getMySubscribedPacks.mockReturnValueOnce(of({ packs: [foreign] }));
+    api.getPack.mockReturnValue(of(foreign));
+    const { fixture } = await render();
+    fixture.componentRef.setInput('grouped', true);
+    fixture.detectChanges();
+    const details = await renderDetails();
+    await details.componentInstance['subscribe']();
+    fixture.detectChanges();
+    expect(api.deleteSubscription).toHaveBeenCalledWith(pack.id);
+    expect(fixture.componentInstance['packs']()).toEqual([]);
+    expect(details.componentInstance['pack']()?.id).toBe(pack.id);
+    expect(details.componentInstance['pack']()?.isSubscribed).toBe(false);
+    expect(details.componentInstance['chosen']()?.id).toBe(sticker.id);
+  });
+
+  it('shows favorite failure feedback outside the scroll groups and rolls back membership', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    picker['selectPack'](secondPack.id);
+    await fixture.whenStable();
+    api.putFavorite.mockReturnValueOnce(throwError(() => new Error('offline')));
+    const previous = picker['contents']().get(undefined);
+    await picker['favorite']({ ...sticker, id: encodeId('199') });
+    fixture.detectChanges();
+    const toast = fixture.nativeElement.querySelector('ion-toast');
+    expect(toast.isOpen).toBe(true);
+    expect(toast.message).toContain('收藏状态更新失败');
+    expect(picker['groups']().every((group) => !group.error)).toBe(true);
+    expect(picker['contents']().get(undefined)).toBe(previous);
+    expect(picker['activeId']()).toBe(secondPack.id);
+    await picker['favorite']({ ...sticker, id: encodeId('199') });
+    fixture.detectChanges();
+    expect(toast.isOpen).toBe(false);
+    expect(picker['contents']().get(undefined)?.stickers[0].id).toBe(encodeId('199'));
+  });
+
+  it('retries a failed group in place without reloading or replacing known favorites', async () => {
+    const { fixture } = await renderGroups();
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    const favorite = sections[0].querySelector('.sticker-item');
+    api.getPack.mockReturnValueOnce(throwError(() => new Error('offline')));
+    intersections.get(sections[1])!();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(sections[1].textContent).toContain('加载失败');
+    expect(sections[1].querySelector('.sticker-grid').classList.contains('failed')).toBe(true);
+    expect(sections[1].querySelectorAll('.sticker-skeleton')).toHaveLength(0);
+    expect(sections[1].querySelector('.group-placeholder')).not.toBeNull();
+    expect(sections[0].querySelector('.sticker-item')).toBe(favorite);
+    sections[1].querySelector('.empty ion-button').click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(sections[1].querySelector('.sticker-item')).not.toBeNull();
+    expect(api.getPack).toHaveBeenCalledTimes(2);
+    expect(api.getMyFavorites).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps favorite changes consistent across groups and a delayed pack response', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    await picker['loadGroup'](pack.id);
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const pending = picker['loadGroup'](secondPack.id);
+    await picker['favorite'](sticker);
+    response.next(secondPack);
+    await pending;
+    expect(picker['groups']().every((group) => group.content?.stickers[0].isFavorited)).toBe(true);
+    const failure = new Subject<undefined>();
+    api.deleteFavorite.mockReturnValueOnce(failure);
+    const removal = picker['favorite']({ ...sticker, isFavorited: true });
+    failure.error(new Error('offline'));
+    await removal;
+    expect(picker['groups']().every((group) => group.content?.stickers[0].isFavorited)).toBe(true);
+  });
+
+  it('retries favorites independently while a pack is highlighted', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    picker['selectPack'](pack.id);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    api.getMyFavorites.mockReturnValueOnce(throwError(() => new Error('offline')));
+    await picker['load']();
+    expect(picker['activeId']()).toBe(pack.id);
+    const reads = api.getPack.mock.calls.length;
+    await picker['retryGroup'](picker['groups']()[0]);
+    expect(api.getMyFavorites).toHaveBeenCalledTimes(3);
+    expect(api.getPack).toHaveBeenCalledTimes(reads);
+    expect(picker['activeId']()).toBe(pack.id);
+  });
+
+  it('cancels an unfinished group read when the picker closes', async () => {
+    const { fixture } = await renderGroups();
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const pending = fixture.componentInstance['loadGroup'](pack.id);
+    expect(response.observed).toBe(true);
+    fixture.destroy();
+    await pending;
+    expect(response.observed).toBe(false);
+  });
+
+  it('updates favorites membership immediately, rolls back failures, and merges late library reads', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    const added = { ...sticker, id: encodeId('120') };
+    const request = new Subject<undefined>();
+    api.putFavorite.mockReturnValueOnce(request);
+    const adding = picker['favorite'](added);
+    expect(picker['groups']()[0].content!.stickers.map((item) => item.id)).toEqual([added.id, sticker.id]);
+    request.error(new Error('offline'));
+    await adding;
+    expect(picker['groups']()[0].content!.stickers).toEqual([sticker]);
+    await picker['favorite'](added);
+    const favorites = picker['groups']()[0].content!.stickers;
+    expect(favorites[0].id).toBe(added.id);
+    const removing = picker['favorite'](favorites[0]);
+    const stale = new Subject<{ stickers: StickerSummary[] }>();
+    api.getMyFavorites.mockReturnValueOnce(stale);
+    const reading = picker['load']();
+    await removing;
+    stale.next({ stickers: favorites });
+    await reading;
+    expect(picker['groups']()[0].content!.stickers).toEqual([sticker]);
+    const addingAgain = picker['favorite'](added);
+    const missing = new Subject<{ stickers: StickerSummary[] }>();
+    api.getMyFavorites.mockReturnValueOnce(missing);
+    const readingAgain = picker['load']();
+    await addingAgain;
+    missing.next({ stickers: [sticker] });
+    await readingAgain;
+    expect(picker['groups']()[0].content!.stickers.map((item) => item.id)).toEqual([added.id, sticker.id]);
+  });
+
+  it('accepts subsequent server changes after a favorite mutation has completed', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    const added = { ...sticker, id: encodeId('120') };
+    await picker['favorite'](added);
+    // Another client removes the favorite before this new read.
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: [sticker] }));
+    await picker['load']();
+    expect(picker['groups']()[0].content!.stickers).toEqual([sticker]);
+    await picker['favorite']({ ...added, isFavorited: true });
+    // Another client adds it again; the completed local removal must not hide it.
+    const restored = { ...added, isFavorited: true };
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: [sticker, restored] }));
+    await picker['load']();
+    expect(picker['groups']()[0].content!.stickers).toEqual([sticker, restored]);
+    api.getPack.mockReturnValueOnce(of({ ...pack, stickers: [restored] }));
+    await picker['loadGroup'](pack.id, true);
+    expect(picker['groups']()[1].content!.stickers).toEqual([restored]);
+  });
+
+  it('restores favorite order and known empty content without displaying loading skeletons', async () => {
+    const items = [
+      sticker,
+      { ...sticker, id: encodeId('120'), isFavorited: true },
+      { ...sticker, id: encodeId('121') },
+    ];
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: items }));
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    const response = new Subject<undefined>();
+    api.deleteFavorite.mockReturnValueOnce(response);
+    const removing = picker['favorite'](items[1]);
+    expect(picker['stickers']().map((item) => item.id)).toEqual([items[0].id, items[2].id]);
+    response.error(new Error('offline'));
+    await removing;
+    expect(picker['stickers']()).toEqual(items);
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: [items[1]] }));
+    await picker['load']();
+    const pending = new Subject<undefined>();
+    api.deleteFavorite.mockReturnValueOnce(pending);
+    const last = picker['favorite'](items[1]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.sticker-item')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.empty')).not.toBeNull();
+    pending.next(undefined);
+    await last;
+  });
+
+  it('deduplicates an inline read with sidebar prefetch and ignores it after choosing another group', async () => {
+    api.getMySubscribedPacks.mockReturnValueOnce(of({ packs: [pack, secondPack] }));
+    const { fixture } = await render();
+    const picker = fixture.componentInstance;
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response).mockReturnValueOnce(of(secondPack));
+    const first = picker['selectPack'](pack.id);
+    fixture.componentRef.setInput('grouped', true);
+    fixture.detectChanges();
+    await picker['selectPack'](secondPack.id);
+    const shared = picker['loadGroup'](pack.id);
+    await fixture.whenStable();
+    expect(picker['activeId']()).toBe(secondPack.id);
+    expect(picker['busy']()).toBe(false);
+    response.next(pack);
+    await Promise.all([first, shared]);
+    expect(picker['activeId']()).toBe(secondPack.id);
+    expect(picker['groups']()[1].content!.stickers).toEqual(pack.stickers);
+    expect(api.getPack).toHaveBeenCalledTimes(2);
+    expect(api.getPack).toHaveBeenNthCalledWith(1, pack.id);
+    expect(api.getPack).toHaveBeenNthCalledWith(2, secondPack.id);
+    expect(api.getMyFavorites).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares sidebar reads with a narrow selection while allowing that latest selection to complete', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const prefetch = picker['loadGroup'](pack.id);
+    fixture.componentRef.setInput('grouped', false);
+    fixture.detectChanges();
+    const selecting = picker['selectPack'](pack.id);
+    response.next(pack);
+    await Promise.all([prefetch, selecting]);
+    expect(picker['activeId']()).toBe(pack.id);
+    expect(picker['busy']()).toBe(false);
+    expect(api.getPack).toHaveBeenCalledOnce();
+  });
+
+  it('uses one height placeholder per unloaded pack and caps skeletons during a large pack read', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ({
+      ...pack,
+      id: encodeId(String(1000 + i)),
+      stickerCount: 100,
+    }));
+    api.getMySubscribedPacks.mockReturnValueOnce(of({ packs: many }));
+    const { fixture } = await render();
+    fixture.componentRef.setInput('grouped', true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.group-placeholder')).toHaveLength(100);
+    expect(fixture.nativeElement.querySelectorAll('.sticker-skeleton')).toHaveLength(0);
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
+    const loading = fixture.componentInstance['loadGroup'](many[0].id);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.sticker-skeleton')).toHaveLength(12);
+    expect(fixture.nativeElement.querySelectorAll('.group-placeholder')).toHaveLength(100);
+    response.error(new Error('offline'));
+    await loading;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.sticker-skeleton')).toHaveLength(0);
+    expect(fixture.nativeElement.querySelectorAll('.group-placeholder')).toHaveLength(100);
+  });
+
+  it('shows upload failures in the target group and clears them when that upload is retried', async () => {
+    const { fixture } = await renderGroups();
+    const picker = fixture.componentInstance;
+    await picker['loadGroup'](pack.id);
+    picker['selectPack'](secondPack.id);
+    await fixture.whenStable();
+    const post = vi
+      .spyOn(TestBed.inject(HttpClient), 'post')
+      .mockReturnValueOnce(throwError(() => new Error('offline')));
+    const event = {
+      target: { files: [new File(['png'], 'tea.png', { type: 'image/png' })], value: '' },
+    } as unknown as Event;
+    await picker['upload'](event, pack.id);
+    fixture.detectChanges();
+    const sections = fixture.nativeElement.querySelectorAll('.sticker-group');
+    expect(sections[0].querySelector('.upload-error')).toBeNull();
+    expect(sections[1].querySelector('.upload-error')?.textContent).toContain('添加表情失败');
+    expect(sections[2].querySelector('.upload-error')).toBeNull();
+    expect(picker['error']()).toBe(false);
+    expect(picker['activeId']()).toBe(secondPack.id);
+    post.mockReturnValueOnce(of(undefined));
+    await picker['upload'](event, pack.id);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.upload-error')).toBeNull();
+    expect(picker['activeId']()).toBe(secondPack.id);
+  });
+
+  async function renderDetails() {
     const fixture = TestBed.createComponent(StickerPicker);
     fixture.componentRef.setInput('selectable', false);
     fixture.componentRef.setInput('stickerId', sticker.id);
     fixture.detectChanges();
-    rpc.expect('stickers.get', { stickerId: '101' }).flush({ ...wireSticker, packs: [wireSummary(pack)] });
-    (await rpc.expectAsync('stickers.getPack', { packId: '103' })).flush(wirePack);
     await fixture.whenStable();
-    await vi.waitFor(() => expect(fixture.componentInstance['busy']()).toBe(false));
-    fixture.detectChanges();
-    return { fixture, rpc };
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(fixture.componentInstance['busy']()).toBe(false);
+    });
+    return fixture;
   }
 
-  it('keeps local additions when an older pack RPC response arrives', async () => {
-    const { fixture, rpc } = await renderDetails();
-    const picker = fixture.componentInstance;
-    const pending = picker['openPack'](pack.id);
-    const response = rpc.expect('stickers.getPack', { packId: decodeId(pack.id) });
-    const added = { ...sticker, id: encodeId('109') };
-    TestBed.inject(StickerUpdates).added.next({ pack, sticker: added });
-    expect(picker['stickers']()).toEqual([sticker, added]);
-    response.flush(wirePack);
-    await pending;
-    expect(picker['stickers']()).toEqual([sticker, added]);
-    expect(picker['pack']()?.stickerCount).toBe(2);
-  });
-
-  it('keeps a newly added pack when an older library RPC response arrives', async () => {
-    const { fixture, rpc } = await render();
-    const pending = fixture.componentInstance['load']();
-    const newPack = { ...pack, id: encodeId('120'), stickerCount: 0 };
-    TestBed.inject(StickerUpdates).added.next({ pack: newPack, sticker });
-    replyLibrary(rpc);
-    await pending;
-    expect(fixture.componentInstance['packs']().find((item) => item.id === newPack.id)?.stickerCount).toBe(1);
-  });
-
   it('opens the whole pack, selects the message sticker and changes selection without sending', async () => {
-    const rpc = peer();
     const other = { ...sticker, id: encodeId('104'), isFavorited: true };
-    const { fixture } = await renderDetails(rpc);
-    const picker = fixture.componentInstance;
-    picker['content'].set({ ...pack, stickers: [other, sticker], stickerCount: 2 });
-    fixture.detectChanges();
+    api.getPack.mockReturnValueOnce(of({ ...pack, stickers: [other, sticker], stickerCount: 2 }));
+    const fixture = await renderDetails();
+    expect(api.getSticker).toHaveBeenCalledWith(sticker.id);
+    expect(api.getPack).toHaveBeenCalledWith(pack.id);
     expect(fixture.nativeElement.querySelector('ion-title').textContent).toContain('Tea');
     expect(fixture.nativeElement.querySelector('.subtitle').textContent).toContain('2 张贴纸');
-    rpc.expectNone('stickers.listFavorites');
+    expect(api.getMyFavorites).not.toHaveBeenCalled();
     const items = fixture.nativeElement.querySelectorAll('.sticker-item');
     expect(items).toHaveLength(2);
     expect(items[1].classList.contains('selected')).toBe(true);
@@ -195,79 +713,59 @@ describe('StickerPicker selection during RPC requests', () => {
     const favorite = fixture.nativeElement.querySelector('ion-footer ion-button');
     expect(favorite.textContent).toContain('取消收藏');
     expect(favorite.color).toBe('danger');
-    const unfavorite = picker['favorite'](other);
-    rpc.expect('stickers.unfavorite', { stickerId: '104' }).flush(null);
-    await unfavorite;
-    fixture.detectChanges();
+    favorite.click();
+    await fixture.whenStable();
+    expect(api.deleteFavorite).toHaveBeenCalledWith(other.id);
     expect(favorite.textContent).toContain('收藏单个');
     expect(favorite.color).toBe('primary');
-    const refavorite = picker['favorite'](picker['chosen']()!);
-    rpc.expect('stickers.favorite', { stickerId: '104' }).flush(null);
-    await refavorite;
-    fixture.detectChanges();
+    favorite.click();
+    await fixture.whenStable();
+    expect(api.putFavorite).toHaveBeenCalledWith(other.id);
     const subscribe = fixture.nativeElement.querySelectorAll('ion-footer ion-button')[1];
-    const subscribing = picker['subscribe']();
-    rpc.expect('stickers.subscribeToPack', { packId: '103' }).flush(null);
-    await subscribing;
-    fixture.detectChanges();
+    subscribe.click();
+    await fixture.whenStable();
+    expect(api.putSubscription).toHaveBeenCalledWith(pack.id);
     expect(subscribe.textContent).toContain('取消订阅');
     expect(subscribe.color).toBe('danger');
-    expect(picker['chosen']()?.isFavorited).toBe(true);
-    const unsubscribing = picker['subscribe']();
-    rpc.expect('stickers.unsubscribeFromPack', { packId: '103' }).flush(null);
-    await unsubscribing;
-    fixture.detectChanges();
+    expect(fixture.componentInstance['chosen']()?.isFavorited).toBe(true);
+    subscribe.click();
+    await fixture.whenStable();
+    expect(api.deleteSubscription).toHaveBeenCalledWith(pack.id);
     expect(subscribe.textContent).toContain('订阅整组');
     expect(subscribe.color).toBe('primary');
   });
 
   it('retries a failed pack lookup without switching to the favorites library', async () => {
-    const rpc = peer();
-    const fixture = TestBed.createComponent(StickerPicker);
-    fixture.componentRef.setInput('selectable', false);
-    fixture.componentRef.setInput('stickerId', sticker.id);
-    fixture.detectChanges();
-    rpc.expect('stickers.get', { stickerId: '101' }).flush({ ...wireSticker, packs: [wireSummary(pack)] });
-    (await rpc.expectAsync('stickers.getPack', { packId: '103' })).error(1503);
-    await fixture.whenStable();
+    api.getPack.mockReturnValueOnce(throwError(() => new Error('offline')));
+    const fixture = await renderDetails();
     expect(fixture.componentInstance['error']()).toBe(true);
-    const retry = fixture.componentInstance['retry']();
-    rpc.expect('stickers.getPack', { packId: '103' }).flush(wirePack);
-    await retry;
+    await fixture.componentInstance['retry']();
     expect(fixture.componentInstance['pack']()?.id).toBe(pack.id);
     expect(fixture.componentInstance['chosen']()?.id).toBe(sticker.id);
-    rpc.expectNone('stickers.listFavorites');
+    expect(api.getMyFavorites).not.toHaveBeenCalled();
   });
 
   it('keeps an ungrouped sticker available for individual favorites', async () => {
-    const rpc = peer();
-    const fixture = TestBed.createComponent(StickerPicker);
-    fixture.componentRef.setInput('selectable', false);
-    fixture.componentRef.setInput('stickerId', sticker.id);
-    fixture.detectChanges();
-    rpc.expect('stickers.get', { stickerId: '101' }).flush({ ...wireSticker, packs: [] });
-    await fixture.whenStable();
-    fixture.detectChanges();
+    api.getSticker.mockReturnValueOnce(of({ ...sticker, packs: [] }));
+    const fixture = await renderDetails();
     expect(fixture.componentInstance['chosen']()?.id).toBe(sticker.id);
-    rpc.expectNone('stickers.getPack');
+    expect(api.getPack).not.toHaveBeenCalled();
     const actions = fixture.nativeElement.querySelectorAll('ion-footer ion-button');
     expect(actions[0].disabled).toBe(false);
     expect(actions[1].disabled).toBe(true);
   });
 
   it('shows sticker skeletons instead of a spinner while the library loads', async () => {
-    const rpc = peer();
+    const response = new Subject<{ stickers: StickerSummary[] }>();
+    api.getMyFavorites.mockReturnValueOnce(response);
     const fixture = TestBed.createComponent(StickerPicker);
     fixture.componentRef.setInput('embedded', true);
     fixture.detectChanges();
-    const favorites = rpc.expect('stickers.listFavorites');
-    rpc.expect('stickers.listSubscribedPacks').flush({ packs: [wireSummary(pack)] });
-    rpc.expect('stickers.listOwnedPacks').flush({ packs: [] });
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelectorAll('.sticker-skeleton')).toHaveLength(12);
     expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
-    favorites.flush({ stickers: [wireSticker] });
+    response.next({ stickers: [sticker] });
     await vi.waitFor(() => {
       fixture.detectChanges();
       expect(fixture.nativeElement.querySelectorAll('.sticker-skeleton')).toHaveLength(0);
@@ -287,13 +785,12 @@ describe('StickerPicker selection during RPC requests', () => {
   });
 
   it('emits an already displayed sticker while favorites reload, keeping navigation busy', async () => {
-    const { fixture, rpc, button, selected } = await render();
+    const { fixture, button, selected } = await render();
+    const response = new Subject<{ stickers: StickerSummary[] }>();
+    api.getMyFavorites.mockReturnValueOnce(response);
     const tab = fixture.nativeElement.querySelector('.pack-tab') as HTMLButtonElement;
     tab.click();
     fixture.detectChanges();
-    const favorites = rpc.expect('stickers.listFavorites');
-    rpc.expect('stickers.listSubscribedPacks').flush({ packs: [wireSummary(pack)] });
-    rpc.expect('stickers.listOwnedPacks').flush({ packs: [] });
     expect(tab.disabled).toBe(true);
     expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
     expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
@@ -301,7 +798,10 @@ describe('StickerPicker selection during RPC requests', () => {
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
     expect(modals.dismiss).not.toHaveBeenCalled();
-    favorites.flush({ stickers: [wireSticker] });
+    response.next({ stickers: [sticker] });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     await vi.waitFor(() => {
       fixture.detectChanges();
       expect(tab.disabled).toBe(false);
@@ -309,32 +809,43 @@ describe('StickerPicker selection during RPC requests', () => {
   });
 
   it('sends the displayed sticker from a modal while another pack is loading', async () => {
-    const { fixture, rpc, button, selected } = await render(false);
+    const { fixture, button, selected } = await render(false);
+    const response = new Subject<StickerPackDetailResponse>();
+    api.getPack.mockReturnValueOnce(response);
     fixture.nativeElement.querySelectorAll('.pack-tab')[1].click();
     fixture.detectChanges();
-    const request = rpc.expect('stickers.getPack', { packId: '103' });
+    expect(api.getPack).toHaveBeenCalledExactlyOnceWith(pack.id);
     expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
     expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
     expect(modals.dismiss).toHaveBeenCalledExactlyOnceWith(sticker, 'send');
     expect(selected).not.toHaveBeenCalled();
-    request.flush(wirePack);
+    response.next(pack);
+    fixture.detectChanges();
     await fixture.whenStable();
+    fixture.detectChanges();
   });
 
   it.each([false, true])('sends while changing favorite status from %s', async (isFavorited) => {
     const item = { ...sticker, isFavorited };
-    const { fixture, rpc, button, selected } = await render(true, true, [item]);
-    const favorite = fixture.componentInstance['favorite'](item);
-    const request = rpc.expect(isFavorited ? 'stickers.unfavorite' : 'stickers.favorite', { stickerId: '101' });
+    const { fixture, selected } = await render();
+    api.getPack.mockReturnValueOnce(of({ ...pack, stickers: [item] }));
+    await fixture.componentInstance['openPack'](pack.id);
     fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('.sticker-item') as HTMLButtonElement;
+    const response = new Subject<undefined>();
+    const request = isFavorited ? api.deleteFavorite : api.putFavorite;
+    request.mockReturnValueOnce(response);
+    const favorite = fixture.componentInstance['favorite'](item);
+    fixture.detectChanges();
+    expect(request).toHaveBeenCalledExactlyOnceWith(item.id);
     expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
     expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith({ ...item, isFavorited: !isFavorited });
-    request.flush(null);
+    response.next(undefined);
     await favorite;
     fixture.detectChanges();
     button.click();
@@ -342,73 +853,73 @@ describe('StickerPicker selection during RPC requests', () => {
   });
 
   it('opens a newly created pack directly from the create response', async () => {
-    const { fixture, rpc } = await render();
-    const { stickers: _stickers, ...summary } = pack;
-    const create = fixture.componentInstance['createPack']();
-    (await rpc.expectAsync('stickers.createPack', { name: 'Tea' })).flush(wireSummary(summary));
-    await create;
+    const { fixture } = await render();
+    api.getMyFavorites.mockClear();
+    api.getMySubscribedPacks.mockClear();
+    api.getMyOwnedPacks.mockClear();
+    await fixture.componentInstance['createPack']();
+    expect(api.postPack).toHaveBeenCalledWith({ name: 'Tea' });
     expect(fixture.componentInstance['pack']()?.id).toBe(pack.id);
     expect(fixture.componentInstance['stickers']()).toEqual([]);
-    rpc.expectNone('stickers.getPack');
-    rpc.expectNone('stickers.listFavorites');
-    rpc.expectNone('stickers.listSubscribedPacks');
-    rpc.expectNone('stickers.listOwnedPacks');
+    expect(api.getPack).not.toHaveBeenCalled();
+    expect(api.getMyFavorites).not.toHaveBeenCalled();
+    expect(api.getMySubscribedPacks).not.toHaveBeenCalled();
+    expect(api.getMyOwnedPacks).not.toHaveBeenCalled();
   });
 
   it('keeps favorite state in the pack itself when a later subscription updates its metadata', async () => {
-    const { fixture, rpc } = await render(false);
+    const { fixture } = await render(false);
     const picker = fixture.componentInstance;
-    const opened = picker['openPack'](pack.id);
-    rpc.expect('stickers.getPack', { packId: '103' }).flush(wirePack);
-    await opened;
-    const favorite = picker['favorite'](sticker);
-    rpc.expect('stickers.favorite', { stickerId: '101' }).flush(null);
-    await favorite;
+    await picker['openPack'](pack.id);
+    await picker['favorite'](sticker);
     expect(picker['pack']()?.stickers).toBe(picker['stickers']());
     expect(picker['stickers']()[0].isFavorited).toBe(true);
-    const subscription = picker['subscribe']();
-    rpc.expect('stickers.subscribeToPack', { packId: '103' }).flush(null);
-    await subscription;
+    await picker['subscribe']();
     expect(picker['pack']()?.isSubscribed).toBe(true);
     expect(picker['stickers']()[0].isFavorited).toBe(true);
   });
 
   it('sends while subscribing to a pack', async () => {
-    const { fixture, rpc, button } = await render(false);
+    const { fixture } = await render(false);
     fixture.componentRef.setInput('packId', pack.id);
     fixture.detectChanges();
-    const opening = rpc.expect('stickers.getPack', { packId: '103' });
-    opening.flush(wirePack);
     await fixture.whenStable();
-    const subscription = fixture.componentInstance['subscribe']();
-    const request = rpc.expect('stickers.subscribeToPack', { packId: '103' });
+    await vi.waitFor(() => expect(fixture.componentInstance['pack']()?.id).toBe(pack.id));
     fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('.sticker-item') as HTMLButtonElement;
+    const response = new Subject<undefined>();
+    api.putSubscription.mockReturnValueOnce(response);
+    const subscription = fixture.componentInstance['subscribe']();
+    fixture.detectChanges();
+    expect(api.putSubscription).toHaveBeenCalledExactlyOnceWith(pack.id);
     expect(fixture.nativeElement.querySelector('.sticker-skeleton')).toBeNull();
     expect(fixture.nativeElement.querySelector('ion-spinner')).toBeNull();
     expect(button.disabled).toBe(false);
     button.click();
     expect(modals.dismiss).toHaveBeenCalledExactlyOnceWith(sticker, 'send');
-    request.flush(null);
+    response.next(undefined);
     await subscription;
   });
 
   it.each([true, false])('does not send in browse mode with embedded=%s, even during a request', async (embedded) => {
-    const { fixture, rpc, button, selected } = await render(embedded, false);
+    const { fixture, button, selected } = await render(embedded, false);
+    const response = new Subject<undefined>();
+    api.putFavorite.mockReturnValueOnce(response);
     const favorite = fixture.componentInstance['favorite'](sticker);
-    const request = rpc.expect('stickers.favorite', { stickerId: '101' });
     fixture.detectChanges();
     expect(button.disabled).toBe(false);
     button.click();
     expect(selected).not.toHaveBeenCalled();
     expect(modals.dismiss).not.toHaveBeenCalled();
-    request.flush(null);
+    response.next(undefined);
     await favorite;
   });
 
   it('keeps a long press from sending and allows the next tap during a request', async () => {
-    const { fixture, rpc, button, pointer, selected } = await render();
+    const { fixture, button, pointer, selected } = await render();
+    const response = new Subject<undefined>();
+    api.putFavorite.mockReturnValueOnce(response);
     const favorite = fixture.componentInstance['favorite'](sticker);
-    const request = rpc.expect('stickers.favorite', { stickerId: '101' });
     vi.useFakeTimers();
     pointer('pointerdown');
     vi.advanceTimersByTime(400);
@@ -421,32 +932,34 @@ describe('StickerPicker selection during RPC requests', () => {
     pointer('pointerup');
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);
-    request.flush(null);
+    response.next(undefined);
     await favorite;
   });
-
   it('restores a favorite immediately after a failed optimistic removal', async () => {
     const item = { ...sticker, isFavorited: true };
-    const { fixture, rpc } = await render(true, true, [item]);
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: [item] }));
+    const { fixture } = await render();
+    const response = new Subject<undefined>();
+    api.deleteFavorite.mockReturnValueOnce(response);
     const picker = fixture.componentInstance;
     const operation = picker['favorite'](item);
-    expect(picker['stickers']()[0].isFavorited).toBe(false);
-    rpc.expect('stickers.unfavorite', { stickerId: '101' }).error(1503);
+    expect(picker['stickers']()).toEqual([]);
+    response.error(new Error('offline'));
     await operation;
     expect(picker['stickers']()[0]).toEqual(item);
-    expect(picker['error']()).toBe(true);
+    expect(picker['favoriteFailed']()).toBe(true);
   });
 
   it('restores a pack subscription after a failed optimistic change', async () => {
-    const { fixture, rpc } = await render(false);
+    const { fixture } = await render(false);
     const picker = fixture.componentInstance;
-    const opening = picker['openPack'](pack.id);
-    rpc.expect('stickers.getPack', { packId: '103' }).flush(wirePack);
-    await opening;
+    await picker['openPack'](pack.id);
     const previous = picker['pack']()!;
+    const response = new Subject<undefined>();
+    (previous.isSubscribed ? api.deleteSubscription : api.putSubscription).mockReturnValueOnce(response);
     const operation = picker['subscribe']();
     expect(picker['pack']()?.isSubscribed).toBe(!previous.isSubscribed);
-    rpc.expect('stickers.subscribeToPack', { packId: '103' }).error(1503);
+    response.error(new Error('offline'));
     await operation;
     expect(picker['pack']()).toEqual(previous);
     expect(picker['error']()).toBe(true);
@@ -454,14 +967,13 @@ describe('StickerPicker selection during RPC requests', () => {
 
   it('records pack usage only inside the auto-sort window while sending', async () => {
     preferences.autoSortPacksEnabled.mockReturnValue(true);
-    const { fixture, rpc } = await render();
-    const opening = fixture.componentInstance['openPack'](pack.id);
-    rpc.expect('stickers.getPack', { packId: '103' }).flush(wirePack);
-    await opening;
+    const { fixture } = await render();
+    await fixture.componentInstance['openPack'](pack.id);
     fixture.componentInstance['send'](sticker);
     const item = { stickerPackId: pack.id, lastUsedOn: expect.any(Number) };
     expect(preferences.upsertPackOrderItem).toHaveBeenCalledWith(item);
     expect(preferences.syncPackOrder).toHaveBeenCalledWith([{ ...item, isAutoSort: true }]);
+
     preferences.upsertPackOrderItem.mockClear();
     preferences.syncPackOrder.mockClear();
     preferences.packOrder.mockReturnValue(
@@ -472,7 +984,7 @@ describe('StickerPicker selection during RPC requests', () => {
     );
     fixture.componentInstance['packs'].update((packs) => [
       ...Array.from({ length: 20 }, (_, index) => ({ ...pack, id: encodeId(String(900 + index)) })),
-      ...packs,
+      pack,
     ]);
     fixture.componentInstance['send'](sticker);
     expect(preferences.upsertPackOrderItem).not.toHaveBeenCalled();
@@ -481,7 +993,8 @@ describe('StickerPicker selection during RPC requests', () => {
   it('records favorite usage and re-sorts the favorites view', async () => {
     preferences.autoSortFavoritesEnabled.mockReturnValue(true);
     const other = { ...sticker, id: encodeId('104') };
-    const { fixture, button, selected } = await render(true, true, [sticker, other]);
+    api.getMyFavorites.mockReturnValueOnce(of({ stickers: [sticker, other] }));
+    const { fixture, button, selected } = await render();
     preferences.favoriteStickerOrder.mockReturnValue([{ stickerId: other.id, lastUsedOn: Date.now() }]);
     button.click();
     expect(selected).toHaveBeenCalledExactlyOnceWith(sticker);

@@ -17,6 +17,7 @@ import {
   EmojiSearchService,
 } from '@nicematic/emoji-picker';
 import { Localization } from '../../i18n/localization';
+import { attachScrollbars } from '../../scrolling/overlay-scrollbars';
 import { PickerData, PickerSearch } from './picker-data';
 import { PickerFlags } from './picker-flags';
 
@@ -58,6 +59,18 @@ export class EmojiPicker {
   protected readonly height = signal(400);
 
   constructor() {
+    afterRenderEffect((onCleanup) => {
+      const viewport = this.picker()?.grid?.scrollContainerRef.nativeElement;
+      if (!viewport) return;
+      // The picker normally hides its native bar, including on systems with overlay scrollbars.
+      const width = viewport.style.scrollbarWidth;
+      viewport.style.scrollbarWidth = '';
+      const instance = attachScrollbars(viewport);
+      onCleanup(() => {
+        instance.destroy();
+        viewport.style.scrollbarWidth = width;
+      });
+    });
     afterRenderEffect(() => {
       if (!this.picker()?.grid?.skinToneEmoji()) return;
       // The library positions this element in viewport coordinates. The top layer

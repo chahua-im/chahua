@@ -20,20 +20,19 @@
   </div>
 </div>
 <div class="stage">
-  <div
-    #viewport
-    class="viewport"
-    [class.zoom]="zoom()"
-    (wheel)="wheel($event)"
-    (pointerdown)="drag($event)"
-    (pointermove)="dragging($event)"
-    (pointerup)="stopDrag()"
-    (pointercancel)="stopDrag()"
-    (touchmove)="touchMove($event)"
-    (touchstart)="start($event)"
-    (touchend)="end($event)"
-    (touchcancel)="end($event)">
-    <div class="canvas" (click)="background($event)">
+  <div #viewport [appScrollbars]="zoom()" class="viewport" [class.zoom]="zoom()">
+    <div
+      class="canvas"
+      (click)="background($event)"
+      (wheel)="wheel($event)"
+      (pointerdown)="drag($event)"
+      (pointermove)="dragging($event)"
+      (pointerup)="stopDrag()"
+      (pointercancel)="stopDrag()"
+      (touchmove)="touchMove($event)"
+      (touchstart)="start($event)"
+      (touchend)="end($event)"
+      (touchcancel)="end($event)">
       @for (item of [current()]; track item.url) {
         @if (failed()) {
           <a class="load-error" [href]="item.url" target="_blank" rel="noopener">
@@ -73,7 +72,7 @@
   }
 </div>
 @if (media().length > 1) {
-  <div class="gallery-viewport">
+  <div appScrollbars class="gallery-viewport">
     <div #gallery class="gallery">
       @for (item of media(); track $index; let index = $index) {
         <button class="thumbnail" [class.selected]="index === this.index()" type="button" (click)="select(index)">

@@ -169,7 +169,7 @@ type ScrollPosition =
   styleUrls: ['../conversation-header.scss', './conversation.page.scss'],
   providers: [ConversationStore, MessageActions],
   host: {
-    '[class.details-open]': 'sidebarOpen()',
+    '[class.details-open]': 'sidebarOpen() || stickerSidebarOpen()',
     '(dragover)': 'composer()?.dragover($event)',
     '(drop)': 'composer()?.drop($event)',
     '(document:visibilitychange)': 'visibilityChanged()',
@@ -229,8 +229,15 @@ export class ConversationPage {
   protected readonly largeScreen = signal(this.wide.matches);
   private readonly panels = inject(PanelNavigation);
   protected readonly sidebarOpen = computed(() => this.panels.sidebar());
+  protected readonly stickerSidebarOpen = computed(
+    () => this.largeScreen() && !this.selecting() && !!this.composer()?.stickersVisible(),
+  );
+  protected stickersOpened() {
+    if (this.largeScreen() && this.sidebarOpen()) void this.panels.close();
+  }
   protected readonly infoIcon = informationCircleOutline;
   protected details() {
+    this.composer()?.closeStickers();
     if (this.sidebarOpen()) void this.panels.close();
     else
       void this.router.navigate([
@@ -1055,6 +1062,9 @@ export class ConversationPage {
     const resize = () => {
       this.largeScreen.set(this.wide.matches);
     };
+    effect(() => {
+      if (this.sidebarOpen()) untracked(() => this.composer()?.closeStickers());
+    });
     this.wide.addEventListener('change', resize);
     this.destroyRef.onDestroy(() => this.wide.removeEventListener('change', resize));
     effect((onCleanup) => {

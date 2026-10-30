@@ -13,6 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LocalDatePipe } from '../../i18n/local-date.pipe';
 import {
   IonBadge,
@@ -57,6 +58,7 @@ export type MessageAttachmentSource = Pick<MessageResponse, 'messageType' | 'cre
   templateUrl: './message-attachments.html',
   styleUrl: './message-attachments.scss',
   imports: [
+    ContentScrollbars,
     MediaLoaded,
     VoicePlayer,
     IonBadge,

@@ -206,6 +206,7 @@ export class StickerPackDetail {
     this.busy.set(true);
     try {
       await firstValueFrom(this.api.stickers.deletePack({ packId: pack.id }));
+      this.updates.removed.next({ id: pack.id, deleted: true });
       this.preferences.removePackOrderItem(pack.id);
       await this.panels.back();
     } catch {
@@ -230,6 +231,7 @@ export class StickerPackDetail {
     this.busy.set(true);
     try {
       await firstValueFrom(this.api.stickers.unsubscribeFromPack({ packId: pack.id }));
+      this.updates.removed.next({ id: pack.id, deleted: false });
       this.preferences.removePackOrderItem(pack.id);
       await this.panels.back();
     } catch {

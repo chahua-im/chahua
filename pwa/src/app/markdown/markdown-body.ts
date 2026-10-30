@@ -1,4 +1,15 @@
-import { Component, DestroyRef, effect, ElementRef, inject, input, output, Renderer2 } from '@angular/core';
+import {
+  afterRenderEffect,
+  Component,
+  DestroyRef,
+  effect,
+  ElementRef,
+  inject,
+  input,
+  output,
+  Renderer2,
+} from '@angular/core';
+import { attachScrollbars } from '../scrolling/overlay-scrollbars';
 import { highlightCodeBlock } from './code-highlight';
 import type { MarkdownNode } from './nodes';
 import { SpoilerParticles } from './spoiler-particles';
@@ -34,6 +45,13 @@ export class MarkdownBody {
 
   constructor() {
     effect(() => this.render(this.nodes()));
+    afterRenderEffect((onCleanup) => {
+      this.nodes();
+      const scrollbars = [...this.host.nativeElement.querySelectorAll('pre')].map((element) =>
+        attachScrollbars(element),
+      );
+      onCleanup(() => scrollbars.forEach((instance) => instance.destroy()));
+    });
     this.destroy.onDestroy(() => this.render([]));
   }
 

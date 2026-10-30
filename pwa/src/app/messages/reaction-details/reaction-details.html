@@ -5,7 +5,11 @@
       <ion-button (click)="panels.close()">{{ 'common.done' | transloco }}</ion-button>
     </ion-buttons>
   </ion-toolbar>
-  <ion-segment [scrollable]="true" [value]="emoji()" (ionChange)="emoji.set($event.detail.value?.toString() ?? '')">
+  <ion-segment
+    appScrollbars
+    [scrollable]="true"
+    [value]="emoji()"
+    (ionChange)="emoji.set($event.detail.value?.toString() ?? '')">
     <ion-segment-button value="">
       <ion-label>{{ 'reactions.all' | transloco: { count: count() } }}</ion-label>
     </ion-segment-button>

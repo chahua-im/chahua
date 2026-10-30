@@ -133,10 +133,14 @@ Service Worker 缓存应用资源（包括 landing 安装页及含表情数据�
 | 聊天内消息搜索                       | `messages.search`，chatId、q、sort、limit、offset                                                                   | ChatSearch 局部分页                                                            |
 | 邀请预览与管理                       | `invites.getByCode({inviteCode})`、`invites.list`                                                                   | InviteCard、StartChat、ChatInvites                                             |
 | 查看完整表态                         | `reactions.list({chatId: c, messageId: m})`                                                                         | ReactionDetails；用 sortIndex 还原时间顺序并按用户聚合，按表情本地过滤         |
-| 打开贴纸库                           | `stickers.listFavorites`、`stickers.listSubscribedPacks`、`stickers.listOwnedPacks`                                 | StickerPicker；切包读取该包详情，包列表按用户贴纸包顺序排序                    |
+| 打开贴纸库                           | `stickers.listFavorites`、`stickers.listSubscribedPacks`、`stickers.listOwnedPacks`                                 | StickerPicker；窄屏切包读取详情，侧栏在分组接近视口或点击定位时读取并缓存该包，不重复请求已加载包，宽窄布局共用进行中的同包请求；迟到响应可更新缓存，但只有仍匹配最近一次选择的响应才能改变当前包；包列表按用户贴纸包顺序排序                    |
 | 打开表情和贴纸设置                   | `stickers.listOwnedPacks`、`stickers.listSubscribedPacks`                                                           | StickerSettings 合并展示                                                       |
 | 打开贴纸包详情                       | `stickers.getPack({packId})`                                                                                        | StickerPackDetail                                                              |
 | 好友验证设置                         | `friends.getSettings`                                                                                               | 表单组件                                                                       |
+
+删除或取消订阅成功后，StickerUpdates 通知已挂载贴纸库立即移除对应包及内容缓存；取消该包的进行中读取，并过滤重叠库列表响应中的旧条目。取消订阅仍保留显式打开的贴纸详情。后续新发起的库读取以服务器结果为准。
+
+贴纸收藏操作立即同步已加载分组，失败回滚。只有与操作重叠的收藏或包详情读取需要合并本地收藏结果，避免迟到回包撤销操作；操作完成后新发起的读取以服务器结果为准，允许其他客户端的修改生效。
 
 Reaction 的已读是会话级：进入前台会话/话题、恢复可见或重连时读取 messageIds 与 readThrough；保留未跳转的目标，将新目标去重合并，再按 readThrough 确认快照。重复生命周期共享当前查询或已知结果；有效未读零跳过查询，真实重连或新通知强制校准。请求期间只有新通知或确认后仍有未读才追加查询；查询失败不确认。后台不查询或确认，前台离开时使用保存的聊天/话题身份再确认一次，不依赖旧路由仍激活。普通消息已读不推进 reaction 游标。
 

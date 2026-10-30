@@ -15,7 +15,19 @@ import {
   viewChild,
 } from '@angular/core';
 import { TranslocoPipe } from '@jsverse/transloco';
-import { IonAlert, IonIcon, IonItem, IonLabel, IonList, IonTextarea, isPlatform } from '@ionic/angular';
+import {
+  IonAlert,
+  IonButton,
+  IonButtons,
+  IonIcon,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonTextarea,
+  IonTitle,
+  IonToolbar,
+  isPlatform,
+} from '@ionic/angular';
 import {
   attachOutline,
   closeOutline,
@@ -48,6 +60,7 @@ import { AttachmentUpload, UploadStatus } from '../upload';
 import { UploadProgress } from '../upload-progress/upload-progress';
 import { UploadFailure } from '../upload-failure';
 import { VoicePlayer } from '../voice-player/voice-player';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { VoiceRecorder } from '../voice-recorder/voice-recorder';
 import { displayText, editText, wireText } from './mention-text';
 import { shortcutFormatKind, wrapInlineFormat, type InlineFormatKind } from './text-format';
@@ -68,10 +81,15 @@ enum Panel {
   templateUrl: './message-composer.html',
   styleUrl: './message-composer.scss',
   imports: [
+    ContentScrollbars,
     TranslocoPipe,
     NgTemplateOutlet,
     ChatAvatar,
     IonAlert,
+    IonButton,
+    IonButtons,
+    IonTitle,
+    IonToolbar,
     VoicePlayer,
     IonIcon,
     IonTextarea,
@@ -95,6 +113,8 @@ enum Panel {
 })
 export class MessageComposer {
   readonly text = model('');
+  readonly dockStickers = input(false);
+  readonly stickersOpened = output<void>();
   readonly relationship = input<FriendRelationshipResponse>();
   readonly restriction = input<SpeakingMode>();
   protected readonly blocked = signal(false);
@@ -132,6 +152,7 @@ export class MessageComposer {
   protected readonly Panel = Panel;
   protected readonly Purpose = AttachmentUploadPurpose;
   protected readonly panel = signal(Panel.None);
+  readonly stickersVisible = computed(() => this.panel() === Panel.Stickers && !this.restriction());
   protected readonly dragDepth = signal(0);
   readonly voiceActive = signal(false);
   private readonly destroy = inject(DestroyRef);
@@ -244,11 +265,18 @@ export class MessageComposer {
   protected async togglePanel(panel: Panel) {
     if (this.restriction()) return;
     this.panel.set(this.panel() === panel ? Panel.None : panel);
-    if (this.panel() !== Panel.None) (await this.textarea()?.getInputElement())?.blur();
+    if (this.panel() !== Panel.None) {
+      this.stickersOpened.emit();
+      if (!this.dockStickers()) (await this.textarea()?.getInputElement())?.blur();
+    }
+  }
+  closeStickers() {
+    this.panel.set(Panel.None);
   }
   protected outside(event: Event) {
     const target = event.target as HTMLElement;
     if (
+      !this.dockStickers() &&
       this.panel() !== Panel.None &&
       !this.host.nativeElement.contains(target) &&
       !target.closest('ion-modal,ion-popover,ion-alert,ion-action-sheet')
@@ -508,7 +536,7 @@ export class MessageComposer {
   }
   protected sticker(sticker: StickerSummary) {
     if (this.forwarding() || !this.canWrite()) return;
-    this.panel.set(Panel.None);
+    if (!this.dockStickers()) this.panel.set(Panel.None);
     this.submitted.emit({ messageType: MessageType.sticker, attachmentIds: [], sticker });
   }
   protected sendVoice(file: File) {

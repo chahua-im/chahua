@@ -23,6 +23,7 @@ import {
   play,
   scanOutline,
 } from 'ionicons/icons';
+import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { MediaKind } from '../message-attachments/media-kind';
 
@@ -36,7 +37,7 @@ export interface ViewerMedia {
   selector: 'app-media-viewer',
   templateUrl: './media-viewer.html',
   styleUrl: './media-viewer.scss',
-  imports: [IonIcon, IonSpinner, TranslocoPipe],
+  imports: [ContentScrollbars, IonIcon, IonSpinner, TranslocoPipe],
   host: { class: 'ion-page', '(document:keydown)': 'key($event)' },
 })
 export class MediaViewer {
@@ -137,7 +138,7 @@ export class MediaViewer {
   protected drag(event: PointerEvent) {
     if (event.pointerType !== 'mouse' || !this.zoom() || event.button !== 0) return;
     const viewport = this.viewport()!.nativeElement;
-    viewport.setPointerCapture(event.pointerId);
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     this.pan = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
   }
   protected dragging(event: PointerEvent) {

@@ -50,66 +50,104 @@
       {{ (pack.isSubscribed ? 'stickers.removePack' : 'stickers.addPack') | transloco }}
     </ion-button>
   }
-  <div class="sticker-grid">
-    @for (sticker of stickers(); track sticker.id) {
-      <button
-        type="button"
-        class="sticker-item"
-        [class.selected]="!selectable() && chosen()?.id === sticker.id"
-        (click)="send(sticker)"
-        (pointerdown)="press(sticker, $event)"
-        (pointermove)="move($event)"
-        (pointerup)="cancelHold()"
-        (pointercancel)="cancelHold()"
-        (contextmenu)="showMenu(sticker, $event)">
-        <span class="sticker-tile-skeleton skeleton-block"></span>
-        @if (sticker.media.contentType.startsWith('video/')) {
-          <video
-            appMediaLoaded
-            [src]="sticker.media.url"
-            autoplay
-            loop
-            [muted]="true"
-            playsinline
-            preload="metadata"></video>
-        } @else {
-          <img appMediaLoaded [src]="sticker.media.url" loading="lazy" decoding="async" />
+  <div
+    #libraryScroll
+    [appScrollbars]="embedded()"
+    class="sticker-library"
+    [class.grouped]="grouped()"
+    (scroll)="scroll.onScroll()">
+    @for (group of groups(); track group.id) {
+      @let renderGroup = scroll.renders(group.id);
+      <section #groupSection class="sticker-group">
+        @if (grouped()) {
+          <h3 class="group-title">{{ group.name ?? ('stickers.favorites' | transloco) }}</h3>
         }
-      </button>
-    }
-    @if (busy() && !stickers().length) {
-      @for (slot of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; track slot) {
-        <span class="skeleton-block sticker-skeleton"></span>
-      }
-    } @else if (error()) {
-      <p class="empty">
-        {{ 'stickers.loadFailed' | transloco }}
-        <ion-button fill="clear" (click)="retry()">{{ 'common.retry' | transloco }}</ion-button>
-      </p>
-    } @else if (!stickers().length) {
-      <p class="empty">{{ 'stickers.empty' | transloco }}</p>
+        <div class="sticker-grid" [class.failed]="grouped() && group.id != null && group.error && !group.content">
+          @for (sticker of renderGroup ? (group.content?.stickers ?? []) : []; track sticker.id) {
+            <button
+              type="button"
+              class="sticker-item"
+              [class.selected]="!selectable() && chosen()?.id === sticker.id"
+              (click)="send(sticker, group.id ?? null)"
+              (pointerdown)="press(sticker, $event)"
+              (pointermove)="move($event)"
+              (pointerup)="cancelHold()"
+              (pointercancel)="cancelHold()"
+              (contextmenu)="showMenu(sticker, $event)">
+              <span class="sticker-tile-skeleton skeleton-block"></span>
+              @if (sticker.media.contentType.startsWith('video/')) {
+                <video
+                  appMediaLoaded
+                  [src]="sticker.media.url"
+                  autoplay
+                  loop
+                  [muted]="true"
+                  playsinline
+                  preload="metadata"></video>
+              } @else {
+                <img appMediaLoaded [src]="sticker.media.url" loading="lazy" decoding="async" />
+              }
+            </button>
+          }
+          @if (
+            grouped() && ((group.id != null && !group.content) || (!renderGroup && group.content?.stickers?.length))
+          ) {
+            <div class="group-placeholder" [style.--placeholder-rows]="group.placeholderRows">
+              @if (group.fetching && !group.content) {
+                @for (slot of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; track slot) {
+                  @if (slot < group.placeholderRows! * 4) {
+                    <span class="skeleton-block sticker-skeleton"></span>
+                  }
+                }
+              }
+            </div>
+          } @else if (group.loading && !group.content) {
+            @for (slot of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; track slot) {
+              <span class="skeleton-block sticker-skeleton"></span>
+            }
+          }
+          @if (group.error) {
+            <p class="empty">
+              {{ 'stickers.loadFailed' | transloco }}
+              <ion-button fill="clear" (click)="retryGroup(group)">{{ 'common.retry' | transloco }}</ion-button>
+            </p>
+          } @else if ((group.content || !group.loading) && !group.content?.stickers?.length) {
+            <p class="empty">{{ 'stickers.empty' | transloco }}</p>
+          }
+        </div>
+        @if (group.uploadError) {
+          <p class="empty upload-error">{{ 'stickers.addFailed' | transloco }}</p>
+        }
+        @if (selectable() && group.ownerUid === session.user()?.uid) {
+          <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event, group.id)" />
+          <ion-button fill="clear" [disabled]="busy() || !group.content" (click)="stickerFile.click()">
+            <ion-icon slot="start" [icon]="icons.cloudUploadOutline" />
+            {{ 'stickers.add' | transloco }}
+          </ion-button>
+        }
+      </section>
     }
   </div>
-  @if (selectable() && pack()?.ownerUid === session.user()?.uid) {
-    <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event)" />
-    <ion-button fill="clear" [disabled]="busy()" (click)="stickerFile.click()">
-      <ion-icon slot="start" [icon]="icons.cloudUploadOutline" />
-      {{ 'stickers.add' | transloco }}
-    </ion-button>
-  }
   @if (selectable() || packs().length > 1) {
-    <div class="pack-bar">
+    <div appScrollbars class="pack-bar">
       @if (selectable()) {
-        <button type="button" class="pack-tab" [class.selected]="!pack()" [disabled]="busy()" (click)="load()">
+        <button
+          #packTab
+          type="button"
+          class="pack-tab"
+          [class.selected]="activeId() == null"
+          [disabled]="busy() && !grouped()"
+          (click)="selectFavorites()">
           <ion-icon [icon]="icons.heart" />
         </button>
       }
       @for (item of packs(); track item.id) {
         <button
+          #packTab
           type="button"
           class="pack-tab"
-          [class.selected]="pack()?.id === item.id"
-          [disabled]="busy()"
+          [class.selected]="activeId() === item.id"
+          [disabled]="busy() && !grouped()"
           (click)="selectPack(item.id)"
           [title]="item.name">
           @if (item.previewSticker?.media?.contentType?.startsWith('image/')) {
@@ -146,3 +184,8 @@
     </ion-list>
   </ng-template>
 </ion-popover>
+<ion-toast
+  [isOpen]="favoriteFailed()"
+  [message]="'stickers.favoriteFailed' | transloco"
+  [duration]="2500"
+  (didDismiss)="favoriteFailed.set(false)" />
