@@ -10,6 +10,12 @@
 </ion-header>
 <ion-content appScrollbars color="light">
   <ion-list [inset]="true">
+    <ion-item [button]="true" [detail]="true" routerLink="/settings/stickers" lines="none">
+      <ion-icon slot="start" [icon]="stickerIcon" color="primary"></ion-icon>
+      <ion-label>{{ 'settings.menu.stickers' | transloco }}</ion-label>
+    </ion-item>
+  </ion-list>
+  <ion-list [inset]="true">
     <ion-list-header>{{ 'settings.general.colorMode' | transloco }}</ion-list-header>
     <ion-radio-group [value]="preferences.colorMode()" (ionChange)="setColorMode($event.detail.value)">
       <ion-item>

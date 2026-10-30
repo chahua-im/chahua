@@ -864,7 +864,7 @@ describe('MessageMenu', () => {
     expect(labels()).toEqual(['回复', '转发', '收藏表情', '链接', '撤回']);
     expect(fixture.nativeElement.querySelector('.reactions.panel')).toBeNull();
     await menu['choose'](MessageAction.FavoriteSticker);
-    expect(favoriteStickers.set).toHaveBeenCalledWith(sticker.id, true);
+    expect(favoriteStickers.set).toHaveBeenCalledWith(sticker, true);
     expect(savedMessages.save).not.toHaveBeenCalled();
   });
 
@@ -928,7 +928,7 @@ describe('MessageMenu', () => {
     fixture.detectChanges();
     expect(labels()).toContain('取消收藏表情');
     await menu['choose'](MessageAction.FavoriteSticker);
-    expect(favoriteStickers.set).toHaveBeenCalledWith(sticker.id, false);
+    expect(favoriteStickers.set).toHaveBeenCalledWith(sticker, false);
     expect(menu['notice']()).toBe(MessageNotice.Unsaved);
   });
 });

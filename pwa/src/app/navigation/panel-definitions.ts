@@ -172,7 +172,7 @@ export const panelDefinitions: readonly PanelDefinition[] = [
     path: 'settings/stickers',
     kind: PanelKind.Settings,
     content: PanelContent.StickerSettings,
-    settings: { address: 'sticker-settings', parent: '/settings', child: 'stickers' },
+    settings: { address: 'sticker-settings', parent: '/settings/general', child: 'stickers' },
   },
   {
     path: 'settings/stickers/:packId',

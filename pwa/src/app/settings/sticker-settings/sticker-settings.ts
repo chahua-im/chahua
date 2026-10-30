@@ -28,6 +28,7 @@ import { RpcApi } from '../../../generated/rpc-api';
 import type { StickerPackSummary, UpdateStickerPackOrderItem } from '../../../generated/models';
 import { decodeId } from '../../api/snowflake-id';
 import { EmojiPicker } from '../../messages/emoji-picker/emoji-picker';
+import { StickerUpdates } from '../../messages/sticker-updates';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
 import { LoadError } from '../../ui/load-error/load-error';
@@ -123,6 +124,7 @@ export class StickerSettings {
   private readonly destroy = inject(DestroyRef);
   private readonly editor = viewChild(StickerEditor);
   private readonly api = inject(RpcApi);
+  private readonly updates = inject(StickerUpdates);
   private readonly transloco = inject(TranslocoService);
   private readonly router = inject(Router);
   protected readonly panels = inject(PanelNavigation);
@@ -199,6 +201,7 @@ export class StickerSettings {
       if (this.destroy.destroyed) return;
       this.owned.update((owned) => [...owned, pack]);
       this.packs.update((packs) => [pack, ...packs]);
+      this.updates.changed.next({ ...pack, stickers: [] });
       this.preferences.upsertPackOrderItem({ stickerPackId: pack.id, lastUsedOn: Date.now() });
       await this.editor()?.dismiss();
       if (this.destroy.destroyed) return;

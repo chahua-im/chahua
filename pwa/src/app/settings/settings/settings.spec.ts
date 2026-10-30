@@ -444,7 +444,9 @@ describe('Settings', () => {
     });
   });
 
-  it('links to the sticker settings page and loads its pack list', async () => {
+  it('links to sticker settings from chat settings and loads its pack list', async () => {
+    expect(page.querySelector('ion-item[href="/settings/stickers"]')).toBeNull();
+    await openPage('聊天设置');
     const item = Array.from(page.querySelectorAll('ion-item')).find(
       (entry) => entry.textContent?.trim() === '表情和贴纸',
     )!;
@@ -462,7 +464,7 @@ describe('Settings', () => {
       Array.from(page.querySelectorAll('ion-list')[0].querySelectorAll('ion-label')).map((item) =>
         item.textContent?.trim(),
       ),
-    ).toEqual(['消息通知', '隐私', '聊天设置', '表情和贴纸', '语言']);
+    ).toEqual(['消息通知', '隐私', '聊天设置', '语言']);
     expect(page.querySelector('ion-item[href="/settings/experimental"]')).toBeNull();
     expect(page.querySelector('ion-toggle')).toBeNull();
     expect(notifications.refresh).not.toHaveBeenCalled();

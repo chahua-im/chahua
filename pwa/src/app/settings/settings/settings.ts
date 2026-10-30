@@ -20,7 +20,6 @@ import {
   chatbubblesOutline,
   constructOutline,
   eyeOutline,
-  happyOutline,
   languageOutline,
   notificationsOutline,
   refreshOutline,
@@ -75,7 +74,6 @@ export class Settings {
   protected readonly generalIcon = chatbubblesOutline;
 
   protected readonly presenceIcon = eyeOutline;
-  protected readonly stickerIcon = happyOutline;
   protected readonly notificationIcon = notificationsOutline;
   protected readonly updateIcon = refreshOutline;
   protected readonly devIcon = constructOutline;

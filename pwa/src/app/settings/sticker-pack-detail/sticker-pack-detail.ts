@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, input, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   AlertController,
@@ -22,7 +22,7 @@ import { CHAHUA_BASE_URL } from '../../../generated/endpoints/chahua.base-url';
 import type { StickerPackDetailResponse, StickerSummary } from '../../../generated/models';
 import { decodeId, type SnowflakeID } from '../../api/snowflake-id';
 import { MediaLoaded } from '../../messages/media-loaded';
-import { appendSticker, StickerUpdates } from '../../messages/sticker-updates';
+import { appendSticker, removePackSticker, StickerUpdates } from '../../messages/sticker-updates';
 import { detectFileMimeType, isHeicLikeMedia, withDetectedMimeType } from '../../messages/media-processing/file-type';
 import { PanelNavigation } from '../../navigation/panel-navigation';
 import { ContentScrollbars } from '../../scrolling/content-scrollbars';
@@ -119,6 +119,7 @@ import { StickerPreferences } from '../sticker-preferences';
 export class StickerPackDetail {
   readonly packId = input.required<SnowflakeID>();
   private readonly api = inject(RpcApi);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly updates = inject(StickerUpdates);
   private readonly transloco = inject(TranslocoService);
   private readonly http = inject(HttpClient);
@@ -143,6 +144,12 @@ export class StickerPackDetail {
   constructor() {
     this.updates.added.pipe(takeUntilDestroyed()).subscribe(({ pack, sticker }) => {
       this.pack.update((current) => (current?.id === pack.id ? appendSticker(current, sticker) : current));
+    });
+    this.updates.changed.pipe(takeUntilDestroyed()).subscribe((pack) => {
+      this.pack.update((current) => (current?.id === pack.id ? pack : current));
+    });
+    this.updates.stickerRemoved.pipe(takeUntilDestroyed()).subscribe(({ pack, stickerId }) => {
+      this.pack.update((current) => (current?.id === pack.id ? removePackSticker(current, stickerId) : current));
     });
     effect(() => void this.load(this.packId()));
   }
@@ -174,13 +181,15 @@ export class StickerPackDetail {
   protected async saveName({ name }: StickerEditorValue) {
     const pack = this.pack();
     if (!pack || this.busy() || !name.trim() || name.trim() === pack.name) return;
+    const uid = this.session.user()?.uid;
     const epoch = this.epoch;
     this.busy.set(true);
     this.editorError.set(undefined);
     try {
       const updated = await firstValueFrom(this.api.stickers.updatePack({ packId: pack.id, name: name.trim() }));
-      if (this.epoch !== epoch || this.pack()?.id !== pack.id) return;
+      if (this.destroyRef.destroyed || this.session.user()?.uid !== uid || this.epoch !== epoch || this.pack()?.id !== pack.id) return;
       this.pack.update((current) => (current?.id === updated.id ? { ...current, ...updated } : current));
+      this.updates.changed.next(this.pack()!);
       await this.editor()?.dismiss();
       this.renaming.set(false);
     } catch {
@@ -243,6 +252,7 @@ export class StickerPackDetail {
   protected async removeSticker(sticker: StickerSummary) {
     const pack = this.pack();
     if (!pack || this.busy()) return;
+    const uid = this.session.user()?.uid;
     const alert = await this.alerts.create({
       header: this.transloco.translate('settings.stickerPack.removeStickerTitle'),
       message: this.transloco.translate('settings.stickerPack.removeStickerMessage'),
@@ -256,17 +266,13 @@ export class StickerPackDetail {
     this.busy.set(true);
     try {
       await firstValueFrom(this.api.stickers.removeFromPack({ packId: pack.id, stickerId: sticker.id }));
-      const current = this.pack();
-      if (current)
-        this.pack.set({
-          ...current,
-          stickerCount: current.stickerCount - 1,
-          stickers: current.stickers.filter((item) => item.id !== sticker.id),
-        });
+      if (this.session.user()?.uid !== uid) return;
+      this.updates.stickerRemoved.next({ pack, stickerId: sticker.id });
     } catch {
-      this.notice.set(this.transloco.translate('settings.stickerPack.removeStickerFailed'));
+      if (!this.destroyRef.destroyed && this.session.user()?.uid === uid)
+        this.notice.set(this.transloco.translate('settings.stickerPack.removeStickerFailed'));
     } finally {
-      this.busy.set(false);
+      if (!this.destroyRef.destroyed && this.session.user()?.uid === uid) this.busy.set(false);
     }
   }
 
@@ -298,6 +304,7 @@ export class StickerPackDetail {
     const pack = this.pack();
     const file = this.uploadFile();
     if (!pack || !file || this.busy() || !values.emoji.trim()) return;
+    const uid = this.session.user()?.uid;
     this.editorError.set(undefined);
     this.busy.set(true);
     try {
@@ -308,13 +315,8 @@ export class StickerPackDetail {
       const sticker = await firstValueFrom(
         this.http.post<StickerSummary>(`${this.baseUrl}/stickers/packs/${decodeId(pack.id)}/stickers`, body),
       );
-      const current = this.pack();
-      if (current)
-        this.pack.set({
-          ...current,
-          stickerCount: current.stickerCount + 1,
-          stickers: [...current.stickers, sticker],
-        });
+      if (this.destroyRef.destroyed || this.session.user()?.uid !== uid) return;
+      this.updates.added.next({ pack, sticker });
       await this.editor()?.dismiss();
       this.uploadFile.set(undefined);
     } catch {

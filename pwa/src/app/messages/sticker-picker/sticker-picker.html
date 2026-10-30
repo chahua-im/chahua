@@ -58,11 +58,23 @@
     (scroll)="scroll.onScroll()">
     @for (group of groups(); track group.id) {
       @let renderGroup = scroll.renders(group.id);
+      @let canAdd = selectable() && group.id != null && group.ownerUid === session.user()?.uid;
       <section #groupSection class="sticker-group">
         @if (grouped()) {
           <h3 class="group-title">{{ group.name ?? ('stickers.favorites' | transloco) }}</h3>
         }
         <div class="sticker-grid" [class.failed]="grouped() && group.id != null && group.error && !group.content">
+          @if (renderGroup && canAdd && group.content) {
+            <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event, group.id)" />
+            <button
+              type="button"
+              class="sticker-item sticker-add"
+              [title]="'stickers.add' | transloco"
+              [disabled]="busy()"
+              (click)="stickerFile.click()">
+              <ion-icon [icon]="icons.addOutline" />
+            </button>
+          }
           @for (sticker of renderGroup ? (group.content?.stickers ?? []) : []; track sticker.id) {
             <button
               type="button"
@@ -90,7 +102,8 @@
             </button>
           }
           @if (
-            grouped() && ((group.id != null && !group.content) || (!renderGroup && group.content?.stickers?.length))
+            grouped() &&
+            ((group.id != null && !group.content) || (!renderGroup && (group.content?.stickers?.length || canAdd)))
           ) {
             <div class="group-placeholder" [style.--placeholder-rows]="group.placeholderRows">
               @if (group.fetching && !group.content) {
@@ -111,19 +124,12 @@
               {{ 'stickers.loadFailed' | transloco }}
               <ion-button fill="clear" (click)="retryGroup(group)">{{ 'common.retry' | transloco }}</ion-button>
             </p>
-          } @else if ((group.content || !group.loading) && !group.content?.stickers?.length) {
+          } @else if (!canAdd && (group.content || !group.loading) && !group.content?.stickers?.length) {
             <p class="empty">{{ 'stickers.empty' | transloco }}</p>
           }
         </div>
         @if (group.uploadError) {
           <p class="empty upload-error">{{ 'stickers.addFailed' | transloco }}</p>
-        }
-        @if (selectable() && group.ownerUid === session.user()?.uid) {
-          <input #stickerFile type="file" accept="image/*,video/webm" hidden (change)="upload($event, group.id)" />
-          <ion-button fill="clear" [disabled]="busy() || !group.content" (click)="stickerFile.click()">
-            <ion-icon slot="start" [icon]="icons.cloudUploadOutline" />
-            {{ 'stickers.add' | transloco }}
-          </ion-button>
         }
       </section>
     }
@@ -168,6 +174,14 @@
       @if (selectable()) {
         <button type="button" class="pack-tab" [disabled]="busy()" (click)="createPack()">
           <ion-icon [icon]="icons.addOutline" />
+        </button>
+        <button
+          type="button"
+          class="pack-tab"
+          [title]="'settings.menu.stickers' | transloco"
+          [disabled]="busy()"
+          routerLink="/settings/stickers">
+          <ion-icon [icon]="icons.settingsOutline" />
         </button>
       }
     </div>
