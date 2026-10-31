@@ -205,7 +205,9 @@ migrated local PostgreSQL database. Their fixtures are rolled back.
 ## Metrics
 
 Prometheus endpoint behavior and the complete metric catalog are in
-[docs/metrics.md](docs/metrics.md).
+[docs/metrics.md](docs/metrics.md). The checked-in
+[Grafana dashboard](../docs/grafana.json) shows unified HTTP and RPC API traffic,
+successful latency and outcomes alongside domain metrics.
 
 ## OpenAPI contract
 

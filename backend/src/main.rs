@@ -202,7 +202,7 @@ async fn main() {
         );
 
     let metrics_registry = state.metrics.clone();
-    let http_metrics = state.metrics.http.clone();
+    let http_metrics = state.metrics.api.clone();
     let client_tracking_state = state.clone();
 
     let (api_router, _) = handlers::api_router().split_for_parts();
@@ -237,15 +237,16 @@ async fn main() {
             client_tracking_state,
             services::client_tracking::track_client_activity,
         ))
+        .with_state(state);
+
+    let app = app
+        .merge(
+            utoipa_swagger_ui::SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi_doc),
+        )
         .layer(middleware::from_fn_with_state(
             http_metrics,
             metrics::track_http_metrics,
-        ))
-        .with_state(state);
-
-    let app = app.merge(
-        utoipa_swagger_ui::SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi_doc),
-    );
+        ));
     let app = if let Some(allowed_origins) = config.server.cors_allowed_origins.clone() {
         info!(
             allowed_origins = ?allowed_origins,

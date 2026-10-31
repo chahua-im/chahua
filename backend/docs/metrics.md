@@ -16,8 +16,9 @@ not part of this endpoint unless source code registers them later.
   A `*_total` metric is a counter.
 - **Gauge** values are current snapshots and can rise or fall.
 - Each **histogram** named `foo` exposes `foo_bucket{le="..."}`, `foo_sum`, and
-  `foo_count`; it has no separate redundant total. `histogram_quantile` consumes
-  the bucket series.
+  `foo_count`; `histogram_quantile` consumes the bucket series. The unified API
+  counter is not redundant: it also retains the native `error_code` omitted from
+  the API histogram.
 - The **Buckets** column below refers to the single bucket profiles in
   [Histogram bucket profiles](#histogram-bucket-profiles). All profiles also
   include Prometheus's implicit `+Inf` bucket.
@@ -40,23 +41,132 @@ not part of this endpoint unless source code registers them later.
 | `H10` | `0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60` seconds |
 | `H11` | `0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120` seconds |
 
-## HTTP API
+## Unified API
 
 | Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
 | --- | --- | --- | --- |
-| `http_requests_total` | Counter; `method`, `route`, `status` | Completed non-multipart API requests, counted after the handler returns. `route` is Axum's matched route template, or `unknown` when none matched; `status` is the numeric response status. | The route template, method, and status keep this bounded by the API surface; do not replace `route` with a request path. |
-| `http_request_duration_seconds` | Histogram; `method`, `route`, `status` | End-to-end non-multipart API request latency around the next handler, in seconds. | `H1`; same bounded labels as `http_requests_total`. |
-| `http_multipart_duration_seconds` | Histogram; `method`, `route`, `status` | End-to-end requests whose `Content-Type` starts with `multipart/form-data`, in seconds. | `H1`; same bounded labels as `http_requests_total`. |
+| `api_requests_total` | Counter; `transport`, `api`, `status`, `error_code` | One completed API call or whole-envelope rejection, classified by transport and outcome. | Labels use bounded operation and outcome classifications. |
+| `api_request_duration_seconds` | Histogram; `transport`, `api`, `status` | Server-side turnaround through individual response preparation, in seconds, for the same completions. | `H1`; native `error_code` is deliberately omitted to limit cardinality. |
 
-## JSON-RPC API
+- `transport` is `http` or `rpc`. `api` is the canonical registered RPC
+  operation literal shared by equivalent HTTP endpoints, or `unknown` for
+  unrecognized operations/routes and whole-envelope rejections. Paths, arbitrary
+  method names, IDs, tokens, request bodies and error text are not labels.
+- HTTP-only labels are `sessions.createWebSocketTicket`, `users.getAuthToken`,
+  `stickers.uploadToPack`, `external.createInvite`, `external.getRelationships`,
+  `external.getSessionGeneration`, and `external.revokeSessions`.
+  `users.getAuthToken` is legacy signing, distinct from the shared `auth.refresh`
+  operation. Other equivalent HTTP and RPC operations use the same API label.
+- `status` is the numeric HTTP status for HTTP, or the HTTP-equivalent status
+  below for RPC. HTTP 2xx and 3xx and RPC successes use `error_code="none"`;
+  failures use the native numeric HTTP status or RPC error code as a string.
+  RPC success is `status="200"`.
 
-| Family | Type / labels | Meaning and recording boundary | Buckets / cardinality |
-| --- | --- | --- | --- |
-| `rpc_requests_total` | Counter; `method`, `outcome` | Completed RPC dispatches, including notifications, and protocol/admission rejections. `outcome` is `success` or a fixed `RpcErrorCode` name. | `method` is a registered RPC method literal or `unknown`; neither peer-supplied unknown names nor IDs, tokens, bodies or error text become labels. |
-| `rpc_request_duration_seconds` | Histogram; `method` | RPC dispatch latency in seconds, including blocking-worker scheduling and serial control-lane wait. Protocol/admission rejection observations contain only their rejection-processing duration. | `H1`; the same bounded method labels as the RPC counter. |
+| RPC error | Native `error_code` | `status` |
+| --- | --- | --- |
+| ParseError | `-32700` | `400` |
+| InvalidRequest | `-32600` | `400` |
+| InvalidParams | `-32602` | `400` |
+| BadRequest | `1000` | `400` |
+| Unauthorized | `1001` | `401` |
+| Forbidden | `1003` | `403` |
+| SpeakingRestricted | `1103` | `403` |
+| MethodNotFound | `-32601` | `404` |
+| NotFound | `1004` | `404` |
+| Conflict | `1009` | `409` |
+| Gone | `1010` | `410` |
+| PayloadTooLarge | `1013` | `413` |
+| Overloaded | `1429` | `429` |
+| DispatcherInternal | `-32603` | `500` |
+| Internal | `1500` | `500` |
+| Unavailable | `1503` | `503` |
 
-RPC operations do not increment HTTP request counters. HTTP upgrade, schema,
-resource and upload requests retain their HTTP metrics.
+HTTP counts completed application API requests, including multipart uploads,
+authentication failures, method 405s and unknown-route 404s. The actual `/ws`
+upgrade endpoint, `/docs`, `/api-docs`, `/metrics`, `/health`, `/healthz` and
+`/readyz` are excluded. Its outer timing includes authentication, activity
+tracking and handler work through the prepared response, not socket transmission.
+
+RPC timing starts when a complete frame arrives at `RpcSessionInput`, before
+bounded input, control-lane and worker waits, and ends when that call's response
+is serialized and prepared. It excludes sibling batch wait, result/outbound
+queue wait and socket transmission. Each incoming call, including a notification,
+is counted separately; peer responses and outgoing pushes are ignored. A whole
+malformed, oversized or otherwise unparsed envelope rejection is counted once as
+`unknown`. Preparation budget errors are `429`/`1429`, oversized replies are
+`413`/`1013`, and serialization errors are `500`/`-32603`. Supervised admitted
+work still records if it completes after disconnect; cancellation before
+preparation is not a completion.
+
+## API PromQL
+
+These examples aggregate the `wetty-chat-backend` job across instances over five
+minutes. For business-traffic transport share, exclude only the explicit
+housekeeping operations below from both numerator and denominator; in particular,
+`auth.refresh` and `sessions.listClients` remain business traffic.
+
+**Business traffic share by transport (percent)**
+
+```promql
+100 * sum by (transport) (
+  rate(api_requests_total{job="wetty-chat-backend",api!~"session[.](open|ping|setAppState)|presence[.]watch|conversations[.](watchUnread|watchStates)|sessions[.]createWebSocketTicket"}[5m])
+)
+/
+scalar(sum(
+  rate(api_requests_total{job="wetty-chat-backend",api!~"session[.](open|ping|setAppState)|presence[.]watch|conversations[.](watchUnread|watchStates)|sessions[.]createWebSocketTicket"}[5m])
+))
+```
+
+**Successful per-API p95 across transports (seconds)**
+
+```promql
+histogram_quantile(0.95,
+  sum by (api, le) (
+    rate(api_request_duration_seconds_bucket{job="wetty-chat-backend",status=~"2..|3.."}[5m])
+  )
+)
+```
+
+Add `transport` to the aggregation to separate transports. Restricting latency
+to successful calls prevents fast errors from making a failing API appear fast;
+compare failure rates and traffic alongside latency.
+
+**Per-API success rate across transports**
+
+```promql
+(
+  sum by (api) (rate(api_requests_total{job="wetty-chat-backend",status=~"2..|3.."}[5m]))
+  or on (api)
+  (0 * sum by (api) (rate(api_requests_total{job="wetty-chat-backend"}[5m])))
+)
+/
+sum by (api) (rate(api_requests_total{job="wetty-chat-backend"}[5m]))
+```
+
+The numerator is zero for an API with only failures. A zero or absent
+denominator remains undefined/no data, not a healthy success rate; successful
+p95 likewise has no meaningful value without successful observations.
+
+**Failure throughput by API, HTTP-equivalent status and native error code**
+
+```promql
+sum by (api, transport, status, error_code) (
+  rate(api_requests_total{job="wetty-chat-backend",status=~"4..|5.."}[5m])
+)
+```
+
+This is failures per second, not a fraction. Keep `transport` when interpreting
+native codes: HTTP uses HTTP status codes, RPC uses RPC codes. `status` separates
+4xx from 5xx; compare against the full traffic rate for context:
+
+```promql
+sum by (api, transport) (
+  rate(api_requests_total{job="wetty-chat-backend"}[5m])
+)
+```
+
+This volume includes housekeeping, as do the latency and outcome examples; use
+the business-traffic filter above on both sides of any filtered ratio.
 
 ## Chat messages
 

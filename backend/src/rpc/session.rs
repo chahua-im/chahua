@@ -259,14 +259,16 @@ enum InputLease {
 /// a complete inbound frame in the bounded core queue.
 pub struct RpcSessionInput {
     tx: mpsc::Sender<String>,
-    permits: mpsc::Sender<InputLease>,
+    permits: mpsc::Sender<(InputLease, Instant)>,
     pair_lock: Arc<Mutex<()>>,
     budget: RpcByteBudget,
+    metrics: Arc<crate::metrics::ApiMetrics>,
     state: Arc<TransportState>,
 }
 
 impl RpcSessionInput {
     pub async fn send(&self, text: String) -> Result<(), RpcIoError> {
+        let started = Instant::now();
         if self.state.is_closed() {
             return Err(RpcIoError::Closed);
         }
@@ -277,6 +279,13 @@ impl RpcSessionInput {
             match self.budget.reserve(MAX_QUEUED_BYTES) {
                 Ok(lease) => InputLease::Oversized(lease),
                 Err(error) => {
+                    self.metrics.record(
+                        "rpc",
+                        "unknown",
+                        RpcErrorCode::Overloaded.metric_status(),
+                        RpcErrorCode::Overloaded.metric_code(),
+                        started.elapsed().as_secs_f64(),
+                    );
                     self.state.close();
                     return Err(error);
                 }
@@ -285,6 +294,13 @@ impl RpcSessionInput {
             match self.budget.reserve(text.len()) {
                 Ok(lease) => InputLease::Frame(lease),
                 Err(error) => {
+                    self.metrics.record(
+                        "rpc",
+                        "unknown",
+                        RpcErrorCode::Overloaded.metric_status(),
+                        RpcErrorCode::Overloaded.metric_code(),
+                        started.elapsed().as_secs_f64(),
+                    );
                     self.state.close();
                     return Err(error);
                 }
@@ -307,7 +323,7 @@ impl RpcSessionInput {
             return Err(RpcIoError::Closed);
         }
         text_slot.send(text);
-        lease_slot.send(lease);
+        lease_slot.send((lease, started));
         Ok(())
     }
 
@@ -370,7 +386,7 @@ pub struct RpcSessionTransport {
 /// type leaks into the engine.
 pub struct RpcSessionDeps {
     services: RpcServices,
-    input_permits: mpsc::Receiver<InputLease>,
+    input_permits: mpsc::Receiver<(InputLease, Instant)>,
     output_permits: mpsc::Sender<RpcFrameLease>,
     output_pair_lock: Arc<Mutex<()>>,
     budget: RpcByteBudget,
@@ -396,6 +412,7 @@ pub fn rpc_session_channels(
     let (input_permit_tx, input_permit_rx) = mpsc::channel(INPUT_QUEUE);
     let (output_tx, output_rx) = mpsc::channel(OUTPUT_QUEUE);
     let (output_permit_tx, output_permit_rx) = mpsc::channel(OUTPUT_QUEUE);
+    let metrics = services.metrics.api.clone();
     let deps = RpcSessionDeps {
         services,
         input_permits: input_permit_rx,
@@ -410,6 +427,7 @@ pub fn rpc_session_channels(
             permits: input_permit_tx,
             pair_lock,
             budget,
+            metrics,
             state: state.clone(),
         },
         output: RpcSessionOutput {
@@ -484,6 +502,7 @@ struct PreparedFrame {
 struct PreparedResponse {
     frame: PreparedFrame,
     success: bool,
+    oversized: bool,
     lifecycle: Option<RpcLifecycleFailure>,
 }
 
@@ -500,7 +519,8 @@ fn prepare_response(
         tracing::error!(?error, "RPC response serialization failed");
         RpcIoError::Closed
     })?;
-    let (text, success, lifecycle) = if text.len() > MAX_FRAME_BYTES {
+    let oversized = text.len() > MAX_FRAME_BYTES;
+    let (text, success, lifecycle) = if oversized {
         (
             serde_json::to_string(&RpcResponse::error(
                 response.id,
@@ -520,6 +540,7 @@ fn prepare_response(
     Ok(PreparedResponse {
         frame: PreparedFrame { text, lease },
         success,
+        oversized,
         lifecycle,
     })
 }
@@ -1579,18 +1600,50 @@ struct WorkResult {
 enum ScheduledCall {
     Pending,
     Immediate(Option<PreparedResponse>),
-    Duplicate,
+    Duplicate(Option<PreparedResponse>),
 }
 
-fn record_rejection(services: &RpcServices, method: &str, code: RpcErrorCode) {
+fn prepare_recorded(
+    services: &RpcServices,
+    api: &'static str,
+    started: Instant,
+    response: Option<RpcResponse>,
+    error: Option<RpcErrorCode>,
+    budget: &RpcByteBudget,
+) -> Result<Option<PreparedResponse>, RpcIoError> {
+    let prepared = response
+        .map(|response| prepare_response(response, budget))
+        .transpose();
+    let error = match &prepared {
+        Err(RpcIoError::BudgetExhausted) => Some(RpcErrorCode::Overloaded),
+        Err(_) => Some(RpcErrorCode::DispatcherInternal),
+        Ok(Some(response)) if response.oversized => Some(RpcErrorCode::PayloadTooLarge),
+        _ => error,
+    };
+    let (status, code) = error.map_or((axum::http::StatusCode::OK, "none"), |code| {
+        (code.metric_status(), code.metric_code())
+    });
     services
         .metrics
-        .rpc
-        .record(methods::registered_name(method), code.name(), 0.0);
+        .api
+        .record("rpc", api, status, code, started.elapsed().as_secs_f64());
+    prepared
+}
+
+fn record_rejection(
+    services: &RpcServices,
+    api: &'static str,
+    started: Instant,
+    response: Option<RpcResponse>,
+    code: RpcErrorCode,
+    budget: &RpcByteBudget,
+) -> Result<Option<PreparedResponse>, RpcIoError> {
+    prepare_recorded(services, api, started, response, Some(code), budget)
 }
 
 async fn schedule_call(
     call: RpcCall,
+    started: Instant,
     destination: ResultDestination,
     close_after_error: bool,
     shared: Arc<SessionShared>,
@@ -1603,10 +1656,21 @@ async fn schedule_call(
     budget: RpcByteBudget,
     input_lease: Option<RpcFrameLease>,
 ) -> ScheduledCall {
+    let api = methods::registered_name(&call.method);
     let id = call.id.clone();
     if let Some(id) = &id {
         if !outstanding.insert(id.clone()) {
-            return ScheduledCall::Duplicate;
+            let response = record_rejection(
+                &services,
+                api,
+                started,
+                Some(RpcResponse::invalid_request()),
+                RpcErrorCode::InvalidRequest,
+                &budget,
+            )
+            .ok()
+            .flatten();
+            return ScheduledCall::Duplicate(response);
         }
     }
     let class = methods::method_class(&call.method);
@@ -1614,24 +1678,27 @@ async fn schedule_call(
         Some(ExecutionClass::Read | ExecutionClass::Mutation) => match admit(&admission.ordinary) {
             Some(permits) => Some(permits),
             None => {
-                if let Some(id) = id {
+                if let Some(id) = &id {
                     if matches!(destination, ResultDestination::Single) {
-                        outstanding.remove(&id);
+                        outstanding.remove(id);
                     }
-                    record_rejection(&services, &call.method, RpcErrorCode::Overloaded);
-                    return match prepare_response(
-                        RpcResponse::error(id, RpcError::new(RpcErrorCode::Overloaded)),
-                        &budget,
-                    ) {
-                        Ok(response) => ScheduledCall::Immediate(Some(response)),
-                        Err(_) => {
-                            shared.transport.close();
-                            ScheduledCall::Immediate(None)
-                        }
-                    };
                 }
-                record_rejection(&services, &call.method, RpcErrorCode::Overloaded);
-                return ScheduledCall::Immediate(None);
+                let response =
+                    id.map(|id| RpcResponse::error(id, RpcError::new(RpcErrorCode::Overloaded)));
+                return match record_rejection(
+                    &services,
+                    api,
+                    started,
+                    response,
+                    RpcErrorCode::Overloaded,
+                    &budget,
+                ) {
+                    Ok(response) => ScheduledCall::Immediate(response),
+                    Err(_) => {
+                        shared.transport.close();
+                        ScheduledCall::Immediate(None)
+                    }
+                };
             }
         },
         Some(ExecutionClass::Session | ExecutionClass::Control) => {
@@ -1641,6 +1708,14 @@ async fn schedule_call(
                     _global: None,
                 }),
                 Err(_) => {
+                    let _ = record_rejection(
+                        &services,
+                        api,
+                        started,
+                        None,
+                        RpcErrorCode::Overloaded,
+                        &budget,
+                    );
                     shared.transport.close();
                     return ScheduledCall::Immediate(None);
                 }
@@ -1655,6 +1730,14 @@ async fn schedule_call(
         if let Some(id) = id {
             outstanding.remove(&id);
         }
+        let _ = record_rejection(
+            &services,
+            api,
+            started,
+            None,
+            RpcErrorCode::Unavailable,
+            &budget,
+        );
         return ScheduledCall::Immediate(None);
     };
     if class.is_none() {
@@ -1663,21 +1746,19 @@ async fn schedule_call(
         } else {
             RpcError::with_message(RpcErrorCode::Unauthorized, "Authentication required")
         };
-        record_rejection(&services, &call.method, error.code);
-        return match id {
-            Some(id) => {
-                if matches!(destination, ResultDestination::Single) {
-                    outstanding.remove(&id);
-                }
-                match prepare_response(RpcResponse::error(id, error), &budget) {
-                    Ok(response) => ScheduledCall::Immediate(Some(response)),
-                    Err(_) => {
-                        shared.transport.close();
-                        ScheduledCall::Immediate(None)
-                    }
-                }
+        let code = error.code;
+        if let Some(id) = &id {
+            if matches!(destination, ResultDestination::Single) {
+                outstanding.remove(id);
             }
-            None => ScheduledCall::Immediate(None),
+        }
+        let response = id.map(|id| RpcResponse::error(id, error));
+        return match record_rejection(&services, api, started, response, code, &budget) {
+            Ok(response) => ScheduledCall::Immediate(response),
+            Err(_) => {
+                shared.transport.close();
+                ScheduledCall::Immediate(None)
+            }
         };
     }
     let method = call.method.clone();
@@ -1689,16 +1770,33 @@ async fn schedule_call(
         async move {
             let _input_lease = input_lease;
             let _permits = permits;
-            let response = methods::dispatch_call(&context, call, &services).await;
-            let response = match response {
-                Some(response) => match prepare_response(response, &budget) {
-                    Ok(response) => Some(response),
+            let (response, error) =
+                match AssertUnwindSafe(methods::dispatch_call(&context, call, &services))
+                    .catch_unwind()
+                    .await
+                {
+                    Ok(result) => result,
                     Err(_) => {
+                        tracing::error!("RPC supervised operation panicked");
+                        let _ = record_rejection(
+                            &services,
+                            api,
+                            started,
+                            None,
+                            RpcErrorCode::DispatcherInternal,
+                            &budget,
+                        );
                         shared.transport.close();
                         return;
                     }
-                },
-                None => None,
+                };
+            let response = match prepare_recorded(&services, api, started, response, error, &budget)
+            {
+                Ok(response) => response,
+                Err(_) => {
+                    shared.transport.close();
+                    return;
+                }
             };
             let result = WorkResult {
                 id,
@@ -1983,7 +2081,7 @@ pub async fn serve_rpc_session(
             }
             input_text = input.recv(), if !handshake_pending => {
                 let Some(text) = input_text else { break; };
-                let Some(lease) = input_permits.recv().await else {
+                let Some((lease, started)) = input_permits.recv().await else {
                     dependencies.state.close();
                     break;
                 };
@@ -1996,17 +2094,9 @@ pub async fn serve_rpc_session(
                     drop(lease);
                     let id = oversized_request_id(&text);
                     drop(text);
-                    if let Some(id) = id {
-                        let response = RpcResponse::error(
-                            id,
-                            RpcError::new(RpcErrorCode::PayloadTooLarge),
-                        );
-                        match prepare_response(response, &dependencies.budget) {
-                            Ok(response) => {
-                                let _ = sink.send_prepared(response.frame).await;
-                            }
-                            Err(_) => {}
-                        }
+                    let response = id.map(|id| RpcResponse::error(id, RpcError::new(RpcErrorCode::PayloadTooLarge)));
+                    if let Ok(Some(response)) = record_rejection(&services, "unknown", started, response, RpcErrorCode::PayloadTooLarge, &dependencies.budget) {
+                        let _ = sink.send_prepared(response.frame).await;
                     }
                     dependencies.state.close();
                     break;
@@ -2017,18 +2107,18 @@ pub async fn serve_rpc_session(
                 let message = match parse_message(&text, MAX_BATCH_ITEMS) {
                     Ok(message) => message,
                     Err(response) => {
-                        record_rejection(&services, "unknown", match &response.outcome {
+                        let code = match &response.outcome {
                             super::protocol::RpcOutcome::Failure { error } => error.code,
                             super::protocol::RpcOutcome::Success { .. } => RpcErrorCode::InvalidRequest,
-                        });
-                        match prepare_response(response, &dependencies.budget) {
-                            Ok(response) => {
+                        };
+                        match record_rejection(&services, "unknown", started, Some(response), code, &dependencies.budget) {
+                            Ok(Some(response)) => {
                                 if sink.send_prepared(response.frame).await.is_err() {
                                     dependencies.state.close();
                                     break;
                                 }
                             }
-                            Err(_) => {
+                            _ => {
                                 dependencies.state.close();
                                 break;
                             }
@@ -2049,12 +2139,11 @@ pub async fn serve_rpc_session(
                         })) if method == "session.open"
                     );
                     if !valid_open {
-                        record_rejection(&services, "unknown", RpcErrorCode::InvalidRequest);
-                        match prepare_response(RpcResponse::invalid_request(), &dependencies.budget) {
-                            Ok(response) => {
+                        match record_rejection(&services, "unknown", started, Some(RpcResponse::invalid_request()), RpcErrorCode::InvalidRequest, &dependencies.budget) {
+                            Ok(Some(response)) => {
                                 let _ = sink.send_prepared(response.frame).await;
                             }
-                            Err(_) => {}
+                            _ => {}
                         }
                         dependencies.state.close();
                         break;
@@ -2067,15 +2156,14 @@ pub async fn serve_rpc_session(
                 match message {
                     RpcMessage::Single(RpcItem::Response) => {}
                     RpcMessage::Single(RpcItem::Invalid(response)) => {
-                        record_rejection(&services, "unknown", RpcErrorCode::InvalidRequest);
-                        match prepare_response(response, &dependencies.budget) {
-                            Ok(response) => {
+                        match record_rejection(&services, "unknown", started, Some(response), RpcErrorCode::InvalidRequest, &dependencies.budget) {
+                            Ok(Some(response)) => {
                                 if sink.send_prepared(response.frame).await.is_err() {
                                     dependencies.state.close();
                                     break;
                                 }
                             }
-                            Err(_) => {
+                            _ => {
                                 dependencies.state.close();
                                 break;
                             }
@@ -2085,6 +2173,7 @@ pub async fn serve_rpc_session(
                         let close_after_error = opening_handshake;
                         match schedule_call(
                             call,
+                            started,
                             ResultDestination::Single,
                             close_after_error,
                             shared.clone(),
@@ -2105,12 +2194,8 @@ pub async fn serve_rpc_session(
                                 }
                             }
                             ScheduledCall::Immediate(None) => {}
-                            ScheduledCall::Duplicate => {
-                                record_rejection(&services, "unknown", RpcErrorCode::InvalidRequest);
-                                if let Ok(response) = prepare_response(
-                                    RpcResponse::invalid_request(),
-                                    &dependencies.budget,
-                                ) {
+                            ScheduledCall::Duplicate(response) => {
+                                if let Some(response) = response {
                                     let _ = sink.send_prepared(response.frame).await;
                                 }
                                 dependencies.state.close();
@@ -2126,10 +2211,9 @@ pub async fn serve_rpc_session(
                             match item {
                                 RpcItem::Response => {}
                                 RpcItem::Invalid(response) => {
-                                    record_rejection(&services, "unknown", RpcErrorCode::InvalidRequest);
-                                    match prepare_response(response, &dependencies.budget) {
-                                        Ok(response) => batch.push(response, false),
-                                        Err(_) => {
+                                    match record_rejection(&services, "unknown", started, Some(response), RpcErrorCode::InvalidRequest, &dependencies.budget) {
+                                        Ok(Some(response)) => batch.push(response, false),
+                                        _ => {
                                             dependencies.state.close();
                                             break 'session;
                                         }
@@ -2149,6 +2233,7 @@ pub async fn serve_rpc_session(
                                     }
                                     match schedule_call(
                                         call,
+                                        started,
                                         ResultDestination::Batch(batch_id),
                                         false,
                                         shared.clone(),
@@ -2170,12 +2255,8 @@ pub async fn serve_rpc_session(
                                                 }
                                             }
                                         }
-                                        ScheduledCall::Duplicate => {
-                                            record_rejection(&services, "unknown", RpcErrorCode::InvalidRequest);
-                                            if let Ok(response) = prepare_response(
-                                                RpcResponse::invalid_request(),
-                                                &dependencies.budget,
-                                            ) {
+                                        ScheduledCall::Duplicate(response) => {
+                                            if let Some(response) = response {
                                                 let _ = sink.send_prepared(response.frame).await;
                                             }
                                             dependencies.state.close();
@@ -2290,6 +2371,79 @@ mod tests {
             .await
             .expect("RPC session cleanup deadline")
             .expect("RPC session completes successfully");
+    }
+
+    #[tokio::test]
+    async fn prepared_response_failures_record_the_actual_outcome() {
+        let Some(services) = crate::rpc::test_support::services().await else {
+            return;
+        };
+        let oversized =
+            RpcResponse::success(RpcId::Null, Value::String("x".repeat(MAX_FRAME_BYTES)));
+        let prepared = prepare_recorded(
+            &services,
+            "session.ping",
+            Instant::now(),
+            Some(oversized),
+            None,
+            &budget(MAX_FRAME_BYTES),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!prepared.success);
+        assert!(prepared.frame.text.contains("\"code\":1013"));
+        let failed = prepare_recorded(
+            &services,
+            "session.ping",
+            Instant::now(),
+            Some(RpcResponse::success(RpcId::Null, Value::Null)),
+            None,
+            &budget(0),
+        );
+        assert!(failed.is_err());
+        let metrics = services.metrics.render().unwrap();
+        assert!(metrics.contains("api_requests_total{api=\"session.ping\",error_code=\"1013\",status=\"413\",transport=\"rpc\"} 1\n"));
+        assert!(metrics.contains("api_requests_total{api=\"session.ping\",error_code=\"1429\",status=\"429\",transport=\"rpc\"} 1\n"));
+    }
+
+    #[tokio::test]
+    async fn batch_calls_notifications_and_errors_are_counted_individually() {
+        let Some(services) = crate::rpc::test_support::services().await else {
+            return;
+        };
+        let token = services
+            .auth_token_service
+            .issue_session(1, &uuid::Uuid::new_v4().to_string(), 0)
+            .unwrap();
+        let (input, mut output, task) = open_authenticated(services.clone(), token).await;
+        input
+            .send(
+                json!([
+                    {"jsonrpc":"2.0","id":"ok","method":"session.ping","params":{}},
+                    {"jsonrpc":"2.0","method":"session.ping","params":{}},
+                    {"jsonrpc":"2.0","id":"bad","method":"session.ping","params":[]},
+                    {"jsonrpc":"2.0","id":"unknown","method":"arbitrary.unregistered"},
+                    {"jsonrpc":"2.0","id":"peer-response","result":null}
+                ])
+                .to_string(),
+            )
+            .await
+            .unwrap();
+        let response = receive_json(&mut output).await;
+        assert_eq!(response.as_array().unwrap().len(), 3);
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let metrics = services.metrics.render().unwrap();
+                if metrics.contains("api_requests_total{api=\"session.ping\",error_code=\"none\",status=\"200\",transport=\"rpc\"} 2\n")
+                    && metrics.contains("api_requests_total{api=\"session.ping\",error_code=\"-32602\",status=\"400\",transport=\"rpc\"} 1\n")
+                    && metrics.contains("api_requests_total{api=\"unknown\",error_code=\"-32601\",status=\"404\",transport=\"rpc\"} 1\n") {
+                    assert!(!metrics.contains("arbitrary.unregistered"));
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("all batch calls recorded");
+        close_session(input, output, task).await;
     }
 
     #[tokio::test]
@@ -2551,6 +2705,7 @@ mod tests {
             permits: permit_tx,
             pair_lock: Arc::new(Mutex::new(())),
             budget: budget.clone(),
+            metrics: crate::metrics::Metrics::new().api,
             state: state.clone(),
         };
 
@@ -2560,7 +2715,7 @@ mod tests {
             budget.reserve(1),
             Err(RpcIoError::BudgetExhausted)
         ));
-        let InputLease::Frame(lease) = permit_rx.recv().await.unwrap() else {
+        let (InputLease::Frame(lease), _) = permit_rx.recv().await.unwrap() else {
             panic!("normal frame must carry a byte lease");
         };
         drop(lease);

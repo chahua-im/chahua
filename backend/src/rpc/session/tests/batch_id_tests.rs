@@ -30,7 +30,7 @@ async fn completed_batch_member_id_stays_outstanding_until_the_aggregate_is_queu
             .metrics
             .render()
             .unwrap()
-            .contains("rpc_requests_total{method=\"session.ping\",outcome=\"success\"} 1\n")
+            .contains("api_requests_total{api=\"session.ping\",error_code=\"none\",status=\"200\",transport=\"rpc\"} 1\n")
         {
             tokio::task::yield_now().await;
         }
@@ -38,11 +38,32 @@ async fn completed_batch_member_id_stays_outstanding_until_the_aggregate_is_queu
     .await
     .expect("fast batch member completed");
     barrier(&input, &mut output).await;
+    // Keep the worker blocked long enough to verify its measured latency,
+    // then close the session while that admitted work is still outstanding.
+    tokio::time::sleep(Duration::from_millis(100)).await;
     input.send(json!({"jsonrpc":"2.0","id":"reuse","method":"groups.create","params":{"name":"must not execute reused batch ID"}}).to_string()).await.unwrap();
     let duplicate = receive_json(&mut output).await;
     assert_eq!(duplicate["id"], Value::Null);
     assert_eq!(duplicate["error"]["code"], -32600);
     drop(held);
+    let metrics = timeout(Duration::from_secs(5), async {
+        loop {
+            let metrics = services.metrics.render().unwrap();
+            if metrics.contains("api_requests_total{api=\"users.getMe\",error_code=\"none\",status=\"200\",transport=\"rpc\"} 1\n") {
+                break metrics;
+            }
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("disconnected worker records its outcome");
+    let prefix =
+        "api_request_duration_seconds_sum{api=\"users.getMe\",status=\"200\",transport=\"rpc\"} ";
+    let duration = metrics
+        .lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .expect("worker latency is exported")
+        .parse::<f64>()
+        .unwrap();
+    assert!(duration >= 0.1, "worker wait must be included: {duration}");
     close_session(input, output, task).await;
     let created = crate::schema::groups::table
         .filter(crate::schema::groups::name.eq("must not execute reused batch ID"))

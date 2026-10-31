@@ -1,6 +1,7 @@
+mod api;
 mod http;
-mod rpc;
-pub use rpc::RpcMetrics;
+
+pub use api::ApiMetrics;
 
 use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
@@ -19,13 +20,11 @@ use crate::services::push::PushMetrics;
 use crate::services::ws_registry::WsMetrics;
 
 pub use http::track_http_metrics;
-use http::HttpMetrics;
 
 #[derive(Clone)]
 pub struct Metrics {
     registry: Registry,
-    pub http: Arc<HttpMetrics>,
-    pub rpc: Arc<RpcMetrics>,
+    pub api: Arc<ApiMetrics>,
     pub chat: Arc<ChatMetrics>,
     pub ws: Arc<WsMetrics>,
     pub presence: Arc<PresenceMetrics>,
@@ -41,8 +40,7 @@ impl Metrics {
     pub fn new() -> Self {
         let registry = Registry::new();
         Self {
-            http: Arc::new(HttpMetrics::new(&registry)),
-            rpc: Arc::new(RpcMetrics::new(&registry)),
+            api: Arc::new(ApiMetrics::new(&registry)),
             chat: Arc::new(ChatMetrics::new(&registry)),
             ws: Arc::new(WsMetrics::new(&registry)),
             presence: Arc::new(PresenceMetrics::new(&registry)),
@@ -96,10 +94,12 @@ mod tests {
     #[tokio::test]
     async fn metrics_endpoint_renders_registered_collectors() {
         let metrics = Arc::new(Metrics::new());
-        metrics.http.record("GET", "/seed", StatusCode::OK, 0.001);
         metrics
-            .http
-            .record_multipart("POST", "/upload", StatusCode::CREATED, 0.05);
+            .api
+            .record("http", "messages.list", StatusCode::OK, "none", 0.001);
+        metrics
+            .api
+            .record("rpc", "messages.list", StatusCode::FORBIDDEN, "1003", 0.05);
         metrics.chat.record_message(42);
         metrics.push.record_notification("web_push", true);
         metrics.push.record_job("success", 0.002);
@@ -170,9 +170,8 @@ mod tests {
             .await
             .expect("body should be readable");
         let body = String::from_utf8(body.to_vec()).expect("metrics body should be utf8");
-        assert!(body.contains("http_requests_total"));
-        assert!(body.contains("http_request_duration_seconds"));
-        assert!(body.contains("http_multipart_duration_seconds"));
+        assert!(body.contains("api_requests_total"));
+        assert!(body.contains("api_request_duration_seconds"));
         assert!(body.contains("messages_total"));
         assert!(body.contains("push_notifications_total"));
         assert!(body.contains("push_notification_jobs_total"));

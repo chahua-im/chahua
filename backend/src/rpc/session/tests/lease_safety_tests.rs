@@ -68,7 +68,7 @@ async fn cancelled_input_send_never_publishes_an_unpaired_frame_or_closes_transp
     let (text_tx, mut text_rx) = mpsc::channel(1);
     let (lease_tx, mut lease_rx) = mpsc::channel(1);
     lease_tx
-        .send(InputLease::Frame(RpcFrameLease::empty()))
+        .send((InputLease::Frame(RpcFrameLease::empty()), Instant::now()))
         .await
         .expect("occupy permit sidecar queue");
     let input = RpcSessionInput {
@@ -76,6 +76,7 @@ async fn cancelled_input_send_never_publishes_an_unpaired_frame_or_closes_transp
         permits: lease_tx,
         pair_lock: Arc::new(Mutex::new(())),
         budget,
+        metrics: crate::metrics::Metrics::new().api,
         state: state.clone(),
     };
     let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
@@ -108,7 +109,8 @@ async fn cancelled_input_send_never_publishes_an_unpaired_frame_or_closes_transp
         "cancelling one send does not close live transport"
     );
 
-    let InputLease::Frame(placeholder) = lease_rx.recv().await.expect("placeholder lease") else {
+    let (InputLease::Frame(placeholder), _) = lease_rx.recv().await.expect("placeholder lease")
+    else {
         panic!("placeholder must be a normal frame lease");
     };
     drop(placeholder);
@@ -117,7 +119,7 @@ async fn cancelled_input_send_never_publishes_an_unpaired_frame_or_closes_transp
         .await
         .expect("later frame remains reachable");
     assert_eq!(text_rx.recv().await.as_deref(), Some("B"));
-    let InputLease::Frame(lease) = lease_rx.recv().await.expect("B lease") else {
+    let (InputLease::Frame(lease), _) = lease_rx.recv().await.expect("B lease") else {
         panic!("B must retain its normal frame lease");
     };
     drop(lease);

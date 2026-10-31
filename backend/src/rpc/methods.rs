@@ -17,8 +17,6 @@ mod stickers;
 mod threads;
 mod users;
 
-use std::time::Instant;
-
 use serde_json::Value;
 use tracing::Instrument;
 use utoipa::{
@@ -249,7 +247,7 @@ pub async fn dispatch_call(
     context: &RpcCallContext,
     call: RpcCall,
     services: &RpcServices,
-) -> Option<RpcResponse> {
+) -> (Option<RpcResponse>, Option<RpcErrorCode>) {
     let RpcCall { id, method, params } = call;
     let class = method_class(&method);
     let registered_method = registered_name(&method);
@@ -259,7 +257,6 @@ pub async fn dispatch_call(
         rpc_id = ?id,
         method = registered_method
     );
-    let started = Instant::now();
     let result = async {
         if context.session.is_none()
             && method != "session.open"
@@ -312,16 +309,12 @@ pub async fn dispatch_call(
     }
     .instrument(span)
     .await;
-    let outcome = match &result {
-        Ok(_) => "success",
-        Err(error) => error.code.name(),
-    };
-    services
-        .metrics
-        .rpc
-        .record(registered_method, outcome, started.elapsed().as_secs_f64());
-    id.map(|id| match result {
-        Ok(value) => RpcResponse::success(id, value),
-        Err(error) => RpcResponse::error(id, error),
-    })
+    let error_code = result.as_ref().err().map(|error| error.code);
+    (
+        id.map(|id| match result {
+            Ok(value) => RpcResponse::success(id, value),
+            Err(error) => RpcResponse::error(id, error),
+        }),
+        error_code,
+    )
 }

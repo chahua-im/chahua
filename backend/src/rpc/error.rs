@@ -42,6 +42,47 @@ error_codes! {
     Overloaded = 1429 => "Too many requests",
 }
 
+impl RpcErrorCode {
+    pub fn metric_status(self) -> axum::http::StatusCode {
+        use axum::http::StatusCode;
+        match self {
+            Self::ParseError | Self::InvalidRequest | Self::InvalidParams | Self::BadRequest => {
+                StatusCode::BAD_REQUEST
+            }
+            Self::MethodNotFound | Self::NotFound => StatusCode::NOT_FOUND,
+            Self::DispatcherInternal | Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Forbidden | Self::SpeakingRestricted => StatusCode::FORBIDDEN,
+            Self::Conflict => StatusCode::CONFLICT,
+            Self::Gone => StatusCode::GONE,
+            Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Overloaded => StatusCode::TOO_MANY_REQUESTS,
+        }
+    }
+
+    pub fn metric_code(self) -> &'static str {
+        match self {
+            Self::ParseError => "-32700",
+            Self::InvalidRequest => "-32600",
+            Self::MethodNotFound => "-32601",
+            Self::InvalidParams => "-32602",
+            Self::DispatcherInternal => "-32603",
+            Self::BadRequest => "1000",
+            Self::Unauthorized => "1001",
+            Self::Forbidden => "1003",
+            Self::NotFound => "1004",
+            Self::Conflict => "1009",
+            Self::Gone => "1010",
+            Self::PayloadTooLarge => "1013",
+            Self::SpeakingRestricted => "1103",
+            Self::Unavailable => "1503",
+            Self::Internal => "1500",
+            Self::Overloaded => "1429",
+        }
+    }
+}
+
 impl Serialize for RpcErrorCode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_i32(*self as i32)
@@ -184,6 +225,34 @@ impl From<AppError> for RpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_error_has_a_native_metric_code_and_http_equivalent() {
+        use axum::http::StatusCode;
+        let expected = [
+            StatusCode::BAD_REQUEST,
+            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
+            StatusCode::BAD_REQUEST,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::NOT_FOUND,
+            StatusCode::CONFLICT,
+            StatusCode::GONE,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            StatusCode::FORBIDDEN,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::TOO_MANY_REQUESTS,
+        ];
+        assert_eq!(RpcErrorCode::ALL.len(), expected.len());
+        for (code, status) in RpcErrorCode::ALL.iter().zip(expected) {
+            assert_eq!(code.metric_status(), status);
+            assert_eq!(code.metric_code().parse::<i32>().unwrap(), *code as i32);
+        }
+    }
 
     #[test]
     fn business_restriction_preserves_safe_detail_without_http_status() {
